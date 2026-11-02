@@ -43,44 +43,70 @@
                     @([VerifyNative]::DesktopWindows() | Where-Object { $_['class'] -ceq '#32770' -and [IntPtr]([long]($_['rootOwner'])) -eq $script:window }).Count -eq 0
                 } 'picture picker closed' 30
             }
-            function Get-BotFilePickerEdit {
+            function Get-BotFilePickerEdits {
                 $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
-                foreach ($id in @('1148', '1152')) {
-                    $byId = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
-                    $edit = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byId)
-                    if ($null -ne $edit) { $script:botPickerSelector = ('automationId ' + $id); return $edit }
-                }
-                $byName = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'File name:')
-                $edit = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byName)
-                if ($null -ne $edit) { $script:botPickerSelector = 'file name edit'; return $edit }
                 $editType = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-                $edit = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editType)
-                if ($null -ne $edit) { $script:botPickerSelector = 'first edit control' }
-                return $edit
+                $found = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editType))
+                $ordered = @()
+                foreach ($id in @('1148', '1152')) { foreach ($item in $found) { if ($item.Current.AutomationId -ceq $id) { $ordered += $item } } }
+                foreach ($item in $found) { if ($item.Current.AutomationId -notin @('1148', '1152')) { $ordered += $item } }
+                return $ordered
+            }
+            function Get-BotFilePickerDialogue {
+                $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
+                $all = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+                return @(foreach ($item in $all) {
+                    @{ name = $item.Current.Name; class = $item.Current.ClassName; automationId = $item.Current.AutomationId; type = $item.Current.ControlType.ProgrammaticName; focusable = $item.Current.IsKeyboardFocusable }
+                })
             }
             function Set-BotFilePickerPath([string]$Path) {
                 [void][VerifyNative]::SetForegroundWindow($script:botPicker)
                 Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:botPicker } 'picture picker focused before typing the path' 20
-                $edit = $null
-                for ($attempt = 0; $attempt -lt 20 -and $null -eq $edit; $attempt++) {
-                    $edit = Get-BotFilePickerEdit
-                    if ($null -eq $edit) { Start-Sleep -Milliseconds 250 }
+                $attempts = 0
+                while ($attempts -lt 30) {
+                    $attempts++
+                    $edits = @(Get-BotFilePickerEdits)
+                    foreach ($edit in $edits) {
+                        $pattern = $null
+                        try { $pattern = [System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { $pattern = $null }
+                        if ($null -eq $pattern) { continue }
+                        try { $pattern.SetValue($Path) } catch { continue }
+                        if ($pattern.Current.Value -ceq $Path) {
+                            $script:botPickerSelector = ('value pattern on automationId ' + $edit.Current.AutomationId + ' ' + $edit.Current.ClassName)
+                            $script:botPickerInput = 'value pattern'
+                            return
+                        }
+                    }
+                    Start-Sleep -Milliseconds 250
                 }
-                if ($null -eq $edit) { throw 'The picture picker exposes no File name edit through UI Automation' }
-                $pattern = $null
-                try {
-                    $current = $edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                    $pattern = [System.Windows.Automation.ValuePattern]$current
-                } catch { $pattern = $null }
-                if ($null -ne $pattern) {
-                    $pattern.SetValue($Path)
-                    $script:botPickerInput = 'value pattern'
-                    Wait-Until { $pattern.Current.Value -ceq $Path } 'picture picker File name field carries the requested path' 20
-                    return
+                Save-Json (Get-BotFilePickerDialogue) 'picture-picker.uia.json'
+                $typed = $null
+                foreach ($edit in @(Get-BotFilePickerEdits)) {
+                    if (-not $edit.Current.IsKeyboardFocusable) { continue }
+                    try { $edit.SetFocus() } catch { continue }
+                    Start-Sleep -Milliseconds 200
+                    if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.AutomationId -ceq $edit.Current.AutomationId) { $typed = $edit; break }
                 }
-                $edit.SetFocus()
+                if ($null -eq $typed) {
+                    Press @(0x12, 0x4E) 'Alt+N: focus the file name field'
+                }
+                $script:botPickerSelector = 'keyboard typing into the focused picker field'
                 $script:botPickerInput = 'focused edit typing'
                 Type-Text $Path
+                $leaf = Split-Path -Leaf $Path
+                try {
+                    Wait-Until {
+                        foreach ($edit in @(Get-BotFilePickerEdits)) {
+                            $value = $null
+                            try { $value = ([System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value } catch { $value = $null }
+                            if ($null -ne $value -and $value.Contains($leaf)) { return $true }
+                        }
+                        return $false
+                    } 'typed path appears in the picture picker file name field' 10
+                } catch {
+                    Save-Json (Get-BotFilePickerDialogue) 'picture-picker.uia.json'
+                    throw 'The typed path never reached the picture picker file name field'
+                }
             }
             function Get-BotSavedPicture {
                 $path = Join-Path $scratch 'roaming/ZigShell/session.json'
