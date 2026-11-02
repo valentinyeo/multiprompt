@@ -112,9 +112,13 @@
             Wait-Until { ([regex]::Matches(((Get-Content $repoLogPath -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count -gt $repoListsBefore } 'Pick repo list reopened'
             Press @(0x0D) 'Enter: open the harness folder repo'
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore + 1 } 'Pick repo opened one new tab'
-            $openedTabs = @((Read-Session).tabs)
-            $openedRepo = @($openedTabs | Where-Object { $_.PSObject.Properties.Name -contains 'cwd' -and $_.cwd -eq $repoFolder })
-            if ($openedRepo.Count -ne 1) { throw ('Pick repo saved ' + $openedRepo.Count + ' tabs for the harness folder') }
+            $openedSession = Read-Session
+            $openedTabs = @($openedSession.tabs)
+            $pickedTab = $openedTabs[$openedTabs.Count - 1]
+            $pickedFolder = if ($pickedTab.PSObject.Properties.Name -contains 'cwd') { $pickedTab.cwd } else { '' }
+            if ($pickedFolder -ne $repoFolder) { throw ('Pick repo saved the new tab without the harness folder: ' + $pickedFolder) }
+            $pickedActive = if ($openedSession.PSObject.Properties.Name -contains 'active_shell_id') { [int]$openedSession.active_shell_id } else { 0 }
+            if ($pickedActive -ne [int]$pickedTab.shell_id) { throw 'Pick repo opened a tab without switching to it' }
             Doctor
             $crashReports = 0
             $crashRoot = Join-Path $scratch 'roaming/ZigShell/crashes'
@@ -123,7 +127,7 @@
             Snapshot 'pick-repo-opened'
             Press @(0x11, 0x57) 'Ctrl+W: close the tab Pick repo opened'
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore } 'Pick repo tab closed'
-            $result.checks += @{ name = 'pick-repo-open'; shot = 'pick-repo-opened.png'; tabsBefore = $pickTabsBefore; tabsAfter = $openedTabs.Count; tabCwd = $openedRepo[0].cwd; crashReports = $crashReports }
+            $result.checks += @{ name = 'pick-repo-open'; shot = 'pick-repo-opened.png'; tabsBefore = $pickTabsBefore; tabsAfter = $openedTabs.Count; tabCwd = $pickedFolder; tabSelected = ($pickedActive -eq [int]$pickedTab.shell_id); crashReports = $crashReports }
             Press @(0x11, 0x57) 'Ctrl+W: close the harness folder tab'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
             Snapshot 'pick-repo-closed'
