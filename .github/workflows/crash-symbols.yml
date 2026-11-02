@@ -1,0 +1,48 @@
+name: Crash symbols
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Commit the verifier built, as a full or short sha
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  symbols:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.revision }}
+          fetch-depth: 0
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build with the verifier flags
+        shell: pwsh
+        run: |
+          $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()
+          if (-not $tag.StartsWith('v')) { throw 'no reachable release tag' }
+          $revision = (git rev-parse HEAD).Trim()
+          "crash-symbols build $tag $revision" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          zig build -Drelease=false -Dversion="$($tag.Substring(1))" -Drevision="$revision"
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+          Get-ChildItem zig-out/bin | Format-Table Name, Length
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: crash-symbols-${{ inputs.revision }}
+          path: |
+            zig-out/bin/multiprompt.exe
+            zig-out/bin/multiprompt.pdb
+          if-no-files-found: warn
