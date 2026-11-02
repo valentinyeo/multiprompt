@@ -2,24 +2,7 @@ const std = @import("std");
 const win = @import("win32.zig");
 const diagnostics = @import("diagnostics.zig");
 
-pub const Step = enum {
-    read_marker,
-    draft_bind,
-    save_session,
-    chat_history,
-    console_shown,
-    hide_prev_browser,
-    park,
-    browser_visible,
-    arm_settle,
-    position,
-    focus,
-    reposition,
-    browser_swp,
-    browser_show,
-    browser_launch,
-    browser_wake,
-};
+pub const Step = @import("switch_step.zig").Step;
 
 pub const Trace = struct {
     started: i64 = 0,
