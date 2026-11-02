@@ -162,6 +162,15 @@ test "pinned URLs require complete supported destinations" {
     try std.testing.expect(!validPinnedUrl("https:///path"));
 }
 
+test "local avatar identity survives session parsing without using tab names" {
+    var parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Renamed\",\"avatar_local_id\":\"00112233445566778899aabbccddeeff\"},{\"kind\":\"cmd\",\"name\":\"Other\",\"avatar_local_id\":\"bad\"}]}");
+    defer parsed.deinit();
+    var tabs: [2]@import("app_state.zig").SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), sessionTabs(parsed.value, &tabs, 9));
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff }, &tabs[0].avatar_local_id);
+    try std.testing.expect(std.mem.allEqual(u8, &tabs[1].avatar_local_id, 0));
+}
+
 pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 {
     const Tab = @TypeOf(tabs[0]);
     var count: u32 = 0;
@@ -179,6 +188,11 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.name_len = copyWide(obj, "name", &tab.name);
         tab.tmux_session_len = copyString(obj, "tmux_session", &tab.tmux_session);
         tab.tmux_identity_len = copyString(obj, "tmux_identity", &tab.tmux_identity);
+        if (string(field(obj, "avatar_local_id"))) |value| {
+            if (value.len == 32) {
+                if (std.fmt.hexToBytes(&tab.avatar_local_id, value)) |_| {} else |_| { tab.avatar_local_id = @splat(0); }
+            }
+        }
         if (tab.kind == .tmux and tab.tmux_session_len == 0) continue;
         tab.cwd_len = copyString(obj, "cwd", &tab.cwd);
         tab.favicon_path_len = copyString(obj, "favicon_path", &tab.favicon_path);

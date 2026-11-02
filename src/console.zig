@@ -2053,6 +2053,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_pinned_top = app_state.shells[idx].pinned_top;
     const saved_starred_pinned_top = app_state.shells[idx].starred_pinned_top;
     const saved_favorite = app_state.shells[idx].favorite;
+    const saved_avatar_local_id = app_state.shells[idx].avatar_local_id;
     const saved_last_used = app_state.shells[idx].last_used;
     const saved_visits = app_state.shells[idx].visits;
     const saved_input = app_state.shells[idx].input;
@@ -2196,6 +2197,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .pinned_top = saved_pinned_top,
         .starred_pinned_top = saved_starred_pinned_top,
         .favorite = saved_favorite,
+        .avatar_local_id = saved_avatar_local_id,
         .last_used = saved_last_used,
         .visits = saved_visits,
         .input = saved_input,
@@ -2493,6 +2495,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.favorite = app_state.shells[idx].favorite;
         entry.face = app_state.shells[idx].face;
         entry.color = app_state.shells[idx].color;
+        entry.avatar_local_id = app_state.shells[idx].avatar_local_id;
         app_state.g_closed_history[app_state.g_closed_count] = entry;
         app_state.g_closed_count += 1;
     }

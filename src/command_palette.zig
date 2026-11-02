@@ -659,6 +659,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE) return words.bot_face;
     if (target == app_state.SEARCH_TABCTX_BOT_COLOR) return words.bot_color;
+    if (target == app_state.SEARCH_BOT_PHOTO_UPLOAD) return words.bot_photo_upload;
+    if (target == app_state.SEARCH_BOT_PHOTO_RESET) return words.bot_photo_reset;
     if (target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) return @import("bot_look.zig").faces[target - app_state.SEARCH_BOT_FACE_OFFSET];
     if (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT) return @import("bot_look.zig").colors[target - app_state.SEARCH_BOT_COLOR_OFFSET];
     const room = @import("room_frontend.zig");
@@ -2935,6 +2937,15 @@ pub fn updateSearchResults() void {
     if (app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) {
         app_state.g_search_results[0] = SEARCH_TABCTX_BACK;
         app_state.g_search_result_count = 1;
+        if (app_state.g_bot_look_mode == .face) {
+            const words = @import("ui_words.zon");
+            for ([_]usize{ app_state.SEARCH_BOT_PHOTO_UPLOAD, app_state.SEARCH_BOT_PHOTO_RESET }, [_][]const u8{ words.bot_photo_upload, words.bot_photo_reset }) |id, label| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                if (!asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+                app_state.g_search_results[app_state.g_search_result_count] = id;
+                app_state.g_search_result_count += 1;
+            }
+        }
         const labels: []const []const u8 = if (app_state.g_bot_look_mode == .face) &@import("bot_look.zig").faces else &@import("bot_look.zig").colors;
         const offset = if (app_state.g_bot_look_mode == .face) app_state.SEARCH_BOT_FACE_OFFSET else app_state.SEARCH_BOT_COLOR_OFFSET;
         for (labels, 0..) |label, i| {

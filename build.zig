@@ -9,6 +9,7 @@ fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.linkSystemLibrary("msimg32", .{});
     module.linkSystemLibrary("d2d1", .{});
     module.linkSystemLibrary("dwrite", .{});
+    module.linkSystemLibrary("gdiplus", .{});
 }
 
 fn linkComputer(b: *std.Build, module: *std.Build.Module) void {

@@ -2080,9 +2080,10 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     const appearance = avatar.forShell(shell);
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[photo-proof] expanded target={d} rect={d},{d},{d},{d}", .{ index, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
         debugLog(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
     }
-    avatar.draw(hdc, avatar_rect, appearance);
+    if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, appearance);
     if (shell.favorite) {
         const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) selectedSessionBackground() else themeSidebarBg();
         drawStarBadge(hdc, avatar_rect, 36, background);
@@ -2126,7 +2127,11 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     }
     const avatar = @import("bot_avatar.zig");
     const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
-    avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
+    if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+        var log: [120]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
+    }
+    if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
     if (shell.favorite) {
         const background = if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected and !@import("room_frontend.zig").isActive()) RGB(53, 53, 53) else themeSidebarBg();
         drawStarBadge(hdc, avatar_rect, 56, background);
@@ -2412,12 +2417,18 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };
                 if (chatDraftHasForShell(@intCast(i))) kind_rc.bottom -= uiScaled(14);
-                if (app_state.shells[i].ai_agent != 0 or app_state.shells[i].tmux_session_len > 0) {
-                    const size = @min(uiScaled(28), kind_rc.bottom - kind_rc.top);
-                    const left = @divTrunc(kind_rc.left + kind_rc.right - size, 2);
-                    const top = @divTrunc(kind_rc.top + kind_rc.bottom - size, 2);
+                const size = @min(uiScaled(28), kind_rc.bottom - kind_rc.top);
+                const left = @divTrunc(kind_rc.left + kind_rc.right - size, 2);
+                const top = @divTrunc(kind_rc.top + kind_rc.bottom - size, 2);
+                const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+                const photo_drawn = @import("bot_photo.zig").draw(&app_state.shells[i], hdc, avatar_rect);
+                if (app_state.shells[i].ai_agent != 0 or app_state.shells[i].tmux_session_len > 0 or photo_drawn) {
                     const avatar = @import("bot_avatar.zig");
-                    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(&app_state.shells[i]));
+                    if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+                        var log: [120]u8 = undefined;
+                        debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
+                    }
+                    if (!photo_drawn) avatar.draw(hdc, avatar_rect, avatar.forShell(&app_state.shells[i]));
                     if (app_state.shells[i].disconnected or app_state.shells[i].needs_attention) drawAttentionDot(hdc, left + size - 2, top + size - 2, uiScaled(3), if (app_state.shells[i].disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
                 } else if (app_state.shells[i].disconnected) {
                     drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, RGB(255, 145, 55));
@@ -4360,11 +4371,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var cc_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&cc_hint), @intCast(chl), &cc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
-                    } else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE or result_idx == app_state.SEARCH_TABCTX_BOT_COLOR or
+                    } else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE or result_idx == app_state.SEARCH_TABCTX_BOT_COLOR or result_idx == app_state.SEARCH_BOT_PHOTO_UPLOAD or result_idx == app_state.SEARCH_BOT_PHOTO_RESET or
                         (result_idx >= app_state.SEARCH_BOT_FACE_OFFSET and result_idx < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT)) {
                         const face_choice = result_idx >= app_state.SEARCH_BOT_FACE_OFFSET and result_idx < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT;
                         const color_choice = result_idx >= app_state.SEARCH_BOT_COLOR_OFFSET and result_idx < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT;
-                        const label: []const u8 = if (face_choice) @import("bot_look.zig").faces[result_idx - app_state.SEARCH_BOT_FACE_OFFSET] else if (color_choice) @import("bot_look.zig").colors[result_idx - app_state.SEARCH_BOT_COLOR_OFFSET] else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE) ui_words.bot_face else ui_words.bot_color;
+                        const label: []const u8 = if (face_choice) @import("bot_look.zig").faces[result_idx - app_state.SEARCH_BOT_FACE_OFFSET] else if (color_choice) @import("bot_look.zig").colors[result_idx - app_state.SEARCH_BOT_COLOR_OFFSET] else if (result_idx == app_state.SEARCH_BOT_PHOTO_UPLOAD) ui_words.bot_photo_upload else if (result_idx == app_state.SEARCH_BOT_PHOTO_RESET) ui_words.bot_photo_reset else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE) ui_words.bot_face else ui_words.bot_color;
                         var wide: [96]u16 = undefined;
                         const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
                         const workspace_slot = if (color_choice) @import("command_palette.zig").workspaceColorTargetSlot() else null;

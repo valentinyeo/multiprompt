@@ -102,6 +102,8 @@ pub fn restore() void {
         shell.workspace = row.workspace;
         @memcpy(shell.tmux_session[0..row.tmux_session.len], row.tmux_session);
         shell.tmux_session_len = @intCast(row.tmux_session.len);
+        shell.tmux_host = row.tmux_host;
+        shell.avatar_local_id = row.avatar_local_id;
         shell.group_id = row.group_id;
         shell.starred_group_id = row.starred_group_id;
         shell.ai_agent = row.agent;
@@ -265,6 +267,8 @@ pub fn save() void {
         .last_read_message_id = shell.last_read_message_id,
         .name = state.shells[i].name[0..shell.name_len],
         .tmux_session = shell.tmux_session[0..shell.tmux_session_len],
+        .tmux_host = shell.tmux_host,
+        .avatar_local_id = shell.avatar_local_id,
         .kind = @intFromEnum(shell.kind),
         .workspace = shell.workspace,
         .group_id = shell.group_id,

@@ -2398,6 +2398,7 @@ pub fn reopenLastClosedShell() void {
         app_state.shells[app_state.shell_count - 1].favorite = entry.favorite;
         app_state.shells[app_state.shell_count - 1].face = entry.face;
         app_state.shells[app_state.shell_count - 1].color = entry.color;
+        app_state.shells[app_state.shell_count - 1].avatar_local_id = entry.avatar_local_id;
         @import("account_desktop.zig").applyPendingAppearance(app_state.shell_count - 1);
         if (entry.group) |saved| app_state.shells[app_state.shell_count - 1].group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, false);
         if (entry.starred_group) |saved| app_state.shells[app_state.shell_count - 1].starred_group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, true);
@@ -2408,7 +2409,7 @@ pub fn reopenLastClosedShell() void {
             app_state.shells[new_idx].name_len = entry.name_len;
             app_state.shells[new_idx].name_source = if (entry.was_manual) .manual else .semantic;
         }
-        if (entry.group != null or entry.starred_group != null or entry.favorite or entry.face != null or entry.color != null) saveSession();
+        if (entry.group != null or entry.starred_group != null or entry.favorite or entry.face != null or entry.color != null or !std.mem.allEqual(u8, &entry.avatar_local_id, 0)) saveSession();
     }
 }
 

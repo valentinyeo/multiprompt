@@ -4938,6 +4938,48 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
+                if (app_state.g_bot_look_mode == .face and (target == app_state.SEARCH_BOT_PHOTO_UPLOAD or target == app_state.SEARCH_BOT_PHOTO_RESET)) {
+                    const sid = app_state.g_bot_look_sid;
+                    const idx = findShellById(sid) orelse return 0;
+                    if (!@import("bot_look.zig").eligible(idx)) return 0;
+                    const photo = @import("bot_photo.zig");
+                    if (target == app_state.SEARCH_BOT_PHOTO_RESET) {
+                        if (photo.key(&app_state.shells[idx])) |digest| {
+                            if (!photo.reset(digest)) showHeaderNoticeAscii("Could not reset image", 4000, true);
+                        }
+                    } else {
+                        const digest = photo.ensureKey(idx) orelse {
+                            showHeaderNoticeAscii("Could not save picture", 4000, true);
+                            return 0;
+                        };
+                        const title_id = app_state.shells[idx].title_id;
+                        var file: [32768]u16 = @splat(0);
+                        var picker = std.mem.zeroes(app_state.OPENFILENAMEW);
+                        picker.lStructSize = @sizeOf(app_state.OPENFILENAMEW);
+                        picker.hwndOwner = hwnd;
+                        picker.lpstrFilter = L("Images\x00*.png;*.jpg;*.jpeg\x00");
+                        picker.nFilterIndex = 1;
+                        picker.lpstrFile = &file;
+                        picker.nMaxFile = file.len;
+                        picker.lpstrTitle = L("Upload image");
+                        picker.Flags = 0x00080000 | 0x00001000 | 0x00000800 | 0x00000004 | 0x00000008;
+                        if (@import("fonts.zig").openFileName(&picker) != 0) {
+                            const current = findShellById(sid) orelse return 0;
+                            if (!@import("bot_look.zig").eligible(current) or app_state.shells[current].title_id != title_id) return 0;
+                            const current_key = photo.key(&app_state.shells[current]) orelse return 0;
+                            if (!std.mem.eql(u8, &digest, &current_key)) return 0;
+                            if (photo.import(digest, @ptrCast(&file))) {
+                                debugLog("[bot-photo] import=ok");
+                            } else {
+                                debugLog("[bot-photo] import=failed");
+                                showHeaderNoticeAscii("Could not use that image", 4000, true);
+                            }
+                        }
+                    }
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    _ = InvalidateRect(hwnd, null, 1);
+                    return 0;
+                }
                 if (app_state.g_bot_look_mode != .none and
                     ((target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) or
                     (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT))) {
@@ -8727,6 +8769,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            @import("bot_photo.zig").shutdown();
             computer.shutdown();
             @import("room_frontend.zig").deinit();
             freeze_recorder.closing();

@@ -8,6 +8,8 @@ pub const Row = struct {
     last_read_message_id: u64 = 0,
     name: []const u16,
     tmux_session: []const u8 = "",
+    tmux_host: u8 = 0,
+    avatar_local_id: [16]u8 = @splat(0),
     kind: u8 = 0,
     workspace: u8 = 0,
     group_id: u32 = 0,
@@ -90,6 +92,19 @@ fn valid(s: Snapshot) bool {
         if (block.start > s.text.len or block.len > s.text.len - block.start or block.prefix > block.len or block.detail_start > s.text.len or block.detail_len > s.text.len - block.detail_start or block.diff_start > s.text.len or block.diff_len > s.text.len - block.diff_start) return false;
     }
     return active;
+}
+
+test "local avatar identity survives launch snapshot and legacy rows default empty" {
+    const a = std.testing.allocator;
+    const id = [_]u8{7} ** 16;
+    const bytes = try encode(a, .{ .active = 1, .rows = &.{.{ .id = 1, .name = &.{'A'}, .avatar_local_id = id }} });
+    defer a.free(bytes);
+    const restored = (try decode(a, bytes)).?;
+    defer restored.deinit();
+    try std.testing.expectEqualSlices(u8, &id, &restored.value.rows[0].avatar_local_id);
+    const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[65]}]}")).?;
+    defer legacy.deinit();
+    try std.testing.expect(std.mem.allEqual(u8, &legacy.value.rows[0].avatar_local_id, 0));
 }
 
 test "ISSUE-502 active session rendered chat blocks and sidebar round trip" {

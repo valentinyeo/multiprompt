@@ -456,6 +456,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (workspace_filter == null and !std.mem.allEqual(u8, &app_state.shells[i].avatar_local_id, 0)) {
+            const id_text = std.fmt.bytesToHex(app_state.shells[i].avatar_local_id, .lower);
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"avatar_local_id\":\"{s}\"", .{id_text}) catch return false;
+            pos += field.len;
+        }
         const saved_id = std.fmt.bufPrint(json_buf[pos..], ",\"shell_id\":{d}", .{app_state.shells[i].shell_id}) catch return false;
         pos += saved_id.len;
         if (app_state.shells[i].last_active != 0) {
@@ -1495,6 +1500,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].favorite = tabs[t].favorite;
     app_state.shells[idx].face = tabs[t].face;
     app_state.shells[idx].color = tabs[t].color;
+    app_state.shells[idx].avatar_local_id = tabs[t].avatar_local_id;
     @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
     app_state.shells[idx].last_used = tabs[t].last_used;
     app_state.shells[idx].input = tabs[t].input;
@@ -1876,6 +1882,7 @@ pub fn restoreSession() u32 {
         if (@import("launch_cache.zig").pending and tabs[t].shell_id != 0) {
             if (findShellById(tabs[t].shell_id)) |idx| {
                 if (idx < live_shell_count) {
+                    if (std.mem.allEqual(u8, &app_state.shells[idx].avatar_local_id, 0)) app_state.shells[idx].avatar_local_id = tabs[t].avatar_local_id;
                     restored_shell_ids[t] = app_state.shells[idx].shell_id;
                     if (restored_active_tab != null and restored_active_tab.? == t) restored_active_shell_id = app_state.shells[idx].shell_id;
                     spawned += 1;
