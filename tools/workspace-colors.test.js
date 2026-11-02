@@ -22,7 +22,10 @@ test('ordered palette is portable metadata, not a workspace name mapping', () =>
 });
 
 test('settings persist overrides, account sync advertises them and startup caches retain them', () => {
-  assert.match(read('src/account_client.zig'), /hosts,host_removal,workspace_color/);
+  const clientSource = read('src/account_client.zig');
+  assert.match(clientSource, /hosts,host_removal/);
+  assert.ok(clientSource.includes('",workspace_color" else ""'));
+  assert.ok(clientSource.includes('",bot_appearance" else ""'));
   const settings = read('src/settings_panel.zig');
   assert.match(settings, /for \(@import\("bot_avatar.zig"\).colors, 0\.\.\)/);
   assert.match(settings, /state.g_ws_colors\[workspace\] = color;[\s\S]*?saveSession\(\)/);
