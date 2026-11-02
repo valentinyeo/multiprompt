@@ -60,7 +60,7 @@ test('ISSUE-268 sticky find bar fences hidden transcript controls and keeps brow
   const render = source.slice(transcriptStart);
   for (const message of ['WM_LBUTTONDOWN', 'WM_LBUTTONDBLCLK', 'WM_RBUTTONDOWN']) {
     const branch = render.slice(render.indexOf(`        ${message} => {`));
-    assert.match(branch, /^        \w+ => \{\s*if \(app_state\.g_chat_find_open and GET_Y\(lp\) < uiScaled\(app_state\.CHAT_FIND_TOP_H\)\) return 0;/);
+    assert.match(branch, /^        \w+ => \{\s*(?:_ = KillTimer\(hwnd, selection_offer_timer\);\s*)?if \(app_state\.g_chat_find_open and GET_Y\(lp\) < uiScaled\(app_state\.CHAT_FIND_TOP_H\)\) return 0;/);
   }
   const shortcuts = fs.readFileSync('src/shortcuts.zig', 'utf8');
   const start = shortcuts.indexOf('if (app_state.ISSUE_268_CHAT_FIND');

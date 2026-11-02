@@ -3127,6 +3127,8 @@ def host_assistant_event(provider, sid, tmux, session, event):
         elif block.get("type") in ("text", "thinking") and parent is None:
             kind = block["type"]
             opened = host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind)
+            if session["pending"].pop(opened["item"], None) is not None and not opened["done"] and opened["text"]:
+                host_event(provider, sid, tmux, session, opened["kind"] + ".delta", dict(text=opened["text"], done=False), opened["item"])
             text = block.get("text") if kind == "text" else block.get("thinking")
             host_complete(provider, sid, tmux, session, opened, text if isinstance(text, str) else None)
 
@@ -5272,7 +5274,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 48
+RUNTIME_GENERATION = 49
 
 if __name__ == '__main__':
     import base64 as _base64
