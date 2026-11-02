@@ -11,6 +11,21 @@ fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.linkSystemLibrary("dwrite", .{});
 }
 
+fn linkComputer(b: *std.Build, module: *std.Build.Module, target: std.Build.ResolvedTarget) void {
+    const arch = switch (target.result.cpu.arch) { .x86_64 => "x64", .aarch64 => "arm64", else => @panic("Computer requires x64 or arm64") };
+    module.addAnonymousImport("computer_assets", .{ .root_source_file = b.path("assets/computer/resources.zig"), .target = target });
+    module.addAnonymousImport("computer_loader", .{ .root_source_file = b.path(b.fmt("vendor/webview2/{s}/WebView2Loader.dll", .{arch})) });
+    module.addAnonymousImport("computer_webview2_license", .{ .root_source_file = b.path("vendor/webview2/LICENSE.txt") });
+    module.addAnonymousImport("computer_webview2_notice", .{ .root_source_file = b.path("vendor/webview2/NOTICE.txt") });
+    module.addAnonymousImport("computer_windows_header_license", .{ .root_source_file = b.path("vendor/webview2/WIN32METADATA-LICENSE") });
+    module.addCSourceFile(.{ .file = b.path("src/computer_view.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti", "-fms-extensions", "-D_WIN32_WINNT=0x0A00" } });
+    module.addIncludePath(b.path("vendor/webview2/include"));
+    module.link_libcpp = true;
+    module.linkSystemLibrary("ole32", .{});
+    module.linkSystemLibrary("uuid", .{});
+    module.linkSystemLibrary("ws2_32", .{});
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -57,6 +72,7 @@ pub fn build(b: *std.Build) void {
     });
 
     linkColorEmoji(b, exe.root_module);
+    linkComputer(b, exe.root_module, target);
     if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
@@ -107,6 +123,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     linkColorEmoji(b, dev_exe.root_module);
+    linkComputer(b, dev_exe.root_module, target);
     dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
@@ -621,6 +638,12 @@ pub fn build(b: *std.Build) void {
     const console_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-font.test.js" });
     test_step.dependOn(&console_font_tests.step);
     vps_test_step.dependOn(&console_font_tests.step);
+    const computer_adapter_tests = b.addSystemCommand(&.{ "node", "--test", "tools/computer-view.test.js" });
+    test_step.dependOn(&computer_adapter_tests.step);
+    vps_test_step.dependOn(&computer_adapter_tests.step);
+    const computer_discovery_tests = b.addSystemCommand(&.{ "python3", "tests/test_computer_discovery.py" });
+    test_step.dependOn(&computer_discovery_tests.step);
+    vps_test_step.dependOn(&computer_discovery_tests.step);
     const palette_rows_tests = b.addSystemCommand(&.{ "node", "--test", "tools/palette-rows.test.js" });
     test_step.dependOn(&palette_rows_tests.step);
     const external_browser_links_tests = b.addSystemCommand(&.{ "node", "--test", "tools/external-browser-links.test.js", "tools/external-browser-links-native.test.js" });

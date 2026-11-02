@@ -1,0 +1,25 @@
+Microsoft.Web.WebView2 1.0.3537.50
+Source: https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3537.50/microsoft.web.webview2.1.0.3537.50.nupkg
+Package SHA-256 (actual bytes, matches supplied expected digest):
+5ea526bbd728adda0da4d31219267e96460494a427e4894c4e09d9f320f4b9aa
+
+Unmodified package members:
+build/native/include/WebView2.h -> include/WebView2.h
+SHA-256: 387a0524c1a4498db32756a6d3b1f4d43a90ac80cb921527f15d3dbf4a857459
+build/native/x64/WebView2Loader.dll -> x64/WebView2Loader.dll
+SHA-256: 2f965e10aed3b356a408978a0e6d74eb86e3e722dd008fa9ad39f68884479e85
+build/native/arm64/WebView2Loader.dll -> arm64/WebView2Loader.dll
+SHA-256: 0f753606aaa25e21b6c6f4c270ab4a9831029e75c1741d9f27a434961ee6b657
+LICENSE.txt and NOTICE.txt retained verbatim and embedded with the client resources.
+
+Only the target architecture's loader is embedded. No static loader import library, development bridge DLL, runtime installer, or runtime download is used. The installed Microsoft runtime is required. Source acquisition did not execute package programs.
+
+The SDK header imports EventToken.h, which Zig's MinGW header set does not supply.
+Unmodified official Microsoft Windows header, pinned win32metadata commit:
+28f487f630b0b9233bb2aad4fd29f5a94c3cc41d
+https://raw.githubusercontent.com/microsoft/win32metadata/28f487f630b0b9233bb2aad4fd29f5a94c3cc41d/generation/WinSDK/RecompiledIdlHeaders/winrt/EventToken.h
+-> include/EventToken.h
+SHA-256: 5ba4a664c63d454572346598efd22b826c80c44ad9257eefbbe64c659fe56991
+Repository LICENSE retained as WIN32METADATA-LICENSE and embedded with the resources.
+License SHA-256: c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
+Official IID constants are used directly; no UUID annotations, COM layouts, or Windows structs are recreated.
