@@ -1182,7 +1182,7 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
     }
 }
 
-test "IGSH-907 Chat View header ignores capacity while terminal keeps it" {
+test "IGSH-907 capacity changes no header ink in Chat View or the terminal" {
     const w = @import("win32.zig");
     const saved_shell = app_state.shells[0];
     const saved_count = app_state.shell_count;
@@ -1270,7 +1270,7 @@ test "IGSH-907 Chat View header ignores capacity while terminal keeps it" {
         }
     }
     std.debug.print("IGSH-907 chat_equal={} terminal_equal={}\n", .{ chat_equal, terminal_equal });
-    try std.testing.expect(!terminal_equal);
+    try std.testing.expect(terminal_equal);
     try std.testing.expect(chat_equal);
 }
 
