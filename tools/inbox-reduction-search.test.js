@@ -6,11 +6,11 @@ const test = require("node:test");
 const source = require('./app-source').readAppSource();
 
 function functionBody(name, nextName) {
-  const start = source.indexOf(`fn ${name}(`);
-  const end = source.indexOf(`\nfn ${nextName}(`, start);
+  const start = source.search(new RegExp(`^(?:pub )?fn ${name}\\(`, "m"));
   assert.notStrictEqual(start, -1, `${name} is missing`);
+  const end = source.slice(start + 1).search(new RegExp(`^(?:pub )?fn ${nextName}\\(|^test "`, "m"));
   assert.notStrictEqual(end, -1, `could not isolate ${name}`);
-  return source.slice(start, end);
+  return source.slice(start, start + 1 + end);
 }
 
 test("Inbox reduction search matches every visible identity field", () => {
@@ -40,9 +40,9 @@ test("Ctrl+F and slash enter one shared Inbox search mode", () => {
 
 test("Inbox search has visible query, empty-result, and help states", () => {
   const paint = functionBody("paintInbox", "openInbox");
-  assert.match(paint, /L\("Find Inbox"\)/);
+  assert.match(paint, /L\("Search Inbox"\)/);
   assert.match(paint, /g_inbox_filter_buf/);
   assert.match(paint, /No Inbox sessions match this search/);
-  assert.match(paint, /Ctrl\+F or \/ search/);
+  assert.match(paint, /Ctrl\+F search/);
   assert.match(source, /\.a = "Ctrl\+F or \/", \.b = "Reduce Inbox to matching sessions"/);
 });
