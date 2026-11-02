@@ -24,8 +24,13 @@ function body(source, name) {
 }
 
 function runDecision(source, start, end, context) {
-  const code = source.slice(source.indexOf(start), source.indexOf(end))
-    .replace(/\bor\b/g, '||').replace(/\band\b/g, '&&');
+  const from = source.indexOf(start);
+  const legacy = source.indexOf('    if (app_state.g_browser_url_poll_pending)', from);
+  const found = end === '\u0000' ? -1 : source.indexOf(end, from);
+  const to = found >= 0 ? found : (legacy >= 0 ? legacy : source.lastIndexOf('\n}'));
+  const code = source.slice(from, to)
+    .replace(/\bor\b/g, '||').replace(/\band\b/g, '&&')
+    .replace(/_ = /g, '').replace(/\.poll\b/g, "'poll'");
   return vm.runInNewContext(`(() => { ${code}\nreturn 'proceed'; })()`, context);
 }
 
@@ -53,7 +58,7 @@ function launchDecision(source, app_state, idx) {
 function pollDecision(source, app_state, foreground = true) {
   const calls = [];
   runDecision(body(source, 'pollBrowserUrlTick').replace('    if (browser_control_mask_color == null and activeBrowserEdgeMasksAllowed()) {\n        if (calcBrowserLayout()) |layout| refreshBrowserControlMaskColor(layout);\n    }\n', ''),
-    'if (app_state.active_shell', '    if (app_state.g_browser_url_poll_pending)', {
+    'if (app_state.active_shell', '\u0000', {
       app_state, IsIconic: () => false, foregroundIsOurs: () => foreground,
       TIMER_BROWSER_URL_POLL: 13,
       KillTimer: () => calls.push('stop'),
@@ -92,7 +97,9 @@ test('both profiles retry a cold native bridge instead of permanently leaving th
   const visible = body(pane, 'updateBrowserVisibility');
   assert.match(visible, /if \(app_state.g_main_hwnd != null\) \{\s+_ = SetTimer\(app_state.g_main_hwnd, TIMER_BROWSER_URL_POLL, 2000, null\);/);
   assert.doesNotMatch(body(pane, 'pollBrowserUrlTick'), /KillTimer/);
-  assert.match(body(pane, 'startBrowserWindowResolve'), /browserResolveSlot\(&app_state.g_browser_resolve_inflight, shell_id, now\) orelse return/);
+  const resolve = body(pane, 'startBrowserWindowResolve');
+  assert.match(resolve, /browserResolveSlot\(&app_state.g_browser_resolve_inflight, shell_id, now\) orelse \{/);
+  assert.match(resolve, /browser_pin_entry_pending = false;\s*finishPinnedNavigation\(shell_id,/);
 });
 
 test('nonce alone never adopts a window routed by Chrome into the other profile process', () => {
