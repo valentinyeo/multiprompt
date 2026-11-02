@@ -162,7 +162,7 @@ test "Android and desktop share raw UTF-8 bot identity" {
     try std.testing.expectEqual(first, forShell(&shell));
 }
 
-test "IGSH-1192 every robot retains fractional circular edges at 100 and 150 percent" {
+test "IGSH-1192 every robot retains fractional edges at 100 and 150 percent" {
     for ([_]i32{ 100, 150 }) |scale| {
         const size = @divTrunc(40 * scale, 100);
         const cell = size + 12;
@@ -188,6 +188,7 @@ test "IGSH-1192 every robot retains fractional circular edges at 100 and 150 per
             const rect = w.RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
             draw(dc, rect, .{ .face = @intCast(face), .color = 0 });
             _ = w.GdiFlush();
+            const head = headBounds(presets[face_presets[face]].shape, @floatFromInt(size * 4), @floatFromInt(size * 4));
             var partial: usize = 0;
             var visible: usize = 0;
             for (0..@intCast(size)) |y| {
@@ -195,9 +196,12 @@ test "IGSH-1192 every robot retains fractional circular edges at 100 and 150 per
                     var covered: usize = 0;
                     for (0..4) |sy| {
                         for (0..4) |sx| {
-                            const dx = 2 * @as(i32, @intCast(x * 4 + sx)) + 1 - size * 4;
-                            const dy = 2 * @as(i32, @intCast(y * 4 + sy)) + 1 - size * 4;
-                            if (dx * dx + dy * dy <= size * size * 16) covered += 1;
+                            const px = @as(f32, @floatFromInt(x * 4 + sx)) + 0.5;
+                            const py = @as(f32, @floatFromInt(y * 4 + sy)) + 0.5;
+                            if (px < head.x or px >= head.x + head.width or py < head.y or py >= head.y + head.height) continue;
+                            const dx = @max(@abs(px - (head.x + head.width / 2)) - (head.width / 2 - head.radius), 0);
+                            const dy = @max(@abs(py - (head.y + head.height / 2)) - (head.height / 2 - head.radius), 0);
+                            if (dx * dx + dy * dy <= head.radius * head.radius) covered += 1;
                         }
                     }
                     const pixel = pixels[(@as(usize, @intCast(top)) + y) * @as(usize, @intCast(width)) + @as(usize, @intCast(left)) + x] & 0xffffff;

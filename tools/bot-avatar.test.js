@@ -82,7 +82,7 @@ test('pinned tile hit testing measures both coordinates, shared with the painted
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-layout-'));
   require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   fs.writeFileSync(path.join(dir, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 0; }\n');
-  fs.writeFileSync(path.join(dir, 'workspace_switcher.zig'), 'pub fn headerHeight() i32 { return 0; }\n');
+  fs.writeFileSync(path.join(dir, 'workspace_switcher.zig'), 'pub fn headerHeight() i32 { return 20; }\n');
   fs.writeFileSync(path.join(dir, 'room_frontend.zig'), 'pub const enabled = false;\npub fn roomHit(_: usize) ?@import("layout.zig").HitTarget { return null; }\n');
   try {
     fs.writeFileSync(path.join(dir, 'layout.zig'), `const std = @import("std");
@@ -219,7 +219,7 @@ test('IGSH-1192 fractional circle resolve preserves artwork, premultiplies edges
 const RoundedBounds = struct { x: f32, y: f32, width: f32, height: f32, radius: f32 };
 ${resolve}
 fn circle(n: usize) RoundedBounds {
-    const side: f32 = @floatFromInt(n);
+    const side: f32 = @floatFromInt(n * 4);
     return .{ .x = 0, .y = 0, .width = side, .height = side, .radius = side / 2 };
 }
 test "fractional circle is symmetric, premultiplied and resolved in place" {
