@@ -2449,10 +2449,14 @@ pub fn workspaceDisplayName(ws: u8, buf: *[32]u8) []const u8 {
     return std.fmt.bufPrint(buf, "Workspace {d}", .{@as(u32, ws) + 1}) catch "Workspace";
 }
 
+pub fn isOtherWorkspaceName(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, OTHER_WORKSPACE_NAME);
+}
+
 pub fn isOtherWorkspaceSlot(ws: u8) bool {
     if (ws >= app_state.g_lws_count or ws >= MAX_LWS) return false;
     const len: usize = @intCast(@min(app_state.g_ws_name_len[ws], @as(u32, @intCast(app_state.g_ws_names[ws].len))));
-    return std.ascii.eqlIgnoreCase(app_state.g_ws_names[ws][0..len], OTHER_WORKSPACE_NAME);
+    return isOtherWorkspaceName(app_state.g_ws_names[ws][0..len]);
 }
 
 pub fn ensureOtherWorkspaceSlot() void {
