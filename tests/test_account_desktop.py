@@ -96,11 +96,14 @@ class AccountDesktop(unittest.TestCase):
 
     def test_debounce_poll_conflict_and_durable_diff(self):
         save = function(MAIN, 'publishSessionLayout')
-        self.assertIn('account_layout.publishNeeded(local, base.value, synced.value)', save)
+        self.assertIn('account_layout.publishNeeded(plain_local, plain_base, plain_synced)', save)
+        self.assertIn('account_layout.withoutAppearance(arena.allocator(), local)', save)
         self.assertIn('session_layout.parse(arena.allocator(), g_account_base orelse return)', save)
         self.assertIn('TIMER_ACCOUNT_SAVE, 2000', save)
-        self.assertIn('account-layout-pending.json', save)
-        self.assertIn('writeFileAtomicW(path, pending)', save)
+        self.assertIn('account-layout-pending.json', function(MAIN, 'layoutPendingPath'))
+        pending_write = function(MAIN, 'accountWritePendingLocked')
+        self.assertIn('CreateFileW(', pending_write)
+        self.assertIn('MoveFileExW(', pending_write)
         self.assertIn('TIMER_ACCOUNT, 5000', function(MAIN, 'accountBootstrap'))
         self.assertIn('account_layout.rebase', function(MAIN, 'accountRequest'))
         self.assertIn('remote.status != 409', function(MAIN, 'accountRequest'))
@@ -142,7 +145,7 @@ class AccountDesktop(unittest.TestCase):
         acquire = bootstrap.index('WaitForSingleObject(mutex, 0)')
         self.assertLess(bootstrap.index("len == 1 and env[0] == '1'"), acquire)
         self.assertIn('startAccountJob(.{ .kind = .startup })', function(MAIN, 'accountBootstrap'))
-        self.assertIn('accountResumeJob(.startup)', function(MAIN, 'layoutSyncWorker'))
+        self.assertIn('submitted = accountResumeJob(.startup) catch {', function(MAIN, 'startAccountJob'))
         main = function(MAIN, 'main')
         self.assertLess(main.index('accountClaim(hwnd)'), main.index('launch_cache.restore();'))
         self.assertIn('result != 0 and result != 0x80', bootstrap)
@@ -206,7 +209,7 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('if (sessionFileIsValid(bytes)) bytes else null', prepare)
         self.assertIn('account_layout.restoreCache', prepare)
         reply = function(MAIN, 'handleLayoutReply')
-        failure = reply.split('accountPrepareRestore(to_apply, !reply.colors_supported and reply.job.edited == null) catch {', 1)[1].split('};', 1)[0]
+        failure = reply.split('!reply.appearance_supported and reply.job.edited == null) catch blk: {', 1)[1].split('};', 1)[0]
         self.assertNotIn('return;', failure)
         self.assertNotIn('g_account_locked = was_locked;', reply)
 
@@ -219,7 +222,7 @@ class AccountDesktop(unittest.TestCase):
 
     def test_failure_stops_save_timer_and_only_poll_retries_with_backoff(self):
         self.assertIn('KillTimer(g_main_hwnd, TIMER_ACCOUNT_SAVE)', function(MAIN, 'accountSyncFailed'))
-        self.assertIn('if (notify and !g_account_locked)', function(MAIN, 'accountSyncFailed'))
+        self.assertIn('if (notify) syncLog("account-sync: sync failed, local changes kept for retry")', function(MAIN, 'accountSyncFailed'))
         self.assertIn('!g_account_retry.notified and !g_account_reauth', function(MAIN, 'publishSessionLayout'))
         self.assertIn('!g_account_retry.ready(GetTickCount64())', function(MAIN, 'pullSessionLayout'))
         self.assertIn('g_account_retry.succeeded()', function(MAIN, 'handleLayoutReply'))
@@ -238,7 +241,7 @@ class AccountDesktop(unittest.TestCase):
     def test_fixed_window_title_and_version_marker(self):
         self.assertRegex(MAIN, r'const APP_VERSION = build_config\.app_version orelse "[^"\n]+"')
         self.assertIn('L("Multi Bot")', MAIN)
-        self.assertIn('const title = "Multi Bot";', (ROOT / 'src/startup.zig').read_text())
+        self.assertIn('const title = if (IS_DEV) "Multibot DEV" else "Multi Bot";', (ROOT / 'src/startup.zig').read_text())
 
     def test_version_matches_latest_changelog(self):
         def version(source):

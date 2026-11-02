@@ -1759,6 +1759,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         return;
     }
     var room_layout_applied = false;
+    var room_prepare_ok = true;
     defer if (!room_layout_applied) @import("room_frontend.zig").setAccount(null);
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1879,10 +1880,11 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const target_with_intents = appearance_intent.overlay(alloc, target_before_intents.value, g_appearance orelse &.{}) catch return;
     to_apply = session_layout.encode(alloc, target_with_intents) catch return;
     if (app_state.g_account_bootstrapping) {
-        to_apply = accountPrepareRestore(alloc, to_apply, !reply.colors_supported and reply.job.edited == null, !reply.appearance_supported and reply.job.edited == null) catch {
+        to_apply = accountPrepareRestore(alloc, to_apply, !reply.colors_supported and reply.job.edited == null, !reply.appearance_supported and reply.job.edited == null) catch blk: {
+            room_prepare_ok = false;
             app_state.g_account_status = "Could not reconcile saved layout. Local cache kept.";
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
-            return;
+            break :blk to_apply;
         };
     } else {
         app_state.g_account_locked = false;
@@ -1977,7 +1979,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
-    if (@import("room_frontend.zig").enabled) {
+    if (room_prepare_ok and @import("room_frontend.zig").enabled) {
         room_layout_applied = @import("room_frontend.zig").applyAccountLayout(reply.account_id, to_apply);
     }
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
