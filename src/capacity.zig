@@ -273,11 +273,17 @@ pub fn sidebarStickyCardHitTest(my: i32) bool {
 pub const AdmissionOrigin = enum { user, automatic };
 
 fn capacityAdmissionFor(origin: AdmissionOrigin, state: CapacityState, host_busy: u16, host_limit: u16) CapacityAdmission {
-    _ = origin;
-    if (state == .red or state == .critical) return .block_host_pressure;
-    if (host_limit > 0 and host_busy >= host_limit) return .block_host_busy;
-    if (state == .amber) return .warn;
-    return .allow;
+    const saturated = host_limit > 0 and host_busy >= host_limit;
+    return switch (state) {
+        .critical => .block_host_pressure,
+        .red => if (origin == .automatic) .block_host_pressure else .warn,
+        .amber => .warn,
+        .green, .unknown => if (saturated) (if (origin == .automatic) .block_host_busy else .warn) else .allow,
+    };
+}
+
+fn capacityHostMetrics(host: u8) @import("app_state.zig").HostCapacity {
+    return if (host < app_state.g_host_capacity.len) app_state.g_host_capacity[host] else .{};
 }
 
 fn capacityAuditPath(buf: *[512]u8) ?[]const u8 {
@@ -324,7 +330,16 @@ pub fn capacityAdmitNewAgent(host: u8, workspace: u8, origin: AdmissionOrigin, l
     switch (decision) {
         .allow => return true,
         .warn => {
-            const msg = std.fmt.bufPrint(&msg_buf, "{s} AMBER ({d}/{d} busy) - starting {s}", .{ capacityHostLabel(host), host_busy, host_limit, label }) catch "VPS capacity warning";
+            const metrics = capacityHostMetrics(host);
+            const msg = std.fmt.bufPrint(&msg_buf, "{s} {s}: load {d}.{d}/{d}, {d} busy - starting {s}", .{
+                capacityHostLabel(host),
+                capacityStateLabel(state),
+                metrics.load_milli / 1000,
+                metrics.load_milli % 1000 / 100,
+                metrics.cores,
+                host_busy,
+                label,
+            }) catch "VPS capacity warning";
             showHeaderNoticeAscii(msg, 6000, true);
             return true;
         },

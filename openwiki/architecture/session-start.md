@@ -41,6 +41,10 @@ Shell`.
 
 Before anything is spawned, `capacityAdmitNewAgent` (from `src/capacity.zig`)
 may refuse a program that creates an agent workload. A refusal produces no tab.
+The gate takes the origin of the start: a start a person asked for (a palette
+custom command, a workspace session, Codex, Pi) is admitted with the warning on a
+busy host and refused only at critical pressure, while a start nobody clicked
+(Claude resurrection) still stops at red or critical.
 
 The tmux session name is `term-<hex>` from `GetTickCount64`, so two tabs created
 in the same millisecond would collide, and nothing checks that the name is free
