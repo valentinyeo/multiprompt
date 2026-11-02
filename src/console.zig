@@ -1809,9 +1809,9 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
 }
 
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
+    if (app_state.g_account_locked) return false;
     const pending_chat_view = app_state.g_pending_chat_view;
     app_state.g_pending_chat_view = false;
-    if (app_state.g_account_locked) return false;
     const background_workspace = app_state.g_pending_background_workspace;
     if (tmux_session) |session| {
         if (findLocalTmuxTab(app_state.g_pending_tmux_host, session)) |existing| {
