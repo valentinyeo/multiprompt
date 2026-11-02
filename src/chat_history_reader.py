@@ -2313,7 +2313,8 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Your browser pane works through zsb; run `zsb --help` to see its commands.\n"
                       "When Multibot lacks something that would make your work easier, run\n"
-                      "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.")
+                      "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
+                      "Feedback is saved locally. No board ticket is filed.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error", 5: "agent_not_found"}
@@ -2919,6 +2920,11 @@ def host_agent_env(provider, sid):
     tmux = config.get('tmux')
     if isinstance(tmux, str) and tmux:
         env['MULTIBOT_SESSION'] = tmux
+    name = host_chat_name(provider, sid)
+    if name:
+        for key in ("TMUX", "TMUX_PANE"):
+            env.pop(key, None)
+        env.update(ZSB_SESSION=name, MULTIPROMPT_TAB=name)
     return env
 
 
@@ -5294,7 +5300,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 50
+RUNTIME_GENERATION = 51
 
 if __name__ == '__main__':
     import base64 as _base64

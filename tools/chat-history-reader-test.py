@@ -4353,6 +4353,20 @@ class AgentHostTest(unittest.TestCase):
         self.assertIsNotNone(command, 'a host must find its agent outside the login PATH')
         self.assertEqual(command[0], str(binary))
 
+    def test_IGSH_1525_live_agent_knows_its_browser_pane_session(self):
+        self.enable()
+        with patch.dict(os.environ, dict(TMUX='/tmp/other,1,0', TMUX_PANE='%9')), \
+                patch.object(reader.subprocess, 'Popen') as popen:
+            reader.host_agent_start(self.provider, self.sid)
+        env = popen.call_args.kwargs.get('env') or {}
+        self.assertEqual(env.get('ZSB_SESSION'), self.tmux, 'the browser bridge finds the pane by this session name')
+        self.assertEqual(env.get('MULTIPROMPT_TAB'), self.tmux)
+        self.assertEqual(env.get('MULTIBOT_PROVIDER'), self.provider)
+        self.assertEqual(env.get('MULTIBOT_SESSION'), self.tmux)
+        self.assertEqual(env['PATH'].split(':')[0], str(self.home / reader.HOST_RUNTIME_TOOLS))
+        self.assertNotIn('TMUX', env, 'a stray tmux would point the bridge at another session')
+        self.assertNotIn('TMUX_PANE', env)
+
     def test_host_reports_a_missing_agent_instead_of_raising(self):
         self.enable()
         empty = self.home / 'empty-home'
@@ -4449,7 +4463,8 @@ class AgentFeedbackCliTest(unittest.TestCase):
         self.assertFalse(self.log.exists(), 'an empty wish must not reach the log')
         saved = self.cli('a shortcut for browser screenshots', '--why', 'a shot takes three commands')
         self.assertEqual(saved.returncode, 0, saved.stderr)
-        self.assertEqual(saved.stdout, 'Feedback saved. Thanks.\n')
+        self.assertEqual(saved.stdout, 'Feedback saved locally. No board ticket filed.\n')
+        self.assertEqual(self.log.stat().st_mode & 0o077, 0)
         lines = self.log.read_text(encoding='utf-8').splitlines()
         self.assertEqual(len(lines), 1)
         row = json.loads(lines[0])

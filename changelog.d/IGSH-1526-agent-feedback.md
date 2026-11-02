@@ -1,1 +1,1 @@
-Every live chat session is told it runs inside Multiprompt and can ask for missing tools with one command.
+Claude live chat can save feedback locally. It does not file board tickets.

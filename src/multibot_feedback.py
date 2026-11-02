@@ -7,7 +7,7 @@ import time
 import uuid
 from pathlib import Path
 
-SUCCESS = 'Feedback saved. Thanks.'
+SUCCESS = 'Feedback saved locally. No board ticket filed.'
 EMPTY_WANT = 'multibot-feedback: say what you want from Multibot'
 
 
@@ -37,13 +37,14 @@ def feedback_row(want, why):
 def save(row):
     path = state_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with path.open('a', encoding='utf-8') as stream:
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, 'a', encoding='utf-8') as stream:
         stream.write(json.dumps(row, sort_keys=True) + '\n')
 
 
 def main(argv):
     parser = argparse.ArgumentParser(prog='multibot-feedback',
-                                     description='Ask Multibot for something that would make this session easier.')
+                                     description='Save feedback locally. No board ticket is filed.')
     parser.add_argument('want')
     parser.add_argument('--why', default='')
     args = parser.parse_args(argv)
@@ -51,7 +52,11 @@ def main(argv):
     if not want:
         print(EMPTY_WANT, file=sys.stderr)
         return 2
-    save(feedback_row(want, args.why.strip()))
+    try:
+        save(feedback_row(want, args.why.strip()))
+    except OSError as exc:
+        print(f'multibot-feedback: could not save locally: {exc}', file=sys.stderr)
+        return 1
     print(SUCCESS)
     return 0
 
