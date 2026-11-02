@@ -318,6 +318,11 @@ const CAPTURE_CAP: usize = 64 * 1024;
 
 var g_snapshot_fn: ?SnapshotFn = null;
 var g_dump_fn: ?MiniDumpFn = null;
+var g_private_viewer_used = std.atomic.Value(bool).init(false);
+
+pub fn disableMemoryDumpsForPrivateViewer() void {
+    g_private_viewer_used.store(true, .release);
+}
 var g_version: []const u8 = "";
 var g_is_dev: bool = false;
 var g_in_crash: bool = false;
@@ -457,6 +462,7 @@ fn pruneOldCrashFiles() void {
 }
 
 fn writeMiniDump(path: [:0]const u16, info: ?*win.EXCEPTION_POINTERS, tid: u32) bool {
+    if (g_private_viewer_used.load(.acquire)) return false;
     const dump_fn = g_dump_fn orelse return false;
     const h = win.CreateFileW(path.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
     if (@intFromPtr(h) == win.INVALID_HANDLE or h == null) return false;
@@ -628,7 +634,7 @@ fn recordCrash() void {
         .snap = snap,
         .log_tail = log_tail,
         .stack_rvas = rvas[0..n_rvas],
-        .dump_name = if (g_dump_fn != null) dmp_name else null,
+        .dump_name = if (g_dump_fn != null and !g_private_viewer_used.load(.acquire)) dmp_name else null,
         .reopen = reopen,
     });
     var txt_wide: [340]u16 = undefined;

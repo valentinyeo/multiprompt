@@ -41,7 +41,7 @@ function harness() {
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
-  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('@import("console.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
+  const production = functions.join('\n').replaceAll('@import("computer_pane.zig").', 'computer.').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('@import("console.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -50,6 +50,13 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
+const computer = struct {
+    fn selected() bool { return false; }
+    fn splitPermille() u16 { return 500; }
+    fn sync() void {}
+    fn present() void {}
+    fn setSplitPermille(_: u16) void {}
+};
 const chat_style = struct { ${fn(read('chat_style'), 'readingColumn')} ${fn(read('chat_style'), 'contentColumn')} };
 const chat_history = struct { ${fn(read('chat_history'), 'column')} };
 const HANDLE = ?*anyopaque;
@@ -111,7 +118,7 @@ var reserved = false;
 var test_client = RECT{ .right = 1920, .bottom = 1032 };
 var shell_rect: RECT = .{};
 fn mainWindowDpi() u32 { return 96; }
-${fn(browser, 'browserSplitPermilleForActiveShell')}
+${fn(browser, 'browserSplitPermilleForActiveShell').replaceAll('@import("computer_pane.zig").', 'computer.')}
 fn browserSlotReserved() bool { return reserved; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
 var test_permission_visible = false;
@@ -560,4 +567,10 @@ test "selected session is gray and distinct from its sidebar" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('Computer owns the right pane slot and its saved split while it is open', () => {
+  assert.match(fn(browser, 'browserSlotReserved'), /@import\("computer_pane\.zig"\)\.selected\(\)/);
+  assert.match(fn(browser, 'browserSplitPermilleForActiveShell'), /@import\("computer_pane\.zig"\)\.splitPermille\(\)/);
+  assert.match(fn(layout, 'activePaneRects'), /browserSlotReserved\(\)/);
 });

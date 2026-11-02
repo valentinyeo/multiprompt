@@ -148,6 +148,8 @@ pub fn activePaneContentRect(client: RECT) RECT {
 }
 
 pub fn repositionActive() void {
+    @import("computer_pane.zig").sync();
+    defer @import("computer_pane.zig").present();
     if (@import("room_frontend.zig").isActive()) {
         @import("room_frontend.zig").resize(app_state.g_main_hwnd);
         hideAllBrowserChrome();
@@ -159,7 +161,7 @@ pub fn repositionActive() void {
     if (IsIconic(app_state.g_main_hwnd) != 0) return;
     if (app_state.g_webview2_active) {
         if (app_state.g_webview2_set_visible) |set_visible|
-            set_visible(if (webView2OwnsActiveShell()) 1 else 0);
+            set_visible(if (webView2OwnsActiveShell() and !@import("computer_pane.zig").selected()) 1 else 0);
     }
     if (app_state.g_all_sessions_active) {
         _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
@@ -170,7 +172,7 @@ pub fn repositionActive() void {
         if (app_state.g_chat_browser_swap.shell_id == 0 and IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0) _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
         if (app_state.g_chat_browser_swap.shell_id == 0) {
             if (browserSlotReserved()) {
-                if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
+                if (@import("computer_pane.zig").selected()) hideAllBrowserChrome() else if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
             } else {
                 hideAllBrowserChrome();
             }
@@ -208,7 +210,7 @@ pub fn repositionActive() void {
         _ = SetWindowPos(sh, null, left, con_top, w, h, SWP_FRAMECHANGED | SWP_NOZORDER);
         verifyShellWindowSize(sh, left, con_top, w, h);
         if (browserSlotReserved()) {
-            if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
+            if (@import("computer_pane.zig").selected()) hideAllBrowserChrome() else if (webView2OwnsActiveShell()) positionWebView2() else positionActiveBrowser();
         }
         return;
     }

@@ -1,0 +1,15 @@
+{
+  "project": "noVNC/noVNC",
+  "version": "1.6.0",
+  "tag": "v1.6.0",
+  "source": "https://codeload.github.com/novnc/noVNC/tar.gz/refs/tags/v1.6.0",
+  "archive_sha256": "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa",
+  "directory": "vendor/novnc",
+  "members": ["core/**", "vendor/pako/**", "LICENSE.txt", "AUTHORS", "docs/LICENSE.MPL-2.0", "docs/LICENSE.BSD-3-Clause", "docs/LICENSE.BSD-2-Clause"],
+  "local_patches": {
+    "core/display.js": "Increment paintSerial only after drawing actual damaged pixels into the visible canvas.",
+    "core/rfb.js": "Expose paintedframe only after a pixel-bearing completed framebuffer update and display flush; expose releaseInput before viewOnly/disconnect; emit beforedisconnect before removing the canvas so target-scoped RAM snapshots survive unexpected teardown; require VNC authentication; drop password reference after challenge response."
+  },
+  "runtime_cdn": false,
+  "licensing": "Upstream copyright notices, authors, MPL-2.0, BSD texts, and pako MIT license retained. The modified MPL source is distributed in this directory."
+}

@@ -776,6 +776,7 @@ pub fn browserNativeBottomOverrun() i32 {
 }
 
 pub fn browserPaneActive() bool {
+    if (@import("computer_pane.zig").selected()) return false;
     return app_state.active_shell < app_state.shell_count and
         app_state.shells[app_state.active_shell].browser_enabled and
         app_state.shells[app_state.active_shell].browser_hwnd != null and
@@ -787,6 +788,7 @@ fn browserSlotReservedPure(has_active_shell: bool, browser_enabled: bool, webvie
 }
 
 pub fn browserSlotReserved() bool {
+    if (@import("computer_pane.zig").selected()) return true;
     return browserSlotReservedPure(
         app_state.active_shell < app_state.shell_count,
         app_state.active_shell < app_state.shell_count and (app_state.shells[app_state.active_shell].browser_enabled or
@@ -804,11 +806,13 @@ test "browserSlotReservedPure reserves for any enabled or WebView2-owned tab" {
 }
 
 pub fn browserSplitPermilleForActiveShell() u16 {
+    if (@import("computer_pane.zig").selected()) return @import("computer_pane.zig").splitPermille();
     if (app_state.active_shell >= app_state.shell_count) return BROWSER_SPLIT_DEFAULT_PERMILLE;
     return @min(app_state.shells[app_state.active_shell].browser_split_permille, 1000);
 }
 
 pub fn activeBrowserHwndLive() ?HANDLE {
+    if (@import("computer_pane.zig").selected()) return null;
     if (app_state.active_shell >= app_state.shell_count) return null;
     if (!app_state.shells[app_state.active_shell].browser_enabled) return null;
     const bh = app_state.shells[app_state.active_shell].browser_hwnd orelse return null;
@@ -1908,6 +1912,7 @@ fn navigateBrowserPaneWithIntent(idx: u32, raw_url: []const u8, intent: app_stat
 
 pub fn openBrowserPaneForShell(idx: u32, raw_url: []const u8) void {
     if (idx >= app_state.shell_count) return;
+    @import("computer_pane.zig").chooseBrowser(idx);
     app_state.shells[idx].browser_signin_offered = false;
     if (app_state.shells[idx].browser_open_failed) closeBrowserForShell(idx);
     const url = std.mem.trim(u8, raw_url, &[_]u8{ '\r', '\n', ' ', '\t' });
@@ -2012,6 +2017,10 @@ pub fn setBrowserSplitFromMouse(x: i32) void {
     const available = @max(0, pane.right - pane.left - style.paneGap());
     if (available == 0) return;
     const width = style.clampPaneSplitWidth(available, x - pane.left - @divTrunc(style.paneGap(), 2));
+    if (@import("computer_pane.zig").selected()) {
+        @import("computer_pane.zig").setSplitPermille(@intCast(@divTrunc(width * 1000 + @divTrunc(available, 2), available)));
+        return;
+    }
     if (app_state.active_shell < app_state.shell_count) {
         app_state.shells[app_state.active_shell].browser_split_permille = @intCast(@divTrunc(width * 1000 + @divTrunc(available, 2), available));
     }
@@ -3332,7 +3341,7 @@ fn unlockForegroundAfterRequestLaunch() void {
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_launch, timing_started);
-    if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx)) return;
+    if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx) or @import("computer_pane.zig").chosenFor(idx)) return;
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     if (app_state.g_browser_adopt_target_idx != 0xFFFFFFFF) return;
     const launch_now = GetTickCount64();
@@ -3631,6 +3640,7 @@ fn positionBrowserUrlBar(layout: BrowserLayout) void {
 }
 
 pub fn positionActiveBrowser() void {
+    if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
     const timing_started = switch_timing.start();
     defer switch_timing.record(.position, timing_started);
     if (app_state.g_monitor_transition.active and !app_state.g_monitor_transition.positioning) {
@@ -3711,6 +3721,11 @@ pub fn positionActiveBrowser() void {
 
 pub fn paletteAnchoredBesideBrowser() bool {
     if (!app_state.g_search_active) return false;
+    if (@import("computer_pane.zig").selected()) {
+        if (@import("computer_pane.zig").fullWidth()) return false;
+        const layout = calcBrowserLayout() orelse return false;
+        return layout.splitter_left - SIDEBAR_W() >= searchOverlayW() + 24;
+    }
     if (app_state.active_shell >= app_state.shell_count) return false;
     if (!app_state.shells[app_state.active_shell].browser_enabled) return false;
     const bh = app_state.shells[app_state.active_shell].browser_hwnd;
@@ -3733,6 +3748,7 @@ pub fn snippetFormAnchoredBesideBrowser() bool {
 }
 
 pub fn browserChromeHiddenForOverlay() bool {
+    if (@import("computer_pane.zig").selected()) return true;
     return !@import("room_frontend.zig").privateActionsAllowed() or @import("settings_panel.zig").isOpen() or
         app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
         (app_state.g_snippet_create_active and !snippetFormAnchoredBesideBrowser()) or
@@ -3765,6 +3781,7 @@ test "browserPaneOccupiesLayoutPure parks on every on-screen blocker" {
 }
 
 fn browserPaneMayOccupyLayout(idx: u32) bool {
+    if (@import("computer_pane.zig").chosenFor(idx)) return false;
     if (idx >= app_state.shell_count or app_state.g_main_hwnd == null or app_state.shells[idx].browser_docking or app_state.g_chat_browser_swap.shell_id != 0) return false;
     return browserPaneOccupiesLayoutPure(
         idx == app_state.active_shell,
@@ -3930,7 +3947,7 @@ fn hideBrowserWindowHard(hwnd: HANDLE) void {
 }
 
 pub fn hideAllBrowserChrome() void {
-    if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (app_state.g_chat_browser_swap.shell_id != 0 and !@import("computer_pane.zig").selected()) return;
     hideBrowserFloatingChrome();
     for (0..app_state.shell_count) |i| {
         const bh = app_state.shells[i].browser_hwnd;
@@ -4089,6 +4106,7 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
+    if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
     if (!@import("room_frontend.zig").privateActionsAllowed()) {
         hideAllBrowserChrome();
         return;
@@ -4613,6 +4631,7 @@ test "IGSH-523 connected pane stays visible without an extension past the openin
 }
 
 pub fn browserPaneCoversSlot() bool {
+    if (@import("computer_pane.zig").selected()) return true;
     if (app_state.active_shell >= app_state.shell_count) return false;
     if (webView2OwnsActiveShell()) return true;
     const sh = &app_state.shells[app_state.active_shell];
@@ -5661,6 +5680,7 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
 }
 
 pub fn startBrowserUrlBarEdit() void {
+    if (@import("computer_pane.zig").selected()) return;
     if (!focusGuard(app_state.g_main_hwnd)) return;
     if (!activeBrowserShowsUrlBar()) return;
     commitRename();
@@ -5713,7 +5733,7 @@ pub fn webView2OwnsShell(idx: u32) bool {
 }
 
 pub fn webView2OwnsActiveShell() bool {
-    return webView2OwnsShell(app_state.active_shell);
+    return !@import("computer_pane.zig").selected() and webView2OwnsShell(app_state.active_shell);
 }
 
 pub fn webView2HasInputFocus() bool {

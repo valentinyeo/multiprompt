@@ -286,6 +286,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+I (inside)", .b = "Jump back to ALL split", .header = false },
     .{ .a = "q / Esc", .b = "Close Inbox", .header = false },
     .{ .a = "View", .b = "", .header = true },
+    .{ .a = "Ctrl+K -> Computer: Take control / Give back", .b = "Control Computer or return to watching", .header = false },
+    .{ .a = "Ctrl+K -> Computer: Retry", .b = "Retry a lost Computer connection", .header = false },
     .{ .a = "Ctrl+Shift+F", .b = "Toggle full-width (fullscreen)", .header = false },
     .{ .a = "Ctrl+Shift+B", .b = "Cycle sidebar: open / collapsed / hidden", .header = false },
     .{ .a = "multiprompt-browser sidebar", .b = "Reveal the sidebar from a shell", .header = false },
@@ -660,8 +662,45 @@ fn queueDictationStopFromEnter() bool {
     return true;
 }
 
+var computer_consumed_keys = [_]bool{false} ** 256;
+
+fn computerAppMessage(vk: u32, ctrl: bool, shift: bool, alt: bool, win: bool) ?u32 {
+    if (win) return null;
+    if (alt and !ctrl) return switch (vk) {
+        0x43 => WM_APP_CHAT_TOGGLE,
+        0x41, 0x42 => WM_APP_BROWSER_TOGGLE,
+        0x51, 0x4D => WM_APP_BROWSER_FOCUS_TOGGLE,
+        else => null,
+    };
+    if (ctrl and !alt) return switch (vk) {
+        0x4B => if (!shift) WM_APP_SEARCH_OPEN else null,
+        0x46 => if (shift) WM_APP_TOGGLE_FULLWIDTH else null,
+        0xC0 => if (!shift) WM_APP_BROWSER_FOCUS_TOGGLE else null,
+        else => null,
+    };
+    return null;
+}
+
+test "IGSH-1087 private typing bypasses chat and shell shortcuts except deliberate app chords" {
+    for ([_]u32{ 0x0D, 0x1B, 0x20, 0x09, 0x41, 0x43, 0x46, 0x54, 0x56, 0x58 }) |vk| {
+        try std.testing.expectEqual(@as(?u32, null), computerAppMessage(vk, false, false, false, false));
+        try std.testing.expectEqual(@as(?u32, null), computerAppMessage(vk, true, false, false, false));
+        try std.testing.expectEqual(@as(?u32, null), computerAppMessage(vk, true, false, true, false));
+    }
+    try std.testing.expectEqual(@as(?u32, WM_APP_CHAT_TOGGLE), computerAppMessage(0x43, false, false, true, false));
+    try std.testing.expectEqual(@as(?u32, WM_APP_SEARCH_OPEN), computerAppMessage(0x4B, true, false, false, false));
+    try std.testing.expectEqual(@as(?u32, WM_APP_TOGGLE_FULLWIDTH), computerAppMessage(0x46, true, true, false, false));
+    try std.testing.expectEqual(@as(?u32, WM_APP_BROWSER_TOGGLE), computerAppMessage(0x41, false, false, true, false));
+    try std.testing.expectEqual(@as(?u32, WM_APP_BROWSER_FOCUS_TOGGLE), computerAppMessage(0x51, false, false, true, false));
+    try std.testing.expectEqual(@as(?u32, null), computerAppMessage(0x4B, true, false, false, true));
+    try std.testing.expectEqual(@as(?u32, null), computerAppMessage(0x4B, true, true, false, false));
+}
+
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-    if (app_state.g_account_locked) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+    if (app_state.g_account_locked) {
+        computer_consumed_keys = @splat(false);
+        return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+    }
     app_state.g_last_kb_hook_tick = GetTickCount64();
     if (nCode == HC_ACTION) {
         if (app_state.g_power_deep_idle and app_state.g_main_hwnd != null) {
@@ -692,8 +731,36 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_user_action_tick = GetTickCount64();
         }
 
+        const key_down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+        const key_up = wp == WM_KEYUP or wp == WM_SYSKEYUP;
+        if (kb.vkCode < computer_consumed_keys.len and computer_consumed_keys[kb.vkCode]) {
+            if (key_up) computer_consumed_keys[kb.vkCode] = false;
+            return 1;
+        }
         if (@import("settings_panel.zig").ownsForeground()) {
-            if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+            if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = key_down;
+            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        }
+        if (@import("computer_pane.zig").hasInputFocus()) {
+            if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = key_down;
+            if (key_down and (kb.flags & 0x10) == 0) {
+                const shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+                const win = GetAsyncKeyState(0x5B) < 0 or GetAsyncKeyState(0x5C) < 0;
+                if (computerAppMessage(kb.vkCode, isCtrlDown(), shift, isAltDown(kb.flags), win)) |message| {
+                    var argument: WPARAM = 0;
+                    if (message == WM_APP_SEARCH_OPEN) {
+                        argument = 1;
+                    } else if (message == WM_APP_BROWSER_TOGGLE) {
+                        argument = if (kb.vkCode == 0x41 and shift) 2 else 1;
+                    }
+                    @import("computer_pane.zig").revoke();
+                    app_state.g_sysmenu_pending = false;
+                    if (PostMessageW(app_state.g_main_hwnd, message, argument, if (message == WM_APP_BROWSER_TOGGLE) @intCast(kb.time) else 0) != 0) {
+                        computer_consumed_keys[kb.vkCode] = true;
+                        return 1;
+                    }
+                }
+            }
             return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
         if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
