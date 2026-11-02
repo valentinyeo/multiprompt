@@ -30,9 +30,11 @@ const db = await mf.getD1Database('DB');
 for (const sql of readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').split(';').filter(s => s.trim())) await db.prepare(sql).run();
 
 const refresh = secret();
+const secondRefresh = args['second-device'] === 'true' ? secret() : null;
 const keys = { admin: 'mpk_a_' + secret(), workspace: 'mpk_w_' + secret(), other: 'mpk_w_' + secret() };
 await db.prepare('INSERT INTO layouts VALUES (?,?,?)').bind(account, 1, JSON.stringify(layout)).run();
 await db.prepare('INSERT INTO devices (id,account,name,refresh_hash,created,last_seen) VALUES (?,?,?,?,?,?)').bind('journey-device', account, 'Journey', await hash(refresh), 1, 1).run();
+if (secondRefresh) await db.prepare('INSERT INTO devices (id,account,name,refresh_hash,created,last_seen) VALUES (?,?,?,?,?,?)').bind('journey-device-b', account, 'Journey B', await hash(secondRefresh), 1, 1).run();
 const addKey = async (key, kind, workspace) => db.prepare('INSERT INTO service_keys (hash,account,kind,workspace,label,created) VALUES (?,?,?,?,?,?)').bind(await hash(key), account, kind, workspace, 'journey', 1).run();
 await addKey(keys.admin, 'admin', null);
 await addKey(keys.workspace, 'workspace', 'Notes');
@@ -70,7 +72,7 @@ const server = args.pfx
   ? createHttps({ pfx: readFileSync(args.pfx), passphrase: args.pfxpass }, handler)
   : createHttp(handler);
 server.listen(port, args.bind || '0.0.0.0', () => {
-  if (stateFile) writeFileSync(stateFile, JSON.stringify({ account, refresh_token: refresh, admin_key: keys.admin, workspace_key: keys.workspace, other_key: keys.other }));
+  if (stateFile) writeFileSync(stateFile, JSON.stringify({ account, refresh_token: refresh, admin_key: keys.admin, workspace_key: keys.workspace, other_key: keys.other, ...(secondRefresh ? { second_refresh_token: secondRefresh } : {}) }));
   console.log('journey service ready on ' + port);
 });
 process.on('SIGTERM', async () => { server.close(); await mf.dispose(); process.exit(0); });

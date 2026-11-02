@@ -2,6 +2,11 @@ name: Account layout journey
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Published version tag
+        required: false
+        type: string
   schedule:
     - cron: '0 2 * * *'
 
@@ -16,11 +21,13 @@ jobs:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Install pinned Windows Zig
+        if: inputs.tag == ''
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP\zig.zip"
@@ -29,12 +36,58 @@ jobs:
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Build the real app
+        if: inputs.tag == ''
         shell: pwsh
         run: |
           zig build -Dtarget=x86_64-windows-gnu --summary all
           if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
           New-Item -ItemType Directory -Force bin | Out-Null
           Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+          Copy-Item zig-out/bin/zigshell-bridge.exe bin/zigshell-bridge.exe
+      - name: Acquire published binaries
+        if: inputs.tag != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Invalid release tag' }
+          if ($env:GITHUB_REF -cne "refs/tags/$tag") { throw 'Dispatch ref must equal release tag' }
+          $headSha = (git rev-parse HEAD).Trim()
+          $tagSha = (git rev-parse "refs/tags/$tag^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $headSha -cne $tagSha -or $headSha -cne $env:GITHUB_SHA) { throw 'Release tag and checkout differ' }
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.tag_name -cne $tag -or $release.draft -or $release.prerelease) { throw 'Published release not found' }
+          $releaseTarget = (git rev-parse --verify "$($release.target_commitish)^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $releaseTarget -cne $tagSha) { throw 'Published release target differs from tag' }
+          New-Item -ItemType Directory -Force bin | Out-Null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --dir bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+          $manifest = Get-Content bin/SHA256SUMS.txt
+          foreach ($asset in @('multiprompt-x64.exe', 'zigshell-bridge-x64.exe')) {
+            $lines = @($manifest | Where-Object { $_ -cmatch ('^[a-fA-F0-9]{64}\s+\*?' + [regex]::Escape($asset) + '$') })
+            if ($lines.Count -ne 1) { throw "Missing or duplicate checksum for $asset" }
+            $expected = $lines[0].Substring(0, 64).ToLowerInvariant()
+            if ((Get-FileHash "bin/$asset" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw "Checksum mismatch for $asset" }
+          }
+          Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+          Copy-Item bin/zigshell-bridge-x64.exe bin/zigshell-bridge.exe
+      - name: Record binary provenance
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $bytes = [IO.File]::ReadAllBytes("$PWD/bin/multiprompt.exe")
+          $binaryText = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
+          $markers = [regex]::Matches($binaryText, 'MPVERSION=(\d+\.\d+\.\d+);')
+          $versions = @($markers | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+          if ($versions.Count -ne 1) { throw 'Missing or inconsistent embedded version' }
+          if ($env:RELEASE_TAG -and $versions[0] -cne $env:RELEASE_TAG.Substring(1)) { throw 'Embedded version differs from release tag' }
+          $sha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source SHA' }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          [ordered]@{ mode = if ($env:RELEASE_TAG) { 'published' } else { 'branch-build' }; tag = $env:RELEASE_TAG; harness_sha = $sha; app_source_sha = $sha; app_sha256 = (Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant(); bridge_sha256 = (Get-FileHash bin/zigshell-bridge.exe -Algorithm SHA256).Hash.ToLowerInvariant(); embedded_version = $versions[0]; run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Build the test account service
         working-directory: service
         shell: pwsh
@@ -46,9 +99,21 @@ jobs:
       - name: Drive the real desktop against the account service
         shell: pwsh
         run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+      - name: Require native roundtrip evidence
+        shell: pwsh
+        run: |
+          $result = Get-Content evidence/result.json -Raw | ConvertFrom-Json
+          $devices = @($result.native_roundtrip.device_ids)
+          if ($result.verdict -cne 'pass' -or $result.native_roundtrip.verdict -cne 'pass' -or $devices.Count -ne 2 -or !$devices[0] -or !$devices[1] -or $devices[0] -ceq $devices[1]) { throw 'Missing native roundtrip proof' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: account-journey-desktop
-          path: evidence
+          path: |
+            evidence/result.json
+            evidence/provenance.json
+            evidence/native-*.png
+            evidence/native-*.json
+            evidence/desktop-*.png
+            evidence/desktop-*.json
           if-no-files-found: error

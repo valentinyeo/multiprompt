@@ -4,7 +4,6 @@ New-Item -ItemType Directory -Force $Output | Out-Null
 $Output = (Resolve-Path $Output).Path
 $Exe = (Resolve-Path $Exe).Path
 $repo = (Resolve-Path "$PSScriptRoot/../..").Path
-Start-Transcript "$Output/driver.log"
 Add-Type -AssemblyName System.Drawing
 try { Add-Type -AssemblyName System.Security } catch {}
 Add-Type -Path "$repo/tools/verify-reconnect/desktop.cs"
@@ -14,16 +13,28 @@ $settings = "$work/roaming/ZigShell"
 $log = "$settings/debug.log"
 $hostName = 'account.multiprompt.dev'
 $app = $null
+$appB = $null
+$main = [IntPtr]::Zero
+$mainB = [IntPtr]::Zero
 $server = $null
+$cert = $null
+$rootCertAdded = $false
 $failure = $null
-$results = [ordered]@{}
-function Read-Log {
-    if (!(Test-Path $log)) { return '' }
+$stage = 'setup'
+$results = [ordered]@{ native_roundtrip = @{ verdict = 'fail' } }
+$hostsFile = "$env:SystemRoot/System32/drivers/etc/hosts"
+$hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
+$originalEnv = @{}
+foreach ($envName in @('APPDATA', 'LOCALAPPDATA', 'ZIGSHELL_DEBUG', 'MULTIPROMPT_NO_LOGIN', 'NODE_EXTRA_CA_CERTS', 'MULTIPROMPT_KEY')) {
+    $originalEnv[$envName] = [Environment]::GetEnvironmentVariable($envName, 'Process')
+}
+function Read-Log([string]$LogPath = $log) {
+    if (!(Test-Path $LogPath)) { return '' }
     for ($retry = 0; $retry -lt 100; $retry++) {
         $stream = $null
         $reader = $null
         try {
-            $stream = [IO.File]::Open($log, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+            $stream = [IO.File]::Open($LogPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
             $reader = [IO.StreamReader]::new($stream)
             return $reader.ReadToEnd()
         } catch [IO.IOException] {
@@ -39,29 +50,72 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90)
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 100 } while ([DateTime]::UtcNow -lt $deadline)
     throw "Timed out: $Description"
 }
-function Shot([string]$Name) {
+function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
+    if ($Window -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId -or [ReconnectDesktop]::GetForegroundWindow() -ne $Window) { throw 'App window is not owned and foreground' }
+}
+function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id) {
+    if ([ReconnectDesktop]::GetForegroundWindow() -ne $Window) { [ReconnectDesktop]::Activate($Window) }
     Start-Sleep -Milliseconds 2000
+    Assert-Window $Window $ProcessId
     $bitmap = [Drawing.Bitmap]::new([ReconnectDesktop]::GetSystemMetrics(0), [ReconnectDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Output/$Name.png", [Drawing.Imaging.ImageFormat]::Png) }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
+    @{ capture = $Name; pid = $ProcessId; hwnd = $Window.ToInt64() } | ConvertTo-Json | Set-Content "$Output/$Name.json"
 }
-function Show-Workspace([string]$Name) {
+function Show-Workspace([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id, [string]$SessionPath = "$settings/session-journey-a.json") {
     for ($n = 2; $n -le 9; $n++) {
-        [ReconnectDesktop]::Activate($main)
+        [ReconnectDesktop]::Activate($Window)
+        Assert-Window $Window $ProcessId
         [ReconnectDesktop]::Key(0x12, $false)
         [ReconnectDesktop]::Key([ushort](0x30 + $n), $false)
         [ReconnectDesktop]::Key([ushort](0x30 + $n), $true)
         [ReconnectDesktop]::Key(0x12, $true)
         Start-Sleep -Milliseconds 500
-        $app.Refresh()
         try {
-            $state = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            $state = Get-Content $SessionPath -Raw | ConvertFrom-Json
             $slot = [int]$state.active_workspace
             if ($slot -ge 0 -and $slot -lt @($state.workspaces).Count -and $state.workspaces[$slot].name -ceq $Name) { return }
         } catch {}
     }
     throw "Could not switch to workspace $Name in saved session"
+}
+function Assert-Focus([IntPtr]$Window, [int]$ProcessId, [IntPtr]$Expected) {
+    Assert-Window $Window $ProcessId
+    $focusState = [ReconnectDesktop]::Focus($Window)
+    if ($focusState[0] -ne $Window.ToInt64() -or $focusState[1] -ne $Expected.ToInt64() -or [ReconnectDesktop]::Owner($Expected) -ne $ProcessId -or [ReconnectDesktop]::GetAncestor($Expected, 2) -ne $Window) { throw 'Unexpected input focus' }
+}
+function Type-Ascii([string]$Value, [IntPtr]$Window, [int]$ProcessId, [IntPtr]$Expected) {
+    foreach ($character in $Value.ToCharArray()) {
+        Assert-Focus $Window $ProcessId $Expected
+        $vk = if ($character -eq ' ') { 0x20 } else { [int][char]::ToUpperInvariant($character) }
+        [ReconnectDesktop]::Type([ushort]$vk)
+    }
+}
+function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
+    [ReconnectDesktop]::Activate($Window)
+    Assert-Window $Window $ProcessId
+    [ReconnectDesktop]::Key(0x11, $false)
+    [ReconnectDesktop]::Type(0x4B)
+    [ReconnectDesktop]::Key(0x11, $true)
+    [void](Wait-For 'palette focus' { $f = [ReconnectDesktop]::Focus($Window); $f[0] -eq $Window.ToInt64() -and $f[1] -eq $Window.ToInt64() } 10)
+    Type-Ascii 'rename workspace' $Window $ProcessId $Window
+    Assert-Focus $Window $ProcessId $Window
+    [ReconnectDesktop]::Type(0x0D)
+    $edit = Wait-For 'workspace rename edit' {
+        $f = [ReconnectDesktop]::Focus($Window)
+        $candidate = [IntPtr]$f[1]
+        if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and [ReconnectDesktop]::Owner($candidate) -eq $ProcessId -and [ReconnectDesktop]::GetAncestor($candidate, 2) -eq $Window -and [ReconnectDesktop]::Class($candidate) -eq 'Edit' -and [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName) { $candidate }
+    } 10
+    Assert-Focus $Window $ProcessId $edit
+    return $edit
+}
+function Session-Has([string]$SessionPath, [string]$Name, [string]$Absent) {
+    try {
+        $snapshot = Get-Content $SessionPath -Raw | ConvertFrom-Json
+        $names = @($snapshot.workspaces | ForEach-Object { $_.name })
+        return (@($names | Where-Object { $_ -ceq $Name }).Count -eq 1 -and @($names | Where-Object { $_ -ceq $Absent }).Count -eq 0)
+    } catch { return $false }
 }
 function Tab-Count([string]$Text) {
     $found = [regex]::Matches($Text, 'account-sync: applied workspaces=\S* tabs=(\d+)')
@@ -82,15 +136,19 @@ try {
     $cer = "$work/service.cer"
     [void](Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password)
     [void](Export-Certificate -Cert $cert -FilePath $cer)
+    $rootCertAdded = $true
     [void](Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root)
     $pem = "$work/service.pem"
     $b64 = [Convert]::ToBase64String($cert.RawData, 'InsertLineBreaks')
     [IO.File]::WriteAllText($pem, "-----BEGIN CERTIFICATE-----`n$b64`n-----END CERTIFICATE-----`n")
-    Add-Content -Path "$env:SystemRoot/System32/drivers/etc/hosts" -Value "127.0.0.1 $hostName"
+    [IO.File]::AppendAllText($hostsFile, "`r`n127.0.0.1 $hostName`r`n")
     $env:NODE_EXTRA_CA_CERTS = $pem
     $state = "$work/service-state.json"
-    $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($password))
-    $server = Start-Process node -ArgumentList "`"$repo/service/journey/server.mjs`"", '--port=443', "--pfx=`"$pfx`"", "--pfxpass=$plain", "--state=`"$state`"" -PassThru -RedirectStandardOutput "$Output/service.log" -RedirectStandardError "$Output/service.err.log"
+    $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+    try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+    $server = Start-Process node -ArgumentList "`"$repo/service/journey/server.mjs`"", '--port=443', '--second-device=true', "--pfx=`"$pfx`"", "--pfxpass=$plain", "--state=`"$state`"" -PassThru -RedirectStandardOutput "$work/service.log" -RedirectStandardError "$work/service.err.log"
+    $plain = $null
     [void](Wait-For 'test account service' { Test-Path $state } 60)
     $secrets = Get-Content $state -Raw | ConvertFrom-Json
     $probe = & curl.exe -s "https://$hostName/v1/layout"
@@ -104,7 +162,9 @@ try {
     $env:LOCALAPPDATA = "$work/local"
     $env:ZIGSHELL_DEBUG = '1'
     Remove-Item Env:MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue
-    $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
+    $stage = 'first app launch'
+    $app = Start-Process $Exe -ArgumentList '--single-window', '--name', 'journey-a', '--no-window-restore' -PassThru
+    $results.app_a_pid = $app.Id
     $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ReconnectDesktop]::SetForegroundWindow($main)
     [void](Wait-For 'first layout from the account service' { (Read-Log) -match 'account-sync: applied workspaces=Work\|Notes' } 60)
@@ -114,64 +174,158 @@ try {
     Shot 'desktop-before'
     $results.before = "desktop shows Work with runner sessions, $baseTabs tabs in total"
 
+    $stage = 'legacy CLI journey'
     $listed = Invoke-Layout $secrets.admin_key @('list')
-    $listed.text | Set-Content "$Output/cli-list.txt"
     if ($listed.code -ne 0 -or $listed.text -notmatch 'runner-3') { throw "admin list failed: $($listed.text)" }
 
     $offset = (Read-Log).Length
     $start = [DateTime]::UtcNow
     $moved = Invoke-Layout $secrets.admin_key @('move', '--to', 'Runners', '--create', '--match', 'runner-*')
-    $moved.text | Set-Content "$Output/cli-move.txt"
     if ($moved.code -ne 0 -or $moved.text -notmatch 'moved 3 sessions to Runners') { throw "admin move failed: $($moved.text)" }
     [void](Wait-For 'desktop shows the new section' { (Read-Log).Substring($offset) -match 'account-sync: applied workspaces=\S*Runners' } 30)
     $seen = [DateTime]::UtcNow
     $elapsed = ($seen - $start).TotalSeconds
     Show-Workspace 'Runners'
     Shot 'desktop-after'
-    $results.admin_move = $moved.text
+    $results.admin_move = 'moved 3 sessions to Runners'
     $results.desktop_seconds_to_show_new_section = [Math]::Round($elapsed, 2)
     if ($elapsed -gt 10) { throw "Desktop took $elapsed seconds to show the new section" }
 
     $scoped = Invoke-Layout $secrets.workspace_key @('list')
-    $scoped.text | Set-Content "$Output/cli-workspace-list.txt"
     if ($scoped.code -ne 0 -or $scoped.text -match 'runner-' -or $scoped.text -notmatch 'notes-a') { throw "workspace key list is wrong: $($scoped.text)" }
     $own = Invoke-Layout $secrets.workspace_key @('open', 'notes-new', '--no-tmux')
-    $own.text | Set-Content "$Output/cli-workspace-open.txt"
     if ($own.code -ne 0) { throw "workspace key could not open in its own workspace: $($own.text)" }
     $refused = Invoke-Layout $secrets.workspace_key @('move', '--to', 'Work', 'notes-a')
-    $refused.text | Set-Content "$Output/cli-workspace-refused.txt"
     if ($refused.code -eq 0 -or $refused.text -notmatch 'refused|not found') { throw "workspace key was not refused: $($refused.text)" }
     $other = Invoke-Layout $secrets.other_key @('list')
-    $other.text | Set-Content "$Output/cli-other-workspace.txt"
     if ($other.code -eq 0) { throw 'a key for another workspace was accepted' }
-    $results.workspace_list = $scoped.text
-    $results.workspace_refusal = $refused.text
-    $results.other_workspace = $other.text
+    $results.workspace_list = 'pass'
+    $results.workspace_refusal = 'pass'
+    $results.other_workspace = 'pass'
 
     Start-Sleep -Seconds 8
     $tabsBeforeOpen = Tab-Count (Read-Log)
     $offset = (Read-Log).Length
     $start = [DateTime]::UtcNow
     $opened = Invoke-Layout $secrets.admin_key @('open', 'fresh-session', '--workspace', 'Runners', '--title', 'Fresh session', '--no-tmux')
-    $opened.text | Set-Content "$Output/cli-open.txt"
     if ($opened.code -ne 0) { throw "open failed: $($opened.text)" }
     [void](Wait-For 'desktop shows the opened session' { (Tab-Count (Read-Log).Substring($offset)) -eq ($tabsBeforeOpen + 1) } 30)
     $openSeconds = ([DateTime]::UtcNow - $start).TotalSeconds
     Shot 'desktop-opened'
-    $results.open = $opened.text
+    $results.open = 'pass'
     $results.desktop_seconds_to_show_opened_session = [Math]::Round($openSeconds, 2)
     if ($openSeconds -gt 10) { throw "Desktop took $openSeconds seconds to show the opened session" }
+
+    $stage = 'second device authentication'
+    $tokenBody = @{ grant_type = 'refresh_token'; refresh_token = $secrets.second_refresh_token } | ConvertTo-Json -Compress
+    $tokenB = Invoke-RestMethod -Method Post -Uri "https://$hostName/oauth/token" -ContentType 'application/json' -Body $tokenBody
+    if ($tokenB.device_id -cne 'journey-device-b' -or !$tokenB.access_token -or !$tokenB.refresh_token -or $tokenB.expires_in -lt 300) { throw 'Invalid second device authentication' }
+    $headersB = @{ Authorization = "Bearer $($tokenB.access_token)" }
+    $devices = Invoke-RestMethod -Uri "https://$hostName/v1/devices" -Headers $headersB
+    if ($devices.device_id -cne 'journey-device-b' -or @($devices.devices | Where-Object { $_.id -ceq 'journey-device' -and !$_.revoked }).Count -ne 1 -or @($devices.devices | Where-Object { $_.id -ceq 'journey-device-b' -and !$_.revoked }).Count -ne 1) { throw 'Device membership mismatch' }
+    $settingsB = "$work/roaming-b/ZigShell"
+    $sessionA = "$settings/session-journey-a.json"
+    $sessionB = "$settingsB/session-journey-b.json"
+    $logB = "$settingsB/debug.log"
+    New-Item -ItemType Directory -Force $settingsB, "$work/local-b" | Out-Null
+    $credentialB = [Text.Encoding]::UTF8.GetBytes((@{ refresh_token = $tokenB.refresh_token } | ConvertTo-Json -Compress))
+    $protectedB = [Security.Cryptography.ProtectedData]::Protect($credentialB, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    [IO.File]::WriteAllBytes("$settingsB/account-device.dat", $protectedB)
+    $env:APPDATA = "$work/roaming-b"
+    $env:LOCALAPPDATA = "$work/local-b"
+    $stage = 'second app launch'
+    $appB = Start-Process $Exe -ArgumentList '--single-window', '--name', 'journey-b', '--no-window-restore' -PassThru
+    $results.app_b_pid = $appB.Id
+    $mainB = Wait-For 'second app window' { $h = [ReconnectDesktop]::Window($appB.Id); if ($h -ne [IntPtr]::Zero) { $h } } 60
+    [void](Wait-For 'second app baseline apply' { (Read-Log $logB) -match 'account-sync: applied workspaces=\S*Runners' } 60)
+    $newName = 'saved' + [guid]::NewGuid().ToString('N').Substring(0, 16)
+    $stage = 'native baselines'
+    [void](Wait-For 'A baseline session' { Session-Has $sessionA 'Runners' $newName } 30)
+    [void](Wait-For 'B baseline session' { Session-Has $sessionB 'Runners' $newName } 30)
+    Show-Workspace 'Runners' $mainB $appB.Id $sessionB
+    $editB = Open-Rename $mainB $appB.Id 'Runners'
+    Shot 'native-b-before' $mainB $appB.Id
+    Assert-Focus $mainB $appB.Id $editB
+    [ReconnectDesktop]::Type(0x1B)
+    Show-Workspace 'Runners' $main $app.Id $sessionA
+    $editA = Open-Rename $main $app.Id 'Runners'
+    Shot 'native-a-before' $main $app.Id
+    Assert-Focus $main $app.Id $editA
+    $baseline = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $headersB
+    $baselineNames = @($baseline.layout.workspaces | ForEach-Object { $_.name })
+    if (@($baselineNames | Where-Object { $_ -ceq 'Runners' }).Count -ne 1 -or @($baselineNames | Where-Object { $_ -ceq $newName }).Count -ne 0) { throw 'Service baseline mismatch' }
+    $baselineRevision = [long]$baseline.revision
+    $app.Refresh()
+    $appB.Refresh()
+    if ($app.HasExited -or $appB.HasExited -or !(Session-Has $sessionA 'Runners' $newName) -or !(Session-Has $sessionB 'Runners' $newName)) { throw 'Both native baselines are required' }
+    $offsetB = (Read-Log $logB).Length
+    $nativeStart = [DateTime]::UtcNow
+    $stage = 'native rename'
+    Assert-Focus $main $app.Id $editA
+    if ([ReconnectDesktop]::Text($editA) -cne 'Runners') { throw 'Rename edit changed unexpectedly' }
+    [ReconnectDesktop]::Key(0x11, $false)
+    [ReconnectDesktop]::Type(0x41)
+    [ReconnectDesktop]::Key(0x11, $true)
+    Type-Ascii $newName $main $app.Id $editA
+    Assert-Focus $main $app.Id $editA
+    if ([ReconnectDesktop]::Text($editA) -cne $newName) { throw 'Rename input mismatch' }
+    [ReconnectDesktop]::Type(0x0D)
+    $stage = 'A local save'
+    [void](Wait-For 'A local rename' { Session-Has $sessionA $newName 'Runners' } 60)
+    $stage = 'service publication'
+    $published = Wait-For 'B authenticated published layout' {
+        $reply = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $headersB
+        $names = @($reply.layout.workspaces | ForEach-Object { $_.name })
+        if ([long]$reply.revision -gt $baselineRevision -and @($names | Where-Object { $_ -ceq $newName }).Count -eq 1 -and @($names | Where-Object { $_ -ceq 'Runners' }).Count -eq 0) { $reply }
+    } 90
+    $stage = 'B native apply'
+    [void](Wait-For 'B native post-baseline apply' {
+        $currentLog = Read-Log $logB
+        $appB.Refresh()
+        !$appB.HasExited -and $currentLog.Length -ge $offsetB -and $currentLog.Substring($offsetB) -match ('account-sync: applied workspaces=\S*' + [regex]::Escape($newName) + '(\|| )') -and (Session-Has $sessionB $newName 'Runners')
+    } 90)
+    $stage = 'native final displays'
+    Show-Workspace $newName $main $app.Id $sessionA
+    $editA = Open-Rename $main $app.Id $newName
+    Shot 'native-a-after' $main $app.Id
+    Assert-Focus $main $app.Id $editA
+    [ReconnectDesktop]::Type(0x1B)
+    Show-Workspace $newName $mainB $appB.Id $sessionB
+    $editB = Open-Rename $mainB $appB.Id $newName
+    Shot 'native-b-after' $mainB $appB.Id
+    Assert-Focus $mainB $appB.Id $editB
+    [ReconnectDesktop]::Type(0x1B)
+    $app.Refresh()
+    $appB.Refresh()
+    if ($app.HasExited -or $appB.HasExited -or !(Session-Has $sessionA $newName 'Runners') -or !(Session-Has $sessionB $newName 'Runners')) { throw 'Both final native sessions are required' }
+    $results.native_roundtrip = [ordered]@{ verdict = 'pass'; device_ids = @('journey-device', 'journey-device-b'); instances = @('journey-a', 'journey-b'); pids = @($app.Id, $appB.Id); hwnds = @($main.ToInt64(), $mainB.ToInt64()); workspace = $newName; baseline_revision = $baselineRevision; published_revision = [long]$published.revision; seconds = [Math]::Round(([DateTime]::UtcNow - $nativeStart).TotalSeconds, 2) }
     $results.verdict = 'pass'
 } catch {
-    $failure = $_
+    $failure = $true
     $results.verdict = 'fail'
-    $results.error = "$_"
-    try { Shot 'desktop-failure' } catch {}
+    $results.failed_stage = $stage
 } finally {
-    $results | ConvertTo-Json -Depth 5 | Set-Content "$Output/result.json"
-    if (Test-Path $log) { Copy-Item $log "$Output/debug.log" }
-    if ($app -and !$app.HasExited) { Stop-Process -Id $app.Id -Force }
-    if ($server -and !$server.HasExited) { Stop-Process -Id $server.Id -Force }
-    Stop-Transcript | Out-Null
+    foreach ($ownedProcess in @($appB, $app, $server)) {
+        if ($ownedProcess) {
+            try {
+                $ownedProcess.Refresh()
+                if (!$ownedProcess.HasExited) {
+                    & taskkill.exe /PID $ownedProcess.Id /T /F 2>&1 | Out-Null
+                    if (!$ownedProcess.WaitForExit(10000)) { throw 'Owned process did not exit' }
+                }
+            } catch { $failure = $true; $results.cleanup = 'failed' }
+        }
+    }
+    try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { $failure = $true; $results.cleanup = 'failed' }
+    foreach ($envName in $originalEnv.Keys) { [Environment]::SetEnvironmentVariable($envName, $originalEnv[$envName], 'Process') }
+    if ($cert) {
+        try {
+            if ($rootCertAdded -and (Test-Path "Cert:\LocalMachine\Root\$($cert.Thumbprint)")) { Remove-Item "Cert:\LocalMachine\Root\$($cert.Thumbprint)" -ErrorAction Stop }
+            if (Test-Path "Cert:\LocalMachine\My\$($cert.Thumbprint)") { Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -ErrorAction Stop }
+        } catch { $failure = $true; $results.cleanup = 'failed' }
+    }
+    try { if (Test-Path $work) { Remove-Item $work -Recurse -Force -ErrorAction Stop } } catch { $failure = $true; $results.cleanup = 'failed' }
+    if ($failure) { $results.verdict = 'fail'; $results.native_roundtrip.verdict = 'fail' }
+    $results | ConvertTo-Json -Depth 8 | Set-Content "$Output/result.json"
 }
-if ($failure) { throw $failure }
+if ($failure) { throw "Account journey failed at $stage" }
