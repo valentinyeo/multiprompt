@@ -299,6 +299,9 @@ test('production layout measures only changed suffixes and caches unchanged geom
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+test('IGSH-1415 a local copy the transcript already carries is not laid out', () => {
+  assert.match(body(source, 'chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
+});
 test('ISSUE-268 oldest match has room below the find bar and closing removes that room', () => {
   const check = `
   test "ISSUE-268 first loaded message clears the sticky find bar" {
