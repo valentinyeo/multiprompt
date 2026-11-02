@@ -28,7 +28,7 @@ test("Inbox ETA deadline and total survive the published JSON row", () => {
   }
   assert.match(paint, /eta_valid and \(g_eta_numbers_on or g_eta_progress_on\) and width >= uiScaled\(320\)/);
   assert.match(paint, /const eta_valid = row\.act == 1 and row\.eta_total_ms > 0 and row\.eta_deadline_tick != 0;/);
-  assert.match(paint, /etaFillFraction\(etaElapsedMs\(row\.eta_total_ms, remaining_ms\), row\.eta_total_ms\)/);
+  assert.match(paint, /etaFillFraction\(etaElapsedMs\(row\.eta_total_ms, remaining\), row\.eta_total_ms\)/);
   assert.match(paint, /fillRoundRect\(hdc, \.\{ \.left = bar_left, \.top = track\.top, \.right = bar_left \+ fill, \.bottom = track\.bottom \}/);
 });
 

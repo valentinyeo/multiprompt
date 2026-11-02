@@ -5623,12 +5623,13 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.addCleanup(agent.stdout.close)
         session = dict(state={})
         reader.host_session_reset(session, agent)
-        session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
                                    daemon=True)
         with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
             running.start()
-            time.sleep(0.9)
+            time.sleep(0.2)
+            session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
+            time.sleep(0.8)
             self.assertTrue(running.is_alive(), 'a parked approval must not die with the idle timer')
             session['parked'].clear()
             running.join(timeout=5)
