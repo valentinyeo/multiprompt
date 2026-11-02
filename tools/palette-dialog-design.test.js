@@ -81,7 +81,9 @@ test('IGSH-1061: custom native surfaces use declared Win32 APIs and guarded focu
 test('IGSH-1061: dialog measures body against full content width and uses approved corner radius', () => {
   assert.match(read('src/fonts.zig'), /return @import\("dialog.zig"\)\.messageBox/);
   const dialog = read('src/dialog.zig');
-  assert.match(dialog, /var body = w\.RECT\{ \.left = 0, \.top = 0, \.right = width - state\.px\(48\), \.bottom = 0 \}/);
+  assert.match(dialog, /const text_width = @max\(0, width - state\.px\(48\)\);/);
+  assert.match(dialog, /var body = title_rc;/);
+  assert.match(dialog, /dwrite\.DialogLayout\.create\(dc, state\.text, text_width\)/);
   assert.match(dialog, /fillRoundRect\(dc, state\.card, state\.px\(20\), outline\)/);
   assert.match(dialog, /fillRoundRect\(dc, inner, state\.px\(20\) - 1, panel\)/);
 });
