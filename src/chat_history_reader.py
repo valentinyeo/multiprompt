@@ -2310,6 +2310,11 @@ HOST_EVENTS_PAGE = 256
 HOST_EVENTS_BYTES = 512 * 1024
 HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and wait for the user's feedback "
                           "or implementation request in a later turn.")
+HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
+                      "Your browser pane works through zsb; run `zsb --help` to see its commands.\n"
+                      "When Multibot lacks something that would make your work easier, run\n"
+                      "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.")
+HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error", 5: "agent_not_found"}
 HOST_CHILDREN = []
@@ -2904,6 +2909,19 @@ def host_transcript_exists(provider, sid):
         return False
 
 
+def host_agent_env(provider, sid):
+    config = host_config(provider, sid) or {}
+    env = dict(os.environ)
+    tools = str(HOME / HOST_RUNTIME_TOOLS)
+    path = env.get('PATH', '')
+    env['PATH'] = tools + (':' + path if path else '')
+    env['MULTIBOT_PROVIDER'] = provider
+    tmux = config.get('tmux')
+    if isinstance(tmux, str) and tmux:
+        env['MULTIBOT_SESSION'] = tmux
+    return env
+
+
 def host_agent_start(provider, sid):
     base = host_command(provider, sid)
     if base is None:
@@ -2911,9 +2929,11 @@ def host_agent_start(provider, sid):
     command = base + ["--print", "--input-format", "stream-json",
                                             "--output-format", "stream-json", "--verbose",
                                             "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+    if provider == 'claude':
+        command += ["--append-system-prompt", HOST_APPEND_PROMPT]
     command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
     return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            cwd=host_cwd(provider, sid), start_new_session=True)
+                            cwd=host_cwd(provider, sid), env=host_agent_env(provider, sid), start_new_session=True)
 
 
 def host_agent_recorded_pid(provider, sid):
@@ -5274,7 +5294,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 49
+RUNTIME_GENERATION = 50
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -5344,6 +5364,13 @@ if __name__ == '__main__':
                         try:
                             publish('mp-send', _base64.b64decode(mp_send_source))
                         except (ValueError, OSError):
+                            pass
+                    feedback_source = globals().get('FEEDBACK_SOURCE')
+                    if isinstance(feedback_source, str) and feedback_source:
+                        try:
+                            publish('multibot-feedback', _base64.b64decode(feedback_source))
+                            _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()
                 try:

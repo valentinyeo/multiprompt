@@ -15,6 +15,7 @@ import threading
 import time
 import types
 import unittest
+import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -4292,6 +4293,19 @@ class AgentHostTest(unittest.TestCase):
         self.assertIn('--include-partial-messages', args)
         self.assertEqual(args[args.index('--permission-prompt-tool') + 1], 'stdio')
 
+    def test_host_tells_claude_it_runs_inside_multibot_and_can_file_feedback(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        args = self.agent_rows('start')[0]['args']
+        self.assertIn('--append-system-prompt', args)
+        prompt = args[args.index('--append-system-prompt') + 1]
+        self.assertIn('multibot-feedback', prompt)
+        self.assertIn('Multibot', prompt)
+        self.assertIn('zsb', prompt)
+        self.assertLess(len(prompt), 600)
+
     def test_host_turn_runs_with_bypass_permissions_after_enable(self):
         self.enable()
         self.assertEqual(reader.host_cli(["enable", self.provider, self.sid, "--tmux", self.tmux,
@@ -4408,6 +4422,45 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux])['status'], 'enabled')
         self.assertTrue(reader.host_enabled(self.provider, self.sid))
         self.assertEqual(reader.host_cli(['status', 'codex', self.sid])['status'], 'refused')
+
+
+class AgentFeedbackCliTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.work = self.home / 'demo-project'
+        self.work.mkdir()
+        self.log = self.home / '.local/state/multibot/feedback.jsonl'
+        self.script = ROOT / 'src/multibot_feedback.py'
+
+    def cli(self, *args, **env):
+        base = {key: value for key, value in os.environ.items()
+                if key not in ('XDG_STATE_HOME', 'ZSB_SESSION', 'TMUX', 'MULTIBOT_FEEDBACK_LOG',
+                               'MULTIBOT_PROVIDER', 'MULTIBOT_SESSION')}
+        base.update(HOME=str(self.home), MULTIBOT_PROVIDER='claude', MULTIBOT_SESSION='fixture-chat')
+        base.update(env)
+        return subprocess.run([sys.executable, str(self.script), *args], cwd=str(self.work),
+                              capture_output=True, text=True, env=base, timeout=60)
+
+    def test_feedback_cli_saves_one_line_and_rejects_an_empty_wish(self):
+        rejected = self.cli('', '--why', 'nothing to say')
+        self.assertEqual(rejected.returncode, 2)
+        self.assertFalse(self.log.exists(), 'an empty wish must not reach the log')
+        saved = self.cli('a shortcut for browser screenshots', '--why', 'a shot takes three commands')
+        self.assertEqual(saved.returncode, 0, saved.stderr)
+        self.assertEqual(saved.stdout, 'Feedback saved. Thanks.\n')
+        lines = self.log.read_text(encoding='utf-8').splitlines()
+        self.assertEqual(len(lines), 1)
+        row = json.loads(lines[0])
+        self.assertEqual(set(row), {'id', 'at', 'want', 'why', 'session', 'provider', 'cwd'})
+        self.assertEqual(row['want'], 'a shortcut for browser screenshots')
+        self.assertEqual(row['why'], 'a shot takes three commands')
+        self.assertEqual(row['session'], 'fixture-chat')
+        self.assertEqual(row['provider'], 'claude')
+        self.assertEqual(row['cwd'], 'demo-project')
+        self.assertEqual(str(uuid.UUID(row['id'])), row['id'])
+        self.assertLessEqual(row['at'], int(time.time()))
 
 
 class AdoptHostTest(unittest.TestCase):
