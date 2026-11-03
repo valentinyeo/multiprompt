@@ -29,8 +29,7 @@ test('IGSH-1266 a reset the server confirmed clears on its nonces alone', () => 
 });
 
 test('IGSH-1266 a reset the server never confirms stops holding sends', () => {
-  assert.match(source, /const CHAT_RESET_UNCONFIRMED_LIMIT: u8 = 12;/);
-  assert.match(body('chatResetGiveUp'), /pending\.unconfirmed \+\|= 1;\s*return pending\.unconfirmed >= CHAT_RESET_UNCONFIRMED_LIMIT;/);
+  assert.match(body('chatResetGiveUp'), /pending\.unconfirmed \+\|= 1;\s*return pending\.unconfirmed >= 12;/);
   const finish = body('chatTmuxSendFinish');
   assert.match(finish, /else if \(chatResetGiveUp\(&g_chat_pending_reset\.\?\)\) \{\s*g_chat_pending_reset = null;\s*for \(g_chat_outbox\.items\) \|\*entry\| entry\.reset_pending = false;/);
 });

@@ -3174,15 +3174,13 @@ test "ISSUE-349 an explicit tmux send error falls back, a timeout does not" {
     try std.testing.expect(!chatTmuxSendRejected(""));
 }
 
-const CHAT_RESET_UNCONFIRMED_LIMIT: u8 = 12;
-
 fn chatResetConfirmed(server_ok: bool, pending: app_state.ChatPendingReset, nonce: u64, request_nonce: u64) bool {
     return server_ok and pending.nonce != 0 and pending.nonce == nonce and pending.request_nonce == request_nonce;
 }
 
 fn chatResetGiveUp(pending: *app_state.ChatPendingReset) bool {
     pending.unconfirmed +|= 1;
-    return pending.unconfirmed >= CHAT_RESET_UNCONFIRMED_LIMIT;
+    return pending.unconfirmed >= 12;
 }
 
 test "Chat View reset: a reset the server confirmed clears even after the chat history was rebuilt" {
@@ -3197,7 +3195,7 @@ test "Chat View reset: a reset the server never confirms stops holding sends" {
     var pending = app_state.ChatPendingReset{ .nonce = 41, .request_nonce = 42 };
     var tries: u8 = 0;
     while (!chatResetGiveUp(&pending)) tries += 1;
-    try std.testing.expectEqual(CHAT_RESET_UNCONFIRMED_LIMIT - 1, tries);
+    try std.testing.expectEqual(@as(u8, 11), tries);
 }
 
 fn chatTmuxSendFinish() void {
