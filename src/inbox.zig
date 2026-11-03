@@ -705,9 +705,8 @@ fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
         const now_ms = frequent.unixMs(nowFileTime() / 10_000);
         const ka = frequent.orderKey(a.visits.optional() orelse &.{}, now_ms, if (a.input != 0) a.input else null);
         const kb = frequent.orderKey(b.visits.optional() orelse &.{}, now_ms, if (b.input != 0) b.input else null);
-        if (ka != kb) return frequent.bottomOrder(ka, kb);
-    }
-    if (app_state.g_inbox_tab != frequent.frequent_split) {
+        if (ka != kb) return ka > kb;
+    } else {
         const ka = @max(a.la, a.lv);
         const kb = @max(b.la, b.lv);
         if (ka != kb) return ka > kb;
@@ -741,6 +740,62 @@ test "Inbox sorts displayed recency before attention and activity" {
     try std.testing.expect(inboxRowLess(older, newer));
     newer.lv = 400;
     try std.testing.expect(inboxRowLess(newer, older));
+}
+
+test "Inbox frequent tab shows the newest session on top" {
+    const saved_tab = app_state.g_inbox_tab;
+    defer app_state.g_inbox_tab = saved_tab;
+    app_state.g_inbox_tab = frequent.frequent_split;
+    const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+    var older: InboxRow = .{};
+    older.sid = 1;
+    older.input = now_ms - 2_000;
+    var newer: InboxRow = .{};
+    newer.sid = 2;
+    newer.input = now_ms - 1_000;
+    try std.testing.expect(inboxRowLess(newer, older));
+    try std.testing.expect(!inboxRowLess(older, newer));
+}
+
+test "Inbox J and K stop at the top and bottom row" {
+    const prior_hwnd = app_state.g_main_hwnd;
+    const prior_ws_count = app_state.g_inbox_ws_count;
+    const prior_ws = app_state.g_inbox_ws[0];
+    const prior_rows = app_state.g_inbox_rows[0..3].*;
+    const prior_row_count = app_state.g_inbox_row_count;
+    const prior_unread = app_state.g_unread_only;
+    const prior_tab = app_state.g_inbox_tab;
+    const prior_filter = app_state.g_inbox_filter_active;
+    const prior_sel = app_state.g_inbox_sel;
+    defer {
+        app_state.g_main_hwnd = prior_hwnd;
+        app_state.g_inbox_ws_count = prior_ws_count;
+        app_state.g_inbox_ws[0] = prior_ws;
+        app_state.g_inbox_rows[0..3].* = prior_rows;
+        app_state.g_inbox_row_count = prior_row_count;
+        app_state.g_unread_only = prior_unread;
+        app_state.g_inbox_tab = prior_tab;
+        app_state.g_inbox_filter_active = prior_filter;
+        app_state.g_inbox_sel = prior_sel;
+    }
+    app_state.g_main_hwnd = @ptrFromInt(1);
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0] = .{ .hwnd = 2 };
+    app_state.g_unread_only = false;
+    app_state.g_inbox_tab = frequent.all_split;
+    app_state.g_inbox_filter_active = false;
+    for (0..3) |i| app_state.g_inbox_rows[i] = .{ .ws = 0, .sid = @intCast(i + 1), .la = 100 - i };
+    app_state.g_inbox_row_count = 3;
+    app_state.g_inbox_sel = 0;
+    handleInboxKey(app_state.g_main_hwnd, 0);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 1);
+    handleInboxKey(app_state.g_main_hwnd, 1);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 1);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 0);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_inbox_sel);
 }
 
 fn sortInboxRows() void {
@@ -1998,10 +2053,10 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
     const vis = inboxVisibleCount();
     switch (wp) {
         0 => {
-            if (vis > 0) app_state.g_inbox_sel = if (app_state.g_inbox_sel == 0) vis - 1 else app_state.g_inbox_sel - 1;
+            if (app_state.g_inbox_sel > 0) app_state.g_inbox_sel -= 1;
         },
         1 => {
-            if (vis > 0) app_state.g_inbox_sel = if (app_state.g_inbox_sel + 1 >= vis) 0 else app_state.g_inbox_sel + 1;
+            if (app_state.g_inbox_sel + 1 < vis) app_state.g_inbox_sel += 1;
         },
         2, 3 => {
             moveInboxSplit(wp == 2, false);
