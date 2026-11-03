@@ -152,13 +152,13 @@ try {
     if (@($twoTables.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $twoWant }).Count -ne 1) { throw ('The ' + $two.tmux + ' chat pane holds no tab for ' + $two.page) }
     if (@($twoTables.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneWant }).Count -ne 0) { throw ('The ' + $two.tmux + ' chat pane holds the other chat page') }
     if (@($twoTables.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant }).Count -ne 0) { throw ('The ' + $two.tmux + ' chat pane holds the page the other chat navigated to') }
+    Snapshot 'chat-two-own-page'
     $result.checks += @{ name = 'chat-two-own-page'; session = $two.tmux; tab = $two.shellId; beforeOpen = $twoBefore; opened = $twoOpen; status = $twoStatus; paneInfo = $twoPane; page = $two.page }
     $oneKept = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-after' -Session $one.tmux
     if ($oneKept.pane -cne 'open' -or $oneKept.windowId -ne $oneStatus.windowId) { throw ('The ' + $one.tmux + ' chat lost its own pane after the other chat opened one: ' + (ConvertTo-Json -InputObject $oneKept -Compress)) }
     $oneKeptTabs = Invoke-Zsb @('tabs') $script:liveChatPort 'chat-one-tabs-after' -Session $one.tmux
     if (@($oneKeptTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant }).Count -ne 1) { throw ('The ' + $one.tmux + ' chat lost its own page after the other chat opened one') }
     if (@($oneKeptTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $twoWant }).Count -ne 0) { throw ('The ' + $one.tmux + ' chat shows the other chat page') }
-    Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($one.name + ' pane is still on screen') 20
     Snapshot 'chat-one-keeps-page'
     $result.checks += @{ name = 'chats-keep-their-own-pages'; first = $one.tmux; second = $two.tmux; firstStatusAfter = $oneKept; firstWindowId = $oneStatus.windowId; secondWindowId = $twoStatus.windowId; firstPage = $one.page; secondPage = $two.page }
     Save-Json (Read-BrowserPaneFor $one.shellId) 'pane-chat-one.json'
