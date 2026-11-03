@@ -2129,19 +2129,6 @@ pub fn chatOutboxTick() void {
         chatOutboxChanged();
     }
     if (app_state.g_chat_active) chatEchoMatchActive();
-    var requeued = false;
-    for (app_state.g_chat_outbox.items) |*entry| {
-        const idx = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
-        if (!chat_echo.requeueOnReconnect(entry.state, entry.message_wire_id[0] != 0, entry.write_started, entry.host_confirmed, chatLinkLooksDown(idx))) continue;
-        entry.state = .queued;
-        entry.write_started = false;
-        entry.channel_pending = false;
-        requeued = true;
-    }
-    if (requeued) {
-        _ = saveChatOutbox();
-        chatOutboxChanged();
-    }
     if (chatOutboxFindSending(&app_state.g_chat_outbox) == null) {
         for (0..app_state.g_chat_outbox.items.len) |e| {
             const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
@@ -2313,6 +2300,25 @@ pub fn sshAutoReconnectTick() void {
     armSshReconnectTimerIfNeeded();
 }
 
+fn chatOutboxRequeueAfterReconnect(idx: u32) void {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return;
+    var requeued = false;
+    for (app_state.g_chat_outbox.items) |*entry| {
+        if (!std.mem.eql(u8, entry.key[0..entry.key_len], key)) continue;
+        if (!chat_echo.requeueOnReconnect(entry.state, entry.message_wire_id[0] != 0, entry.write_started, entry.host_confirmed, false)) continue;
+        entry.state = .queued;
+        entry.write_started = false;
+        entry.channel_pending = false;
+        requeued = true;
+    }
+    if (requeued) {
+        _ = saveChatOutbox();
+        chatOutboxChanged();
+    }
+}
+
 fn sshReconnectOk(idx: u32) void {
     const shell = &app_state.shells[idx];
     if (shell.ssh_reconnect.phase == .closed) return;
@@ -2321,6 +2327,7 @@ fn sshReconnectOk(idx: u32) void {
     shell.disconnected = false;
     var buf: [128]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect ok id={d}", .{shell.shell_id}) catch return);
+    chatOutboxRequeueAfterReconnect(idx);
     armChatOutboxTimerIfNeeded();
     @import("console.zig").showReconnectedConsole(idx);
     if (state_changed) @import("drawing.zig").invalidateReconnectContent(idx);
