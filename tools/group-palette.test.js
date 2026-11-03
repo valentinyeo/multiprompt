@@ -34,6 +34,26 @@ function decl(name) {
   assert.ok(match, name);
   return match[0];
 }
+const inlinedModules = ['account_desktop.zig', 'rename.zig', 'sidebar.zig'];
+function dropTest(file, prefix) {
+  const text = fs.readFileSync(file, 'utf8');
+  const start = text.indexOf(`test "${prefix}`);
+  if (start < 0) return false;
+  let depth = 0;
+  let i = text.indexOf('{', start);
+  for (; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}' && --depth === 0) break;
+  }
+  fs.writeFileSync(file, text.slice(0, start) + text.slice(i + 1));
+  return true;
+}
+function productionSource() {
+  const bodies = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')];
+  const stray = bodies.flatMap(body => [...body.matchAll(/@import\("([^"]+)"\)/g)].map(([, name]) => name)).filter(name => !inlinedModules.includes(name));
+  assert.deepEqual(stray, [], 'copied production bodies must not import the application tree inline; stub the module in the harness and list it in inlinedModules');
+  return inlinedModules.reduce((text, name) => text.replaceAll(`@import("${name}").`, ''), bodies.join('\n'));
+}
 function harness() {
   const closedCapture = read('console').slice(read('console').indexOf('        var entry: ClosedShell ='), read('console').indexOf('        app_state.g_closed_count += 1;') + '        app_state.g_closed_count += 1;'.length);
   const reminderRead = reminders.slice(reminders.indexOf('        e.group_id = @intCast(json_reader.uint'), reminders.indexOf('        e.pinned_top ='));
@@ -41,7 +61,7 @@ function harness() {
   const saving = block(session, 'if (app_state.groups[gi].color_set)');
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
-  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
+  const production = productionSource();
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -49,6 +69,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
+fn applyPendingAppearance(_: u32) void {}
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
 const ui_words = @import("ui_words.zon");
@@ -185,7 +206,7 @@ fn CreateSolidBrush(_: DWORD) HANDLE { return 1; }
 fn DeleteObject(_: HANDLE) i32 { return 1; }
 fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
 ${production}
-test "split persistence leaves minimum pane widths to the shared geometry clamp" {
+test "group palette: split persistence leaves minimum pane widths to the shared geometry clamp" {
     for ([_]u32{0, 40, 350, 960, 1000, 5000}) |split| {
         var buf: [256]u8 = undefined;
         const json = try std.fmt.bufPrint(&buf, "{{\\"tabs\\":[{{\\"kind\\":\\"cmd\\",\\"name\\":\\"T\\",\\"bsplit\\":{d}}}]}}", .{split});
@@ -196,7 +217,7 @@ test "split persistence leaves minimum pane widths to the shared geometry clamp"
         try std.testing.expectEqual(@as(u16, @intCast(@min(split, 1000))), tabs[0].bsplit_permille);
     }
 }
-test "empty root excludes group rows while context and typed search include them" {
+test "group palette: empty root excludes group rows while context and typed search include them" {
     group_count = 0;
     next_group_id = 1;
     _ = createGroup(&.{'A'});
@@ -221,7 +242,7 @@ test "empty root excludes group rows while context and typed search include them
     g_search_len = 0;
     g_search_result_count = 0;
 }
-test "picked colors survive closed tab reopen, reminders and layout export import including palette zero" {
+test "group palette: picked colors survive closed tab reopen, reminders and layout export import including palette zero" {
     for ([_]u8{0, 4, 7}) |color| {
         for ([_]bool{false, true}) |picked| {
             group_count = 0;
@@ -300,7 +321,7 @@ fn serializedColor(gi: usize, json_buf: *[256]u8) []const u8 {
     ${saving}
     return json_buf[0..pos];
 }
-test "new and legacy groups are neutral in both themes; explicit choices survive save and restore" {
+test "group palette: new and legacy groups are neutral in both themes; explicit choices survive save and restore" {
     group_count = 0;
     _ = createGroup(&.{'T'});
     try std.testing.expect(!groups[0].color_set);
@@ -333,7 +354,7 @@ test "new and legacy groups are neutral in both themes; explicit choices survive
     try std.testing.expect(groups[0].color_set);
     try std.testing.expectEqual(@as(u8,0), groups[0].color);
 }
-test "group band covers popup actions, scoped target, search and workspace destinations" {
+test "group palette: group band covers popup actions, scoped target, search and workspace destinations" {
     group_count = 0;
     next_group_id = 1;
     _ = createGroup(&.{'A'});
@@ -388,14 +409,20 @@ test "group band covers popup actions, scoped target, search and workspace desti
 }
 `;
 }
+test('the group palette harness imports only its copied roots', () => {
+  const allowed = new Set(['std', 'json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'ui_words.zon']);
+  const reached = [...new Set([...harness().matchAll(/@import\("([^"]+)"\)/g)].map(([, name]) => name))].filter(name => !allowed.has(name));
+  assert.deepEqual(reached, [], 'the harness must not reach the application tree');
+});
 test('extracted production group default, migration, explicit colors and palette dispatch', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-palette-'));
   require('./fixtures/inline-stubs').writeAll(dir);
   try {
     copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig', 'ui_words.zon'], dir);
+    dropTest(path.join(dir, 'json_reader.zig'), 'local avatar identity survives session parsing');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(file, harness());
+    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     console.log(result.stderr.trim());
@@ -408,8 +435,8 @@ test('extracted production group default, migration, explicit colors and palette
       const original = harness();
       const mutated = mutate(original);
       assert.notEqual(mutated, original, name);
-      fs.writeFileSync(file, mutated.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-      const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
+      fs.writeFileSync(file, mutated);
+      const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
       assert.notEqual(bad.status, 0, name);
       assert.match(bad.stderr, /FAIL/, name);
       console.log(`${name} rejected`);

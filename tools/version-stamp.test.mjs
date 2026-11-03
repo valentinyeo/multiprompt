@@ -163,10 +163,15 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
     const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
+    const canSave = /^  push:\n/m.test(workflow);
     for (const cache of caches) {
       const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
+      if (!canSave) {
+        assert.match(cache, /uses: actions\/cache\/restore@/, `${file} must never save a cache outside a master push`);
+        continue;
+      }
       assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
         const condition = cache.match(new RegExp(`if: ${pathGuard}${guard}\\(([^\\n]+)\\)\\n`));

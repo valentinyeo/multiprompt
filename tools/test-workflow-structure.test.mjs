@@ -69,6 +69,16 @@ test('routing checks reject the removed dependency, missing history, classifier 
   }
 });
 
+test('Tests starts on every pull request and every master push so drift cannot hide', () => {
+  const events = workflow.split('\non:\n')[1]?.split('\npermissions:')[0];
+  assert.ok(events, 'workflow events are declared');
+  assert.match(events, /^  pull_request:$/m);
+  assert.match(events, /^  push:\n    branches: \[master\]$/m);
+  assert.match(events, /^  workflow_dispatch:$/m);
+  assert.match(events, /^  schedule:\n    - cron: /m);
+  assert.doesNotMatch(events, /^  (?:workflow_run|repository_dispatch):/m);
+});
+
 test('red regression job installs the Zig compiler before running changed suites', () => {
   const red = fs.readFileSync(new URL('../.github/workflows/check-red-run.yml', import.meta.url), 'utf8');
   const install = red.indexOf('      - name: Install Zig 0.16.0');
