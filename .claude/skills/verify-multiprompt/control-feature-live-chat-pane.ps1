@@ -86,7 +86,12 @@ try {
     $two = $chats[1]
     $selectChat = {
         param([hashtable]$Chat)
-        Press @(0x11, (0x31 + $Chat.index)) ('Ctrl+' + ($Chat.index + 1) + ': select ' + $Chat.name)
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $inbox = Read-Inbox
+            if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
+            Press @(0x11, 0x09) ('Ctrl+Tab ' + $attempt + ': cycle towards ' + $Chat.name)
+            Start-Sleep -Milliseconds 250
+        }
         Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId } ($Chat.name + ' selected')
     }
     & $selectChat $one
