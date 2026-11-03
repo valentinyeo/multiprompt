@@ -6308,6 +6308,14 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.assertEqual((agent, sid, path), ('pi', self.sid, None))
         self.assertEqual(wire.split('\n')[0].split('\t')[9], 'pi')
 
+    def test_pi_settle_answers_with_a_settle_reply(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        query = dict(id=9, op='settle', codex=False, provider='pi', sid=self.sid, tmux=self.tmux, cwd=str(self.home),
+                     texts=['hello pi'], after_ms=0)
+        lines = reader.settle_response(query).split('\n')
+        self.assertEqual(lines[0], '@mp\t9\tsettle\tok\t-\t1')
+        self.assertEqual(json.loads(lines[1]), dict(i=0, delivered_ms=0, line=0))
+
     def test_pi_sends_a_second_message_as_a_follow_up_while_a_run_is_active(self):
         os.environ['FAKE_RPC_OFFSET'] = '1'
         self.enable()
