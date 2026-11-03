@@ -3102,7 +3102,7 @@ def host_session_state(provider, sid):
 def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
-                   thread=None, native_turn=None, pi_run=False, pi_message=0, pi_last=None)
+                   thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None)
 
 
 def host_db(provider, sid, tmux, session):
@@ -3605,8 +3605,8 @@ def host_handle_request(provider, sid, tmux, session, request):
     return dict(status="sent")
 
 
-def host_accept(provider, sid, tmux, session, event):
-    sends = [entry for entry in session.get("sends") or [] if not entry.get("accepted")]
+def host_accept(provider, sid, tmux, session, event, only=None):
+    sends = [entry for entry in session.get("sends") or [] if not entry.get("accepted") and only in (None, entry["id"])]
     if not sends:
         return
     written = host_written(session["state"])
@@ -3754,14 +3754,39 @@ def host_codex_thread(provider, sid, session, resume):
 
 
 def host_codex_write(provider, sid, session, token, text):
-    approval, sandbox = host_codex_policy(session)
-    return host_codex_call(session, "turn/start", dict(threadId=session["thread"], approvalPolicy=approval,
-                                                       sandboxPolicy=HOST_CODEX_SANDBOXES[sandbox],
-                                                       input=[dict(type="text", text=text, text_elements=[])]), "turn")
+    content = [dict(type="text", text=text, text_elements=[])]
+    if isinstance(session.get("native_turn"), str):
+        sent = host_codex_call(session, "turn/steer", dict(threadId=session["thread"], expectedTurnId=session["native_turn"],
+                                                           input=content), "steer")
+    else:
+        approval, sandbox = host_codex_policy(session)
+        sent = host_codex_call(session, "turn/start", dict(threadId=session["thread"], approvalPolicy=approval,
+                                                           sandboxPolicy=HOST_CODEX_SANDBOXES[sandbox], input=content), "turn")
+    if sent:
+        session["codex_tokens"][session["seq"]] = token
+    return sent
+
+
+def host_unsent(provider, sid, tmux, session, token):
+    entry = next((item for item in session.get("sends") or [] if item["id"] == token and not item.get("accepted")), None)
+    if entry is None:
+        return
+    session["sends"].remove(entry)
+    digest = hashlib.sha256(("host:" + sid + ":" + token + ":" + entry["attempt"]).encode()).hexdigest()
+    fact = dict(kind="not_sent", sid=sid, id=token, attempt=entry["attempt"], event_id="host:not_sent:" + digest,
+                provenance=HOST_ADAPTERS[provider]["provenance"])
+    try:
+        host_apply(provider, sid, tmux, [fact])
+    except (OSError, ValueError):
+        pass
+    session["state"]["sends"] = [item["id"] for item in session["sends"]]
+    host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "not_sent", dict(id=token, attempt=entry["attempt"]))
 
 
 def host_codex_response(provider, sid, tmux, session, message):
     purpose = session["rpc"].pop(message.get("id"), None)
+    token = session["codex_tokens"].pop(message.get("id"), None)
     result = message.get("result") if isinstance(message.get("result"), dict) else {}
     failed = "error" in message
     if purpose == "initialize":
@@ -3787,17 +3812,18 @@ def host_codex_response(provider, sid, tmux, session, message):
         host_state_write(provider, sid, session["state"])
         host_log(provider, sid, "init", dict(session=native, step=purpose))
         host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
-    elif purpose == "turn":
+    elif purpose in ("turn", "steer"):
         if not failed:
             turn = result.get("turn") if isinstance(result.get("turn"), dict) else {}
-            if isinstance(turn.get("id"), str):
+            if purpose == "turn" and isinstance(turn.get("id"), str):
                 session["native_turn"] = turn["id"]
-            host_accept(provider, sid, tmux, session, message)
-        elif session.get("native_turn") is None:
+            host_accept(provider, sid, tmux, session, message, token)
+            return
+        host_unsent(provider, sid, tmux, session, token)
+        host_log(provider, sid, "codex_turn_failed", dict(step=purpose))
+        if purpose == "turn" and session.get("native_turn") is None and not session.get("sends"):
             host_turn_end(provider, sid, tmux, session, dict(status="failed", stop_reason="turn_start_failed", usage={}),
                           dict(subtype="turn_start_failed"))
-        else:
-            host_log(provider, sid, "codex_steer_failed")
 
 
 def host_codex_tool(item):
@@ -3897,7 +3923,6 @@ def host_codex_event(provider, sid, tmux, session, message):
         turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         if isinstance(turn.get("id"), str):
             session["native_turn"] = turn["id"]
-        host_accept(provider, sid, tmux, session, message)
     elif method == "item/agentMessage/delta" and isinstance(params.get("itemId"), str):
         if isinstance(params.get("delta"), str) and params["delta"]:
             host_delta(session, host_stream_block(session, params["itemId"], "text", 0), params["delta"])
@@ -4007,16 +4032,21 @@ def host_pi_event(provider, sid, tmux, session, event):
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
         if event.get("command") != "prompt":
             return
-        if event.get("success") is False or data.get("disposition") == "handled":
-            failed = event.get("success") is False
-            host_log(provider, sid, "pi_prompt", dict(success=not failed, disposition=data.get("disposition")))
+        if event.get("success") is False:
+            host_log(provider, sid, "pi_prompt", dict(success=False, disposition=data.get("disposition")))
+            host_unsent(provider, sid, tmux, session, event.get("id"))
+            if not session.get("pi_run") and not session.get("sends"):
+                host_turn_end(provider, sid, tmux, session, dict(status="failed", stop_reason="prompt_failed", usage={}),
+                              dict(subtype="prompt_failed"))
+            return
+        if data.get("disposition") == "handled":
+            host_log(provider, sid, "pi_prompt", dict(success=True, disposition="handled"))
             if not session.get("pi_run"):
                 host_accept(provider, sid, tmux, session, event)
-                host_turn_end(provider, sid, tmux, session,
-                              dict(status="failed" if failed else "completed", stop_reason=data.get("disposition"), usage={}),
-                              dict(subtype="prompt_" + ("failed" if failed else "handled")))
+                host_turn_end(provider, sid, tmux, session, dict(status="completed", stop_reason="handled", usage={}),
+                              dict(subtype="prompt_handled"))
             return
-        host_accept(provider, sid, tmux, session, event)
+        host_accept(provider, sid, tmux, session, event, event.get("id"))
     elif kind == "agent_start":
         session["pi_run"] = True
         host_accept(provider, sid, tmux, session, event)
