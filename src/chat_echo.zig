@@ -235,6 +235,11 @@ pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: b
     return state == .queued and !write_started and !busy and !link_down;
 }
 
+pub fn requeueOnReconnect(state: OutboxState, has_client_id: bool, write_started: bool, host_confirmed: bool, link_down: bool) bool {
+    if (link_down or host_confirmed or state != .not_sent) return false;
+    return has_client_id or !write_started;
+}
+
 pub fn cancellable(state: OutboxState, removed_ms: i64) bool {
     return state == .delivered and removed_ms == 0;
 }
@@ -1021,4 +1026,19 @@ test "IGSH-1102 distinct accepted messages in one millisecond all confirm" {
     try std.testing.expectEqual(@as(?usize, 0), assigned[0]);
     try std.testing.expectEqual(@as(?usize, 1), assigned[1]);
     try std.testing.expectEqual(@as(?usize, 2), assigned[2]);
+}
+
+test "IGSH-1605 a message typed while the link is down waits then is delivered once after reconnect" {
+    try std.testing.expect(!mayType(.queued, false, false, true));
+    try std.testing.expect(mayType(.queued, false, false, false));
+    try std.testing.expect(!requeueOnReconnect(.queued, true, false, false, false));
+    try std.testing.expect(!requeueOnReconnect(.delivered, true, true, false, false));
+}
+
+test "IGSH-1605 a send that failed when the link dropped is requeued by its client id once the link is back" {
+    try std.testing.expect(!requeueOnReconnect(.not_sent, true, true, false, true));
+    try std.testing.expect(requeueOnReconnect(.not_sent, true, true, false, false));
+    try std.testing.expect(requeueOnReconnect(.not_sent, false, false, false, false));
+    try std.testing.expect(!requeueOnReconnect(.not_sent, false, true, false, false));
+    try std.testing.expect(!requeueOnReconnect(.not_sent, true, true, true, false));
 }

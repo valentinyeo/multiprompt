@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Phase = enum { connected, disconnected, reconnecting, ended, closed };
+pub const Phase = enum { connected, disconnected, reconnecting, closed };
 
 pub fn backoffMs(attempt: u8, jitter: u64) u64 {
     const base = @min(@as(u64, 1000) << @as(u6, @intCast(@min(attempt, 5))), 30_000);
@@ -26,44 +26,9 @@ pub const State = struct {
     next_tick: u64 = 0,
     delay_ms: u64 = 0,
     veto_until: ?u64 = null,
-    disconnect_since: ?u64 = null,
-    disconnect_reason: ?enum { exited, missing, timeout, detached, spawn } = null,
-
-    pub fn confirmDisconnect(self: *State, now: u64, reason: []const u8, process_alive: bool) void {
-        if (self.phase == .closed) return;
-        const confirmed: @TypeOf(self.disconnect_reason) = if (std.mem.eql(u8, reason, "tmux-detached"))
-            .detached
-        else if (std.mem.eql(u8, reason, "attach-timeout"))
-            .timeout
-        else if (std.mem.eql(u8, reason, "spawn-failed") or std.mem.eql(u8, reason, "restore-spawn-failed"))
-            .spawn
-        else if (!process_alive and (std.mem.eql(u8, reason, "process-exit-event") or std.mem.eql(u8, reason, "process-exit-poll")))
-            .exited
-        else if (!process_alive and !std.mem.eql(u8, reason, "probe-unreachable"))
-            .missing
-        else
-            null;
-        if (confirmed) |cause| {
-            if (self.disconnect_since == null) self.disconnect_since = now;
-            if (self.disconnect_reason == null or cause != .missing) self.disconnect_reason = cause;
-        }
-    }
-
-    pub fn noticeReason(self: State, now: u64, disconnected: bool) ?[]const u8 {
-        if (!disconnected or self.phase != .disconnected or self.attempts == 0) return null;
-        const since = self.disconnect_since orelse return null;
-        if (now -| since < 10_000) return null;
-        return switch (self.disconnect_reason orelse return null) {
-            .exited => "SSH exited",
-            .missing => "SSH process missing",
-            .timeout => "attach timed out",
-            .detached => "remote session detached",
-            .spawn => "SSH could not start",
-        };
-    }
 
     pub fn lost(self: *State, now: u64, jitter: u64) void {
-        if (self.phase == .closed or self.phase == .ended or self.phase == .disconnected) return;
+        if (self.phase == .closed or self.phase == .disconnected) return;
         self.phase = .disconnected;
         self.delay_ms = backoffMs(self.attempts, jitter);
         self.next_tick = now + self.delay_ms;
@@ -80,7 +45,7 @@ pub const State = struct {
     }
 
     pub fn start(self: *State) void {
-        if (self.phase == .closed or self.phase == .ended) return;
+        if (self.phase == .closed) return;
         self.ever_healthy = self.ever_healthy or self.healthy_attach;
         self.healthy_attach = false;
         self.phase = .reconnecting;
@@ -90,7 +55,6 @@ pub const State = struct {
 
     pub fn manual(self: *State, now: u64) void {
         if (self.phase == .closed or self.phase == .reconnecting) return;
-        if (self.phase == .ended) self.create_session = true;
         self.awaiting_probe = false;
         self.gone_results = 0;
         self.gone_probe_deadline = null;
@@ -100,12 +64,12 @@ pub const State = struct {
     }
 
     pub fn ok(self: *State) void {
-        if (self.phase == .closed or self.phase == .ended) return;
+        if (self.phase == .closed) return;
         self.* = .{ .healthy_attach = true, .ever_healthy = true };
     }
 
     pub fn observeGone(self: *State, gone: bool, process_alive: bool, now: u64) bool {
-        const eligible = self.phase != .reconnecting and self.phase != .closed and self.phase != .ended and
+        const eligible = self.phase != .reconnecting and self.phase != .closed and
             !self.create_session and !self.creating_session and (self.ever_healthy or self.healthy_attach or self.restored_session);
         self.gone_results = if (gone and eligible and !process_alive) self.gone_results +| 1 else 0;
         self.awaiting_probe = self.gone_results > 0;
@@ -122,11 +86,16 @@ pub const State = struct {
         }
     }
 
-    pub fn end(self: *State) void {
+    pub fn recreate(self: *State, now: u64, jitter: u64) void {
         if (self.phase == .closed) return;
-        self.phase = .ended;
-        self.next_tick = 0;
+        self.create_session = true;
         self.awaiting_probe = false;
+        self.gone_results = 0;
+        self.gone_probe_deadline = null;
+        self.attempts = 0;
+        self.phase = .disconnected;
+        self.delay_ms = backoffMs(0, jitter);
+        self.next_tick = now + self.delay_ms;
     }
 
     pub fn close(self: *State) void {
@@ -178,25 +147,53 @@ test "ISSUE-521 session gone requires successful complete probe and exact sessio
     try std.testing.expect(!sessionGone("@@S work\n@@MP_LIVE@@\n", "work", true, 0));
 }
 
-test "ISSUE-521 ended tabs never reconnect until explicit new session request" {
+test "IGSH-1605 a gone session recreates itself without a manual request" {
     var state: State = .{};
-    state.end();
-    state.lost(100, 1);
-    state.start();
     state.ok();
-    try std.testing.expectEqual(Phase.ended, state.phase);
-    try std.testing.expect(!state.due(std.math.maxInt(u64)));
-    state.manual(200);
+    state.recreate(100, 0);
+    try std.testing.expectEqual(Phase.disconnected, state.phase);
     try std.testing.expect(state.create_session);
-    try std.testing.expect(state.due(200));
+    try std.testing.expect(!state.due(100));
+    try std.testing.expect(state.due(1100));
     state.start();
     state.ok();
     try std.testing.expect(!state.create_session);
-    state.lost(300, 0);
-    state.awaiting_probe = true;
+    try std.testing.expectEqual(Phase.connected, state.phase);
+    state.close();
+    state.recreate(200, 0);
+    try std.testing.expectEqual(Phase.closed, state.phase);
     try std.testing.expect(!state.due(std.math.maxInt(u64)));
-    state.awaiting_probe = false;
-    try std.testing.expect(state.due(std.math.maxInt(u64)));
+}
+
+test "IGSH-1605 an exited link keeps retrying forever without manual" {
+    var state: State = .{};
+    state.ok();
+    var now: u64 = 0;
+    for (0..200) |i| {
+        state.lost(now, i);
+        try std.testing.expectEqual(Phase.disconnected, state.phase);
+        try std.testing.expect(state.delay_ms <= 30_000);
+        now = state.next_tick;
+        try std.testing.expect(state.due(now));
+        state.start();
+        try std.testing.expectEqual(Phase.reconnecting, state.phase);
+    }
+    try std.testing.expectEqual(@as(u8, 200), state.attempts);
+}
+
+test "IGSH-1605 a recreated session that exits again keeps retrying" {
+    var state: State = .{};
+    state.ok();
+    state.recreate(0, 0);
+    var now: u64 = 0;
+    for (0..50) |i| {
+        now = state.next_tick;
+        try std.testing.expect(state.due(now));
+        state.start();
+        state.lost(now + 10, i);
+    }
+    try std.testing.expectEqual(Phase.disconnected, state.phase);
+    try std.testing.expect(state.create_session);
 }
 
 pub fn probeMisses(previous: u8, ok: bool) u8 {
@@ -273,82 +270,6 @@ test "ISSUE-501 attachment probe distinguishes detached and exact session names"
     try std.testing.expect(!attached("", "work"));
 }
 
-test "ISSUE-512 only a confirmed loss surviving debounce and a reconnect attempt can warn" {
-    var state: State = .{};
-    state.lost(0, 0);
-    try std.testing.expect(state.noticeReason(60_000, true) == null);
-    state.confirmDisconnect(0, "process-exit-event", false);
-    try std.testing.expect(state.noticeReason(10_000, true) == null);
-    state.start();
-    try std.testing.expect(state.noticeReason(60_000, true) == null);
-    state.lost(500, 0);
-    try std.testing.expect(state.noticeReason(9999, true) == null);
-    try std.testing.expectEqualStrings("SSH exited", state.noticeReason(10_000, true).?);
-    try std.testing.expect(state.noticeReason(10_000, false) == null);
-    state.confirmDisconnect(11_000, "process-exit-poll", false);
-    try std.testing.expectEqual(@as(?u64, 0), state.disconnect_since);
-    try std.testing.expectEqualStrings("SSH exited", state.noticeReason(11_000, true).?);
-}
-
-test "ISSUE-512 live transport and failed health probes never confirm a notice" {
-    for ([_][]const u8{ "probe-unreachable", "process-exit-event", "console-missing", "power-resume", "time-change" }) |reason| {
-        var state: State = .{};
-        state.confirmDisconnect(100, reason, true);
-        state.lost(100, 0);
-        state.start();
-        state.lost(200, 0);
-        try std.testing.expect(state.noticeReason(60_000, true) == null);
-    }
-}
-
-test "ISSUE-512 recovery cancels pending and visible warnings and a new loss gets a fresh debounce" {
-    for ([_]u64{ 500, 20_000 }) |recovered_at| {
-        var state: State = .{};
-        state.confirmDisconnect(100, "tmux-detached", true);
-        state.lost(100, 0);
-        state.start();
-        state.lost(200, 0);
-        state.ok();
-        try std.testing.expect(state.noticeReason(recovered_at, true) == null);
-        try std.testing.expect(state.disconnect_since == null);
-        state.confirmDisconnect(recovered_at, "attach-timeout", true);
-        state.lost(recovered_at, 0);
-        state.start();
-        state.lost(recovered_at + 100, 0);
-        try std.testing.expect(state.noticeReason(recovered_at + 9999, true) == null);
-        try std.testing.expectEqualStrings("attach timed out", state.noticeReason(recovered_at + 10_000, true).?);
-    }
-}
-
-test "ISSUE-512 confirmed failures explain their cause and manual retry still skips backoff" {
-    const cases = .{
-        .{ "process-exit-poll", false, "SSH exited" },
-        .{ "process-missing-poll", false, "SSH process missing" },
-        .{ "tmux-detached", true, "remote session detached" },
-        .{ "attach-timeout", true, "attach timed out" },
-        .{ "spawn-failed", false, "SSH could not start" },
-        .{ "restore-spawn-failed", false, "SSH could not start" },
-    };
-    inline for (cases) |case| {
-        var state: State = .{};
-        state.confirmDisconnect(100, case[0], case[1]);
-        state.lost(100, 0);
-        state.start();
-        state.lost(200, 0);
-        state.confirmDisconnect(300, "console-missing", false);
-        try std.testing.expectEqualStrings(case[2], state.noticeReason(10_100, true).?);
-        state.manual(10_101);
-        try std.testing.expect(state.due(10_101));
-        state.start();
-        try std.testing.expect(state.noticeReason(10_101, true) == null);
-        state.close();
-        state.confirmDisconnect(20_000, "spawn-failed", false);
-        state.manual(20_000);
-        try std.testing.expect(!state.due(20_000));
-        try std.testing.expect(state.noticeReason(20_000, true) == null);
-    }
-}
-
 test "ISSUE-511 gone requires two consecutive results and never overrides a live transport" {
     var state: State = .{ .healthy_attach = true };
     try std.testing.expect(!state.observeGone(true, false, 0));
@@ -379,32 +300,31 @@ fn testGoneLifecycle(restored: bool, output: []const u8) !void {
         try std.testing.expect(!state.observeGone(gone, true, @intCast(i)));
         try std.testing.expectEqual(@as(u8, 0), state.gone_results);
     }
-    state.confirmDisconnect(100, "process-exit-event", false);
     state.lost(100, 0);
     try std.testing.expect(state.due(state.next_tick));
     state.start();
     state.healthy_attach = false;
-    state.confirmDisconnect(2000, "process-exit-event", false);
     state.lost(2000, 0);
     state.awaiting_probe = true;
     try std.testing.expect(!state.observeGone(gone, false, 60_000));
     state.expireProbeWait(61_000, 1100);
     try std.testing.expect(!state.due(61_000));
     try std.testing.expectEqual(@as(u8, 1), state.gone_results);
-    if (state.observeGone(gone, false, 62_000)) state.end();
-    try std.testing.expectEqual(Phase.ended, state.phase);
-    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+    if (state.observeGone(gone, false, 62_000)) state.recreate(62_000, 0);
+    try std.testing.expectEqual(Phase.disconnected, state.phase);
+    try std.testing.expect(state.create_session);
+    try std.testing.expect(state.due(63_000));
 }
 
-test "ISSUE-511 lifecycle healthy respawn attach exit confirms ended" {
+test "ISSUE-511 lifecycle healthy respawn attach exit recreates" {
     try testGoneLifecycle(false, "@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n");
 }
 
-test "ISSUE-511 lifecycle restored named tab confirms ended" {
+test "ISSUE-511 lifecycle restored named tab recreates" {
     try testGoneLifecycle(true, "@@S other\n@@LS_OK@@\n@@MP_LIVE@@\n");
 }
 
-test "ISSUE-511 lifecycle no server confirms ended and live transport is vetoed" {
+test "ISSUE-511 lifecycle no server recreates and live transport is vetoed" {
     try testGoneLifecycle(false, "@@LS_OK@@\n@@MP_LIVE@@\n");
     try testGoneLifecycle(true, "@@LS_OK@@\n@@MP_LIVE@@\n");
 }
@@ -421,8 +341,9 @@ test "ISSUE-511 confirmation hold starts at first gone not spawn and times out t
     state.start();
     try std.testing.expectEqual(@as(u8, 1), state.gone_results);
     state.lost(81_000, 0);
-    if (state.observeGone(true, false, 82_000)) state.end();
-    try std.testing.expectEqual(Phase.ended, state.phase);
+    if (state.observeGone(true, false, 82_000)) state.recreate(82_000, 0);
+    try std.testing.expect(state.create_session);
+    try std.testing.expect(state.due(83_000));
 }
 
 test "ISSUE-511 creating sessions stay protected after failed creation respawn" {

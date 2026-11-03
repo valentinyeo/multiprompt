@@ -160,7 +160,7 @@ test "ISSUE-543 loading remote tabs" {
     await zig(runtime(loadingChecks), 'ISSUE-543 loading');
   });
   test('ISSUE-543 negative control: original reconnect tick disconnects a loading tab', async () => {
-    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => fs.readFileSync(path.join(__dirname, 'fixtures/igsh-543/review-before', path.basename(file)), 'utf8')).join('\n').replaceAll('app_state.', '');
+    const original = ['src/console.zig', 'src/chat_send.zig'].map(file => fs.readFileSync(path.join(__dirname, 'fixtures/igsh-543/review-before', path.basename(file)), 'utf8')).join('\n').replaceAll('app_state.', '').split('\n').filter(line => !line.includes('confirmDisconnect')).join('\n');
     await zig(runtime(loadingChecks, original), 'ISSUE-543 loading', true, 1, /TestUnexpectedResult/);
   });
   test('ISSUE-501 backoff growth cap jitter and success reset execute production logic', async () => {
@@ -233,9 +233,9 @@ test('ISSUE-501 silent-detach probe and UI reconnect actions are integrated', as
   assert.match(body('closeShellRemember'), /ssh_reconnect.close\(\)/);
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
   assert.match(main, /WM_APP_RECONNECT =>[^]*sshReconnectNow/);
-  assert.match(main, /reconnectButtonRect\(client_rc.right\)/);
+  assert.doesNotMatch(main, /reconnectButtonRect/);
   assert.match(main, /process-exit-event/);
-  assert.match(body('paintThreadTitle'), /paintDisconnectedNotice/);
+  assert.doesNotMatch(body('paintThreadTitle'), /paintDisconnectedNotice/);
   assert.match(body('paintDisconnectedShell'), /Disconnected/);
   assert.match(body('shellConsoleShouldBeVisible'), /disconnected/);
   assert.match(body('registerShellExitWait'), /exit-wait-registration-failed/);
@@ -679,12 +679,12 @@ test "IGSH-568 forty disconnected tabs" {
   await zig(code, 'IGSH-568 forty');
 });
 
-test('ISSUE-521 pure reconnect effects ended phase and session probe parsing execute in CI', async () => {
+test('ISSUE-521 pure reconnect effects and session probe parsing execute in CI', async () => {
   await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-521 imported logic" { _ = reconnect; }', 'ISSUE-521');
 });
 
 
-test('ISSUE-521 fast attach failure waits for probe and ended tabs stay stopped until explicit restart', async () => {
+test('ISSUE-521 fast attach failure waits for probe and a gone session recreates itself', async () => {
   await zig(probeRuntime(`
 test "ISSUE-521 confirmed gone stops and restarts" {
     fake_now = 10000;
@@ -701,7 +701,7 @@ test "ISSUE-521 confirmed gone stops and restarts" {
     job.finished.store(true, .release);
     _ = job.owners.fetchSub(1, .acq_rel);
     sshProbeFinish();
-    try std.testing.expect(shells[0].ssh_reconnect.phase != .ended);
+    try std.testing.expect(!shells[0].ssh_reconnect.create_session);
     sshProbeStart();
     const confirm = ssh_probe_job orelse return error.MissingConfirmation;
     confirm.healthy[0] = true;
@@ -709,20 +709,13 @@ test "ISSUE-521 confirmed gone stops and restarts" {
     confirm.finished.store(true, .release);
     _ = confirm.owners.fetchSub(1, .acq_rel);
     sshProbeFinish();
-    try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.ended, shells[0].ssh_reconnect.phase);
-    try std.testing.expectEqual(@as(usize, 1), ended_logs);
-    const probes = probe_starts;
-    for (0..60) |_| {
-        fake_now += 1000;
-        sshAutoReconnectTick();
-        sshDisconnect(0, "late-exit");
-    }
-    try std.testing.expectEqual(@as(usize, 0), spawns);
-    try std.testing.expectEqual(probes, probe_starts);
-    try std.testing.expectEqual(@as(usize, 1), ended_logs);
-    sshReconnectNow(0);
-    try std.testing.expectEqual(@as(usize, 1), spawns);
+    try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.disconnected, shells[0].ssh_reconnect.phase);
     try std.testing.expect(shells[0].ssh_reconnect.create_session);
+    try std.testing.expectEqual(@as(usize, 1), ended_logs);
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    fake_now += 2000;
+    sshAutoReconnectTick();
+    try std.testing.expectEqual(@as(usize, 1), spawns);
 }
 `), 'ISSUE-521 confirmed');
 });
@@ -787,49 +780,6 @@ test "ISSUE-512 recovered tab has no stale global notice" {
 `), 'ISSUE-512');
 });
 
-test('ISSUE-512 pure notice policy and active-tab rendering use recovery state instead of global messages', async () => {
-  await zig('const reconnect = @import("ssh_reconnect.zig");\ntest "ISSUE-512 imported notice logic" { _ = reconnect; }', 'ISSUE-512');
-  const drawing = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
-  const paint = body('paintDisconnectedNotice', drawing);
-  assert.match(paint, /shells\[app_state\.active_shell\]/);
-  assert.match(paint, /ssh_reconnect\.noticeReason\(now, shell\.disconnected\)/);
-  assert.match(paint, /disconnected: \{s\} - Ctrl\+Shift\+R to reconnect/);
-  assert.doesNotMatch(body('markSshTabDisconnected'), /showHeaderNoticeAscii/);
-});
-
-test('ISSUE-512 debounced warnings refresh only the header and stop after recovery', async () => {
-  await zig(runtime(`
-test "ISSUE-512 quiet warning refresh" {
-    shells[0].process = null;
-    shells[0].disconnected = true;
-    shells[0].ssh_reconnect = .{ .phase = .disconnected, .attempts = 1, .next_tick = 60000 };
-    shells[0].ssh_reconnect.confirmDisconnect(0, "process-exit-event", false);
-    fake_now = 9999;
-    sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 1), repaints);
-    try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, true) == null);
-    fake_now = 10000;
-    sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 2), repaints);
-    try std.testing.expectEqualStrings("SSH exited", shells[0].ssh_reconnect.noticeReason(fake_now, true).?);
-    shells[0].ssh_reconnect.ok();
-    shells[0].disconnected = false;
-    shells[0].process = @ptrFromInt(1);
-    sshAutoReconnectTick();
-    try std.testing.expectEqual(@as(usize, 2), repaints);
-    try std.testing.expectEqual(@as(usize, 0), content_invalidations);
-    try std.testing.expectEqual(@as(usize, 0), full_repaints);
-    try std.testing.expect(shells[0].ssh_reconnect.noticeReason(fake_now, false) == null);
-}
-`), 'ISSUE-512 quiet');
-  const tick = body('sshAutoReconnectTick', fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8'));
-  assert.match(tick, /reconnectTabVisible\(app_state\.active_shell\)/);
-  assert.match(tick, /header\.top = threadTitleTop\(\);\s*header\.bottom = header\.top \+ threadTitleHeight\(\);\s*_ = InvalidateRect\(app_state\.g_main_hwnd, &header, 0\);/);
-  assert.doesNotMatch(tick, /invalidateReconnectContent\(|InvalidateRect\([^\n]*null/);
-  const paint = body('paintDisconnectedNotice', fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8'));
-  assert.match(paint, /const text = if \(shell\.ssh_reconnect\.phase == \.ended\)\s*"Session ended"\s*else if \(shell\.ssh_reconnect\.noticeReason/);
-});
-
 test('ISSUE-513 synthetic chat tabs never enter SSH recovery or repaint while idle', async () => {
   await zig(runtime(`
 test "ISSUE-513 fixture recovery isolation" {
@@ -859,7 +809,7 @@ test "ISSUE-513 fixture recovery isolation" {
 `), 'ISSUE-513 fixture');
 });
 
-test('ISSUE-513 disconnected countdown repaints only its header and respects backoff', async () => {
+test('IGSH-1605 disconnected countdown never repaints and respects backoff', async () => {
   await zig(runtime(`
 test "ISSUE-513 bounded countdown repaint" {
     shells[0].process = null;
@@ -871,12 +821,8 @@ test "ISSUE-513 bounded countdown repaint" {
         sshAutoReconnectTick();
     }
     try std.testing.expectEqual(@as(usize, 0), spawns);
-    try std.testing.expectEqual(@as(usize, 29), repaints);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
     try std.testing.expectEqual(@as(usize, 0), full_repaints);
-    try std.testing.expectEqual(@as(i32, 0), last_paint.left);
-    try std.testing.expectEqual(@as(i32, 1920), last_paint.right);
-    try std.testing.expectEqual(threadTitleTop(), last_paint.top);
-    try std.testing.expectEqual(threadTitleTop() + threadTitleHeight(), last_paint.bottom);
     fake_now += 1000;
     sshAutoReconnectTick();
     try std.testing.expectEqual(@as(usize, 1), spawns);
@@ -985,7 +931,7 @@ test "ISSUE-511 protected gone results" {
             job.finished.store(true, .release);
             _ = job.owners.fetchSub(1, .acq_rel);
             sshProbeFinish();
-            try std.testing.expect(shells[0].ssh_reconnect.phase != .ended);
+            try std.testing.expect(shells[0].ssh_reconnect.phase != .closed);
         }
         if (alive) try std.testing.expectEqual(before, kills);
         try std.testing.expectEqual(@as(usize, 0), ended_logs);
@@ -1039,9 +985,9 @@ test "ISSUE-513 pending probes and reconnects keep one-second monitoring and clo
     shells[0].ssh_reconnect.ok();
     armSshReconnectTimerIfNeeded();
     try std.testing.expectEqual(@as(u32, 15000), timer_ms);
-    shells[0].ssh_reconnect.end();
+    shells[0].ssh_reconnect.recreate(fake_now, 0);
     armSshReconnectTimerIfNeeded();
-    try std.testing.expectEqual(@as(u32, 0), timer_ms);
+    try std.testing.expectEqual(@as(u32, 1000), timer_ms);
     shells[0].ssh_reconnect.close();
     armSshReconnectTimerIfNeeded();
     try std.testing.expectEqual(@as(u32, 0), timer_ms);
@@ -1075,6 +1021,9 @@ test('ISSUE-511 lifecycle oracles reject 9542152 state behavior', async () => {
   baseline = baseline.replace('process_alive: bool) bool {\n        const eligible', 'process_alive: bool, now: u64) bool {\n        _ = now;\n        const eligible');
   baseline = baseline.replace('    pub fn end(self: *State) void {', `    pub fn expireProbeWait(self: *State, now: u64, spawn_tick: u64) void {
         if (self.awaiting_probe and now -| spawn_tick >= 45_000) self.awaiting_probe = false;
+    }
+    pub fn recreate(self: *State, _: u64, _: u64) void {
+        self.end();
     }
     pub fn end(self: *State) void {`);
   for (const scenario of ['healthy respawn', 'restored named', 'no server']) {
@@ -1136,7 +1085,8 @@ test "ISSUE-511 tick waits for confirming gone" {
     second.finished.store(true, .release);
     _ = second.owners.fetchSub(1, .acq_rel);
     sshAutoReconnectTick();
-    try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.ended, shells[0].ssh_reconnect.phase);
+    try std.testing.expectEqual(@import("ssh_reconnect.zig").Phase.disconnected, shells[0].ssh_reconnect.phase);
+    try std.testing.expect(shells[0].ssh_reconnect.create_session);
     try std.testing.expectEqual(before, spawns);
 }
 `);

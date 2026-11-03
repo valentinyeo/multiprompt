@@ -3949,12 +3949,7 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (app_state.shells[app_state.active_shell].ssh_reconnect.phase == .ended) {
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Reconnect", "restart session", "reattach tab", "reconnect tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
-                app_state.g_search_result_count += 1;
-            }
-        } else if (show_reconnect) {
+        if (show_reconnect) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RECONNECT_OFFSET;
             app_state.g_search_result_count += 1;
         }

@@ -149,39 +149,33 @@ test('ISSUE-521 healthy probes confirm missing sessions before ending and skip e
   assert.match(worker, /\.sessionGone\(/);
   const finish = body('sshProbeFinish', send);
   assert.match(finish, /if \(shell\.ssh_reconnect\.observeGone\(item\.session_gone, process_alive, GetTickCount64\(\)\)\) \{\s*sshSessionEnded\(idx\);\s*continue;/);
-  assert.match(finish, /phase == \.ended/);
-  assert.match(body('sshProbeStart', send), /phase == \.ended/);
-  assert.match(body('sshAutoReconnectTick', send), /phase == \.ended/);
-  assert.match(body('sshDisconnect', send), /phase == \.ended/);
   const ended = body('sshSessionEnded', send);
-  assert.match(ended, /ssh-reconnect ended id=\{d\} reason=session-gone/);
-  assert.match(ended, /\.end\(\)/);
+  assert.match(ended, /ssh-reconnect recreate id=\{d\} reason=session-gone/);
+  assert.match(ended, /\.recreate\(now, now \^ shell\.shell_id\)/);
+  assert.match(ended, /tmux_identity_len = 0/);
   assert.doesNotMatch(ended, /repositionActive|invalidateSidebar|SetFocus|SetForegroundWindow/);
   assert.match(body('sessionGone', reconnect), /ssh_ok and exit_code == 0/);
   assert.match(reconnect, /test "ISSUE-521 session gone/);
-  assert.match(reconnect, /test "ISSUE-521 ended tabs/);
+  assert.match(reconnect, /test "IGSH-1605 a gone session recreates itself/);
   assert.match(body('due', reconnect), /!self\.awaiting_probe/);
   assert.match(body('sshDisconnect', send), /exit_code == 1.*3000/);
 });
 
 test('ISSUE-521 ended overlay and palette restart the same named host session explicitly', () => {
   const drawing = read('drawing.zig');
-  assert.match(drawing, /"Session ended"/);
-  assert.match(drawing, /L\("Start new session"\)/);
+  assert.doesNotMatch(drawing, /Start new session|"Session ended"/);
   const cmd = body('makeCmdLine', read('console.zig'));
   assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session\)/);
   const attach = body('attachCommand', read('tmux_identity.zig'));
   assert.match(attach, /try writer\.writeAll\(if \(create\) "tmux new-session -A -s " else "tmux attach -t "\);/);
   assert.doesNotMatch(attach, /ignore-size/);
   assert.match(attach, /try quote\(&writer,/);
-  assert.match(body('sshReconnectNow', send), /if \(was_ended\) shell\.tmux_identity_len = 0/);
   assert.match(body('respawnShellInPlace', read('console.zig')), /saved_ssh_reconnect\.create_session/);
-  assert.match(body('manual', reconnect), /self\.phase == \.ended/);
+  assert.match(body('recreate', reconnect), /self\.create_session = true/);
   const startId = state.match(/SEARCH_TABCTX_START_SESSION: usize = (\d+)/);
   assert.ok(startId);
   const urlId = state.match(/SEARCH_TABCTX_CHAT_TAB_URL: usize = (\d+)/);
   if (urlId) assert.notEqual(startId[1], urlId[1]);
-  assert.match(read('command_palette.zig'), /phase == \.ended/);
   assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_RECONNECT/);
   assert.doesNotMatch(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
   assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_RECONNECT\) L\(ui_words\.palette_reconnect\)/);
@@ -210,18 +204,14 @@ test('ISSUE-521 user palette reconnect closes the palette and shows the requeste
 
 test('ISSUE-521 visible-tab overlay restart does not request focus or switch tabs', () => {
   const main = read('main.zig');
-  const clickStart = main.indexOf('if (@import("drawing.zig").reconnectButtonRect(client_rc.right)) |button| {');
-  const clickEnd = main.indexOf('\n            if (chatViewOwnsInput()', clickStart);
-  assert.ok(clickStart >= 0 && clickEnd > clickStart);
-  const click = main.slice(clickStart, clickEnd);
-  assert.match(click, /PostMessageW\(hwnd, WM_APP_RECONNECT, 0, 0\);\s*return 0;/);
+  assert.doesNotMatch(main, /reconnectButtonRect/);
   const handlerStart = main.indexOf('        WM_APP_RECONNECT => {');
   const handlerEnd = main.indexOf('\n        WM_APP_HIDE_TAB_UNTIL_ATTENTION => {', handlerStart);
   assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
   const handler = main.slice(handlerStart, handlerEnd);
   assert.match(handler, /sshReconnectNow\(app_state\.active_shell\)/);
   const forbidden = /SetFocus\(|SetForegroundWindow\(|switchToShell\(|showActiveShellAfterOverlay\(|repositionActive\(|TIMER_REFOCUS|g_shell_focused\s*=/;
-  for (const source of [click, handler, body('sshReconnectNow', send), body('sshReconnectAttempt', send)]) {
+  for (const source of [handler, body('sshReconnectNow', send), body('sshReconnectAttempt', send)]) {
     assert.doesNotMatch(source, forbidden);
   }
   const show = body('showReconnectedConsole', read('console.zig'));

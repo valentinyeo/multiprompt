@@ -1815,17 +1815,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and
                 !app_state.g_snippet_create_active and @import("browser_pane.zig").browserPlaceholderClick(mx, my)) return 0;
 
-            if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active) {
-                var client_rc: RECT = std.mem.zeroes(RECT);
-                _ = GetClientRect(hwnd, &client_rc);
-                if (@import("drawing.zig").reconnectButtonRect(client_rc.right)) |button| {
-                    if (mx >= button.left and mx < button.right and my >= button.top and my < button.bottom) {
-                        _ = PostMessageW(hwnd, WM_APP_RECONNECT, 0, 0);
-                        return 0;
-                    }
-                }
-            }
-
             if (chatViewOwnsInput() and mx >= SIDEBAR_W() and !inboxButtonHitTest(mx, my)) {
                 if (browserSplitterHit(mx, my)) {
                     app_state.g_browser_dragging = true;

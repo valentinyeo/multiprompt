@@ -1982,7 +1982,7 @@ fn zsbSessionState(shell: *const app_state.Shell, process_code: ?u32) ZsbSession
     if (process_code) |code| if (code != @import("win32.zig").STILL_ACTIVE) return .disconnected;
     if (shell.launch_failed) return .disconnected;
     return switch (shell.ssh_reconnect.phase) {
-        .disconnected, .ended, .closed => .disconnected,
+        .disconnected, .closed => .disconnected,
         .reconnecting => .connecting,
         .connected => if (shell.disconnected)
             .disconnected
@@ -2605,13 +2605,11 @@ test "session state requires live transport and confirmed attachment rather than
     try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
     shell.ssh_reconnect.start();
     try std.testing.expectEqual(ZsbSessionState.connecting, zsbSessionState(&shell, live));
-    shell.ssh_reconnect.end();
-    try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
     shell.ssh_reconnect.close();
     try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
     shell = app_state.empty_shell;
     shell.ssh_reconnect.ok();
-    for ([_]@import("ssh_reconnect.zig").Phase{ .disconnected, .ended, .closed }) |phase| {
+    for ([_]@import("ssh_reconnect.zig").Phase{ .disconnected, .closed }) |phase| {
         shell.ssh_reconnect.phase = phase;
         try std.testing.expectEqual(ZsbSessionState.disconnected, zsbSessionState(&shell, live));
     }

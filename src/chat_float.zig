@@ -42,9 +42,7 @@ pub fn collectHoles(out: *HoleList) void {
     var main_rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = w32.GetClientRect(app_state.g_main_hwnd, &main_rc);
     out.add(@import("window_frame.zig").controlsRect(main_rc.right), 0);
-    if (drawing.chatTitleHoleRect(main_rc.right - main_rc.left)) |band| {
-        out.add(band, 0);
-    } else if (drawing.chatTitleLayout()) |title| {
+    if (drawing.chatTitleLayout()) |title| {
         out.add(title.pill, @divTrunc(title.pill.bottom - title.pill.top, 2));
         out.addFloating(title.more, @divTrunc(title.more.bottom - title.more.top, 2));
         if (title.meta.len > 0) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));

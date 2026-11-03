@@ -268,7 +268,7 @@ const reviewCases = [
     assert.match(complete, /launch_failed = true/);
     assert.match(complete, /showHeaderNoticeAscii\("Could not start terminal/);
     const paint = body(read('src/drawing.zig'), 'paintDisconnectedShell');
-    assert.match(paint, /if \(!launch_failed and reconnectButtonRect/);
+    assert.match(paint, /if \(!launch_failed and !reconnectNoticeShown/);
     assert.match(paint, /if \(launch_failed\) L\("Terminal could not start/);
   }],
 ];

@@ -1551,6 +1551,7 @@ function runHarness(control = false) {
       .replaceAll('@import("win32.zig").MessageBoxW', 'MessageBoxW')
       .replaceAll('@import("fonts.zig").messageBox', 'MessageBoxW')
       .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    if (source.includes('fn chatOutboxRequeueAfterReconnect(')) functions += '\n' + body('chatOutboxRequeueAfterReconnect');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'question-old') {
       functions = functions.replace('    if (chatSendQuestionText(send_text)) return;', '');
@@ -1591,6 +1592,13 @@ test('cache timestamp oracle rejects the actual integration omission (positive c
   const result = runHarness(true);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 0, found 1/);
+});
+test('IGSH-1605 a successful reconnect requeues sends that failed while the link was down before the outbox timer re-arms', () => {
+  const ok = body('sshReconnectOk');
+  assert.match(ok, /chatOutboxRequeueAfterReconnect\(idx\);[\s\S]*armChatOutboxTimerIfNeeded\(\)/);
+  const requeue = body('chatOutboxRequeueAfterReconnect');
+  assert.match(requeue, /chat_echo\.requeueOnReconnect\(entry\.state, /);
+  assert.match(requeue, /entry\.state = \.queued;[\s\S]*entry\.write_started = false;/);
 });
 test('composer always persists through the same outbox before delivery', () => {
   const send = body('sendChatPrompt');

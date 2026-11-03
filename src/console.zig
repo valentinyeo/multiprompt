@@ -2312,9 +2312,8 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (chatBenchEnabled() or idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return;
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
-    if (app_state.shells[idx].ssh_reconnect.phase == .closed or app_state.shells[idx].ssh_reconnect.phase == .ended) return;
+    if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;
     const state_changed = !app_state.shells[idx].disconnected;
-    app_state.shells[idx].ssh_reconnect.confirmDisconnect(GetTickCount64(), "console-missing", app_state.shells[idx].process != null and shellProcessAliveForRead(idx));
     var exit_code: DWORD = 0;
     if (app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0 and exit_code != STILL_ACTIVE) {
         app_state.shells[idx].ssh_reconnect.exit_code = exit_code;
