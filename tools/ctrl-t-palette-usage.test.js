@@ -206,6 +206,12 @@ test("all session rename entry points synchronize display surfaces without chang
 
 });
 
+test("IGSH-1546 Ctrl+K Codex and Pi chat rows start a hosted live chat", () => {
+  assert.match(functionBody("spawnCodexTmuxSession", "spawnPiTmuxSession"), /spawnHostedChatSession\(\.codex\)/);
+  assert.match(functionBody("spawnPiTmuxSession", "clampSearchSelectionAndScroll"), /spawnHostedChatSession\(\.pi\)/);
+  assert.doesNotMatch(source, /buildCodexTmuxLaunchCmd/);
+});
+
 test("Ctrl+K shell rows use readable names without decorative prefixes", () => {
   const paintStart = source.indexOf("if (g_search_active) {", source.indexOf("fn paintSidebar("));
   const paintEnd = source.indexOf("\nfn updateSearchResults(", paintStart);

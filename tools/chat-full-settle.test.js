@@ -238,3 +238,8 @@ test('outbox tick owns full settlement completion and startup behind the switch'
   assert.match(body('chatFullSettleStart'), /std\.Thread\.spawn\([^]*chatFullSettleThread/);
   assert.match(body('armChatOutboxTimerIfNeeded'), /g_chat_full_settle_job != null/);
 });
+
+test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
+  const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
+  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
+});
