@@ -160,7 +160,8 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
 test('PR, manual and nightly runs restore Zig caches while master pushes can save them', () => {
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-    const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
+    const speed = workflow.split('\n  switch-performance:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
+    const caches = workflow.split(/(?=^      - )/m).filter(step => !speed?.includes(step)).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
     const canSave = /^  push:\n/m.test(workflow);
@@ -191,15 +192,17 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
         assert.ok(caches[i + 1].includes('uses: actions/cache@'));
         assert.equal(caches[i].split('        with:\n')[1], caches[i + 1].split('        with:\n')[1]);
       }
-      for (const [name, cap, prefix, run] of [
-        ['test', 1600, 'shards-v7-group-', 'Run tests'],
-        ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests'],
+      const gated = "steps\\.paths\\.outputs\\.heavy == 'true' && steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
+      for (const [name, cap, prefix, run, gate] of [
+        ['test', 1600, 'shards-v7-group-', 'Run tests', gated],
+        ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests', gated],
+        ['switch-performance', 1600, '-zig-0\\.16\\.0-speed-', 'Build baseline and candidate', ''],
       ]) {
         const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
         const steps = job.split(/(?=^      - )/m);
         const trim = steps.filter(step => step.includes('name: Bound Zig cache before save'));
         assert.equal(trim.length, 1);
-        assert.match(trim[0], /if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
+        assert.match(trim[0], new RegExp(`if: ${gate}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\\n`));
         assert.match(trim[0], /shell: bash\n/);
         assert.equal((trim[0].match(/du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/g) || []).length, 1);
         assert.ok(trim[0].includes('du -sh "$ZIG_GLOBAL_CACHE_DIR"\n'));
@@ -214,6 +217,13 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
           assert.match(cache, /path: \|\n            \.zig-cache\n            \$\{\{ env\.ZIG_GLOBAL_CACHE_DIR \}\}/);
         }
       }
+      const speedCaches = speed.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/restore)?@/.test(step));
+      assert.equal(speedCaches.length, 2);
+      assert.match(speedCaches[0], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
+      assert.match(speedCaches[0], /if: \(?github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'schedule'\)?\n/);
+      assert.match(speedCaches[1], /uses: actions\/cache@[a-f0-9]{40}\n/);
+      assert.match(speedCaches[1], /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
+      assert.equal(speedCaches[0].split('        with:\n')[1], speedCaches[1].split('        with:\n')[1]);
     }
   }
 });
