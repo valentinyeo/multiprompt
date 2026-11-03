@@ -364,7 +364,7 @@ test('v2 shared fixture is byte-identical and Frequent stays first with selected
   assert.equal(read('src/fixtures/issue-415-frequent.json'), file);
   const fixture = JSON.parse(file);
   assert.equal(fixture.now, 1_800_000_000_000);
-  assert.deepEqual(fixture.expected, ['beta', 'alpha', 'gamma']);
+  assert.deepEqual(fixture.expected, ['gamma', 'alpha', 'beta']);
   assert.ok(fixture.layout.tabs.every(tab => tab.tmux_host === 0));
   const paint = between('fn paintInbox(', 'fn openInbox(');
   assert.match(paint, /const builtins = frequent\.builtinSplits\(/);

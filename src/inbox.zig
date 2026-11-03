@@ -2136,54 +2136,6 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
     _ = InvalidateRect(hwnd, null, 0);
 }
 
-test "ISSUE-423 hidden selection and keyboard cycling follow visible split order" {
-    const previous_settings = app_state.g_layout_settings;
-    const previous_tab = app_state.g_inbox_tab;
-    const previous_sel = app_state.g_inbox_sel;
-    const previous_count = app_state.g_inbox_ws_count;
-    const previous_unread = app_state.g_unread_only;
-    const previous_ws = app_state.g_inbox_ws[0];
-    defer {
-        app_state.g_layout_settings = previous_settings;
-        app_state.g_inbox_tab = previous_tab;
-        app_state.g_inbox_sel = previous_sel;
-        app_state.g_inbox_ws_count = previous_count;
-        app_state.g_unread_only = previous_unread;
-        app_state.g_inbox_ws[0] = previous_ws;
-    }
-    app_state.g_inbox_ws_count = 1;
-    app_state.g_inbox_ws[0] = .{ .attn = 0 };
-    app_state.g_unread_only = false;
-    for (0..16) |bits| {
-        app_state.g_layout_settings = .{ .frequent = bits & 1 != 0, .favorites = bits & 2 != 0, .all = bits & 4 != 0, .frequent_first = bits & 8 != 0 };
-        const builtins = frequent.builtinSplits(app_state.g_layout_settings.?);
-        app_state.g_inbox_tab = frequent.frequent_split;
-        ensureInboxSplitVisible();
-        try std.testing.expect(inboxSplitVisible(app_state.g_inbox_tab));
-        if (!app_state.g_layout_settings.?.frequent) try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
-        app_state.g_inbox_tab = builtins.ids[0];
-        moveInboxSplit(true, false);
-        try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
-        for (builtins.slice()[1..]) |id| {
-            moveInboxSplit(false, true);
-            try std.testing.expectEqual(id, app_state.g_inbox_tab);
-        }
-        moveInboxSplit(false, true);
-        try std.testing.expectEqual(frequent.workspaceSplit(0), app_state.g_inbox_tab);
-        moveInboxSplit(false, false);
-        try std.testing.expectEqual(frequent.workspaceSplit(0), app_state.g_inbox_tab);
-        moveInboxSplit(false, true);
-        try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
-        moveInboxSplit(true, true);
-        try std.testing.expectEqual(frequent.workspaceSplit(0), app_state.g_inbox_tab);
-        app_state.g_unread_only = true;
-        app_state.g_inbox_tab = builtins.ids[builtins.len - 1];
-        moveInboxSplit(false, true);
-        try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
-        app_state.g_unread_only = false;
-    }
-}
-
 test "Inbox J and K stop at the ends and gg and G jump to them" {
     const prior_hwnd = app_state.g_main_hwnd;
     const prior_ws_count = app_state.g_inbox_ws_count;
@@ -2230,4 +2182,52 @@ test "Inbox J and K stop at the ends and gg and G jump to them" {
     try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
     handleInboxKey(app_state.g_main_hwnd, 20);
     try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
+}
+
+test "ISSUE-423 hidden selection and keyboard cycling follow visible split order" {
+    const previous_settings = app_state.g_layout_settings;
+    const previous_tab = app_state.g_inbox_tab;
+    const previous_sel = app_state.g_inbox_sel;
+    const previous_count = app_state.g_inbox_ws_count;
+    const previous_unread = app_state.g_unread_only;
+    const previous_ws = app_state.g_inbox_ws[0];
+    defer {
+        app_state.g_layout_settings = previous_settings;
+        app_state.g_inbox_tab = previous_tab;
+        app_state.g_inbox_sel = previous_sel;
+        app_state.g_inbox_ws_count = previous_count;
+        app_state.g_unread_only = previous_unread;
+        app_state.g_inbox_ws[0] = previous_ws;
+    }
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0] = .{ .attn = 0 };
+    app_state.g_unread_only = false;
+    for (0..16) |bits| {
+        app_state.g_layout_settings = .{ .frequent = bits & 1 != 0, .favorites = bits & 2 != 0, .all = bits & 4 != 0, .frequent_first = bits & 8 != 0 };
+        const builtins = frequent.builtinSplits(app_state.g_layout_settings.?);
+        app_state.g_inbox_tab = frequent.frequent_split;
+        ensureInboxSplitVisible();
+        try std.testing.expect(inboxSplitVisible(app_state.g_inbox_tab));
+        if (!app_state.g_layout_settings.?.frequent) try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
+        app_state.g_inbox_tab = builtins.ids[0];
+        moveInboxSplit(true, false);
+        try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
+        for (builtins.slice()[1..]) |id| {
+            moveInboxSplit(false, true);
+            try std.testing.expectEqual(id, app_state.g_inbox_tab);
+        }
+        moveInboxSplit(false, true);
+        try std.testing.expectEqual(frequent.workspaceSplit(0), app_state.g_inbox_tab);
+        moveInboxSplit(false, false);
+        try std.testing.expectEqual(frequent.workspaceSplit(0), app_state.g_inbox_tab);
+        moveInboxSplit(false, true);
+        try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
+        moveInboxSplit(true, true);
+        try std.testing.expectEqual(frequent.workspaceSplit(0), app_state.g_inbox_tab);
+        app_state.g_unread_only = true;
+        app_state.g_inbox_tab = builtins.ids[builtins.len - 1];
+        moveInboxSplit(false, true);
+        try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
+        app_state.g_unread_only = false;
+    }
 }
