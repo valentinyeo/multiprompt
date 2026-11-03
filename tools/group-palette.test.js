@@ -34,7 +34,7 @@ function decl(name) {
   assert.ok(match, name);
   return match[0];
 }
-const inlinedModules = ['rename.zig', 'sidebar.zig'];
+const inlinedModules = ['account_desktop.zig', 'rename.zig', 'sidebar.zig'];
 function dropTest(file, prefix) {
   const text = fs.readFileSync(file, 'utf8');
   const start = text.indexOf(`test "${prefix}`);
@@ -51,8 +51,8 @@ function dropTest(file, prefix) {
 function productionSource() {
   const bodies = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')];
   const stray = bodies.flatMap(body => [...body.matchAll(/@import\("([^"]+)"\)/g)].map(([, name]) => name)).filter(name => !inlinedModules.includes(name));
-  assert.deepEqual(stray, [], 'copied production bodies must not import the application tree inline; hoist the member to a file-scope const');
-  return bodies.join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
+  assert.deepEqual(stray, [], 'copied production bodies must not import the application tree inline; stub the module in the harness and list it in inlinedModules');
+  return inlinedModules.reduce((text, name) => text.replaceAll(`@import("${name}").`, ''), bodies.join('\n'));
 }
 function harness() {
   const closedCapture = read('console').slice(read('console').indexOf('        var entry: ClosedShell ='), read('console').indexOf('        app_state.g_closed_count += 1;') + '        app_state.g_closed_count += 1;'.length);

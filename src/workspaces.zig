@@ -193,8 +193,6 @@ const browserUrlSlice = @import("browser_pane.zig").browserUrlSlice;
 const hideBrowserFloatingChrome = @import("browser_pane.zig").hideBrowserFloatingChrome;
 const parkStrayBrowserPanes = @import("browser_pane.zig").parkStrayBrowserPanes;
 const chatHistoryForget = @import("chat_session.zig").chatHistoryForget;
-const applyPendingAppearance = @import("account_desktop.zig").applyPendingAppearance;
-const appearancePendingMask = @import("account_desktop.zig").appearancePendingMask;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const invalidateSidebar = @import("window_layout.zig").invalidateSidebar;
@@ -2204,7 +2202,7 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     if (idx >= app_state.shell_count) return false;
     const shell = app_state.shells[idx];
     if (shell.hwnd == null) return false;
-    const pending_mask = appearancePendingMask(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len]) catch return false;
+    const pending_mask = @import("account_desktop.zig").appearancePendingMask(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len]) catch return false;
     if (pending_mask != 0) return false;
 
     var browser_transfer: app_state.BrowserTabTransfer = std.mem.zeroes(app_state.BrowserTabTransfer);
@@ -2401,7 +2399,7 @@ pub fn reopenLastClosedShell() void {
         app_state.shells[app_state.shell_count - 1].face = entry.face;
         app_state.shells[app_state.shell_count - 1].color = entry.color;
         app_state.shells[app_state.shell_count - 1].avatar_local_id = entry.avatar_local_id;
-        applyPendingAppearance(app_state.shell_count - 1);
+        @import("account_desktop.zig").applyPendingAppearance(app_state.shell_count - 1);
         if (entry.group) |saved| app_state.shells[app_state.shell_count - 1].group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, false);
         if (entry.starred_group) |saved| app_state.shells[app_state.shell_count - 1].starred_group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, true);
         app_state.g_closed_count -= 1;
@@ -4504,7 +4502,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].favorite = tabs[t].favorite;
             app_state.shells[idx].face = tabs[t].face;
             app_state.shells[idx].color = tabs[t].color;
-            applyPendingAppearance(@intCast(idx));
+            @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
             app_state.shells[idx].last_used = tabs[t].last_used;
             app_state.shells[idx].input = tabs[t].input;
             app_state.shells[idx].visits = tabs[t].visits;
