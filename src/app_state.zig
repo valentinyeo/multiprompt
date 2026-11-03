@@ -3975,6 +3975,7 @@ pub const ChatPendingReset = struct {
     key: chat_transcript.Identity = .{},
     nonce: u64 = 0,
     request_nonce: u64 = 0,
+    unconfirmed: u8 = 0,
 };
 pub var g_chat_pending_reset: ?ChatPendingReset = null;
 pub var g_chat_reset_next: u64 = 0;
