@@ -114,6 +114,7 @@ try {
     Wait-Until { -not [VerifyNative]::PaneVisible($script:window) } ($one.name + ' shows no browser pane yet') 20
     $oneBefore = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-before' -Session $one.tmux
     if ($oneBefore.session -cne $one.tmux -or $oneBefore.pane -cne 'closed') { throw ('zsb status from the ' + $one.tmux + ' chat did not report its own closed pane: ' + (ConvertTo-Json -InputObject $oneBefore -Compress)) }
+    Snapshot 'action'
     $oneOpen = Invoke-Zsb @('open', $one.page) $script:liveChatPort 'chat-one-open' -Session $one.tmux -AllowPlainOk
     Wait-Until {
         $pane = Read-BrowserPaneFor $one.shellId
@@ -160,6 +161,7 @@ try {
     if (@($oneKeptTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant }).Count -ne 1) { throw ('The ' + $one.tmux + ' chat lost its own page after the other chat opened one') }
     if (@($oneKeptTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $twoWant }).Count -ne 0) { throw ('The ' + $one.tmux + ' chat shows the other chat page') }
     Snapshot 'chat-one-keeps-page'
+    Snapshot 'after'
     $result.checks += @{ name = 'chats-keep-their-own-pages'; first = $one.tmux; second = $two.tmux; firstStatusAfter = $oneKept; firstWindowId = $oneStatus.windowId; secondWindowId = $twoStatus.windowId; firstPage = $one.page; secondPage = $two.page }
     Save-Json (Read-BrowserPaneFor $one.shellId) 'pane-chat-one.json'
     Save-Json (Read-BrowserPaneFor $two.shellId) 'pane-chat-two.json'
