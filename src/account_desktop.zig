@@ -1055,14 +1055,22 @@ fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutRep
 }
 
 fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !void {
-    const escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\"");
-    for (aliases) |alias| {
-        const command = try std.fmt.allocPrint(a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ ssh, alias, escaped });
-        _ = accountSshOutput(a, command, 30000) catch |err| {
-            const text = try std.fmt.allocPrint(a, "Could not update SSH access on {s}. Check this host and try again.", .{alias});
-            accountDeviceKeyError(reply, text);
-            return err;
-        };
+    const Runner = struct {
+        a: std.mem.Allocator,
+        ssh: []const u8,
+        escaped: []const u8,
+        failed_alias: ?[]const u8 = null,
+        pub fn apply(self: *@This(), alias: []const u8) !void {
+            errdefer self.failed_alias = alias;
+            const command = try std.fmt.allocPrint(self.a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ self.ssh, alias, self.escaped });
+            _ = try accountSshOutput(self.a, command, 30000);
+        }
+    };
+    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\"") };
+    const rollout = account_keys.applyOnHosts(aliases, &runner);
+    if (rollout.failed > 0) {
+        accountDeviceKeyError(reply, try std.fmt.allocPrint(a, "Could not update SSH access on {s}. Check this host and try again.", .{runner.failed_alias.?}));
+        return error.Process;
     }
 }
 
