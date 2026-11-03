@@ -546,9 +546,12 @@ for (const [name, failure, blocked] of [
   assert.equal(result.process.exitCode, 1);
 });
 
-test('auto-revert workflow runs for failed or cancelled master pushes and manual dispatch', () => {
+test('auto-revert stays manual-only and never reacts to a failed or cancelled master push', () => {
   const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
-  assert.match(workflow, /\n    if: github\.event_name == 'workflow_dispatch' \|\| \(\(github\.event\.workflow_run\.conclusion == 'failure' \|\| github\.event\.workflow_run\.conclusion == 'cancelled'\) && github\.event\.workflow_run\.event == 'push' && github\.event\.workflow_run\.head_branch == 'master'\)\n/);
+  const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
+  assert.match(events, /^  workflow_dispatch:\n/m);
+  assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run|repository_dispatch|schedule):/m);
+  assert.match(workflow, /\n    if: \$\{\{ false \}\}\n/);
 });
 
 test('auto-revert workflow grants contents and pull-request writes with the existing token', () => {
@@ -571,8 +574,10 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.ok(matrices[1].includes('chat-send-latency'));
   assert.ok(matrices[1].includes('remind-me'));
   assert.ok(matrices[1].includes('chat-first-paint'));
-  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
-  verifyPushBranches(verify);
+  const events = verify.split('\non:\n')[1].split('\npermissions:')[0];
+  assert.match(events, /^  workflow_dispatch:/m);
+  assert.match(events, /^  schedule:/m);
+  assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run|repository_dispatch):/m);
   const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)[1];
   const targeted = vm.runInNewContext(expression, {
     needs: { journeys: { outputs: { pr: JSON.stringify(matrices[0]), full: JSON.stringify(matrices[1]) } } },
