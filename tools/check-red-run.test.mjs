@@ -309,6 +309,17 @@ const after = 1;
     assert.match(result.stderr, /stayed green on merge-base source/);
   });
 
+  test('workflow edits travel with test repairs without a merge-base regression proof', t => {
+    const f = fixture(t);
+    f.write('.github/workflows/ci.yml', 'name: ci\non:\n  pull_request:\n');
+    f.write('tools/value.test.cjs', "require('node:test')('repairs a suite that refused to load',()=>{});\n");
+    f.commit();
+    const result = f.run();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /TEST_ONLY_PROVEN 1 changed suites/);
+    assert.doesNotMatch(result.stdout, /stayed green on merge-base source/);
+  });
+
   test('changed fixtures travel with the test, but implementation stays at merge-base', t => {
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
