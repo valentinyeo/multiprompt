@@ -6221,6 +6221,14 @@ class IGSH_1544_CodexHostTest(HostProviderCase):
         self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
         self.assertEqual(self.message('codex_fixture_message_02')['state'], 'accepted')
 
+    def test_codex_history_with_a_provider_field_answers_as_codex(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        self.enable()
+        query = dict(id=8, codex=True, provider='codex', sid=self.sid, tmux=self.tmux, cwd=str(self.home), follow=True)
+        agent, sid, path, wire = reader.resolve_response_path(query)
+        self.assertEqual((agent, path), ('codex', None))
+        self.assertEqual(wire.split('\n')[0].split('\t')[9], 'codex')
+
     def test_codex_maps_permission_modes_onto_approval_policy_and_sandbox(self):
         self.enable(permission_mode='bypassPermissions')
         self.send('codex_fixture_message_01')
@@ -6292,6 +6300,13 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.assertEqual(self.wait_for(lambda: (self.message('pi_fixture_message_0002') or {}).get('state') == 'failed' and 'ok'), 'ok')
         self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
         self.assertEqual(self.message('pi_fixture_message_0001')['state'], 'accepted')
+
+    def test_pi_history_answers_empty_with_the_pi_agent(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        query = dict(id=7, codex=False, provider='pi', sid=self.sid, tmux=self.tmux, cwd=str(self.home), follow=True)
+        agent, sid, path, wire = reader.resolve_response_path(query)
+        self.assertEqual((agent, sid, path), ('pi', self.sid, None))
+        self.assertEqual(wire.split('\n')[0].split('\t')[9], 'pi')
 
     def test_pi_sends_a_second_message_as_a_follow_up_while_a_run_is_active(self):
         os.environ['FAKE_RPC_OFFSET'] = '1'
