@@ -1551,6 +1551,7 @@ function runHarness(control = false) {
       .replaceAll('@import("win32.zig").MessageBoxW', 'MessageBoxW')
       .replaceAll('@import("fonts.zig").messageBox', 'MessageBoxW')
       .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    if (source.includes('fn chatOutboxRequeueAfterReconnect(')) functions += '\n' + body('chatOutboxRequeueAfterReconnect');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'question-old') {
       functions = functions.replace('    if (chatSendQuestionText(send_text)) return;', '');
