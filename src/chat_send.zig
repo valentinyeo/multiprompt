@@ -2129,6 +2129,19 @@ pub fn chatOutboxTick() void {
         chatOutboxChanged();
     }
     if (app_state.g_chat_active) chatEchoMatchActive();
+    var requeued = false;
+    for (app_state.g_chat_outbox.items) |*entry| {
+        const idx = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
+        if (!chat_echo.requeueOnReconnect(entry.state, entry.message_wire_id[0] != 0, entry.write_started, entry.host_confirmed, chatLinkLooksDown(idx))) continue;
+        entry.state = .queued;
+        entry.write_started = false;
+        entry.channel_pending = false;
+        requeued = true;
+    }
+    if (requeued) {
+        _ = saveChatOutbox();
+        chatOutboxChanged();
+    }
     if (chatOutboxFindSending(&app_state.g_chat_outbox) == null) {
         for (0..app_state.g_chat_outbox.items.len) |e| {
             const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
@@ -2298,16 +2311,6 @@ pub fn sshAutoReconnectTick() void {
     }
     sshProbeStart();
     armSshReconnectTimerIfNeeded();
-    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].disconnected and
-        @import("drawing.zig").reconnectTabVisible(app_state.active_shell))
-    {
-        var header: RECT = undefined;
-        if (GetClientRect(app_state.g_main_hwnd, &header) != 0) {
-            header.top = threadTitleTop();
-            header.bottom = header.top + threadTitleHeight();
-            _ = InvalidateRect(app_state.g_main_hwnd, &header, 0);
-        }
-    }
 }
 
 fn sshReconnectOk(idx: u32) void {

@@ -96,7 +96,7 @@ print('INDEPENDENT_READER_RECEIPTS_OK')
 
 test('IGSH-1152 header paint uses the same notice text measured before expiry', () => {
   const source = read('src/drawing.zig');
-  const layout = source.slice(source.indexOf('pub fn chatTitleLayout('), source.indexOf('pub fn chatTitleHoleRect('));
+  const layout = source.slice(source.indexOf('pub fn chatTitleLayout('), source.indexOf('fn paintMoreButton('));
   const paint = source.slice(source.indexOf('fn paintChatTitlePill('), source.indexOf('pub fn paintThreadTitle('));
   assert.match(source, /meta: \[\]const u16/);
   assert.doesNotMatch(source, /has_meta: bool/);
