@@ -95,6 +95,11 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
   assert.match(flow, /name: Reject PowerShell host name collisions\n        shell: pwsh/);
   assert.match(flow, /require_jobs "\$WINDOWS"[^\n]*"\$SPEED"/);
+  assert.ok(speed.includes('ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache'), 'Both speed builds must share one local Zig cache');
+  assert.ok(speed.includes('ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache'), 'The speed build must cache its global Zig tree');
+  assert.match(speed, /uses: actions\/cache\/restore@[0-9a-f]{40}/, 'Pull requests must restore the speed Zig cache');
+  assert.match(speed, /uses: actions\/cache@[0-9a-f]{40}/, 'Master pushes must save the speed Zig cache');
+  assert.ok(speed.includes('-zig-0.16.0-speed-'), 'The speed cache must use its own key prefix');
 });
 
 test('empty fixture suggestion never asks the console to verify nonexistent grey text', () => {
