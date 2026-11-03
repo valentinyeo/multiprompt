@@ -69,6 +69,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Session tabs](session-tabs.md): `zsb session-rename`, `session-rebind`, `session-move` and `session-close` repair four background tabs without changing the active tab or foreground window, and the saved layout survives a restart exactly.
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
+- [Inbox order](inbox-order.md): recent sessions lead the Inbox and a newer notification moves the older session above it, checked against app-published timestamps and a visual review of both captures.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
 - [Status card](status-card.md): measure the one-line sidebar status card on all three pages after real Ctrl+Shift+G presses and capture its hover view; fail outside 20 to 30 px.
 - [Title bar](title-bar.md): native caption glyph identity and app-black caption-facing masks with mismatched Chrome themes at real 100%, 125% and 150% monitor scaling.

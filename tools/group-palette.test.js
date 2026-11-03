@@ -185,7 +185,7 @@ fn CreateSolidBrush(_: DWORD) HANDLE { return 1; }
 fn DeleteObject(_: HANDLE) i32 { return 1; }
 fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
 ${production}
-test "split persistence leaves minimum pane widths to the shared geometry clamp" {
+test "group palette: split persistence leaves minimum pane widths to the shared geometry clamp" {
     for ([_]u32{0, 40, 350, 960, 1000, 5000}) |split| {
         var buf: [256]u8 = undefined;
         const json = try std.fmt.bufPrint(&buf, "{{\\"tabs\\":[{{\\"kind\\":\\"cmd\\",\\"name\\":\\"T\\",\\"bsplit\\":{d}}}]}}", .{split});
@@ -196,7 +196,7 @@ test "split persistence leaves minimum pane widths to the shared geometry clamp"
         try std.testing.expectEqual(@as(u16, @intCast(@min(split, 1000))), tabs[0].bsplit_permille);
     }
 }
-test "empty root excludes group rows while context and typed search include them" {
+test "group palette: empty root excludes group rows while context and typed search include them" {
     group_count = 0;
     next_group_id = 1;
     _ = createGroup(&.{'A'});
@@ -221,7 +221,7 @@ test "empty root excludes group rows while context and typed search include them
     g_search_len = 0;
     g_search_result_count = 0;
 }
-test "picked colors survive closed tab reopen, reminders and layout export import including palette zero" {
+test "group palette: picked colors survive closed tab reopen, reminders and layout export import including palette zero" {
     for ([_]u8{0, 4, 7}) |color| {
         for ([_]bool{false, true}) |picked| {
             group_count = 0;
@@ -300,7 +300,7 @@ fn serializedColor(gi: usize, json_buf: *[256]u8) []const u8 {
     ${saving}
     return json_buf[0..pos];
 }
-test "new and legacy groups are neutral in both themes; explicit choices survive save and restore" {
+test "group palette: new and legacy groups are neutral in both themes; explicit choices survive save and restore" {
     group_count = 0;
     _ = createGroup(&.{'T'});
     try std.testing.expect(!groups[0].color_set);
@@ -333,7 +333,7 @@ test "new and legacy groups are neutral in both themes; explicit choices survive
     try std.testing.expect(groups[0].color_set);
     try std.testing.expectEqual(@as(u8,0), groups[0].color);
 }
-test "group band covers popup actions, scoped target, search and workspace destinations" {
+test "group palette: group band covers popup actions, scoped target, search and workspace destinations" {
     group_count = 0;
     next_group_id = 1;
     _ = createGroup(&.{'A'});
@@ -395,7 +395,7 @@ test('extracted production group default, migration, explicit colors and palette
     copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig', 'ui_words.zon'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     console.log(result.stderr.trim());
@@ -409,7 +409,7 @@ test('extracted production group default, migration, explicit colors and palette
       const mutated = mutate(original);
       assert.notEqual(mutated, original, name);
       fs.writeFileSync(file, mutated.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-      const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
+      const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
       assert.notEqual(bad.status, 0, name);
       assert.match(bad.stderr, /FAIL/, name);
       console.log(`${name} rejected`);
