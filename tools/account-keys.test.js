@@ -28,18 +28,19 @@ function audit(source) {
   assert.match(sync, /key.status == \.pending and std.mem.eql\(u8, key.device_id, decision.device_id\) and std.mem.eql\(u8, key.public_key, decision.public_key\)/);
   assert.match(sync, /if \(!current\) return error.DeviceChanged/);
   assert.match(sync, /if \(aliases.len == 0\)/);
-  assert.match(sync, /try accountRunKeyCommand\(a, ssh, aliases, try account_keys.addCommand/);
+  assert.match(sync, /_ = try accountRunKeyCommand\(a, ssh, aliases, try account_keys.addCommand/);
   assert.ok(sync.indexOf('try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(') < sync.indexOf('request("POST", path'));
   assert.match(sync, /"\/v1\/device-keys\/\{s\}\/\{s\}"/);
   assert.match(sync, /if \(decision.approve\) "approve" else "deny"/);
   assert.match(sync, /key.status != \.revoked or account_keys.isCleaned\(state.items, key.public_key\)/);
   assert.ok(sync.indexOf('account_keys.removeCommand(') < sync.indexOf('writeDpapiFile("account-keys-cleaned.dat"'));
-  assert.match(sync, /try accountRunKeyCommand\(a, ssh, aliases, try account_keys.removeCommand/);
+  assert.match(sync, /if \(!try accountRunKeyCommand\(a, ssh, aliases, try account_keys.removeCommand\(a, key.public_key\), reply\)\) continue;/);
   const remote = section(source, 'accountRunKeyCommand');
   assert.match(remote, /-o BatchMode=yes -o ConnectTimeout=10/);
-  assert.match(remote, /accountSshOutput\(a, command, 30000\) catch \|err\|/);
-  assert.match(remote, /Could not update SSH access on \{s\}/);
-  assert.match(remote, /return err/);
+  assert.match(remote, /_ = try accountSshOutput\(self.a, command, 30000\)/);
+  assert.match(remote, /const rollout = account_keys.applyOnHosts\(aliases, &runner\)/);
+  assert.match(remote, /if \(!rollout.reachedAny\(\)\) \{\s*accountDeviceKeyError\(reply, "Could not update SSH access on any host\./);
+  assert.match(remote, /return rollout.complete\(\)/);
   const prompt = section(source, 'accountPromptDeviceKeys');
   assert.match(prompt, /key.status != \.pending or std.mem.eql\(u8, key.device_id, listing.value.device_id\)/);
   assert.match(prompt, /Approve this device\? \{s\} asks to reach your servers\./);
@@ -67,6 +68,9 @@ test('device-key transport, worker SSH, UI decisions and durable cleanup fail cl
     ['key.status != .pending or std.mem.eql(u8, key.device_id, listing.value.device_id)', 'false'],
     ['key.status != .revoked or account_keys.isCleaned(state.items, key.public_key)', 'false'],
     ['-o BatchMode=yes -o ConnectTimeout=10', '-o ConnectTimeout=1'],
+    ['if (!rollout.reachedAny()) {', 'if (false) {'],
+    ['return rollout.complete();', 'return true;'],
+    ['reply)) continue;', 'reply)) {}'],
   ]) {
     assert.ok(desktop.includes(before), before);
     assert.throws(() => audit(desktop.replace(before, after)), before);
