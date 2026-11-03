@@ -3,6 +3,7 @@
             $script:botPicker = [IntPtr]::Zero
             $script:botPickerSelector = ''
             $script:botPickerInput = ''
+            New-Item -ItemType Directory -Force (Join-Path $scratch 'profile/Desktop') | Out-Null
             $result.subFeatures = @('upload-picture', 'picture-survives-restart', 'cancel-keeps-picture', 'unreadable-keeps-look', 'reset-restores-face')
             function Wait-BotPaletteRows([string]$Query, [long]$From) {
                 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
@@ -94,7 +95,20 @@
                     Assert-BotFilePickerForeground
                     Press @(0x1B) 'Esc: cancel the picture picker again'
                     Wait-BotPickerClosed
+                } finally {
+                    Clear-BotPickerErrors
                 }
+            }
+            function Clear-BotPickerErrors {
+                foreach ($window in [VerifyNative]::DesktopWindows()) {
+                    if ($window['class'] -cne '#32770' -or [int]$window['pid'] -ne $process.Id -or $window['visible'] -ne $true) { continue }
+                    if ([IntPtr]([long]($window['rootOwner'])) -ne [IntPtr]([long]($window['handle']))) { continue }
+                    Record ('Dismiss the picker error dialog: ' + $window['title'])
+                    [void][VerifyNative]::PostMessage([IntPtr]([long]($window['handle'])), 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)
+                }
+                Wait-Until {
+                    @([VerifyNative]::DesktopWindows() | Where-Object { $_['class'] -ceq '#32770' -and [int]($_['pid']) -eq $process.Id -and [IntPtr]([long]($_['rootOwner'])) -eq [IntPtr]([long]($_['handle'])) }).Count -eq 0
+                } 'stray picker error dialogs closed' 10
             }
             function Enter-BotPicturePath([string]$Path) {
                 Assert-BotFilePickerForeground
@@ -117,6 +131,8 @@
                     Set-BotPickerText $again $Path
                     Press @(0x0D) 'Enter: pick the picture again'
                     Wait-BotPickerClosed
+                } finally {
+                    Clear-BotPickerErrors
                 }
             }
             function Get-BotSavedPicture {
