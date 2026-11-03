@@ -34,6 +34,11 @@ function decl(name) {
   assert.ok(match, name);
   return match[0];
 }
+const appImports = [
+  ['account_desktop.zig', 'applyPendingAppearance'],
+  ['chat_session.zig', 'chatReadBoundary'],
+  ['chat_session.zig', 'chatReadMark'],
+];
 function harness() {
   const closedCapture = read('console').slice(read('console').indexOf('        var entry: ClosedShell ='), read('console').indexOf('        app_state.g_closed_count += 1;') + '        app_state.g_closed_count += 1;'.length);
   const reminderRead = reminders.slice(reminders.indexOf('        e.group_id = @intCast(json_reader.uint'), reminders.indexOf('        e.pinned_top ='));
@@ -42,13 +47,14 @@ function harness() {
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
   const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
-  return `const std = @import("std");
+  let source = `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
+fn applyPendingAppearance(_: u32) void {}
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
 const ui_words = @import("ui_words.zon");
@@ -387,7 +393,14 @@ test "group palette: group band covers popup actions, scoped target, search and 
     try std.testing.expectEqual(@as(u32,1), shells[0].group_id);
 }
 `;
+  for (const [module, name] of appImports) source = source.replaceAll(`@import("${module}").${name}`, name);
+  return source;
 }
+test('the group palette harness imports only its copied roots', () => {
+  const allowed = new Set(['std', 'json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'ui_words.zon']);
+  const reached = [...new Set([...harness().matchAll(/@import\("([^"]+)"\)/g)].map(([, name]) => name))].filter(name => !allowed.has(name));
+  assert.deepEqual(reached, [], 'the harness must not reach the application tree');
+});
 test('extracted production group default, migration, explicit colors and palette dispatch', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-palette-'));
   require('./fixtures/inline-stubs').writeAll(dir);
@@ -395,7 +408,7 @@ test('extracted production group default, migration, explicit colors and palette
     copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig', 'ui_words.zon'], dir);
     dropTest(path.join(dir, 'json_reader.zig'), 'local avatar identity survives session parsing');
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, harness());
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -409,7 +422,7 @@ test('extracted production group default, migration, explicit colors and palette
       const original = harness();
       const mutated = mutate(original);
       assert.notEqual(mutated, original, name);
-      fs.writeFileSync(file, mutated.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+      fs.writeFileSync(file, mutated);
       const bad = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
       assert.notEqual(bad.status, 0, name);
       assert.match(bad.stderr, /FAIL/, name);
