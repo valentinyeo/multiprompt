@@ -252,7 +252,7 @@ test "ISSUE-502 v2 cached placeholders cannot record a front visit before deferr
     recordFrontVisit();
     try std.testing.expectEqual(@as(u8, 1), shells[0].visits.len);
 }
-test "v2 fixture production paint puts beta alpha gamma on screen and gamma at greatest y" {
+test "v2 fixture production paint puts gamma alpha beta on screen and gamma at the top" {
     const Fixture = struct { now: u64, layout: @import("session_layout.zig").Layout, expected: []const []const u8 };
     const parsed = try std.json.parseFromSlice(Fixture, std.testing.allocator, @embedFile("fixture.json"), .{});
     defer parsed.deinit();
@@ -276,7 +276,7 @@ test "v2 fixture production paint puts beta alpha gamma on screen and gamma at g
         try std.testing.expectEqual(inboxLayout(1000, 900).top + @as(i32, @intCast(i)) * inboxLayout(1000, 900).stride, drawn_y[i]);
         try std.testing.expectEqual(inboxNameBounds(inboxLayout(1000, 900), &g_inbox_rows[i]).left, drawn_left[i]);
     }
-    try std.testing.expect(drawn_y[2] > drawn_y[1]);
+    try std.testing.expect(drawn_y[0] < drawn_y[1]);
 }
 `;
 
@@ -307,7 +307,7 @@ test('v2 regressions reject missing focus gating input stamps and reversed on-sc
     s => s.replace('foregroundIsOurs(), frequent.unixMs', 'true, frequent.unixMs'),
     s => s.replace('!launch_cache.pending and ', ''),
     s => s.replace('shells[idx].input = @max(shells[idx].input, now_ms);', ''),
-    s => s.replace('return frequent.bottomOrder(ka, kb);', 'return ka > kb;'),
+    s => s.replace('return frequent.newestFirst(ka, kb);', 'return ka < kb;'),
   ]) {
     const result = runHarness(mutate);
     assert.notEqual(result.status, 0);

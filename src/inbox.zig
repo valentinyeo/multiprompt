@@ -705,7 +705,7 @@ fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
         const now_ms = frequent.unixMs(nowFileTime() / 10_000);
         const ka = frequent.orderKey(a.visits.optional() orelse &.{}, now_ms, if (a.input != 0) a.input else null);
         const kb = frequent.orderKey(b.visits.optional() orelse &.{}, now_ms, if (b.input != 0) b.input else null);
-        if (ka != kb) return ka > kb;
+        if (ka != kb) return frequent.newestFirst(ka, kb);
     } else {
         const ka = @max(a.la, a.lv);
         const kb = @max(b.la, b.lv);
@@ -755,54 +755,6 @@ test "Inbox frequent tab shows the newest session on top" {
     newer.input = now_ms - 1_000;
     try std.testing.expect(inboxRowLess(newer, older));
     try std.testing.expect(!inboxRowLess(older, newer));
-}
-
-test "Inbox J and K stop at the ends and gg and G jump to them" {
-    const prior_hwnd = app_state.g_main_hwnd;
-    const prior_ws_count = app_state.g_inbox_ws_count;
-    const prior_ws = app_state.g_inbox_ws[0];
-    const prior_rows = app_state.g_inbox_rows[0..3].*;
-    const prior_row_count = app_state.g_inbox_row_count;
-    const prior_unread = app_state.g_unread_only;
-    const prior_tab = app_state.g_inbox_tab;
-    const prior_filter = app_state.g_inbox_filter_active;
-    const prior_sel = app_state.g_inbox_sel;
-    defer {
-        app_state.g_main_hwnd = prior_hwnd;
-        app_state.g_inbox_ws_count = prior_ws_count;
-        app_state.g_inbox_ws[0] = prior_ws;
-        app_state.g_inbox_rows[0..3].* = prior_rows;
-        app_state.g_inbox_row_count = prior_row_count;
-        app_state.g_unread_only = prior_unread;
-        app_state.g_inbox_tab = prior_tab;
-        app_state.g_inbox_filter_active = prior_filter;
-        app_state.g_inbox_sel = prior_sel;
-    }
-    app_state.g_main_hwnd = @ptrFromInt(1);
-    app_state.g_inbox_ws_count = 1;
-    app_state.g_inbox_ws[0] = .{ .hwnd = 2 };
-    app_state.g_unread_only = false;
-    app_state.g_inbox_tab = frequent.all_split;
-    app_state.g_inbox_filter_active = false;
-    for (0..3) |i| app_state.g_inbox_rows[i] = .{ .ws = 0, .sid = @intCast(i + 1), .la = 100 - i };
-    app_state.g_inbox_row_count = 3;
-    app_state.g_inbox_sel = 0;
-    handleInboxKey(app_state.g_main_hwnd, 0);
-    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
-    handleInboxKey(app_state.g_main_hwnd, 1);
-    handleInboxKey(app_state.g_main_hwnd, 1);
-    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
-    handleInboxKey(app_state.g_main_hwnd, 1);
-    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
-    handleInboxKey(app_state.g_main_hwnd, 0);
-    try std.testing.expectEqual(@as(u32, 1), app_state.g_inbox_sel);
-    handleInboxKey(app_state.g_main_hwnd, 21);
-    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
-    app_state.g_inbox_g_tick = 0;
-    handleInboxKey(app_state.g_main_hwnd, 20);
-    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
-    handleInboxKey(app_state.g_main_hwnd, 20);
-    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
 }
 
 fn sortInboxRows() void {
@@ -2230,4 +2182,52 @@ test "ISSUE-423 hidden selection and keyboard cycling follow visible split order
         try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
         app_state.g_unread_only = false;
     }
+}
+
+test "Inbox J and K stop at the ends and gg and G jump to them" {
+    const prior_hwnd = app_state.g_main_hwnd;
+    const prior_ws_count = app_state.g_inbox_ws_count;
+    const prior_ws = app_state.g_inbox_ws[0];
+    const prior_rows = app_state.g_inbox_rows[0..3].*;
+    const prior_row_count = app_state.g_inbox_row_count;
+    const prior_unread = app_state.g_unread_only;
+    const prior_tab = app_state.g_inbox_tab;
+    const prior_filter = app_state.g_inbox_filter_active;
+    const prior_sel = app_state.g_inbox_sel;
+    defer {
+        app_state.g_main_hwnd = prior_hwnd;
+        app_state.g_inbox_ws_count = prior_ws_count;
+        app_state.g_inbox_ws[0] = prior_ws;
+        app_state.g_inbox_rows[0..3].* = prior_rows;
+        app_state.g_inbox_row_count = prior_row_count;
+        app_state.g_unread_only = prior_unread;
+        app_state.g_inbox_tab = prior_tab;
+        app_state.g_inbox_filter_active = prior_filter;
+        app_state.g_inbox_sel = prior_sel;
+    }
+    app_state.g_main_hwnd = @ptrFromInt(1);
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0] = .{ .hwnd = 2 };
+    app_state.g_unread_only = false;
+    app_state.g_inbox_tab = frequent.all_split;
+    app_state.g_inbox_filter_active = false;
+    for (0..3) |i| app_state.g_inbox_rows[i] = .{ .ws = 0, .sid = @intCast(i + 1), .la = 100 - i };
+    app_state.g_inbox_row_count = 3;
+    app_state.g_inbox_sel = 0;
+    handleInboxKey(app_state.g_main_hwnd, 0);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 1);
+    handleInboxKey(app_state.g_main_hwnd, 1);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 1);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 0);
+    try std.testing.expectEqual(@as(u32, 1), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 21);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    app_state.g_inbox_g_tick = 0;
+    handleInboxKey(app_state.g_main_hwnd, 20);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 20);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
 }

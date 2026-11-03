@@ -258,7 +258,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Frequent as first tab", .b = "Put Frequent first or immediately after Favorites; synced across your account", .header = false },
     .{ .a = "Ctrl+K -> Show Favorites split", .b = "Show or hide Favorites; synced across your account", .header = false },
     .{ .a = "Ctrl+K -> Show All split", .b = "Show or hide All; All stays visible if every split is hidden", .header = false },
-    .{ .a = "Ctrl+K -> Inbox: Frequent", .b = "Sessions you use or repeatedly watch across devices, newest at the bottom", .header = false },
+    .{ .a = "Ctrl+K -> Inbox: Frequent", .b = "Sessions you use or repeatedly watch across devices, newest on top", .header = false },
     .{ .a = "Ctrl+K -> Inbox: Never Show This Session", .b = "Toggle permanent Inbox exclusion for this tab (also right-click tab)", .header = false },
     .{ .a = "Alt+J / Alt+K", .b = "Next / previous Inbox session, or workspace (including Starred) outside Inbox context", .header = false },
     .{ .a = "Ctrl+Shift+Up / Down", .b = "Move active tab up / down", .header = false },

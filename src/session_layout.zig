@@ -455,7 +455,7 @@ test "visits merge union dedupe cap eight never drops and encoding round trip" {
     }
 }
 
-test "v2 shared fixture input and watch-only order beta alpha gamma" {
+test "v2 shared fixture input and watch-only order gamma alpha beta" {
     const frequent = @import("frequent.zig");
     const Fixture = struct { now: u64, layout: Layout, expected: []const []const u8 };
     const parsed = try std.json.parseFromSlice(Fixture, std.testing.allocator, @embedFile("fixtures/issue-415-frequent.json"), .{});
@@ -471,16 +471,12 @@ test "v2 shared fixture input and watch-only order beta alpha gamma" {
     }
     std.mem.sort(Tab, rows[0..count], {}, struct {
         fn less(_: void, a: Tab, b: Tab) bool {
-            return frequent.bottomOrder(frequent.orderKey(a.visits orelse &.{}, 1_800_000_000_000, a.input), frequent.orderKey(b.visits orelse &.{}, 1_800_000_000_000, b.input));
+            return frequent.newestFirst(frequent.orderKey(a.visits orelse &.{}, 1_800_000_000_000, a.input), frequent.orderKey(b.visits orelse &.{}, 1_800_000_000_000, b.input));
         }
     }.less);
     try std.testing.expectEqual(fixture.expected.len, count);
-    var bottom: []const u8 = "";
-    for (rows[0..count], fixture.expected) |row, name| {
-        try std.testing.expectEqualStrings(name, row.name);
-        bottom = row.name;
-    }
-    try std.testing.expectEqualStrings("gamma", bottom);
+    for (rows[0..count], fixture.expected) |row, name| try std.testing.expectEqualStrings(name, row.name);
+    try std.testing.expectEqualStrings("gamma", rows[0].name);
 }
 
 test "input merge never loses or lowers known time" {

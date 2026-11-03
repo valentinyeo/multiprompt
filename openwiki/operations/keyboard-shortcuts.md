@@ -125,7 +125,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Frequent as first tab | Put Frequent first or immediately after Favorites; synced across your account |
 | Ctrl+K -&gt; Show Favorites split | Show or hide Favorites; synced across your account |
 | Ctrl+K -&gt; Show All split | Show or hide All; All stays visible if every split is hidden |
-| Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest at the bottom |
+| Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest on top |
 | Ctrl+K -&gt; Inbox: Never Show This Session | Toggle permanent Inbox exclusion for this tab (also right-click tab) |
 | Alt+J / Alt+K | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | Ctrl+Shift+Up / Down | Move active tab up / down |
