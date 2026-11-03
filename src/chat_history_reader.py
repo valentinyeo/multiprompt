@@ -1538,13 +1538,16 @@ def live_fields(source, size, tmux, shown=None, sid=None):
 
 
 def resolve_response_path(q, source=None, as_owner=False):
-    rid, agent = q["id"], "codex" if q["codex"] else "claude"
+    rid = q["id"]
+    agent = q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q["codex"] else "claude"
     sid, tmux, cwd = q["sid"], q["tmux"], q["cwd"]
     if (not isinstance(rid, int) or rid < 0 or
             sid and not SESSION_ID.fullmatch(sid) or
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
+    if agent == "pi":
+        return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
     denied = False
     delegated = None
