@@ -258,7 +258,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Frequent as first tab", .b = "Put Frequent first or immediately after Favorites; synced across your account", .header = false },
     .{ .a = "Ctrl+K -> Show Favorites split", .b = "Show or hide Favorites; synced across your account", .header = false },
     .{ .a = "Ctrl+K -> Show All split", .b = "Show or hide All; All stays visible if every split is hidden", .header = false },
-    .{ .a = "Ctrl+K -> Inbox: Frequent", .b = "Sessions you use or repeatedly watch across devices, newest at the bottom", .header = false },
+    .{ .a = "Ctrl+K -> Inbox: Frequent", .b = "Sessions you use or repeatedly watch across devices, newest on top", .header = false },
     .{ .a = "Ctrl+K -> Inbox: Never Show This Session", .b = "Toggle permanent Inbox exclusion for this tab (also right-click tab)", .header = false },
     .{ .a = "Alt+J / Alt+K", .b = "Next / previous Inbox session, or workspace (including Starred) outside Inbox context", .header = false },
     .{ .a = "Ctrl+Shift+Up / Down", .b = "Move active tab up / down", .header = false },
@@ -279,7 +279,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Inbox (Alt+I)", .b = "", .header = true },
     .{ .a = "Sidebar inbox button", .b = "Click or Ctrl+Shift+I to toggle; Alt+I opens / selects All", .header = false },
     .{ .a = "Ctrl+F or /", .b = "Reduce Inbox to matching sessions", .header = false },
-    .{ .a = "j/k or Alt+J/K  gg/G  1-9", .b = "Move / top / bottom / jump row", .header = false },
+    .{ .a = "j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9", .b = "Move / top / bottom / jump row", .header = false },
     .{ .a = "Tab / h / l", .b = "Switch workspace split", .header = false },
     .{ .a = "e or Alt+E / z or Alt+Z / u", .b = "Archive / undo archive / toggle read-unread", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (global)", .header = false },
@@ -1210,6 +1210,14 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             } else {
                 _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_STEP, if (kb.vkCode == 0x4A) 1 else 0, 0);
             }
+            return 1;
+        }
+        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x47 and app_state.g_inbox_active and !app_state.g_inbox_filter_active and foregroundIsOurs() and !app_state.g_search_active and app_state.g_edit_hwnd == null) {
+            app_state.g_sysmenu_pending = false;
+            keybd_event(0xFF, 0, 0, 0);
+            keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
+            const shift_down = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, if (shift_down) 21 else 20, 0);
             return 1;
         }
         if (app_state.g_browser_focus_mode and activeBrowserSurfaceHasForegroundFocus()) {

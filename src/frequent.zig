@@ -183,8 +183,8 @@ pub fn orderKey(visits: []const u64, now_ms: u64, input: ?u64) u64 {
     return if (inputRecent(input, now_ms)) input.? else newest(visits) orelse 0;
 }
 
-pub fn bottomOrder(a: u64, b: u64) bool {
-    return a < b;
+pub fn newestFirst(a: u64, b: u64) bool {
+    return a > b;
 }
 
 pub fn shellInputKey(vk: u32) bool {

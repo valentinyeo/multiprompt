@@ -67,8 +67,8 @@
     ]
   },
   "expected": [
-    "beta",
+    "gamma",
     "alpha",
-    "gamma"
+    "beta"
   ]
 }

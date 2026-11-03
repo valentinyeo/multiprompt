@@ -125,7 +125,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Frequent as first tab | Put Frequent first or immediately after Favorites; synced across your account |
 | Ctrl+K -&gt; Show Favorites split | Show or hide Favorites; synced across your account |
 | Ctrl+K -&gt; Show All split | Show or hide All; All stays visible if every split is hidden |
-| Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest at the bottom |
+| Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest on top |
 | Ctrl+K -&gt; Inbox: Never Show This Session | Toggle permanent Inbox exclusion for this tab (also right-click tab) |
 | Alt+J / Alt+K | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | Ctrl+Shift+Up / Down | Move active tab up / down |
@@ -154,7 +154,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | --- | --- |
 | Sidebar inbox button | Click or Ctrl+Shift+I to toggle; Alt+I opens / selects All |
 | Ctrl+F or / | Reduce Inbox to matching sessions |
-| j/k or Alt+J/K  gg/G  1-9 | Move / top / bottom / jump row |
+| j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
