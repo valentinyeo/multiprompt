@@ -12,6 +12,28 @@ fn ms(start: std.Io.Timestamp) i64 {
 }
 
 test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
+    const report = struct {
+        fn peakRssKb() ?u64 {
+            if (@import("builtin").os.tag != .linux) return null;
+            const a = std.heap.page_allocator;
+            const data = std.Io.Dir.cwd().readFileAlloc(std.testing.io, "/proc/self/status", a, .limited(4096)) catch return null;
+            defer a.free(data);
+            const at = std.mem.indexOf(u8, data, "VmHWM:") orelse return null;
+            var fields = std.mem.tokenizeAny(u8, data[at + "VmHWM:".len ..], " \t\n");
+            const text = fields.next() orelse return null;
+            const kb = std.fmt.parseInt(u64, text, 10) catch return null;
+            return kb;
+        }
+        fn stage(comptime name: []const u8) void {
+            std.debug.print("CPU707 stage {s} peak_rss_kb={d}\n", .{ name, peakRssKb() orelse 0 });
+        }
+        fn checked(comptime what: []const u8, result: anytype) @TypeOf(result) {
+            return result catch |err| {
+                std.debug.print("CPU707 {s} failed: {s} peak_rss_kb={d} mode={s}\n", .{ what, @errorName(err), peakRssKb() orelse 0, @tagName(@import("builtin").mode) });
+                return err;
+            };
+        }
+    };
     const a = std.heap.page_allocator;
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
@@ -22,34 +44,38 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"timestamp\":\"2026-10-03T12:34:00Z\",\"text\":\"{s}\"}}\n", .{padding});
     defer a.free(row);
     var messages: usize = 0;
-    while (wire.items.len < 50 * 1024 * 1024) : (messages += 1) try wire.appendSlice(a, row);
-    try wire.appendSlice(a, "@@MP_END@@\n");
+    while (wire.items.len < 50 * 1024 * 1024) : (messages += 1) try report.checked("build wire", wire.appendSlice(a, row));
+    try report.checked("close wire", wire.appendSlice(a, "@@MP_END@@\n"));
+    report.stage("wire built");
     const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
     var h: history.History = .{};
     defer h.deinit(a);
     const parse_wall_start = std.Io.Clock.awake.now(std.testing.io);
     const parse_start = now();
-    try h.apply(a, wire.items, 1, key);
+    try report.checked("parse", h.apply(a, wire.items, 1, key));
     const parse_ms = ms(parse_start);
     const parse_wall_ms = parse_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expectEqual(messages, h.blocks.items.len);
     try std.testing.expect(h.rows.items.len >= 50 * 1024 * 1024 - 256);
     try std.testing.expect(parse_ms < 3000);
+    report.stage("parsed");
+    const parse_peak_kb = report.peakRssKb() orelse 0;
+    try std.testing.expect(parse_peak_kb < 1024 * 1024);
 
     const delta_wall_start = std.Io.Clock.awake.now(std.testing.io);
     const delta_start = now();
-    var suffix = try h.suffix(a);
+    var suffix = try report.checked("copy suffix", h.suffix(a));
     defer suffix.deinit(a);
     try std.testing.expectEqual(row.len, suffix.rows.items.len);
-    try suffix.apply(a, "@mp\t2\thistory\tok\tsid\t52428800\t52428900\t9\t0\tclaude\tterm-1\n{\"role\":\"user\",\"text\":\"new prompt\"}\n@@MP_END@@\n", 2, key);
-    try h.appendParsed(a, &suffix);
+    try report.checked("parse suffix", suffix.apply(a, "@mp\t2\thistory\tok\tsid\t52428800\t52428900\t9\t0\tclaude\tterm-1\n{\"role\":\"user\",\"text\":\"new prompt\"}\n@@MP_END@@\n", 2, key));
+    try report.checked("append parsed", h.appendParsed(a, &suffix));
     const delta_ms = ms(delta_start);
     const delta_wall_ms = delta_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expectEqual(messages + 1, h.blocks.items.len);
     try std.testing.expectEqual(messages - 1, h.changed_from);
     try std.testing.expect(delta_ms < 100);
 
-    const users = try a.alloc(echo.UserBlock, h.blocks.items.len);
+    const users = try report.checked("allocate users", a.alloc(echo.UserBlock, h.blocks.items.len));
     defer a.free(users);
     for (h.blocks.items, 0..) |b, i| users[i] = .{ .text = h.text.items[b.start..][0..b.len], .stamp_ms = b.stamp_ms };
     var pending: [20]echo.Pending = @splat(.{ .prefix = std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), .text = std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), .anchor = .{ .counted = true } });
@@ -63,7 +89,7 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     const reconcile_ms = ms(reconcile_start);
     const reconcile_wall_ms = reconcile_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expect(reconcile_ms < 1000);
-    std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d} clock=awake parse_cpu_ms={d} delta_cpu_ms={d} reconcile_cpu_ms={d} cpu_clock=cpu_thread\n", .{ wire.items.len, messages, parse_wall_ms, delta_wall_ms, reconcile_wall_ms, parse_ms, delta_ms, reconcile_ms });
+    std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d} clock=awake parse_cpu_ms={d} delta_cpu_ms={d} reconcile_cpu_ms={d} cpu_clock=cpu_thread peak_rss_kb={d}\n", .{ wire.items.len, messages, parse_wall_ms, delta_wall_ms, reconcile_wall_ms, parse_ms, delta_ms, reconcile_ms, report.peakRssKb() orelse 0 });
 }
 
 test "CPU707 bounded cache and tail/older paging preserve complete accessible history" {
