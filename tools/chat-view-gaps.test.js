@@ -41,6 +41,16 @@ function zig(args, dir) {
   });
 }
 
+const HELPER_LIMIT_MS = 60000;
+
+function expectChild(result, label, limitMs, elapsedMs) {
+  if (result.error?.code === 'ETIMEDOUT' || result.signal !== null) {
+    assert.fail(`${label} timed out: allowed ${limitMs} ms, took ${elapsedMs} ms`);
+  }
+  if (result.error) assert.fail(`${label} could not run: ${result.error.message}`);
+  assert.equal(result.status, 0, `${label} exited ${result.status}: ${result.stdout}${result.stderr}`);
+}
+
 function execute(t, name, code, modules = [], filter = '', flags = []) {
   const dir = prepare(t, name, modules);
   fs.writeFileSync(path.join(dir, 'repro.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
@@ -234,8 +244,11 @@ with Path(sys.argv[2]).open('a') as output:
 q.update(id=2,cached_sid='sid',inode=int(fields[7]),offset=int(fields[6]),start=int(fields[14]),mtime=int(fields[11]),probe=fields[12])
 print(json.dumps(dict(rows=rows,wire=wire,delta=r.response(q))))
 `;
-  const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
-  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const started = Date.now();
+  const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: HELPER_LIMIT_MS, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  const elapsed = Date.now() - started;
+  expectChild(run, 'reader order helper', HELPER_LIMIT_MS, elapsed);
+  console.log(`reader order helper: ${elapsed} ms, allowed ${HELPER_LIMIT_MS} ms`);
   const { rows, wire, delta } = JSON.parse(run.stdout);
   assert.deepEqual(rows.map(row => ({ role: row.role, text: row.text })), [ { role: 'assistant', text: 'Before the tool.' }, { role: 'tool', text: 'Read a.txt' }, { role: 'assistant', text: 'After the tool.' } ]);
   assert.equal(rows[0].id, 'message-1');
@@ -880,8 +893,11 @@ append(event('assistant','next live reply'))
 delta=read()
 print(json.dumps(dict(initial=initial,tail=tail,older=older,delta=delta,size=p.stat().st_size)))
 `;
-  const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
-  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const started = Date.now();
+  const run = spawnSync('python3', ['-B', '-c', script, path.join(__dirname, '../src/chat_history_reader.py'), fixture], { cwd: dir, encoding: 'utf8', timeout: HELPER_LIMIT_MS, maxBuffer: 4 * 1024 * 1024 });
+  const elapsed = Date.now() - started;
+  expectChild(run, 'tail gap helper', HELPER_LIMIT_MS, elapsed);
+  console.log(`tail gap helper: ${elapsed} ms, allowed ${HELPER_LIMIT_MS} ms`);
   const { initial, tail, older, delta, size } = JSON.parse(run.stdout);
   assert.ok(size > 25 * 1024 * 1024);
   const native = execute(t, 'tail-gap-apply', `
