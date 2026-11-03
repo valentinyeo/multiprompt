@@ -1593,6 +1593,13 @@ test('cache timestamp oracle rejects the actual integration omission (positive c
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 0, found 1/);
 });
+test('IGSH-1605 a successful reconnect requeues sends that failed while the link was down before the outbox timer re-arms', () => {
+  const ok = body('sshReconnectOk');
+  assert.match(ok, /chatOutboxRequeueAfterReconnect\(idx\);[\s\S]*armChatOutboxTimerIfNeeded\(\)/);
+  const requeue = body('chatOutboxRequeueAfterReconnect');
+  assert.match(requeue, /chat_echo\.requeueOnReconnect\(entry\.state, /);
+  assert.match(requeue, /entry\.state = \.queued;[\s\S]*entry\.write_started = false;/);
+});
 test('composer always persists through the same outbox before delivery', () => {
   const send = body('sendChatPrompt');
   assert.match(send, /chatEchoEnqueueForShell\(active_shell, send_text, \.queued\)/);
