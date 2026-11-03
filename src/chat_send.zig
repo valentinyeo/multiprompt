@@ -2120,7 +2120,7 @@ pub fn chatOutboxTick() void {
         for (0..count) |offset| {
             const idx: u32 = @intCast((app_state.g_chat_message_sync_next + offset) % count);
             const shell = app_state.shells[idx];
-            if (!chatMessageGoesToHost(shell.kind, shell.ai_agent)) continue;
+            if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3)) continue;
             if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxCountForShell(idx) == 0) continue;
             chatMessageSyncStart(idx);
             if (app_state.g_chat_message_sync_job != null) {
