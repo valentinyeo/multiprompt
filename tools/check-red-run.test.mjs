@@ -71,7 +71,7 @@ if (fs.existsSync(checker)) {
     f.write('tools/value.test.cjs', f.regression);
     const head = f.commit();
     f.git('update-ref', 'refs/remotes/origin/master', head);
-    for (const name of ['check-red-run', 'switch-performance']) {
+    for (const name of ['check-red-run', 'speed-baseline']) {
       const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
       const expression = job.match(/(?:base|BASE): \$\{\{ (.+) \}\}/)?.[1];
       assert.ok(expression, `${name} baseline expression exists`);

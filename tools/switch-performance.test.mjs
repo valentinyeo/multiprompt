@@ -86,20 +86,26 @@ test('idle timing instrumentation refuses to attach to a moved refresh branch', 
 
 test('speed check runs on every PR and blocks the aggregate', () => {
   const flow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
-  assert.ok(flow.includes('\n  switch-performance:\n'), 'The performance job must ship');
-  const speed = flow.split('\n  switch-performance:\n')[1].split('\n  test-result:\n')[0];
+  const job = name => flow.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
+  const baseline = job('speed-baseline');
+  const candidate = job('speed-candidate');
+  const speed = `${baseline}\n${candidate}`;
+  assert.ok(baseline && candidate, 'The two speed builds must ship as separate jobs so they run side by side');
   assert.ok(speed.includes('ref: $' + '{{ github.event.pull_request.head.sha || github.sha }}'), 'Speed proof must build the exact PR head, not a synthetic merge');
+  assert.match(job('switch-performance'), /needs: \[speed-baseline, speed-candidate\]/, 'The verdict must wait for both speed builds');
   assert.match(flow, /check-red-run, switch-performance\]/);
   assert.match(flow, /SPEED: \$\{\{ needs\.switch-performance\.result \}\}/);
   assert.ok(flow.includes('elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then'));
   assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
   assert.match(flow, /name: Reject PowerShell host name collisions\n        shell: pwsh/);
   assert.match(flow, /require_jobs "\$WINDOWS"[^\n]*"\$SPEED"/);
-  assert.ok(speed.includes('ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache'), 'Both speed builds must share one local Zig cache');
-  assert.ok(speed.includes('ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache'), 'The speed build must cache its global Zig tree');
-  assert.match(speed, /uses: actions\/cache\/restore@[0-9a-f]{40}/, 'Pull requests must restore the speed Zig cache');
-  assert.match(speed, /uses: actions\/cache@[0-9a-f]{40}/, 'Master pushes must save the speed Zig cache');
-  assert.ok(speed.includes('-zig-0.16.0-speed-'), 'The speed cache must use its own key prefix');
+  for (const build of [baseline, candidate]) {
+    assert.ok(build.includes('ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache'), 'Each speed build must reuse the restored local Zig cache');
+    assert.ok(build.includes('ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache'), 'Each speed build must cache its global Zig tree');
+    assert.match(build, /uses: actions\/cache\/restore@[0-9a-f]{40}/, 'Pull requests must restore the speed Zig cache');
+    assert.match(build, /uses: actions\/cache@[0-9a-f]{40}/, 'Master pushes must save the speed Zig cache');
+    assert.ok(build.includes('-zig-0.16.0-speed-'), 'The speed cache must use its own key prefix');
+  }
 });
 
 test('empty fixture suggestion never asks the console to verify nonexistent grey text', () => {

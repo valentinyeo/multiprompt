@@ -160,8 +160,8 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
 test('PR, manual and nightly runs restore Zig caches while master pushes can save them', () => {
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-    const speed = workflow.split('\n  switch-performance:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
-    const caches = workflow.split(/(?=^      - )/m).filter(step => !speed?.includes(step)).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
+    const speedJobs = ['speed-baseline', 'speed-candidate'].map(name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0]).filter(Boolean);
+    const caches = workflow.split(/(?=^      - )/m).filter(step => !speedJobs.some(job => job.includes(step))).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
     const canSave = /^  push:\n/m.test(workflow);
@@ -196,7 +196,8 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
       for (const [name, cap, prefix, run, gate] of [
         ['test', 1600, 'shards-v7-group-', 'Run tests', gated],
         ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests', gated],
-        ['switch-performance', 1600, '-zig-0\\.16\\.0-speed-', 'Build baseline and candidate', ''],
+        ['speed-baseline', 1600, '-zig-0\\.16\\.0-speed-', 'Build baseline', ''],
+        ['speed-candidate', 1600, '-zig-0\\.16\\.0-speed-', 'Build candidate', ''],
       ]) {
         const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
         const steps = job.split(/(?=^      - )/m);
@@ -217,13 +218,15 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
           assert.match(cache, /path: \|\n            \.zig-cache\n            \$\{\{ env\.ZIG_GLOBAL_CACHE_DIR \}\}/);
         }
       }
-      const speedCaches = speed.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/restore)?@/.test(step));
-      assert.equal(speedCaches.length, 2);
-      assert.match(speedCaches[0], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
-      assert.match(speedCaches[0], /if: \(?github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'schedule'\)?\n/);
-      assert.match(speedCaches[1], /uses: actions\/cache@[a-f0-9]{40}\n/);
-      assert.match(speedCaches[1], /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
-      assert.equal(speedCaches[0].split('        with:\n')[1], speedCaches[1].split('        with:\n')[1]);
+      const speedCaches = speedJobs.flatMap(job => job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/restore)?@/.test(step)));
+      assert.equal(speedCaches.length, 4);
+      for (let i = 0; i < speedCaches.length; i += 2) {
+        assert.match(speedCaches[i], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
+        assert.match(speedCaches[i], /if: \(?github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'schedule'\)?\n/);
+        assert.match(speedCaches[i + 1], /uses: actions\/cache@[a-f0-9]{40}\n/);
+        assert.match(speedCaches[i + 1], /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
+        assert.equal(speedCaches[i].split('        with:\n')[1], speedCaches[i + 1].split('        with:\n')[1]);
+      }
     }
   }
 });
