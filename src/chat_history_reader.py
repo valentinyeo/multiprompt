@@ -3653,7 +3653,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 host_state_write(provider, sid, session["state"])
                 host_log(provider, sid, "inflight_timeout", dict(id=inflight.get("id")))
             idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
-            if not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
+            if session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
                 host_log(provider, sid, "idle_stop")
                 return
             for key, _ in selector.select(host_flush_timeout(session)):
@@ -3662,6 +3662,8 @@ def host_loop(provider, sid, tmux, session, server, agent):
                         chunk = agent.stdout.read1(65536)
                     except (OSError, ValueError):
                         return
+                    if chunk:
+                        session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
                         host_log(provider, sid, "agent_closed")
                         return
@@ -5300,7 +5302,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 51
+RUNTIME_GENERATION = 52
 
 if __name__ == '__main__':
     import base64 as _base64
