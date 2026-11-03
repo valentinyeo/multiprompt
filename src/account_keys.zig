@@ -30,6 +30,31 @@ pub fn removeCommand(a: Allocator, key: []const u8) ![]const u8 {
     return std.fmt.allocPrint(a, remove_template, .{key[12..]});
 }
 
+pub const HostRollout = struct {
+    applied: usize = 0,
+    failed: usize = 0,
+
+    pub fn reachedAny(self: HostRollout) bool {
+        return self.applied > 0;
+    }
+
+    pub fn complete(self: HostRollout) bool {
+        return self.failed == 0;
+    }
+};
+
+pub fn applyOnHosts(aliases: []const []const u8, runner: anytype) HostRollout {
+    var rollout: HostRollout = .{};
+    for (aliases) |alias| {
+        runner.apply(alias) catch {
+            rollout.failed += 1;
+            continue;
+        };
+        rollout.applied += 1;
+    }
+    return rollout;
+}
+
 pub const Status = enum { pending, approved, denied, revoked };
 pub const Device = struct { device_id: []const u8, name: []const u8, public_key: []const u8, status: Status };
 pub const Listing = struct { device_id: []const u8, keys: []const Device };
@@ -160,4 +185,33 @@ test "publication is deduplicated after success but key changes and explicit pal
     try std.testing.expect(syncPolicy(Job.pull, 1, 0, key, "ssh-ed25519 BBBB").publish);
     try std.testing.expect(syncPolicy(Job.device_keys, 1, 0, key, key).publish);
     try std.testing.expect(!syncPolicy(Job.device_keys, 1, 0, key, null).publish);
+}
+
+test "one unreachable host does not stop key changes on the other hosts and stays due for retry" {
+    const Fake = struct {
+        down: []const []const u8,
+        reached: [8][]const u8 = undefined,
+        len: usize = 0,
+        pub fn apply(self: *@This(), alias: []const u8) !void {
+            for (self.down) |down| if (std.mem.eql(u8, alias, down)) return error.Unreachable;
+            self.reached[self.len] = alias;
+            self.len += 1;
+        }
+    };
+    var one_down: Fake = .{ .down = &.{"b"} };
+    const partial = applyOnHosts(&.{ "a", "b", "c" }, &one_down);
+    try std.testing.expectEqual(HostRollout{ .applied = 2, .failed = 1 }, partial);
+    try std.testing.expect(partial.reachedAny());
+    try std.testing.expect(!partial.complete());
+    try std.testing.expectEqual(@as(usize, 2), one_down.len);
+    try std.testing.expectEqualStrings("a", one_down.reached[0]);
+    try std.testing.expectEqualStrings("c", one_down.reached[1]);
+    var all_down: Fake = .{ .down = &.{ "a", "b" } };
+    const failed = applyOnHosts(&.{ "a", "b" }, &all_down);
+    try std.testing.expectEqual(HostRollout{ .applied = 0, .failed = 2 }, failed);
+    try std.testing.expect(!failed.reachedAny());
+    var none_down: Fake = .{ .down = &.{} };
+    const done = applyOnHosts(&.{ "a", "b" }, &none_down);
+    try std.testing.expectEqual(HostRollout{ .applied = 2, .failed = 0 }, done);
+    try std.testing.expect(done.reachedAny() and done.complete());
 }

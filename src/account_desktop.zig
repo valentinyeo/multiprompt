@@ -1054,16 +1054,24 @@ fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutRep
     return aliases.toOwnedSlice(a);
 }
 
-fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !void {
-    const escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\"");
-    for (aliases) |alias| {
-        const command = try std.fmt.allocPrint(a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ ssh, alias, escaped });
-        _ = accountSshOutput(a, command, 30000) catch |err| {
-            const text = try std.fmt.allocPrint(a, "Could not update SSH access on {s}. Check this host and try again.", .{alias});
-            accountDeviceKeyError(reply, text);
-            return err;
-        };
+fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !bool {
+    const Runner = struct {
+        a: std.mem.Allocator,
+        ssh: []const u8,
+        escaped: []const u8,
+        pub fn apply(self: *@This(), alias: []const u8) !void {
+            errdefer debugLog2("account-keys: skipped unreachable SSH host:", alias);
+            const command = try std.fmt.allocPrint(self.a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ self.ssh, alias, self.escaped });
+            _ = try accountSshOutput(self.a, command, 30000);
+        }
+    };
+    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\"") };
+    const rollout = account_keys.applyOnHosts(aliases, &runner);
+    if (!rollout.reachedAny()) {
+        accountDeviceKeyError(reply, "Could not update SSH access on any host. Check your connection and try again.");
+        return error.Process;
     }
+    return rollout.complete();
 }
 
 fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutReply) !void {
@@ -1103,7 +1111,7 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
                     accountDeviceKeyError(reply, "No configured SSH hosts were found. The device was not approved.");
                     return error.InvalidHosts;
                 }
-                try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
+                _ = try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
             }
             const path = try std.fmt.allocPrint(a, "/v1/device-keys/{s}/{s}", .{ decision.device_id, if (decision.approve) "approve" else "deny" });
             const decided = try account_client.request("POST", path, access, "");
@@ -1120,7 +1128,7 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     if (cleaned) |bytes| try state.appendSlice(a, bytes);
     for (listing.value.keys) |key| {
         if (key.status != .revoked or account_keys.isCleaned(state.items, key.public_key) or aliases.len == 0) continue;
-        try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply);
+        if (!try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply)) continue;
         try state.appendSlice(a, key.public_key);
         try state.append(a, '\n');
         if (!writeDpapiFile("account-keys-cleaned.dat", state.items)) return error.Storage;
