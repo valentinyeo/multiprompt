@@ -5722,11 +5722,12 @@ class AgentHostControlTest(AgentHostStreamTest):
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
                                    daemon=True)
         self.addCleanup(running.join, 10)
-        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3), patch.object(reader, 'HOST_INFLIGHT_TIMEOUT', 0.2):
+        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
             running.start()
-            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time())
+            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
             session['state']['inflight'] = session['inflight']
-            self.wait_for(lambda: self.host_events('inflight_timeout'), timeout=10)
+            time.sleep(0.5)
+            self.assertIsInstance(session['inflight'], dict, 'a long turn must never lose its message to a timer')
             for _ in range(6):
                 os.write(write_end, b'x')
                 time.sleep(0.15)

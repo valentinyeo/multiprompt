@@ -2298,7 +2298,6 @@ HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_IDLE_SECONDS = 300
 HOST_DELIVERY_TIMEOUT = 15
-HOST_INFLIGHT_TIMEOUT = 900
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
 HOST_LINE_LIMIT = 4 * 1024 * 1024
@@ -3646,12 +3645,6 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
-            inflight = session.get("inflight")
-            if isinstance(inflight, dict) and time.time() - inflight.get("at", 0) > HOST_INFLIGHT_TIMEOUT:
-                session["inflight"] = None
-                session["state"]["inflight"] = None
-                host_state_write(provider, sid, session["state"])
-                host_log(provider, sid, "inflight_timeout", dict(id=inflight.get("id")))
             idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
             if session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
                 host_log(provider, sid, "idle_stop")
