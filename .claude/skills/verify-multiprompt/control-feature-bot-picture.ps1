@@ -83,6 +83,19 @@
                 }
                 Start-Sleep -Milliseconds 300
             }
+            function Dismiss-BotPicturePicker {
+                Assert-BotFilePickerForeground
+                Press @(0x1B) 'Esc: cancel the picture picker'
+                try {
+                    Wait-BotPickerClosed
+                } catch {
+                    if (@(Get-BotPickerWindows).Count -eq 0) { return }
+                    Record 'The picker stayed open; press Esc again'
+                    Assert-BotFilePickerForeground
+                    Press @(0x1B) 'Esc: cancel the picture picker again'
+                    Wait-BotPickerClosed
+                }
+            }
             function Enter-BotPicturePath([string]$Path) {
                 Assert-BotFilePickerForeground
                 $edit = Get-BotPickerEditHandle
@@ -204,8 +217,7 @@
             $result.checks += $cancelCheck
             Invoke-BotPictureMenu 'upload image' 'Enter: Upload image'
             Wait-BotFilePicker
-            Press @(0x1B) 'Esc: cancel the picture picker'
-            Wait-BotPickerClosed
+            Dismiss-BotPicturePicker
             Press @(0x1B) 'Esc: close the bot-look palette after cancelling'
             $cancelPicture = Get-BotSavedPicture
             if ($cancelPicture -ne $uploadedPicture) { throw "Cancelling the picker changed the saved picture: $uploadedPicture -> $cancelPicture" }
