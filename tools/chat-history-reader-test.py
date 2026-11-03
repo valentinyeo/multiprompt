@@ -6005,6 +6005,8 @@ def play(key, line):
                 if (got.get('id') == step['$wait'] and 'method' not in got) or got.get('type') == step['$wait']:
                     waited = got.get('id')
                     break
+                if got.get('method') in script:
+                    play(got['method'], got)
             continue
         text = json.dumps(step).replace('"$ID"', json.dumps(line.get('id'))).replace('"$WID"', json.dumps(waited))
         sys.stdout.write(text + '\n')
@@ -6055,7 +6057,7 @@ class HostProviderCase(unittest.TestCase):
 
     def send(self, token, text=None):
         self.request('submit', message_id=token, text=text or self.text)
-        return self.request('dispatch')
+        self.wait_for(lambda: self.request('dispatch') and (self.message(token) or {}).get('state') != 'queued')
 
     def message(self, token):
         return self.request('status', message_id=token)['message']
@@ -6089,6 +6091,14 @@ class HostProviderCase(unittest.TestCase):
 
     def control(self, **request):
         return reader.host_request(self.provider, self.sid, request)
+
+    def worker_delivers(self, token):
+        self.enable()
+        self.request('submit', message_id=token, text=self.text)
+        worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
+        worker.start()
+        self.assertEqual(self.wait_for(lambda: (self.message(token) or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        return worker
 
 
 class IGSH_1544_CodexHostTest(HostProviderCase):
@@ -6152,6 +6162,27 @@ class IGSH_1544_CodexHostTest(HostProviderCase):
         db.close()
         self.assertEqual((json.loads(binding[0])['mode'], binding[1]), ('codex_app_server_turn', 'sent'))
 
+    def test_codex_submit_alone_is_delivered_by_the_message_worker(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        self.worker_delivers('codex_worker_message_01')
+        self.assertEqual([line['params']['input'][0]['text'] for line in self.sent() if line.get('method') == 'turn/start'], [self.text])
+
+    def test_codex_steers_a_running_turn_and_fails_a_refused_steer(self):
+        self.enable()
+        self.send('codex_fixture_message_01')
+        self.wait_for(lambda: self.events('approval.request'))
+        self.send('codex_fixture_message_02', 'also check the tests')
+        self.assertEqual(self.wait_for(lambda: (self.message('codex_fixture_message_02') or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        steer = self.params('turn/steer')[0]
+        self.assertEqual((steer['threadId'], steer['expectedTurnId']), (self.thread, 'turn-1'))
+        self.assertEqual(steer['input'], [dict(type='text', text='also check the tests', text_elements=[])])
+        self.send('codex_fixture_message_03', 'and the docs')
+        self.assertEqual(self.wait_for(lambda: (self.message('codex_fixture_message_03') or {}).get('state') == 'failed' and 'ok'), 'ok')
+        self.assertEqual(len(self.params('turn/start')), 1)
+        self.assertEqual(self.control(op='approval_reply', request_id='codex-0', decision='accept')['status'], 'ok')
+        self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
+        self.assertEqual(self.message('codex_fixture_message_02')['state'], 'accepted')
+
     def test_codex_maps_permission_modes_onto_approval_policy_and_sandbox(self):
         self.enable(permission_mode='bypassPermissions')
         self.send('codex_fixture_message_01')
@@ -6206,6 +6237,23 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.assertEqual(self.control(op='approval_reply', request_id='x', decision='accept')['reason'], 'unsupported_request')
         self.assertEqual(self.control(op='interrupt')['status'], 'ok')
         self.wait_for(lambda: dict(type='abort') in self.sent())
+
+    def test_pi_submit_alone_is_delivered_by_the_message_worker(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        self.worker_delivers('pi_worker_message_0001')
+        self.assertEqual(self.prompts(), [dict(id='pi_worker_message_0001', type='prompt', message=self.text)])
+        self.wait_for(lambda: self.events('turn.ended'))
+
+    def test_pi_marks_a_refused_follow_up_failed_and_finishes_the_run(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        os.environ['FAKE_RPC_OFFSET'] = '2'
+        self.enable()
+        self.send('pi_fixture_message_0001', 'first prompt')
+        self.wait_for(lambda: len(self.prompts()) == 1)
+        self.send('pi_fixture_message_0002', 'second prompt')
+        self.assertEqual(self.wait_for(lambda: (self.message('pi_fixture_message_0002') or {}).get('state') == 'failed' and 'ok'), 'ok')
+        self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
+        self.assertEqual(self.message('pi_fixture_message_0001')['state'], 'accepted')
 
     def test_pi_sends_a_second_message_as_a_follow_up_while_a_run_is_active(self):
         os.environ['FAKE_RPC_OFFSET'] = '1'
