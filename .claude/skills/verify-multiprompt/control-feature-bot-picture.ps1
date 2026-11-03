@@ -59,49 +59,49 @@
                 $all = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition))
                 return @(foreach ($item in $all) { @{ name = $item.Current.Name; class = $item.Current.ClassName; automationId = $item.Current.AutomationId; type = $item.Current.ControlType.ProgrammaticName } })
             }
-            function Get-BotPickerEdit {
-                $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
-                $editClass = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
-                $comboClass = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ComboBoxEx32')
-                $combo = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $comboClass)
-                if ($null -ne $combo) {
-                    $inner = $combo.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editClass)
-                    if ($null -ne $inner) { $script:botPickerSelector = 'Edit inside the ComboBoxEx32 file name box'; return $inner }
+            function Get-BotPickerEditHandle {
+                $combo_ex = [VerifyNative]::FindWindowEx($script:botPicker, [IntPtr]::Zero, 'ComboBoxEx32', $null)
+                if ($combo_ex -ne [IntPtr]::Zero) {
+                    $combo = [VerifyNative]::FindWindowEx($combo_ex, [IntPtr]::Zero, 'ComboBox', $null)
+                    if ($combo -ne [IntPtr]::Zero) {
+                        $inner = [VerifyNative]::FindWindowEx($combo, [IntPtr]::Zero, 'Edit', $null)
+                        if ($inner -ne [IntPtr]::Zero) { $script:botPickerSelector = 'Edit inside the ComboBoxEx32 file name box'; return $inner }
+                    }
+                    $nested = [VerifyNative]::FindWindowEx($combo_ex, [IntPtr]::Zero, 'Edit', $null)
+                    if ($nested -ne [IntPtr]::Zero) { $script:botPickerSelector = 'Edit child of the ComboBoxEx32 file name box'; return $nested }
                 }
-                $direct = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $editClass)
-                if ($null -ne $direct) { $script:botPickerSelector = 'Edit child of the picker'; return $direct }
-                return $null
+                $direct = [VerifyNative]::FindWindowEx($script:botPicker, [IntPtr]::Zero, 'Edit', $null)
+                if ($direct -ne [IntPtr]::Zero) { $script:botPickerSelector = 'Edit child of the picker'; return $direct }
+                return [IntPtr]::Zero
+            }
+            function Set-BotPickerText([IntPtr]$Edit, [string]$Text) {
+                [void][VerifyNative]::PostMessage($Edit, 0x00B1, [UIntPtr]::Zero, [IntPtr](-1))
+                Start-Sleep -Milliseconds 100
+                foreach ($character in $Text.ToCharArray()) {
+                    [void][VerifyNative]::PostMessage($Edit, 0x0102, [UIntPtr][uint32][char]$character, [IntPtr]1)
+                    Start-Sleep -Milliseconds 15
+                }
+                Start-Sleep -Milliseconds 300
             }
             function Enter-BotPicturePath([string]$Path) {
                 Assert-BotFilePickerForeground
-                $edit = Get-BotPickerEdit
-                if ($null -eq $edit) {
+                $edit = Get-BotPickerEditHandle
+                if ($edit -eq [IntPtr]::Zero) {
                     Save-Json (Get-BotPickerChildren) 'picture-picker-children.json'
                     throw 'The picture picker exposes no Edit inside its ComboBoxEx32 file name box'
                 }
-                $pattern = $null
-                try { $pattern = [System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { $pattern = $null }
-                if ($null -ne $pattern) {
-                    $pattern.SetValue($Path)
-                    Wait-Until { $pattern.Current.Value -ceq $Path } 'picture picker file name field carries the requested path' 20
-                    $script:botPickerInput = 'value pattern on the file name field'
-                } else {
-                    try { $edit.SetFocus() } catch { throw ('The picture picker file name field refused focus: ' + $_.Exception.Message) }
-                    Press @(0x11, 0x41) 'Ctrl+A: clear the picture picker file name field'
-                    Type-Text $Path
-                    $script:botPickerInput = 'focused file name field typing'
-                }
+                Set-BotPickerText $edit $Path
+                $script:botPickerInput = 'selected all then posted characters into the file name Edit'
                 Press @(0x0D) 'Enter: pick the picture'
                 try {
                     Wait-BotPickerClosed
                 } catch {
                     if (@(Get-BotPickerWindows).Count -eq 0) { return }
-                    Record 'The picker stayed open; retype the path once more'
+                    Record 'The picker stayed open; set the file name field once more'
                     Assert-BotFilePickerForeground
-                    $again = Get-BotPickerEdit
-                    if ($null -ne $again) { try { $again.SetFocus() } catch { } }
-                    Press @(0x11, 0x41) 'Ctrl+A: replace the previous picker text'
-                    Type-Text $Path
+                    $again = Get-BotPickerEditHandle
+                    if ($again -eq [IntPtr]::Zero) { throw 'The picture picker file name field disappeared before the retry' }
+                    Set-BotPickerText $again $Path
                     Press @(0x0D) 'Enter: pick the picture again'
                     Wait-BotPickerClosed
                 }
