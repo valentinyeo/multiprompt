@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { copyZig } = require('./zig-copy');
+const { copyZig, dropTest } = require('./zig-copy');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, 'src', name + '.zig'), 'utf8');
 const state = read('app_state');
@@ -393,6 +393,7 @@ test('extracted production group default, migration, explicit colors and palette
   require('./fixtures/inline-stubs').writeAll(dir);
   try {
     copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig', 'ui_words.zon'], dir);
+    dropTest(path.join(dir, 'json_reader.zig'), 'local avatar identity survives session parsing');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file, '--test-filter', 'group palette'], { encoding: 'utf8', timeout: 120000 });
