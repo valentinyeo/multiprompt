@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { compareTags, plainChange, productChange } from './version-stamp.mjs';
 
 const filler = 'Checks and fixes, no visible change';
+const productTicket = /^(?:IGSH-\d+|https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+)$/;
+const fillerTicket = /^(?:IGSH-\d+|HYCI-\d+|https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+)$/;
 
 export function releaseNotes(source, tag) {
   const releases = [...source.matchAll(/\.\{ \.ver = "(\d+\.\d+\.\d+)",[^\n]*?\.items = &\.\{([\s\S]*?)\n    \}(?:, \.ticket = "(?:\\.|[^"\\])*")? \},/g)].map(match => {
@@ -15,7 +17,8 @@ export function releaseNotes(source, tag) {
       });
       return { text: JSON.parse(literal), ticket: JSON.parse(item[2]) };
     });
-    if (strict && (!items.length || items.length !== [...match[2].matchAll(/\.text\s*=/g)].length || items.some(item => !plainChange(item.text) || !/^(?:IGSH-\d+|https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+)$/.test(item.ticket)))) {
+    const ticketed = item => (productChange(item.text) ? productTicket : fillerTicket).test(item.ticket);
+    if (strict && (!items.length || items.length !== [...match[2].matchAll(/\.text\s*=/g)].length || items.some(item => !plainChange(item.text) || !ticketed(item)))) {
       throw new Error(`Release ${match[1]} needs plain ticketed lines`);
     }
     const kept = items.filter(item => productChange(item.text));

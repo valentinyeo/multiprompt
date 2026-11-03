@@ -32,6 +32,8 @@ const reviewedReleases = {
 };
 
 const checksOnly = checks;
+const ciTicket = /^HYCI-\d+$/;
+const releaseTicket = /^(?:IGSH|HYCI)-\d+$/;
 
 const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
@@ -167,10 +169,15 @@ export function buildChangelog(files, tag, history = [], commits = []) {
     const reviewed = reviewedReleases[stepTag];
     if (reviewed && sha !== reviewed[0]) throw new Error(`${stepTag}: reviewed release commit does not match ${sha || 'missing commit'}`);
     const notes = new Map(Object.entries(reviewed?.[1] || {}));
+    const ciTickets = [];
     if (!reviewed) {
       for (const commit of stepCommits || []) {
-        const match = /^(IGSH-\d+)(?::|\s)/.exec(commit.subject);
+        const match = /^([A-Z][A-Z0-9]*-\d+)(?::|\s)/.exec(commit.subject);
         if (!match) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
+        if (ciTicket.test(match[1])) {
+          if (!ciTickets.includes(match[1])) ciTickets.push(match[1]);
+          continue;
+        }
         if (!notes.has(match[1])) notes.set(match[1], checksOnly);
       }
     }
@@ -181,12 +188,18 @@ export function buildChangelog(files, tag, history = [], commits = []) {
       if (lines.length) fragmentNotes.set(ticket, [...(fragmentNotes.get(ticket) || []), ...lines]);
     }
     for (const [ticket, lines] of fragmentNotes) {
+      if (ciTicket.test(ticket)) continue;
       if (!reviewed && !notes.has(ticket)) throw new Error(`${stepTag}: ${ticket} fragment has no matching commit ticket`);
       notes.set(ticket, lines.join(' '));
     }
-    if (!notes.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
+    if (!notes.size) {
+      const ticket = ciTickets.at(-1);
+      if (!ticket) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
+      notes.set(ticket, checksOnly);
+    }
     for (const [ticket, text] of notes) {
-      if (!/^IGSH-\d+$/.test(ticket) || !plainChange(text) || !(productChange(text) || text === checksOnly)) {
+      const allowed = ciTicket.test(ticket) ? text === checksOnly : productChange(text) || text === checksOnly;
+      if (!releaseTicket.test(ticket) || !plainChange(text) || !allowed) {
         throw new Error(`${stepTag}: invalid ticketed line for ${ticket}`);
       }
     }

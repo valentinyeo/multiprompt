@@ -750,3 +750,34 @@ test('IGSH-1243 build reads ticketed commits between published tags', async t =>
     }
   }
 });
+
+test('tests after: a CI-board ticket releases without product notes', async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.29.1');
+  r.write({ 'tools/repair.txt': 'Updated checks.\n' });
+  r.git('add', 'tools/repair.txt');
+  r.git('commit', '-m', 'HYCI-101: share one Windows app build cache');
+  const result = spawnSync(process.execPath, [tool, 'build', 'v0.29.2', '["v0.29.1"]'], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
+  assert.match(source, /\.\{ \.ver = "0\.29\.2", \.items = &\.\{\n        \.\{ \.text = "Checks and fixes, no visible change", \.ticket = "HYCI-101" \},\n    \} \},/);
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0].changes, []);
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0].tickets, []);
+});
+
+test('tests after: a CI-board ticket cannot carry a product line', async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.29.1');
+  r.write({ 'changelog.d/HYCI-101-repair.md': 'Typing feels faster.\n' });
+  r.git('add', 'changelog.d/HYCI-101-repair.md');
+  r.git('commit', '-m', 'HYCI-101: repair the shared build cache');
+  const result = spawnSync(process.execPath, [tool, 'build', 'v0.29.2', '["v0.29.1"]'], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
+  assert.equal(source.includes('Typing feels faster.'), false);
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0].changes, []);
+  const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
+  assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /needs plain ticketed lines/);
+});
