@@ -204,9 +204,6 @@ test("all session rename entry points synchronize display surfaces without chang
   assert.match(source, /codexDisplayNameIsAutomaticProjectTitle/,
     "Codex project-name terminal titles must not impersonate thread renames");
 
-  const codexLaunch = functionBody("buildCodexTmuxLaunchCmd", "buildCodexTmuxSessionName");
-  assert.match(codexLaunch, /tui\.terminal_title=\[\\\\\\"thread-title\\\\\\"\]/,
-    "multiprompt-launched Codex sessions must expose the durable thread name in their terminal title");
 });
 
 test("Ctrl+K shell rows use readable names without decorative prefixes", () => {

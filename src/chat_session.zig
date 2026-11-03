@@ -281,6 +281,7 @@ pub fn chatFileIdentityForShell(idx: u32) chat_transcript.Identity {
     const s = &app_state.shells[idx];
     if (s.kind != .tmux and !chatBenchEnabled()) return .{};
     var key = chat_transcript.Identity.init(s.shell_id, s.tmux_host, s.ai_agent == 2 or (chatBenchEnabled() and std.mem.startsWith(u8, s.claude_sid[0..s.claude_sid_len], "codex-")), s.claude_sid[0..s.claude_sid_len], s.claude_cwd[0..s.claude_cwd_len]);
+    key.pi = s.ai_agent == 3;
     if (s.tmux_session_len < key.tmux.len) @memcpy(key.tmux[0..s.tmux_session_len], s.tmux_session[0..s.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return .{};
     for (app_state.g_chat_histories.items) |entry| {
@@ -450,6 +451,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
     var key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2,
         shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     if (key.shell_id == 0) return null;
+    key.pi = shell.ai_agent == 3;
     @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return null;
     return .{ .key = key, .agent = shell.ai_agent };
@@ -728,7 +730,7 @@ fn chatLiveLock(mutex: *@import("app_state.zig").SpinMutex) void {
 var g_chat_live_stream: ?*ChatLiveStream = null;
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
-    if (key.shell_id == 0 or key.codex or key.sid[0] == 0) return false;
+    if (key.shell_id == 0 or key.codex or key.pi or key.sid[0] == 0) return false;
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
@@ -1139,6 +1141,7 @@ fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_histor
     return std.json.Stringify.valueAlloc(a, .{
         .id = id,
         .codex = key.codex,
+        .provider = key.provider(),
         .sid = std.mem.sliceTo(&key.sid, 0),
         .tmux = std.mem.sliceTo(&key.tmux, 0),
         .cwd = std.mem.sliceTo(&key.cwd, 0),
@@ -1725,7 +1728,9 @@ fn chatCacheIdentity() chat_transcript.Identity {
     const key = chatFileIdentity();
     if (key.shell_id != 0 or app_state.active_shell >= app_state.shell_count) return key;
     const shell = &app_state.shells[app_state.active_shell];
-    return chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
+    var cache_key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
+    cache_key.pi = shell.ai_agent == 3;
+    return cache_key;
 }
 
 fn chatStoreTabCache(from_file: bool) void {

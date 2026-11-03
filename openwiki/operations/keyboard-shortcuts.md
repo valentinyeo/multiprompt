@@ -223,8 +223,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+T | New Claude live chat in this workspace folder (also Alt+T outside the palette and the sidebar plus) |
 | Ctrl+K -&gt; New Claude session | Start a Claude live chat in this workspace folder; same as Ctrl+T and the sidebar plus |
 | Ctrl+K -&gt; New Claude in terminal | Start Claude the old way, typed into a terminal in this workspace folder |
-| Ctrl+K -&gt; New Codex chat | Open a Codex session in this workspace folder |
-| Ctrl+K -&gt; New Pi chat | Open a Pi session in this workspace folder |
+| Ctrl+K -&gt; New Codex chat | Start a Codex live chat in this workspace folder, same chat view as Claude |
+| Ctrl+K -&gt; New Pi chat | Start a Pi live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |

@@ -10,7 +10,7 @@ pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
-const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
+const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, pi: bool = false, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
 pub const History = struct {
     status: transcript.Status = .{},
     rows: std.ArrayList(u8) = .empty,
@@ -588,7 +588,7 @@ pub const History = struct {
 
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
         const rows = try self.cacheRows(a);
-        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
+        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .pi = key.pi, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
         defer a.free(header);
         if (header.len + 1 > 512) return error.InvalidHistory;
         return std.fmt.allocPrint(a, "{s}\n{s}", .{ header, rows });
@@ -601,7 +601,7 @@ pub const History = struct {
         defer parsed.deinit();
         const h = parsed.value;
         if ((h.version < 2 or h.version > 6) or h.sid.len == 0 or h.sid.len >= 40 or h.read_sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
-            (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
+            (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or h.pi != key.pi or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
             (key.sid[0] != 0 and !std.mem.eql(u8, h.sid, std.mem.sliceTo(&key.sid, 0)))) return error.InvalidHistory;
         var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 6, .start = h.start, .revision = 1 };
         errdefer result.deinit(a);
@@ -688,7 +688,7 @@ pub const History = struct {
         const empty_answer = inode == 0 and base == 0 and end == 0 and !std.mem.eql(u8, mode_text, "older");
         if (sid.len == 0 or sid.len >= self.sid.len or end < base or (inode == 0 and !empty_answer) or fields.next() != null or
             (!std.mem.eql(u8, more, "0") and !std.mem.eql(u8, more, "1")) or
-            !std.mem.eql(u8, agent, if (key.codex) "codex" else "claude") or
+            !std.mem.eql(u8, agent, key.provider()) or
             !std.mem.eql(u8, tmux, if (key.tmux[0] != 0) std.mem.sliceTo(&key.tmux, 0) else "-")) return error.InvalidHistory;
         if (key.tmux[0] == 0 and key.sid[0] != 0 and !std.mem.eql(u8, sid, std.mem.sliceTo(&key.sid, 0))) return error.InvalidHistory;
         const append = !empty_answer and std.mem.eql(u8, mode_text, "delta");
@@ -826,11 +826,11 @@ pub fn statusOnly(wire: []const u8) bool {
 
 pub fn cacheKey(key: transcript.Identity) u64 {
     const name = if (key.tmux[0] != 0) std.mem.sliceTo(&key.tmux, 0) else std.mem.sliceTo(&key.sid, 0);
-    return std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &.{ key.host, @intFromBool(key.codex), @intFromBool(key.tmux[0] != 0) }), name);
+    return std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &.{ key.host, @intFromBool(key.codex) | (@as(u8, @intFromBool(key.pi)) << 1), @intFromBool(key.tmux[0] != 0) }), name);
 }
 
 pub fn sameSession(a: transcript.Identity, b: transcript.Identity) bool {
-    if (a.shell_id == 0 or b.shell_id == 0 or a.host != b.host or a.codex != b.codex) return false;
+    if (a.shell_id == 0 or b.shell_id == 0 or a.host != b.host or a.codex != b.codex or a.pi != b.pi) return false;
     if (a.sid[0] != 0 and b.sid[0] != 0 and !std.mem.eql(u8, &a.sid, &b.sid)) return false;
     if (a.tmux[0] != 0 or b.tmux[0] != 0) return a.tmux[0] != 0 and std.mem.eql(u8, &a.tmux, &b.tmux);
     if (a.sid[0] != 0 or b.sid[0] != 0) return a.sid[0] != 0 and std.mem.eql(u8, &a.sid, &b.sid);

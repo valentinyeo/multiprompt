@@ -45,7 +45,7 @@ const Entry = struct {
 var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
-const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0) };
+const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, pi: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
 var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1 }{.{}};
 const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;

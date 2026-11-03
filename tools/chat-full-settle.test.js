@@ -29,8 +29,9 @@ const ChatEchoState = chat_echo.OutboxState;
 const CHAT_OUTBOX_KEY_CAP = 256;
 const CHAT_OUTBOX_TOTAL_MAX = 400;
 const chat_transcript = struct { const Identity = struct {
-    shell_id: u32 = 1, host: u8 = 0, codex: bool = false,
+    shell_id: u32 = 1, host: u8 = 0, codex: bool = false, pi: bool = false,
     sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0), cwd: [192]u8 = @splat(0),
+    pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; }
 }; };
 var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;
 var g_chat_full_settle_job: ?*ChatFullSettleJob = null;

@@ -28,7 +28,7 @@ test("host telemetry includes normalized load, memory, swap, and Linux PSI", () 
 
 test("all known new-agent paths use the shared admission gate", () => {
   for (const [name, next] of [
-    ["spawnCodexTmuxSession", "showHeaderNoticeAscii"],
+    ["spawnHostedChatSession", "spawnCodexTmuxSession"],
     ["spawnCustomCmd", "remotePathSafeForShell"],
     ["resurrectArchivedByKey", "remoteShellTextIsSafe"],
   ]) {

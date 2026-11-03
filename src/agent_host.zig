@@ -3,6 +3,32 @@ const std = @import("std");
 pub const ENABLED = true;
 pub const READER = "~/.multiprompt-runtime/reader.py";
 
+pub const Provider = enum {
+    claude,
+    codex,
+    pi,
+
+    pub fn wire(self: Provider) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn label(self: Provider) []const u8 {
+        return switch (self) {
+            .claude => "Claude",
+            .codex => "Codex",
+            .pi => "Pi",
+        };
+    }
+
+    pub fn aiAgent(self: Provider) u8 {
+        return switch (self) {
+            .claude => 1,
+            .codex => 2,
+            .pi => 3,
+        };
+    }
+};
+
 pub fn eligible(program: []const u8) bool {
     return ENABLED and std.mem.startsWith(u8, program, "claude");
 }
@@ -60,9 +86,14 @@ fn safePath(value: []const u8) bool {
 }
 
 pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
+    return launchCommandFor(out, .claude, session, cwd, sid);
+}
+
+pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
     if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid)) return null;
-    const mode = " --permission-mode bypassPermissions";
-    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c {s} 'python3 {s} host enable claude {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start claude {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, cwd, READER, sid, session, cwd, mode, READER, sid, session }) catch null;
+    const mode = if (provider == .claude) " --permission-mode bypassPermissions" else "";
+    const name = provider.wire();
+    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c {s} 'python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start {s} {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, cwd, READER, name, sid, session, cwd, mode, READER, name, sid, session }) catch null;
 }
 
 pub const MoveTarget = enum { terminal, chat };
@@ -131,4 +162,28 @@ test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude
     try std.testing.expect(launchCommand(&out, "live-abc", "~/projects", "bad") == null);
     try std.testing.expect(launchCommand(&out, "live-a;b", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") == null);
     try std.testing.expect(launchCommand(&out, "live-abc", "~/pro jects", "ffffffff-ffff-4fff-bfff-ffffffffffff") == null);
+}
+
+test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider and no Claude permission flag" {
+    var out: [1024]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const codex = launchCommandFor(&out, .codex, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s live-abc -c ~/projects 'python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc", codex);
+    const pi = launchCommandFor(&out, .pi, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host enable pi ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "permission-mode") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
+    try std.testing.expect(launchCommandFor(&out, .pi, "live-abc", "~/projects", "bad") == null);
+    const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    var expected: [1024]u8 = undefined;
+    try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);
+}
+
+test "IGSH-1546 each provider maps to the agent kind its tab shows" {
+    try std.testing.expectEqual(@as(u8, 1), Provider.claude.aiAgent());
+    try std.testing.expectEqual(@as(u8, 2), Provider.codex.aiAgent());
+    try std.testing.expectEqual(@as(u8, 3), Provider.pi.aiAgent());
+    try std.testing.expectEqualStrings("Codex", Provider.codex.label());
+    try std.testing.expectEqualStrings("pi", Provider.pi.wire());
 }

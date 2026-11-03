@@ -37,7 +37,7 @@ var g_chat_verify_shell_id: u32 = 11;
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
 const ShellKind = enum { tmux, cmd, vps, vps2, local, ssh };
-const Shell = struct { shell_id: u32, pid: u32, kind: ShellKind = .cmd, ai_agent: u8 = 0, host: u8 = 0, codex: bool = false, sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0) };
+const Shell = struct { shell_id: u32, pid: u32, kind: ShellKind = .cmd, ai_agent: u8 = 0, host: u8 = 0, codex: bool = false, pi: bool = false, sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
 var shells = [_]Shell{ .{ .shell_id = 11, .pid = 123 }, .{ .shell_id = 22, .pid = 456 } };
 const ChatPendingReset = struct { key: @TypeOf(shells[0]) = .{ .shell_id = 0, .pid = 0 }, nonce: u64 = 0, request_nonce: u64 = 0 };
 var g_chat_pending_reset: ?ChatPendingReset = null;
