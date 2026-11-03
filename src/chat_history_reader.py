@@ -1552,6 +1552,13 @@ def resolve_response_path(q, source=None, as_owner=False):
         path = conversation_path(agent, sid, cwd) if sid and not follow else None
     except PermissionError:
         path, denied = None, True
+    if agent == "codex" and sid and host_dispatch_switch(agent, sid):
+        native = host_session_state(agent, sid).get("native_session")
+        try:
+            hosted = conversation_path(agent, native, cwd) if isinstance(native, str) else None
+        except PermissionError:
+            hosted = None
+        return (agent, sid, hosted, None) if hosted is not None else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
     owner = conversation_owner(cwd) if agent == "claude" else None
     if follow and owner and owner[1] != HOME and source is not None and not as_owner:
         delegated = owner_response(dict(q, sid=""), owner, source)
@@ -1598,10 +1605,10 @@ def resolve_response_path(q, source=None, as_owner=False):
     return agent, sid, path, None
 
 
-def empty_history_response(q, sid, tmux):
+def empty_history_response(q, sid, tmux, agent="claude"):
     rid = q["id"]
     probe = hashlib.sha256(("empty:" + sid).encode()).hexdigest()
-    header = f"@mp\t{rid}\thistory\tok\t{sid}\t0\t0\t0\t0\tclaude\t{tmux or '-'}\t0\t{probe}\tdelta\t0"
+    header = f"@mp\t{rid}\thistory\tok\t{sid}\t0\t0\t0\t0\t{agent}\t{tmux or '-'}\t0\t{probe}\tdelta\t0"
     status = wire_row(dict(role="status", no_transcript=True))
     return "\n".join((header, status, END, ""))
 
@@ -2119,7 +2126,7 @@ def message_row(row):
 
 def message_expire(db, provider, sid):
     rows = db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='sent' AND deadline<=? ORDER BY position", (provider, sid, time.time())).fetchall()
-    if rows and provider == 'claude' and host_owned(provider, sid):
+    if rows and provider in HOST_PROVIDERS and host_owned(provider, sid):
         state = host_session_state(provider, sid)
         inflight = state.get('inflight')
         current = {token for token in state.get('sends') or [] if isinstance(token, str)}
@@ -2290,9 +2297,9 @@ def import_legacy_messages(db, sid, transcript, epoch):
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
-HOST_PROVIDERS = ('claude',)
+HOST_PROVIDERS = ('claude', 'codex', 'pi')
 MESSAGE_WORKER_IDLE_SECONDS = 120
-HOST_BINARY_NAMES = {'claude': 'claude'}
+HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
@@ -2315,6 +2322,20 @@ HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
                       "Feedback is saved locally. No board ticket is filed.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
+HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
+HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
+HOST_CODEX_POLICIES = {'bypassPermissions': ('never', 'danger-full-access'), 'dontAsk': ('never', 'danger-full-access'),
+                       'acceptEdits': ('on-request', 'workspace-write'), 'auto': ('on-request', 'workspace-write'),
+                       'default': ('on-request', 'workspace-write'), 'manual': ('untrusted', 'workspace-write'),
+                       'plan': ('untrusted', 'read-only')}
+HOST_CODEX_APPROVALS = ('item/commandExecution/requestApproval', 'item/fileChange/requestApproval',
+                        'execCommandApproval', 'applyPatchApproval')
+HOST_CODEX_LEGACY = {'accept': 'approved', 'acceptForSession': 'approved_for_session', 'decline': 'denied', 'cancel': 'abort'}
+HOST_PI_DIALOGS = ('select', 'confirm', 'input', 'editor')
+HOST_CODEX_SANDBOXES = {'danger-full-access': {'type': 'dangerFullAccess'},
+                        'read-only': {'type': 'readOnly', 'networkAccess': False},
+                        'workspace-write': {'type': 'workspaceWrite', 'writableRoots': [], 'networkAccess': False,
+                                            'excludeTmpdirEnvVar': False, 'excludeSlashTmp': False}}
 HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error", 5: "agent_not_found"}
 HOST_CHILDREN = []
@@ -2419,9 +2440,7 @@ def host_command(provider, sid):
             return None
         parts = [resolved]
     extra = config.get("args")
-    parts = parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
-    mode = config.get("permission_mode")
-    return parts + (["--permission-mode", mode] if mode in HOST_PERMISSION_MODES else [])
+    return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
 
 
 def host_folder(value):
@@ -2737,6 +2756,8 @@ def host_stop(provider, sid, force=False):
 
 
 def host_handover(provider, sid):
+    if provider != "claude":
+        return dict(status="refused", reason="terminal_unsupported")
     result = host_stop(provider, sid)
     host_write(host_paths(provider, sid)["owner"], dict(owner="terminal", at=time.time()))
     host_log(provider, sid, "handover", dict(previous=result.get("status")))
@@ -2803,6 +2824,8 @@ def host_terminal_restore(provider, sid, tmux, command, reason):
 def host_terminal(provider, sid, tmux=None):
     if not host_identity(provider, sid):
         return dict(status='refused', reason='unsupported_provider')
+    if provider != 'claude':
+        return dict(status='refused', reason='terminal_unsupported')
     if not host_enabled(provider, sid):
         return dict(status='already', reason='not_hosted')
     if tmux is None:
@@ -2922,6 +2945,11 @@ def host_agent_env(provider, sid):
     path = env.get('PATH', '')
     env['PATH'] = tools + (':' + path if path else '')
     env['MULTIBOT_PROVIDER'] = provider
+    if provider != 'claude':
+        env['MULTIBOT_HOST'] = host_key(provider, sid)
+    if provider == 'codex':
+        for key in HOST_CODEX_SECRETS:
+            env.pop(key, None)
     tmux = config.get('tmux')
     if isinstance(tmux, str) and tmux:
         env['MULTIBOT_SESSION'] = tmux
@@ -2931,6 +2959,24 @@ def host_agent_env(provider, sid):
             env.pop(key, None)
         env.update(ZSB_SESSION=name, MULTIPROMPT_TAB=name)
     return env
+
+
+def host_claude_argv(provider, sid, base):
+    mode = (host_config(provider, sid) or {}).get("permission_mode")
+    command = base + (["--permission-mode", mode] if mode in HOST_PERMISSION_MODES else [])
+    command += ["--print", "--input-format", "stream-json",
+                "--output-format", "stream-json", "--verbose",
+                "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+    command += ["--append-system-prompt", HOST_APPEND_PROMPT]
+    return command + (["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid])
+
+
+def host_codex_argv(provider, sid, base):
+    return base + ["app-server"]
+
+
+def host_pi_argv(provider, sid, base):
+    return base + ["--mode", "rpc", *HOST_PI_MODEL, "--session-id", sid, "--append-system-prompt", HOST_APPEND_PROMPT]
 
 
 def host_agent_start(provider, sid):
@@ -2943,18 +2989,11 @@ def host_agent_start(provider, sid):
         base = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else [host_binary_name(provider)]
         extra = config.get("args")
         base = base + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
-        mode = config.get("permission_mode")
-        if mode in HOST_PERMISSION_MODES:
-            base += ["--permission-mode", mode]
     else:
         base = host_command(provider, sid)
     if base is None:
         return None
-    command = base + ["--print", "--input-format", "stream-json",
-                                            "--output-format", "stream-json", "--verbose",
-                                            "--include-partial-messages", "--permission-prompt-tool", "stdio"]
-    if provider == 'claude':
-        command += ["--append-system-prompt", HOST_APPEND_PROMPT]
+    command = HOST_ADAPTERS[provider]["argv"](provider, sid, base)
     if cross_owner:
         user, home = owner
         env = {"PATH": "/usr/bin:/bin"}
@@ -2980,14 +3019,14 @@ def host_agent_start(provider, sid):
             raise RuntimeError("owner_unavailable")
         if probe.returncode not in (0, 74):
             raise RuntimeError({72: "cwd_unavailable", 73: "agent_not_found"}.get(probe.returncode, "owner_unavailable"))
-        command += ["--resume" if probe.returncode == 74 else "--session-id", sid]
+        if provider == "claude":
+            command[-2:] = ["--resume" if probe.returncode == 74 else "--session-id", sid]
         command = prefix + shell + [setup + 'cd "$1" || exit 72; shift; exec "$@"', "agent-start", cwd] + command
         try:
             return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                     env=env, start_new_session=True)
         except OSError:
             raise RuntimeError("owner_unavailable")
-    command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
     return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             cwd=cwd, env=host_agent_env(provider, sid), start_new_session=True)
 
@@ -3006,7 +3045,14 @@ def host_agent_orphan(provider, sid, pid):
             command = handle.read(8192).replace(b"\x00", b" ").decode("utf-8", "replace")
     except OSError:
         return False
-    return sid in command and "--print" in command
+    if provider == "claude":
+        return sid in command and "--print" in command
+    try:
+        with open("/proc/" + str(pid) + "/environ", "rb") as handle:
+            environ = handle.read(262144).split(b"\x00")
+    except OSError:
+        return False
+    return ("MULTIBOT_HOST=" + host_key(provider, sid)).encode() in environ
 
 
 def host_reap_agent(provider, sid):
@@ -3055,7 +3101,8 @@ def host_session_state(provider, sid):
 
 def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
-                   messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False)
+                   messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
+                   thread=None, native_turn=None, pi_run=False, pi_message=0, pi_last=None)
 
 
 def host_db(provider, sid, tmux, session):
@@ -3490,14 +3537,15 @@ def host_handle_request(provider, sid, tmux, session, request):
     if operation == "stop":
         session["stop"] = True
         return dict(status="ok")
+    adapter = HOST_ADAPTERS[provider]
     if operation in ("approval_reply", "question_reply", "plan_reply"):
-        return host_answer(provider, sid, tmux, session, request)
+        return adapter["answer"](provider, sid, tmux, session, request)
     if operation == "interrupt":
-        return host_interrupt(provider, sid, session)
+        return adapter["interrupt"](provider, sid, session)
     if operation == "set_permission_mode":
         if request.get("mode") not in HOST_PERMISSION_MODES:
             return host_refuse("invalid_permission_mode")
-        return host_set_mode(provider, sid, session, request["mode"])
+        return adapter["set_mode"](provider, sid, session, request["mode"])
     if operation != "deliver":
         return dict(status="error", reason="invalid_op")
     token, attempt, epoch, text = request.get("id"), request.get("attempt"), request.get("epoch"), request.get("text")
@@ -3513,7 +3561,9 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="duplicate", reason="already_written", attempt=seen.get("attempt"))
     if tmux is None:
         return host_refuse("no_chat")
-    binding = dict(v=1, mode="stream_json_user_line", host=os.getpid(), session=sid)
+    if not session.get("ready"):
+        return dict(status="busy", reason="agent_starting")
+    binding = dict(v=1, mode=adapter["binding"], host=os.getpid(), session=sid)
     try:
         claim = host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding)
     except (OSError, ValueError):
@@ -3526,12 +3576,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="duplicate", reason="attempt_exists")
     if claim.get("status") != "claimed":
         return host_refuse("attempt_unavailable")
-    line = json.dumps(dict(type="user", message=dict(role="user", content=[dict(type="text", text=text)])),
-                      separators=(",", ":")) + "\n"
-    try:
-        session["agent"].stdin.write(line.encode("utf-8"))
-        session["agent"].stdin.flush()
-    except (OSError, ValueError):
+    if not adapter["write"](provider, sid, session, token, text):
         try:
             host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding, "not_sent")
         except (OSError, ValueError):
@@ -3542,7 +3587,7 @@ def host_handle_request(provider, sid, tmux, session, request):
     except (OSError, ValueError):
         pass
     written[token] = dict(attempt=attempt, epoch=epoch, accepted=False, at=time.time(),
-                          mode="stream_json_user_line")
+                          mode=adapter["binding"])
     session["state"]["turns"] = session["state"].get("turns", 0) + 1
     entry = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False,
                  turn="t-" + str(session["state"]["turns"]),
@@ -3569,7 +3614,7 @@ def host_accept(provider, sid, tmux, session, event):
         entry["accepted"] = True
         digest = hashlib.sha256(("host:" + sid + ":" + entry["id"] + ":" + entry["attempt"]).encode()).hexdigest()
         fact = dict(kind="accepted", sid=sid, id=entry["id"], attempt=entry["attempt"],
-                    event_id="host:accepted:" + digest, provenance="stream_json_turn_start")
+                    event_id="host:accepted:" + digest, provenance=HOST_ADAPTERS[provider]["provenance"])
         applied = False
         if tmux is not None:
             try:
@@ -3590,8 +3635,11 @@ def host_agent_event(provider, sid, tmux, session, raw):
         event = json.loads(raw)
     except (ValueError, UnicodeError):
         return
-    if not isinstance(event, dict):
-        return
+    if isinstance(event, dict):
+        HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
+
+
+def host_claude_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     inflight = session.get("inflight")
     if kind == "system":
@@ -3632,19 +3680,400 @@ def host_agent_event(provider, sid, tmux, session, raw):
         if isinstance(inflight, dict) and not inflight.get("accepted"):
             host_accept(provider, sid, tmux, session, event)
         session["state"]["result"] = dict(subtype=event.get("subtype"), at=time.time())
-        host_stream_finish(provider, sid, tmux, session)
-        host_event(provider, sid, tmux, session, "turn.ended",
-                   dict(status=host_turn_status(session, event), stop_reason=event.get("stop_reason"),
-                        cost_usd=event.get("total_cost_usd"), usage=event.get("usage") or {}))
-        session["state"]["inflight"] = None
-        session["state"]["sends"] = []
-        session["inflight"] = None
-        session["sends"] = []
-        session["turn"] = None
-        session["interrupted"] = False
+        host_turn_end(provider, sid, tmux, session,
+                      dict(status=host_turn_status(session, event), stop_reason=event.get("stop_reason"),
+                           cost_usd=event.get("total_cost_usd"), usage=event.get("usage") or {}),
+                      dict(subtype=event.get("subtype")))
+
+
+def host_claude_open(provider, sid, tmux, session):
+    session["ready"] = True
+
+
+def host_claude_write(provider, sid, session, token, text):
+    return host_control_send(session, dict(type="user", message=dict(role="user", content=[dict(type="text", text=text)])))
+
+
+def host_turn_end(provider, sid, tmux, session, payload, detail):
+    inflight = session.get("inflight")
+    host_stream_finish(provider, sid, tmux, session)
+    host_event(provider, sid, tmux, session, "turn.ended", payload)
+    session["state"]["inflight"] = None
+    session["state"]["sends"] = []
+    session["inflight"] = None
+    session["sends"] = []
+    session["turn"] = None
+    session["interrupted"] = False
+    host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "turn_done", dict(id=inflight.get("id") if isinstance(inflight, dict) else None, **detail))
+
+
+def host_codex_policy(session):
+    mode = session["state"].get("mode")
+    return HOST_CODEX_POLICIES.get(mode, HOST_CODEX_POLICIES["default"])
+
+
+def host_codex_call(session, method, params, purpose):
+    session["seq"] += 1
+    ident = session["seq"]
+    session["rpc"][ident] = purpose
+    if host_control_send(session, dict(jsonrpc="2.0", id=ident, method=method, params=params)):
+        return True
+    session["rpc"].pop(ident, None)
+    return False
+
+
+def host_codex_reply(session, ident, result=None, error=None):
+    payload = dict(jsonrpc="2.0", id=ident)
+    payload.update(dict(error=error) if error is not None else dict(result=result or {}))
+    return host_control_send(session, payload)
+
+
+def host_codex_open(provider, sid, tmux, session):
+    host_codex_call(session, "initialize", dict(clientInfo=dict(name="multibot", title="Multibot", version="1"),
+                                                capabilities=dict(experimentalApi=False, requestAttestation=False)),
+                    "initialize")
+
+
+def host_codex_thread(provider, sid, session, resume):
+    state = session["state"]
+    approval, sandbox = host_codex_policy(session)
+    cwd = host_cwd(provider, sid)
+    params = dict(cwd=cwd, approvalPolicy=approval, sandbox=sandbox, developerInstructions=HOST_APPEND_PROMPT)
+    native = state.get("native_session")
+    try:
+        found = isinstance(native, str) and conversation_path(provider, native, cwd) is not None
+    except (OSError, ValueError):
+        found = False
+    if resume and found:
+        host_codex_call(session, "thread/resume", dict(params, threadId=native), "resume")
+    else:
+        host_codex_call(session, "thread/start", params, "start")
+    host_log(provider, sid, "codex_permissions", dict(mode=state.get("mode"), approval=approval, sandbox=sandbox,
+                                                     resume=bool(resume and found)))
+
+
+def host_codex_write(provider, sid, session, token, text):
+    approval, sandbox = host_codex_policy(session)
+    return host_codex_call(session, "turn/start", dict(threadId=session["thread"], approvalPolicy=approval,
+                                                       sandboxPolicy=HOST_CODEX_SANDBOXES[sandbox],
+                                                       input=[dict(type="text", text=text, text_elements=[])]), "turn")
+
+
+def host_codex_response(provider, sid, tmux, session, message):
+    purpose = session["rpc"].pop(message.get("id"), None)
+    result = message.get("result") if isinstance(message.get("result"), dict) else {}
+    failed = "error" in message
+    if purpose == "initialize":
+        if failed:
+            host_log(provider, sid, "host_error", dict(error="codex_initialize_failed"))
+            session["stop"] = True
+            return
+        host_control_send(session, dict(jsonrpc="2.0", method="initialized"))
+        host_codex_thread(provider, sid, session, True)
+    elif purpose in ("start", "resume"):
+        thread = result.get("thread") if isinstance(result.get("thread"), dict) else {}
+        native = thread.get("id")
+        if failed or not isinstance(native, str) or not native:
+            host_log(provider, sid, "codex_thread_failed", dict(step=purpose))
+            if purpose == "resume":
+                host_codex_thread(provider, sid, session, False)
+            else:
+                session["stop"] = True
+            return
+        session["thread"] = native
+        session["ready"] = True
+        session["state"]["native_session"] = native
         host_state_write(provider, sid, session["state"])
-        host_log(provider, sid, "turn_done", dict(id=inflight.get("id") if isinstance(inflight, dict) else None,
-                                                  subtype=event.get("subtype")))
+        host_log(provider, sid, "init", dict(session=native, step=purpose))
+        host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
+    elif purpose == "turn":
+        if not failed:
+            turn = result.get("turn") if isinstance(result.get("turn"), dict) else {}
+            if isinstance(turn.get("id"), str):
+                session["native_turn"] = turn["id"]
+            host_accept(provider, sid, tmux, session, message)
+        elif session.get("native_turn") is None:
+            host_turn_end(provider, sid, tmux, session, dict(status="failed", stop_reason="turn_start_failed", usage={}),
+                          dict(subtype="turn_start_failed"))
+        else:
+            host_log(provider, sid, "codex_steer_failed")
+
+
+def host_codex_tool(item):
+    kind = item.get("type")
+    if kind == "commandExecution":
+        return "Bash", dict(command=item.get("command"), cwd=item.get("cwd"))
+    if kind == "fileChange":
+        return "Edit", dict(changes=item.get("changes") or [])
+    if kind == "mcpToolCall":
+        return str(item.get("server") or "mcp") + "." + str(item.get("tool") or ""), item.get("arguments") or {}
+    if kind == "dynamicToolCall":
+        return str(item.get("tool") or "tool"), item.get("arguments") or {}
+    if kind == "webSearch":
+        return "WebSearch", dict(query=item.get("query"))
+    return None, None
+
+
+def host_codex_output(item):
+    kind = item.get("type")
+    if kind == "commandExecution":
+        return host_event_text(item.get("aggregatedOutput")), item.get("status") != "completed" or item.get("exitCode") not in (0, None)
+    if kind == "mcpToolCall":
+        error = item.get("error")
+        if error:
+            return host_event_text(json.dumps(error) if not isinstance(error, str) else error), True
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        return host_tool_output(result.get("content")), False
+    if kind == "dynamicToolCall":
+        return "", item.get("success") is False
+    return "", item.get("status") in ("failed", "declined")
+
+
+def host_codex_item(provider, sid, tmux, session, item, done):
+    ident = item.get("id")
+    if not isinstance(ident, str):
+        return
+    kind = item.get("type")
+    if kind == "agentMessage" and done:
+        block = host_stream_block(session, ident, "text", 0)
+        host_complete(provider, sid, tmux, session, block, item.get("text") if isinstance(item.get("text"), str) else None)
+        return
+    if kind == "reasoning" and done:
+        for index, text in enumerate(item.get("summary") if isinstance(item.get("summary"), list) else []):
+            if isinstance(text, str):
+                host_complete(provider, sid, tmux, session, host_stream_block(session, ident, "thinking", index), text)
+        return
+    tool, arguments = host_codex_tool(item)
+    if tool is None:
+        return
+    if not done:
+        host_event(provider, sid, tmux, session, "item.started",
+                   dict(type="tool_call", tool=tool, input=arguments, title=tool, display_name=tool), ident)
+        return
+    output, failed = host_codex_output(item)
+    host_event(provider, sid, tmux, session, "item.done",
+               dict(status="failed" if failed else "completed", output=output, is_error=failed), ident)
+
+
+def host_codex_request(provider, sid, tmux, session, message):
+    method, ident = message.get("method"), message.get("id")
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    if method not in HOST_CODEX_APPROVALS:
+        host_codex_reply(session, ident, error=dict(code=-32601, message="unsupported request"))
+        host_log(provider, sid, "codex_request_refused", dict(method=method))
+        return
+    key = "codex-" + str(ident)
+    command = params.get("command")
+    if "command" in params or method == "execCommandApproval":
+        tool, arguments = "Bash", dict(command=" ".join(command) if isinstance(command, list) else command, cwd=params.get("cwd"))
+    else:
+        tool, arguments = "Edit", dict(changes=params.get("fileChanges") or params.get("changes") or {},
+                                       grant_root=params.get("grantRoot"))
+    request = dict(tool_name=tool, tool_use_id=params.get("itemId") or params.get("callId"), input=arguments,
+                   title=tool, description=params.get("reason"))
+    session["parked"][key] = dict(kind="approval", request=request, signal=threading.Event(), at=time.time(),
+                                  rpc=ident, method=method)
+    host_event(provider, sid, tmux, session, "approval.request", host_approval(request, key))
+    host_log(provider, sid, "control_request", dict(request_id=key, tool=tool, kind="approval"))
+
+
+def host_codex_status(session, turn):
+    if session.get("interrupted") or turn.get("status") == "interrupted":
+        return "interrupted"
+    return "completed" if turn.get("status") == "completed" else "failed"
+
+
+def host_codex_event(provider, sid, tmux, session, message):
+    method = message.get("method")
+    if method is None:
+        host_codex_response(provider, sid, tmux, session, message)
+        return
+    if "id" in message:
+        host_codex_request(provider, sid, tmux, session, message)
+        return
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    if method == "turn/started":
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        if isinstance(turn.get("id"), str):
+            session["native_turn"] = turn["id"]
+        host_accept(provider, sid, tmux, session, message)
+    elif method == "item/agentMessage/delta" and isinstance(params.get("itemId"), str):
+        if isinstance(params.get("delta"), str) and params["delta"]:
+            host_delta(session, host_stream_block(session, params["itemId"], "text", 0), params["delta"])
+    elif method == "item/reasoning/summaryTextDelta" and isinstance(params.get("itemId"), str):
+        index = params.get("summaryIndex") if type(params.get("summaryIndex")) is int else 0
+        if isinstance(params.get("delta"), str) and params["delta"]:
+            host_delta(session, host_stream_block(session, params["itemId"], "thinking", index), params["delta"])
+    elif method in ("item/started", "item/completed") and isinstance(params.get("item"), dict):
+        host_codex_item(provider, sid, tmux, session, params["item"], method == "item/completed")
+    elif method == "serverRequest/resolved":
+        host_control_cancel(provider, sid, tmux, session, "codex-" + str(params.get("requestId")))
+    elif method == "error":
+        error = params.get("error") if isinstance(params.get("error"), dict) else {}
+        host_log(provider, sid, "codex_error", dict(retry=bool(params.get("willRetry")), message=host_event_text(error.get("message"), 200)))
+    elif method == "turn/completed":
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        session["native_turn"] = None
+        host_turn_end(provider, sid, tmux, session,
+                      dict(status=host_codex_status(session, turn), stop_reason=turn.get("status"), usage={}),
+                      dict(subtype=turn.get("status")))
+
+
+def host_codex_answer(provider, sid, tmux, session, request):
+    request_id = request.get("request_id")
+    parked = session["parked"].get(request_id) if isinstance(request_id, str) else None
+    if request.get("op") != "approval_reply":
+        return host_refuse("unsupported_request")
+    if not isinstance(parked, dict):
+        return dict(status="refused", reason="unknown_request")
+    decision = request.get("decision")
+    if decision not in HOST_CODEX_LEGACY:
+        return host_refuse("invalid_decision")
+    del session["parked"][request_id]
+    parked["signal"].set()
+    legacy = parked["method"] in ("execCommandApproval", "applyPatchApproval")
+    host_codex_reply(session, parked["rpc"], dict(decision=HOST_CODEX_LEGACY[decision] if legacy else decision))
+    host_resolved(provider, sid, tmux, session, parked, dict(request_id=request_id, decision=decision, by="desktop"))
+    host_log(provider, sid, "control_answer", dict(request_id=request_id, kind="approval", decision=decision))
+    return dict(status="ok")
+
+
+def host_codex_interrupt(provider, sid, session):
+    if not isinstance(session.get("thread"), str) or not isinstance(session.get("native_turn"), str):
+        return host_refuse("no_active_turn")
+    if not host_codex_call(session, "turn/interrupt", dict(threadId=session["thread"], turnId=session["native_turn"]), "interrupt"):
+        return dict(status="error", reason="stdin_write_failed")
+    session["interrupted"] = True
+    inflight = session.get("inflight")
+    host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
+    return dict(status="ok")
+
+
+def host_codex_set_mode(provider, sid, session, mode):
+    session["state"]["mode"] = mode
+    host_state_write(provider, sid, session["state"])
+    approval, sandbox = host_codex_policy(session)
+    host_log(provider, sid, "codex_permissions", dict(mode=mode, approval=approval, sandbox=sandbox))
+    return dict(status="ok")
+
+
+def host_pi_open(provider, sid, tmux, session):
+    session["ready"] = True
+    session["state"]["native_session"] = sid
+    host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "init", dict(session=sid))
+    host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
+
+
+def host_pi_write(provider, sid, session, token, text):
+    payload = dict(id=token, type="prompt", message=text)
+    if isinstance(session.get("inflight"), dict):
+        payload["streamingBehavior"] = "followUp"
+    return host_control_send(session, payload)
+
+
+def host_pi_end(provider, sid, tmux, session, aborted):
+    last = session.get("pi_last") if isinstance(session.get("pi_last"), dict) else {}
+    usage = last.get("usage") if isinstance(last.get("usage"), dict) else {}
+    cost = usage.get("cost") if isinstance(usage.get("cost"), dict) else {}
+    if aborted or session.get("interrupted") or last.get("stopReason") == "aborted":
+        status = "interrupted"
+    else:
+        status = "failed" if last.get("stopReason") == "error" else "completed"
+    session["pi_run"] = False
+    session["pi_last"] = None
+    host_turn_end(provider, sid, tmux, session,
+                  dict(status=status, stop_reason=last.get("stopReason"), cost_usd=cost.get("total"), usage=usage),
+                  dict(subtype=status))
+
+
+def host_pi_update(provider, sid, tmux, session, event):
+    update = event.get("assistantMessageEvent") if isinstance(event.get("assistantMessageEvent"), dict) else {}
+    part = update.get("type") if isinstance(update.get("type"), str) else ""
+    kind = "text" if part.startswith("text_") else "thinking" if part.startswith("thinking_") else None
+    if kind is None or type(update.get("contentIndex")) is not int:
+        return
+    block = host_stream_block(session, "pi-" + str(session["pi_message"]), kind, update["contentIndex"])
+    if part.endswith("_delta") and isinstance(update.get("delta"), str) and update["delta"]:
+        host_delta(session, block, update["delta"])
+    elif part.endswith("_end") and not block["done"]:
+        host_complete(provider, sid, tmux, session, block, update.get("content") if isinstance(update.get("content"), str) else None)
+
+
+def host_pi_event(provider, sid, tmux, session, event):
+    kind = event.get("type")
+    if kind == "response":
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if event.get("command") != "prompt":
+            return
+        if event.get("success") is False or data.get("disposition") == "handled":
+            failed = event.get("success") is False
+            host_log(provider, sid, "pi_prompt", dict(success=not failed, disposition=data.get("disposition")))
+            if not session.get("pi_run"):
+                host_accept(provider, sid, tmux, session, event)
+                host_turn_end(provider, sid, tmux, session,
+                              dict(status="failed" if failed else "completed", stop_reason=data.get("disposition"), usage={}),
+                              dict(subtype="prompt_" + ("failed" if failed else "handled")))
+            return
+        host_accept(provider, sid, tmux, session, event)
+    elif kind == "agent_start":
+        session["pi_run"] = True
+        host_accept(provider, sid, tmux, session, event)
+    elif kind == "message_start":
+        session["pi_message"] += 1
+    elif kind == "message_update":
+        host_pi_update(provider, sid, tmux, session, event)
+    elif kind == "message_end":
+        message = event.get("message") if isinstance(event.get("message"), dict) else {}
+        if message.get("role") == "assistant":
+            session["pi_last"] = message
+    elif kind == "tool_execution_start" and isinstance(event.get("toolCallId"), str):
+        tool = event.get("toolName")
+        host_event(provider, sid, tmux, session, "item.started",
+                   dict(type="tool_call", tool=tool, input=event.get("args") or {}, title=tool, display_name=tool),
+                   event["toolCallId"])
+    elif kind == "tool_execution_end" and isinstance(event.get("toolCallId"), str):
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        failed = bool(event.get("isError"))
+        host_event(provider, sid, tmux, session, "item.done",
+                   dict(status="failed" if failed else "completed", output=host_tool_output(result.get("content")),
+                        is_error=failed), event["toolCallId"])
+    elif kind == "agent_settled":
+        host_pi_end(provider, sid, tmux, session, bool(event.get("aborted")))
+    elif kind == "extension_ui_request" and event.get("method") in HOST_PI_DIALOGS:
+        host_control_send(session, dict(type="extension_ui_response", id=event.get("id"), cancelled=True))
+        host_log(provider, sid, "pi_dialog_cancelled", dict(method=event.get("method")))
+
+
+def host_pi_answer(provider, sid, tmux, session, request):
+    return host_refuse("unsupported_request")
+
+
+def host_pi_interrupt(provider, sid, session):
+    if not host_control_send(session, dict(type="abort")):
+        return dict(status="error", reason="stdin_write_failed")
+    session["interrupted"] = True
+    inflight = session.get("inflight")
+    host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
+    return dict(status="ok")
+
+
+def host_pi_set_mode(provider, sid, session, mode):
+    return host_refuse("pi_always_full_access")
+
+
+HOST_ADAPTERS = {
+    "claude": dict(argv=host_claude_argv, open=host_claude_open, write=host_claude_write, event=host_claude_event,
+                   answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
+                   binding="stream_json_user_line", provenance="stream_json_turn_start"),
+    "codex": dict(argv=host_codex_argv, open=host_codex_open, write=host_codex_write, event=host_codex_event,
+                  answer=host_codex_answer, interrupt=host_codex_interrupt, set_mode=host_codex_set_mode,
+                  binding="codex_app_server_turn", provenance="codex_turn_start"),
+    "pi": dict(argv=host_pi_argv, open=host_pi_open, write=host_pi_write, event=host_pi_event,
+               answer=host_pi_answer, interrupt=host_pi_interrupt, set_mode=host_pi_set_mode,
+               binding="pi_rpc_prompt", provenance="pi_prompt_accepted"),
+}
 
 
 def host_agent_read(provider, sid, tmux, session, chunk):
@@ -3707,6 +4136,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
     host_event(provider, sid, tmux, session, "host.status", dict(state="starting"))
+    HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
     with selectors.DefaultSelector() as selector:
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
@@ -3996,7 +4426,7 @@ def host_adopt(provider, sid, tmux, cwd=None, mode=None):
 
 
 def host_dispatch_switch(provider, sid):
-    return provider == "claude" and host_enabled(provider, sid) and not host_handed_over(provider, sid)
+    return provider in HOST_PROVIDERS and host_enabled(provider, sid) and not host_handed_over(provider, sid)
 
 
 def host_dispatch_start(provider, sid):
@@ -4013,7 +4443,7 @@ def message_store_request(q):
     import fcntl
     provider, sid, tmux = q.get('provider'), q.get('sid'), q.get('tmux')
     if (type(q.get('message_protocol')) is not int or q['message_protocol'] != 1 or
-            provider not in ('claude', 'codex') or not isinstance(sid, str) or not SESSION_ID.fullmatch(sid) or
+            provider not in HOST_PROVIDERS or not isinstance(sid, str) or not SESSION_ID.fullmatch(sid) or
             not isinstance(tmux, str) or not TMUX_NAME.fullmatch(tmux)):
         raise ValueError('invalid message protocol or identity')
     if q.get('op') not in ('message_dispatch', 'message_reset'):
@@ -4048,7 +4478,7 @@ def message_store_transaction(q):
             resolved = resolve_tmux_agent(provider, tmux, require_bound=True)
             if resolved and resolved[0] == sid:
                 db.execute('INSERT OR REPLACE INTO message_locators VALUES (?,?,?)', (provider, sid, tmux))
-            elif provider == 'claude' and host_dispatch_switch(provider, sid) and host_chat_name(provider, sid) == tmux:
+            elif host_dispatch_switch(provider, sid) and host_chat_name(provider, sid) == tmux:
                 db.execute('INSERT OR REPLACE INTO message_locators VALUES (?,?,?)', (provider, sid, tmux))
             if provider == 'claude' and resolved and resolved[0] == sid and op in ('message_submit', 'message_reset'):
                 import_legacy_messages(db, sid, resolved[1], epoch)
@@ -5263,7 +5693,7 @@ def events_wake():
 
 def events_subscription(query):
     provider, sid, after = query.get("provider"), query.get("sid"), query.get("after", 0)
-    if provider not in ("claude", "codex") or not isinstance(sid, str) or SESSION_ID.fullmatch(sid) is None:
+    if provider not in HOST_PROVIDERS or not isinstance(sid, str) or SESSION_ID.fullmatch(sid) is None:
         raise ValueError("invalid subscription")
     if type(after) is not int or after < 0:
         raise ValueError("invalid subscription cursor")
@@ -5396,7 +5826,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 58
+RUNTIME_GENERATION = 59
 
 if __name__ == '__main__':
     import base64 as _base64
