@@ -86,13 +86,22 @@ try {
     $two = $chats[1]
     $selectChat = {
         param([hashtable]$Chat)
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $inbox = Read-Inbox
+        if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
+        Doctor
+        Assert-Foreground
+        Record ('Click the ' + $Chat.name + ' console to take input back from its browser pane')
+        [VerifyNative]::ClickClient($script:window, 360, 320)
+        Start-Sleep -Milliseconds 300
+        $slots = 0
+        for ($slot = 1; $slot -le 9; $slot++) {
             $inbox = Read-Inbox
             if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
-            Press @(0x11, 0x09) ('Ctrl+Tab ' + $attempt + ': cycle towards ' + $Chat.name)
-            Start-Sleep -Milliseconds 250
+            Press @(0x11, (0x30 + $slot)) ('Ctrl+' + $slot + ': open sidebar session ' + $slot + ' looking for ' + $Chat.name)
+            $slots = $slot
+            Start-Sleep -Milliseconds 200
         }
-        Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId } ($Chat.name + ' selected')
+        Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId } ($Chat.name + ' selected after ' + $slots + ' session chords')
     }
     & $selectChat $one
     $oneBefore = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-before' -Session $one.tmux
@@ -118,9 +127,6 @@ try {
     $oneAgainTabs = Invoke-Zsb @('tabs') $script:liveChatPort 'chat-one-tabs-second' -Session $one.tmux
     if (@($oneAgainTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant }).Count -ne 1) { throw ('The ' + $one.tmux + ' chat pane lost the page both commands opened') }
     $result.checks += @{ name = 'chat-one-agent-path'; session = $one.tmux; tab = $one.shellId; beforeOpen = $oneBefore; opened = $oneOpen; status = $oneStatus; paneInfo = $onePane; navigated = $oneNavigate.result.tab; page = $one.page }
-    Record ('Alt+Q: return input to the ' + $one.name + ' chat')
-    [VerifyNative]::Chord(@(0x12, 0x51))
-    Start-Sleep -Milliseconds 300
     Wait-Until {
         $pane = Read-BrowserPaneFor $two.shellId
         $null -ne $pane -and $pane.PSObject.Properties['browser_state'] -and $pane.browser_state -eq 'closed' -and $pane.browser_connection_id -eq 0
@@ -149,9 +155,6 @@ try {
     if (@($twoTables.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneWant }).Count -ne 0) { throw ('The ' + $two.tmux + ' chat pane holds the other chat page') }
     Snapshot 'chat-two-own-page'
     $result.checks += @{ name = 'chat-two-own-page'; session = $two.tmux; tab = $two.shellId; beforeOpen = $twoBefore; opened = $twoOpen; status = $twoStatus; paneInfo = $twoPane; page = $two.page }
-    Record ('Alt+Q: return input to the ' + $two.name + ' chat')
-    [VerifyNative]::Chord(@(0x12, 0x51))
-    Start-Sleep -Milliseconds 300
     & $selectChat $one
     Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($one.name + ' pane is on screen again') 25
     $oneKept = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-after' -Session $one.tmux
