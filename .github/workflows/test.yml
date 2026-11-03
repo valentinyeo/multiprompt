@@ -647,6 +647,9 @@ jobs:
   switch-performance:
     runs-on: windows-latest
     timeout-minutes: 25
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
@@ -654,6 +657,26 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Restore Zig (PR)
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-speed-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-speed-
+      - name: Cache Zig
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-speed-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-speed-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -707,6 +730,14 @@ jobs:
       - name: Require session speed limits
         if: always()
         run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
+      - name: Bound Zig cache before save
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
+          python3 tools/trim-zig-cache.py --cap-mib 1600
+          du -sh "$ZIG_GLOBAL_CACHE_DIR"
+          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
