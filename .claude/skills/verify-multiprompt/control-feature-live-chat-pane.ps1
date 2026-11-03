@@ -88,9 +88,18 @@ try {
         param([hashtable]$Chat)
         $inbox = Read-Inbox
         if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
-        for ($slot = 1; $slot -le 9; $slot++) {
+        for ($slot = 1; $slot -le 3; $slot++) {
             Press @(0x11, (0x30 + $slot)) ('Ctrl+' + $slot + ': open sidebar session ' + $slot + ' looking for ' + $Chat.name)
-            Start-Sleep -Milliseconds 200
+            Start-Sleep -Milliseconds 700
+            $inbox = Read-Inbox
+            if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
+        }
+        for ($row = 0; $row -lt 3; $row++) {
+            Doctor
+            Assert-Foreground
+            Record ('Click sidebar row ' + ($row + 1) + ' looking for ' + $Chat.name)
+            [VerifyNative]::ClickClient($script:window, 150, (96 + 60 * $row))
+            Start-Sleep -Milliseconds 400
             $inbox = Read-Inbox
             if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
         }
