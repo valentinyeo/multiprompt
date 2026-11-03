@@ -320,6 +320,16 @@ const after = 1;
     assert.doesNotMatch(result.stdout, /stayed green on merge-base source/);
   });
 
+  test('nested documentation travels with test repairs like a root README', t => {
+    const f = fixture(t);
+    f.write('.claude/skills/verify/features/README.md', '# features\n');
+    f.write('tools/value.test.cjs', "require('node:test')('repairs a suite that refused to load',()=>{});\n");
+    f.commit();
+    const result = f.run();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /TEST_ONLY_PROVEN 1 changed suites/);
+  });
+
   test('changed fixtures travel with the test, but implementation stays at merge-base', t => {
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
