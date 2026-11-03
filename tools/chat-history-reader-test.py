@@ -5706,6 +5706,39 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
         self.assertTrue([row for row in self.host_events('idle_stop')])
 
+    def test_a_long_turn_and_agent_output_keep_the_host_past_the_idle_timer(self):
+        import socket as module
+        path = self.home / 'long-turn.sock'
+        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        read_end, write_end = os.pipe()
+        self.addCleanup(os.close, write_end)
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
+        self.addCleanup(agent.stdout.close)
+        session = dict(state={})
+        reader.host_session_reset(session, agent)
+        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
+                                   daemon=True)
+        self.addCleanup(running.join, 10)
+        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
+            running.start()
+            session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
+            session['state']['inflight'] = session['inflight']
+            time.sleep(0.5)
+            self.assertIsInstance(session['inflight'], dict, 'a long turn must never lose its message to a timer')
+            for _ in range(6):
+                os.write(write_end, b'x')
+                time.sleep(0.15)
+            self.assertTrue(running.is_alive(), 'an open turn must survive the idle timer while the agent writes output')
+            self.assertEqual([row for row in self.host_events('idle_stop')], [],
+                             'the host must never stop itself while its turn is open')
+            session['turn'], session['inflight'], session['state']['inflight'] = None, None, None
+            running.join(timeout=10)
+        self.assertFalse(running.is_alive(), 'a host quiet after its turn must still stop when it is idle')
+        self.assertTrue([row for row in self.host_events('idle_stop')])
+
 
 
 
