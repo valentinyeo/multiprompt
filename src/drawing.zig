@@ -711,14 +711,6 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     return layout;
 }
 
-pub fn chatTitleHoleRect(win_w: i32) ?RECT {
-    if (reconnectButtonRect(win_w) != null) {
-        const column = chatViewLayout().transcript;
-        return .{ .left = column.left, .top = threadTitleTop(), .right = column.right, .bottom = threadTitleTop() + threadTitleHeight() };
-    }
-    return null;
-}
-
 fn paintMoreButton(hdc: HANDLE, more: RECT, border: u32, fill: u32, edge: i32) void {
     const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
     const radius = @divTrunc(more.bottom - more.top, 2);
@@ -779,10 +771,6 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const title_top = threadTitleTop();
     const title_bottom = title_top + th;
-    if (reconnectButtonRect(win_w)) |button| {
-        paintDisconnectedNotice(hdc, button, title_top, title_bottom);
-        return;
-    }
     if (app_state.g_chat_active and @import("chat_composer.zig").chatViewOwnsInput()) {
         paintChatTitlePill(hdc);
         return;
@@ -1369,39 +1357,10 @@ pub fn invalidateReconnectContent(idx: u32) void {
     _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
 }
 
-pub fn reconnectButtonRect(win_w: i32) ?RECT {
-    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].disconnected) return null;
-    const shell = app_state.shells[app_state.active_shell];
-    if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return null;
-    const right = threadTitleBandRightFor(win_w) - uiScaled(8);
-    return .{ .left = @max(SIDEBAR_W(), right - uiScaled(if (shell.ssh_reconnect.phase == .ended) 152 else 96)), .top = threadTitleTop() + uiScaled(3), .right = right, .bottom = threadTitleTop() + threadTitleHeight() - uiScaled(3) };
-}
-
-fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) void {
-    const shell = app_state.shells[app_state.active_shell];
-    _ = SetBkMode(hdc, TRANSPARENT);
-    const old_font = SelectObject(hdc, uiFontSubtitle());
-    defer _ = SelectObject(hdc, old_font);
-    _ = SetTextColor(hdc, customColorOr("warning", if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70)));
-    var buf: [192]u8 = undefined;
-    const now = GetTickCount64();
-    const seconds = (shell.ssh_reconnect.next_tick -| now + 999) / 1000;
-    const text = if (shell.ssh_reconnect.phase == .ended)
-        "Session ended"
-    else if (shell.ssh_reconnect.noticeReason(now, shell.disconnected)) |reason|
-        std.fmt.bufPrint(&buf, "{s} disconnected: {s} - Ctrl+Shift+R to reconnect", .{ if (shell.pinned_top) "Pinned session" else "Session", reason }) catch "Reconnecting..."
-    else if (shell.ssh_reconnect.phase == .reconnecting)
-        "Reconnecting..."
-    else
-        std.fmt.bufPrint(&buf, "Reconnecting in {d}s", .{seconds}) catch "Reconnecting...";
-    var notice = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
-    drawAscii(hdc, text, &notice, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-    const brush = CreateSolidBrush(customColorOr("button_bg", if (app_state.g_light_theme) RGB(220, 225, 232) else RGB(60, 65, 75)));
-    var rc = button;
-    _ = FillRect(hdc, &rc, brush);
-    _ = DeleteObject(brush);
-    _ = SetTextColor(hdc, themeConsoleFg());
-    _ = DrawTextW(hdc, if (shell.ssh_reconnect.phase == .ended) L("Start new session") else L("Reconnect"), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+fn reconnectNoticeShown() bool {
+    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].disconnected) return false;
+    const kind = app_state.shells[app_state.active_shell].kind;
+    return kind == .tmux or kind == .vps or kind == .vps2;
 }
 
 pub fn paintDisconnectedShell(hdc: HANDLE) void {
@@ -1409,13 +1368,13 @@ pub fn paintDisconnectedShell(hdc: HANDLE) void {
     var client: RECT = undefined;
     _ = GetClientRect(app_state.g_main_hwnd, &client);
     const launch_failed = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].launch_failed;
-    if (!launch_failed and reconnectButtonRect(client.right) == null) return;
+    if (!launch_failed and !reconnectNoticeShown()) return;
     var rc = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = threadTitleTop() + threadTitleHeight() + uiScaled(40), .right = threadTitleBandRightFor(client.right) - uiScaled(16), .bottom = threadTitleTop() + threadTitleHeight() + uiScaled(100) };
     _ = SetBkMode(hdc, TRANSPARENT);
     const old_font = SelectObject(hdc, uiFontTitle());
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, themeConsoleFg());
-    _ = DrawTextW(hdc, if (launch_failed) L("Terminal could not start. Close this tab and try again.") else if (app_state.shells[app_state.active_shell].ssh_reconnect.phase == .ended) L("Session ended") else L("Disconnected. Your session will reconnect automatically."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = DrawTextW(hdc, if (launch_failed) L("Terminal could not start. Close this tab and try again.") else L("Disconnected. Your session will reconnect automatically."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 test "ISSUE-444 paint backbuffer exposes pixels so smooth shapes avoid full-surface transfers" {

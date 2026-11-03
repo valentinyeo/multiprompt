@@ -284,9 +284,6 @@ pub fn open() void {
     const main = app_state.g_main_hwnd orelse return;
     if (!chat_composer.chatViewOwnsInput()) return;
     const title = drawing.chatTitleLayout() orelse return;
-    var client: w.RECT = undefined;
-    _ = w.GetClientRect(main, &client);
-    if (drawing.reconnectButtonRect(client.right) != null) return;
     const pane = chat_composer.chatViewLayout().pane;
     const width = pane.right - pane.left;
     const height = pane.bottom - pane.top;
