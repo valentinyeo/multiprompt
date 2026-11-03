@@ -5352,7 +5352,7 @@ def settle_response(q, source=None, as_owner=False):
         return error("invalid_after_ms")
     try:
         agent, _sid, path, delegated = resolve_response_path(q, source, as_owner)
-        if delegated is not None:
+        if delegated is not None and agent == "claude":
             return delegated
         targets = [" ".join(clean_command_markup(text).split()) for text in texts]
         chained = [settle_unchained(target) for target in targets]
@@ -5362,7 +5362,7 @@ def settle_response(q, source=None, as_owner=False):
             rows = held_settlement(q, _sid, rows)
             return (f"@mp\t{rid}\tsettle\tok\t-\t{len(rows)}\n" +
                     "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows) + END + "\n")
-        paths = [path]
+        paths = [path] if delegated is None else []
         if agent == "claude" and q["after_ms"] > 0:
             paths += sorted((p for p in path.parent.glob("*.jsonl")
                              if p != path and p.stat().st_mtime * 1000 >= q["after_ms"] - 5000),
