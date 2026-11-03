@@ -757,7 +757,7 @@ test "Inbox frequent tab shows the newest session on top" {
     try std.testing.expect(!inboxRowLess(older, newer));
 }
 
-test "Inbox J and K stop at the top and bottom row" {
+test "Inbox J and K stop at the ends and gg and G jump to them" {
     const prior_hwnd = app_state.g_main_hwnd;
     const prior_ws_count = app_state.g_inbox_ws_count;
     const prior_ws = app_state.g_inbox_ws[0];
@@ -796,6 +796,13 @@ test "Inbox J and K stop at the top and bottom row" {
     try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
     handleInboxKey(app_state.g_main_hwnd, 0);
     try std.testing.expectEqual(@as(u32, 1), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 21);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    app_state.g_inbox_g_tick = 0;
+    handleInboxKey(app_state.g_main_hwnd, 20);
+    try std.testing.expectEqual(@as(u32, 2), app_state.g_inbox_sel);
+    handleInboxKey(app_state.g_main_hwnd, 20);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
 }
 
 fn sortInboxRows() void {

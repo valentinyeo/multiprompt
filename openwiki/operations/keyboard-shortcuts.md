@@ -154,7 +154,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | --- | --- |
 | Sidebar inbox button | Click or Ctrl+Shift+I to toggle; Alt+I opens / selects All |
 | Ctrl+F or / | Reduce Inbox to matching sessions |
-| j/k or Alt+J/K  gg/G  1-9 | Move / top / bottom / jump row |
+| j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
