@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { copyZig, dropTest } = require('./zig-copy');
+const { copyZig } = require('./zig-copy');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, 'src', name + '.zig'), 'utf8');
 const state = read('app_state');
@@ -34,11 +34,26 @@ function decl(name) {
   assert.ok(match, name);
   return match[0];
 }
-const appImports = [
-  ['account_desktop.zig', 'applyPendingAppearance'],
-  ['chat_session.zig', 'chatReadBoundary'],
-  ['chat_session.zig', 'chatReadMark'],
-];
+const inlinedModules = ['rename.zig', 'sidebar.zig'];
+function dropTest(file, prefix) {
+  const text = fs.readFileSync(file, 'utf8');
+  const start = text.indexOf(`test "${prefix}`);
+  if (start < 0) return false;
+  let depth = 0;
+  let i = text.indexOf('{', start);
+  for (; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}' && --depth === 0) break;
+  }
+  fs.writeFileSync(file, text.slice(0, start) + text.slice(i + 1));
+  return true;
+}
+function productionSource() {
+  const bodies = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')];
+  const stray = bodies.flatMap(body => [...body.matchAll(/@import\("([^"]+)"\)/g)].map(([, name]) => name)).filter(name => !inlinedModules.includes(name));
+  assert.deepEqual(stray, [], 'copied production bodies must not import the application tree inline; hoist the member to a file-scope const');
+  return bodies.join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
+}
 function harness() {
   const closedCapture = read('console').slice(read('console').indexOf('        var entry: ClosedShell ='), read('console').indexOf('        app_state.g_closed_count += 1;') + '        app_state.g_closed_count += 1;'.length);
   const reminderRead = reminders.slice(reminders.indexOf('        e.group_id = @intCast(json_reader.uint'), reminders.indexOf('        e.pinned_top ='));
@@ -46,8 +61,8 @@ function harness() {
   const saving = block(session, 'if (app_state.groups[gi].color_set)');
   const commands = [...rename.matchAll(/const (MENU_\w+) =/g)].map(([, n]) => n);
   const win32 = read('win32');
-  const production = [fn(sidebar, 'createGroup'), fn(sidebar, 'findGroupIdx'), fn(sidebar, 'tabGroupId'), fn(sidebar, 'setTabGroupId'), fn(sidebar, 'displayedGroupColor'), ...['paletteGroupId', 'groupPaletteCommand', 'groupPaletteLabel', 'groupPaletteActionAvailable', 'runGroupPaletteAction'].map(n => fn(rename, n)), fn(palette, 'appendGroupPaletteResults'), fn(workspaces, 'importWorkspaceGroups'), fn(workspaces, 'restoreSessionGroup'), fn(workspaces, 'reopenLastClosedShell')].join('\n').replaceAll('@import("rename.zig").', '').replaceAll('@import("sidebar.zig").', '');
-  let source = `const std = @import("std");
+  const production = productionSource();
+  return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -393,8 +408,6 @@ test "group palette: group band covers popup actions, scoped target, search and 
     try std.testing.expectEqual(@as(u32,1), shells[0].group_id);
 }
 `;
-  for (const [module, name] of appImports) source = source.replaceAll(`@import("${module}").${name}`, name);
-  return source;
 }
 test('the group palette harness imports only its copied roots', () => {
   const allowed = new Set(['std', 'json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'ui_words.zon']);

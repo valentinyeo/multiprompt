@@ -56,20 +56,6 @@ function copyZig(roots, dest, srcDir = path.join(__dirname, '../src')) {
   return [...copied];
 }
 
-function dropTest(file, prefix) {
-  const text = fs.readFileSync(file, 'utf8');
-  const start = text.indexOf(`test "${prefix}`);
-  if (start < 0) return false;
-  let depth = 0;
-  let i = text.indexOf('{', start);
-  for (; i < text.length; i++) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}' && --depth === 0) break;
-  }
-  fs.writeFileSync(file, text.slice(0, start) + text.slice(i + 1));
-  return true;
-}
-
 function handWrittenLists(jsSource) {
   const snippets = [];
   for (const match of jsSource.matchAll(/for\s*\(\s*(?:const|let|var)\s+\w+\s+of\s+\[[^\]]*\]\s*\)\s*(?:\{[\s\S]*?\n\s*\}|[^\n]*)/g)) {
@@ -81,4 +67,4 @@ function handWrittenLists(jsSource) {
   return snippets;
 }
 
-module.exports = { copyZig, dropTest, imports, dataImports, handWrittenLists };
+module.exports = { copyZig, imports, dataImports, handWrittenLists };
