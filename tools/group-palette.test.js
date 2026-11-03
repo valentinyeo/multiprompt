@@ -78,7 +78,7 @@ const Shell = struct {
     name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
     tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
-    face: ?u8 = null, color: ?u8 = null,
+    face: ?u8 = null, color: ?u8 = null, avatar_local_id: [16]u8 = @splat(0),
 };
 var shells = [_]Shell{.{}, .{}, .{}, .{}};
 var g_closed_count: u32 = 0;
