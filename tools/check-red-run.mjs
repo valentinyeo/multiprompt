@@ -19,7 +19,7 @@ const changed = git('diff', '--name-only', '-z', base, head).split('\0').filter(
 const present = git('diff', '--name-only', '-z', '--diff-filter=ACMRT', base, head).split('\0').filter(Boolean);
 const testFile = file => /(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file);
 const tests = present.filter(testFile);
-const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/|[^/]+\.md$)/;
+const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/)|[^/]+\.md$/;
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'check-red-run-'));
 const green = path.join(scratch, 'head');
 const red = path.join(scratch, 'base');
