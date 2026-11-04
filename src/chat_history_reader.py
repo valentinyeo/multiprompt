@@ -5467,7 +5467,7 @@ def settle_response(q, source=None, as_owner=False):
         return error("invalid_after_ms")
     try:
         agent, _sid, path, delegated = resolve_response_path(q, source, as_owner)
-        if delegated is not None and agent == "claude":
+        if delegated is not None and (agent == "claude" or delegated != empty_history_response(q, _sid, q["tmux"], agent)):
             return delegated
         targets = [" ".join(clean_command_markup(text).split()) for text in texts]
         chained = [settle_unchained(target) for target in targets]
@@ -5887,7 +5887,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 61
+RUNTIME_GENERATION = 62
 
 if __name__ == '__main__':
     import base64 as _base64

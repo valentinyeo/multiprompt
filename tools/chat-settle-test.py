@@ -159,6 +159,15 @@ class SettleTest(unittest.TestCase):
             self.assertEqual(wire[0], '@mp\t7\tsettle\tok\t-\t1')
             self.assertEqual(json.loads(wire[1]), dict(i=0, delivered_ms=0, line=0))
 
+    def test_hosted_codex_empty_history_settles_without_delivery(self):
+        query = dict(self.query, codex=True, texts=['hello codex'])
+        with patch.object(reader, 'host_dispatch_switch', return_value=True), \
+                patch.object(reader, 'host_session_state', return_value={}):
+            wire = reader.settle_response(query).splitlines()
+        self.assertEqual(wire[0], '@mp\t7\tsettle\tok\t-\t1')
+        self.assertEqual(json.loads(wire[1]), dict(i=0, delivered_ms=0, line=0))
+        self.assertEqual(wire[2], reader.END)
+
     def test_shared_tmux_resolution_and_owner_delegation(self):
         self.write([self.user('please check the build')])
         with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)) as resolve:

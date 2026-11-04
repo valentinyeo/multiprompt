@@ -6323,6 +6323,7 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         return [line for line in self.sent() if line.get('type') == 'prompt']
 
     def test_pi_start_does_not_accept_an_unacknowledged_follow_up(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
         session = dict(state={})
         reader.host_session_reset(session, types.SimpleNamespace(stdin=io.BytesIO()))
         session['ready'] = True
