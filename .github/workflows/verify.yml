@@ -447,7 +447,7 @@ jobs:
         run: node --test tools/chat-accepted-proof.test.mjs tools/chat-reactions-proof.test.mjs
       - name: Check inline working pixel oracle
         continue-on-error: true
-        run: node --test tools/chat-working-proof.test.mjs
+        run: node --test tools/chat-working-proof.test.mjs tools/live-working-proof.test.mjs
       - name: Check unread divider contracts
         continue-on-error: true
         run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs
