@@ -1424,6 +1424,7 @@ pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
     var active_changed = false;
+    var preview_changed = false;
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) {
         const live = @import("chat_live.zig");
         const live_shell = app_state.shells[app_state.active_shell].shell_id;
@@ -1460,6 +1461,8 @@ pub fn chatFileOnReady() void {
         entry.disk_loaded = true;
         entry.loading_disk = false;
         if (entry.result) |history| {
+            const preview_index = findShellById(entry.key.shell_id);
+            const old_preview = if (preview_index) |idx| @import("agent_second_line.zig").forShell(idx) else null;
             const belongs_to_active = chat_history.sameSession(key, entry.key);
             if (belongs_to_active and !disk) @import("chat_live.zig").historyCaughtUp(entry.key.shell_id);
             if (entry.staged) {
@@ -1540,6 +1543,9 @@ pub fn chatFileOnReady() void {
                 }
                 if (changed) saveSession();
             }
+            if (preview_index) |idx| {
+                if (!std.meta.eql(old_preview.?, @import("agent_second_line.zig").forShell(idx))) preview_changed = true;
+            }
         } else if (disk) {
             entry.next = 0;
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
@@ -1549,6 +1555,10 @@ pub fn chatFileOnReady() void {
             chatHistoryStreamStop(entry);
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
         }
+    }
+    if (preview_changed) {
+        @import("window_layout.zig").invalidateSidebar();
+        @import("inbox.zig").publishInboxState();
     }
     if (active_changed and app_state.g_chat_active) {
         layoutChatControls();

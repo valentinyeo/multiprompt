@@ -470,9 +470,13 @@ pub fn publishInboxStateNow() void {
         const o9 = ",\"pv\":\"";
         @memcpy(json[pos .. pos + o9.len], o9);
         pos += o9.len;
-        appendJsonEscaped(&json, &pos, inboxUtf8Prefix(app_state.shells[i].preview[0..app_state.shells[i].preview_len], 90));
+        const second_line = @import("agent_second_line.zig").forShell(@intCast(i));
+        appendJsonEscaped(&json, &pos, inboxUtf8Prefix(second_line.text[0..second_line.len], 90));
         json[pos] = '"';
         pos += 1;
+        const question_field = if (second_line.question) ",\"pv_semantic\":true,\"pv_question\":true" else ",\"pv_semantic\":true,\"pv_question\":false";
+        @memcpy(json[pos .. pos + question_field.len], question_field);
+        pos += question_field.len;
         if (app_state.shells[i].ai_agent != 0) {
             const oag = ",\"ag\":";
             @memcpy(json[pos .. pos + oag.len], oag);
@@ -625,7 +629,7 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         var spv: [96]u8 = std.mem.zeroes([96]u8);
         const snl = json_reader.copyString(o, "name", &sname);
         const ssl = json_reader.copyString(o, "sub", &ssub);
-        const spvl = json_reader.copyString(o, "pv", &spv);
+        const spvl = if (json_reader.boolTrue(o, "pv_semantic")) json_reader.copyString(o, "pv", &spv) else 0;
         const sid = json_reader.uint(o, "sid");
         const kind = json_reader.uint(o, "kind");
         const act = json_reader.uint(o, "act");
@@ -682,6 +686,7 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         const pvl2 = @min(spvl, @as(u32, 95));
         @memcpy(app_state.g_inbox_rows[ri].pv[0..pvl2], spv[0..pvl2]);
         app_state.g_inbox_rows[ri].pv_len = pvl2;
+        app_state.g_inbox_rows[ri].pv_question = json_reader.boolTrue(o, "pv_question");
         app_state.g_inbox_row_count += 1;
 
         app_state.g_inbox_ws[ws_idx].total += 1;
@@ -1578,29 +1583,11 @@ pub fn paintInbox(hdc: HANDLE) void {
         const show_eta = eta_valid and (app_state.g_eta_numbers_on or app_state.g_eta_progress_on) and width >= uiScaled(320);
         const preview_right = if (show_eta) layout.right - uiScaled(146) else layout.right - uiScaled(14);
         const pv = row.pv[0..row.pv_len];
-        var clean = true;
-        var escape_debris = pv.len > 0;
-        var has_separator = false;
-        for (pv) |c| {
-            if (c < 32 or c == 127) clean = false;
-            if (c == ';') has_separator = true;
-            if (!std.ascii.isDigit(c) and c != ';' and c != ':' and c != '[' and c != '?' and c != 'c' and c != 'm') escape_debris = false;
-        }
-        if (escape_debris and has_separator) clean = false;
-        const sub = row.sub[0..row.sub_len];
-        var cwd: [64]u8 = undefined;
-        var fallback: []const u8 = if (row.cwd_len > 0) row.cwd[0..row.cwd_len] else if (std.mem.startsWith(u8, sub, "tmux: ")) "" else sub;
-        if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
-            if (findShellById(row.sid)) |idx| {
-                const cwd_len = inboxCwd(&app_state.shells[idx], &cwd);
-                fallback = cwd[0..cwd_len];
-            }
-        }
-        const preview = if (pv.len > 0 and clean) pv else fallback;
+        const preview = pv;
         var preview_buf: [96]u16 = undefined;
         const preview_len = json_reader.wide(preview, &preview_buf);
         _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-        _ = SetTextColor(hdc, muted);
+        _ = SetTextColor(hdc, if (row.pv_question) blue else muted);
         var preview_rc = RECT{ .left = text_left, .top = y + uiScaled(29), .right = @max(text_left, preview_right), .bottom = y + uiScaled(48) };
         _ = @import("dwrite_text.zig").draw(hdc, &preview_buf, @intCast(preview_len), &preview_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
         if (show_eta) {
