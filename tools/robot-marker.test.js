@@ -40,13 +40,14 @@ test('marker geometry and state tests are included in Windows CI builds', () => 
   assert.match(geometry, /test "robot marker geometry at 100 and 150 percent"/);
 });
 
-test('Windows journey records both workspaces, placements and marker states without inventing Graphite', () => {
+test('Windows journey records both workspaces, placements and marker states across the three requested themes', () => {
   const driver = read('.claude/skills/verify-multiprompt/control-feature-favorites-groups.ps1');
-  assert.match(driver, /foreach \(\$theme in @\('light', 'amoled'\)\)/);
+  assert.match(driver, /foreach \(\$theme in @\('light', 'amoled', 'edgegray'\)\)/);
+  assert.match(driver, /if \(\$theme -eq 'edgegray'\) \{ 'edge grey' \}/);
+  assert.match(driver, /Select-Theme \$themeQuery \("robot-dots-\$theme-theme"\) \$theme/);
   assert.match(driver, /foreach \(\$view in @\('home', 'starred'\)\)/);
   assert.match(driver, /foreach \(\$placement in @\('row', 'pinned'\)\)/);
   assert.match(driver, /Snapshot "robot-dots-\$theme-\$view-\$placement-read"/);
   assert.match(driver, /Snapshot "robot-dots-\$theme-\$view-\$placement-unread"/);
-  assert.match(driver, /theme = 'Graphite 2'; reason = 'not shipped'/);
   assert.match(driver, /-not \$state.tabs\[\$tabIndex\]\.PSObject.Properties\[\$field\] -or -not \$state.tabs\[\$tabIndex\]\.\$field/);
 });

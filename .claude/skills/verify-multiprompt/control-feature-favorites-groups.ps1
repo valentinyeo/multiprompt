@@ -8,8 +8,9 @@
             Press @(0x12, 0x53) 'Alt+S: favorite initial CMD session'
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].favorite -eq $true } 'favorite true saved in session.json'
             $markerSid = (Read-Session).tabs[$tabIndex].shell_id
-            foreach ($theme in @('light', 'amoled')) {
-                Select-Theme $theme ("robot-dots-$theme-theme")
+            foreach ($theme in @('light', 'amoled', 'edgegray')) {
+                $themeQuery = if ($theme -eq 'edgegray') { 'edge grey' } else { $theme }
+                Select-Theme $themeQuery ("robot-dots-$theme-theme") $theme
                 foreach ($view in @('home', 'starred')) {
                     if ($view -eq 'home') { Press @(0x12, 0x32) 'Alt+2: Home robot markers' }
                     else { Press @(0x12, 0x31) 'Alt+1: Starred robot markers' }
@@ -40,8 +41,7 @@
                     }
                 }
             }
-            $result.checks += @{ name = 'IGSH-1534-robot-dots'; themes = @('light', 'amoled'); views = @('home', 'starred'); placements = @('row', 'pinned'); states = @('read', 'unread') }
-            $result.checks += @{ name = 'IGSH-1534-unavailable-theme'; theme = 'Graphite 2'; reason = 'not shipped' }
+            $result.checks += @{ name = 'IGSH-1534-robot-dots'; themes = @('light', 'amoled', 'edgegray'); views = @('home', 'starred'); placements = @('row', 'pinned'); states = @('read', 'unread') }
             Press @(0x12, 0x32) 'Alt+2: return home for grouping'
             Palette 'move to group'
             Press @(0x0D) 'Enter: Move to Group submenu in home workspace'
