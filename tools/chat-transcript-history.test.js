@@ -466,6 +466,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(known_layouts, status_layout_calls);
     one.preview_status_ms = 0;
     ticks += 100;
+    remote_calls = 0;
     one.pending = true;
     chatFileFetchThread(&one, one.key, 11, false, null);
     chatFileOnReady();
@@ -473,6 +474,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     const preview_before_status = one.preview_status_ms;
     const preview_before_content = one.preview_loaded_ms;
     ticks += 100;
+    remote_calls = 0;
     one.pending = true;
     chatFileFetchThread(&one, one.key, 11, false, null);
     chatFileOnReady();
