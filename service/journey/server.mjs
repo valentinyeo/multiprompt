@@ -43,7 +43,7 @@ await addKey(keys.other, 'workspace', 'Missing');
 let reportOffline = false;
 const handler = async (req, res) => {
   if (args.reports === 'true' && req.url === '/__journey/reports') {
-    const rows = await db.prepare('SELECT report_id,captured_at,received_at,app_version,summary,stack_trace FROM crash_reports ORDER BY received_at,rowid').all();
+    const rows = await db.prepare('SELECT device_id,report_id,captured_at,received_at,app_version,android_version,thread,summary,stack_trace FROM crash_reports ORDER BY received_at,rowid').all();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ reports: rows.results }));
     return;
