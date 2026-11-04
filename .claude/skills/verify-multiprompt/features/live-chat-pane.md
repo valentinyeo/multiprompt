@@ -33,7 +33,7 @@ Preconditions match [Session open](session-open.md) and [Browser switch speed](b
 ## Gotchas
 
 - The real reader host, tmux and Claude agent are absent. This proves the desktop side with explicit session tokens, not a real hosted chat creation or agent environment. The reader suite checks the supplied environment separately.
-- The wrapper selftest uses a real public test page. It fails if the page or pane cannot be reached.
+- The wrapper selftest uses a real public test page. It fails if the page or pane cannot be reached. An initially empty pane retains a blank tab after the test page closes; existing user tabs are never closed.
 - An isolated fixture relay removes only fixture authentication before forwarding unchanged session requests to the app listener. It does not answer browser commands. This replaces the remote relay boundary, not the app or extension. No real relay credential is used.
 - The wrapper runs from Git Bash's executable directory so its native Python subprocesses resolve Git Bash rather than the Windows subsystem launcher.
 - Background pane ownership uses app-published state and extension tab lists. Screenshots do not prove a background pane is visible.

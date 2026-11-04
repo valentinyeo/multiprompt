@@ -425,7 +425,13 @@ def close_page():
         if len(matches) != 1:
             raise ValueError("ambiguous cleanup; refusing to close unrelated tabs")
         tab_id = str(matches[0]["id"])
-    request("close-tab", tab_id)
+    try:
+        request("close-tab", tab_id)
+    except ValueError as exc:
+        if "refusing to close the last tab in a multiprompt browser pane" not in str(exc):
+            raise
+        request("navigate", "about:blank", "--new-tab")
+        request("close-tab", tab_id)
     if any(str(tab["id"]) == tab_id for tab in tabs()):
         raise ValueError("selftest tab still exists after close")
 
