@@ -28,6 +28,14 @@ test('activation requests paint before foreground handlers and cancels on hide o
   assert.ok(paint.indexOf('defer freeze_recorder.painted();') < paint.indexOf('const mem_dc = ensurePaintBackbuffer'));
 });
 
+test('hosted-console foreground handoff remains an app activation', () => {
+  const focus = read('src/focus.zig');
+  const event = focus.slice(focus.indexOf('fn foregroundWinEventProc('), focus.indexOf('fn browserOrphanWinEventProc('));
+  assert.match(event, /const ours = foregroundHwndIsOurs\(hwnd\)/);
+  assert.match(event, /freeze_recorder.zig"\)\.activation\(ours and IsIconic\(app_state.g_main_hwnd\) == 0\)/);
+  assert.match(event, /if \(ours\) _ = InvalidateRect\(app_state.g_main_hwnd, null, 0\)/);
+});
+
 test('maximized clipping selects the proposed monitor and rejects minimized frames', () => {
   const frame = read('src/window_frame.zig');
   assert.match(frame, /IsZoomed\(hwnd\) != 0 and w\.IsIconic\(hwnd\) == 0/);

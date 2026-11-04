@@ -159,7 +159,8 @@ function Measure-Response([string]$Stage) {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     Send-Checked 0
     $elapsed = $clock.Elapsed.TotalMilliseconds
-    $samples.Add(@{ stage = $Stage; atMs = $journeyClock.Elapsed.TotalMilliseconds; wmNullMs = $elapsed; iconic = [int][BackgroundFreezeJourney]::IsIconic($main) })
+    $foreground = [BackgroundFreezeJourney]::GetForegroundWindow()
+    $samples.Add(@{ stage = $Stage; atMs = $journeyClock.Elapsed.TotalMilliseconds; wmNullMs = $elapsed; iconic = [int][BackgroundFreezeJourney]::IsIconic($main); foregroundMain = $foreground -eq $main; foregroundChild = [BackgroundFreezeJourney]::IsChild($main, $foreground) })
     if ($elapsed -ge 1000) { throw "WM_NULL exceeded 1000 ms during $Stage" }
 }
 function Report-Files { return @(Get-ChildItem -LiteralPath $crashes -Filter 'freeze-*.txt' -ErrorAction SilentlyContinue) }

@@ -434,7 +434,10 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());
     clearSelectedTabDotOnReturn();
     if (app_state.g_main_hwnd == null) return;
-    if (foregroundHwndIsOurs(hwnd)) {
+    const ours = foregroundHwndIsOurs(hwnd);
+    @import("freeze_recorder.zig").activation(ours and IsIconic(app_state.g_main_hwnd) == 0);
+    if (ours) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    if (ours) {
         installHook();
         const browser_popup_active = activeBrowserTransientPopupHasForegroundFocus();
         if (browser_popup_active) {
