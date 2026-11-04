@@ -287,7 +287,6 @@ pub const WM_APP_BROWSER_LIFECYCLE_DONE: u32 = WM_APP + 208;
 pub const WM_APP_MORE_MENU_ACTION: u32 = WM_APP + 209;
 pub const WM_APP_SETTINGS_OPEN: u32 = WM_APP + 210;
 pub const WM_APP_APP_SAVE_FAILED: u32 = WM_APP + 211;
-pub const WM_APP_CHAT_TOOL_STEPS: u32 = WM_APP + 212;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;

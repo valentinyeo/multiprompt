@@ -237,6 +237,20 @@ var g_pending_loaded = false;
 var g_pending_bytes: ?[]u8 = null;
 var g_pending_write_mutex: app_state.SpinMutex = .{};
 var g_sync_log_at: u64 = 0;
+var g_photo_sync: @import("bot_photo_sync.zig").Sync = .{};
+var g_photo_sync_loaded = false;
+var g_photo_sync_saved_generation: u64 = 0;
+const PhotoContext = struct {
+    access: []const u8,
+    pub fn read(_: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
+        return @import("bot_photo.zig").readForSync(digest);
+    }
+    pub fn send(self: @This(), method: []const u8, path: []const u8, body: []const u8) !u32 {
+        const response = try account_client.request(method, path, self.access, body);
+        defer response.deinit();
+        return response.status;
+    }
+};
 
 fn syncLogThrottled(msg: []const u8) void {
     const now = GetTickCount64();
@@ -1135,6 +1149,36 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     }
 }
 
+fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const session_layout.Tab) !void {
+    const a = std.heap.page_allocator;
+    const account = try account_client.field(credential, "account_id");
+    defer freeSecret(account);
+    if (!g_photo_sync_loaded) {
+        var path_buf: [512]u8 = undefined;
+        const path = syncAuthPath(&path_buf, "account-photo-base.dat") orelse return error.Storage;
+        var wide_buf: [520]u16 = undefined;
+        const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+        if (GetFileAttributesW(wide.ptr) == 0xffffffff) {
+            const reason = @import("win32.zig").GetLastError();
+            if (reason != 2 and reason != 3) return error.Storage;
+        } else {
+            const bytes = readDpapiFile("account-photo-base.dat", 8 * 1024 * 1024) orelse return error.Storage;
+            defer a.free(bytes);
+            g_photo_sync = try @TypeOf(g_photo_sync).parse(a, bytes);
+            g_photo_sync_saved_generation = g_photo_sync.generation;
+        }
+        g_photo_sync_loaded = true;
+    }
+    const result = g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
+    if (g_photo_sync.generation != g_photo_sync_saved_generation) {
+        const encoded = try std.json.Stringify.valueAlloc(a, g_photo_sync, .{});
+        defer a.free(encoded);
+        if (!writeDpapiFile("account-photo-base.dat", encoded)) return error.Storage;
+        g_photo_sync_saved_generation = g_photo_sync.generation;
+    }
+    try result;
+}
+
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const a = std.heap.page_allocator;
     var renewed = job.kind == .login;
@@ -1326,6 +1370,11 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
     reply.appearance_confirmable = appearance_confirmable;
+    if (remote.photos_supported) {
+        accountSyncPhotos(access, response.bytes, final_layout.value.tabs) catch {
+            debugLog("account-sync: picture upload deferred");
+        };
+    }
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };

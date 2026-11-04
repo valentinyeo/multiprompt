@@ -3814,11 +3814,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
-        @import("win32.zig").WM_APP_CHAT_TOOL_STEPS => {
-            if (!chatViewOwnsInput()) return 0;
-            @import("chat_render.zig").chatToggleAllTools();
-            return 0;
-        },
         WM_APP_CHAT_COPY_CODE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatCopyLatestCode();

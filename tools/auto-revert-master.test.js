@@ -421,7 +421,7 @@ test('revert PR dispatches exactly the required workflows on its branch after cr
     assert.ok(index > create && index < merge);
   }
   const required = fs.readFileSync(`${__dirname}/../.github/required-checks.txt`, 'utf8').trim().split(/\r?\n/).sort();
-  assert.deepEqual(required, ['no-comments', 'secret-scan', 'test', 'verify (appearance)']);
+  assert.deepEqual(required, ['chat-ui-approval', 'no-comments', 'secret-scan', 'test', 'verify (appearance)']);
   const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  actions: write\n/);
 });
@@ -587,9 +587,9 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   });
   assert.deepEqual(JSON.parse(JSON.stringify(targeted)), ['browser-pane-stuck', 'chat-messages-only']);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
-  assert.match(release, /journeys:\n    if: inputs.proof\n    needs: prepare\n    uses: \.\/\.github\/workflows\/verify\.yml\n    with:\n      feature: all\n      revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
-  assert.equal((release.match(/feature: all/g) || []).length, 1);
-  assert.match(release, /build:\n    needs: \[prepare, journeys\]/);
+  assert.doesNotMatch(release, /\n  journeys:/);
+  assert.match(release, /\n  launch:\n    needs: \[prepare, build\]/);
+  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {

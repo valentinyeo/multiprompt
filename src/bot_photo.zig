@@ -203,8 +203,18 @@ pub fn import(digest: [32]u8, source: [*:0]const u16) bool {
     const flushed = w.FlushFileBuffers(file) != 0;
     const closed = w.CloseHandle(file) != 0;
     if (!flushed or !closed or w.MoveFileExW(@ptrCast(&temp), target.ptr, 1 | 8) == 0) return false;
+    var marker_buf: [800]u16 = undefined;
+    if (resetPath(target, &marker_buf)) |marker| _ = w.DeleteFileW(marker.ptr);
     invalidate(digest);
     return true;
+}
+
+fn resetPath(path: []const u16, out: *[800]u16) ?[:0]u16 {
+    if (path.len + 6 >= out.len) return null;
+    @memcpy(out[0..path.len], path);
+    for (".reset", 0..) |c, i| out[path.len + i] = c;
+    out[path.len + 6] = 0;
+    return out[0 .. path.len + 6 :0];
 }
 
 pub fn reset(digest: [32]u8) bool {
@@ -212,9 +222,78 @@ pub fn reset(digest: [32]u8) bool {
     defer unlock(mutex);
     var target_buf: [768]u16 = undefined;
     const target = pathFor(digest, &target_buf) orelse return false;
+    var marker_buf: [800]u16 = undefined;
+    const marker = resetPath(target, &marker_buf) orelse return false;
+    const file = w.CreateFileW(marker.ptr, w.GENERIC_WRITE, 0, null, 2, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return false;
+    const flushed = w.FlushFileBuffers(file) != 0;
+    const closed = w.CloseHandle(file) != 0;
+    if (!flushed or !closed) return false;
     if (w.DeleteFileW(target.ptr) == 0 and w.GetLastError() != 2) return false;
     invalidate(digest);
     return true;
+}
+
+pub const SyncPhoto = @import("bot_photo_sync.zig").Photo;
+
+fn readPng(path: [*:0]const u16) ![]u8 {
+    const file = w.CreateFileW(path, w.GENERIC_READ, w.FILE_SHARE_READ, null, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return error.Storage;
+    defer _ = w.CloseHandle(file);
+    var size: i64 = 0;
+    if (w.GetFileSizeEx(file, &size) == 0 or size <= 0) return error.Storage;
+    if (size > 65536) return error.TooLarge;
+    const bytes = try std.heap.page_allocator.alloc(u8, @intCast(size));
+    errdefer std.heap.page_allocator.free(bytes);
+    var count: u32 = 0;
+    if (w.ReadFile(file, bytes.ptr, @intCast(bytes.len), &count, null) == 0 or count != bytes.len) return error.Storage;
+    return bytes;
+}
+
+fn smallPng(path: [:0]const u16) ![]u8 {
+    var gdip: usize = 0;
+    if (GdiplusStartup(&gdip, &.{}, null) != 0 or gdip == 0) return error.Image;
+    defer GdiplusShutdown(gdip);
+    var source: H = null;
+    if (GdipCreateBitmapFromFile(path.ptr, &source) != 0 or source == null) return error.Image;
+    defer _ = GdipDisposeImage(source);
+    var image: H = null;
+    if (GdipCreateBitmapFromScan0(120, 120, 0, 0x0026200a, null, &image) != 0 or image == null) return error.Image;
+    defer _ = GdipDisposeImage(image);
+    var graphics: H = null;
+    if (GdipGetImageGraphicsContext(image, &graphics) != 0 or graphics == null) return error.Image;
+    _ = GdipSetInterpolationMode(graphics, 7);
+    const drawn = GdipDrawImageRectI(graphics, source, 0, 0, 120, 120);
+    _ = GdipDeleteGraphics(graphics);
+    if (drawn != 0) return error.Image;
+    var temp: [800]u16 = undefined;
+    if (path.len + 9 >= temp.len) return error.Storage;
+    @memcpy(temp[0..path.len], path);
+    for (".sync.png", 0..) |c, i| temp[path.len + i] = c;
+    temp[path.len + 9] = 0;
+    defer _ = w.DeleteFileW(@ptrCast(&temp));
+    if (GdipSaveImageToFile(image, @ptrCast(&temp), &png_encoder, null) != 0) return error.Image;
+    return readPng(@ptrCast(&temp));
+}
+
+pub fn readForSync(digest: [32]u8) !SyncPhoto {
+    const mutex = lock(digest) orelse return error.Busy;
+    defer unlock(mutex);
+    var target_buf: [768]u16 = undefined;
+    const target = pathFor(digest, &target_buf) orelse return error.Storage;
+    if (w.GetFileAttributesW(target.ptr) != 0xffffffff) {
+        const bytes = readPng(target.ptr) catch |err| switch (err) {
+            error.TooLarge => try smallPng(target),
+            else => return err,
+        };
+        return .{ .png = bytes };
+    }
+    if (w.GetLastError() != 2) return error.Storage;
+    var marker_buf: [800]u16 = undefined;
+    const marker = resetPath(target, &marker_buf) orelse return error.Storage;
+    if (w.GetFileAttributesW(marker.ptr) != 0xffffffff) return .deleted;
+    if (w.GetLastError() != 2) return error.Storage;
+    return .absent;
 }
 
 pub fn draw(shell: *const state.Shell, hdc: H, rc: w.RECT) bool {

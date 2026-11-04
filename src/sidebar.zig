@@ -2101,13 +2101,12 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     var name = RECT{ .left = avatar_rect.right + uiScaled(10), .top = y + uiScaled(10), .right = right, .bottom = y + uiScaled(29) };
     if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-    _ = SetTextColor(hdc, hint);
+    const second_line = @import("agent_second_line.zig").forShell(@intCast(index));
+    _ = SetTextColor(hdc, if (second_line.question) RGB(137, 180, 248) else hint);
     var preview: [128]u16 = undefined;
-    const len = std.unicode.utf8ToUtf16Le(&preview, shell.preview[0..shell.preview_len]) catch 0;
+    const len = std.unicode.utf8ToUtf16Le(&preview, second_line.text[0..second_line.len]) catch 0;
     var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
-    if (chatDraftHasForShell(index)) {
-        _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_NOPREFIX);
-    } else if (len > 0) {
+    if (len > 0) {
         _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 }
@@ -3667,13 +3666,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
-                        var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - (if (is_chat_tools) @as(i32, 140) else 8), .bottom = ry + row_h };
+                        var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        if (is_chat_tools) {
-                            _ = SelectObject(hdc, palette_hint_font);
-                            var hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = paletteDrawText(hdc, L("Ctrl+Shift+J"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                        }
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

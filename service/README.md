@@ -55,6 +55,9 @@ Read Android crashes newest first with `python3 service/crash-reports.py --limit
 - `POST /v1/device-keys/{device_id}/deny`: device Bearer auth; deny another device's pending key on the same account
 - `POST /v1/crash-reports`: device Bearer auth; strict Android report fields, 32 KiB body limit, duplicate IDs scoped to each device, newest 50 reports per device retained and deleted on revocation
 - `GET /v1/layout`, `PUT /v1/layout`: revision-based layout sync; stale writes return 409
+- `GET`, `PUT`, `DELETE /v1/bot-photos/{key}`: account-scoped remote session pictures. Workspace keys can access only their workspace's sessions. PUT accepts `{ "png": "<base64>" }`, with a PNG no larger than 256 by 256 pixels and 65536 decoded bytes. GET returns the same shape or 404. Keys use the lowercase hex remote digest from `bot_photo_key.zig`, including the raw host byte. The Worker owns each tab's positive `photo` revision, exposes it only to clients requesting `bot_photo`, and preserves it regardless of layout PUT contents. DELETE removes the picture and tab revision.
+
+Apply the additive `bot_photos` table in `schema.sql` before deploying this Worker. Existing clients remain compatible: layout responses omit `photo` unless requested, and old layout uploads cannot erase pictures.
 
 Callbacks accept only exact Android companion callback schemes or `http://127.0.0.1:<port>/callback`. Layout schema allows workspace names and tmux tab names, identities, host-slot indices (0/1/2), workspace membership, optional manual-title flags, and optional boolean `favorite` stars, and optional non-negative safe-integer `used` Unix-epoch millisecond timestamps. It rejects local paths, PIDs, SSH keys, and credential fields. Limits match desktop capacity: nine workspaces and 256 tabs.
 
@@ -108,7 +111,7 @@ Clients advertising `host_removal` may send optional `removed_hosts`, a unique a
 
 ## Service keys and the mp-layout tool
 
-A service key lets a server edit the same account layout the apps sync, without a device sign-in. Keys are `mpk_a_` (admin) or `mpk_w_` (workspace) followed by 43 URL-safe characters. Only the SHA-256 hash is stored, in `service_keys`, and a key works only on `GET` and `PUT /v1/layout`; every other route answers `403 key_scope`. Revoking a key means setting `revoked=1`.
+A service key lets a server edit the same account layout the apps sync, without a device sign-in. Keys are `mpk_a_` (admin) or `mpk_w_` (workspace) followed by 43 URL-safe characters. Only the SHA-256 hash is stored, in `service_keys`, and a key works on `GET` and `PUT /v1/layout` plus `GET`, `PUT` and `DELETE /v1/bot-photos/{key}`; every other route answers `403 key_scope`. Revoking a key means setting `revoked=1`.
 
 An admin key sees and changes the whole layout, exactly like a device. A workspace key is tied to one workspace. Its reads show only that workspace and its sessions. Its writes may add, reorder, rename and remove sessions inside that workspace. The service merges the write into the stored layout and answers `403 scope_denied`, writing nothing, when the write adds or renames a workspace, or lists a session that belongs to another workspace. A workspace key never changes settings or server slots.
 

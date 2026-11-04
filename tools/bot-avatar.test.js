@@ -161,7 +161,7 @@ test "tiles wrap and every mouse target remains the painted session" {
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
   const drawing = read('src/drawing.zig');
   assert.match(block(drawing, 'fn paintChatTitlePill('), /avatar\.draw\(hdc, layout\.icon, avatar\.forShell\(shell\)\)/);
-  assert.match(block(sidebar, 'fn paintChatSidebarRow('), /shell\.preview/);
+  assert.match(block(sidebar, 'fn paintChatSidebarRow('), /agent_second_line\.zig/);
 });
 
 

@@ -37,52 +37,6 @@ pub const Block = struct {
     result_offset: ?u64 = null,
 };
 pub const Range = struct { start: usize, end: usize };
-pub fn toolGroup(items: []const Block, index: usize) ?Range {
-    if (index >= items.len or items[index].role != .tool) return null;
-    var start = index;
-    var end = index + 1;
-    while (start > 0 and items[start - 1].role == .tool) start -= 1;
-    while (end < items.len and items[end].role == .tool) end += 1;
-    return .{ .start = start, .end = end };
-}
-
-pub fn toolPreview(text: []const u16) []const u16 {
-    var end: usize = 0;
-    var lines: usize = 0;
-    while (end < text.len and end < 320) : (end += 1) {
-        if (text[end] == '\n') {
-            lines += 1;
-            if (lines == 4) break;
-        }
-    }
-    if (end > 0 and end < text.len and text[end - 1] >= 0xD800 and text[end - 1] <= 0xDBFF) end -= 1;
-    return text[0..end];
-}
-
-test "tool output preview bounds length and lines without changing source" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("one\ntwo\nthree\nfour\nfive");
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("one\ntwo\nthree\nfour"), toolPreview(text));
-    var long: [400]u16 = @splat('x');
-    long[319] = 0xD800;
-    long[320] = 0xDC00;
-    try std.testing.expectEqual(@as(usize, 319), toolPreview(&long).len);
-    try std.testing.expectEqual(@as(u16, 0xD800), long[319]);
-}
-
-test "consecutive tools form independent ranges" {
-    const items = [_]Block{
-        .{ .start = 0, .len = 0, .role = .prose },
-        .{ .start = 0, .len = 0, .role = .tool, .tool_id = 10 },
-        .{ .start = 0, .len = 0, .role = .tool, .tool_id = 11 },
-        .{ .start = 0, .len = 0, .role = .user },
-        .{ .start = 0, .len = 0, .role = .tool, .tool_id = 12 },
-    };
-    try std.testing.expectEqual(Range{ .start = 1, .end = 3 }, toolGroup(&items, 2).?);
-    try std.testing.expectEqual(Range{ .start = 4, .end = 5 }, toolGroup(&items, 4).?);
-    try std.testing.expect(toolGroup(&items, 3) == null);
-    try std.testing.expect(toolGroup(&items, 5) == null);
-}
-
 pub const Style = struct { bold: bool = false, italic: bool = false, code: bool = false };
 pub const Span = struct { text: Range, style: Style = .{}, target: ?Range = null };
 

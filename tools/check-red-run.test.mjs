@@ -209,6 +209,24 @@ const after = 1;
     assert.equal(f.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
   });
 
+  test('service suites prepare each snapshot and copy changed fixtures', t => {
+    const f = fixture(t);
+    const bin = path.join(f.repo, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\nmkdir -p node_modules\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nmkdir -p .build\ncp worker.txt .build/worker.txt\n', { mode: 0o755 });
+    f.write('service/worker.txt', 'broken');
+    f.write('service/test/fixtures/input.txt', 'old');
+    const base = f.commit();
+    f.write('service/worker.txt', 'fixed');
+    f.write('service/test/fixtures/input.txt', 'fixed');
+    f.write('service/test/worker.test.cjs', "const assert=require('node:assert/strict'); const fs=require('node:fs'); require('node:test')('bundle',()=>{assert.ok(fs.existsSync('service/node_modules')); assert.equal(fs.readFileSync('service/.build/worker.txt','utf8'),fs.readFileSync('service/test/fixtures/input.txt','utf8'));});\n");
+    f.commit();
+    const result = f.run(base, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /RED PROVEN service\/test\/worker.test.cjs/);
+  });
+
   test('an ineffective test is rejected, even when another suite catches the bug', t => {
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');

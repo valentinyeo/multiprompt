@@ -40,6 +40,13 @@ test "remote avatar keys follow host and case insensitive session identity" {
     try std.testing.expect((Key{ .remote = .{ .host = 1, .session = "" } }).digest() == null);
 }
 
+test "remote avatar digest matches cross-device vectors" {
+    const first = (Key{ .remote = .{ .host = 1, .session = "My-Bot" } }).digest().?;
+    const second = (Key{ .remote = .{ .host = 0, .session = "chief-of-staff" } }).digest().?;
+    try std.testing.expectEqualStrings("7fb158a6819a5e497a67662c60c7837ffbd327627773fd876686c60f93d88d5a", &std.fmt.bytesToHex(first, .lower));
+    try std.testing.expectEqualStrings("44b6ce7ad143b0f7a96b98865d4055b049f45518e19e9b4753e8a2f6ee121b06", &std.fmt.bytesToHex(second, .lower));
+}
+
 test "local avatar keys are isolated and require an identity" {
     const first = (Key{ .local = [_]u8{1} ** 16 }).digest().?;
     const second = (Key{ .local = [_]u8{2} ** 16 }).digest().?;

@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
-Add-Type -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -26,11 +26,12 @@ $settings = Join-Path $profile 'roaming/ZigShell'
 $env:APPDATA = Join-Path $profile 'roaming'
 $env:LOCALAPPDATA = Join-Path $profile 'local'
 $env:USERPROFILE = Join-Path $profile 'home'
+$env:HOME = $env:USERPROFILE
 $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '0'
 $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
-New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE | Out-Null
+New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE, (Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:USERPROFILE 'Documents') | Out-Null
 $checks = [Collections.Generic.List[object]]::new()
 $result = @{ feature='bot-photo'; version=$ExpectedVersion; sha256=$ExpectedHash; status='failed'; checks=$checks; cleanup='pending'; error=$null }
 $job = $null
@@ -72,8 +73,14 @@ function Focus {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
 }
 function Press([int[]]$Keys) {
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App does not own keyboard' }
-    [ChatDeliveryDesktop]::Chord($Keys)
+    $opensPalette = $Keys.Count -eq 2 -and $Keys[0] -eq 0x11 -and $Keys[1] -eq 0x4b
+    $offset = if ($opensPalette) { (Log).Length } else { 0 }
+    [VerifyNative]::Chord($Keys)
+    if ($opensPalette) {
+        [void](Wait-For 'palette opened' { $trace = Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=[1-9]\d*' })
+    }
 }
 function Query([string]$Text, [int]$Target) {
     $before = (Log).Length
@@ -106,6 +113,8 @@ function Pick([string]$Path) {
     }
     [Windows.Forms.Clipboard]::SetText($Path)
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog) { throw 'File dialog lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x4e))
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x41))
     [ChatDeliveryDesktop]::Chord(@(0x11, 0x56))
     [ChatDeliveryDesktop]::Chord(@(0x0d))
     [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog })
@@ -192,8 +201,12 @@ function Assert-Normalized([string]$Path, [bool]$Tall = $false) {
 }
 function Start-App {
     $script:job = [VerifyJob]::new()
-    $script:app = $job.Start($Exe, $profile, (Join-Path $Evidence "stdout-$($checks.Count).log"), (Join-Path $Evidence "stderr-$($checks.Count).log"), '--no-window-restore')
-    $script:main = Wait-For 'owned main' { $h = [ChatDeliveryDesktop]::Window([uint32]$app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    $script:app = $job.Start($Exe, $profile, (Join-Path $Evidence "stdout-$($checks.Count).log"), (Join-Path $Evidence "stderr-$($checks.Count).log"), '--single-window --no-window-restore')
+    $script:main = Wait-For 'owned main' {
+        if ($app.HasExited) { throw ('App exited before its main window: ' + $app.ExitCode) }
+        $h = [ChatDeliveryDesktop]::Window([uint32]$app.Id)
+        if ($h -ne [IntPtr]::Zero) { $h }
+    }
     Focus
     [void](Wait-For 'local tabs restored' { try { @((State).tabs).Count -ge 2 -and (Log) -match 'launch step=browser' } catch { $false } })
 }
@@ -233,9 +246,9 @@ try {
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-wide'
     Check 'other-bot-pixels-unchanged' ((Capture-Avatar (Index-Name 'Photo Beta') 'other-after') -eq $otherBefore)
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
-    Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b); Press @(0x1b)
+    Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
     Focus; Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
-    [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.pinned_top -eq $true })
+    [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.PSObject.Properties['pinned_top'] -and $tab.pinned_top -eq $true })
     Assert-Avatar 'pinned' (Index-For $firstId) 'pinned-wide'
     Focus; Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
     [void](Wait-For 'unpinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; -not $tab.PSObject.Properties['pinned_top'] -or -not $tab.pinned_top })
@@ -328,7 +341,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
-    if ($main -ne [IntPtr]::Zero) { try { Shot 'failure' } catch {} }
+    try { Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup = 0 }
     if (Test-Path (Join-Path $settings 'session.json')) { Copy-Item (Join-Path $settings 'session.json') (Join-Path $Evidence 'session.json') }

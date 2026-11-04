@@ -128,9 +128,16 @@ try {
       console.log('RED_RUN_NOT_REQUIRED native Zig test edits only; Windows tests still required');
     } else {
       if (!tests.length) throw new Error('No changed regression tests. Add a portable .test.js, .test.mjs, .test.cjs or Python regression that fails on merge-base source.');
-      const inputs = changed.filter(file => /^(?:tools\/fixtures\/|tools\/[^/]*fixture[^/]*$|tests\/fixtures\/)/.test(file));
+      const inputs = present.filter(file => /^(?:tools\/fixtures\/|tools\/[^/]*fixture[^/]*$|tests\/fixtures\/|service\/test\/fixtures\/)/.test(file));
       execFileSync('git', ['-C', red, 'restore', `--source=${head}`, '--worktree', '--', ...tests, ...inputs], { stdio: 'pipe' });
       const testOnly = changed.every(file => docs.test(file) || workflow.test(file) || (file.startsWith('tools/') && testFile(file)) || (present.includes(file) && inputs.includes(file)));
+      if (tests.some(file => file.startsWith('service/test/'))) {
+        for (const dir of testOnly ? [green] : [green, red]) {
+          const cwd = path.join(dir, 'service');
+          execFileSync('npm', ['ci', '--no-audit', '--no-fund', '--prefer-offline'], { cwd, stdio: 'inherit', timeout: 300000 });
+          execFileSync('npx', ['wrangler', 'deploy', '--dry-run', '--outdir', '.build'], { cwd, stdio: 'inherit', timeout: 300000 });
+        }
+      }
       for (const file of tests) {
         const fixed = run(file, green);
         console.log(`HEAD ${file}\n${fixed.output}`);

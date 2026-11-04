@@ -659,14 +659,6 @@ def shell():
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
         return 0
-    if op == "hidden-steps":
-        for group, size in ((1, 2), (2, 1)):
-            for index in range(size):
-                identity = f"hidden-step-{group}-{index}"
-                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command=f"echo step {group}-{index}"))]))
-                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content=f"Output for step {group}-{index}", is_error=False)]))
-            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="text", text=f"Finished group {group}. The next reply stays visible.")]))
-        return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
         fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id="activity-todo", content="verified", is_error=False)]))

@@ -19,8 +19,8 @@ test('chat sidebar shows approved robots and previews, retaining unread and hove
   assert.match(row, /if \(app_state\.g_sidebar_hover == index\)[^]*?inboxRelTime/);
   assert.doesNotMatch(row, /00d7/);
   assert.match(row, /avatar\.draw/);
-  assert.match(row, /shell\.preview/);
-  assert.match(row, /chatDraftHasForShell/);
+  assert.match(row, /agent_second_line\.zig/);
+  assert.doesNotMatch(row, /shell\.preview|chatDraftHasForShell/);
   assert.match(sidebar, /if \(!app_state\.g_sidebar_collapsed\) \{\s*paintChatSidebarRow/);
 });
 
