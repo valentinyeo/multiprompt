@@ -224,7 +224,7 @@ function Assert-Avatar([string]$Surface, [int]$Index, [string]$Name, [bool]$Tall
         Check "$Name-circle-corner" (-not $cornerIsPhoto)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
-function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false) {
+function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool]$Generated = $false) {
     $index = Index-For $Id
     $tab = @((State).tabs)[$index]
     $wasChat = $tab.PSObject.Properties['cv'] -and $tab.cv
@@ -242,13 +242,17 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false) {
     Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
     [void](Wait-For 'Starred tile pinned' { @((State).tabs)[(Index-For $Id)].starred_pinned_top })
     Shot "$Name-starred-header"
-    Assert-Avatar 'pinned' $index "$Name-starred" $Tall
+    if ($Generated) { Assert-Generated $index "$Name-starred" 'pinned' } else { Assert-Avatar 'pinned' $index "$Name-starred" $Tall }
     $failures = @()
-    try { Assert-Avatar 'header' $index "$Name-header" $Tall } catch { $failures += $_.Exception.Message }
+    try {
+        if ($Generated) { Assert-Generated $index "$Name-header" 'header' } else { Assert-Avatar 'header' $index "$Name-header" $Tall }
+    } catch { $failures += $_.Exception.Message }
     Press @(0x11, 0x10, 0x49)
     [void](Wait-For 'Inbox opened' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; $s.inbox_active })
     Shot "$Name-inbox-window"
-    try { Assert-Avatar 'inbox' ([int]$tab.shell_id) "$Name-inbox" $Tall } catch { $failures += $_.Exception.Message }
+    try {
+        if ($Generated) { Assert-Generated ([int]$tab.shell_id) "$Name-inbox" 'inbox' } else { Assert-Avatar 'inbox' ([int]$tab.shell_id) "$Name-inbox" $Tall }
+    } catch { $failures += $_.Exception.Message }
     Press @(0x1b)
     [void](Wait-For 'Inbox closed' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; -not $s.inbox_active })
     Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
@@ -271,11 +275,13 @@ function Capture-Avatar([int]$Index, [string]$Name) {
     try { $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size); $bitmap.Save((Join-Path $Evidence "$Name.png")) } finally { $graphics.Dispose(); $bitmap.Dispose() }
     return (Get-FileHash (Join-Path $Evidence "$Name.png") -Algorithm SHA256).Hash
 }
-function Assert-Generated([int]$Index, [string]$Name) {
-    $pattern = "\[photo-proof\] expanded target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
+function Assert-Generated([int]$Index, [string]$Name, [string]$Surface = 'expanded') {
+    $pattern = "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
     $match = Wait-For 'generated avatar coordinates' { $found = [regex]::Matches((Log), $pattern); if ($found.Count -gt 0) { $found[$found.Count-1] } }
     $x = [int]$match.Groups[1].Value; $y = [int]$match.Groups[2].Value
     $size = [int]$match.Groups[3].Value - $x
+    $rect = "$x,$y,$($match.Groups[3].Value),$($match.Groups[4].Value)"
+    Check "$Name-chosen-face-color" ((Log).Contains("[bots] face=6 color=0 rect=$rect"))
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, $x, $y)
     $bitmap = [Drawing.Bitmap]::new($size, $size)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -473,6 +479,7 @@ try {
     $saved = @((State).tabs | Where-Object { $_.name -eq 'Renamed Alpha' })[0]
     Check 'reset-retains-face-and-color' ($saved.face -eq 6 -and $saved.color -eq 0)
     Assert-Generated (Index-For $firstId) 'generated-after-reset'
+    Assert-AllFaces $firstId 'matching-reset' $false $true
     Shot 'reset'
     Stop-App
     Start-App

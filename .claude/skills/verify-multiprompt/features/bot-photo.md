@@ -10,7 +10,9 @@ Open Ctrl+K, choose Bot face, then Upload image or Reset.
 
 ## Driving it with control.ps1
 
-Dispatch `verify.yml` with `feature=bot-photo`. The Windows-only driver uses isolated local sessions and real native file dialogs. Evidence is uploaded as `verify-bot-photo`.
+Dispatch `verify.yml` with `feature=bot-photo`. The Windows-only driver seeds two isolated local CMD tabs, then uses real native file dialogs to import generated PNG and JPEG fixtures. Evidence is uploaded as `verify-bot-photo`.
+
+IGSH-1541 adds the real Alt+S / Alt+1 Starred path, pins the selected bot there, opens Chat View with Alt+C and toggles Inbox with Ctrl+Shift+I. Pixel samples at the production-painted avatar rectangles must show the same asymmetric image on the Starred tile, chat title and Inbox row. The journey repeats with a different image before any restart, then resets and checks the selected generated face and color across all three. Full-window screenshots and individual crops are retained, including failed samples.
 
 Before launching Multiprompt, an independent legacy Windows file picker must pass the identical Alt+Tab and file-entry sequence against a separate blank window. It records the actual selected path. This distinguishes driver/native-dialog failures from app behavior.
 
