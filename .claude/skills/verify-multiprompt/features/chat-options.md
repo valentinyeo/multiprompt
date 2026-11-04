@@ -6,7 +6,9 @@ Only a pending structured question creates answer cards. Claude Code supplies As
 
 ## How to get to it (user POV)
 
-Open Chat View with Alt+C on a connected session awaiting a structured question. Click a choice, or select several choices and Submit. Choose Other to type an answer.
+For a terminal session, open Chat View with Alt+C. Live chats already show Chat View. Click a choice, or select several choices and Submit. Choose Other to type an answer.
+
+In a live chat, type /plan or /permissions and send it. Choose a mode in the small palette. The same mode choices appear in Ctrl+K. Unsupported terminal commands stay editable and show a plain notice.
 
 Verification:
 
@@ -22,6 +24,10 @@ gh workflow run verify.yml --ref master -f feature=chat-options -f tag=vX.Y.Z
 ```
 
 Retain the workflow run, exact build hash, provider answer receipts and AMOLED screenshots together.
+
+The journey then selects an isolated live chat and types /plan, /permissions, /model, /resume and /rewind through the real composer. It saves a screenshot for every command. Plan and permissions open the existing palette. Choosing Plan, Ask and Accept edits must produce exactly three set_permission_mode controls for that live chat, in order, and no slash-command outbox messages. /model shows the allowed coming-soon notice until its dedicated picker is available; /resume and /rewind show unavailable notices and keep their drafts editable.
+
+The slash boundary runs the app-supplied reader and the real host mode handler. Only host ownership and the agent control transport are stand-ins. Raw controls, acknowledgements, resulting mode, input actions, screenshots, executable identity and owned-process cleanup remain in the artifact. This proves native routing and host controls, not a real paid agent session.
 
 ## Gotchas
 

@@ -267,6 +267,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages, Enter opens the right-click options, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
+| /plan or /permissions in live chat / Ctrl+K "Chat permission mode" | Choose Plan, Ask, or Accept edits for this chat; /plan selects Plan first |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |

@@ -988,14 +988,16 @@ fn chatAcPaint(hwnd: HANDLE) void {
         var wide_name: [257]u16 = undefined;
         const name_len = std.unicode.utf8ToUtf16Le(&wide_name, title) catch 0;
         _ = chatDrawText(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        const tag: []const u8 = if (std.mem.eql(u8, entry.hint, "opens in terminal")) "opens in terminal" else switch (entry.kind) {
+        const live_interactive = std.mem.eql(u8, entry.hint, "opens in terminal") and app_state.active_shell < app_state.shell_count and
+            !@import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len]);
+        const tag: []const u8 = if (live_interactive) "live chat" else if (std.mem.eql(u8, entry.hint, "opens in terminal")) "opens in terminal" else switch (entry.kind) {
             'S', 'K' => "skill",
             'P' => "plugin",
             'J' => "project",
             'C', 'R' => "prompt",
             else => "built-in",
         };
-        const tag_width = if (std.mem.eql(u8, entry.hint, "opens in terminal")) uiScaled(142) else uiScaled(82);
+        const tag_width = if (!live_interactive and std.mem.eql(u8, entry.hint, "opens in terminal")) uiScaled(142) else uiScaled(82);
         var hint_rc = RECT{ .left = @divTrunc(rc.right, 3), .top = top, .right = rc.right - tag_width, .bottom = top + row_h };
         _ = SetTextColor(dc, customColorOr("hint", if (app_state.g_light_theme) RGB(100, 108, 118) else RGB(167, 171, 181)));
         var hint_text: [512]u8 = undefined;
@@ -1255,6 +1257,9 @@ fn chatAcOnComposerChanged() void {
     var text: [16384]u16 = undefined;
     const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
     if (n < 0) return;
+    const current = text[0..@intCast(n)];
+    if (app_state.g_chat_ac_skill_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len])) app_state.g_chat_ac_skill_command_len = 0;
+    if (app_state.g_chat_ac_dialog_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) app_state.g_chat_ac_dialog_len = 0;
     var caret: u32 = 0;
     _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&caret), 0);
     const token = if (app_state.g_chat_ac.browse) app_state.g_chat_ac.token else chat_complete.tokenAtCaret(text[0..@intCast(n)], @min(caret, @as(u32, @intCast(n))), agent) orelse {
@@ -1341,6 +1346,13 @@ fn chatAcAccept() bool {
     app_state.g_chat_skill_name_len = 0;
     app_state.g_chat_skill_body_len = 0;
     app_state.g_chat_ac_dialog_len = 0;
+    app_state.g_chat_ac_skill_command_len = 0;
+    app_state.g_chat_ac_dialog_shell_id = app_state.shells[app_state.active_shell].shell_id;
+    app_state.g_chat_ac_skill_shell_id = app_state.g_chat_ac_dialog_shell_id;
+    if ((entry.kind == 'S' or entry.kind == 'K') and ilen <= app_state.g_chat_ac_skill_command.len) {
+        app_state.g_chat_ac_skill_command_len = ilen;
+        @memcpy(app_state.g_chat_ac_skill_command[0..ilen], wide[0..ilen]);
+    }
     if (std.mem.eql(u8, entry.hint, "opens in terminal") and applied.caret > 0 and ilen <= app_state.g_chat_ac_dialog_command.len) {
         app_state.g_chat_ac_dialog_len = ilen;
         @memcpy(app_state.g_chat_ac_dialog_command[0..ilen], wide[0..ilen]);

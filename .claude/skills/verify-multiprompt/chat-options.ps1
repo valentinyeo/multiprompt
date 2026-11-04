@@ -67,3 +67,5 @@ if (Test-Path $outboxPath) {
     if (@($outbox).Count -gt 0) { throw 'Question answer became an ordinary queued message' }
 }
 $result.checks += @{ name = 'structured-question-cards'; plainLists = 'no cards'; single = $first.labels; multiple = $second.labels; other = $other.labels; boundary = 'Real reader and app; scripted provider UI, no paid provider calls' }
+
+. (Join-Path $PSScriptRoot 'chat-slash.ps1')

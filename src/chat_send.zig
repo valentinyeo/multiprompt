@@ -392,6 +392,109 @@ pub fn voicePasteTranscriptToShellNoEnter(transcript: []const u16) bool {
         sendLocalChatPromptEx(app_state.active_shell, transcript, false);
 }
 
+const ChatModeJob = struct {
+    key: @import("chat_transcript.zig").Identity,
+    mode: @import("chat_slash.zig").PermissionMode,
+    command: @import("chat_slash.zig").Route = .send,
+    ok: bool = false,
+};
+
+var chat_mode_picker_key: @import("chat_transcript.zig").Identity = .{};
+var chat_mode_picker_command: @import("chat_slash.zig").Route = .send;
+var chat_mode_busy = std.atomic.Value(bool).init(false);
+
+pub fn chatModeCapturePicker() void {
+    chat_mode_picker_key = .{};
+    chat_mode_picker_command = .send;
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len])) return;
+    chat_mode_picker_key = chatFileIdentityForShell(app_state.active_shell);
+}
+
+pub fn chatModePickerAvailable() bool {
+    return chat_mode_picker_key.shell_id != 0;
+}
+
+pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
+    const key = chat_mode_picker_key;
+    const index = @import("inbox.zig").findShellById(key.shell_id) orelse return false;
+    if (key.sid[0] == 0 or !std.meta.eql(key, chatFileIdentityForShell(index))) return false;
+    if (chat_mode_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
+    const job = std.heap.page_allocator.create(ChatModeJob) catch {
+        chat_mode_busy.store(false, .release);
+        return false;
+    };
+    job.* = .{ .key = key, .mode = mode, .command = chat_mode_picker_command };
+    const thread = std.Thread.spawn(.{}, chatModeThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        chat_mode_busy.store(false, .release);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+fn chatModeThread(job: *ChatModeJob) void {
+    const a = std.heap.page_allocator;
+    defer chat_mode_busy.store(false, .release);
+    const request = @import("chat_slash.zig").modeRequest(a, job.key.shell_id, if (job.key.codex) "codex" else "claude", std.mem.sliceTo(&job.key.sid, 0), job.mode) catch {
+        chatModePostResult(job);
+        return;
+    };
+    defer a.free(request);
+    var response: std.ArrayList(u8) = .empty;
+    defer response.deinit(a);
+    job.ok = @import("chat_session.zig").chatHistoryPersistent(job.key.host, job.key.shell_id, request, 4096, &response, null) and @import("chat_slash.zig").modeReplyOk(a, response.items);
+    chatModePostResult(job);
+}
+
+fn chatModePostResult(job: *ChatModeJob) void {
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_MODE_RESULT, 0, @bitCast(@intFromPtr(job))) == 0) std.heap.page_allocator.destroy(job);
+}
+
+pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
+    if (lp == 0) return;
+    const job: *ChatModeJob = @ptrFromInt(@as(usize, @bitCast(lp)));
+    defer std.heap.page_allocator.destroy(job);
+    if (!job.ok) {
+        showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
+        return;
+    }
+    if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and std.meta.eql(job.key, chatFileIdentityForShell(app_state.active_shell))) {
+        if (job.command != .send and app_state.g_chat_composer_hwnd != null) {
+            var text: [16384]u16 = undefined;
+            const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
+            if (len > 0 and @import("chat_slash.zig").route(true, text[0..@intCast(len)]) == job.command) {
+                _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+                app_state.g_chat_draft_dirty = true;
+                chatDraftFlush();
+            }
+        }
+        showHeaderNoticeAscii("Permission mode changed", 3000, false);
+    }
+}
+
+fn chatModeOpenPicker(default_plan: bool) void {
+    _ = @import("win32.zig").SendMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_SEARCH_OPEN, 0, 0);
+    chat_mode_picker_command = if (default_plan) .plan else .permissions;
+    const query = std.unicode.utf8ToUtf16LeStringLiteral("chat permission mode");
+    @memcpy(app_state.g_search_buf[0..query.len], query);
+    app_state.g_search_len = query.len;
+    app_state.g_search_sel = 0;
+    app_state.g_search_scroll = 0;
+    @import("command_palette.zig").updateSearchResults();
+    if (default_plan) {
+        for (app_state.g_search_results[0..app_state.g_search_result_count], 0..) |target, i| {
+            if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET) {
+                app_state.g_search_sel = @intCast(i);
+                break;
+            }
+        }
+    }
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
 var chat_steer_prompt = false;
 
 pub fn chatSteerPrompt() void {
@@ -419,6 +522,29 @@ pub fn sendChatPrompt() void {
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var text_buf: [16384]u16 = undefined;
     const text_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text_buf, @intCast(text_buf.len));
+    if (text_len_i > 0 and app_state.g_chat_skill_name_len == 0 and app_state.g_chat_reply_len == 0) {
+        const text = text_buf[0..@intCast(text_len_i)];
+        const shell = &app_state.shells[app_state.active_shell];
+        const live = !@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len]);
+        const selected_skill = app_state.g_chat_ac_skill_shell_id == shell.shell_id and app_state.g_chat_ac_skill_command_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len]);
+        const interactive = app_state.g_chat_ac_dialog_shell_id == shell.shell_id and app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]);
+        const route = @import("chat_slash.zig").decide(live, text, selected_skill, interactive);
+        switch (route) {
+            .plan, .permissions => {
+                chatModeOpenPicker(route == .plan);
+                return;
+            },
+            .model => {
+                showHeaderNoticeAscii("Model picker is coming soon", 4000, false);
+                return;
+            },
+            .unavailable => {
+                showHeaderNoticeAscii("This command is unavailable in live chat", 4000, false);
+                return;
+            },
+            .send => {},
+        }
+    }
     if (chatLivePlanReply(text_buf[0..@intCast(@max(0, text_len_i))])) return;
     if (text_len_i <= 0) {
         if (chat_steer_prompt) chatEchoPushQueuedNow();
@@ -513,6 +639,7 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Opened in the terminal, press Alt+C to see it", 4000, false);
     }
     app_state.g_chat_ac_dialog_len = 0;
+    app_state.g_chat_ac_skill_command_len = 0;
     _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
     app_state.g_chat_draft_dirty = true;
     chatDraftFlush();

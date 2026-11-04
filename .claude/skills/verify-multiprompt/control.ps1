@@ -274,7 +274,7 @@ try {
     if ($Feature -in @('chat-switch-speed', 'chat-options')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $remoteNames = @(if ($Feature -eq 'chat-options') { 'verify-agent-1' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
+        $remoteNames = @(if ($Feature -eq 'chat-options') { 'verify-agent-1'; 'live-slash' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
         $remotePanes = [ordered]@{}
         $remoteSids = [ordered]@{}
         for ($i = 0; $i -lt $remoteNames.Count; $i++) {
@@ -302,6 +302,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
         if ($Feature -eq 'chat-options') {
             $remoteDocument.name = 'chat-options'
+            $remoteDocument.slashProof = $true
             $remoteDocument.mode = 'busy'
             $remoteDocument.sid = $remoteSids['verify-agent-1']
             $remoteDocument.transcript = Join-Path $remoteDocument.home ('.claude/projects/C--verify-work0/' + $remoteDocument.sid + '.jsonl')
@@ -312,6 +313,11 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Ordinary list fixture failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
+        if ($Feature -eq 'chat-options') {
+            $remoteTabs[1].cv = $true
+            $remoteTabs[1].csid = $remoteSids['live-slash']
+            $remoteTabs[1].claude_session = $true
+        }
         $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $remoteTabs } -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson

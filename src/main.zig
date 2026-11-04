@@ -3837,6 +3837,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (lp != 0) @import("chat_render.zig").chatFileNotice(lp) else showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
             return 0;
         },
+        app_state.WM_APP_CHAT_MODE_RESULT => {
+            @import("chat_send.zig").chatModeFinish(lp);
+            return 0;
+        },
         WM_APP_CHAT_COPY_SELECTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatCopySelection();
@@ -4114,7 +4118,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_spawn_ws = if (was_all_sessions) 0xFE else 0xFF;
             }
             const was_search_active = app_state.g_search_active;
-            if (!was_search_active) app_state.g_search_pin_sid = if (!was_all_sessions and !app_state.g_search_from_inbox and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+            if (!was_search_active) {
+                app_state.g_search_pin_sid = if (!was_all_sessions and !app_state.g_search_from_inbox and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+                @import("chat_send.zig").chatModeCapturePicker();
+            }
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
             app_state.g_search_active = true;
@@ -5293,6 +5300,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     chatSelectAll();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET or target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET or target == app_state.SEARCH_CHAT_MODE_EDITS_OFFSET) {
+                    const mode: @import("chat_slash.zig").PermissionMode = if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET) .plan else if (target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET) .manual else .acceptEdits;
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (!@import("chat_send.zig").chatModeSelect(mode)) showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
