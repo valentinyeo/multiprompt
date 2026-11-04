@@ -39,7 +39,7 @@ test('chat UI approval guard', async t => {
     assert.equal(await check(''), false);
     assert.equal(await check(link), true);
     for (const text of ['<p>Yes</p>', '<p>Yes, do this.</p>', '<p>👍</p>', '<p><strong>Approved</strong>.</p>', '<p>Y&#101;s</p>']) assert.equal(await check(link, ui, board([{ ...own, text }])), true, text);
-    for (const text of ['> Approved', '```\nApproved\n```', 'Not approved', 'Approved?', 'Approved if ready', 'The runner said approved', '<blockquote><p>Yes</p></blockquote>', '<script>Yes</script>', '<p hidden>Yes</p>', '<p style="display:none">Yes</p>', '<code>Yes</code>', '<p>Yes, but not yet.</p>', '<p>Yes, if ready.</p>', '<p>Yes?</p>', '<p>Yes</p><p>if ready.</p>']) {
+    for (const text of ['> Approved', '```\nApproved\n```', 'Not approved', 'Approved?', '<s>Yes</s>', '<del>Approved</del>', '~~Yes~~', 'Approved if ready', 'The runner said approved', '<blockquote><p>Yes</p></blockquote>', '<script>Yes</script>', '<p hidden>Yes</p>', '<p style="display:none">Yes</p>', '<code>Yes</code>', '<p>Yes, but not yet.</p>', '<p>Yes, if ready.</p>', '<p>Yes?</p>', '<p>Yes</p><p>if ready.</p>']) {
       assert.equal(await check(link, ui, board([{ ...own, text }])), false, text);
     }
     for (const author of [
@@ -94,7 +94,7 @@ test('chat UI approval guard', async t => {
     ]) assert.equal(await check('', [file]), false);
     assert.equal(await check('', [{ filename: 'tools/check-chat-ui-approval.cjs', status: 'added' }], null), true);
     for (const filename of ['CLAUDE.md', 'AGENTS.md', 'GATES.md', 'tools/chat-ui-approval.test.js']) assert.equal(await check('', [{ filename, status: 'modified' }], null), true);
-    for (const filename of ['src/telemetry_panel.zig', 'src/chat_float.zig', 'src/chat_skill.zig', 'src/chat_composer_text.zig', 'src/chat_markdown.zig', 'src/chat_capture.zig', 'src/fonts.zig', 'src/font_probe.zig', 'SRC/sidebar.zig', 'src/message_menu.zig', 'src/room_view.zig', 'src/bot_photo.zig', 'src/update_card.zig']) assert.equal(await check('', [{ filename, status: 'modified' }]), false, filename);
+    for (const filename of ['src/telemetry_panel.zig', 'src/chat_float.zig', 'src/chat_skill.zig', 'src/chat_composer_text.zig', 'src/chat_markdown.zig', 'src/chat_capture.zig', 'src/fonts.zig', 'src/font_probe.zig', 'SRC/sidebar.zig', 'src/message_menu.zig', 'src/room_view.zig', 'src/bot_photo.zig', 'src/update_card.zig', 'src/workspace_switcher.zig', 'src/design_tokens.zig', 'src/bot_look.zig', 'src/star_badge_geometry.zig']) assert.equal(await check('', [{ filename, status: 'modified' }]), false, filename);
     assert.equal(await check('', [{ filename: 'src/capacity.zig', status: 'modified', changes: 2, patch: '@@ -1 +1 @@\n-oldAdmission()\n+newAdmission()' }], null), true);
     assert.equal(await check('', [{ filename: 'src/capacity.zig', status: 'modified', changes: 2, patch: '@@ -1 +1 @@\n-oldDraw()\n+newDraw()' }]), false);
     for (const symbol of ['chat_block', 'chat_capture', 'cache', 'tailFor', 'classification']) assert.equal(await check('', [{ filename: 'src/chat_session.zig', status: 'modified', changes: 2, patch: `@@ -1 +1 @@\n-old\n+${symbol}` }]), false, symbol);

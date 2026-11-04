@@ -1,5 +1,5 @@
-const pureUI = /^(?:chat_(?:render|style|code|diff|image|options|permission|find_ui|scrollbar|table_measure|float|skill|composer_text|markdown|capture)|sidebar|drawing|window_layout|themes|dwrite_text|smooth|bot_avatar|bot_photo|room_view|update_card|ui_words|telemetry_panel|fonts|font_probe|message_menu)(?:[._/]|$)/i;
-const mixedUI = /^(?:chat_session|main|app_state|chat_composer|composer|capacity|archive|inbox|usage_card)(?:[._/]|$)/i;
+const pureUI = /^(?:chat_(?:render|style|code|diff|image|options|permission|find_ui|scrollbar|table_measure|float|skill|composer_text|markdown|capture)|sidebar|drawing|window_layout|themes|dwrite_text|smooth|bot_avatar|bot_photo|room_view|workspace_switcher|design_tokens|bot_look|star_badge_geometry|update_card|ui_words|telemetry_panel|fonts|font_probe|message_menu)(?:[._/]|$)/i;
+const mixedUI = /^(?:chat_session|main|app_state|chat_composer|composer|capacity|archive|inbox|usage_card|browser_pane|workspace_view|session_layout)(?:[._/]|$)/i;
 const uiSymbol = /(?:draw|paint|render|layout|sidebar|composer|chat[_A-Z]*(?:view|ui|style|color|font|width|height|rect|pixel|scroll|block|capture)|cache|tailFor|classification|\b(?:rect|font|color|colour|pixel|dpi|invalidate|redraw|hwnd)\b)/i;
 const policy = /^(?:tools\/check-chat-ui-approval\.cjs|\.github\/workflows\/[^/]*(?:chat-ui-approval|chat-guard)[^/]*\.ya?ml)$/i;
 const newUI = /(?:^|[_/.-])(?:sidebar|render|drawing|draw|paint|layout|ui)(?:[_/.-]|$)/i;
@@ -40,7 +40,7 @@ function textLines(text) {
     if (closing) {
       if (stack.pop()?.tag !== tag) throw new Error('invalid markup');
     } else if (tag !== 'br') {
-      const hidden = /^(?:blockquote|pre|code|script|style|template)$/.test(tag) || /(?:\bhidden\b|aria-hidden\s*=\s*["']?true|display\s*:\s*none|visibility\s*:\s*hidden)/i.test(attrs);
+      const hidden = /^(?:blockquote|pre|code|script|style|template|s|del)$/.test(tag) || /(?:\bhidden\b|aria-hidden\s*=\s*["']?true|display\s*:\s*none|visibility\s*:\s*hidden)/i.test(attrs);
       stack.push({ tag, hidden });
     }
     if (/^(?:p|div|li|br|h[1-6]|blockquote|pre|code|script|style|template)$/.test(tag)) output += '\n';
@@ -57,7 +57,7 @@ function textLines(text) {
   return output.split('\n').map(line => {
     if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; return ''; }
     if (fenced || /^(?:\s*>| {4}|\t)/.test(line)) return '';
-    return line.replace(/`[^`]*`/g, '').replace(/[*_~]/g, '').trim();
+    return line.replace(/`[^`]*`|~~[^~]*~~/g, '').replace(/[*_]/g, '').trim();
   }).filter(Boolean);
 }
 
