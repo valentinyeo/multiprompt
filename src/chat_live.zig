@@ -1202,6 +1202,10 @@ test "IGSH-1593 startup failure survives empty history and replay" {
     const ended = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"startup-failure\",\"payload\":{\"status\":\"failed\"}}}]}}";
     try std.testing.expect(applyPage(90, sid, ended));
     try std.testing.expect(!running(90));
+    const stopped = "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
+    try std.testing.expect(applyPage(90, sid, stopped));
+    historyCaughtUp(90);
+    try std.testing.expectEqual(@as(u64, 4), begin(90, 0, sid));
     try std.testing.expect(held(90));
     var text: [128]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;

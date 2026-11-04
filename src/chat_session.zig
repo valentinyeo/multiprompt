@@ -1631,7 +1631,9 @@ fn refreshChatBlockCache(force: bool) bool {
         if (!force) pollChatStatus(app_state.active_shell);
         break :blk null;
     };
-    if (!from_file and (screen_len == null or screen_len.? == 0) and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id) return false;
+    const shell_id = app_state.shells[app_state.active_shell].shell_id;
+    const live_revision = @import("chat_live.zig").revision(shell_id);
+    if (!from_file and (screen_len == null or screen_len.? == 0) and app_state.g_chat_cache_shell_id == shell_id and live_revision == g_chat_live_drawn_revision) return false;
     const len = if (from_file) entry.?.history.text.items.len else screen_len orelse 0;
     const count = if (from_file) entry.?.history.blocks.items.len else CHAT_MAX_BLOCKS;
     var open_tools = std.AutoHashMap(u64, void).init(std.heap.page_allocator);
@@ -1647,8 +1649,6 @@ fn refreshChatBlockCache(force: bool) bool {
     var live_blocks: [16]ChatBlock = undefined;
     if (!chatEnsureTranscriptCapacity(len + CHAT_LIVE_TEXT_ROOM, count + live_blocks.len)) return false;
     const source = if (from_file) entry.?.history.text.items else app_state.g_chat_screen[0..len];
-    const shell_id = app_state.shells[app_state.active_shell].shell_id;
-    const live_revision = @import("chat_live.zig").revision(shell_id);
     const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) ^ (live_revision *% 0x9E3779B97F4A7C15);
     const generation = if (from_file) entry.?.generation else 0;
     const seen: []const @import("chat_markdown.zig").Block = if (from_file) entry.?.history.blocks.items else &.{};
@@ -2068,6 +2068,105 @@ pub fn chatDeliveryPending(shell_id: u32, include_not_sent: bool) bool {
         if (app_state.shells[idx].shell_id == shell_id) return true;
     }
     return false;
+}
+
+test "IGSH-1593 startup failure reaches an empty cached transcript after the host stops" {
+    const live = @import("chat_live.zig");
+    const sid = "11111111-2222-3333-4444-123456789abc";
+    const shell_id = 1593001;
+    const saved = .{
+        .shell = app_state.shells[0],
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .hwnd = app_state.g_main_hwnd,
+        .histories = app_state.g_chat_histories,
+        .tables = app_state.g_chat_tables,
+        .table_shell = app_state.g_chat_tables_shell_id,
+        .received = app_state.g_chat_received,
+        .cache_shell = app_state.g_chat_cache_shell_id,
+        .cache_generation = app_state.g_chat_cache_generation,
+        .generation = app_state.g_chat_history_generation,
+        .drawn = g_chat_live_drawn_revision,
+        .text = app_state.g_chat_capture[0..128].*,
+        .blocks = app_state.g_chat_blocks[0..4].*,
+        .block_count = app_state.g_chat_block_count,
+        .last_len = app_state.g_chat_last_len,
+        .last_hash = app_state.g_chat_last_hash,
+        .file_valid = app_state.g_chat_file_valid,
+        .from_file = app_state.g_chat_blocks_from_file,
+        .working = app_state.g_chat_screen_working,
+        .reuse = app_state.g_chat_layout_reuse,
+    };
+    app_state.g_chat_histories = .empty;
+    app_state.g_chat_tables = .{};
+    app_state.g_chat_tables_shell_id = 0;
+    app_state.g_chat_received = .{};
+    defer {
+        live.release(shell_id);
+        chatHistoryForget(shell_id);
+        app_state.g_chat_histories.deinit(std.heap.page_allocator);
+        app_state.g_chat_tables.deinit(std.heap.page_allocator);
+        app_state.g_chat_received.deinit(std.heap.page_allocator);
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.hwnd;
+        app_state.g_chat_histories = saved.histories;
+        app_state.g_chat_tables = saved.tables;
+        app_state.g_chat_tables_shell_id = saved.table_shell;
+        app_state.g_chat_received = saved.received;
+        app_state.g_chat_cache_shell_id = saved.cache_shell;
+        app_state.g_chat_cache_generation = saved.cache_generation;
+        app_state.g_chat_history_generation = saved.generation;
+        g_chat_live_drawn_revision = saved.drawn;
+        app_state.g_chat_capture[0..128].* = saved.text;
+        app_state.g_chat_blocks[0..4].* = saved.blocks;
+        app_state.g_chat_block_count = saved.block_count;
+        app_state.g_chat_last_len = saved.last_len;
+        app_state.g_chat_last_hash = saved.last_hash;
+        app_state.g_chat_file_valid = saved.file_valid;
+        app_state.g_chat_blocks_from_file = saved.from_file;
+        app_state.g_chat_screen_working = saved.working;
+        app_state.g_chat_layout_reuse = saved.reuse;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_main_hwnd = null;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = shell_id;
+    @memcpy(app_state.shells[0].claude_sid[0..sid.len], sid);
+    app_state.shells[0].claude_sid_len = sid.len;
+    app_state.g_chat_cache_shell_id = shell_id;
+    app_state.g_chat_cache_generation = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_last_hash = 0;
+    g_chat_live_drawn_revision = 0;
+    try std.testing.expect(!refreshChatBlockCache(true));
+    try std.testing.expect(live.starting(shell_id, 0, sid));
+    _ = live.begin(shell_id, 0, sid);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"startup-failure\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.done\",\"turn\":\"startup-failure\",\"item\":\"startup-failure\",\"payload\":{\"text\":\"Could not start chat: working folder unavailable.\"}}}," ++
+        "{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"startup-failure\",\"payload\":{\"status\":\"failed\"}}}," ++
+        "{\"seq\":4,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
+    try std.testing.expect(live.applyPage(shell_id, sid, page));
+    try std.testing.expect(!live.running(shell_id));
+    live.historyCaughtUp(shell_id);
+    try std.testing.expectEqual(@as(u64, 4), live.begin(shell_id, 0, sid));
+    try std.testing.expect(refreshChatBlockCache(true));
+    const expected = std.unicode.utf8ToUtf16LeStringLiteral("Could not start chat: working folder unavailable.");
+    try std.testing.expectEqualSlices(u16, expected, app_state.g_chat_capture[0..app_state.g_chat_last_len]);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_block_count);
+    try std.testing.expectEqual(@import("chat_markdown.zig").Role.prose, app_state.g_chat_blocks[0].role);
+    try std.testing.expect(!live.applyPage(shell_id, sid, page));
+    _ = refreshChatBlockCache(true);
+    try std.testing.expectEqual(@as(usize, 1), app_state.g_chat_block_count);
+    try std.testing.expectEqualSlices(u16, expected, app_state.g_chat_capture[0..app_state.g_chat_last_len]);
 }
 
 test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polling" {

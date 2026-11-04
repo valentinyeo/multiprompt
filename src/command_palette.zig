@@ -2213,7 +2213,98 @@ pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
 pub var g_start_fail: StartFail = .none;
 pub var g_pick_row_gone: bool = false;
 
-fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
+fn workspaceHomeCandidate(configured: []const u8, known: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, configured, "~/") or !std.mem.startsWith(u8, known, "/home/")) return null;
+    const end = std.mem.indexOfScalarPos(u8, known, 6, '/') orelse return null;
+    if (end == 6 or std.mem.eql(u8, known[6..end], ".") or std.mem.eql(u8, known[6..end], "..")) return null;
+    var known_parts = std.mem.splitScalar(u8, known[1..], '/');
+    while (known_parts.next()) |part| {
+        if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    const suffix = configured[1..];
+    if (!std.mem.startsWith(u8, known[end..], suffix)) return null;
+    if (known.len > end + suffix.len and known[end + suffix.len] != '/') return null;
+    var parts = std.mem.splitScalar(u8, configured[2..], '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    return known[0..end];
+}
+
+test "workspace home candidates require the configured folder" {
+    try std.testing.expectEqualStrings("/home/owner", workspaceHomeCandidate("~/projects/sample", "/home/owner/projects/sample/sub") orelse return error.TestUnexpectedResult);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/sample", "/home/owner/projects/samples") == null);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/../sample", "/home/owner/projects/../sample") == null);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/sample", "/srv/projects/sample") == null);
+}
+
+fn resolveWorkspaceLiveCwd(workspace: u8, host: u8, cwd: []const u8, out: *[256]u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, cwd, "~/")) return cwd;
+    var home: ?[]const u8 = null;
+    var ambiguous = false;
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.workspace != workspace) continue;
+        if (std.mem.startsWith(u8, shell.tmux_session[0..shell.tmux_session_len], "live-") or std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], "live")) continue;
+        if ((@import("capacity.zig").remoteHostForShell(shell) orelse continue) != host) continue;
+        const known = @import("vps.zig").shellKnownRemotePath(shell, host) orelse continue;
+        const candidate = workspaceHomeCandidate(cwd, known) orelse continue;
+        if (i == app_state.active_shell) return std.fmt.bufPrint(out, "{s}{s}", .{ candidate, cwd[1..] }) catch null;
+        if (home) |previous| {
+            if (!std.mem.eql(u8, previous, candidate)) ambiguous = true;
+        } else home = candidate;
+    }
+    if (ambiguous) return null;
+    const selected = home orelse return cwd;
+    return std.fmt.bufPrint(out, "{s}{s}", .{ selected, cwd[1..] }) catch null;
+}
+
+test "workspace live cwd selects matching terminal and rejects ambiguity" {
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_cache_count = app_state.g_tmux_cache_count;
+    defer {
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_tmux_cache_count = saved_cache_count;
+    }
+    app_state.g_tmux_cache_count = 0;
+    app_state.shell_count = 3;
+    for (0..3) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].kind = .vps;
+        app_state.shells[i].workspace = 1;
+    }
+    const paths = [_][]const u8{ "/home/one/projects/sample", "/home/two/projects/sample/sub", "/home/other/projects/sample" };
+    for (paths, 0..) |path, i| {
+        @memcpy(app_state.shells[i].cached_cwd[0..path.len], path);
+        app_state.shells[i].cached_cwd_len = @intCast(path.len);
+    }
+    app_state.shells[2].workspace = 2;
+    var out: [256]u8 = undefined;
+    app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/two/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.active_shell = 2;
+    try std.testing.expect(resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) == null);
+    app_state.shells[1].kind = .vps2;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 2, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].kind = .tmux;
+    app_state.shells[1].tmux_host = 0;
+    const failed_path = "/home/reader/projects/sample";
+    @memcpy(app_state.shells[1].cached_cwd[0..failed_path.len], failed_path);
+    app_state.shells[1].cached_cwd_len = failed_path.len;
+    @memcpy(app_state.shells[1].tmux_session[0..8], "live-bad");
+    app_state.shells[1].tmux_session_len = 8;
+    app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shell_count = 0;
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+}
+
+fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
     g_start_fail = .none;
     const workspace = activeWorkspaceSlot();
     const program = workspaceSessionProgram(configured_program, with_agent);
@@ -2234,6 +2325,12 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         return false;
     }
     const live_chat = host_sid != null and newTabOpensChatView(program);
+    var resolved_cwd: [256]u8 = undefined;
+    const cwd = if (live_chat) resolveWorkspaceLiveCwd(workspace, host, input_cwd, &resolved_cwd) orelse {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: workspace home ambiguous or path too long");
+        return false;
+    } else input_cwd;
     var session_buf: [64]u8 = undefined;
     const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
     var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
