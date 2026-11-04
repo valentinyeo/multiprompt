@@ -18,6 +18,9 @@ The journey emits the supported ACTIVE and DONE hook notifications for that owne
 The real app detects it and paints its native transcript.
 The journey finds three separate round dots from screenshot pixels, requires a different animation frame, signals the stand-in to reply, and requires the dots to disappear.
 Inspect `working-0.png`, `working-1.png`, their crops, `after.png` and `working-proof.json`.
+IGSH-1665 waits for the published current step plus minutes or the exact idle Ready reply, then captures `second-line-{working,finished}-{light,amoled,edgegray}-{inbox,sidebar}.png` through real keyboard actions.
+The existing gray theme is Edge Grey, not Graphite 2. These captures do not claim an unavailable theme.
+The stand-in supplies Inspecting files and Ready, not needs-you questions or real provider activity.
 Native layout tests additionally compare the placeholder rectangle against a real one-line reply, including input-wait suppression.
 
 ## Gotchas

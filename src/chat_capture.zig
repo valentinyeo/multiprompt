@@ -177,7 +177,7 @@ fn chatWideContainsAscii(value: []const u16, needle: []const u8) bool {
     return false;
 }
 
-fn chatLineIsToolActivity(line: []const u16) bool {
+pub fn chatLineIsToolActivity(line: []const u16) bool {
     if (line.len < 3) return false;
     const has_marker = line[0] == 0x2022 or line[0] == 0x25CF or line[0] == 0x23FA or line[0] == 0x273B;
     var start: usize = if (has_marker) 1 else 0;
@@ -253,7 +253,7 @@ fn chatClauseIsCountedAction(clause: []const u16) bool {
     return true;
 }
 
-fn chatLineIsCollapsedToolSummary(line: []const u16) bool {
+pub fn chatLineIsCollapsedToolSummary(line: []const u16) bool {
     if (line.len < 5) return false;
     const sep = [_]u16{ ',', ' ' };
     var it = std.mem.splitSequence(u16, line, &sep);
@@ -571,7 +571,7 @@ fn chatBodyIsBackgroundAgentsLaunched(body: []const u16) bool {
     return chatWideContainsAscii(body, "background agent") and chatWideContainsAscii(body, "launched");
 }
 
-fn chatLineIsAgentStatusNoise(line: []const u16) bool {
+pub fn chatLineIsAgentStatusNoise(line: []const u16) bool {
     const marker_len = chatStatusMarkerLen(line);
     if (marker_len == 0) return false;
     var start = marker_len;
@@ -603,7 +603,7 @@ fn chatBodyIsToolCallHeader(body: []const u16) bool {
     return false;
 }
 
-fn chatLineIsGenericToolHeader(line: []const u16) bool {
+pub fn chatLineIsGenericToolHeader(line: []const u16) bool {
     const marker_len = chatStatusMarkerLen(line);
     if (marker_len == 0) return false;
     var start = marker_len;
