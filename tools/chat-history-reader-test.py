@@ -4009,6 +4009,79 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         self.assertEqual(len([command for command in commands if 'paste-buffer' in command]), 1)
         self.assertTrue(any('C-u' in command for command in commands))
 
+class IGSH_1647_PictureLinkSendTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', 'sid.jsonl')).start()
+        self.text = 'Please check https://example.com/picture.png'
+        self.state = dict(box='', buffer='', clock=0, ready=0, enters=0, pasted=0, sent=[])
+        patch.object(reader.time, 'sleep', side_effect=self.sleep).start()
+        patch.object(reader.subprocess, 'run', side_effect=self.run_tmux).start()
+
+    def sleep(self, seconds):
+        self.state['clock'] += seconds
+
+    def run_tmux(self, command, **kwargs):
+        state = self.state
+        stdout = ''
+        if 'load-buffer' in command:
+            state['buffer'] = kwargs['input'].decode('utf-8')
+        if 'paste-buffer' in command:
+            state['box'] += state['buffer']
+            state['ready'] = state['clock'] + 0.3
+            state['pasted'] += 1
+        if 'send-keys' in command and command[-1] == 'Enter':
+            state['enters'] += 1
+            if state['clock'] >= state['ready']:
+                state['sent'].append(state['box'])
+                state['box'] = ''
+        if 'capture-pane' in command:
+            stdout = '\u276f ' + state['box'] + '\n' + '\u2500' * 20 + '\n'
+        return types.SimpleNamespace(returncode=0, stdout=stdout)
+
+    def send(self):
+        return reader.send_response_preserve_draft(dict(tmux='fixture', sid='sid', text=self.text))
+
+    def test_picture_link_is_submitted_once_and_box_ends_empty(self):
+        self.assertEqual(self.send()['status'], 'sent')
+        self.assertEqual(self.state['box'], '')
+        self.assertEqual(self.state['sent'], [self.text])
+        self.assertEqual(self.state['pasted'], 1)
+        self.assertEqual(self.state['enters'], 1)
+
+    def test_swallowed_enter_retries_without_pasting_twice(self):
+        original = self.run_tmux
+        def run(command, **kwargs):
+            if 'send-keys' in command and command[-1] == 'Enter' and self.state['enters'] == 0:
+                self.state['enters'] += 1
+                return types.SimpleNamespace(returncode=0, stdout='')
+            return original(command, **kwargs)
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(self.send()['status'], 'sent')
+        self.assertEqual(self.state['box'], '')
+        self.assertEqual(self.state['sent'], [self.text])
+        self.assertEqual(self.state['pasted'], 1)
+        self.assertEqual(self.state['enters'], 2)
+
+    def test_full_box_is_not_sent_after_three_enters(self):
+        original = self.run_tmux
+        def run(command, **kwargs):
+            if 'send-keys' in command and command[-1] == 'Enter':
+                self.state['enters'] += 1
+                return types.SimpleNamespace(returncode=0, stdout='')
+            return original(command, **kwargs)
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(self.send()['status'], 'not_sent')
+        self.assertEqual(self.state['box'], self.text)
+        self.assertEqual(self.state['sent'], [])
+        self.assertEqual(self.state['enters'], 3)
+        self.assertEqual(self.state['pasted'], 1)
+        self.assertNotIn('sent', reader.draft_record('fixture'))
+
+
 FAKE_AGENT = r'''#!/usr/bin/env python3
 import json, os, sys
 log = os.environ['FAKE_AGENT_LOG']
