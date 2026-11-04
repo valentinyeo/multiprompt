@@ -277,7 +277,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+Left / Alt+Right", .b = "Cycle prev / next workspace", .header = false },
     .{ .a = "Ctrl+N / Alt+N pill", .b = "New workspace", .header = false },
     .{ .a = "Inbox (Alt+I)", .b = "", .header = true },
-    .{ .a = "Sidebar inbox button", .b = "Click or Ctrl+Shift+I to toggle; Alt+I opens / selects All", .header = false },
+    .{ .a = "Sidebar inbox button", .b = "Click to open; Ctrl+Shift+I toggles; Alt+I opens / selects All", .header = false },
     .{ .a = "Ctrl+F or /", .b = "Reduce Inbox to matching sessions", .header = false },
     .{ .a = "j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9", .b = "Move / top / bottom / jump row", .header = false },
     .{ .a = "Tab / h / l", .b = "Switch workspace split", .header = false },

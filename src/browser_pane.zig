@@ -665,8 +665,8 @@ pub fn inboxButtonRect(in_overlay: bool) RECT {
 }
 
 pub fn inboxButtonHitTest(mx: i32, my: i32) bool {
-    if (!app_state.g_inbox_active and (!app_state.g_single_window or app_state.g_sidebar_collapsed or app_state.g_hide_sidebar or app_state.g_hide_pills)) return false;
-    const r = inboxButtonRect(app_state.g_inbox_active);
+    if (app_state.g_inbox_active or !app_state.g_single_window or app_state.g_sidebar_collapsed or app_state.g_hide_sidebar or app_state.g_hide_pills) return false;
+    const r = inboxButtonRect(false);
     return mx >= r.left and mx < r.right and my >= r.top and my < r.bottom;
 }
 

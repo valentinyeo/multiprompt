@@ -45,4 +45,64 @@
             Press @(0x0D) 'Enter: unmute the current tab'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells | Where-Object { $_.sid -eq $sid }).Count -eq 1 } 'unmuted session listed in published Inbox'
             $result.checks += @{ name = 'inbox-unmuted-listed'; sid = $sid; listed = $true }
+            if ((Read-Session).hide_pills) {
+                Focus-Palette 'workspace switcher' 6213
+                Press @(0x0D) 'Enter: show workspace switcher for Inbox button proof'
+                Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills } 'workspace switcher shown and saved for Inbox button proof'
+            }
+            $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+            Wait-Until { (Test-Path $snapshotPath) -and (Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width -ge 100 } 'app publishes sidebar width'
+            $sidebarLogical = [int](Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width
+            $session = Read-Session
+            $uiScale = if ($session.PSObject.Properties['ui_scale']) { [int]$session.ui_scale } else { 100 }
+            $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+            if ($dpi -eq 0) { throw 'Inbox button DPI unavailable' }
+            $scale = $dpi * $uiScale / 9600.0
+            $closedX = [int][Math]::Floor($sidebarLogical * $scale) - [int][Math]::Floor(24 * $scale) - [int][Math]::Floor(6 * $scale)
+            $openX = [int][Math]::Floor(8 * $scale)
+            $buttonWidth = [int][Math]::Floor(24 * $scale)
+            $frame = New-Object VerifyNative+Rect
+            $origin = New-Object VerifyNative+Point
+            if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Inbox button geometry unavailable' }
+            $dx = $origin.X - $frame.Left
+            $dy = $origin.Y - $frame.Top
+            foreach ($theme in @('light', 'amoled')) {
+                Select-Theme $theme ("inbox-button-$theme-theme")
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $false } 'Inbox closed before button check'
+                [VerifyNative]::MoveMouseClient($script:window, 50, 100, $false)
+                Snapshot "inbox-button-$theme-closed"
+                Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox for button check'
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'Inbox opened for button check'
+                [VerifyNative]::MoveMouseClient($script:window, 50, 100, $false)
+                Snapshot "inbox-button-$theme-open"
+                $counts = @{}
+                foreach ($mode in @('closed', 'open')) {
+                    $x = if ($mode -eq 'open') { $openX } else { $closedX }
+                    $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence "inbox-button-$theme-$mode.png"))
+                    try {
+                        $bg = $image.GetPixel($dx + $x + 2, $dy + 17)
+                        $different = 0
+                        for ($py = 10; $py -lt 24; $py++) {
+                            for ($px = $x + 3; $px -lt $x + $buttonWidth - 3; $px++) {
+                                $pixel = $image.GetPixel($dx + $px, $dy + $py)
+                                if ([Math]::Abs([int]$pixel.R - [int]$bg.R) -gt 35 -or [Math]::Abs([int]$pixel.G - [int]$bg.G) -gt 35 -or [Math]::Abs([int]$pixel.B - [int]$bg.B) -gt 35) { $different++ }
+                            }
+                        }
+                        $counts[$mode] = $different
+                    } finally { $image.Dispose() }
+                }
+                if ($counts.open -ne 0 -or $counts.closed -lt 4) { throw "Inbox button pixels failed for $theme`: open=$($counts.open), closed=$($counts.closed)" }
+                [VerifyNative]::ClickClient($script:window, ($openX + [int][Math]::Floor($buttonWidth / 2)), 17)
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'former button does not close Inbox'
+                Press @(0x1B) 'Esc: close Inbox for restored button check'
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $false } 'Inbox closed for restored button check'
+                [VerifyNative]::ClickClient($script:window, ($closedX + [int][Math]::Floor($buttonWidth / 2)), 17)
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'restored button reopens Inbox'
+                Press @(0x1B) 'Esc: return from Inbox button check'
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $false } 'Inbox returned after button check'
+                [VerifyNative]::MoveMouseClient($script:window, 50, 100, $false)
+                Snapshot "inbox-button-$theme-returned"
+                $result.checks += @{ name = "inbox-button-$theme"; openPixels = $counts.open; closedPixels = $counts.closed; sidebarWidth = $sidebarLogical; dpi = $dpi; uiScale = $uiScale; reopened = $true; returned = $true }
+            }
+            $result.checks += @{ name = 'inbox-button-unavailable-theme'; theme = 'Graphite 2'; reason = 'not shipped' }
         
