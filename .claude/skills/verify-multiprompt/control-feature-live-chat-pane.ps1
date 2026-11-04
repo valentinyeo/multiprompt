@@ -86,13 +86,15 @@ try {
     $two = $chats[1]
     $selectChat = {
         param([hashtable]$Chat)
-        $inbox = Read-Inbox
-        if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
+        $selected = {
+            $switches = [regex]::Matches((Get-Content $log -Raw), 'switchToShell: \d+ -> (\d+)')
+            $switches.Count -gt 0 -and [int]$switches[$switches.Count - 1].Groups[1].Value -eq $Chat.index
+        }
+        if (& $selected) { return }
         for ($slot = 1; $slot -le 3; $slot++) {
             Press @(0x11, (0x30 + $slot)) ('Ctrl+' + $slot + ': open sidebar session ' + $slot + ' looking for ' + $Chat.name)
             Start-Sleep -Milliseconds 700
-            $inbox = Read-Inbox
-            if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
+            if (& $selected) { return }
         }
         for ($row = 0; $row -lt 3; $row++) {
             Doctor
@@ -100,10 +102,9 @@ try {
             Record ('Click sidebar row ' + ($row + 1) + ' looking for ' + $Chat.name)
             [VerifyNative]::ClickClient($script:window, 150, (96 + 60 * $row))
             Start-Sleep -Milliseconds 400
-            $inbox = Read-Inbox
-            if ($null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId) { return }
+            if (& $selected) { return }
         }
-        Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $Chat.shellId } ($Chat.name + ' selected')
+        Wait-Until { & $selected } ($Chat.name + ' selected')
     }
     & $selectChat $two
     Wait-Until { -not [VerifyNative]::PaneVisible($script:window) } ($two.name + ' shows no browser pane yet') 20

@@ -23,7 +23,7 @@ Preconditions match [Session open](session-open.md) and [Browser switch speed](b
 
 - **Dispatch.** Run `gh workflow run verify.yml --ref <branch> -f feature=live-chat-pane`.
 - **Setup.** Create a group through the palette. Use `session-open` for `live-1` and `live-2`. Require saved tmux tabs with those names. Serve two local pages per chat.
-- **Selftest.** Select chat one. Run the shipped wrapper with its session token and app listener port. Require successful exit, matching session and chat name, active and visible hosting, and passing open, text, type, click, screenshot, hosting and close steps. Retain the JSON summary and raw output.
+- **Selftest.** Select chat one and confirm the actual switch trace matches its saved tab index. Published Inbox selection can lag behind keyboard input. Run the shipped wrapper with its session token and app listener port. Require successful exit, matching session and chat name, active and visible hosting, and passing open, text, type, click, screenshot, hosting and close steps. Retain the JSON summary and raw output.
 - **Chat one.** Use its token to open a page. Require connected published pane state, matching `status` and `pane-info`, and exactly one matching page in `tabs`. Navigate to its second page and wait for its exact title and URL in the pane tab list. A loading acknowledgement is not page evidence.
 - **Isolation.** Before opening chat two, require its published pane stays closed with connection id zero.
 - **Chat two.** Open its page in the background. Require a distinct window id and matching chat name. Require its tab list excludes both first-chat URLs.
