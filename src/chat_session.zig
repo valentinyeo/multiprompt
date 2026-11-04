@@ -281,6 +281,7 @@ pub fn chatFileIdentityForShell(idx: u32) chat_transcript.Identity {
     const s = &app_state.shells[idx];
     if (s.kind != .tmux and !chatBenchEnabled()) return .{};
     var key = chat_transcript.Identity.init(s.shell_id, s.tmux_host, s.ai_agent == 2 or (chatBenchEnabled() and std.mem.startsWith(u8, s.claude_sid[0..s.claude_sid_len], "codex-")), s.claude_sid[0..s.claude_sid_len], s.claude_cwd[0..s.claude_cwd_len]);
+    key.pi = s.ai_agent == 3;
     if (s.tmux_session_len < key.tmux.len) @memcpy(key.tmux[0..s.tmux_session_len], s.tmux_session[0..s.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return .{};
     for (app_state.g_chat_histories.items) |entry| {
@@ -450,6 +451,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
     var key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2,
         shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     if (key.shell_id == 0) return null;
+    key.pi = shell.ai_agent == 3;
     @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return null;
     return .{ .key = key, .agent = shell.ai_agent };
@@ -457,7 +459,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
 
 fn chatVoiceMatches(key: chat_transcript.Identity, entry: *const ChatHistoryEntry) bool {
     return !entry.retired and key.shell_id == entry.key.shell_id and key.host == entry.key.host and
-        key.codex == entry.key.codex and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
+        key.codex == entry.key.codex and key.pi == entry.key.pi and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
         std.mem.eql(u8, &key.cwd, &entry.key.cwd) and
         (key.sid[0] == 0 or std.mem.eql(u8, &key.sid, &entry.key.sid));
 }
@@ -477,6 +479,9 @@ test "voice source rejects permissive cross-session matches" {
     try std.testing.expect(!chatVoiceMatches(key, &entry));
     entry.key = key;
     entry.key.codex = true;
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+    entry.key = key;
+    entry.key.pi = true;
     try std.testing.expect(!chatVoiceMatches(key, &entry));
     entry.key = key;
     entry.retired = true;
@@ -709,6 +714,7 @@ pub fn chatHistoryStreamsKeep(shell_id: u32) void {
 const ChatLiveStream = struct {
     shell_id: u32 = 0,
     host: u8 = 0,
+    provider: []const u8 = "claude",
     sid: [40]u8 = @splat(0),
     sid_len: usize = 0,
     refs: std.atomic.Value(u32) = .init(2),
@@ -728,7 +734,7 @@ fn chatLiveLock(mutex: *@import("app_state.zig").SpinMutex) void {
 var g_chat_live_stream: ?*ChatLiveStream = null;
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
-    if (key.shell_id == 0 or key.codex or key.sid[0] == 0) return false;
+    if (key.shell_id == 0 or key.sid[0] == 0) return false;
     const index = findShellById(key.shell_id) orelse return false;
     if (index >= app_state.shell_count) return false;
     const shell = app_state.shells[index];
@@ -765,13 +771,14 @@ fn chatLiveStreamEnsure(key: chat_transcript.Identity) void {
     defer g_chat_live_mutex.unlock();
     if (g_chat_live_stream) |current| {
         const same = !current.ended.load(.acquire) and current.shell_id == key.shell_id and current.host == key.host and
+            std.mem.eql(u8, current.provider, key.provider()) and
             std.mem.eql(u8, current.sid[0..current.sid_len], sid);
         if (same) return;
         chatLiveStreamStopLocked();
     }
     const a = std.heap.page_allocator;
     const stream = a.create(ChatLiveStream) catch return;
-    stream.* = .{ .shell_id = key.shell_id, .host = key.host };
+    stream.* = .{ .shell_id = key.shell_id, .host = key.host, .provider = key.provider() };
     stream.sid_len = @min(sid.len, stream.sid.len);
     @memcpy(stream.sid[0..stream.sid_len], sid[0..stream.sid_len]);
     const thread = std.Thread.spawn(.{}, chatLiveStreamThread, .{ stream, key }) catch {
@@ -799,7 +806,7 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
     stream.mutex.unlock();
     chatLiveLog("start", stream.shell_id, after, @intFromBool(started));
     if (!started or stream.cancelled.load(.acquire)) return;
-    const line = @import("chat_live.zig").subscribeLine(a, stream.shell_id, sid, after) catch return;
+    const line = @import("chat_live.zig").subscribeLine(a, stream.shell_id, key.provider(), sid, after) catch return;
     defer a.free(line);
     var written: DWORD = 0;
     if (WriteFile(stream.channel.input, line.ptr, @intCast(line.len), &written, null) == 0 or written != line.len or
@@ -1124,6 +1131,7 @@ fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_histor
     return std.json.Stringify.valueAlloc(a, .{
         .id = id,
         .codex = key.codex,
+        .provider = key.provider(),
         .sid = std.mem.sliceTo(&key.sid, 0),
         .tmux = std.mem.sliceTo(&key.tmux, 0),
         .cwd = std.mem.sliceTo(&key.cwd, 0),
@@ -1516,7 +1524,7 @@ pub fn chatFileOnReady() void {
                     changed = true;
                 }
                 if (!disk and app_state.shells[idx].ai_agent == 0) {
-                    app_state.shells[idx].ai_agent = if (entry.key.codex) 2 else 1;
+                    app_state.shells[idx].ai_agent = if (entry.key.pi) 3 else if (entry.key.codex) 2 else 1;
                     changed = true;
                 }
                 if (changed) saveSession();
@@ -1710,7 +1718,9 @@ fn chatCacheIdentity() chat_transcript.Identity {
     const key = chatFileIdentity();
     if (key.shell_id != 0 or app_state.active_shell >= app_state.shell_count) return key;
     const shell = &app_state.shells[app_state.active_shell];
-    return chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
+    var cache_key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
+    cache_key.pi = shell.ai_agent == 3;
+    return cache_key;
 }
 
 fn chatStoreTabCache(from_file: bool) void {

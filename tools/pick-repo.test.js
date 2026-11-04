@@ -98,10 +98,10 @@ test('IGSH-1266 the launch buffers hold every path the launch accepts', () => {
   const pendingMax = number(state, /pub var g_pending_tmux_cmd: \[(\d+)\]u8 = std\.mem\.zeroes/, 'the pending command buffer must exist');
   const reader = host.match(/pub const READER = "([^"]+)";/);
   assert.ok(reader, 'the runtime path must be named once');
-  const mode = host.match(/const mode = "([^"]*)";/);
+  const mode = host.match(/const mode = if \(provider == \.claude\) "([^"]*)" else "";/);
   assert.ok(mode, 'the permission mode must be named once');
 
-  const launch = host.slice(host.indexOf('pub fn launchCommand('));
+  const launch = host.slice(host.indexOf('pub fn launchCommandFor('));
   const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
   assert.ok(format, 'the host launch format must be readable');
   const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
@@ -112,6 +112,7 @@ test('IGSH-1266 the launch buffers hold every path the launch accepts', () => {
     READER: reader[1].length,
     sid: 36,
     mode: mode[1].length,
+    name: 'codex'.length,
   };
   const parts = format[1].split('{s}');
   const ordered = args[1].split(',').map((value) => value.trim());

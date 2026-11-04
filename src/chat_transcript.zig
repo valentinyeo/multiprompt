@@ -7,9 +7,14 @@ pub const Identity = struct {
     shell_id: u32 = 0,
     host: u8 = 0,
     codex: bool = false,
+    pi: bool = false,
     sid: [40]u8 = @splat(0),
     tmux: [64]u8 = @splat(0),
     cwd: [192]u8 = @splat(0),
+
+    pub fn provider(self: Identity) []const u8 {
+        return if (self.pi) "pi" else if (self.codex) "codex" else "claude";
+    }
 
     pub fn init(shell_id: u32, host: u8, codex: bool, sid: []const u8, cwd: []const u8) Identity {
         var key = Identity{ .shell_id = shell_id, .host = host, .codex = codex };
@@ -433,7 +438,7 @@ pub fn parse(wire: []const u8, id: u32, key: Identity, wide: []u16, out: []md.Bl
         const agent_field = fields.next() orelse return null;
         const tmux_field = fields.next() orelse return null;
         if (!std.mem.eql(u8, tmux_field, std.mem.sliceTo(&key.tmux, 0))) return null;
-        if (!std.mem.eql(u8, agent_field, if (key.codex) "codex" else "claude")) return null;
+        if (!std.mem.eql(u8, agent_field, key.provider())) return null;
         parsed.resolved_codex = key.codex;
         if (sid_field.len > 0 and !std.mem.eql(u8, sid_field, "-")) {
             if (sid_field.len >= parsed.resolved_sid.len) return null;

@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'u
 
 test('host launches only the agent as the validated workspace owner', () => {
   const program = String.raw`
-import json, os, selectors, sys, tempfile
+import io, json, os, selectors, sys, tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -97,6 +97,18 @@ with tempfile.TemporaryDirectory() as directory:
         for _ in range(3):
             assert r['host_start'](provider, sid).get('permanent') is True
         assert len(r['message_events_page'](provider, sid, 0)['events']) == len(events)
+    assert 'codex' in r['HOST_PROVIDERS']
+    stream = io.BytesIO()
+    session = dict(state={})
+    r['host_session_reset'](session, SimpleNamespace(stdin=stream))
+    r['host_claude_open'](provider, sid, tmux, session)
+    assert session['ready'] is False
+    request = dict(op='deliver', id='synthetic-message', attempt='first', epoch=1, text='hello')
+    assert r['host_handle_request']('codex', sid, tmux, session, request) == dict(status='busy', reason='agent_starting')
+    with patch.dict(r, host_attempt=lambda *args: dict(status='claimed')):
+        assert r['host_handle_request'](provider, sid, tmux, session, request)['status'] == 'sent'
+    assert json.loads(stream.getvalue())['message']['content'][0]['text'] == 'hello'
+    assert session['ready'] is False
     class Selector:
         def __enter__(self): return self
         def __exit__(self, *args): pass
