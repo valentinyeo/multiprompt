@@ -1534,6 +1534,10 @@ pub fn paintInbox(hdc: HANDLE) void {
         if (index == app_state.g_inbox_sel) @import("smooth.zig").fillRoundRect(hdc, .{ .left = layout.left, .top = y, .right = layout.right, .bottom = y + layout.row_height }, uiScaled(12), selected_bg);
         if (width < uiScaled(80)) continue;
         const avatar_rc = RECT{ .left = layout.left + uiScaled(10), .top = y + uiScaled(8), .right = layout.left + uiScaled(50), .bottom = y + uiScaled(48) };
+        if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+            var log: [120]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] inbox target={d} rect={d},{d},{d},{d}", .{ row.sid, avatar_rc.left, avatar_rc.top, avatar_rc.right, avatar_rc.bottom }) catch "[photo-proof] unavailable");
+        }
         if (row.ag != 0) {
             const avatar = @import("bot_avatar.zig");
             var appearance = avatar.Appearance.forSession(row.name[0..row.name_len]);

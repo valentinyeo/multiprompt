@@ -739,6 +739,10 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     fillRoundRectAA(hdc, layout.pill, @divTrunc(layout.pill.bottom - layout.pill.top, 2), border);
     fillRoundRectAA(hdc, .{ .left = layout.pill.left + edge, .top = layout.pill.top + edge, .right = layout.pill.right - edge, .bottom = layout.pill.bottom - edge }, @divTrunc(layout.pill.bottom - layout.pill.top, 2) - edge, fill);
     if (layout.has_icon) {
+        if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+            var log: [120]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] header target={d} rect={d},{d},{d},{d}", .{ app_state.active_shell, layout.icon.left, layout.icon.top, layout.icon.right, layout.icon.bottom }) catch "[photo-proof] unavailable");
+        }
         const avatar = @import("bot_avatar.zig");
         avatar.draw(hdc, layout.icon, avatar.forShell(shell));
     }

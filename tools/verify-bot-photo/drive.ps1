@@ -219,10 +219,46 @@ function Assert-Avatar([string]$Surface, [int]$Index, [string]$Name, [bool]$Tall
         $corner = $bitmap.GetPixel(0, 0)
         $centerOk = if ($Tall) { $green.R -gt 150 -and $green.G -gt 150 -and $green.B -lt 100 -and $blue.R -gt 120 -and $blue.B -gt 120 -and $blue.G -lt 100 } else { $green.G -gt 140 -and $green.R -lt 100 -and $blue.B -gt 120 -and $blue.R -lt 100 }
         $cornerIsPhoto = if ($Tall) { $corner.R -gt 150 -and $corner.G -gt 150 -and $corner.B -lt 100 } else { $corner.G -gt 140 -and $corner.R -lt 100 }
+        $bitmap.Save((Join-Path $Evidence "$Name.png"))
         Check "$Name-circle-center" $centerOk
         Check "$Name-circle-corner" (-not $cornerIsPhoto)
-        $bitmap.Save((Join-Path $Evidence "$Name.png"))
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false) {
+    $index = Index-For $Id
+    $tab = @((State).tabs)[$index]
+    $wasChat = $tab.PSObject.Properties['cv'] -and $tab.cv
+    Focus
+    if (-not $tab.PSObject.Properties['favorite'] -or -not $tab.favorite) {
+        Press @(0x12, 0x53)
+        [void](Wait-For 'favorite saved' { @((State).tabs)[(Index-For $Id)].favorite })
+    }
+    Press @(0x12, 0x31)
+    [void](Wait-For 'Starred workspace' { (State).starred_view })
+    if (-not $wasChat) {
+        Press @(0x12, 0x43)
+        [void](Wait-For 'chat title visible' { @((State).tabs)[(Index-For $Id)].cv })
+    }
+    Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
+    [void](Wait-For 'Starred tile pinned' { @((State).tabs)[(Index-For $Id)].starred_pinned_top })
+    Shot "$Name-starred-header"
+    Assert-Avatar 'pinned' $index "$Name-starred" $Tall
+    $failures = @()
+    try { Assert-Avatar 'header' $index "$Name-header" $Tall } catch { $failures += $_.Exception.Message }
+    Press @(0x11, 0x10, 0x49)
+    [void](Wait-For 'Inbox opened' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; $s.inbox_active })
+    Shot "$Name-inbox-window"
+    try { Assert-Avatar 'inbox' ([int]$tab.shell_id) "$Name-inbox" $Tall } catch { $failures += $_.Exception.Message }
+    Press @(0x1b)
+    [void](Wait-For 'Inbox closed' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; -not $s.inbox_active })
+    Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Press @(0x12, 0x32)
+    [void](Wait-For 'home workspace' { -not (State).starred_view })
+    if (-not $wasChat) {
+        Press @(0x12, 0x43)
+        [void](Wait-For 'shell view restored' { -not @((State).tabs)[(Index-For $Id)].cv })
+    }
+    if ($failures.Count -gt 0) { throw ($failures -join '; ') }
 }
 function Capture-Avatar([int]$Index, [string]$Name) {
     $pattern = "\[photo-proof\] expanded target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
@@ -348,6 +384,7 @@ try {
     Check 'other-local-bot-unchanged' (@((State).tabs | Where-Object { $_.name -eq 'Photo Beta' -and $_.PSObject.Properties['avatar_local_id'] }).Count -eq 0)
     Shot 'uploaded-wide'
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-wide'
+    Assert-AllFaces $firstId 'matching-wide'
     Check 'other-bot-pixels-unchanged' ((Capture-Avatar (Index-Name 'Photo Beta') 'other-after') -eq $otherBefore)
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
     Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
@@ -386,6 +423,7 @@ try {
     $replacementHash = (Get-FileHash $first.FullName -Algorithm SHA256).Hash
     Shot 'uploaded-tall'
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-tall' $true
+    Assert-AllFaces $firstId 'matching-replacement' $true
     $secondIndex = Index-Name 'Photo Beta'
     Focus; Press @(0x11, 0x4b); Query 'photo beta' $secondIndex; Press @(0x0d)
     Pick $wide
