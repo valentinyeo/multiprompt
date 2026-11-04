@@ -29,3 +29,11 @@ test('Windows proof restores the workspace strip through the real palette before
   for (const state of ['closed', 'open', 'returned']) assert.ok(journey.includes(`Snapshot "inbox-button-$theme-${state}"`));
   assert.match(journey, /\$counts\.open -ne 0 -or \$counts\.closed -lt 4/);
 });
+
+test('Windows verification uses the production target and retains early exit diagnostics', () => {
+  const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
+  const sharedBuild = workflow.slice(workflow.indexOf('- name: Build the Windows app once for this push'), workflow.indexOf('  reopen-board-contract:'));
+  assert.match(sharedBuild, /zig build -Dtarget=x86_64-windows-gnu -Drelease=false/);
+  const library = fs.readFileSync('.claude/skills/verify-multiprompt/control-library.ps1', 'utf8');
+  assert.ok(library.includes('App exited with code $($process.ExitCode) while waiting for $Description'));
+});

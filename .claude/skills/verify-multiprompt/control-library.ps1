@@ -100,7 +100,7 @@ function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     do {
-        if ($null -ne $process -and $process.HasExited) { throw "App exited while waiting for $Description" }
+        if ($null -ne $process -and $process.HasExited) { throw "App exited with code $($process.ExitCode) while waiting for $Description" }
         try { if (& $Condition) { return } } catch { $lastError = $_.Exception.Message }
         if ($Tight) { [Threading.Thread]::Sleep(1) } else { Start-Sleep -Milliseconds $PollMilliseconds }
     } while ([DateTime]::UtcNow -lt $deadline)
