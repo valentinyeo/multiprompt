@@ -21,6 +21,6 @@ for line in sys.stdin:
     transcript = Path(json.loads((root / 'state.json').read_text(encoding='utf-8-sig'))['transcript'])
     with transcript.open('a', encoding='utf-8') as out:
         out.write(json.dumps(dict(type='user', sessionId=sid, uuid=str(uuid.uuid4()), message=dict(role='user', content=content))) + '\n')
-        out.write(json.dumps(dict(type='assistant', sessionId=sid, uuid=str(uuid.uuid4()), message=dict(role='assistant', id='fixture-' + uuid.uuid4().hex, content=[dict(type='text', text='Synthetic fixture response.')])) + '\n')
+        out.write(json.dumps(dict(type='assistant', sessionId=sid, uuid=str(uuid.uuid4()), message=dict(role='assistant', id='fixture-' + uuid.uuid4().hex, content=[dict(type='text', text='Synthetic fixture response.')]))) + '\n')
     print(json.dumps(dict(type='assistant', message=dict(role='assistant', id='fixture-' + uuid.uuid4().hex, content=[dict(type='text', text='Synthetic fixture response.')]))), flush=True)
     print(json.dumps(dict(type='result', subtype='success', session_id=sid, result='Synthetic fixture response.')), flush=True)
