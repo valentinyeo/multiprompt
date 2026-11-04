@@ -3,7 +3,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { verify } = require('./chat-instant-proof.cjs');
+function verify(root) {
+  const cache = fs.readFileSync(path.join(__dirname, '../src/launch_cache.zig'), 'utf8');
+  const restore = cache.slice(cache.indexOf('pub fn restore()'), cache.indexOf('pub fn painted('));
+  assert.doesNotMatch(restore, /kind\s*!=\s*\.tmux/, 'saved remote history must be restored before connection');
+  return require('./chat-instant-proof.cjs').verify(root);
+}
 
 function fixture(change) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'instant-chat-'));

@@ -7,6 +7,10 @@ const path = require('node:path');
 const { spawnSync, execFileSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const old = fs.readFileSync('tools/fixtures/chat-before-2b45249.zig', 'utf8');
+test('IGSH-1289 a hosted send binds its missing session identity after startup', () => {
+  assert.match(source, /if \(entry\.message_sid\[0\] == 0\) entry\.message_sid = identity\.sid;/);
+  assert.match(source, /route == \.host_message and \(!entry\.message_v1 or entry\.message_sid\[0\] == 0\)/);
+});
 function body(text, name) {
   const start = text.indexOf(`fn ${name}(`);
   assert(start >= 0, name);
