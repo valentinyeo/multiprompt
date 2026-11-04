@@ -2,6 +2,26 @@ const std = @import("std");
 
 pub const Action = enum(u8) { allow, always, deny };
 pub const labels = [_][]const u8{ "Allow", "Always allow", "Deny" };
+pub const titles = [_][]const u8{ "Approve", "Always allow this session", "Decline" };
+pub const details = [_][]const u8{ "Run it once.", "Don’t ask again in this chat.", "Skip it. Say why in the chat." };
+
+pub const Presentation = struct {
+    identity: u64 = 0,
+    anchor: ?usize = null,
+    question: [240]u16 = @splat(0),
+    question_len: usize = 0,
+    command: [512]u16 = @splat(0),
+    command_len: usize = 0,
+    state: union(enum) { absent, pending, picked: Action } = .absent,
+
+    pub fn open(self: *Presentation, identity: u64, menu: *const PermissionMenu) void {
+        self.* = .{ .identity = identity, .state = .pending };
+        self.question_len = menu.question_len;
+        @memcpy(self.question[0..self.question_len], menu.question[0..menu.question_len]);
+        self.command_len = menu.command_len;
+        @memcpy(self.command[0..self.command_len], menu.command[0..menu.command_len]);
+    }
+};
 
 pub const Option = struct {
     number: u8 = 0,
@@ -15,6 +35,10 @@ pub const PermissionMenu = struct {
     allow: ?u8 = null,
     always: ?u8 = null,
     deny: ?u8 = null,
+    question: [240]u16 = @splat(0),
+    question_len: usize = 0,
+    command: [512]u16 = @splat(0),
+    command_len: usize = 0,
 
     pub fn optionText(self: *const PermissionMenu, action: Action) ?[]const u16 {
         const number = self.digit(action) orelse return null;
@@ -66,6 +90,20 @@ pub fn parse(rows: []const []const u16) ?PermissionMenu {
     }
     const q = question orelse return null;
     var menu: PermissionMenu = .{};
+    const question_text = trim(rows[q]);
+    menu.question_len = @min(question_text.len, menu.question.len);
+    @memcpy(menu.question[0..menu.question_len], question_text[0..menu.question_len]);
+    var command: []const u16 = &.{};
+    for (rows[0..q]) |raw| {
+        const row = trim(raw);
+        if (row.len > 0 and row[0] < 128 and row[0] != '-' and !starts(row, "environment:") and !starts(row, "reason:")) command = row;
+    }
+    for (rows[q + 1 ..]) |raw| {
+        const row = trim(raw);
+        if (row.len > 2 and row[0] == '$' and row[1] == ' ') command = trim(row[2..]);
+    }
+    menu.command_len = @min(command.len, menu.command.len);
+    @memcpy(menu.command[0..menu.command_len], command[0..menu.command_len]);
     var selected = false;
     var ended = false;
     var has_footer = false;
@@ -190,4 +228,34 @@ test "ISSUE-266 button text is the exact printed option for its mapped number" {
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Yes, proceed once"), menu.optionText(.allow).?);
     const empty: PermissionMenu = .{};
     try std.testing.expect(empty.optionText(.allow) == null);
+}
+
+test "IGSH-1599 permission metadata keeps the question and command without changing provider digits" {
+    const claude = try std.unicode.utf8ToUtf16LeAlloc(std.testing.allocator, @embedFile("testdata/chat-permission-claude.txt"));
+    defer std.testing.allocator.free(claude);
+    const menu = parseText(claude) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Do you want to proceed?"), menu.question[0..menu.question_len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("touch hello3.txt"), menu.command[0..menu.command_len]);
+    try std.testing.expectEqual(@as(?u8, '4'), menu.digit(.deny));
+    const codex = try std.unicode.utf8ToUtf16LeAlloc(std.testing.allocator, @embedFile("testdata/chat-permission-codex.txt"));
+    defer std.testing.allocator.free(codex);
+    const exec = parseText(codex) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("touch hello4.txt"), exec.command[0..exec.command_len]);
+}
+
+test "IGSH-1599 a new permission replaces the picked state and its old transcript anchor" {
+    var menu: PermissionMenu = .{};
+    const question = std.unicode.utf8ToUtf16LeStringLiteral("Do you want to proceed?");
+    menu.question_len = question.len;
+    @memcpy(menu.question[0..question.len], question);
+    var presentation: Presentation = .{};
+    presentation.open(10, &menu);
+    try std.testing.expect(presentation.state == .pending);
+    presentation.state = .{ .picked = .deny };
+    presentation.anchor = 8;
+    presentation.open(11, &menu);
+    try std.testing.expect(presentation.state == .pending);
+    try std.testing.expectEqual(@as(u64, 11), presentation.identity);
+    try std.testing.expect(presentation.anchor == null);
+    try std.testing.expectEqualSlices(u16, question, presentation.question[0..presentation.question_len]);
 }

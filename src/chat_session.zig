@@ -962,7 +962,13 @@ fn chatLiveSyncCard() void {
         if (!fresh and app_state.g_chat_permission_sid == shell_id and app_state.g_chat_permission.count == menu.count) return;
         app_state.g_chat_permission = menu;
         app_state.g_chat_permission_sid = shell_id;
-        app_state.shells[app_state.active_shell].permission_answered = false;
+        const shell = &app_state.shells[app_state.active_shell];
+        const identity = std.hash.Wyhash.hash(@as(u64, shell_id), request[0..len]);
+        if (shell.permission_presentation.identity != identity or shell.permission_presentation.state == .absent) {
+            shell.permission_presentation.open(identity, &menu);
+            shell.permission_answered = false;
+            @import("chat_render.zig").chatPermissionChanged();
+        }
         g_chat_live_card_len = len;
         @memcpy(g_chat_live_card_request[0..len], request[0..len]);
         if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -972,6 +978,11 @@ fn chatLiveSyncCard() void {
     if (!live.cardDismissed(shell_id)) return;
     app_state.g_chat_permission = .{};
     app_state.g_chat_permission.count = 0;
+    const presentation = &app_state.shells[app_state.active_shell].permission_presentation;
+    if (presentation.state == .pending) {
+        presentation.state = .absent;
+        @import("chat_render.zig").chatPermissionChanged();
+    }
     g_chat_live_card_len = 0;
     live.cardShown(shell_id);
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);

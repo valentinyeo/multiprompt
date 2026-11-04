@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -222,6 +222,10 @@ try {
         New-Item -ItemType Directory -Force $uploadConfigDir | Out-Null
         [IO.File]::WriteAllText((Join-Path $uploadConfigDir 'config.toml'), "api_base_url = `"http://127.0.0.1:$((Get-Content -LiteralPath $receiverPortFile -Raw).Trim())`"`nupload_secret = `"verify-only-upload-secret`"`n")
         New-Item -ItemType File -Force (Join-Path $script:uploadReceiverDir 'uploads.jsonl') | Out-Null
+    }
+    if ($Feature -eq 'permission-rows') {
+        $env:MP_PERMISSION_ROOT = $scratch
+        Copy-Item (Join-Path $PSScriptRoot '../../../src/testdata/chat-permission-claude.txt') (Join-Path $scratch 'permission-menu.txt')
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -449,6 +453,9 @@ try {
         'chat-options' {
             . (Join-Path $PSScriptRoot 'chat-options.ps1')
         }
+        'permission-rows' {
+            . (Join-Path $PSScriptRoot 'permission-rows.ps1')
+        }
         'chat-composer-text' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-composer-text.ps1')
         }
@@ -539,6 +546,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
+    if ($null -ne $process -and $process.HasExited) { $result.exitCode = $process.ExitCode }
     if ($script:window -ne [IntPtr]::Zero) {
         try { Snapshot 'failure' } catch { $result.captureError = $_.Exception.Message }
     }

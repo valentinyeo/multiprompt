@@ -27,12 +27,15 @@ int main(int argc, char **argv) {
         DWORD written;
         return WriteConsoleInputW(input, records, (n + 3) * 2, &written) && written == (n + 3) * 2 ? 0 : 11;
     }
-    FILE *events = fopen("C:\\stub-events.txt", "w");
+    WCHAR root[MAX_PATH];
+    DWORD root_len = GetEnvironmentVariableW(L"MP_PERMISSION_ROOT", root, MAX_PATH);
+    if (root_len >= MAX_PATH || !SetCurrentDirectoryW(root_len ? root : L"C:\\")) return 13;
+    FILE *events = fopen("stub-events.txt", "w");
     if (!events) return 3;
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleMode(input, ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS);
-    FILE *menu = fopen("C:\\permission-menu.txt", "rb");
+    FILE *menu = fopen("permission-menu.txt", "rb");
     if (!menu) return 6;
     char utf8[16384];
     size_t length = fread(utf8, 1, sizeof(utf8), menu);
@@ -55,23 +58,23 @@ int main(int argc, char **argv) {
         rendered[rendered_length++] = wide[i];
     }
     if (!WriteConsoleW(output, rendered, rendered_length, &written, NULL) || written != rendered_length) return 12;
-    FILE *keys = fopen("C:\\stub-keys.txt", "wb");
+    FILE *keys = fopen("stub-keys.txt", "wb");
     if (!keys) return 9;
-    FILE *pid = fopen("C:\\stub-pid.txt", "w");
+    FILE *pid = fopen("stub-pid.txt", "w");
     if (!pid) return 2;
     fprintf(pid, "%lu", GetCurrentProcessId());
     fclose(pid);
     for (;;) {
-        if (GetFileAttributesW(L"C:\\permission-clear.txt") != INVALID_FILE_ATTRIBUTES) {
-            DeleteFileW(L"C:\\permission-clear.txt");
+        if (GetFileAttributesW(L"permission-clear.txt") != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileW(L"permission-clear.txt");
             GetConsoleScreenBufferInfo(output, &info);
             FillConsoleOutputCharacterW(output, L' ', (DWORD)info.dwSize.X * info.dwSize.Y, origin, &written);
             SetConsoleCursorPosition(output, origin);
             WriteConsoleW(output, L"Permission answered.\r\n", 22, &written, NULL);
 
         }
-        if (GetFileAttributesW(L"C:\\permission-next.txt") != INVALID_FILE_ATTRIBUTES) {
-            DeleteFileW(L"C:\\permission-next.txt");
+        if (GetFileAttributesW(L"permission-next.txt") != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileW(L"permission-next.txt");
             GetConsoleScreenBufferInfo(output, &info);
             FillConsoleOutputCharacterW(output, L' ', (DWORD)info.dwSize.X * info.dwSize.Y, origin, &written);
             SetConsoleCursorPosition(output, origin);

@@ -337,7 +337,7 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
                         try std.testing.expect(rect.bottom <= inner.bottom);
                         try std.testing.expect(rect.right >= rect.left and rect.bottom >= rect.top);
                     }
-                    try std.testing.expectEqual(uiScaled(14) + (if (test_permission_visible) uiScaled(36) else @as(i32, 0)), c.composer_card.top - c.transcript.bottom);
+                    try std.testing.expectEqual(uiScaled(14), c.composer_card.top - c.transcript.bottom);
                     try std.testing.expectEqual(uiScaled(32), c.mic_btn.right - c.mic_btn.left);
                     try std.testing.expectEqual(uiScaled(32), c.mic_btn.bottom - c.mic_btn.top);
                     try std.testing.expect(c.send_btn.left > c.mic_btn.right);
@@ -479,7 +479,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     for (const [name, mutate] of [
-      ['removed working strip', text => text.replace('return if (chatPermissionVisible()) uiScaled(36) else 0;', 'return if (chatPermissionVisible()) uiScaled(36) else uiScaled(18);')],
+      ['permission outside transcript', text => text.replace('fn chatWorkingIndicatorH() i32 {\n    return 0;', 'fn chatWorkingIndicatorH() i32 {\n    return if (chatPermissionVisible()) uiScaled(36) else 0;')],
       ['microphone overlap', text => text.replace('.right = mic_btn.left - uiScaled(12),', '.right = mic_btn.right,')],
       ['send before microphone', text => text.replace('const send_btn = slots.send;', 'const send_btn = RECT{ .left = composer_card.left, .top = slots.send.top, .right = composer_card.left + send_size, .bottom = slots.send.bottom };')],
       ['native focus inset', text => text.replace('const target_x = target.left;', 'const target_x = target.left + uiScaled(10);')],

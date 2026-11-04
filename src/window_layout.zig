@@ -347,7 +347,7 @@ fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, ra
 }
 
 pub fn chatWorkingIndicatorH() i32 {
-    return if (chatPermissionVisible()) uiScaled(36) else 0;
+    return 0;
 }
 
 pub fn chatWorkingIndicatorText() []const u16 {
@@ -427,42 +427,6 @@ pub fn chatPermissionVisible() bool {
         !app_state.shells[app_state.active_shell].permission_answered;
 }
 
-pub fn chatPermissionRect(action: @import("chat_permission.zig").Action) ?RECT {
-    if (!chatPermissionVisible() or app_state.g_chat_permission.digit(action) == null) return null;
-    const layout = chatViewLayout();
-    var count: i32 = 0;
-    var index: i32 = 0;
-    for (std.meta.tags(@import("chat_permission.zig").Action)) |item| {
-        if (app_state.g_chat_permission.digit(item) != null) {
-            if (@intFromEnum(item) < @intFromEnum(action)) index += 1;
-            count += 1;
-        }
-    }
-    const gap = uiScaled(8);
-    const width = @divTrunc(layout.transcript.right - layout.transcript.left - gap * (count - 1), count);
-    const left = layout.transcript.left + index * (width + gap);
-    return .{ .left = left, .right = left + width, .top = layout.transcript.bottom + @import("chat_composer.zig").chatNewMessagesHeight() + uiScaled(2), .bottom = layout.composer_card.top - uiScaled(2) };
-}
-
-fn paintChatPermission(hdc: HANDLE, border: DWORD) void {
-    const old_font = SelectObject(hdc, ensureChatFont());
-    defer _ = SelectObject(hdc, old_font);
-    for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
-        const rc = chatPermissionRect(action) orelse continue;
-        const text = app_state.g_chat_permission.optionText(action) orelse continue;
-        paintChatSurface(hdc, rc, app_state.g_chat_input_color, border, uiScaled(6));
-        _ = SetTextColor(hdc, if (app_state.shells[app_state.active_shell].permission_answered) customColorOr("hint", RGB(135, 139, 147)) else customColorOr("text", if (app_state.g_light_theme) RGB(40, 44, 52) else RGB(220, 224, 232)));
-        var text_rc = rc;
-        text_rc.left += uiScaled(6);
-        text_rc.right -= uiScaled(6);
-        _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | @import("win32.zig").DT_END_ELLIPSIS);
-        if (verboseLoggingEnabled()) {
-            var log: [128]u8 = undefined;
-            debugLog(std.fmt.bufPrint(&log, "[chat] permission rect {s} {d},{d},{d},{d}", .{ @import("chat_permission.zig").labels[i], rc.left, rc.top, rc.right, rc.bottom }) catch "");
-        }
-    }
-}
-
 pub fn paintChatView(hdc: HANDLE) void {
     var canvas = @import("smooth.zig").Canvas.init(hdc);
     defer canvas.deinit();
@@ -514,7 +478,6 @@ pub fn paintChatView(hdc: HANDLE) void {
         close.left = label.right;
         _ = DrawTextW(hdc, L("×"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
-    if (chatPermissionVisible()) paintChatPermission(hdc, card_border);
 }
 
 var chat_buttons_logged: [13]i32 = @splat(std.math.minInt(i32));

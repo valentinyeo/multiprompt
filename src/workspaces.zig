@@ -3581,7 +3581,7 @@ test "duplicate Other repair preserves complete live shell records and other emp
     }
     app_state.shell_count = 4;
     for ([_]u8{ 0, 3, 4, 5 }, 0..) |workspace, i| {
-        app_state.shells[i] = std.mem.zeroes(Shell);
+        app_state.shells[i] = empty_shell;
         app_state.shells[i].workspace = workspace;
         app_state.shells[i].shell_id = @intCast(100 + i);
         app_state.shells[i].pid = @intCast(1000 + i);

@@ -270,9 +270,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
-| Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Answer the live permission prompt: allow |
-| Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Answer the live permission prompt: always allow |
-| Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Answer the live permission prompt: deny |
+| 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
+| 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
+| 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |
 | Esc (Chat View, while working) / Stop button / Ctrl+K "Chat View: Stop the agent" | Send Esc to the agent to stop its current run |
 | Ctrl+K "Chat View: Reset this chat" / right-click tab | Clear local bubbles and cache; reload history, keep unsent composer text |
 | Ctrl+K "Chat View: Clear Offline Queue" | Drop this tab's queued offline Chat View messages |

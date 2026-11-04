@@ -155,11 +155,12 @@ test('ISSUE-266 permission actions have all three surfaces and exact context dis
   assert.match(shortcuts, /kb.vkCode == 0x59 or kb.vkCode == 0x4F or kb.vkCode == 0x44/);
 });
 
-test('ISSUE-266 permission button labels use the agent option text rather than fixed action labels', () => {
-  const layout = read('src/window_layout.zig');
-  const paint = layout.slice(layout.indexOf('fn paintChatPermission('), layout.indexOf('\npub fn paintChatView('));
-  assert.match(paint, /g_chat_permission\.optionText\(action\)/);
-  assert.match(paint, /DrawTextW\(hdc, text\.ptr, @intCast\(text\.len\)/);
+test('IGSH-1599 permission rows use approved titles while transport keeps the provider mapping', () => {
+  const render = read('src/chat_render.zig');
+  assert.match(render, /@import\("chat_permission\.zig"\)\.titles\[i\]/);
+  assert.match(render, /@import\("chat_permission\.zig"\)\.details\[i\]/);
+  assert.match(read('src/chat_send.zig'), /const digit = app_state\.g_chat_permission\.digit\(action\) orelse return false;/);
+  assert.doesNotMatch(read('src/window_layout.zig'), /fn paintChatPermission\(/);
 });
 
 function topLevelSearchRows(text) {
