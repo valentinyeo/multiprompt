@@ -73,9 +73,13 @@ test('idle shutdown keeps confirmed settings capability', () => {
   assert.match(snapshot, /settings_known = true/);
   assert.doesNotMatch(hostStatus, /settings_known\s*=/);
   assert.match(eligible, /chatLiveWanted\(key\)/);
+  assert.match(eligible, /std\.mem\.eql\(u8, key\.provider\(\), "claude"\)/);
   assert.doesNotMatch(eligible, /connected|\.ended|\.cancelled/);
   assert.match(live, /live\.settings_known = false/);
-  assert.match(read('src/chat_session.zig'), /key\.codex/);
+  const wanted = read('src/chat_session.zig').split('fn chatLiveWanted')[1].split('\n}')[0];
+  assert.doesNotMatch(wanted, /key\.codex|key\.pi|key\.provider/);
+  assert.match(read('src/chat_send.zig'), /job\.synced or !std\.mem\.eql\(u8, job\.key\.provider\(\), "claude"\)/);
+  assert.match(live, /openLine\(a, id, op, "claude", sid\)/);
 });
 
 test('pending settings block sends before draft or outbox changes', () => {

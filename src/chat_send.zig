@@ -506,6 +506,10 @@ pub fn chatSteerPrompt() void {
 
 pub fn sendChatMessage(text: []const u16) bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
+    if (@import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
+        showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
+        return false;
+    }
     _ = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse return false;
     app_state.g_chat_read_open_pending = false;
     app_state.g_chat_read_hold = false;
@@ -518,6 +522,10 @@ pub fn sendChatMessage(text: []const u16) bool {
 }
 
 pub fn sendChatPrompt() void {
+    if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and @import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
+        showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
+        return;
+    }
     send_latency.markPressed();
     chatAcClose();
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
@@ -671,6 +679,10 @@ pub fn sendChatPrompt() void {
 
 pub fn chatSendChoice(text: []const u16) bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
+    if (@import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
+        showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
+        return false;
+    }
     send_latency.markPressed();
     const ei = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse {
         showHeaderNoticeAscii("Could not save the message; try again", 3500, true);
@@ -3592,6 +3604,13 @@ fn chatMessageSyncFinish() void {
     const items = json_reader.array(json_reader.field(parsed.value, if (job.synced) "events" else "items"));
     for (items) |item| {
         const event = if (job.synced) json_reader.field(item, "event") else item;
+        const snapshot_settings = if (job.synced or !std.mem.eql(u8, job.key.provider(), "claude")) std.json.Value{ .null = {} } else json_reader.field(item, "host_settings");
+        if (snapshot_settings != .null) {
+            if (@import("chat_live.zig").applySettingsSnapshot(job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), json_reader.uintDefault(parsed.value, "seq", 0), snapshot_settings) and idx == app_state.active_shell and app_state.g_chat_active) {
+                @import("chat_composer.zig").layoutChatControls();
+                if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+            }
+        }
         if (!chatMessageReduce(idx, event)) { history.message_next_tick = 0; return; }
         const kind = json_reader.string(json_reader.field(event, "kind")) orelse "";
         if (std.mem.eql(u8, kind, "text.done") or std.mem.eql(u8, kind, "turn.ended")) {
@@ -4050,6 +4069,14 @@ fn chatLiveReply(line: []u8) bool {
     if (@import("chat_session.zig").chatLiveWrite(line)) return true;
     debugLog("[chat] live reply failed");
     return false;
+}
+
+pub fn chatSetLiveSetting(setting: @import("chat_live.zig").Setting) bool {
+    if (!@import("chat_session.zig").chatSettingsEligible()) return false;
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    const live = @import("chat_live.zig");
+    const line = live.settingLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, std.mem.sliceTo(&key.sid, 0), setting) catch return false;
+    return chatLiveReply(line);
 }
 
 fn chatLiveApprovalAnswer(shell_index: u32, action: @import("chat_permission.zig").Action) bool {
