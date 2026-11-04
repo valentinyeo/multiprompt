@@ -4,8 +4,19 @@ const Key = @import("bot_photo_key.zig").Key;
 pub const Photo = union(enum) { absent, deleted, png: []u8 };
 const Entry = struct { identity: [32]u8, content: [32]u8 };
 pub const Sync = struct {
-    entries: [256]?Entry = @splat(null),
-    next: usize = 0,
+    entries: []Entry = &.{},
+    generation: u64 = 0,
+
+    pub fn deinit(self: *Sync, a: std.mem.Allocator) void {
+        a.free(self.entries);
+        self.* = .{};
+    }
+
+    pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Sync {
+        const parsed = try std.json.parseFromSlice(Sync, a, bytes, .{});
+        defer parsed.deinit();
+        return .{ .entries = try a.dupe(Entry, parsed.value.entries), .generation = parsed.value.generation };
+    }
 
     pub fn run(self: *Sync, a: std.mem.Allocator, account: []const u8, tabs: anytype, context: anytype) !void {
         for (tabs) |tab| {
@@ -25,12 +36,10 @@ pub const Sync = struct {
             hash.final(&content);
             var slot: ?usize = null;
             for (self.entries, 0..) |entry, i| {
-                if (entry) |known| {
-                    if (std.mem.eql(u8, &known.identity, &identity)) { slot = i; break; }
-                }
+                if (std.mem.eql(u8, &entry.identity, &identity)) { slot = i; break; }
             }
             if (slot) |i| {
-                if (std.mem.eql(u8, &self.entries[i].?.content, &content)) continue;
+                if (std.mem.eql(u8, &self.entries[i].content, &content)) continue;
             }
             const hex = std.fmt.bytesToHex(digest, .lower);
             const path = try std.fmt.allocPrint(a, "/v1/bot-photos/{s}", .{hex});
@@ -46,9 +55,14 @@ pub const Sync = struct {
             }
             const status = context.send(if (photo == .png) "PUT" else "DELETE", path, body) catch continue;
             if (status < 200 or status >= 300) continue;
-            const index = slot orelse self.next;
-            self.entries[index] = .{ .identity = identity, .content = content };
-            if (slot == null) self.next = (self.next + 1) % self.entries.len;
+            if (slot) |i| {
+                self.entries[i].content = content;
+            } else {
+                const index = self.entries.len;
+                self.entries = try a.realloc(self.entries, index + 1);
+                self.entries[index] = .{ .identity = identity, .content = content };
+            }
+            self.generation +%= 1;
         }
     }
 };
@@ -81,6 +95,7 @@ test "pictures migrate, retry, replace and reset without duplicate successful up
     };
     var fixture = Fixture{};
     var sync = Sync{};
+    defer sync.deinit(std.testing.allocator);
     const tabs = [_]struct { tmux_host: u8, tmux_session: []const u8 }{.{ .tmux_host = 1, .tmux_session = "My-Bot" }};
     const a = std.testing.allocator;
     fixture.fail = true;
@@ -106,9 +121,8 @@ test "pictures migrate, retry, replace and reset without duplicate successful up
     try std.testing.expectEqual(@as(usize, 5), fixture.sends);
     const saved = try std.json.Stringify.valueAlloc(a, sync, .{});
     defer a.free(saved);
-    const parsed = try std.json.parseFromSlice(Sync, a, saved, .{});
-    defer parsed.deinit();
-    var restarted = parsed.value;
+    var restarted = try Sync.parse(a, saved);
+    defer restarted.deinit(a);
     try restarted.run(a, "account-a", &tabs, &fixture);
     try std.testing.expectEqual(@as(usize, 5), fixture.sends);
     fixture.bytes = "after restart";
@@ -116,7 +130,37 @@ test "pictures migrate, retry, replace and reset without duplicate successful up
     try std.testing.expectEqual(@as(usize, 6), fixture.sends);
     fixture.bytes = null;
     var migrated_reset = Sync{};
+    defer migrated_reset.deinit(a);
     try migrated_reset.run(a, "account-a", &tabs, &fixture);
     try std.testing.expect(fixture.last_delete);
     try std.testing.expectEqual(@as(usize, 7), fixture.sends);
+}
+
+test "acknowledgements survive more than 256 identities and restart" {
+    const Fixture = struct {
+        sends: usize = 0,
+        pub fn read(_: *@This(), _: [32]u8) !Photo {
+            return .{ .png = try std.testing.allocator.dupe(u8, "picture") };
+        }
+        pub fn send(self: *@This(), _: []const u8, _: []const u8, _: []const u8) !u32 {
+            self.sends += 1;
+            return 200;
+        }
+    };
+    const a = std.testing.allocator;
+    var sync = Sync{};
+    defer sync.deinit(a);
+    var fixture = Fixture{};
+    const tabs = [_]struct { tmux_host: u8, tmux_session: []const u8 }{.{ .tmux_host = 1, .tmux_session = "My-Bot" }};
+    for (0..300) |i| {
+        const account = try std.fmt.allocPrint(a, "account-{d}", .{i});
+        defer a.free(account);
+        try sync.run(a, account, &tabs, &fixture);
+    }
+    const saved = try std.json.Stringify.valueAlloc(a, sync, .{});
+    defer a.free(saved);
+    var restarted = try Sync.parse(a, saved);
+    defer restarted.deinit(a);
+    try restarted.run(a, "account-0", &tabs, &fixture);
+    try std.testing.expectEqual(@as(usize, 300), fixture.sends);
 }

@@ -239,6 +239,7 @@ var g_pending_write_mutex: app_state.SpinMutex = .{};
 var g_sync_log_at: u64 = 0;
 var g_photo_sync: @import("bot_photo_sync.zig").Sync = .{};
 var g_photo_sync_loaded = false;
+var g_photo_sync_saved_generation: u64 = 0;
 const PhotoContext = struct {
     access: []const u8,
     pub fn read(_: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
@@ -1153,22 +1154,29 @@ fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const s
     const account = try account_client.field(credential, "account_id");
     defer freeSecret(account);
     if (!g_photo_sync_loaded) {
-        if (readDpapiFile("account-photo-base.dat", 256 * 1024)) |bytes| {
+        var path_buf: [512]u8 = undefined;
+        const path = syncAuthPath(&path_buf, "account-photo-base.dat") orelse return error.Storage;
+        var wide_buf: [520]u16 = undefined;
+        const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+        if (GetFileAttributesW(wide.ptr) == 0xffffffff) {
+            const reason = @import("win32.zig").GetLastError();
+            if (reason != 2 and reason != 3) return error.Storage;
+        } else {
+            const bytes = readDpapiFile("account-photo-base.dat", 8 * 1024 * 1024) orelse return error.Storage;
             defer a.free(bytes);
-            const parsed = try std.json.parseFromSlice(@TypeOf(g_photo_sync), a, bytes, .{});
-            defer parsed.deinit();
-            if (parsed.value.next >= g_photo_sync.entries.len) return error.Storage;
-            g_photo_sync = parsed.value;
+            g_photo_sync = try @TypeOf(g_photo_sync).parse(a, bytes);
+            g_photo_sync_saved_generation = g_photo_sync.generation;
         }
         g_photo_sync_loaded = true;
     }
-    const before = g_photo_sync;
-    errdefer g_photo_sync = before;
-    try g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
-    if (std.meta.eql(before, g_photo_sync)) return;
-    const encoded = try std.json.Stringify.valueAlloc(a, g_photo_sync, .{});
-    defer a.free(encoded);
-    if (!writeDpapiFile("account-photo-base.dat", encoded)) return error.Storage;
+    const result = g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
+    if (g_photo_sync.generation != g_photo_sync_saved_generation) {
+        const encoded = try std.json.Stringify.valueAlloc(a, g_photo_sync, .{});
+        defer a.free(encoded);
+        if (!writeDpapiFile("account-photo-base.dat", encoded)) return error.Storage;
+        g_photo_sync_saved_generation = g_photo_sync.generation;
+    }
+    try result;
 }
 
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
