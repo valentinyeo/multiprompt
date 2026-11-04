@@ -31,7 +31,7 @@ test('slash rename consumes locally before normal message routing', () => {
 });
 
 test('hosted journey drives both names and records its boundaries', () => {
-  const file = '.claude/skills/verify-multiprompt/control-feature-inline-rename.ps1';
+  const file = '.claude/skills/verify-multiprompt/control-inline-rename.ps1';
   assert.ok(fs.existsSync(path.join(__dirname, '..', file)), 'hosted rename journey exists');
   const driver = read(file);
   for (const action of ['title-before', 'title-edit', 'title-after', 'sidebar-before', 'sidebar-edit', 'sidebar-after', '/rename Command name', 'Restart-ChatView 1']) assert.ok(driver.includes(action), action);
