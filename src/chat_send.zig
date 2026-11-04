@@ -539,7 +539,7 @@ pub fn sendChatPrompt() void {
                 return;
             },
             .unavailable => {
-                showHeaderNoticeAscii("This command is unavailable in live chat", 4000, false);
+                showHeaderNoticeAscii("Not available in live chat", 4000, false);
                 return;
             },
             .send => {},
