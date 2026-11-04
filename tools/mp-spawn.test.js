@@ -23,7 +23,7 @@ async function fixture() {
     resolveFolder: value => value === folder ? '/work' : '/other',
     fetch: async (_, request) => {
       if (denied) return { status: 403, json: async () => ({ error: 'private-key' }) };
-      if (request.method === 'GET') return { status: 200, json: async () => ({ layout: structuredClone(layout), revision }) };
+      if (request.method === 'GET') return { status: 200, headers: { get: () => 'groups' }, json: async () => ({ layout: structuredClone(layout), revision }) };
       if (failPut) { failPut = false; return { status: 500, json: async () => ({ error: 'private-key' }) }; }
       if (conflicts-- > 0) { layout.tabs.push({ kind: 'tmux', name: 'unrelated', tmux_session: 'other', tmux_host: 0, workspace: 'Work' }); revision++; return { status: 409, json: async () => ({}) }; }
       const body = JSON.parse(request.body);
@@ -135,6 +135,55 @@ test('tmux creation failure leaves a retryable claim', async () => {
   assert.doesNotMatch(first.err, /private-key/);
   assert.equal((await f.invoke([], { workspace: 'Other' })).code, 1);
   assert.equal((await f.invoke()).code, 0);
+});
+
+test('headless repeats stay undiscoverable; visible mode promotes the same chat and task', async () => {
+  const f = await fixture();
+  const options = ['--mode', 'headless', '--group', 'Runners', '--task', 'one task'];
+  const first = await f.invoke(options);
+  const again = await f.invoke(options);
+  assert.equal(first.code, 0);
+  assert.equal(again.code, 0);
+  assert.equal(JSON.parse(first.out).mode, 'headless');
+  assert.equal(f.layout.tabs.length, 0);
+  assert.ok(!f.calls.some(call => call[0] === 'tmux' && call[1] !== 'has-session'));
+  assert.equal(f.messages.size, 1);
+  const shown = await f.invoke(['--mode', 'visible', '--group', 'Runners', '--task', 'one task']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(JSON.parse(shown.out).sid, JSON.parse(first.out).sid);
+  assert.equal(f.layout.tabs.length, 1);
+  assert.equal(f.layout.tabs[0].group, 'Runners');
+  assert.equal(f.messages.size, 1);
+  assert.equal((await f.invoke(options)).code, 1);
+  assert.equal((await f.invoke(['--group', 'Other'])).code, 1);
+  assert.equal(f.layout.tabs[0].group, 'Runners');
+  assert.ok(f.calls.some(call => call.includes('@mp_host_sid')));
+});
+
+test('invalid modes and groups refuse before any host setup', async () => {
+  for (const options of [['--mode', 'background'], ['--group', ' '], ['--group', 'x'.repeat(65)], ['--group', 'bad\nname'], ['--mode', 'headless', '--mode', 'visible']]) {
+    const f = await fixture();
+    assert.equal((await f.invoke(options)).code, 1);
+    assert.deepEqual(f.calls, []);
+  }
+});
+
+test('old services refuse group requests before setup', async () => {
+  const f = await fixture();
+  const fetch = f.opts.fetch;
+  f.opts.fetch = async (...args) => ({ ...await fetch(...args), headers: { get: () => '' } });
+  const result = await f.invoke(['--group', 'Runners']);
+  assert.equal(result.code, 1);
+  assert.match(result.err, /does not support groups/);
+  assert.deepEqual(f.calls, []);
+});
+
+test('headless cannot adopt an existing terminal or visible setup claim', async () => {
+  const f = await fixture();
+  f.fail();
+  assert.equal((await f.invoke()).code, 1);
+  assert.equal((await f.invoke(['--mode', 'headless'])).code, 1);
+  assert.equal(f.layout.tabs.length, 0);
 });
 
 test('task text travels through protocol, not command arguments', async () => {

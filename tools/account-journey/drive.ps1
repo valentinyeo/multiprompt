@@ -222,16 +222,25 @@ try {
     $start = [DateTime]::UtcNow
     $liveOpened = Invoke-Layout $secrets.admin_key @('open', $liveSession, '--workspace', 'Runners', '--title', 'Named live chat', '--no-tmux')
     if ($liveOpened.code -ne 0) { throw 'Could not publish the live account tab' }
-    [void](Wait-For 'native import saves live identity and Chat View' {
+    $groupHeaders = @{ Authorization = "Bearer $($secrets.admin_key)"; 'X-Layout-Features' = 'groups' }
+    $groupSnapshot = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $groupHeaders
+    $groupTab = @($groupSnapshot.layout.tabs | Where-Object { $_.tmux_session -ceq $liveSession })
+    if ($groupTab.Count -ne 1) { throw 'Expected one live tab before grouping' }
+    $groupTab[0] | Add-Member -NotePropertyName group -NotePropertyValue 'Lead runners' -Force
+    $groupBody = @{ base_revision = $groupSnapshot.revision; layout = $groupSnapshot.layout } | ConvertTo-Json -Depth 20 -Compress
+    [void](Invoke-RestMethod -Method Put -Uri "https://$hostName/v1/layout" -Headers $groupHeaders -ContentType 'application/json' -Body $groupBody)
+    [void](Wait-For 'native import saves live identity, Chat View, and group' {
         try {
             $snapshot = Get-Content "$settings/session-journey-a.json" -Raw | ConvertFrom-Json
             $tabs = @($snapshot.tabs | Where-Object { $_.tmux_session -ceq $liveSession })
-            $tabs.Count -eq 1 -and $tabs[0].csid -ceq $liveSid -and $tabs[0].cv -eq $true -and $tabs[0].name -ceq 'Named live chat'
+            $groups = @($snapshot.groups | Where-Object { $_.name -ceq 'Lead runners' -and $_.id -eq $tabs[0].group_id })
+            $tabs.Count -eq 1 -and $tabs[0].csid -ceq $liveSid -and $tabs[0].cv -eq $true -and $tabs[0].name -ceq 'Named live chat' -and $groups.Count -eq 1
         } catch { $false }
     } 15)
     $liveSeconds = ([DateTime]::UtcNow - $start).TotalSeconds
     if ($liveSeconds -gt 10) { throw "Native live import took $liveSeconds seconds" }
-    $results.named_live_import = @{ verdict = 'pass'; seconds = [Math]::Round($liveSeconds, 2); boundary = 'real account import; no remote host or phone' }
+    $results.named_live_import = @{ verdict = 'pass'; seconds = [Math]::Round($liveSeconds, 2); group = 'Lead runners'; boundary = 'real account import; no remote host or phone' }
+    Shot 'desktop-live-grouped'
 
     $stage = 'second device authentication'
     $tokenBody = @{ grant_type = 'refresh_token'; refresh_token = $secrets.second_refresh_token } | ConvertTo-Json -Compress

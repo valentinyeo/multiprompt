@@ -1,1 +1,1 @@
-Agents can create a named live chat on your signed-in devices without opening a terminal.
+Agents can start a named chat in your workspace and group, or keep it in the background until you want it visible.

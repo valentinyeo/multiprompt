@@ -4620,6 +4620,21 @@ class AgentHostFixture:
 
 
 class AgentHostTest(AgentHostFixture, unittest.TestCase):
+    def test_igsh_1653_headless_host_delivers_without_a_parking_pane(self):
+        self.enable()
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'started')
+            request = dict(message_protocol=1, tmux=self.tmux, provider=self.provider, sid=self.sid,
+                           op='message_submit', message_id=self.token, text=self.text)
+            self.assertEqual(reader.message_store_request(request)['message']['id'], self.token)
+            self.dispatch()
+            self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+            reader.message_store_request(request)
+            self.dispatch()
+            self.assertEqual(self.user_lines(), [self.text])
+            self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'already')
+            self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
+
     def test_host_delivers_once_with_receipt(self):
         self.enable()
         token = self.seed()

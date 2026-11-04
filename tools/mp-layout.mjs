@@ -13,7 +13,7 @@ commands:
   create-section <name>                            add a workspace
   move --to <workspace> [--create] <session>...    move sessions into a workspace in one change
   move --to <workspace> --match <glob> [--host N]  move every session whose name matches
-  spawn --name NAME --folder DIR --workspace WORKSPACE [--task TEXT] [--host N]  create a live chat
+  spawn --name NAME --folder DIR --workspace WORKSPACE [--group GROUP] [--mode visible|headless] [--task TEXT] [--host N]  create or reveal a live chat
   open <session> [--workspace <name>] [--host N] [--title <text>] [--no-tmux]
 
 environment:
@@ -37,12 +37,12 @@ const REFUSALS = {
 
 function parse(argv, command) {
   const flags = { _: [] };
-  const withValue = new Set(['to', 'match', 'host', 'workspace', 'title', 'name', 'folder', 'task']);
+  const withValue = new Set(['to', 'match', 'host', 'workspace', 'title', 'name', 'folder', 'task', 'group', 'mode']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { flags._.push(arg); continue; }
     const name = arg.slice(2);
-    if (command === 'spawn' && (!['name', 'folder', 'workspace', 'task', 'host'].includes(name) || Object.hasOwn(flags, name))) throw new Failure('invalid spawn option');
+    if (command === 'spawn' && (!['name', 'folder', 'workspace', 'task', 'host', 'group', 'mode'].includes(name) || Object.hasOwn(flags, name))) throw new Failure('invalid spawn option');
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || (command === 'spawn' && argv[i + 1].startsWith('--'))) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
@@ -65,7 +65,7 @@ async function call(ctx, method, body) {
   try {
     response = await ctx.fetch(ctx.url + '/v1/layout', {
       method,
-      headers: { Authorization: 'Bearer ' + ctx.key, 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer ' + ctx.key, 'Content-Type': 'application/json', ...(ctx.command === 'spawn' ? { 'X-Layout-Features': 'groups' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       ...(ctx.command === 'spawn' ? { signal: AbortSignal.timeout(8000) } : {})
     });
@@ -74,7 +74,7 @@ async function call(ctx, method, body) {
   }
   let data = null;
   try { data = await response.json(); } catch { data = null; }
-  return { status: response.status, data };
+  return { status: response.status, data, groupsSupported: (response.headers?.get('X-Layout-Features') || '').split(',').some(feature => feature.trim() === 'groups') };
 }
 
 function refusal(result) {
@@ -194,6 +194,10 @@ function spawnLock(path, env) {
 async function spawnSession(ctx, flags) {
   if (flags._.length || !flags.name || !flags.folder || !flags.workspace) throw new Failure('spawn needs name, folder and workspace');
   const name = flags.name.normalize('NFC').trim();
+  const group = flags.group === undefined ? null : flags.group.normalize('NFC').trim();
+  const mode = flags.mode ?? 'visible';
+  if (!['visible', 'headless'].includes(mode)) throw new Failure('mode must be visible or headless');
+  if (group !== null && (!group || group.length > 64 || /[\p{Cc}\p{Cs}]/u.test(group))) throw new Failure('invalid group');
   if (!name || name.length > 64 || /[\p{Cc}\p{Cs}]/u.test(name)) throw new Failure('invalid session name');
   if (!flags.workspace.trim() || Buffer.byteLength(flags.workspace, 'utf8') > 31 || /[\p{Cc}\p{Cs}]/u.test(flags.workspace)) throw new Failure('invalid workspace');
   if (flags.task !== undefined && (!flags.task.trim() || flags.task.includes('\0') || Buffer.byteLength(flags.task, 'utf8') > 65536)) throw new Failure('invalid task');
@@ -217,10 +221,13 @@ async function spawnSession(ctx, flags) {
     const existing = layout.tabs.find(t => t.tmux_host === host && t.tmux_session?.toLowerCase() === session);
     const sameName = layout.tabs.find(t => t.tmux_host === host && typeof t.name === 'string' && t.name.normalize('NFC').trim().toLowerCase() === name.toLowerCase() && t !== existing);
     if (sameName || (existing && (existing.kind !== 'tmux' || existing.workspace !== flags.workspace || typeof existing.name !== 'string' || existing.name.normalize('NFC').trim().toLowerCase() !== name.toLowerCase()))) throw new Failure('session collision');
+    if (existing && mode === 'headless') throw new Failure('session is already visible');
+    if (existing && (existing.group || null) !== group) throw new Failure('group collision');
     return existing;
   };
   const initial = await call(ctx, 'GET');
   if (initial.status !== 200) throw new Failure(initial.status === 401 || initial.status === 403 ? 'key not authorized' : 'account read failed');
+  if (group !== null && !initial.groupsSupported) throw new Failure('account service does not support groups');
   check(initial.data.layout);
   const home = ctx.env.HOME;
   if (!home) throw new Failure('HOME is required');
@@ -247,26 +254,30 @@ async function spawnSession(ctx, flags) {
     const config = readState('.config.json');
     const owner = readState('.owner.json');
     if (owner?.owner === 'terminal') throw new Failure('session is owned by terminal');
-    if (config && (config.cwd !== folder || config.tmux !== session || config.spawn_workspace !== flags.workspace || config.spawn_name !== name.toLowerCase())) throw new Failure('host configuration collision');
+    if (config && (config.cwd !== folder || config.tmux !== session || config.spawn_workspace !== flags.workspace || config.spawn_name !== name.toLowerCase() || (config.spawn_group ?? null) !== group)) throw new Failure('host configuration collision');
+    if (mode === 'headless' && config && config.spawn_mode !== 'headless') throw new Failure('session is already visible');
     const current = await call(ctx, 'GET');
     if (current.status !== 200) throw new Failure(current.status === 401 || current.status === 403 ? 'key not authorized' : 'account read failed');
     check(current.data.layout);
     const parked = ctx.tmux(['has-session', '-t', '=' + session]).status === 0;
     if (parked && !config) throw new Failure('terminal collision');
+    if (parked && mode === 'headless') throw new Failure('parking session already exists');
     if (!config) {
       const target = join(root, stateKey + '.config.json');
       const temporary = target + '.' + process.pid + '.' + Math.random().toString(16).slice(2);
       try {
-        writeFileSync(temporary, JSON.stringify({ enabled: false, cwd: folder, tmux: session, spawn_workspace: flags.workspace, spawn_name: name.toLowerCase() }), { mode: 0o600, flag: 'wx' });
+        writeFileSync(temporary, JSON.stringify({ enabled: false, cwd: folder, tmux: session, spawn_workspace: flags.workspace, spawn_name: name.toLowerCase(), spawn_group: group, spawn_mode: mode }), { mode: 0o600, flag: 'wx' });
         renameSync(temporary, target);
       } catch { try { unlinkSync(temporary); } catch {} throw new Failure('cannot write host state'); }
     }
-    if (!parked) {
-      const created = ctx.tmux(['new-session', '-d', '-s', session, '-c', folder, 'sleep', 'infinity', ';', 'set-option', '-t', '=' + session, '@mp_spawn_sid', sid]);
-      if (created.status !== 0 && ctx.tmux(['has-session', '-t', '=' + session]).status !== 0) throw new Failure('could not start parking session');
+    if (mode === 'visible') {
+      if (!parked) {
+        const created = ctx.tmux(['new-session', '-d', '-s', session, '-c', folder, 'sleep', 'infinity', ';', 'set-option', '-t', '=' + session, '@mp_spawn_sid', sid, ';', 'set-option', '-t', '=' + session + ':', '@mp_host_sid', sid]);
+        if (created.status !== 0 && ctx.tmux(['has-session', '-t', '=' + session]).status !== 0) throw new Failure('could not start parking session');
+      }
+      const pane = ctx.tmux(['display-message', '-p', '-t', '=' + session + ':', '#{pane_current_command}\t#{pane_current_path}\t#{@mp_spawn_sid}']);
+      if (pane.status !== 0 || String(pane.stdout || '').trim() !== `sleep\t${folder}\t${sid}`) throw new Failure('terminal collision');
     }
-    const pane = ctx.tmux(['display-message', '-p', '-t', '=' + session + ':', '#{pane_current_command}\t#{pane_current_path}\t#{@mp_spawn_sid}']);
-    if (pane.status !== 0 || String(pane.stdout || '').trim() !== `sleep\t${folder}\t${sid}`) throw new Failure('terminal collision');
     const runtime = (args, input) => {
       let result;
       try { result = ctx.runtime(args, input); } catch { throw new Failure('host operation failed'); }
@@ -277,9 +288,9 @@ async function spawnSession(ctx, flags) {
       const [enabled] = runtime(['host', 'enable', 'claude', sid, '--tmux', session, '--cwd', folder, '--permission-mode', 'bypassPermissions']);
       if (enabled?.status !== 'enabled') throw new Failure('host enable failed');
     }
-    const result = await edit(ctx, layout => {
+    const result = mode === 'headless' ? { changed: false, revision: current.data.revision } : await edit(ctx, layout => {
       if (check(layout)) return null;
-      layout.tabs.push({ kind: 'tmux', name, tmux_session: session, tmux_host: host, workspace: flags.workspace, manual: true });
+      layout.tabs.push({ kind: 'tmux', name, tmux_session: session, tmux_host: host, workspace: flags.workspace, manual: true, ...(group === null ? {} : { group }) });
       return layout;
     });
     const [started] = runtime(['host', 'start', 'claude', sid]);
@@ -292,7 +303,7 @@ async function spawnSession(ctx, flags) {
       const dispatched = replies.find(r => r.id === 2)?.result;
       if (submitted?.id !== token || submitted.text !== flags.task || !dispatched || submitted.state === 'failed' || dispatched.message?.state === 'failed') throw new Failure('task submission failed');
     }
-    ctx.out(JSON.stringify({ ok: true, sid, session, host, name, workspace: flags.workspace, first_task_id: flags.task === undefined ? null : token, revision: result.revision, changed: result.changed }));
+    ctx.out(JSON.stringify({ ok: true, sid, session, host, name, workspace: flags.workspace, group, mode, first_task_id: flags.task === undefined ? null : token, revision: result.revision, changed: result.changed }));
   } finally { release(); }
 }
 

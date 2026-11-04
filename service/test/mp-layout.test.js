@@ -158,10 +158,13 @@ test('spawn publishes once through the real service and refuses a workspace esca
     },
     runtime: args => { runtimeCalls++; return { status: 0, stdout: JSON.stringify({ status: args[1] === 'enable' ? 'enabled' : 'started' }) }; }
   };
-  const args = ['spawn', '--name', 'New live chat', '--folder', 'work', '--workspace', 'Work'];
+  const args = ['spawn', '--name', 'New live chat', '--folder', 'work', '--workspace', 'Work', '--group', 'Runners'];
   assert.equal(await run(args, { ...opts, env: { ...opts.env, MULTIPROMPT_KEY: innerKey } }), 1);
   assert.equal(runtimeCalls, 0);
   assert.equal(parked, false);
+  for (let i = 0; i < 2; i++) assert.equal(await run([...args, '--mode', 'headless'], opts), 0, errors.join('\n'));
+  assert.equal(parked, false);
+  assert.equal((await stored()).revision, 3);
   for (let i = 0; i < 2; i++) assert.equal(await run(args, opts), 0, errors.join('\n'));
   const result = await stored();
   assert.equal(result.revision, 4);
@@ -169,7 +172,15 @@ test('spawn publishes once through the real service and refuses a workspace esca
   const created = result.layout.tabs.at(-1);
   assert.equal(created.manual, true);
   assert.equal(created.name, 'New live chat');
+  assert.equal(created.group, 'Runners');
   assert.match(created.tmux_session, /^live-[0-9a-f]{32}$/);
+  const headers = { Authorization: 'Bearer ' + adminKey };
+  const legacy = await mf.dispatchFetch(base + '/v1/layout', { headers });
+  const snapshot = await legacy.json();
+  assert.equal(snapshot.layout.tabs.at(-1).group, undefined);
+  const write = await mf.dispatchFetch(base + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: snapshot.revision, layout: snapshot.layout }) });
+  assert.equal(write.status, 200);
+  assert.equal((await stored()).layout.tabs.at(-1).group, 'Runners');
 });
 
 test('the key never appears in output and a missing key is reported', async () => {

@@ -13,6 +13,7 @@ pub const Tab = struct {
     kind: []const u8 = "tmux",
     name: []const u8,
     manual: bool = false,
+    group: ?[]const u8 = null,
     favorite: ?bool = null,
     muted: ?bool = null,
     used: ?u64 = null,
@@ -92,6 +93,7 @@ pub fn validate(layout: Layout) !void {
     for (layout.tabs, 0..) |tab, i| {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
+        if (tab.group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
         if (tab.face) |face| {
             if (face >= 20) return error.InvalidLayout;
         }
