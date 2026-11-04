@@ -33,7 +33,8 @@ test('Windows proof restores the workspace strip through the real palette before
 test('Windows verification uses the production target and retains early exit diagnostics', () => {
   const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
   const sharedBuild = workflow.slice(workflow.indexOf('- name: Build the Windows app once for this push'), workflow.indexOf('  reopen-board-contract:'));
-  assert.match(sharedBuild, /zig build -Dtarget=x86_64-windows-gnu -Drelease=false/);
+  assert.match(sharedBuild, /zig build[^\r\n]* -Dtarget=x86_64-windows-gnu(?:\s|$)/);
+  assert.match(sharedBuild, /zig build[^\r\n]* -Drelease=false(?:\s|$)/);
   const library = fs.readFileSync('.claude/skills/verify-multiprompt/control-library.ps1', 'utf8');
   assert.ok(library.includes('App exited with code $($process.ExitCode) while waiting for $Description'));
 });

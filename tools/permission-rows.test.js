@@ -15,8 +15,7 @@ function body(file, name) {
 test('IGSH-1599 shared Windows proof binaries use the same CPU floor as native CI', () => {
   const workflow = read('.github/workflows/verify.yml');
   const shared = workflow.slice(workflow.indexOf('- name: Build the Windows app once for this push'), workflow.indexOf('  reopen-board-contract:'));
-  assert.match(shared, /zig build[^\r\n]* -Drelease=false(?:\s|$)/);
-  assert.match(shared, /zig build[^\r\n]* -Dcpu=x86_64_v3(?:\s|$)/);
+  assert.match(shared, /zig build -Drelease=false -Dcpu=x86_64_v3 /);
 });
 
 test('IGSH-1599 live approval cannot bypass the duplicate-answer guard', () => {
