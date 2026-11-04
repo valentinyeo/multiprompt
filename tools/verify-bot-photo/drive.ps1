@@ -203,7 +203,7 @@ function Pick([string]$Path, [bool]$SwitchAway = $false) {
     [VerifyNative]::Text($Path)
     [void](Wait-For 'filename typed exactly' { [VerifyNative]::EditText($filename) -ceq $Path })
     [VerifyNative]::Chord(@(0x0d))
-    [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -eq $main })
+    [void](Wait-For 'file dialog closed' { -not [PhotoDialogOwner]::IsWindow($dialog) })
     [void](Wait-For 'import completed' { $trace = Log; $trace.Length -ge $start -and $trace.Substring($start) -match '\[bot-photo\] import=(ok|failed)' })
 }
 function Shot([string]$Name) {
