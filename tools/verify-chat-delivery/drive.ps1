@@ -61,6 +61,7 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 }
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
+if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -544,7 +545,9 @@ foreach ($plan in $plans) {
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
     $isInstant = $plan.name -eq 'instant-chat'
-    $hasTranscript = $isHiddenSteps -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $isModel = $plan.name -eq 'model-settings'
+    $socketTemp = $null
+    $hasTranscript = $isModel -or $isHiddenSteps -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -557,6 +560,11 @@ foreach ($plan in $plans) {
         $env:USERPROFILE = "$profile/home"
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
+        if ($isModel) {
+            $socketTemp = Join-Path ([IO.Path]::GetPathRoot($profile)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+            New-Item -ItemType Directory $socketTemp | Out-Null
+            $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
+        }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
@@ -619,6 +627,7 @@ foreach ($plan in $plans) {
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
+        if ($isModel) { $savedSession.tabs[0].csid = $sid }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
@@ -667,6 +676,8 @@ foreach ($plan in $plans) {
         Doctor $true
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
+        } elseif ($isModel) {
+            . "$PSScriptRoot/model-settings.ps1"
         } elseif ($isInstant) {
             . "$PSScriptRoot/instant-chat.ps1"
         } elseif ($isResync) {
@@ -1335,6 +1346,7 @@ foreach ($plan in $plans) {
         try {
             if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$caseDir/debug.log"; Get-Content "$caseDir/debug.log" | Add-Content "$Evidence/debug.log" }
             if (Test-Path $state) { Copy-Item $state "$caseDir/stand-in" -Recurse -Force }
+            if ($isModel -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
             foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl')) {
                 $source = "$caseDir/stand-in/$file"
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
@@ -1359,7 +1371,8 @@ foreach ($plan in $plans) {
                 if ((Test-Path -LiteralPath $procRoot) -and -not (Get-ChildItem -LiteralPath $procRoot -Force)) { Remove-Item -LiteralPath $procRoot -Force }
             }
             Remove-Item -LiteralPath $profile -Recurse -Force
-            $cleanup.scratch_removed = -not (Test-Path -LiteralPath $profile)
+            if ($socketTemp -and (Test-Path -LiteralPath $socketTemp)) { Remove-Item -LiteralPath $socketTemp -Recurse -Force }
+            $cleanup.scratch_removed = -not (Test-Path -LiteralPath $profile) -and (-not $socketTemp -or -not (Test-Path -LiteralPath $socketTemp))
         } catch { $observation.error = "Evidence/cleanup: $_" }
         Save $observation "$caseDir/observation.json"
         Save $cleanup "$caseDir/cleanup.json"
@@ -1375,6 +1388,10 @@ Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_pro
 Stop-Transcript
 if ($Feature -eq 'chat-hidden-steps') {
     & node "$PSScriptRoot/../chat-hidden-steps-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_MODEL_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-model-proof.cjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_INSTANT_PROOF -eq '1') {

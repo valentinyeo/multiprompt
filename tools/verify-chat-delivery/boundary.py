@@ -1007,6 +1007,8 @@ def reader_namespace():
     except Exception:
         pass
     namespace["start_held_worker"] = lambda *args: None
+    if os.name == "nt" and state().get("name") == "model-settings":
+        namespace["events_wake"] = lambda: None
     if state().get("slashProof"):
         spec = importlib.util.spec_from_file_location("slash_host", Path(__file__).with_name("slash_host.py"))
         slash_host = importlib.util.module_from_spec(spec)
@@ -1076,6 +1078,17 @@ def reader_namespace():
 
 def serve_reader():
     namespace = reader_namespace()
+    if state().get("name") == "model-settings":
+        import hashlib
+        sid = state()["sid"]
+        record("model-reader.jsonl", inner_sha256=hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest(), generation=namespace.get("RUNTIME_GENERATION"))
+        paths = namespace["host_paths"]("claude", sid)
+        if not paths["config"].exists():
+            namespace["host_write"](paths["config"], dict(enabled=True, tmux="verify-agent", command=[sys.executable, str(Path(__file__).with_name("model-agent.py"))]))
+        started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+        record("model-host-start.jsonl", result=started)
+        if started.get("status") not in ("started", "already"):
+            raise RuntimeError("Production host failed to start: " + str(started))
     namespace["serve"](namespace["READER_SOURCE"])
 
 
