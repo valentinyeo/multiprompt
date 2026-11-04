@@ -20,6 +20,7 @@ test('live chat journey runs the shipped selftest and verifies every step and th
   }
   assert.match(driver, /\$selftest\.steps\.\$step\.pass -ne \$true/);
   assert.match(driver, /Snapshot 'chat-one-selftest'/);
+  assert.match(driver, /Wait-Until \{\s*\$current = Invoke-Zsb @\('tabs'\)[\s\S]*?\$oneOtherWant[\s\S]*?\$_.title -ceq \(\$one.marker \+ ' second'\)[\s\S]*?second page loaded in its own pane' 25/);
   assert.match(driver, /http\.server[^\n]+, \$true\)/);
   assert.match(driver, /\$wrapper \+ '" selftest'\), \$true\)/);
   const native = fs.readFileSync(path.join(path.dirname(file), 'control-native.cs'), 'utf8');

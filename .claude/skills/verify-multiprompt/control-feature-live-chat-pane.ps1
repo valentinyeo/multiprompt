@@ -172,10 +172,13 @@ try {
     Snapshot 'chat-one-page'
     $oneNavigate = Invoke-Zsb @('navigate', $one.other) $script:liveChatPort 'chat-one-navigate' -Session $one.tmux
     $oneOtherWant = ([string]$one.other).TrimEnd('/')
-    if (([string]$oneNavigate.result.tab.url).TrimEnd('/') -cne $oneOtherWant -or $oneNavigate.result.tab.title -cne ($one.marker + ' second')) { throw ('zsb navigate from the ' + $one.tmux + ' chat did not reach that chat pane: ' + (ConvertTo-Json -InputObject $oneNavigate -Compress)) }
+    Wait-Until {
+        $current = Invoke-Zsb @('tabs') $script:liveChatPort 'chat-one-navigation-progress' -Session $one.tmux
+        @($current.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant -and $_.title -ceq ($one.marker + ' second') }).Count -eq 1
+    } 'chat one second page loaded in its own pane' 25
     $oneAgainTabs = Invoke-Zsb @('tabs') $script:liveChatPort 'chat-one-tabs-second' -Session $one.tmux
     if (@($oneAgainTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant }).Count -ne 1) { throw ('The ' + $one.tmux + ' chat pane lost the page its agent opened') }
-    $result.checks += @{ name = 'chat-one-agent-path'; session = $one.tmux; tab = $one.shellId; beforeOpen = $oneBefore; opened = $oneOpen; status = $oneStatus; paneInfo = $onePane; navigated = $oneNavigate.result.tab; page = $one.page }
+    $result.checks += @{ name = 'chat-one-agent-path'; session = $one.tmux; tab = $one.shellId; beforeOpen = $oneBefore; opened = $oneOpen; status = $oneStatus; paneInfo = $onePane; navigateAcknowledgement = $oneNavigate.result.tab; navigated = @($oneAgainTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant })[0]; page = $one.page }
     Wait-Until {
         $pane = Read-BrowserPaneFor $two.shellId
         $null -ne $pane -and $pane.PSObject.Properties['browser_state'] -and $pane.browser_state -eq 'closed' -and $pane.browser_connection_id -eq 0
