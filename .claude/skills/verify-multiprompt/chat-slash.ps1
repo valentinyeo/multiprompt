@@ -36,6 +36,7 @@ function Wait-SlashMode([string]$Mode) {
         try { (Get-Content $file -Raw | ConvertFrom-Json).mode -ceq $Mode } catch { $false }
     } ('host acknowledged mode ' + $Mode)
     Wait-ChatFocus 'Edit' ('slash-mode-' + $Mode)
+    Wait-Until { [VerifyNative]::EditText($script:slashComposer) -ceq '' } 'acknowledged mode clears the slash draft'
 }
 $offset = (Read-SharedText $script:slashLog).Length
 Send-Slash '/plan'
@@ -48,8 +49,7 @@ $offset = (Read-SharedText $script:slashLog).Length
 Send-Slash '/permissions'
 Wait-SlashPalette 12000 $offset
 Snapshot 'slash-permissions-picker'
-Press @(0x11, 0x41) 'Ctrl+A: narrow the permission mode picker'
-Type-Text 'chat permission mode ask'
+Type-Text ' ask'
 Wait-SlashPalette 12001 $offset
 Press @(0x0D) 'Enter: choose Ask mode'
 Wait-SlashMode 'manual'
