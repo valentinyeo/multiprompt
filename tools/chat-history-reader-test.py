@@ -4354,6 +4354,41 @@ class FixtureLifecycleTest(unittest.TestCase):
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
 
+    def test_failed_host_fixture_reaps_agent_after_host_crash(self):
+        owned = {}
+        decoy = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
+        self.addCleanup(stop_fixture_process, decoy)
+
+        class FailingFixture(AgentHostFixture, unittest.TestCase):
+            def stop_hosts(self):
+                super().stop_hosts()
+                self.assertEqual(reader.HOME, self.home)
+                self.wait_for(lambda: not reader.host_agent_orphan(self.provider, self.sid, owned['agent_pid']))
+                owned['checked'] = True
+
+            def runTest(self):
+                with self.agent.open('a') as agent:
+                    agent.write('\nimport time; time.sleep(120)\n')
+                self.enable()
+                self.seed()
+                self.dispatch()
+                self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+                self.assertEqual(len(self.host_children), 1)
+                host = self.host_children[0]
+                owned['agent_pid'] = reader.host_agent_recorded_pid(self.provider, self.sid)
+                self.assertTrue(reader.host_agent_orphan(self.provider, self.sid, owned['agent_pid']))
+                stop_fixture_process(host)
+                self.assertTrue(reader.host_agent_orphan(self.provider, self.sid, owned['agent_pid']))
+                self.fail('intentional hosted fixture failure')
+
+        result = unittest.TestResult()
+        FailingFixture().run(result)
+        self.assertEqual(len(result.failures), 1)
+        self.assertIn('intentional hosted fixture failure', result.failures[0][1])
+        self.assertEqual(result.errors, [])
+        self.assertTrue(owned.get('checked'))
+        self.assertIsNone(decoy.poll())
+
     def test_failed_host_fixture_stops_its_thread_and_process_before_restoring_home(self):
         import socket as module
         owned = {}
@@ -4435,6 +4470,7 @@ class AgentHostFixture:
         finally:
             for child in self.host_children:
                 stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
 
     def enable(self, mode='ok', **extra):
         config = dict(enabled=True, tmux=self.tmux, command=[sys.executable, str(self.agent)], cwd=str(self.home))
@@ -6271,6 +6307,7 @@ class HostProviderCase(unittest.TestCase):
         finally:
             for child in self.host_children:
                 stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
 
     def enable(self, **extra):
         self.assertIn(self.provider, reader.HOST_PROVIDERS)
