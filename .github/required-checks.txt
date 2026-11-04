@@ -2,3 +2,4 @@ test
 secret-scan
 no-comments
 verify (appearance)
+chat-ui-approval
