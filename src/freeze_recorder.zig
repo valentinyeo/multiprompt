@@ -9,6 +9,7 @@ extern "user32" fn RegisterWindowMessageW([*:0]const u16) callconv(.winapi) u32;
 pub const NOTICE_TEXT = "Multi Bot froze last time, a report was saved";
 pub const THRESHOLD_MS = 5000;
 const EVENT_COUNT = 16;
+const Reason = enum(u2) { blank_chat, heartbeat, paint };
 pub const View = enum(u3) { terminal, chat, browser, inbox, search, sessions, shortcuts, changelog };
 
 extern "kernel32" fn CreateThread(?*anyopaque, usize, *const fn (?*anyopaque) callconv(.winapi) u32, ?*anyopaque, u32, ?*u32) callconv(.winapi) win.HANDLE;
@@ -51,6 +52,31 @@ pub const Detector = struct {
         return true;
     }
 };
+
+const PaintDetector = struct {
+    demand: u64 = 0,
+    recorded: bool = false,
+
+    fn probe(self: *PaintDetector, demand: u64, now: u64) bool {
+        if (self.demand != demand) self.* = .{ .demand = demand };
+        if (demand == 0 or self.recorded or now -| (demand - 1) <= THRESHOLD_MS) return false;
+        self.recorded = true;
+        return true;
+    }
+};
+
+var g_paint_demand = std.atomic.Value(u64).init(0);
+var g_active = false;
+
+pub fn activation(active: bool) void {
+    if (active == g_active) return;
+    g_active = active;
+    g_paint_demand.store(if (active) awakeMillis() +| 1 else 0, .release);
+}
+
+pub fn painted() void {
+    g_paint_demand.store(0, .release);
+}
 
 var g_window: win.HANDLE = null;
 var g_main_thread: win.HANDLE = null;
@@ -144,6 +170,7 @@ pub fn stop() void {
 
 fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
     var detector: Detector = .{};
+    var paint_detector: PaintDetector = .{};
     var token: u32 = 1;
     var started = awakeMillis();
     if (PostMessageW(g_window, g_message, token, 0) == 0) return 0;
@@ -151,8 +178,10 @@ fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
         if (win.IsWindow(g_window) == 0) break;
         const now = awakeMillis();
         const responsive = g_ack.load(.acquire) == token;
-        if (detector.probe(responsive, started, now)) record(.freeze, now -| detector.missed_since.?);
-        if (g_blank_pending.swap(false, .acq_rel)) record(.blank_chat, 0);
+        if (detector.probe(responsive, started, now)) record(.freeze, now -| detector.missed_since.?, .heartbeat);
+        const demand = g_paint_demand.load(.acquire);
+        if (responsive and paint_detector.probe(demand, now) and g_paint_demand.load(.acquire) == demand) record(.freeze, now -| (demand - 1), .paint);
+        if (g_blank_pending.swap(false, .acq_rel)) record(.blank_chat, 0, .blank_chat);
         if (responsive) {
             token +%= 1;
             started = now;
@@ -223,7 +252,7 @@ fn instruction(b: *crash.Buf, ip: usize) void {
     b.add("instruction: unavailable\n");
 }
 
-fn record(kind: upload.FreezeKind, unresponsive_ms: u64) void {
+fn record(kind: upload.FreezeKind, unresponsive_ms: u64, reason: Reason) void {
     const location = capture();
     var memory: [8192]u8 = undefined;
     var b: crash.Buf = .{ .data = &memory };
@@ -231,6 +260,12 @@ fn record(kind: upload.FreezeKind, unresponsive_ms: u64) void {
     GetSystemTimeAsFileTime(&time);
     const timestamp = ((@as(u64, time.dwHighDateTime) << 32) | time.dwLowDateTime) / 10_000_000 - 11_644_473_600;
     b.print("multiprompt {s} report\nversion: {s}\ntime_unix: {d}\nunresponsive_ms: {d}\nthread_context: {s}\n", .{ if (kind == .freeze) "freeze" else "blank chat", g_version, timestamp, unresponsive_ms, if (location.captured) "captured" else "unavailable" });
+    b.print("reason: {d}\n", .{@intFromEnum(reason)});
+    var frame: win.RECT = std.mem.zeroes(win.RECT);
+    var client: win.RECT = std.mem.zeroes(win.RECT);
+    if (win.GetWindowRect(g_window, &frame) != 0 and win.GetClientRect(g_window, &client) != 0) {
+        b.print("frame_size: {d} {d}\nclient_size: {d} {d}\n", .{ frame.right - frame.left, frame.bottom - frame.top, client.right - client.left, client.bottom - client.top });
+    }
     instruction(&b, location.ip);
     b.add("stack_rvas:\n");
     for (location.rvas[0..location.count]) |rva| b.print("  0x{X}\n", .{rva});
@@ -255,6 +290,40 @@ fn record(kind: upload.FreezeKind, unresponsive_ms: u64) void {
         }
     }
     upload.queueFreeze(kind, g_version, @intCast(timestamp), location.rvas[0..location.count], context);
+}
+
+test "activation demand is not extended by repeated activation or idle paints" {
+    defer {
+        g_active = false;
+        g_paint_demand.store(0, .release);
+    }
+    activation(false);
+    activation(true);
+    const first = g_paint_demand.load(.acquire);
+    try std.testing.expect(first != 0);
+    activation(true);
+    try std.testing.expectEqual(first, g_paint_demand.load(.acquire));
+    painted();
+    activation(true);
+    try std.testing.expectEqual(@as(u64, 0), g_paint_demand.load(.acquire));
+    activation(false);
+    activation(true);
+    try std.testing.expect(g_paint_demand.load(.acquire) != 0);
+    activation(false);
+    try std.testing.expectEqual(@as(u64, 0), g_paint_demand.load(.acquire));
+}
+
+test "paint demand threshold cancellation and recovery" {
+    var detector: PaintDetector = .{};
+    try std.testing.expect(!detector.probe(0, 100000));
+    try std.testing.expect(!detector.probe(101, 5100));
+    try std.testing.expect(detector.probe(101, 5101));
+    try std.testing.expect(!detector.probe(101, 20000));
+    try std.testing.expect(!detector.probe(0, 20001));
+    try std.testing.expect(!detector.probe(30001, 35000));
+    try std.testing.expect(detector.probe(30001, 35001));
+    try std.testing.expect(!detector.probe(40001, 1));
+    try std.testing.expect(!detector.probe(0, 50000));
 }
 
 test "freeze threshold, one report per stall, recovery permits a later report" {

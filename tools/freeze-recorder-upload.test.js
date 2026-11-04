@@ -42,18 +42,24 @@ var g_window: ?*anyopaque = null;
 var g_message: u32 = 0xC000;
 var g_ack = std.atomic.Value(u32).init(0);
 var g_blank_pending = std.atomic.Value(bool).init(false);
+var g_paint_demand = std.atomic.Value(u64).init(0);
+var g_active = false;
+var cancel_paint = false;
+var last_reason: ?Reason = null;
 var tick: u64 = 0;
 var records: usize = 0;
 var posts: usize = 0;
 var healthy = false;
 const PostMessageW = win.PostMessageW;
 fn awakeMillis() u64 { return tick; }
-${source.includes("record(.freeze,") ? "fn record(_: upload.Kind, _: u64) void" : "fn record(_: u64) void"} { records += 1; }
+${declaration(source, 'const Reason = enum')};
+fn record(_: upload.Kind, _: u64, reason: Reason) void { records += 1; last_reason = reason; }
 const win = struct {
     const HANDLE = ?*anyopaque;
     fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
         if (timeout == 0) return 0x102;
         tick += timeout;
+        if (cancel_paint and tick >= 3000) activation(false);
         return if (tick <= 20000) 0x102 else 0;
     }
     fn IsWindow(_: HANDLE) i32 { return 1; }
@@ -66,6 +72,9 @@ const win = struct {
     }
 };
 ${declaration(source, 'pub const Detector = struct')};
+${declaration(source, 'const PaintDetector = struct')};
+${declaration(source, 'pub fn activation(')}
+${declaration(source, 'pub fn painted(')}
 ${declaration(source, 'fn worker(')}
 test "hidden hang and healthy negative control" {
     _ = worker(null);
@@ -75,6 +84,22 @@ test "hidden hang and healthy negative control" {
     _ = worker(null);
     try std.testing.expectEqual(@as(usize, 0), records);
     try std.testing.expect(posts > 1);
+    tick = 0; records = 0; posts = 0; last_reason = null;
+    activation(true);
+    _ = worker(null);
+    try std.testing.expectEqual(@as(usize, 1), records);
+    try std.testing.expectEqual(Reason.paint, last_reason.?);
+    try std.testing.expect(posts > 1);
+    activation(false);
+    tick = 0; records = 0; posts = 0; cancel_paint = true;
+    activation(true);
+    _ = worker(null);
+    try std.testing.expectEqual(@as(usize, 0), records);
+    tick = 0; records = 0; posts = 0; cancel_paint = false;
+    activation(true);
+    painted();
+    _ = worker(null);
+    try std.testing.expectEqual(@as(usize, 0), records);
 }
 `);
 });

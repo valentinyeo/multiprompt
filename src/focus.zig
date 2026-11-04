@@ -434,7 +434,9 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());
     clearSelectedTabDotOnReturn();
     if (app_state.g_main_hwnd == null) return;
-    if (foregroundHwndIsOurs(hwnd)) {
+    const ours = foregroundHwndIsOurs(hwnd);
+    @import("freeze_recorder.zig").activation(ours and IsIconic(app_state.g_main_hwnd) == 0);
+    if (ours) {
         installHook();
         const browser_popup_active = activeBrowserTransientPopupHasForegroundFocus();
         if (browser_popup_active) {
@@ -450,10 +452,9 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
         browserTrace("FGevt not-ours -> suspend maskRaise");
         suspendBrowserEdgeMaskRaiseForPopup();
     }
-    if (paneRingRepaintNeeded(&app_state.g_pane_ring_state, paneRingState()) and activePaneBorderOn()) {
-        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-        invalidateBrowserBottomMask();
-    }
+    const repaint_ring = paneRingRepaintNeeded(&app_state.g_pane_ring_state, paneRingState()) and activePaneBorderOn();
+    if (ours or repaint_ring) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    if (repaint_ring) invalidateBrowserBottomMask();
 }
 
 fn browserOrphanWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LONG, idChild: LONG, eventThread: DWORD, eventTime: DWORD) callconv(WINAPI) void {

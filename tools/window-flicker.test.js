@@ -92,6 +92,8 @@ fn fontSyncActiveNow() void {}
 var keyboard_hook_installed = false;
 fn installHook() void { keyboard_hook_installed = true; }
 fn sessionFrontChanged() void {}
+var paint_demand_active = false;
+fn freezeActivation(active: bool) void { paint_demand_active = active; }
 fn focusGuardReturnFromPane(_: HANDLE) bool { return false; }
 fn syncPaneFocusModeFromForeground(_: HANDLE, _: bool) void {}
 fn leftMouseButtonDown() bool { return false; }
@@ -130,7 +132,7 @@ fn foregroundMovesTo(h: HANDLE) void {
 }
 ${body('armConsoleGeometrySettle')}
 ${body('settleConsoleGeometry')}
-${body('foregroundWinEventProc').replaceAll('@import("main.zig").', '')}
+${body('foregroundWinEventProc').replaceAll('@import("main.zig").', '').replaceAll('@import("freeze_recorder.zig").activation', 'freezeActivation')}
 ${optional('windowPosChangeMovesGeometry')}
 ${optional('paneRingState')}
 ${optional('paneRingRepaintNeeded')}
@@ -200,7 +202,9 @@ test "IGSH-1161 browser foreground restores shortcut delivery" {
         keyboard_hook_installed = false;
         foregroundMovesTo(@ptrFromInt(0x1000));
         try std.testing.expect(!keyboard_hook_installed);
+        try std.testing.expect(!paint_demand_active);
         foregroundMovesTo(pane_hwnd);
+        try std.testing.expect(paint_demand_active);
         if (keyboard_hook_installed) delivered += 1;
     }
     try std.testing.expectEqual(@as(usize, 20), delivered);

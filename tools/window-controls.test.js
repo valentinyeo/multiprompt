@@ -38,8 +38,9 @@ test('IGSH-1000 screenshots prove three glyphs and top-edge separator in both wi
 
 test('IGSH-1000 maximized client content excludes the native invisible resize borders', () => {
   const frame = read('src/window_frame.zig');
-  assert.match(frame, /client.top = @max\(client.top, monitor.rcWork.top\)/);
-  assert.match(frame, /client.bottom = @min\(client.bottom, monitor.rcWork.bottom\)/);
+  assert.match(frame, /client\.\* = maximizedClientRect\(client\.\*, monitor.rcWork\)/);
+  assert.match(frame, /\.top = @max\(proposed.top, work.top\)/);
+  assert.match(frame, /\.bottom = @min\(proposed.bottom, work.bottom\)/);
   assert.match(journey, /Abs\(\$pixels.captionInset\) -gt 1 -or -not \$pixels.clientInsideWorkArea/);
   assert.match(native, /origin.Y, client.Right, client.Bottom[\s\S]*monitor.Work.Left, monitor.Work.Top/);
 });

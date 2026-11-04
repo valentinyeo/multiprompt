@@ -70,19 +70,26 @@ fn hover(hwnd: w.HANDLE, button: ?Button) void {
     _ = w.InvalidateRect(hwnd, &band, 0);
 }
 
+fn maximizedClientRect(proposed: w.RECT, work: w.RECT) w.RECT {
+    if (proposed.left > work.left or proposed.top > work.top or proposed.right < work.right or proposed.bottom < work.bottom) return proposed;
+    return .{
+        .left = @max(proposed.left, work.left),
+        .top = @max(proposed.top, work.top),
+        .right = @min(proposed.right, work.right),
+        .bottom = @min(proposed.bottom, work.bottom),
+    };
+}
+
 pub fn handle(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) ?w.LRESULT {
     switch (msg) {
         0x0083 => {
             if (lp == 0) return 0;
             const client: *w.RECT = @ptrFromInt(@as(usize, @bitCast(lp)));
-            if (w.IsZoomed(hwnd) != 0) {
+            if (w.IsZoomed(hwnd) != 0 and w.IsIconic(hwnd) == 0) {
                 var monitor = std.mem.zeroes(w.MONITORINFO);
                 monitor.cbSize = @sizeOf(w.MONITORINFO);
-                if (w.GetMonitorInfoW(w.MonitorFromWindow(hwnd, w.MONITOR_DEFAULTTONEAREST), &monitor) != 0) {
-                    client.left = @max(client.left, monitor.rcWork.left);
-                    client.top = @max(client.top, monitor.rcWork.top);
-                    client.right = @min(client.right, monitor.rcWork.right);
-                    client.bottom = @min(client.bottom, monitor.rcWork.bottom);
+                if (w.GetMonitorInfoW(w.MonitorFromRect(client, w.MONITOR_DEFAULTTONEAREST), &monitor) != 0) {
+                    client.* = maximizedClientRect(client.*, monitor.rcWork);
                 }
             }
             return 0;
@@ -196,6 +203,24 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE) void {
             },
         }
     }
+}
+
+test "IGSH-1651 pending frame geometry cannot collapse against the previous work area" {
+    const old_work = w.RECT{ .left = 0, .top = 0, .right = 1920, .bottom = 1040 };
+    const proposed = w.RECT{ .left = 1912, .top = -8, .right = 3848, .bottom = 1048 };
+    const result = maximizedClientRect(proposed, old_work);
+    try std.testing.expectEqual(@as(i32, 1936), result.right - result.left);
+    try std.testing.expectEqualDeep(proposed, result);
+    const restored = w.RECT{ .left = 400, .top = 80, .right = 1400, .bottom = 780 };
+    try std.testing.expectEqualDeep(restored, maximizedClientRect(restored, old_work));
+    const iconic = w.RECT{ .left = -32000, .top = -32000, .right = -31840, .bottom = -31970 };
+    try std.testing.expectEqualDeep(iconic, maximizedClientRect(iconic, old_work));
+}
+
+test "IGSH-1651 settled maximized frame still excludes native resize borders" {
+    const work = w.RECT{ .left = 1920, .top = 40, .right = 3840, .bottom = 1080 };
+    const proposed = w.RECT{ .left = 1912, .top = 32, .right = 3848, .bottom = 1088 };
+    try std.testing.expectEqualDeep(work, maximizedClientRect(proposed, work));
 }
 
 test "custom frame retains resize corners, native window-button hits and a thin drag strip" {
