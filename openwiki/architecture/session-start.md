@@ -272,6 +272,8 @@ starts nothing until the user picks.
 - The declared folder is a `commands.json` default entry for the workspace
   (`default: true`, `workspace`, `cwd`, optional `folder_host`). The last matching
   entry wins, so setting the folder again replaces an earlier choice.
+- Without a declared folder, the picker uses the active tmux tab's server when it
+  belongs to the requested workspace; otherwise it uses the existing workspace fallback.
 - `Ctrl+K` -> **Pick repo...** lists git repo roots on the workspace server: repo
   roots of open tabs first, then repos one level under `~/projects`. Typing filters
   the paths, Enter starts the session kind that asked for the pick (Claude, Codex,

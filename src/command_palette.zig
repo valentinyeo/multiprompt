@@ -1645,6 +1645,10 @@ pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
 }
 
 pub fn workspaceHostForNewTab(ws: u8) u8 {
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        if ((!app_state.g_single_window or shell.workspace == ws) and shell.tmux_session_len > 0) return shell.tmux_host;
+    }
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (app_state.g_single_window and shell.workspace != ws) continue;
