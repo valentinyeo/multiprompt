@@ -4,6 +4,15 @@ const { readFileSync, existsSync } = require('node:fs');
 
 const control = readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8');
 const sessions = readFileSync('.claude/skills/verify-multiprompt/control-feature-sessions.ps1', 'utf8');
+
+test('shared Windows verifier builds use a portable CPU', () => {
+  const workflow = readFileSync('.github/workflows/verify.yml', 'utf8');
+  const start = workflow.indexOf('- name: Build the Windows app once for this push');
+  const end = workflow.indexOf('- uses:', start);
+  assert.ok(start >= 0 && end > start);
+  assert.match(workflow.slice(start, end), /zig build[^\n]*-Dcpu=(?:baseline|x86_64_v3)\b/);
+});
+
 test('sessions installs the SSH boundary before launch', () => {
   assert.ok(existsSync('tools/verify-repo-picker/ssh.c'), 'repository picker boundary source must exist');
   const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
