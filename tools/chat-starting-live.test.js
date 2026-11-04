@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || process.cwd();
 const live = fs.readFileSync(path.join(root, 'src/chat_live.zig'), 'utf8');
 const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
+const session = fs.readFileSync(path.join(root, 'src/chat_session.zig'), 'utf8');
 
 function section(source, start, end) {
   const a = source.indexOf(start);
@@ -36,6 +37,14 @@ test('first subscription keeps starting state and ready respects real turns', ()
   assert.equal(becomesIdle(0, 'running'), true);
   assert.equal(becomesIdle(3, 'running'), false);
   assert.equal(becomesIdle(0, 'idle'), false);
+});
+
+test('empty history still renders a changed live transcript', () => {
+  const refresh = section(session, 'fn refreshChatBlockCache(', 'fn chatCacheIdentity(');
+  const guard = refresh.slice(refresh.indexOf('if (!from_file and (screen_len'), refresh.indexOf('const len = if (from_file)'));
+  assert.match(guard, /live_revision == g_chat_live_drawn_revision/);
+  assert.ok(refresh.indexOf('const live_revision =') < refresh.indexOf(guard));
+  assert.ok(refresh.indexOf('tailFor(') > refresh.indexOf(guard));
 });
 
 test('startup failure survives history catch-up and replay', () => {

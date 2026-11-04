@@ -3030,7 +3030,8 @@ def host_agent_start(provider, sid):
         if tmux:
             prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
         shell = ["/bin/sh", "-l", "-c"]
-        setup = 'PATH="$HOME/.multiprompt-runtime:$HOME/.local/bin:$PATH"; export PATH; '
+        folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
+        setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
         source = globals().get("READER_SOURCE")
         if not isinstance(source, str) or not source:
             raise RuntimeError("owner_unavailable")
@@ -5887,7 +5888,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 63
+RUNTIME_GENERATION = 64
 
 if __name__ == '__main__':
     import base64 as _base64

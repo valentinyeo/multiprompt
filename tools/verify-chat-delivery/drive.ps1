@@ -48,6 +48,10 @@ if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $plans = @(@{name='live-delivery'; 
 if ($env:CHAT_SWITCH_PROOF -eq '1') { $plans = @(@{name='remote-switch'; mode='idle'; text='long remote conversation switching'}) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; mode='idle'; text='no transcript behind this tab'}) }
+if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
+    if ($Feature -ne 'chat-delivery') { throw 'Startup failure proof requires chat-delivery' }
+    $plans = @(@{name='startup-failure'; mode='idle'; text='no provider transcript'})
+}
 if ($env:CHAT_NOTES_PROOF -eq '1') { $plans = @(@{name='session-notes'; mode='idle'; text='runner note disclosure'}) }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_REPLY_PROOF -eq '1') { $plans = @(@{name='reply-reference'; mode='idle'; text='compact reply navigation'}) }
@@ -614,6 +618,7 @@ foreach ($plan in $plans) {
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
+        if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
@@ -660,7 +665,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($isInstant) {
+        if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
+            . "$PSScriptRoot/startup-failure.ps1"
+        } elseif ($isInstant) {
             . "$PSScriptRoot/instant-chat.ps1"
         } elseif ($isResync) {
             if ($isRecovery) { . "$PSScriptRoot/resync-recovery.ps1" } else { . "$PSScriptRoot/resync.ps1" }
@@ -1416,6 +1423,10 @@ if ($env:CHAT_SWITCH_PROOF -eq '1') {
 }
 if ($env:CHAT_REMOTE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-remote-sync-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-startup-failure-proof.cjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_MISSING_PROOF -eq '1') {

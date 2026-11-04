@@ -1007,7 +1007,7 @@ def reader_namespace():
     except Exception:
         pass
     namespace["start_held_worker"] = lambda *args: None
-    if os.name == "nt" and state().get("name") == "instant-chat":
+    if os.name == "nt" and state().get("name") in ("instant-chat", "startup-failure"):
         import msvcrt
         import types
 
@@ -1030,6 +1030,40 @@ def reader_namespace():
         namespace["events_wake"] = lambda: None
         namespace["start_message_worker"] = lambda *args, **kwargs: None
         record("instant-boundary.jsonl", notification="poll fallback", dispatch="store arrival only")
+    if state().get("name") == "startup-failure":
+        original = namespace["serve_request"]
+        sid = "a1b2c3d4-1593-4000-8000-000000001593"
+
+        def request(line, source, subscriptions, lock):
+            original(line, source, subscriptions, lock)
+            query = json.loads(line)
+            if query.get("op") != "events_subscribe" or query.get("sid") != sid:
+                return
+            marker = ROOT / "startup-failure-started"
+            try:
+                fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                return
+            os.close(fd)
+            record("startup-failure.jsonl", stage="subscribed", sid=sid, provider=query.get("provider"))
+            import threading
+            errors = []
+
+            def host():
+                try:
+                    namespace["host_startup_failure"]("claude", sid, "verify-agent", {}, "cwd_unavailable")
+                except Exception as error:
+                    errors.append(error)
+
+            worker = threading.Thread(target=host)
+            worker.start()
+            worker.join()
+            if errors:
+                raise errors[0]
+            page = namespace["message_events_page"]("claude", sid, 0)
+            record("startup-failure.jsonl", stage="host-stopped", sid=sid, standin="thread", events=page["events"])
+
+        namespace["serve_request"] = request
     return namespace
 
 
