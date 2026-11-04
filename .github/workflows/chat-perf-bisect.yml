@@ -209,13 +209,17 @@ jobs:
         if: inputs.profile
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends valgrind
+          sudo apt-get install -y --no-install-recommends linux-tools-generic
+          sudo sysctl kernel.perf_event_paranoid=-1
+          profiler=$(find /usr/lib/linux-tools -type f -name perf | head -1)
+          test -n "$profiler"
           for side in before after; do
             set +e
-            valgrind --tool=callgrind --callgrind-out-file="evidence/$side.callgrind" "./evidence/$side" > "evidence/$side-profile.log" 2>&1
+            sudo "$profiler" record -e cpu-clock -F 499 --call-graph dwarf -o "evidence/$side.perf" -- "./evidence/$side" > "evidence/$side-profile.log" 2>&1
             printf '%s\n' "$?" > "evidence/$side-profile.exit"
             set -e
-            callgrind_annotate --inclusive=yes --tree=both "evidence/$side.callgrind" > "evidence/$side-profile.txt"
+            sudo "$profiler" report --stdio --no-children -i "evidence/$side.perf" > "evidence/$side-profile.txt"
+            sudo chown "$(id -u):$(id -g)" "evidence/$side.perf"
           done
       - name: Compare all measured work and unchanged limits
         run: node after/tools/chat-update-speed.mjs evidence
