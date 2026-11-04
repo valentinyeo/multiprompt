@@ -31,7 +31,7 @@ $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '0'
 $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
-New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE | Out-Null
+New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE, (Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:USERPROFILE 'Documents') | Out-Null
 $checks = [Collections.Generic.List[object]]::new()
 $result = @{ feature='bot-photo'; version=$ExpectedVersion; sha256=$ExpectedHash; status='failed'; checks=$checks; cleanup='pending'; error=$null }
 $job = $null
@@ -107,6 +107,8 @@ function Pick([string]$Path) {
     }
     [Windows.Forms.Clipboard]::SetText($Path)
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog) { throw 'File dialog lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x4e))
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x41))
     [ChatDeliveryDesktop]::Chord(@(0x11, 0x56))
     [ChatDeliveryDesktop]::Chord(@(0x0d))
     [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog })
