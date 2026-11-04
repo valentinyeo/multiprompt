@@ -1010,7 +1010,6 @@ const InboxLayout = struct {
 const InboxNameBounds = struct {
     left: i32,
     right: i32,
-    workspace_right: i32,
     show_age: bool,
 };
 
@@ -1020,10 +1019,8 @@ fn inboxNameBounds(layout: InboxLayout, row: *const InboxRow) InboxNameBounds {
     const has_time = row.la != 0 or row.lv != 0;
     const age_right_padding: i32 = if (has_time) 100 else 30;
     const show_age = (row.att or has_time) and content_right - left >= uiScaled(age_right_padding - 14 + 80);
-    const workspace_right = if (show_age) @max(left, layout.right - uiScaled(age_right_padding)) else content_right;
-    const has_workspace = row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].name_len > 0;
-    const workspace_space = if (has_workspace and workspace_right - left >= uiScaled(156)) uiScaled(76) else 0;
-    return .{ .left = left, .right = workspace_right - workspace_space, .workspace_right = workspace_right, .show_age = show_age };
+    const right = if (show_age) @max(left, layout.right - uiScaled(age_right_padding)) else content_right;
+    return .{ .left = left, .right = right, .show_age = show_age };
 }
 
 fn inboxLayout(w: i32, h: i32) InboxLayout {
@@ -1561,15 +1558,6 @@ pub fn paintInbox(hdc: HANDLE) void {
         const name_right = @min(name.right, text_left + name_width);
         var name_rc = RECT{ .left = text_left, .top = y + uiScaled(8), .right = name_right, .bottom = y + uiScaled(27) };
         _ = @import("dwrite_text.zig").draw(hdc, &name_buf, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        if (name.workspace_right > name.right and name_right + uiScaled(8) < name.workspace_right) {
-            const ws = &app_state.g_inbox_ws[row.ws];
-            var ws_buf: [64]u16 = undefined;
-            const ws_len = json_reader.wide(ws.name[0..ws.name_len], &ws_buf);
-            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
-            _ = SetTextColor(hdc, faint);
-            var ws_rc = RECT{ .left = name_right + uiScaled(8), .top = y + uiScaled(8), .right = name.workspace_right, .bottom = y + uiScaled(27) };
-            _ = @import("dwrite_text.zig").draw(hdc, &ws_buf, @intCast(ws_len), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
         if (name.show_age) {
             var time_buf: [24]u16 = undefined;
             const time_len = inboxRelTime(@max(row.la, row.lv), &time_buf);
