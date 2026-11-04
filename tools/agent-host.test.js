@@ -58,7 +58,7 @@ test('IGSH-1447 Ctrl+T opens a live chat parked on an idle wait with no shell an
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
   const command = parts.reduce((text, part, index) => text + (index > 0 ? values[ordered[index - 1]] : '') + part, '');
   assert.equal(command,
-    "tmux new-session -d -s live-abc -c ~/projects 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc");
+    "tmux new-session -d -s live-abc -c ~ 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc");
   assert.ok(!command.includes('handover'), 'the terminal must never own a live chat');
   assert.ok(!command.includes('send-keys'), 'nothing is typed into a shell');
   assert.ok(!command.includes('claude --session-id'), 'Claude must not run in the terminal');
@@ -66,7 +66,8 @@ test('IGSH-1447 Ctrl+T opens a live chat parked on an idle wait with no shell an
 
   const palette = read('src/command_palette.zig');
   assert.match(palette, /const live_chat = host_sid != null and newTabOpensChatView\(program\);/);
-  assert.match(palette, /app_state\.g_pending_chat_view = live_chat;/);
+  assert.match(palette, /shell\.chat_view_on = true;/);
+  assert.match(palette, /live\.starting\(shell\.shell_id, host, host_sid\.\?\)/);
   assert.match(palette, /if \(live_chat\) buildLiveChatSessionName/);
 });
 
