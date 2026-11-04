@@ -90,10 +90,10 @@ async function runSelftest(failure) {
               page.title = failure === 'build-title' ? 'Example Domain' : document.title;
               page.built = true;
             }
-          } else if (args[1].replaceAll("'", '"') === 'document.getElementById("zsb-input").value') {
+          } else if (args[1] === "document.getElementById('zsb-input').value") {
             result = input;
           } else {
-            assert.equal(args[1].replaceAll("'", '"'), 'document.getElementById("zsb-result").textContent');
+            assert.equal(args[1], "document.getElementById('zsb-result').textContent");
             result = clicked ? 'clicked' : 'not clicked';
           }
           break;
@@ -133,6 +133,11 @@ async function runSelftest(failure) {
   } finally { await new Promise(resolve => server.close(resolve)); }
 }
 
+test('native Windows selftest preserves MSYS shell arguments instead of CRT argv packing', () => {
+  const wrapper = fs.readFileSync(process.env.ZSB_WRAPPER_SH || path.join(root, 'tools/vps-multiprompt-browser.sh'), 'utf8');
+  assert.match(wrapper, /subprocess\.run\(shlex\.join\(command\) if os\.name == "nt" else command/);
+});
+
 test('selftest exercises the real wrapper transport and reports the visible hosting tab', async () => {
   const result = await runSelftest();
   assert.equal(result.code, 0);
@@ -147,10 +152,6 @@ test('selftest exercises the real wrapper transport and reports the visible host
   assert.equal(result.calls.at(-2)[0], 'close-tab');
   assert.equal(result.buildAttempts, 1);
   assert.deepEqual(result.calls.slice(0, 4).map(args => args[0]), ['open', 'tabs', 'eval', 'tabs']);
-  assert.deepEqual(result.calls.filter(args => args[0] === 'eval' && args[1].startsWith('document.getElementById')).map(args => args[1]), [
-    'document.getElementById("zsb-input").value',
-    'document.getElementById("zsb-result").textContent',
-  ], 'readback string quotes survive the native shell boundary');
 });
 
 for (const retry of ['retry-error', 'retry-result']) {

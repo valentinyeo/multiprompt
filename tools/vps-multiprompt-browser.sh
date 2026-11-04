@@ -242,6 +242,7 @@ import json
 import math
 import os
 import subprocess
+import shlex
 import struct
 import sys
 import time
@@ -279,7 +280,8 @@ def request(*args):
     if remaining <= 0:
         raise TimeoutError()
     try:
-        run = subprocess.run(["bash", wrapper, *args], capture_output=True, text=True,
+        command = ["bash", wrapper, *args]
+        run = subprocess.run(shlex.join(command) if os.name == "nt" else command, capture_output=True, text=True,
                              timeout=remaining,
                              env={**os.environ, "TMUX": "", "ZSB_SESSION": session, "ZSB_PORT": port,
                                   "ZSB_TIMEOUT": str(remaining)})
@@ -373,14 +375,14 @@ def read_page():
 
 def type_input():
     request("type", "--tab", tab_id, "#zsb-input", marker)
-    value = request("eval", 'document.getElementById("zsb-input").value', "--tab", tab_id)
+    value = request("eval", "document.getElementById('zsb-input').value", "--tab", tab_id)
     if value != marker:
         raise ValueError("input value did not match typed text")
 
 
 def click_button():
     request("click", "#zsb-button", "--tab", tab_id)
-    result = request("eval", 'document.getElementById("zsb-result").textContent', "--tab", tab_id)
+    result = request("eval", "document.getElementById('zsb-result').textContent", "--tab", tab_id)
     if result != "clicked":
         raise ValueError("button result did not change to clicked")
 
