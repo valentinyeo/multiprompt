@@ -16,10 +16,18 @@ Copy-Item "$settings/debug.log" "$caseDir/warm-debug.log"
 [IO.File]::WriteAllText("$settings/debug.log", '')
 [IO.File]::WriteAllText("$state/connection-held", 'held')
 $job = [VerifyJob]::new()
+$startupFrames = [Collections.Generic.List[object]]::new()
+function Capture-InstantStartup {
+    $name = 'instant-startup-' + $startupFrames.Count.ToString('00')
+    Shot $name
+    $startupFrames.Add(@{name=$name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()})
+}
+Capture-InstantStartup
 $restartStart = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
-$main = Wait-For 'cold-start owned window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+$main = Wait-For 'cold-start owned window' { Capture-InstantStartup; $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
 $paint = Wait-For 'cached history first paint while connection remains held' {
+    Capture-InstantStartup
     $log = Read-Shared "$settings/debug.log"
     if ($log -match 'launch first-paint ms=(\d+)') { return [int]$Matches[1] + 1 }
 } 5
@@ -27,6 +35,22 @@ $paintMs = $paint - 1
 if ($paintMs -ge 1000) { throw "Saved chat first paint exceeded one second: $paintMs ms" }
 Shot 'instant-first-paint'
 Save @{startedMs=$restartStart; capturedMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); firstPaintMs=$paintMs} "$caseDir/startup-timing.json"
+Save $startupFrames.ToArray() "$caseDir/startup-frames.json"
+Add-Type -AssemblyName PresentationCore, WindowsBase
+$encoder = [System.Windows.Media.Imaging.GifBitmapEncoder]::new()
+for ($frameIndex = 0; $frameIndex -lt $startupFrames.Count; $frameIndex++) {
+    $frame = $startupFrames[$frameIndex]
+    $stream = [IO.File]::OpenRead("$Evidence/$($frame.name).png")
+    try {
+        $bitmap = [System.Windows.Media.Imaging.BitmapFrame]::Create($stream, [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat, [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+        $metadata = [System.Windows.Media.Imaging.BitmapMetadata]::new('gif')
+        $delay = if ($frameIndex + 1 -lt $startupFrames.Count) { [Math]::Max(1, [int](($startupFrames[$frameIndex + 1].ms - $frame.ms) / 10)) } else { 100 }
+        $metadata.SetQuery('/grctlext/Delay', [uint16]$delay)
+        $encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap, $null, $metadata, $null))
+    } finally { $stream.Dispose() }
+}
+$stream = [IO.File]::Create("$Evidence/instant-startup.gif")
+try { $encoder.Save($stream) } finally { $stream.Dispose() }
 $composer = Wait-For 'cached native composer before connection' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h } }
 Bind-Transcript
 Press @(0x11, 0x4B) 'Ctrl+K: select saved conversation while offline'

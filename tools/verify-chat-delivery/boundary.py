@@ -999,6 +999,29 @@ def reader_namespace():
     except Exception:
         pass
     namespace["start_held_worker"] = lambda *args: None
+    if os.name == "nt" and state().get("name") == "instant-chat":
+        import msvcrt
+        import types
+
+        locking = types.ModuleType("fcntl")
+        locking.LOCK_EX, locking.LOCK_NB, locking.LOCK_UN = 2, 4, 8
+
+        def flock(handle, operation):
+            descriptor = handle if isinstance(handle, int) else handle.fileno()
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            mode = msvcrt.LK_UNLCK if operation & locking.LOCK_UN else msvcrt.LK_NBLCK if operation & locking.LOCK_NB else msvcrt.LK_LOCK
+            try:
+                msvcrt.locking(descriptor, mode, 1)
+            except OSError as error:
+                if operation & locking.LOCK_NB:
+                    raise BlockingIOError() from error
+                raise
+
+        locking.flock = flock
+        sys.modules["fcntl"] = locking
+        namespace["events_wake"] = lambda: None
+        namespace["start_message_worker"] = lambda *args, **kwargs: None
+        record("instant-boundary.jsonl", notification="poll fallback", dispatch="store arrival only")
     return namespace
 
 

@@ -13,7 +13,8 @@ function fixture(change) {
   const data = {
     'cleanup.json': { remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true },
     'observation.json': { error: null },
-    'startup-timing.json': { firstPaintMs: 120 },
+    'startup-timing.json': { firstPaintMs: 120, startedMs: 100 },
+    'startup-frames.json': [{ ms: 90 }, { ms: 220 }],
     'saved-launch.json': { chat: true, blocks: [{ role: 'assistant' }] },
     'offline-outbox.json': { queues: [{ messages: [{ t: 'preconnect first', wire_id: id('a') }, { t: 'preconnect second', wire_id: id('b') }] }] },
     'store-before.json': [],
@@ -25,6 +26,7 @@ function fixture(change) {
   fs.writeFileSync(path.join(dir, 'offline-copied.txt'), 'The fake session is ready.');
   fs.writeFileSync(path.join(dir, 'debug.log'), 'launch cached-chat rows=1 active=1 blocks=2');
   fs.writeFileSync(path.join(dir, 'stand-in/connection-waits.jsonl'), '{"ms":400}\n');
+  fs.writeFileSync(path.join(root, 'instant-startup.gif'), 'GIF89a');
   const png = Buffer.alloc(1100);
   Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
   for (const frame of ['instant-first-paint', 'instant-buffered', 'instant-delivered']) fs.writeFileSync(path.join(root, `${frame}.png`), png);

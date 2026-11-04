@@ -403,9 +403,13 @@ jobs:
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
-      FEATURE: ${{ matrix.feature == 'chat-instant' && 'chat-delivery' || matrix.feature }}
+      FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
+      - name: Select instant chat driver
+        if: env.CHAT_INSTANT_PROOF == '1'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'FEATURE=chat-delivery'
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

@@ -394,8 +394,8 @@ ${source.slice(pendingStart, pendingEnd)}
 `;
 const acceptance = `
 test "IGSH-1289 pending sends work before connect without marking another chat working" {
-    defer reset();
-    reset();
+    defer clear();
+    clear();
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first"), .queued);
     try std.testing.expect(chatOutboxWorkingForShell(0));
     try std.testing.expect(!chatOutboxWorkingForShell(1));

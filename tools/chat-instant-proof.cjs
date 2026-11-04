@@ -13,6 +13,11 @@ function verify(root) {
   assert.equal(json('observation.json').error, null);
   const timing = json('startup-timing.json');
   assert.ok(timing.firstPaintMs >= 0 && timing.firstPaintMs < 1000);
+  const frames = json('startup-frames.json');
+  assert.ok(frames.length >= 2);
+  assert.ok(frames[0].ms <= timing.startedMs);
+  assert.ok(frames.at(-1).ms >= timing.startedMs);
+  assert.match(fs.readFileSync(path.join(root, 'instant-startup.gif')).subarray(0, 6).toString(), /^GIF8[79]a$/);
   const snapshot = json('saved-launch.json');
   assert.equal(snapshot.chat, true);
   assert.ok(snapshot.blocks.length > 0);

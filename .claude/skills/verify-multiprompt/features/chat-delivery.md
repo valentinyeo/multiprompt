@@ -71,7 +71,7 @@ It holds every SSH stand-in connection during a fresh process launch, records th
 The independent oracle requires first paint below 1000 ms, two persisted client IDs in order, no matching messages in the pre-connect store, and exactly those IDs once in order in the production host store after release.
 It also checks the absent startup sync banner and zero owned processes after cleanup.
 Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-delivered.png`, `startup-timing.json`, `offline-outbox.json`, and both store snapshots in `verify-chat-delivery`.
-The delayed SSH stand-in replaces networking only. This proves arrival in the production host store, not a live provider response or a real SSH server.
+The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
 Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
 
 ## Gotchas
