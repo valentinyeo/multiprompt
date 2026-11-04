@@ -744,7 +744,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
             @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] header target={d} rect={d},{d},{d},{d}", .{ app_state.active_shell, layout.icon.left, layout.icon.top, layout.icon.right, layout.icon.bottom }) catch "[photo-proof] unavailable");
         }
         const avatar = @import("bot_avatar.zig");
-        if (!@import("bot_photo.zig").draw(shell, hdc, layout.icon)) avatar.draw(hdc, layout.icon, avatar.forShell(shell));
+        avatar.draw(hdc, layout.icon, avatar.forShell(shell));
     }
     if (shell.name_len > 0) {
         _ = SelectObject(hdc, uiFontTitle());
@@ -796,7 +796,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
             ag_rc.top = title_top + @divTrunc(title_bottom - title_top - uiScaled(24), 2);
             ag_rc.bottom = ag_rc.top + uiScaled(24);
             ag_rc.right = ag_rc.left + uiScaled(24);
-            if (!@import("bot_photo.zig").draw(&app_state.shells[app_state.active_shell], hdc, ag_rc)) avatar.draw(hdc, ag_rc, avatar.forShell(&app_state.shells[app_state.active_shell]));
+            avatar.draw(hdc, ag_rc, avatar.forShell(&app_state.shells[app_state.active_shell]));
         }
         text_left += 30;
     }
