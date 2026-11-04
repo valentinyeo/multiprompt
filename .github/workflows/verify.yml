@@ -504,7 +504,7 @@ jobs:
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.USAGE_PACE_PROOF == '1'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'permission-rows' || env.USAGE_PACE_PROOF == '1'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -632,6 +632,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Chat delivery boundary compile failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'Fake tmux compile failed' }
+      - name: Build permission console stand-in
+        if: env.FEATURE == 'permission-rows'
+        run: |
+          zig cc -target x86_64-windows-gnu -O2 tools/chat-permission-agent.c -o verify-bin/claude.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Permission stand-in build failed' }
       - name: Build local Claude console stand-in
         if: env.FEATURE == 'chat-view' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working'
         run: |

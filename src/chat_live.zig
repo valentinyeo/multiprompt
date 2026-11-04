@@ -660,6 +660,10 @@ pub fn approvalMenu(shell_id: u32, out: *chat_permission.PermissionMenu) bool {
         if (!live.used or live.shell_id != shell_id) continue;
         if (!live.request.open or live.request.kind != .approval) return false;
         var menu: chat_permission.PermissionMenu = .{};
+        const question = std.unicode.utf8ToUtf16LeStringLiteral("Do you want to proceed?");
+        menu.question_len = question.len;
+        @memcpy(menu.question[0..question.len], question);
+        menu.command_len = std.unicode.utf8ToUtf16Le(&menu.command, live.request.titleSlice()) catch 0;
         const texts = [_][]const u8{ "Approve", "Always allow this session", "Decline" };
         for (texts, 0..) |value, index| {
             const units = std.unicode.utf8ToUtf16Le(&menu.options[index].text, value) catch return false;
@@ -971,6 +975,8 @@ test "D2 the approval card reuses the three existing buttons and their action ma
     var menu: chat_permission.PermissionMenu = .{};
     try std.testing.expect(approvalMenu(4242, &menu));
     try std.testing.expectEqual(@as(usize, 3), menu.count);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Do you want to proceed?"), menu.question[0..menu.question_len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Run ls"), menu.command[0..menu.command_len]);
     try std.testing.expectEqual(@as(?u8, '1'), menu.allow);
     try std.testing.expectEqual(@as(?u8, '2'), menu.always);
     try std.testing.expectEqual(@as(?u8, '3'), menu.deny);

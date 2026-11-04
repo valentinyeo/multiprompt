@@ -288,6 +288,7 @@ pub const Shell = struct {
     activity: ShellActivity,
     working_since_ms: u64 = 0,
     permission_answered: bool = false,
+    permission_presentation: @import("chat_permission.zig").Presentation = .{},
     chat_question_identity: u64 = 0,
     chat_question_index: usize = 0,
     chat_question_selected: u32 = 0,

@@ -3640,19 +3640,28 @@ fn chatLiveInterrupt(shell_index: u32) bool {
 }
 
 pub fn chatLiveCancelApproval(shell_index: u32) bool {
-    if (shell_index >= app_state.shell_count) return false;
+    if (shell_index >= app_state.shell_count or app_state.shells[shell_index].permission_answered) return false;
     const live = @import("chat_live.zig");
     const shell_id = app_state.shells[shell_index].shell_id;
     var request: [96]u8 = undefined;
     const len = live.requestId(shell_id, .approval, &request) orelse return false;
     const key = chatFileIdentityForShell(shell_index);
     const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0), request[0..len], .cancel) catch return false;
-    return chatLiveReply(line);
+    if (!chatLiveReply(line)) return false;
+    app_state.shells[shell_index].permission_answered = true;
+    app_state.shells[shell_index].permission_presentation.state = .absent;
+    @import("chat_render.zig").chatPermissionChanged();
+    return true;
 }
 
 pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.zig").Action) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
-    if (chatLiveApprovalAnswer(shell_index, action)) return true;
+    if (app_state.shells[shell_index].permission_answered or app_state.shells[shell_index].permission_presentation.state == .picked) return false;
+    if (chatLiveApprovalAnswer(shell_index, action)) {
+        @import("chat_render.zig").chatPermissionPicked(shell_index, action);
+        return true;
+    }
+    if (@import("chat_live.zig").approvalOpen(app_state.shells[shell_index].shell_id)) return false;
     var scratch: [2]u16 = undefined;
     if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
     const shell = &app_state.shells[shell_index];
@@ -3660,6 +3669,7 @@ pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.z
     const digit = app_state.g_chat_permission.digit(action) orelse return false;
     if (!chatAgentKey(shell_index, digit)) return false;
     shell.permission_answered = true;
+    @import("chat_render.zig").chatPermissionPicked(shell_index, action);
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     return true;
 }

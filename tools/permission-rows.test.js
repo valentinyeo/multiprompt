@@ -1,0 +1,38 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+function body(file, name) {
+  const source = read(file);
+  const start = source.indexOf(`fn ${name}(`);
+  assert.ok(start >= 0, name);
+  const end = source.indexOf('\n}', start);
+  assert.ok(end > start, name);
+  return source.slice(start, end + 2);
+}
+
+test('IGSH-1599 live approval cannot bypass the duplicate-answer guard', () => {
+  const send = body('src/chat_send.zig', 'chatPermissionAnswer');
+  const guard = send.indexOf('permission_answered');
+  assert.ok(guard >= 0, 'a picked permission cannot be sent twice');
+  assert.ok(guard < send.indexOf('chatLiveApprovalAnswer('), 'live and console answers share the guard');
+});
+
+test('IGSH-1599 permissions use transcript choices instead of a separate composer bar', () => {
+  assert.match(body('src/window_layout.zig', 'chatWorkingIndicatorH'), /return 0;/);
+  assert.doesNotMatch(body('src/window_layout.zig', 'paintChatView'), /paintChatPermission/);
+  const render = read('src/chat_render.zig');
+  assert.match(render, /permission_presentation/);
+  assert.match(body('src/chat_render.zig', 'chatChoicesRefresh'), /permission/);
+});
+
+test('IGSH-1599 approved permission wording stays distinct from provider digits', () => {
+  const permission = read('src/chat_permission.zig');
+  for (const text of ['Approve', 'Always allow this session', 'Decline', 'Run it once.', 'Don’t ask again in this chat.', 'Skip it. Say why in the chat.']) {
+    assert.ok(permission.includes(`"${text}"`), text);
+  }
+  assert.match(permission, /picked: Action/);
+  const send = body('src/chat_send.zig', 'chatPermissionAnswer');
+  assert.match(send, /g_chat_permission\.digit\(action\)/);
+});

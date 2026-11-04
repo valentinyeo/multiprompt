@@ -663,13 +663,6 @@ pub fn chatButtonAt(x: i32, y: i32) u8 {
     if (layout.send_shown and pointInRect(layout.send_btn, x, y)) return 3;
     if (pointInRect(layout.attach_btn, x, y)) return 4;
     if (pointInRect(layout.mic_btn, x, y)) return 10;
-    if (@import("window_layout.zig").chatPermissionVisible()) {
-        for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
-            if (@import("window_layout.zig").chatPermissionRect(action)) |rc| {
-                if (pointInRect(rc, x, y)) return @intCast(6 + i);
-            }
-        }
-    }
     return 0;
 }
 
@@ -1445,6 +1438,13 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
         if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
         return 0;
+    }
+    if (msg == WM_KEYDOWN and !isCtrlDown()) {
+        const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+        if ((GetAsyncKeyState(0x10) & down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & down) == 0 and @import("chat_render.zig").chatPermissionDigitKey(wp)) {
+            dropPendingActivationChar(hwnd, wp);
+            return 0;
+        }
     }
     if (msg == WM_KEYDOWN) {
         const key_down = @as(i16, @bitCast(@as(u16, 0x8000)));
