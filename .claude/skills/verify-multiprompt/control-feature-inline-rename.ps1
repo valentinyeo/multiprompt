@@ -1,3 +1,18 @@
+            function Rename-WaitChatView {
+                Wait-Until {
+                    $state = Read-Session
+                    if ($null -eq $state -or $state.tabs[$state.active_tab].shell_id -ne $sid -or -not $state.tabs[$state.active_tab].cv -or [VerifyNative]::GetForegroundWindow() -ne $script:window) { return $false }
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                    $transcript = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+                    if ($null -eq $transcript -or $transcript.Current.ProcessId -ne $process.Id -or $transcript.Current.IsOffscreen -or $transcript.Current.NativeWindowHandle -eq 0) { return $false }
+                    [VerifyNative]::GetAncestor([IntPtr]$transcript.Current.NativeWindowHandle, 2) -eq $script:window
+                } 'saved Chat View and visible owned native transcript'
+            }
+            function Rename-Snapshot([string]$Name) {
+                Rename-WaitChatView
+                Snapshot $Name
+            }
             function Rename-EditPoint([string]$Expected) {
                 Wait-Until {
                     $h = [VerifyNative]::GetFocusedWindow($script:window)
@@ -18,36 +33,41 @@
             Press @(0x08) 'Backspace: clear the previous draft'
             $sid = (Read-Session).tabs[(Read-Session).active_tab].shell_id
             $current = (Read-Session).tabs[(Read-Session).active_tab].name
+            Rename-WaitChatView
             Press @(0x12, 0x43) 'Alt+C: find sidebar name geometry in shell view'
+            $state = Read-Session
+            Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
             Press @(0x71) 'F2: open sidebar rename'
             $sidePoint = Rename-EditPoint $current
             Press @(0x1B) 'Esc: cancel geometry probe'
+            Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
             Press @(0x12, 0x43) 'Alt+C: return to Chat View'
+            Rename-WaitChatView
             foreach ($theme in @('light', 'amoled')) {
                 Select-Theme $theme "rename-$theme-theme"
                 Press @(0x71) 'F2: locate the live title editor'
                 $titlePoint = Rename-EditPoint $current
                 Press @(0x1B) 'Esc: cancel title geometry probe'
-                Snapshot "rename-$theme-title-before"
+                Rename-Snapshot "rename-$theme-title-before"
                 Doctor
                 [VerifyNative]::ClickClient($script:window, $titlePoint[0], $titlePoint[1])
                 [void](Rename-EditPoint $current)
-                Snapshot "rename-$theme-title-edit"
+                Rename-Snapshot "rename-$theme-title-edit"
                 $current = "Title $theme"
                 Type-Text $current
                 Press @(0x0D) 'Enter: save title rename'
                 Rename-WaitSaved $current
-                Snapshot "rename-$theme-title-after"
-                Snapshot "rename-$theme-sidebar-before"
+                Rename-Snapshot "rename-$theme-title-after"
+                Rename-Snapshot "rename-$theme-sidebar-before"
                 Doctor
                 [VerifyNative]::ClickClient($script:window, $sidePoint[0], $sidePoint[1])
                 [void](Rename-EditPoint $current)
-                Snapshot "rename-$theme-sidebar-edit"
+                Rename-Snapshot "rename-$theme-sidebar-edit"
                 $current = "Side $theme"
                 Type-Text $current
                 Press @(0x0D) 'Enter: save sidebar rename'
                 Rename-WaitSaved $current
-                Snapshot "rename-$theme-sidebar-after"
+                Rename-Snapshot "rename-$theme-sidebar-after"
             }
             Press @(0x71) 'F2: edit the active name'
             [void](Rename-EditPoint $current)
@@ -69,5 +89,5 @@
             Rename-WaitSaved $current
             Restart-ChatView 1
             Rename-WaitSaved $current
-            Snapshot 'rename-restarted'
+            Rename-Snapshot 'rename-restarted'
             $result.checks += @{ name = 'inline-rename'; themes = @('light', 'amoled'); title = $true; sidebar = $true; cancel = $true; blur = $true; palette = $true; slash = $true; restart = $true; graphite2 = 'unavailable in shipped themes'; remoteAgent = 'not exercised in offline CMD session' }

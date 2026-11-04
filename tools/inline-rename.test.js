@@ -16,6 +16,9 @@ test('inline editor keeps the stable shell identity and commits canonically', ()
   assert.match(rename, /uiFontTitle\(\).*uiFontThreadTitle\(\).*uiFontBot\(\.pinned\).*uiFontBot\(\.name\)/s);
   assert.match(rename, /SendMessageW\(app_state\.g_edit_hwnd, 0x00B1, 0, @bitCast\(@as\(isize, -1\)\)\)/);
   assert.match(main, /WM_APP_COMMIT_RENAME => \{\s*if \(lp != 0/);
+  assert.match(rename, /if \(wp == 0x1B\) \{\s*app_state\.g_focus_user_action_tick = renameCommitActionTick/);
+  assert.match(rename, /in_title and !app_state\.g_chat_active\) name_rc\.bottom - name_rc\.top/);
+  assert.match(main, /if \(tab_idx != app_state\.active_shell or @import\("room_frontend\.zig"\)\.isActive\(\)\) @import\("console\.zig"\)\.switchToShellByUser\(tab_idx\)/);
 });
 
 test('slash rename consumes locally before normal message routing', () => {
@@ -35,4 +38,9 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.match(driver, /@\('light', 'amoled'\)/);
   assert.match(driver, /graphite2 = 'unavailable in shipped themes'/);
   assert.match(driver, /Read-Inbox/);
+  assert.match(driver, /function Rename-Snapshot\([\s\S]*?Rename-WaitChatView\s+Snapshot \$Name/);
+  assert.match(driver, /tabs\[\$state\.active_tab\]\.cv/);
+  assert.match(driver, /ZigShellChatTranscript/);
+  assert.match(driver, /Wait-WorkspaceSurface \$state\.active_workspace \$state\.active_tab \$false/);
+  assert.doesNotMatch(driver, /^\s+Snapshot ["']rename-/m);
 });

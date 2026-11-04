@@ -156,6 +156,7 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
             return 0;
         }
         if (wp == 0x1B) {
+            app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());
             const h = app_state.g_edit_hwnd;
             const was_browser_urlbar = app_state.g_edit_is_browser_urlbar;
             const was_inbox = app_state.g_edit_is_inbox;
@@ -302,7 +303,7 @@ fn startRenameInternal(idx: u32, thread_title: bool) void {
     inline_text_color = if (in_title) (if (app_state.g_light_theme) rgb(20, 20, 20) else if (app_state.g_chat_active and @import("themes.zig").themeReaderDark()) @import("design_tokens.zig").ReaderForeground else rgb(255, 255, 255)) else if (app_state.g_light_theme) rgb(28, 28, 28) else rgb(242, 242, 242);
     if (inline_brush != null) _ = DeleteObject(inline_brush);
     inline_brush = @import("win32.zig").CreateSolidBrush(inline_color);
-    const edit_h = if (in_title) uiScaled(24) else uiScaled(19);
+    const edit_h = if (in_title and !app_state.g_chat_active) name_rc.bottom - name_rc.top else if (in_title) uiScaled(24) else uiScaled(19);
     const edit_y = name_rc.top + @divTrunc(name_rc.bottom - name_rc.top - edit_h, 2);
     app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | (if (tile) @as(u32, 1) else 0), name_rc.left, edit_y, @max(name_rc.right - name_rc.left, 1), edit_h, app_state.g_main_hwnd, null, null, null);
     if (app_state.g_edit_hwnd != null) {

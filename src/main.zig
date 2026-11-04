@@ -2134,7 +2134,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (!isCtrlDown() and (wp & 0x0004) == 0 and @import("room_frontend.zig").privateActionsAllowed()) {
                                 if (@import("rename.zig").sidebarNameRect(tab_idx)) |name| {
                                     if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
-                                        @import("console.zig").switchToShellByUser(tab_idx);
+                                        if (tab_idx != app_state.active_shell or @import("room_frontend.zig").isActive()) @import("console.zig").switchToShellByUser(tab_idx);
                                         startRename(tab_idx);
                                         return 0;
                                     }
