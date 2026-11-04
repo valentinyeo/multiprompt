@@ -193,7 +193,17 @@ function Pick([string]$Path, [bool]$SwitchAway = $false) {
         }
         return
     }
-    Submit-File $dialog $Path
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog) { throw 'File dialog lost foreground' }
+    [VerifyNative]::Chord(@(0x12, 0x4e))
+    $filename = Wait-For 'owned filename input' {
+        $edit = [VerifyNative]::GetFocusedWindow($dialog)
+        if ([ChatDeliveryDesktop]::GetForegroundWindow() -eq $dialog -and [ChatDeliveryDesktop]::Owner($edit) -eq [uint32]$app.Id -and [VerifyNative]::Class($edit) -eq 'Edit') { $edit }
+    }
+    [VerifyNative]::Chord(@(0x11, 0x41))
+    [VerifyNative]::Text($Path)
+    [void](Wait-For 'filename typed exactly' { [VerifyNative]::EditText($filename) -ceq $Path })
+    [VerifyNative]::Chord(@(0x0d))
+    [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -eq $main })
     [void](Wait-For 'import completed' { $trace = Log; $trace.Length -ge $start -and $trace.Substring($start) -match '\[bot-photo\] import=(ok|failed)' })
 }
 function Shot([string]$Name) {
