@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateFreezeReport } from './freeze-recorder-proof.mjs';
+import * as proof from './freeze-recorder-proof.mjs';
+const { validateFreezeReport } = proof;
 
 const report = `multiprompt freeze report
 version: 0.28.1
@@ -13,6 +14,21 @@ stack_rvas:
 app_events (uptime_ms message_id tab_index view):
   1000 0x113 0 terminal
 `;
+
+test('health receipts require actual coverage without gaps, freezes or private trace text', () => {
+  const { validateWatchdogHealth } = proof;
+  assert.equal(typeof validateWatchdogHealth, 'function', 'health receipt oracle exists');
+  const row = { report_id: 'watchdog-100-2-300-0', captured_at: 160, summary: 'Windows watchdog health', thread: 'watchdog', android_version: 'Windows', stack_trace: 'observed_ms: 60000\nresponsive_ms: 59500\nunobserved_ms: 0\nfreezes: 0\n' };
+  validateWatchdogHealth(row);
+  for (const patch of [
+    { stack_trace: row.stack_trace.replace('59500', '61000') },
+    { stack_trace: row.stack_trace.replace('freezes: 0', 'freezes: 1') },
+    { stack_trace: row.stack_trace.replace('unobserved_ms: 0', 'unobserved_ms: 10000') },
+    { stack_trace: row.stack_trace + 'private text\n' },
+    { captured_at: 110 },
+    { thread: 'main' },
+  ]) assert.throws(() => validateWatchdogHealth({ ...row, ...patch }));
+});
 
 test('accept only diagnostic fields with code locations and numeric app events', () => {
   validateFreezeReport(report);
