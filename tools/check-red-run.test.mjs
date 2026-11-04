@@ -64,6 +64,24 @@ function fixture(t) {
 }
 
 if (fs.existsSync(checker)) {
+  test('service admission installs and builds each source snapshot before proving assertions', t => {
+    const f = fixture(t);
+    f.write('service/package.json', JSON.stringify({ name: 'fixture-service', version: '1.0.0', private: true, type: 'module', scripts: { pretest: 'node build.mjs' }, dependencies: { 'fixture-value': 'file:dep' } }));
+    f.write('service/package-lock.json', JSON.stringify({ name: 'fixture-service', version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'fixture-service', version: '1.0.0', dependencies: { 'fixture-value': 'file:dep' } }, dep: { name: 'fixture-value', version: '1.0.0' }, 'node_modules/fixture-value': { resolved: 'dep', link: true } } }));
+    f.write('service/dep/package.json', JSON.stringify({ name: 'fixture-value', version: '1.0.0', type: 'module', exports: './index.js' }));
+    f.write('service/dep/index.js', "export const value = 'broken';\n");
+    f.write('service/build.mjs', "import fs from 'node:fs'; fs.mkdirSync('.build', {recursive:true}); fs.writeFileSync('.build/worker.mjs', \"export {value} from 'fixture-value';\\n\");\n");
+    const base = f.commit();
+    f.write('service/dep/index.js', "export const value = 'fixed';\n");
+    f.write('service/test/value.test.mjs', "import {test} from 'node:test'; import assert from 'node:assert/strict'; import {value} from '../.build/worker.mjs'; test('built service behavior',()=>assert.equal(value,'fixed'));\n");
+    f.commit();
+    const result = f.run(base);
+    assert.equal(result.status, 0, 'service snapshots need their own dependencies and builds');
+    assert.match(result.stdout, /RED PROVEN service\/test\/value.test.mjs/);
+    assert.ok(!fs.existsSync(path.join(f.repo, 'service/node_modules')));
+    assert.ok(!fs.existsSync(path.join(f.repo, 'service/.build')));
+  });
+
   test('manual master checks compare the preceding commit without weakening PR or branch proof', t => {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
     const f = fixture(t);

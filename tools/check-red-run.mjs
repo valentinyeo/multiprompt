@@ -99,6 +99,16 @@ function nativeZigTestsOnly() {
   return true;
 }
 
+function prepareService(dir) {
+  if (!tests.some(file => file.startsWith('service/test/'))) return;
+  for (const args of [['ci', '--no-audit', '--no-fund'], ['run', 'pretest']]) {
+    const result = spawnSync('npm', args, {
+      cwd: path.join(dir, 'service'), encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024,
+    });
+    if (result.error || result.status !== 0) throw new Error(`Cannot prepare service snapshot: npm ${args.join(' ')}\n${result.stdout || ''}${result.stderr || ''}`);
+  }
+}
+
 function run(file, dir) {
   const python = file.endsWith('.py');
   const env = { ...process.env };
@@ -131,13 +141,8 @@ try {
       const inputs = present.filter(file => /^(?:tools\/fixtures\/|tools\/[^/]*fixture[^/]*$|tests\/fixtures\/|service\/test\/fixtures\/)/.test(file));
       execFileSync('git', ['-C', red, 'restore', `--source=${head}`, '--worktree', '--', ...tests, ...inputs], { stdio: 'pipe' });
       const testOnly = changed.every(file => docs.test(file) || workflow.test(file) || (file.startsWith('tools/') && testFile(file)) || (present.includes(file) && inputs.includes(file)));
-      if (tests.some(file => file.startsWith('service/test/'))) {
-        for (const dir of testOnly ? [green] : [green, red]) {
-          const cwd = path.join(dir, 'service');
-          execFileSync('npm', ['ci', '--no-audit', '--no-fund', '--prefer-offline'], { cwd, stdio: 'inherit', timeout: 300000 });
-          execFileSync('npx', ['wrangler', 'deploy', '--dry-run', '--outdir', '.build'], { cwd, stdio: 'inherit', timeout: 300000 });
-        }
-      }
+      prepareService(green);
+      if (!testOnly) prepareService(red);
       for (const file of tests) {
         const fixed = run(file, green);
         console.log(`HEAD ${file}\n${fixed.output}`);
