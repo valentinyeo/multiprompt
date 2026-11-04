@@ -4,7 +4,7 @@
             if ($entries.Count -lt 3) { throw 'What is new: production changelog has fewer than three releases' }
             $expected = @()
             foreach ($entry in $entries) {
-                $items = @([regex]::Matches($entry.Groups[2].Value, '\.\{ \.text = "([^"]+)", \.ticket = "([^"]+)"\s*\}') | ForEach-Object { @{ title = $_.Groups[1].Value; ticket = $_.Groups[2].Value } })
+                $items = @([regex]::Matches($entry.Groups[2].Value, '\.\{ \.text = "((?:\\.|[^"\\])*)", \.ticket = "((?:\\.|[^"\\])*)"\s*\}') | ForEach-Object { @{ title = $_.Groups[1].Value.Replace('\"', '"').Replace('\\', '\'); ticket = $_.Groups[2].Value.Replace('\"', '"').Replace('\\', '\') } })
                 if ($items.Count -gt 0) { $expected += @{ version = $entry.Groups[1].Value; items = $items } }
             }
             if ($expected.Count -lt 3) { throw 'What is new: production title rows unavailable' }

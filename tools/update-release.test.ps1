@@ -26,6 +26,49 @@ function Wait-File([string]$Path) {
         Start-Sleep -Milliseconds 100
     }
 }
+function Wait-CardView([string]$Path, [int]$From, [string]$View, [string[]]$Expected, [string]$Remaining) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        if ($cardProcess.HasExited) { throw 'Update card process exited before painting' }
+        $text = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllText($Path) } else { '' }
+        $fresh = if ($text.Length -ge $From) { $text.Substring($From) } else { '' }
+        $views = [regex]::Matches($fresh, '(?s)\[update\] card view=(collapsed|expanded) n=(\d+) first=([^\r\n]*)[^\n]*\n(.*?)\[update\] card remaining=([^\r\n]*)\r?\n')
+        $matching = @($views | Where-Object { $_.Groups[1].Value -ceq $View })
+        if ($matching.Count -gt 0) { break }
+        if ([DateTime]::UtcNow -gt $deadline) { throw "Timed out waiting for $View update card paint" }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    $viewMatch = $matching[-1]
+    $notes = @([regex]::Matches($viewMatch.Groups[4].Value, '\[update\] card note (\d+)=([^\r\n]*)') | ForEach-Object { $_.Groups[2].Value })
+    Assert ([int]$viewMatch.Groups[2].Value -eq $Expected.Count -and $notes.Count -eq $Expected.Count) "$View card note count changed"
+    for ($i = 0; $i -lt $Expected.Count; $i++) { Assert ($notes[$i] -ceq $Expected[$i]) "$View card note $i changed" }
+    Assert ($viewMatch.Groups[3].Value -ceq $Expected[0]) "$View card first note changed"
+    Assert ($viewMatch.Groups[5].Value -ceq $Remaining) "$View card remaining label changed"
+    $before = $fresh.Substring(0, $viewMatch.Index)
+    $positions = [regex]::Matches($before, '\[update\] more row=(\d+),(\d+)')
+    $viewports = [regex]::Matches($before, '\[update\] notes viewport=(\d+),(\d+),(\d+),(\d+) content=(\d+) scroll=(\d+)')
+    Assert ($positions.Count -gt 0 -and $viewports.Count -gt 0) "$View card geometry missing"
+    $position = $positions[$positions.Count - 1]
+    $viewport = $viewports[$viewports.Count - 1]
+    Assert ([int]$viewport.Groups[6].Value -eq 0 -and [int]$viewport.Groups[5].Value -le ([int]$viewport.Groups[4].Value - [int]$viewport.Groups[2].Value)) "$View card notes are clipped"
+    return @{ view = $View; notes = $notes; remaining = $Remaining; moreX = [int]$position.Groups[1].Value; moreY = [int]$position.Groups[2].Value; viewport = $viewport.Value; logEnd = $From + $viewMatch.Index + $viewMatch.Length }
+}
+function Click-CardMore($View) {
+    $cardProcess.Refresh()
+    $hwnd = $cardProcess.MainWindowHandle
+    Assert ($hwnd -ne [IntPtr]::Zero -and [UpdateProof]::SetForegroundWindow($hwnd)) 'Could not focus update card window'
+    $point = New-Object UpdateProof+Point
+    $point.X = $View.moreX; $point.Y = $View.moreY
+    $client = New-Object UpdateProof+Rect
+    Assert ([UpdateProof]::GetClientRect($hwnd, [ref]$client)) 'Update card client bounds unavailable'
+    Assert ($point.X -ge 0 -and $point.Y -ge 0 -and $point.X -lt $client.R -and $point.Y -lt $client.B) 'More row is outside the client'
+    Assert ([UpdateProof]::ClientToScreen($hwnd, [ref]$point)) 'Cannot convert more row to screen coordinates'
+    Assert ([UpdateProof]::GetAncestor([UpdateProof]::WindowFromPoint($point), 2) -eq $hwnd) 'More row is obscured by another window'
+    Assert ([UpdateProof]::GetForegroundWindow() -eq $hwnd) 'Update card lost foreground before click'
+    Assert ([UpdateProof]::SetCursorPos($point.X, $point.Y)) 'Cannot move pointer to more row'
+    [UpdateProof]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+    [UpdateProof]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+}
 function Select-Release([string]$Version) {
     $script:releaseFolder = Join-Path $Root $Version
     $script:release = [pscustomobject]@{
@@ -76,7 +119,7 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p); [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
@@ -125,6 +168,7 @@ try {
                 $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0])
                 for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
                 Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
+                $collapsed = Wait-CardView $log 0 'collapsed' $expectedNotes[0..2] 'and 1 more'
                 $cardProcess.Refresh()
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
@@ -133,7 +177,19 @@ try {
                 $dc = $graphics.GetHdc()
                 try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-notes.png')) } finally { $bitmap.Dispose() }
-                $observedNotes | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
+                $collapsed | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
+                Click-CardMore $collapsed
+                $expanded = Wait-CardView $log $collapsed.logEnd 'expanded' $expectedNotes 'Show less'
+                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Expanded update card window unavailable'
+                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $dc = $graphics.GetHdc()
+                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Expanded update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'update-card-expanded.png')) } finally { $bitmap.Dispose() }
+                $expanded | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
+                Click-CardMore $expanded
+                $null = Wait-CardView $log $expanded.logEnd 'collapsed' $expectedNotes[0..2] 'and 1 more'
+                Passed 'update card paints ticket titles and expands with real click'
                 Passed 'signed staged notes retain expected data'
                 Select-Release 'v9.11.0'
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Ticket-title release was not staged'

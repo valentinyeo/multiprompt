@@ -139,7 +139,10 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /\$observedNotes\[\$i\] -ceq \$expectedNotes\[\$i\]/);
   assert.match(suite, /GetClientRect\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /GetDpiForWindow\(\$cardProcess.MainWindowHandle/);
-  assert.match(suite, /\$observedNotes \| ConvertTo-Json/);
+  assert.match(suite, /\$collapsed \| ConvertTo-Json/);
+  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'and 1 more'/);
+  assert.match(suite, /Click-CardMore \$collapsed/);
+  assert.match(suite, /'update-card-expanded\.png'/);
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
   assert.match(suite, /Tampered notes accepted/);
