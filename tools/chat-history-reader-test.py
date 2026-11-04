@@ -4289,6 +4289,102 @@ LOCK_PROBE = ("import importlib.util,sys;"
               "print(module.host_lock('claude',sys.argv[2]) is None)")
 
 
+def stop_fixture_process(child):
+    if child.poll() is None:
+        try:
+            child.kill()
+        except ProcessLookupError:
+            pass
+    child.wait(timeout=10)
+
+
+def track_fixture_hosts(test):
+    test.host_children = []
+    spawn = reader.host_spawn
+
+    def tracked(provider, sid, *args, **kwargs):
+        child = spawn(provider, sid, *args, **kwargs)
+        if child is not None and provider == test.provider and sid == test.sid:
+            test.host_children.append(child)
+        return child
+
+    patch.object(reader, 'host_spawn', side_effect=tracked).start()
+
+
+def join_fixture_worker(test, worker):
+    with patch.object(reader, 'host_dispatch_switch', return_value=False), \
+            patch.object(reader, 'resolve_tmux_agent', return_value=None):
+        worker.join(timeout=20)
+    test.assertFalse(worker.is_alive(), 'fixture worker outlived its HOME patch')
+
+
+class FixtureHostSession(dict):
+    def __init__(self):
+        super().__init__(state={})
+        self.started = threading.Event()
+
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        self.started.set()
+
+
+def stop_fixture_host_loop(test, thread, session):
+    started = session.started.wait(timeout=10)
+    session['stop'] = True
+    thread.join(timeout=10)
+    test.assertTrue(started, 'fixture host loop did not initialize')
+    test.assertFalse(thread.is_alive(), 'fixture host loop outlived its HOME patch')
+
+
+class FixtureLifecycleTest(unittest.TestCase):
+    def test_failed_host_fixture_stops_its_thread_and_process_before_restoring_home(self):
+        import socket as module
+        owned = {}
+
+        class FailingFixture(unittest.TestCase):
+            def runTest(self):
+                temp = tempfile.TemporaryDirectory()
+                self.addCleanup(temp.cleanup)
+                home = Path(temp.name)
+                home_patch = patch.object(reader, 'HOME', home)
+                home_patch.start()
+                self.addCleanup(home_patch.stop)
+                server, peer = module.socketpair()
+                self.addCleanup(server.close)
+                self.addCleanup(peer.close)
+                read_end, write_end = os.pipe()
+                self.addCleanup(os.close, write_end)
+                agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
+                self.addCleanup(agent.stdout.close)
+
+                def check_cleanup():
+                    self.assertEqual(reader.HOME, home)
+                    self.assertFalse(owned['thread'].is_alive())
+                    self.assertIsNotNone(owned['process'].poll())
+                    owned['checked'] = True
+
+                self.addCleanup(check_cleanup)
+                owned['process'] = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
+                self.addCleanup(stop_fixture_process, owned['process'])
+                session = FixtureHostSession()
+                owned['thread'] = threading.Thread(target=reader.host_loop,
+                    args=('claude', 'fixture', None, session, server, agent), daemon=True)
+                owned['thread'].start()
+                self.addCleanup(stop_fixture_host_loop, self, owned['thread'], session)
+                self.assertTrue(session.started.wait(timeout=10))
+                self.assertTrue(owned['thread'].is_alive())
+                self.fail('intentional fixture failure')
+
+        result = unittest.TestResult()
+        FailingFixture().run(result)
+        self.assertEqual(len(result.failures), 1)
+        self.assertIn('intentional fixture failure', result.failures[0][1])
+        self.assertEqual(result.errors, [])
+        self.assertTrue(owned.get('checked'))
+        self.assertFalse(owned['thread'].is_alive())
+        self.assertIsNotNone(owned['process'].poll())
+
+
 class AgentHostTest(unittest.TestCase):
     provider = 'claude'
     sid = 'host-fixture-session'
@@ -4302,6 +4398,9 @@ class AgentHostTest(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        self.sid = str(uuid.uuid4())
+        track_fixture_hosts(self)
         self.transcript = self.home / '.claude/projects/-work-demo' / (self.sid + '.jsonl')
         self.transcript.parent.mkdir(parents=True)
         self.transcript.write_text('')
@@ -4314,12 +4413,11 @@ class AgentHostTest(unittest.TestCase):
         self.addCleanup(self.stop_hosts)
 
     def stop_hosts(self):
-        reader.host_stop(self.provider, self.sid, force=True)
-        for path in reader.host_paths(self.provider, self.sid)['root'].glob('*.owner.json'):
-            try:
-                os.kill(json.loads(path.read_text())['pid'], 9)
-            except (OSError, ValueError, KeyError):
-                pass
+        try:
+            reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
 
     def enable(self, mode='ok', **extra):
         config = dict(enabled=True, tmux=self.tmux, command=[sys.executable, str(self.agent)], cwd=str(self.home))
@@ -4410,8 +4508,10 @@ class AgentHostTest(unittest.TestCase):
         db.close()
         worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
         worker.start()
+        self.addCleanup(join_fixture_worker, self, worker)
         self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
         worker.join(timeout=20)
+        self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
         self.assertEqual(self.user_lines(), [self.text])
 
     def test_host_retry_is_idempotent_by_message_id(self):
@@ -4647,6 +4747,7 @@ class AgentHostTest(unittest.TestCase):
                     patch.object(reader, "resolve_tmux_agent", return_value=None):
                 worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
                 worker.start()
+                self.addCleanup(join_fixture_worker, self, worker)
                 worker.join(timeout=15)
         finally:
             threading.excepthook = previous_hook
@@ -4659,9 +4760,9 @@ class AgentHostTest(unittest.TestCase):
         self.enable()
         orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
                                    "--print", "--session-id", self.sid])
-        self.addCleanup(lambda: orphan.poll() is None and orphan.kill())
+        self.addCleanup(stop_fixture_process, orphan)
         decoy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "--print"])
-        self.addCleanup(lambda: decoy.poll() is None and decoy.kill())
+        self.addCleanup(stop_fixture_process, decoy)
         state = reader.host_session_state(self.provider, self.sid)
         state["agent_pid"] = orphan.pid
         reader.host_write(reader.host_paths(self.provider, self.sid)["state"], state)
@@ -5099,9 +5200,11 @@ class HostWorkerDeliveryTest(AgentHostTest):
 
         worker = threading.Thread(target=reader.message_worker, args=(self.tmux, 'claude', self.sid), daemon=True)
         worker.start()
+        self.addCleanup(join_fixture_worker, self, worker)
         self.wait_for(lambda: (self.message() or {}).get('state') in ('accepted', 'started'))
         self.assertEqual(self.user_lines(), [self.text])
         worker.join(timeout=20)
+        self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
 
 
 class EmptyHostedChatTest(unittest.TestCase):
@@ -5938,12 +6041,13 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.addCleanup(os.close, write_end)
         agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
         self.addCleanup(agent.stdout.close)
-        session = dict(state={})
-        reader.host_session_reset(session, agent)
+        session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
                                    daemon=True)
         with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
             running.start()
+            self.addCleanup(stop_fixture_host_loop, self, running, session)
+            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
             time.sleep(0.2)
             session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
             time.sleep(0.8)
@@ -5964,13 +6068,13 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.addCleanup(os.close, write_end)
         agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
         self.addCleanup(agent.stdout.close)
-        session = dict(state={})
-        reader.host_session_reset(session, agent)
+        session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
                                    daemon=True)
-        self.addCleanup(running.join, 10)
         with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
             running.start()
+            self.addCleanup(stop_fixture_host_loop, self, running, session)
+            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
             session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
             session['state']['inflight'] = session['inflight']
             time.sleep(0.5)
@@ -6118,6 +6222,9 @@ class HostProviderCase(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        self.sid = str(uuid.uuid4())
+        track_fixture_hosts(self)
         self.agent = self.home / 'fake-rpc.py'
         self.agent.write_text(FAKE_RPC)
         self.log = self.home / 'fake-rpc.log'
@@ -6127,8 +6234,12 @@ class HostProviderCase(unittest.TestCase):
         self.addCleanup(self.stop_hosts)
 
     def stop_hosts(self):
-        if self.provider in reader.HOST_PROVIDERS:
-            reader.host_stop(self.provider, self.sid, force=True)
+        try:
+            if self.provider in reader.HOST_PROVIDERS:
+                reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
 
     def enable(self, **extra):
         self.assertIn(self.provider, reader.HOST_PROVIDERS)
@@ -6182,7 +6293,10 @@ class HostProviderCase(unittest.TestCase):
         self.request('submit', message_id=token, text=self.text)
         worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
         worker.start()
+        self.addCleanup(join_fixture_worker, self, worker)
         self.assertEqual(self.wait_for(lambda: (self.message(token) or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        worker.join(timeout=20)
+        self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
         return worker
 
 
