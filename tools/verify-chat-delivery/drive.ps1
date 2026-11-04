@@ -323,8 +323,8 @@ function Assert-FullHistory([string]$Stage) {
                 $false
             }
         } 2)
-        Shot "full-history-$Stage-latest"
         $latestClock.Stop()
+        Shot "full-history-$Stage-latest"
         Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
         if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
         Doctor $true

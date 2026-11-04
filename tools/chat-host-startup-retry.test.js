@@ -43,6 +43,8 @@ with tempfile.TemporaryDirectory() as directory:
     other_state = r['host_session_state'](provider, other)
     other_state['startup_failure'].pop('retry_generation', None)
     r['host_state_write'](provider, other, other_state)
+    other_request = dict(request, sid=other, tmux='other-chat')
+    other_message = r['message_store_request'](dict(other_request, op='message_submit', message_id='synthetic-message-other', text='keep this other chat'))['message']
     submitted = r['message_store_request'](dict(request, op='message_submit', message_id=token, text=text))['message']
     assert submitted['state'] == 'queued'
     failed = r['message_store_request'](dict(request, op='message_dispatch'))['message']
@@ -119,6 +121,7 @@ with tempfile.TemporaryDirectory() as directory:
     snapshot = r['message_store_request'](dict(request, op='message_snapshot'))
     messages = [item['message'] for item in snapshot['items'] if 'message' in item and item['message']['id'] == token]
     assert len(messages) == 1 and messages[0]['id'] == token and messages[0]['text'] == text, messages
+    assert r['message_store_request'](dict(other_request, op='message_status', message_id=other_message['id']))['message'] == other_message
 print('retry survived restart and delivered one saved message')
 `;
   const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });

@@ -1,6 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const python = String.raw`
 import ast
@@ -60,6 +62,13 @@ assert namespace['start_message_worker']() == expected, 'incorrect worker suppre
 assert ('slash_host' in installed) == slash, installed
 assert any(row[1].get('notification') == 'poll fallback' for row in records), records
 `;
+
+test('history timing stops at visible transcript observation before screenshot capture', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const check = source.slice(source.indexOf('function Assert-FullHistory('), source.indexOf("    $offset = (Read-Shared", source.indexOf('function Assert-FullHistory(')));
+  assert.match(check, /\$latestClock\.Stop\(\)\s+Shot "full-history-\$Stage-latest"/);
+  assert.match(check, /if \(\$latestClock\.ElapsedMilliseconds -gt 2000\)/);
+});
 
 for (const [scenario, slash] of [
   ['full-history', false],

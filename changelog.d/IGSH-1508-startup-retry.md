@@ -1,1 +1,1 @@
-Retry now recovers messages after chat startup fails.
+Chats keep their account and recover failed sends.

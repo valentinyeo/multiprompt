@@ -65,11 +65,11 @@ def claude_config_dirs(home):
     configured = os.environ.get("CLAUDE_CONFIG_DIR") if home == HOME else None
     return ([Path(configured).expanduser()] if configured else []) + [home / ".claude", home / ".config/claude"]
 
-def conversation_owner(cwd):
+def conversation_owner(cwd, include_home=False):
     if pwd is None:
         return None
     parts = Path(cwd).parts
-    if (len(parts) < 4 or parts[:2] != ("/", "home") or ".." in parts or
+    if (len(parts) < (3 if include_home else 4) or parts[:2] != ("/", "home") or ".." in parts or
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", parts[2])):
         return None
     try:
@@ -3026,7 +3026,7 @@ def host_pi_argv(provider, sid, base):
 
 def host_agent_start(provider, sid):
     cwd = host_cwd(provider, sid)
-    owner = conversation_owner(cwd)
+    owner = conversation_owner(cwd, include_home=True)
     cross_owner = owner is not None and owner[1] != HOME
     if cross_owner:
         config = host_config(provider, sid) or {}
@@ -4234,7 +4234,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                     if chunk:
                         session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
-                        owner = conversation_owner(host_cwd(provider, sid))
+                        owner = conversation_owner(host_cwd(provider, sid), include_home=True)
                         if not session["ready"]:
                             reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
                             host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
@@ -5913,7 +5913,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 66
+RUNTIME_GENERATION = 67
 
 if __name__ == '__main__':
     import base64 as _base64
