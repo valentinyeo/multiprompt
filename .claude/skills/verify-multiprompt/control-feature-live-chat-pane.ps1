@@ -116,18 +116,27 @@ try {
     if ($oneBefore.session -cne $one.tmux -or $oneBefore.pane -cne 'closed') { throw ('zsb status from the ' + $one.tmux + ' chat did not report its own closed pane: ' + (ConvertTo-Json -InputObject $oneBefore -Compress)) }
     Snapshot 'action'
     $selftestEnvironment = @{}
-    foreach ($name in @('ZSB_SESSION', 'ZSB_PORT', 'TMUX', 'PATH')) {
+    foreach ($name in @('ZSB_SESSION', 'ZSB_PORT', 'TMUX', 'PATH', 'MULTIPROMP_NOTIFY_RELAY_TOKEN')) {
         $selftestEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     $selftestJob = New-Object VerifyJob
+    $relayJob = New-Object VerifyJob
     try {
+        $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
+        $relayReady = Join-Path $scratch 'selftest-relay.json'
+        $relayScript = Join-Path $root 'tools/verify-live-chat-pane-relay.py'
+        $relayJob.Start((Get-Command python.exe).Source, $root, (Join-Path $Evidence 'selftest-relay.stdout.log'), (Join-Path $Evidence 'selftest-relay.stderr.log'), ('"' + $relayScript + '" --app-port ' + $script:liveChatPort + ' --ready "' + $relayReady + '"'), $true) | Out-Null
+        Wait-Until { Test-Path $relayReady } 'isolated authenticated relay boundary for the shipped wrapper'
+        $relay = Get-Content $relayReady -Raw | ConvertFrom-Json
         $bash = Join-Path (Split-Path (Split-Path (Get-Command git.exe).Source)) 'bin/bash.exe'
         $env:PATH = (Split-Path $bash) + ';' + $env:PATH
         $env:TMUX = ''
         $env:ZSB_SESSION = $one.tmux
-        $env:ZSB_PORT = [string]$script:liveChatPort
+        $env:ZSB_PORT = [string]$relay.port
+        $env:MULTIPROMP_NOTIFY_RELAY_TOKEN = 'live-chat-pane-fixture'
+        $wrapper = (Join-Path $root 'tools/vps-multiprompt-browser.sh').Replace('\', '/')
         Record ('Run the shipped zsb selftest for ' + $one.tmux)
-        $selftestProcess = $selftestJob.Start($bash, ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))), (Join-Path $Evidence 'chat-one-selftest.stdout.log'), (Join-Path $Evidence 'chat-one-selftest.stderr.log'), '--noprofile --norc tools/vps-multiprompt-browser.sh selftest', $true)
+        $selftestProcess = $selftestJob.Start($bash, (Split-Path $bash), (Join-Path $Evidence 'chat-one-selftest.stdout.log'), (Join-Path $Evidence 'chat-one-selftest.stderr.log'), ('--noprofile --norc "' + $wrapper + '" selftest'), $true)
         if (-not $selftestProcess.WaitForExit(210000)) { throw 'Live chat pane selftest exceeded its deadline' }
         $selftestProcess.Refresh()
         if ($selftestProcess.ExitCode -ne 0) { throw 'Live chat pane selftest failed; see retained selftest output' }
@@ -142,6 +151,8 @@ try {
     } finally {
         $null = $selftestJob.Stop()
         $selftestJob.Dispose()
+        $null = $relayJob.Stop()
+        $relayJob.Dispose()
         foreach ($name in $selftestEnvironment.Keys) {
             [Environment]::SetEnvironmentVariable($name, $selftestEnvironment[$name], 'Process')
         }

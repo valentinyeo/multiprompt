@@ -7,9 +7,11 @@ test('live chat journey runs the shipped selftest and verifies every step and th
   const file = path.join(__dirname, '../.claude/skills/verify-multiprompt/control-feature-live-chat-pane.ps1');
   assert.ok(fs.existsSync(file), 'live chat pane journey exists');
   const driver = fs.readFileSync(file, 'utf8');
-  assert.match(driver, /tools\/vps-multiprompt-browser\.sh selftest/);
+  assert.match(driver, /tools\/vps-multiprompt-browser\.sh/);
+  assert.match(driver, /\$selftestJob\.Start\(\$bash, \(Split-Path \$bash\)/);
   assert.match(driver, /\$env:ZSB_SESSION = \$one\.tmux/);
-  assert.match(driver, /\$env:ZSB_PORT = \[string\]\$script:liveChatPort/);
+  assert.match(driver, /\$env:ZSB_PORT = \[string\]\$relay\.port/);
+  assert.match(driver, /--app-port ' \+ \$script:liveChatPort/);
   assert.match(driver, /\$selftest\.ok -ne \$true/);
   assert.match(driver, /\$selftest\.session -cne \$one\.tmux/);
   assert.match(driver, /\$selftest\.tab_name -cne \$one\.name/);
@@ -19,7 +21,7 @@ test('live chat journey runs the shipped selftest and verifies every step and th
   assert.match(driver, /\$selftest\.steps\.\$step\.pass -ne \$true/);
   assert.match(driver, /Snapshot 'chat-one-selftest'/);
   assert.match(driver, /http\.server[^\n]+, \$true\)/);
-  assert.match(driver, /tools\/vps-multiprompt-browser\.sh selftest', \$true\)/);
+  assert.match(driver, /\$wrapper \+ '" selftest'\), \$true\)/);
   const native = fs.readFileSync(path.join(path.dirname(file), 'control-native.cs'), 'utf8');
   assert.match(native, /4u \| \(noWindow \? 0x08000000u : 0u\)/);
   assert.match(native, /return Start\(exe, directory, stdout, stderr, arguments, false\)/);
