@@ -1,7 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const load = () => import('./ticket-titles.mjs');
+const load = async () => {
+  assert.ok(fs.existsSync(path.join(__dirname, 'ticket-titles.mjs')), 'ticket title module exists');
+  return import('./ticket-titles.mjs');
+};
 
 test('ticket records preserve authoritative Unicode titles', async () => {
   const { ticketRecord, ticketLine } = await load();

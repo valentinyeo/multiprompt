@@ -420,6 +420,8 @@ const after = 1;
     for (const [file, text] of Object.entries(files)) f.write(file, text);
     const base = f.commit();
     const stamped = stampTree(files);
+    const titles = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
+    assert.ok(stamped.files['src/changelog.zig'].includes(`IGSH-154 ${titles['IGSH-154']}`));
     for (const [file, text] of Object.entries(stamped.files)) f.write(file, text);
     for (const file of stamped.removed) fs.unlinkSync(path.join(f.repo, file));
     f.commit();

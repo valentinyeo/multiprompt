@@ -300,7 +300,7 @@ test('release contains one linked authoritative line for each commit ticket', as
   const { releaseNotes } = await import('./release-notes.mjs');
   const files = {
     'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
-    'changelog.d/IGSH-2-chat.md': 'Chats open sooner.\nDrafts stay visible.\n',
+    [path.posix.join('changelog.d', 'IGSH-2-chat.md')]: 'Chats open sooner.\nDrafts stay visible.\n',
   };
   const titles = { 'IGSH-1': 'Earlier title', 'IGSH-2': 'Chat title', 'IGSH-3': 'Checks title' };
   const commits = [{ sha: 'aaa', subject: 'IGSH-2: Improve chats' }, { sha: 'bbb', subject: 'IGSH-3: Repair checks' }, { sha: 'ccc', subject: 'IGSH-2: Follow up' }];
@@ -326,7 +326,7 @@ test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () 
     { sha: '246972c5', subject: 'IGSH-1610: Approve a device even when one SSH host is unreachable (#738)' },
   ];
   let generated;
-  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits, { ...JSON.parse(read('tools/ticket-titles.json')), 'IGSH-1': 'Earlier title' }); });
+  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits, { ...JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json')), 'IGSH-1': 'Earlier title' }); });
   const latest = releaseNotes(generated, 'v0.28.1448').releases[0];
   assert.ok(latest.changes.some(line => line.startsWith('IGSH-1610 ')));
   assert.ok(latest.changes.some(line => line.startsWith('IGSH-1615 ')));
@@ -351,7 +351,7 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
     history.push({ tag, files: { ...source, ...fragments }, sha: git('rev-parse', `${tag}^{commit}`) });
   }
   const files = { ...history.at(-1).files, [path.posix.join('changelog.d', 'IGSH-1243-notes.md')]: 'Changelog ticket links now open their tickets.\n' };
-  const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }], { ...JSON.parse(read('tools/ticket-titles.json')), 'IGSH-1': 'Earlier title' });
+  const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }], { ...JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json')), 'IGSH-1': 'Earlier title' });
   const notes = releaseNotes(generated, 'v0.28.1100');
   for (const tag of tags) {
     const release = notes.releases.find(item => item.version === tag.slice(1));
@@ -363,7 +363,7 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
   assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes/);
   assert.equal(notes.releases.some(item => item.version === '0.28.1041'), false);
   const release1038 = notes.releases.find(item => item.version === '0.28.1038');
-  const actualFragment = 'IGSH-1238 ' + JSON.parse(read('tools/ticket-titles.json'))['IGSH-1238'];
+  const actualFragment = 'IGSH-1238 ' + JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json'))['IGSH-1238'];
   const fragmentIndex = release1038.tickets.indexOf('https://app.hypertask.ai/detail/project-2060/1238');
   assert.equal(release1038.changes[fragmentIndex], actualFragment);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', history.map(item => item.tag === 'v0.28.1048' ? { ...item, sha: 'wrong' } : item), [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]), /reviewed release commit does not match/);

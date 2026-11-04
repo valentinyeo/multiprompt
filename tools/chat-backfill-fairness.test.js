@@ -136,7 +136,7 @@ test('cached tails stop unsolicited backfill; requested older history retains ev
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
   const changelog = readChangelogEntry('IGSH-815').trim();
   assert.ok(changelog.length > 0);
-  for (const line of changelog.split('\n')) assert.match(line, ENTRY_LINE, line);
+  for (const line of changelog.split('\n')) assert.equal(line, 'IGSH-815 Multiprompt Chat View: show every message of a session');
 });
 
 test('changelog rule: several lines per ticket are fine, each line is one sentence, an empty or two-sentence line is rejected', () => {

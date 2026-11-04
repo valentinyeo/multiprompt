@@ -39,7 +39,7 @@ test('all pending fragments are plain, including those inherited from master', a
 
 test('release stamps preserve plain Unicode and quoted product lines; exact stamps still bypass code-fragment requirement', async () => {
   const { stampTree, classifyTrees } = await import('./version-stamp.mjs');
-  const name = 'changelog.d/IGSH-1681-change.md';
+  const name = path.posix.join('changelog.d', 'IGSH-1681-change.md');
   const base = {
     'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
     'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',

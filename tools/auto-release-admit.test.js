@@ -31,7 +31,9 @@ function fixture(t) {
   git('config', 'tag.gpgsign', 'false');
   git('config', 'core.autocrlf', 'false');
   fs.mkdirSync(path.join(dir, 'tools'));
-  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'ticket-titles.mjs', 'ticket-titles.json', 'strip-comments.mjs']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs'];
+  if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs', 'ticket-titles.json');
+  for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.mkdirSync(path.join(dir, 'changelog.d'));
   git('add', 'tools');
   git('commit', '--allow-empty', '-m', 'previous release');
@@ -115,6 +117,17 @@ function skipped(f, env = {}) {
   assert.equal(f.git('--git-dir', f.remote, 'show-ref', '--tags'), remoteTags);
   return result;
 }
+
+test('release stamping names the ticket using its authoritative title', async () => {
+  const { stampTree } = await import('./version-stamp.mjs');
+  const files = {
+    'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n};\n',
+    [path.posix.join('changelog.d', 'IGSH-154-test.md')]: 'Sessions open faster.\n',
+  };
+  const stamp = stampTree(files, undefined, { 'IGSH-154': 'Full authoritative title' });
+  assert.match(stamp.files['src/changelog.zig'], /IGSH-154 Full authoritative title/);
+});
 
 test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and no branch', t => {
   const f = fixture(t);

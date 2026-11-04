@@ -7,7 +7,7 @@ test('generation shares ticket titles with both historical and current release n
   const { releaseNotes } = await import('./release-notes.mjs');
   const files = {
     'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Old product text", .ticket = "IGSH-1" },\n    } },\n};\n',
-    'changelog.d/IGSH-2-change.md': 'A product sentence.\n',
+    [['changelog.d', 'IGSH-2-change.md'].join('/')]: 'A product sentence.\n',
   };
   const titles = { 'IGSH-1': 'Earlier café title', 'IGSH-2': 'Full current title' };
   const source = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'x', subject: 'IGSH-2: Change' }], titles);
@@ -21,8 +21,11 @@ test('generation shares ticket titles with both historical and current release n
 
 test('checked-in visible history has authoritative titles and release notes preserve them', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
+  assert.ok(fs.existsSync('tools/ticket-titles.mjs'), 'ticket title module exists');
+  assert.ok(fs.existsSync('tools/ticket-titles.json'), 'release title catalog exists');
   const { ticketLine, ticketRecord } = await import('./ticket-titles.mjs');
-  const titles = JSON.parse(fs.readFileSync('tools/ticket-titles.json', 'utf8'));
+  const titles = JSON.parse(fs.readFileSync('tools/fixtures/IGSH-1681/ticket-titles.json', 'utf8'));
+  assert.deepEqual(JSON.parse(fs.readFileSync('tools/ticket-titles.json', 'utf8')), titles);
   const source = fs.readFileSync('src/changelog.zig', 'utf8');
   const rows = [...source.matchAll(/\.text = ("(?:\\.|[^"\\])*"), \.ticket = "([^"]+)"/g)];
   assert.ok(rows.length > 0);

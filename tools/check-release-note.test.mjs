@@ -110,6 +110,8 @@ test('a release stamp passes without a note', t => {
   r.commit('IGSH-154: Speed up startup');
   r.git('tag', 'v0.28.735');
   const stamp = stampTree({ ...base(), 'src/main.zig': main, 'changelog.d/IGSH-154-startup.md': 'The app opens faster.\n' });
+  const titles = JSON.parse(fs.readFileSync(new URL('./fixtures/IGSH-1681/ticket-titles.json', import.meta.url), 'utf8'));
+  assert.ok(stamp.files['src/changelog.zig'].includes(`IGSH-154 ${titles['IGSH-154']}`));
   r.write(stamp.files);
   for (const file of stamp.removed) r.remove(file);
   r.commit(`v${stamp.version}: release IGSH-154`);

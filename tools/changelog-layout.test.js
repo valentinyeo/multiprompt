@@ -16,6 +16,7 @@ function between(start, end) {
 }
 
 test('production changelog geometry measures and caches wrapped notes', () => {
+  assert.match(source, /var changelog_ranges:/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'changelog-layout-'));
   const harness = `const std = @import("std");
 const HANDLE = ?*anyopaque;
