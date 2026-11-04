@@ -23,7 +23,9 @@
             Snapshot 'ctrl-t-beta-chat'
             $result.checks += @{ name = 'ctrl-t-beta-chat'; cwd = '/work/projects/beta'; cv = $true; host = 2 }
             Press @(0x11, 0x57) 'Ctrl+W: close beta chat'
-            Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $beforeClaude -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'beta chat closed and host 2 active'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta chat closed'
+            Press @(0x11, 0x32) 'Ctrl+2: return to the seeded third-server session'
+            Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal choice'
 
             Palette 'new claude in terminal'
             Press @(0x0D) 'Enter: New Claude in terminal'
@@ -45,7 +47,9 @@
             Snapshot 'ctrl-t-alpha-chat'
             $result.checks += @{ name = 'cancel-then-ctrl-t-alpha'; cwd = '/work/projects/alpha'; cv = $true; host = 2 }
             Press @(0x11, 0x57) 'Ctrl+W: close alpha chat'
-            Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $beforeClaude -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'alpha chat closed and host 2 active'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'alpha chat closed'
+            Press @(0x11, 0x32) 'Ctrl+2: return to the seeded third-server session'
+            Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal session'
 
             Palette 'new claude in terminal'
             Press @(0x0D) 'Enter: New Claude in terminal'
