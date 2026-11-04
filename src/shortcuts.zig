@@ -362,8 +362,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "End / Ctrl+K \"Chat View: Scroll to newest message\"", .b = "Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
-    .{ .a = "Alt+C", .b = "Switch this tab between the shell and the chat view; Claude keeps running in the shell; also the Ctrl+K row and the tab menu", .header = false },
-    .{ .a = "Ctrl+K -> Switch to chat view / Switch to shell", .b = "Show this tab as the chat view or the shell; same as Alt+C and the right-click tab menu", .header = false },
+    .{ .a = "Alt+C", .b = "Switch terminal tabs between the shell and the chat view; off for live chats, which have no terminal; also the Ctrl+K row and the tab menu for terminal tabs", .header = false },
+    .{ .a = "Ctrl+K -> Switch to chat view / Switch to shell", .b = "Show a terminal tab as the chat view or the shell; hidden for live chats; same as Alt+C and the right-click tab menu", .header = false },
     .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File)", .header = false },
     .{ .a = "Right-click Claude message / Ctrl+K reactions", .b = "Send a quoted reaction; show its badge", .header = false },
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty.", .header = false },
@@ -994,6 +994,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x43 and foregroundIsOurs() and
             !app_state.g_search_active and !app_state.g_all_sessions_active and !app_state.g_inbox_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and app_state.g_edit_hwnd == null)
         {
+            if (app_state.active_shell < app_state.shell_count and
+                !@import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len])) return 1;
             if (!claimBrowserTogglePress(true, kb.time, &app_state.g_chat_toggle_chord_held, &app_state.g_chat_toggle_last_event_time)) return 1;
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);

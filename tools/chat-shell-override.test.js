@@ -30,7 +30,7 @@ const DWORD = u32;
 const BROWSER_SPLIT_DEFAULT_PERMILLE = 350;
 ${kind}
 ${savedTab}
-const Shell = struct { chat_view_on: bool = false, pinned_top: bool = false };
+const Shell = struct { chat_view_on: bool = false, pinned_top: bool = false, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0 };
 var shells = [_]Shell{ .{}, .{ .pinned_top = true } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
@@ -52,6 +52,18 @@ test "IGSH-820 user toggles work on pinned and unpinned tabs" {
     }
     try std.testing.expectEqual(@as(usize, 4), saves);
     try std.testing.expect(shells[1].pinned_top);
+}
+test "IGSH-1655 live Alt+C leaves the persisted view and save count unchanged" {
+    shells[0] = .{ .chat_view_on = true };
+    @memcpy(shells[0].tmux_session[0..9], "live-test");
+    shells[0].tmux_session_len = 9;
+    active_shell = 0;
+    g_chat_active = true;
+    const before = saves;
+    toggleChatView();
+    try std.testing.expect(g_chat_active and shells[0].chat_view_on);
+    try std.testing.expectEqual(before, saves);
+    shells[0] = .{};
 }
 test "ISSUE-611 legacy shell override migration stays scoped" {
     const json = "{\\\"chat_view_mode\\\":\\\"everywhere\\\",\\\"tabs\\\":[{\\\"kind\\\":\\\"cmd\\\",\\\"name\\\":\\\"Shell\\\",\\\"cso\\\":true},{\\\"kind\\\":\\\"cmd\\\",\\\"name\\\":\\\"Chat\\\",\\\"extra\\\":{\\\"cso\\\":true}}]}";

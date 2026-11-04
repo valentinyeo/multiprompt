@@ -166,6 +166,7 @@ const Shell = struct {
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
     chat_view_on: bool = false, pinned_top: bool = false, full_width_pending_console_resize: bool = false,
+    tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
     favorite: bool = false, inbox_excluded: bool = false, muted: bool = false,
 };
@@ -547,6 +548,20 @@ test "IGSH-457 Starred workspace switch keeps the selected console on the shell 
     switchToWorkspace(@import("workspace_view.zig").starred); drain(); try expectShellFont();
     try std.testing.expect(g_starred_workspace);
     try std.testing.expectEqual(@as(u32, 1), active_shell);
+}
+test "IGSH-1655 live Alt+C leaves pending console layout and fonts untouched" {
+    const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
+    try std.testing.expect(spawnSession(.tmux, 0)); drain();
+    @memcpy(shells[0].tmux_session[0..9], "live-test");
+    shells[0].tmux_session_len = 9;
+    shells[0].chat_view_on = true;
+    shells[0].full_width_pending_console_resize = true;
+    g_chat_active = true;
+    const before = resets;
+    toggleChatView();
+    try std.testing.expect(g_chat_active and shells[0].chat_view_on);
+    try std.testing.expect(shells[0].full_width_pending_console_resize);
+    try std.testing.expectEqual(before, resets);
 }
 test "ordinary Chat exit never resets and pending full width ends on the shell font after queued work" {
     for ([_]bool{ false, true }) |pinned| {

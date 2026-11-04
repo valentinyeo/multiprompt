@@ -21,6 +21,16 @@ pub fn setEverywhere(sessions: anytype, on: bool) void {
     }
 }
 
+pub fn canToggle(tmux_session: []const u8) bool {
+    return !std.mem.startsWith(u8, tmux_session, "live-");
+}
+
+test "IGSH-1655 live parking tabs cannot toggle but terminal tabs can" {
+    try std.testing.expect(!canToggle("live-test"));
+    try std.testing.expect(canToggle("term-test"));
+    try std.testing.expect(canToggle(""));
+}
+
 pub fn toggle(session: anytype) void {
     session.chat_view_on = !session.chat_view_on;
 }

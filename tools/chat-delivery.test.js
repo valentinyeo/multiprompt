@@ -52,7 +52,7 @@ const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 const ChatPendingReset = struct { key: chat_transcript.Identity = .{}, nonce: u64 = 0, request_nonce: u64 = 0, unconfirmed: u8 = 0 };
 var g_chat_pending_reset: ?ChatPendingReset = null;
 var g_chat_reset_next: u64 = 0;
-const Shell = struct { chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
+const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
 const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
 const send_latency = struct {
@@ -84,7 +84,10 @@ fn chatReadMark(bottom: bool) bool {
     read_marks += 1;
     return false;
 }
-fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+var terminal_notices: usize = 0;
+fn showHeaderNoticeAscii(text: []const u8, _: u32, _: bool) void {
+    if (std.mem.indexOf(u8, text, "press Alt+C") != null) terminal_notices += 1;
+}
 var question_sends: usize = 0;
 var question_text: []const u16 = &.{};
 var question_send_ok = true;
@@ -288,6 +291,9 @@ fn clear() void {
     enters_at_steer = 0;
     state_at_steer = null;
     composer_text = &.{};
+    terminal_notices = 0;
+    g_chat_ac_dialog_len = 0;
+    shells[0].tmux_session_len = 0;
     chat_steer_prompt = false;
     active_shell = 0;
     fake_now_ms = 2000;
@@ -424,6 +430,22 @@ fn transcript(text: []const u16, stamp: i64) void {
     g_chat_last_len = text.len;
     g_chat_blocks[0] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = stamp };
     g_chat_block_count = 1;
+}
+test "delivery: IGSH-1655 only terminal tabs get an Alt+C hint after a dialog command" {
+    defer clear();
+    const command = std.unicode.utf8ToUtf16LeStringLiteral("/settings");
+    for ([_][]const u8{ "live-test", "term-test" }, 0..) |session, index| {
+        clear();
+        @memcpy(shells[0].tmux_session[0..session.len], session);
+        shells[0].tmux_session_len = @intCast(session.len);
+        composer_text = command;
+        @memcpy(g_chat_ac_dialog_command[0..command.len], command);
+        g_chat_ac_dialog_len = command.len;
+        sendChatPrompt();
+        try std.testing.expectEqual(index, terminal_notices);
+        try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+        try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    }
 }
 test "delivery: IGSH-1063 Other keeps the typed answer until provider progress without an ordinary outbox message" {
     defer clear();

@@ -506,7 +506,10 @@ pub fn sendChatPrompt() void {
     chatAcAfterSend(send_text);
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
     app_state.g_chat_scroll_bottom_pending = true;
-    if (app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, send_text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) {
+    if (app_state.g_chat_ac_dialog_len > 0 and
+        @import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len]) and
+        std.mem.startsWith(u16, send_text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]))
+    {
         showHeaderNoticeAscii("Opened in the terminal, press Alt+C to see it", 4000, false);
     }
     app_state.g_chat_ac_dialog_len = 0;
