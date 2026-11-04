@@ -1,5 +1,15 @@
 # Live chat model and effort
 
+## Sub-features
+
+- Select a Claude model and effort.
+- Retain history and the unsent draft.
+- Show the confirmed selection beside the composer.
+
+## How to get to it (user POV)
+
+Open a live Claude chat. Press Ctrl+K, search for Model Haiku or Effort Low, Medium or High, then press Enter.
+
 ## Driving it with control.ps1
 
 Dispatch `verify.yml` with `feature=chat-model` on the branch, without a release tag. The workflow selects the chat-delivery driver and uploads `verify-chat-delivery`.
@@ -10,4 +20,6 @@ The real Windows app receives Ctrl+K searches and Enter for Model Haiku and Effo
 
 Inspect `model-before.png`, `model-palette-{haiku,low,medium,high}.png`, `model-after-{haiku,low,medium,high}.png`, `model-after.png`, `actions.json`, `doctor.json`, `build.json`, `cleanup.json`, and `model-settings/` config, argv, host log, copied history and observation files. A passing result needs screenshot inspection as well as the independent evidence checker.
 
-This does not verify a real SSH server, real Claude, a Haiku response, model quality or billing. No hosted run or screenshot inspection is implied by this map.
+## Gotchas
+
+The fixture maps Unix sockets to isolated loopback sockets when Windows Python lacks Unix sockets. This does not verify a real SSH server, real Claude, a Haiku response, model quality or billing. No hosted run or screenshot inspection is implied by this map.
