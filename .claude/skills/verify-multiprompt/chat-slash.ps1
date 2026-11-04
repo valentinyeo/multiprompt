@@ -58,7 +58,19 @@ Snapshot 'slash-permissions-applied'
 foreach ($command in @('/model', '/resume', '/rewind')) {
     Send-Slash $command
     Wait-Until { [VerifyNative]::EditText($script:slashComposer) -ceq $command } ('unsupported command remains editable ' + $command)
-    Snapshot ('slash-' + $command.Substring(1) + '-notice')
+    $noticeName = 'slash-' + $command.Substring(1) + '-notice'
+    Snapshot $noticeName
+    $noticeImage = [Drawing.Bitmap]::new((Join-Path $Evidence ($noticeName + '.png')))
+    try {
+        $noticeInk = 0
+        for ($y = 20; $y -lt 60; $y++) {
+            for ($x = 320; $x -lt [Math]::Min(850, $noticeImage.Width); $x++) {
+                $color = $noticeImage.GetPixel($x, $y)
+                if ($color.R -gt 150 -and $color.G -gt 80 -and $color.B -lt 150 -and $color.R -gt $color.G) { $noticeInk++ }
+            }
+        }
+        if ($noticeInk -lt 10) { throw ('Command notice is not visibly painted: ' + $command) }
+    } finally { $noticeImage.Dispose() }
 }
 Press @(0x11, 0x41) 'Ctrl+A: clear the unsupported command'
 Press @(0x08) 'Backspace: clear without sending'

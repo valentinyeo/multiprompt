@@ -30,10 +30,11 @@ test('live commands are routed before the outbox and keep the draft on refusal',
   assert.match(finish, /std\.meta\.eql\(job\.key, chatFileIdentityForShell\(app_state\.active_shell\)\)/);
 });
 
-test('command notices refresh transcript clipping before repainting the header', () => {
-  const source = fs.readFileSync(path.join(root, 'src/console.zig'), 'utf8');
-  const notice = source.slice(source.indexOf('pub fn showHeaderNoticeAscii('), source.indexOf('pub fn notifyTabCapReached('));
-  assert.match(notice, /g_cap_msg_until =[^]*syncChatRegion\(\);[^]*InvalidateRect\(/);
+test('command notices keep the title within the space beside the notice', () => {
+  const source = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
+  const layout = source.slice(source.indexOf('pub fn chatTitleLayout('), source.indexOf('fn paintMoreButton('));
+  assert.match(layout, /const max_w = right_limit - column\.left - margin;/);
+  assert.match(layout, /std\.math\.clamp\(center - @divTrunc\(width, 2\), column\.left \+ margin, right_limit - width\)/);
 });
 
 test('new picker targets and completion message avoid registered bands', async () => {
