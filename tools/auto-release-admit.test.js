@@ -31,7 +31,7 @@ function fixture(t) {
   git('config', 'tag.gpgsign', 'false');
   git('config', 'core.autocrlf', 'false');
   fs.mkdirSync(path.join(dir, 'tools'));
-  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'ticket-titles.mjs', 'ticket-titles.json', 'strip-comments.mjs']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.mkdirSync(path.join(dir, 'changelog.d'));
   git('add', 'tools');
   git('commit', '--allow-empty', '-m', 'previous release');

@@ -15,7 +15,7 @@ function between(start, end) {
   return source.slice(a, b);
 }
 
-test('production changelog geometry covers every entry and its notes without measuring', () => {
+test('production changelog geometry measures and caches wrapped notes', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'changelog-layout-'));
   const harness = `const std = @import("std");
 const HANDLE = ?*anyopaque;
@@ -36,33 +36,49 @@ const Selection = app_state.ChangelogSelection;
 fn uiScaled(n: i32) i32 { return @divTrunc(n * fake_scale, 100); }
 fn paneRect() RECT { return .{ .left = 0, .top = 0, .right = window_width, .bottom = 900 }; }
 fn GetClientRect(_: HANDLE, rc: *RECT) i32 { rc.* = .{ .left = 0, .top = 0, .right = window_width, .bottom = 900 }; return 1; }
-fn DrawTextW(_: HANDLE, _: [*]const u16, n: i32, _: *RECT, _: u32) i32 { measurements += 1; return n; }
+fn DrawTextW(_: HANDLE, _: [*]const u16, n: i32, _: *RECT, _: u32) i32 { return n; }
+const win = struct {
+    const DT_WORDBREAK: u32 = 16;
+    const DT_CALCRECT: u32 = 1024;
+    fn GetDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
+    fn ReleaseDC(_: HANDLE, _: HANDLE) i32 { return 1; }
+};
+const DT_NOPREFIX: u32 = 0x800;
+fn bodyFont() HANDLE { return @ptrFromInt(1); }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return @ptrFromInt(1); }
+fn changeText(_: HANDLE, text: []const u8, rc: *RECT, _: u32) void { measurements += 1; rc.bottom = @as(i32, @intCast((text.len / 20) + 1)) * 18; }
 ` + between('const ChangelogBullet =', 'pub const CHANGELOG =') +
     between('const SOURCE_CHANGELOG =', '\ncomptime {') + '\nvar CHANGELOG = SOURCE_CHANGELOG;\n' +
     between('fn rowHeight()', '\nfn contains(')
+      .replaceAll('@import("win32.zig")', 'win')
       .replaceAll('@import("chat_composer.zig").chatViewLayout().pane', 'paneRect()')
       .replaceAll('@import("window_layout.zig").activePaneRects(client).primary', 'paneRect()') + `
 test "row geometry covers every entry and its notes" {
-    prepareChangelogLayout();
+    prepareChangelogLayout(600, false);
     try std.testing.expectEqual(@as(i32, 0), changelog_row_tops[0]);
     try std.testing.expect(CHANGELOG.len > 0);
     for (CHANGELOG, 0..) |_, idx| {
+        if (noteCount(idx) == 0) {
+            try std.testing.expectEqual(changelog_row_tops[idx], changelog_row_tops[idx + 1]);
+            continue;
+        }
         try std.testing.expect(changelog_row_tops[idx + 1] > changelog_row_tops[idx]);
         try std.testing.expectEqual(@as(?usize, idx), changelogIndexAtContentY(changelog_row_tops[idx]));
         try std.testing.expectEqual(@as(?usize, idx), changelogIndexAtContentY(changelog_row_tops[idx + 1] - 1));
         const row = selectionRange(noteSelection(idx, 0));
         try std.testing.expectEqual(changelog_row_tops[idx] + rowHeight(), row.top);
-        try std.testing.expectEqual(rowHeight(), row.h);
+        try std.testing.expect(row.h >= rowHeight());
     }
     try std.testing.expectEqual(@as(?usize, null), changelogIndexAtContentY(-1));
     try std.testing.expectEqual(@as(?usize, null), changelogIndexAtContentY(changelog_row_tops[CHANGELOG.len]));
-    try std.testing.expectEqual(@as(usize, 0), measurements);
+    try std.testing.expect(measurements > 0);
 }
-test "layout needs no measuring and clamps scroll to its own maximum" {
+test "layout caches measurements and clamps scroll to its own maximum" {
     const initial = calcChangelogLayout();
     try std.testing.expect(initial.view_h > 0);
     try std.testing.expect(initial.max_scroll > 0);
-    try std.testing.expectEqual(@as(usize, 0), measurements);
+    const measured = measurements;
+    try std.testing.expect(measured > 0);
     const half = @divTrunc(initial.max_scroll, 2);
     app_state.g_changelog_scroll = half;
     const scrolled = calcChangelogLayout();
@@ -72,7 +88,7 @@ test "layout needs no measuring and clamps scroll to its own maximum" {
     const clamped = calcChangelogLayout();
     try std.testing.expectEqual(initial.max_scroll, app_state.g_changelog_scroll);
     try std.testing.expectEqual(initial.max_scroll, clamped.max_scroll);
-    try std.testing.expectEqual(@as(usize, 0), measurements);
+    try std.testing.expectEqual(measured, measurements);
 }
 `;
   try {

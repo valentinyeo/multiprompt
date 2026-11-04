@@ -117,11 +117,12 @@ try {
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
                 $stagedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 Assert ($stagedNotes.version -ceq '9.10.0') 'Staged notes version mismatch'
-                $expectedNotes = @('Typing feels faster.', 'Chats keep your place.', 'Middle change.')
+                $expectedNotes = @('IGSH-5 Typing feels faster', 'IGSH-6 Chats keep your place', 'IGSH-2 Middle change', 'IGSH-1 Older change')
                 $currentReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.10.0' })
                 $middleReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.9.0' })
-                Assert ($currentReleases.Count -eq 1 -and $middleReleases.Count -eq 1) 'Staged note releases missing or duplicated'
-                $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0])
+                $olderReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.8.0' })
+                Assert ($currentReleases.Count -eq 1 -and $middleReleases.Count -eq 1 -and $olderReleases.Count -eq 1) 'Staged note releases missing or duplicated'
+                $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0])
                 for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
                 Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
                 $cardProcess.Refresh()
@@ -135,21 +136,21 @@ try {
                 $observedNotes | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
                 Passed 'signed staged notes retain expected data'
                 Select-Release 'v9.11.0'
-                Assert (Save-Update $cardExe '0.0.0' 'x64') 'Checks-only release was not staged'
-                $checksNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
-                Assert ($checksNotes.releases[0].changes.Count -eq 1 -and $checksNotes.releases[0].changes[0] -ceq 'Checks and fixes, no visible change') 'Checks-only fallback is missing or changed'
-                Assert ($checksNotes.releases[0].tickets.Count -eq 1 -and $checksNotes.releases[0].tickets[0] -ceq 'https://app.hypertask.ai/detail/project-2060/1243') 'Checks-only ticket link is missing or changed'
-                Assert ((Get-Content "$cardExe.update/ready.txt" -Raw).Contains('MPVERSION=9.11.0;')) 'Checks-only update marker missing'
-                Assert (-not $cardProcess.HasExited) 'Checks-only update interrupted the app'
+                Assert (Save-Update $cardExe '0.0.0' 'x64') 'Ticket-title release was not staged'
+                $titleNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
+                Assert ($titleNotes.releases[0].changes.Count -eq 1 -and $titleNotes.releases[0].changes[0] -ceq 'IGSH-1243 Changelog ticket links') 'Ticket title is missing or changed'
+                Assert ($titleNotes.releases[0].tickets.Count -eq 1 -and $titleNotes.releases[0].tickets[0] -ceq 'https://app.hypertask.ai/detail/project-2060/1243') 'Ticket link is missing or changed'
+                Assert ((Get-Content "$cardExe.update/ready.txt" -Raw).Contains('MPVERSION=9.11.0;')) 'Ticket-title update marker missing'
+                Assert (-not $cardProcess.HasExited) 'Ticket-title update interrupted the app'
                 $cardProcess.Refresh()
-                Assert ($cardProcess.Responding) 'Quiet update blocked the app'
-                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Quiet update window unavailable'
+                Assert ($cardProcess.Responding) 'Ticket-title update blocked the app'
+                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Ticket-title update window unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
                 $graphics = [Drawing.Graphics]::FromImage($bitmap)
                 $dc = $graphics.GetHdc()
-                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Quiet update screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
-                try { $bitmap.Save((Join-Path $Evidence 'update-card-quiet.png')) } finally { $bitmap.Dispose() }
-                Passed 'checks-only staged notes retain fallback and ticket link'
+                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Ticket-title update screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'update-card-ticket-title.png')) } finally { $bitmap.Dispose() }
+                Passed 'ticket-title staged notes retain title and ticket link'
                 Select-Release 'v9.10.0'
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Real product notes were not restored'
                 Assert ((Get-Content "$cardExe.update/ready.txt" -Raw).Contains('MPVERSION=9.10.0;')) 'Restored update marker missing'
@@ -161,7 +162,7 @@ try {
                 Assert ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($NativeUpdate)).Contains("MPVERSION=$newVersion;")) 'Native update build has the wrong version'
                 $installedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 $installedNotes.version = $newVersion
-                $installedNotes.releases = @(@{ version = $newVersion; changes = @('Restart keeps your chats open.') }) + @($installedNotes.releases)
+                $installedNotes.releases = @(@{ version = $newVersion; changes = @('IGSH-5 Typing feels faster') }) + @($installedNotes.releases)
                 [IO.File]::WriteAllText("$cardExe.update/release-notes.json", ($installedNotes | ConvertTo-Json -Depth 8))
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)

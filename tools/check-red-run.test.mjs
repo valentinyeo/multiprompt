@@ -415,7 +415,7 @@ const after = 1;
     const files = {
       'src/main.zig': 'pub const APP_VERSION = "1.2.3";\n',
       'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
-      'changelog.d/DEMO-1-change.md': 'Opening tabs works.\n',
+      'changelog.d/IGSH-154-change.md': 'Opening tabs works.\n',
     };
     for (const [file, text] of Object.entries(files)) f.write(file, text);
     const base = f.commit();

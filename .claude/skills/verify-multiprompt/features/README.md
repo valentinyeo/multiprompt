@@ -47,6 +47,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 - [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
 
+- [What's new](whats-new.md): real keyboard changelog navigation and source-backed screenshot review.
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.

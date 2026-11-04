@@ -32,35 +32,13 @@ pub const Notes = struct {
 
 pub fn plain(text: []const u8) bool {
     if (text.len == 0 or text.len > 512 or !std.unicode.utf8ValidateSlice(text)) return false;
-    for (text, 0..) |c, i| {
-        if (c < 32 or c == 127 or c == '/' or c == '\\' or c == '`') return false;
-        for ([_][]const u8{ "PR ", "pull request " }) |prefix| {
-            if (i + prefix.len < text.len and std.ascii.eqlIgnoreCase(text[i .. i + prefix.len], prefix)) {
-                const rest = std.mem.trimStart(u8, text[i + prefix.len ..], " #");
-                if (rest.len > 0 and std.ascii.isDigit(rest[0])) return false;
-            }
-        }
-        if (c == '#' and i + 1 < text.len and std.ascii.isDigit(text[i + 1])) return false;
-        if (c == '-' and i + 1 < text.len and std.ascii.isDigit(text[i + 1])) {
-            var start = i;
-            while (start > 0 and std.ascii.isUpper(text[start - 1])) start -= 1;
-            if (start < i) return false;
-        }
-        if (c == '.' and i > 0 and i + 1 < text.len and std.ascii.isAlphanumeric(text[i - 1]) and std.ascii.isAlphabetic(text[i + 1])) return false;
-    }
-    for ([_][]const u8{ "behind the scenes", "latest improvements" }) |filler| {
-        if (std.ascii.indexOfIgnoreCase(text, filler) != null) return false;
-    }
-    for ([_][]const u8{ "Various improvements.", "Bug fixes.", "Maintenance.", "Improvements.", "Fixes." }) |filler| {
-        if (std.ascii.eqlIgnoreCase(text, filler)) return false;
-    }
-    if (std.mem.eql(u8, text, "Checks and fixes, no visible change")) return true;
-    var words = std.mem.tokenizeAny(u8, text, " .,;:!?()-");
-    while (words.next()) |word| {
-        for ([_][]const u8{ "check", "checks", "test", "tests", "CI", "proof", "proofs", "pipeline", "pipelines", "workflow", "workflows" }) |internal| {
-            if (std.ascii.eqlIgnoreCase(word, internal)) return false;
-        }
-    }
+    const prefix: usize = if (std.mem.startsWith(u8, text, "IGSH-")) 5 else if (std.mem.startsWith(u8, text, "HYCI-")) 5 else return false;
+    if (text.len <= prefix or text[prefix] < '1' or text[prefix] > '9') return false;
+    var i = prefix;
+    while (i < text.len and std.ascii.isDigit(text[i])) : (i += 1) {}
+    if (i + 1 >= text.len or text[i] != ' ' or text[i + 1] == ' ' or text[text.len - 1] == ' ') return false;
+    for (text) |c| if (c < 32 or c == 127) return false;
+    if (std.ascii.indexOfIgnoreCase(text[i + 1 ..], "Checks and fixes, no visible change") != null) return false;
     return true;
 }
 
@@ -91,42 +69,30 @@ pub fn pick(releases: []const Release, installed: []const u8, offered: []const u
     return result;
 }
 
-test "IGSH-1243 shows checks-only release notes" {
-    const releases = [_]Release{.{ .version = "0.28.1048", .changes = &.{"Checks and fixes, no visible change"} }};
-    const notes = pick(&releases, "0.28.1047", "0.28.1048");
-    try std.testing.expectEqual(@as(usize, 1), notes.count);
-    try std.testing.expectEqualStrings("Checks and fixes, no visible change", notes.line(0));
-}
-
-test "IGSH-728 picks only versions between installed and offered, newest first" {
+test "ticket titles and skipped releases retain newest-first order" {
     const releases = [_]Release{
-        .{ .version = "1.9.0", .changes = &.{"Already installed."} },
-        .{ .version = "1.10.0", .changes = &.{"Older change."} },
-        .{ .version = "2.0.0", .changes = &.{"Not offered yet."} },
-        .{ .version = "1.11.0", .changes = &.{ "Newest change.", "Another new change." } },
+        .{ .version = "1.9.0", .changes = &.{"IGSH-1 Already installed"} },
+        .{ .version = "1.10.0", .changes = &.{"IGSH-2 Older change"} },
+        .{ .version = "2.0.0", .changes = &.{"IGSH-3 Not offered"} },
+        .{ .version = "1.11.0", .changes = &.{ "IGSH-4 Newest change", "HYCI-5 Another change" } },
     };
     const notes = pick(&releases, "1.9.0", "1.11.0");
     try std.testing.expectEqual(@as(usize, 3), notes.count);
-    try std.testing.expectEqualStrings("Newest change.", notes.line(0));
-    try std.testing.expectEqualStrings("Another new change.", notes.line(1));
-    try std.testing.expectEqualStrings("Older change.", notes.line(2));
+    try std.testing.expectEqualStrings("IGSH-4 Newest change", notes.line(0));
+    try std.testing.expectEqualStrings("HYCI-5 Another change", notes.line(1));
+    try std.testing.expectEqualStrings("IGSH-2 Older change", notes.line(2));
     try std.testing.expectEqual(@as(usize, 0), pick(&releases, "1.11.0", "1.9.0").count);
 }
 
-test "IGSH-948 shows three lines then and N more, and the full list when expanded" {
-    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "One.", "Two.", "Three.", "Four." } }};
+test "invalid notes and filler are not displayed" {
+    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "Old unnumbered note", "IGSH-0 Bad", "IGSH-12 ", "IGSH-12 Checks and fixes, no visible change", "IGSH-12 Valid café" } }};
     const notes = pick(&releases, "1.0.0", "1.1.0");
-    try std.testing.expectEqual(@as(usize, 4), notes.count);
-    try std.testing.expectEqual(@as(usize, 3), notes.shown(false));
-    try std.testing.expectEqual(@as(usize, 4), notes.shown(true));
-    var buf: [32]u8 = undefined;
-    try std.testing.expectEqualStrings("and 1 more", notes.more(&buf, false));
-    try std.testing.expectEqualStrings("", notes.more(&buf, true));
-    try std.testing.expectEqualStrings("", (Notes{}).more(&buf, false));
+    try std.testing.expectEqual(@as(usize, 1), notes.count);
+    try std.testing.expectEqualStrings("IGSH-12 Valid café", notes.line(0));
 }
 
-test "IGSH-948 keeps sixteen lines and counts the rest as more even when expanded" {
-    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "A1.", "A2.", "A3.", "A4.", "A5.", "A6.", "A7.", "A8.", "A9.", "B1.", "B2.", "B3.", "B4.", "B5.", "B6.", "B7.", "B8.", "B9." } }};
+test "capacity counts notes beyond the first sixteen" {
+    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "IGSH-1 One", "IGSH-2 Two", "IGSH-3 Three", "IGSH-4 Four", "IGSH-5 Five", "IGSH-6 Six", "IGSH-7 Seven", "IGSH-8 Eight", "IGSH-9 Nine", "IGSH-10 Ten", "IGSH-11 Eleven", "IGSH-12 Twelve", "IGSH-13 Thirteen", "IGSH-14 Fourteen", "IGSH-15 Fifteen", "IGSH-16 Sixteen", "IGSH-17 Seventeen", "IGSH-18 Eighteen" } }};
     const notes = pick(&releases, "1.0.0", "1.1.0");
     try std.testing.expectEqual(@as(usize, 16), notes.count);
     try std.testing.expectEqual(@as(usize, 18), notes.total);
@@ -135,28 +101,12 @@ test "IGSH-948 keeps sixteen lines and counts the rest as more even when expande
     try std.testing.expectEqualStrings("and 2 more", notes.more(&buf, true));
 }
 
-test "IGSH-1090 keeps real notes individual and maintenance releases quiet" {
-    const releases = [_]Release{
-        .{ .version = "1.1.0", .changes = &.{"Typing feels faster."} },
-        .{ .version = "1.2.0", .changes = &.{"Updates include the latest improvements."} },
-        .{ .version = "1.3.0", .changes = &.{ "Behind the scenes fixes.", "Chat speed checks now ignore shared-machine pauses." } },
-        .{ .version = "1.4.0", .changes = &.{} },
-        .{ .version = "1.5.0", .changes = &.{"Dictation shortcuts keep working when keys queue up."} },
-    };
-    const notes = pick(&releases, "1.0.0", "1.5.0");
-    try std.testing.expectEqual(@as(usize, 2), notes.count);
-    try std.testing.expectEqualStrings("Dictation shortcuts keep working when keys queue up.", notes.line(0));
-    try std.testing.expectEqualStrings("Typing feels faster.", notes.line(1));
-    const quiet = pick(&releases, "1.1.0", "1.4.0");
-    try std.testing.expectEqual(@as(usize, 0), quiet.count);
-    try std.testing.expectEqual(@as(usize, 0), quiet.total);
-    const waiting = pick(&releases, "1.0.0", "1.4.0");
-    try std.testing.expectEqualStrings("Typing feels faster.", waiting.line(0));
-}
-
-test "IGSH-728 skips ticket ids, file paths, file names and PR numbers" {
-    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "Fix IGSH-123.", "Fix src/main.zig.", "Fix C:\\app\\settings.", "Fix update.zig.", "Fix PR #12.", "Fix PR 12.", "Typing feels faster." } }};
+test "collapsed and expanded counts retain omitted items" {
+    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "IGSH-1 One", "IGSH-2 Two", "IGSH-3 Three", "IGSH-4 Four" } }};
     const notes = pick(&releases, "1.0.0", "1.1.0");
-    try std.testing.expectEqual(@as(usize, 1), notes.total);
-    try std.testing.expectEqualStrings("Typing feels faster.", notes.line(0));
+    try std.testing.expectEqual(@as(usize, 3), notes.shown(false));
+    try std.testing.expectEqual(@as(usize, 4), notes.shown(true));
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("and 1 more", notes.more(&buf, false));
+    try std.testing.expectEqualStrings("", notes.more(&buf, true));
 }
