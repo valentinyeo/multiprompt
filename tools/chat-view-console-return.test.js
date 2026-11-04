@@ -52,7 +52,7 @@ const TIMER_CHAT_BROWSER_SWAP = 1;
 const TIMER_CHAT_REFRESH = 2;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, chat_view_on: bool = true, pinned_top: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false };
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_view_on: bool = true, pinned_top: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false };
 var shells = [_]Shell{ .{}, .{} };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
@@ -125,6 +125,32 @@ fn prepare(pinned: bool, full: bool) void {
     theme_resets = 0;
     layouts = 0;
     focuses = 0;
+}
+test "IGSH-1655 Alt+C leaves a live chat open without revealing its parking console" {
+    prepare(false, false);
+    @memcpy(shells[0].tmux_session[0..9], "live-test");
+    shells[0].tmux_session_len = 9;
+    for (0..2) |_| {
+        toggleChatView();
+        try std.testing.expect(g_chat_active);
+        try std.testing.expect(shells[0].chat_view_on);
+    }
+    try std.testing.expect(visible[3] and visible[4]);
+    try std.testing.expect(!visible[10]);
+    try std.testing.expectEqual(@as(usize, 0), stream_stops);
+    try std.testing.expectEqual(@as(usize, 0), layouts);
+}
+test "IGSH-1655 Alt+C still toggles terminal tabs both ways" {
+    prepare(false, false);
+    @memcpy(shells[0].tmux_session[0..9], "term-test");
+    shells[0].tmux_session_len = 9;
+    toggleChatView();
+    try std.testing.expect(!g_chat_active);
+    try std.testing.expect(!shells[0].chat_view_on);
+    try std.testing.expect(visible[10]);
+    toggleChatView();
+    try std.testing.expect(g_chat_active);
+    try std.testing.expect(shells[0].chat_view_on);
 }
 test "close chat reveals native shell without resetting its buffer or font" {
     for ([_]bool{ false, true }) |pinned| {
