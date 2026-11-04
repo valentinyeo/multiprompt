@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
-Add-Type -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
