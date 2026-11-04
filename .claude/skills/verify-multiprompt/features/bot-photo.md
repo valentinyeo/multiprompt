@@ -12,6 +12,8 @@ Open Ctrl+K, choose Bot face, then Upload image or Reset.
 
 Dispatch `verify.yml` with `feature=bot-photo`. The Windows-only driver uses isolated local sessions and real native file dialogs. Evidence is uploaded as `verify-bot-photo`.
 
+The upload and Cancel paths each Alt+Tab away to a separate, job-owned blank window and back three times with the native picker open. Real keyboard input must return to the same visible, enabled picker owned by the main app window, without focus repair. Each cycle records before/away/return screenshots and independently read native ownership, foreground and enabled state. Upload then proves persisted image pixels; Cancel proves the dialog is destroyed, the main window is enabled and Ctrl+K accepts another query. Both owned jobs must clean up to zero processes.
+
 ## Gotchas
 
 This journey uses offline local tabs. It does not verify account sync, remote services, or Android. Review `result.json` and screenshots before claiming success.
