@@ -123,7 +123,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
@@ -241,6 +241,21 @@ try {
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    if ($Feature -eq 'sessions') {
+        $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
+        New-Item -ItemType Directory -Force $env:MP_VERIFY_STATE, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $ssh = Join-Path $scratch 'ssh.exe'
+        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
+        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; tabs = @(
+            @{ kind = 'tmux'; name = 'First'; manual = $true; tmux_host = 0; tmux_session = 'first'; workspace = 0; cv = $false; pid = 0 },
+            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cv = $false; pid = 0 }
+        ) }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        Save-Json $seed 'seed-session.json'
+        $result.repoPickerBoundary = 'Two saved synthetic tmux tabs in Other, host 0 then active host 2; synthetic SSH repository listing and console-backed tmux; no real SSH, tmux server or agent verified.'
+    }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
         New-Item -ItemType Directory -Force $bindingState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -351,7 +366,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('browser-own-profile', 'tab-names', 'inbox-order')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
