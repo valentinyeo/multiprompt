@@ -3588,7 +3588,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="duplicate", reason="already_written", attempt=seen.get("attempt"))
     if tmux is None:
         return host_refuse("no_chat")
-    if not session.get("ready"):
+    if provider != "claude" and not session.get("ready"):
         return dict(status="busy", reason="agent_starting")
     if provider == "codex" and not isinstance(session.get("native_turn"), str) and "turn" in session["rpc"].values():
         return dict(status="busy", reason="turn_starting")
@@ -3716,7 +3716,7 @@ def host_claude_event(provider, sid, tmux, session, event):
 
 
 def host_claude_open(provider, sid, tmux, session):
-    session["ready"] = True
+    pass
 
 
 def host_claude_write(provider, sid, session, token, text):
@@ -5887,7 +5887,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 62
+RUNTIME_GENERATION = 63
 
 if __name__ == '__main__':
     import base64 as _base64
