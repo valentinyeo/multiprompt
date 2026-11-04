@@ -997,6 +997,7 @@ pub const PROCESS_MEMORY_COUNTERS = extern struct {
 const WNDENUMPROC = *const fn (HANDLE, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn EnumWindows(WNDENUMPROC, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn SendMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
+pub extern "user32" fn PostMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn SendMessageTimeoutW(HANDLE, UINT, WPARAM, LPARAM, UINT, UINT, ?*usize) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CallWindowProcW(isize, HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CreatePopupMenu() callconv(WINAPI) HANDLE;

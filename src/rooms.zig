@@ -43,6 +43,7 @@ pub const Controller = struct {
     host_uuid: [36]u8 = undefined,
     has_host_uuid: bool = false,
     live_send: bool = false,
+    legacy_capabilities: bool = false,
     job: ?*transport.Job = null,
     kind: RequestKind = .capabilities,
     journal_lock: ?@import("room_journal.zig").Lock = null,
@@ -134,6 +135,13 @@ pub const Controller = struct {
 
     pub fn capabilities(self: *Controller) bool {
         self.live_send = false;
+        self.legacy_capabilities = false;
+        return self.launch(.capabilities, .{ .op = "capabilities", .room_messages = 1 });
+    }
+
+    pub fn legacyCapabilities(self: *Controller) bool {
+        self.live_send = false;
+        self.legacy_capabilities = true;
         return self.launch(.capabilities, .{ .op = "capabilities" });
     }
 
@@ -144,7 +152,12 @@ pub const Controller = struct {
         const store = payload.object.get("store_only") orelse return false;
         const live = payload.object.get("live_send") orelse return false;
         const uuid = payload.object.get("host_uuid") orelse return false;
-        if (version != .integer or version.integer != 1 or store != .bool or live != .bool or store.bool == live.bool or uuid != .string or !self.bindHost(uuid.string)) return false;
+        if (version != .integer or version.integer != 1 or store != .bool or live != .bool or store.bool == live.bool or uuid != .string) return false;
+        if (live.bool) {
+            const reply_protocol = payload.object.get("room_reply_protocol") orelse return false;
+            if (self.legacy_capabilities or reply_protocol != .integer or reply_protocol.integer != 1) return false;
+        }
+        if (!self.bindHost(uuid.string)) return false;
         self.live_send = live.bool;
         return true;
     }
@@ -268,9 +281,9 @@ test "room capability negotiation accepts store-only and live peers without wide
     const a = std.testing.allocator;
     var legacy = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"10000000-0000-4000-8000-000000000001\",\"store_only\":true,\"live_send\":false}", .{});
     defer legacy.deinit();
-    var live = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"10000000-0000-4000-8000-000000000001\",\"store_only\":false,\"live_send\":true}", .{});
+    var live = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"10000000-0000-4000-8000-000000000001\",\"store_only\":false,\"live_send\":true,\"room_reply_protocol\":1}", .{});
     defer live.deinit();
-    var foreign = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"20000000-0000-4000-8000-000000000002\",\"store_only\":false,\"live_send\":true}", .{});
+    var foreign = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"20000000-0000-4000-8000-000000000002\",\"store_only\":false,\"live_send\":true,\"room_reply_protocol\":1}", .{});
     defer foreign.deinit();
     var controller = Controller.init(0);
     try std.testing.expect(controller.acceptCapabilities(legacy.value));
@@ -280,4 +293,9 @@ test "room capability negotiation accepts store-only and live peers without wide
     try std.testing.expect(!controller.acceptCapabilities(foreign.value));
     try std.testing.expect(!controller.live_send);
     try std.testing.expectEqualStrings("10000000-0000-4000-8000-000000000001", &controller.host_uuid);
+    controller.legacy_capabilities = true;
+    try std.testing.expect(!controller.acceptCapabilities(live.value));
+    controller.legacy_capabilities = false;
+    _ = live.value.object.swapRemove("room_reply_protocol");
+    try std.testing.expect(!controller.acceptCapabilities(live.value));
 }

@@ -82,11 +82,12 @@ test "room mentions select only named members and deduplicate" {
 
 test "email and escaped at signs do not address a room member" {
     const members = [_]Binding{ .{ .alias = "alpha", .id = "a" }, .{ .alias = "beta", .id = "b" } };
-    for ([_][]const u8{ "user@alpha", "\\@alpha", "@@alpha", ".@alpha", "+@alpha", "-@alpha", "é@alpha" }) |text| {
+    for ([_][]const u8{ "user@alpha", "\\@alpha", ".@alpha", "+@alpha", "-@alpha", "é@alpha" }) |text| {
         const result = try plan(text, &members);
         try std.testing.expectEqual(@as(usize, 0), result.alias_count);
         try std.testing.expectEqual(@as(usize, 2), result.target_count);
     }
+    try std.testing.expectError(error.InvalidMention, plan("@@alpha", &members));
     try std.testing.expectError(error.InvalidMessage, plan("  \n", &members));
     try std.testing.expectError(error.InvalidMessage, plan("hello\x00", &members));
     try std.testing.expectError(error.InvalidMessage, plan("hello", &.{}));

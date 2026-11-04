@@ -1523,6 +1523,7 @@ pub fn pollTimer(id: usize) bool {
     switch (completion) {
         .pending => unreachable,
         .failed => |failure| {
+            if (failure.kind == .capabilities and !c.legacy_capabilities and failure.reason == .remote and std.mem.eql(u8, failure.code[0..failure.code_len], "invalid_fields") and c.legacyCapabilities()) return true;
             last_failure = failure;
             if (failure.kind == .catalog_metadata) {
                 finishMetadata(c, fresh, null);
