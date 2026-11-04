@@ -209,6 +209,7 @@ test "IGSH-1651 pending frame geometry cannot collapse against the previous work
     const old_work = w.RECT{ .left = 0, .top = 0, .right = 1920, .bottom = 1040 };
     const proposed = w.RECT{ .left = 1912, .top = -8, .right = 3848, .bottom = 1048 };
     const result = maximizedClientRect(proposed, old_work);
+    try std.testing.expectEqual(@as(i32, 1936), result.right - result.left);
     try std.testing.expectEqualDeep(proposed, result);
     const restored = w.RECT{ .left = 400, .top = 80, .right = 1400, .bottom = 780 };
     try std.testing.expectEqualDeep(restored, maximizedClientRect(restored, old_work));

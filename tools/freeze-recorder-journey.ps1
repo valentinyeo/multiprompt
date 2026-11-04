@@ -164,7 +164,8 @@ try {
     $baseline = Join-Path $env:RUNNER_TEMP ('background-baseline-' + [guid]::NewGuid().ToString('N') + '.exe')
     try {
         Invoke-WebRequest 'https://github.com/valentinyeo/multiprompt/releases/download/v0.28.1450/multiprompt-x64.exe' -OutFile $baseline
-        $manifest = (Invoke-WebRequest 'https://github.com/valentinyeo/multiprompt/releases/download/v0.28.1450/SHA256SUMS.txt').Content
+        Invoke-WebRequest 'https://github.com/valentinyeo/multiprompt/releases/download/v0.28.1450/SHA256SUMS.txt' -OutFile ($baseline + '.sha256')
+        $manifest = Get-Content -LiteralPath ($baseline + '.sha256') -Raw
         $checksum = [regex]::Match($manifest, '(?m)^([a-fA-F0-9]{64})\s+\*?multiprompt-x64\.exe\r?$')
         if (-not $checksum.Success -or (Get-FileHash $baseline -Algorithm SHA256).Hash -ne $checksum.Groups[1].Value) { throw 'Background baseline checksum mismatch' }
         $redEvidence = Join-Path $Evidence 'background-red'
@@ -174,7 +175,7 @@ try {
         $redResult = Get-Content (Join-Path $redEvidence 'result.json') -Raw | ConvertFrom-Json
         if ($redCode -eq 0 -or $redResult.phase -ne 'geometry' -or $redResult.geometry.ClientWidth -ne 8 -or ($red -join "`n") -notmatch 'WM_NCCALCSIZE clipped the proposal from \d+ to 8 pixels') { throw 'Background geometry red control failed for an unexpected reason' }
         $global:LASTEXITCODE = 0
-    } finally { Remove-Item -LiteralPath $baseline -Force -ErrorAction SilentlyContinue }
+    } finally { Remove-Item -LiteralPath $baseline, ($baseline + '.sha256') -Force -ErrorAction SilentlyContinue }
     & "$PSScriptRoot/background-freeze-journey.ps1" -Exe $Exe -Evidence (Join-Path $Evidence 'background')
     Write-Host 'FREEZE_JOURNEY_OK'
 } finally {
