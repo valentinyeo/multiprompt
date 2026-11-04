@@ -1236,6 +1236,7 @@ fn startInboxRename() void {
     commitRename();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
     app_state.g_edit_tab = idx;
+    app_state.g_edit_sid = app_state.shells[idx].shell_id;
     app_state.g_edit_idx = idx;
     app_state.g_edit_is_group = false;
     app_state.g_edit_is_window = false;

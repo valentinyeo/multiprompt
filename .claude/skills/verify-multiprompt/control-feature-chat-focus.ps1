@@ -42,4 +42,5 @@
             Assert-ChatTyping 'abc' 'find-alt-m-typing'
             Snapshot 'after'
             $result.checks += @{ name = 'chat-focus'; restartTyping = $true; findAltQTyping = $true; transcriptAltQTyping = $true; findAltMTyping = $true; panePresent = $false; entry = 'Alt+C, Ctrl+F, Alt+Q, mouse and Alt+M' }
+            . (Join-Path $PSScriptRoot 'control-feature-inline-rename.ps1')
         

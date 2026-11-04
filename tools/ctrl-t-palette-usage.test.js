@@ -177,23 +177,16 @@ test("all session rename entry points synchronize display surfaces without chang
 
   const canonical = functionBody("applyCanonicalSessionRename", "shellNameFromU16AsciiTrimmed");
   assert.match(canonical, /syncShellDisplayNameSurfaces\(idx, sync_name, true\)/);
-  assert.doesNotMatch(canonical, /tmux_session_len\s*=/,
+  assert.doesNotMatch(canonical, /tmux_session_len\s*=(?!=)/,
     "the canonical rename path may update display surfaces but not stable bindings");
 
-  const modal = functionBody("beginPaletteRenameInput", "startThreadTitleRename");
-  assert.match(modal, /g_search_rename_sid = shells\[idx\]\.shell_id/,
-    "the modal target must survive index movement by keeping the stable shell id");
-  assert.match(modal, /g_search_rename_select_all = true/,
-    "the proposed/current name must be preselected for immediate replacement");
-  assert.match(modal, /g_search_buf\[0\.\.g_search_len\].*shells\[idx\]\.name/s,
-    "the rename modal must be prefilled with the proposed current session name");
-
-  assert.match(source, /WM_APP_SEARCH_SELECT_ALL/);
-  assert.match(source, /Ctrl\+A selects all/);
-  assert.match(source, /findShellById\(g_search_rename_sid\)[\s\S]*?applyCanonicalSessionRename\(idx, g_search_buf\[start\.\.end\], true\)/,
-    "modal confirmation must resolve the stable target and use the canonical synchronized commit");
-  assert.match(source, /target == SEARCH_RENAME_SYNC_OFFSET[\s\S]*?beginPaletteRenameInput\(active_shell\)/,
-    "Ctrl+K Rename Session must enter the app modal rather than the inline F2 editor");
+  const paletteRename = functionBody("beginPaletteRenameInput", "startThreadTitleRename");
+  assert.match(paletteRename, /startThreadTitleRename\(\).*startRename\(idx\)/);
+  assert.match(rename, /g_edit_sid = shells\[idx\]\.shell_id/);
+  assert.match(rename, /SetWindowTextW\(g_edit_hwnd, @ptrCast\(&shells\[idx\]\.name\)\)/);
+  assert.match(rename, /SendMessageW\(g_edit_hwnd, 0x00B1, 0, @bitCast\(@as\(isize, -1\)\)\)/);
+  assert.match(commit, /findShellById\(renamed_sid\)/);
+  assert.match(source, /target == SEARCH_RENAME_SYNC_OFFSET[\s\S]*?beginPaletteRenameInput\(shell\)/);
   assert.match(source, /L\("Rename Session"\)/);
   assert.match(source, /L\("Use Agent or Terminal Session Name"\)/);
 

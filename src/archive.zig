@@ -843,6 +843,7 @@ pub fn applyCanonicalSessionRename(idx: u32, raw_name: []const u16, sync_remote:
         }
     }
 
+    const local_agent = sync_remote and app_state.shells[idx].tmux_session_len == 0 and shellLooksLikeCodingAgent(idx);
     const name_len = @min(raw_name.len, app_state.shells[idx].name.len - 1);
     @memcpy(app_state.shells[idx].name[0..name_len], raw_name[0..name_len]);
     app_state.shells[idx].name[name_len] = 0;
@@ -851,7 +852,10 @@ pub fn applyCanonicalSessionRename(idx: u32, raw_name: []const u16, sync_remote:
     if (sync_remote) {
         var sync_buf: [64]u8 = undefined;
         const sync_name = shellNameFromU16AsciiTrimmed(raw_name[0..name_len], &sync_buf);
-        if (sync_name.len > 0) syncShellDisplayNameSurfaces(idx, sync_name, true);
+        if (sync_name.len > 0) {
+            syncShellDisplayNameSurfaces(idx, sync_name, true);
+            if (local_agent and !shellLooksLikeCodingAgent(idx)) sendAgentRenameToLocalShell(idx, sync_name);
+        }
     }
     return true;
 }

@@ -391,7 +391,7 @@ pub fn uiFontInboxSub() HANDLE {
     return app_state.g_font_inbox_sub orelse @import("fonts.zig").controlFont();
 }
 
-fn uiFontThreadTitle() HANDLE {
+pub fn uiFontThreadTitle() HANDLE {
     if (app_state.g_font_thread_title == null) {
         app_state.g_font_thread_title = CreateFontW(uiScaled(@as(i32, @intCast(@abs(themeTitleFontHeight()))) + 8), 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 0, 0, themeTitleFontFace());
     }
