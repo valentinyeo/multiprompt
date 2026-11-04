@@ -40,19 +40,17 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
   assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, &host_buf, &command_buf\) == null\);/);
 
-  const codex = palette.indexOf('fn buildCodexTmuxLaunchCmd(');
-  const codexEnd = palette.indexOf('fn buildCodexTmuxSessionName(');
-  assert.match(palette.slice(codex, codexEnd), /tmux send-keys -t /);
+  assert.ok(!palette.includes('fn buildCodexTmuxLaunchCmd('), 'Codex no longer types into a terminal');
 });
 
 test('IGSH-1447 Ctrl+T opens a live chat parked on an idle wait with no shell and no terminal Claude', () => {
   const host = read('src/agent_host.zig');
-  const launch = host.slice(host.indexOf('pub fn launchCommand('));
+  const launch = host.slice(host.indexOf('pub fn launchCommandFor('));
   const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
   const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
   assert.ok(format && args, 'the launch command must be readable');
-  const mode = host.match(/const mode = "([^"]*)";/);
-  const values = { session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
+  const mode = host.match(/const mode = if \(provider == \.claude\) "([^"]*)" else "";/);
+  const values = { name: 'claude', session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
   const parts = format[1].split('{s}');
   const ordered = args[1].split(',').map((value) => value.trim());
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
@@ -103,4 +101,25 @@ test('IGSH-1266 a stopped live chat host restarts with the reader even when mp-s
   ].join('\n'), reader], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME } });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), reader);
+});
+
+test('IGSH-1546 Codex and Pi chats start the same live chat host with their own provider', () => {
+  const host = read('src/agent_host.zig');
+  const palette = read('src/command_palette.zig');
+  const send = read('src/chat_send.zig');
+  const transcript = read('src/chat_transcript.zig');
+  assert.match(host, /pub const Provider = enum \{\s*claude,\s*codex,\s*pi,/);
+  assert.match(host, /pub fn launchCommandFor\(out: \[\]u8, provider: Provider,/);
+  assert.match(palette, /pub fn spawnCodexTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.codex\);/);
+  assert.match(palette, /pub fn spawnPiTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.pi\);/);
+  assert.match(palette, /ai_agent = provider\.aiAgent\(\)/);
+  const hosted = palette.slice(palette.indexOf('fn spawnHostedChatSession('), palette.indexOf('pub fn spawnCodexTmuxSession('));
+  assert.match(hosted, /g_pending_chat_view = false;/);
+  assert.match(hosted, /shell\.chat_view_on = true;/);
+  assert.match(hosted, /live\.starting\(shell\.shell_id, host, sid\)/);
+  assert.ok(!palette.includes('fn buildCodexTmuxSessionName('), 'Codex no longer types into a terminal');
+  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
+  assert.match(send, /\.provider = job\.key\.provider\(\), \.sid = /);
+  assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3\);/);
+  assert.doesNotMatch(send, /if \(job\.key\.codex\) "codex" else "claude"/);
 });

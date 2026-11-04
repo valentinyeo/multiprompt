@@ -45,7 +45,7 @@ const Entry = struct {
 var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
-const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0) };
+const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, pi: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
 var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1 }{.{}};
 const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;
@@ -351,4 +351,9 @@ test "question keys are numbers, operation and target remain strings" {
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-fno-llvm', '-fno-lld'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, JSON.stringify(result));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
+  const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
+  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
 });

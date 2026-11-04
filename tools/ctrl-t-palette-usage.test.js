@@ -204,9 +204,12 @@ test("all session rename entry points synchronize display surfaces without chang
   assert.match(source, /codexDisplayNameIsAutomaticProjectTitle/,
     "Codex project-name terminal titles must not impersonate thread renames");
 
-  const codexLaunch = functionBody("buildCodexTmuxLaunchCmd", "buildCodexTmuxSessionName");
-  assert.match(codexLaunch, /tui\.terminal_title=\[\\\\\\"thread-title\\\\\\"\]/,
-    "multiprompt-launched Codex sessions must expose the durable thread name in their terminal title");
+});
+
+test("IGSH-1546 Ctrl+K Codex and Pi chat rows start a hosted live chat", () => {
+  assert.match(functionBody("spawnCodexTmuxSession", "spawnPiTmuxSession"), /spawnHostedChatSession\(\.codex\)/);
+  assert.match(functionBody("spawnPiTmuxSession", "clampSearchSelectionAndScroll"), /spawnHostedChatSession\(\.pi\)/);
+  assert.doesNotMatch(source, /buildCodexTmuxLaunchCmd/);
 });
 
 test("Ctrl+K shell rows use readable names without decorative prefixes", () => {

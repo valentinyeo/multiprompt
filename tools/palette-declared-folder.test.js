@@ -22,6 +22,6 @@ test('IGSH-1266 a declared workspace folder is enough to offer the agent chats',
 
   assert.match(palette, /const remote_folder = workspaceFolderForNewChat\(&host, &cwd_buf, &cwd_len\);/, 'the rows use the shared folder rule');
   assert.ok(!/const remote_folder = activeRemoteContextForCodexTmux\(/.test(palette), 'the rows must not require a focused remote tab');
-  assert.match(body(palette, 'spawnCodexTmuxSession', 'spawnPiTmuxSession'), /workspaceFolderForNewChat\(&host, &cwd_buf, &cwd_len\)/, 'New Codex chat spawns in the declared folder');
-  assert.match(body(palette, 'spawnPiTmuxSession', 'clampSearchSelectionAndScroll'), /workspaceFolderForNewChat\(&host, &cwd_buf, &cwd_len\)/, 'New Pi chat spawns in the declared folder');
+  assert.match(body(palette, 'spawnHostedChatSession', 'spawnCodexTmuxSession'), /spawnHostedChatSession\(\.codex\)/, 'New Codex chat spawns through the hosted chat');
+  assert.match(body(palette, 'spawnPiTmuxSession', 'clampSearchSelectionAndScroll'), /spawnHostedChatSession\(\.pi\)/, 'New Pi chat spawns in the declared folder through the hosted chat');
 });

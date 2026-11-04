@@ -9,7 +9,9 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 test('D1 the live model subscribes with a replay cursor on the existing channel', () => {
   const live = read('src/chat_live.zig');
   assert.match(live, /"events_subscribe"/);
-  assert.ok(live.includes('provider\\":\\"claude'));
+  assert.match(live, /try appendQuoted\(&out, a, provider\);/);
+  assert.match(live, /subscribeLine\(a, 88, "claude",/);
+  assert.match(live, /\[_\]\[\]const u8\{ "codex", "pi" \}/);
   assert.ok(live.includes('after\\":{d}'));
   assert.match(live, /"events_unsubscribe"/);
 });
@@ -39,8 +41,24 @@ test('D1 the live channel is opened only for a hosted agent chat and feeds the m
   const session = read('src/chat_session.zig');
   assert.match(session, /chatMessageGoesToHost\(shell\.kind, shell\.ai_agent\)/);
   assert.match(session, /chatLiveStreamEnsure\(key\)/);
-  assert.match(session, /@import\("chat_live\.zig"\)\.subscribeLine\(/);
+  assert.match(session, /subscribeLine\(a, stream\.shell_id, key\.provider\(\), sid, after\)/);
+  const wanted = session.slice(session.indexOf('fn chatLiveWanted('), session.indexOf('fn chatLiveStreamRelease('));
+  assert.doesNotMatch(wanted, /key\.(?:codex|pi)/);
   assert.match(session, /@import\("chat_live\.zig"\)\.applyPage\(/);
+});
+
+test('provider identity stays attached to controls and restored chats', () => {
+  const send = read('src/chat_send.zig');
+  assert.match(send, /interruptLine\(std\.heap\.page_allocator, shell_id, key\.provider\(\),/);
+  assert.match(send, /approvalReplyLine\(std\.heap\.page_allocator, shell_id, key\.provider\(\),/);
+  assert.match(send, /planReplyLine\(std\.heap\.page_allocator, shell_id, key\.provider\(\),/);
+  assert.match(send, /key\.pi != pending\.key\.pi/);
+  assert.match(send, /identity\.pi == pending\.key\.pi/);
+  assert.match(send, /key\.pi == pending\.key\.pi/);
+  const session = read('src/chat_session.zig');
+  assert.match(session, /key\.pi == entry\.key\.pi/);
+  assert.match(session, /ai_agent = if \(entry\.key\.pi\) 3 else if \(entry\.key\.codex\) 2 else 1/);
+  assert.match(session, /std\.mem\.eql\(u8, current\.provider, key\.provider\(\)\)/);
 });
 
 test('D1 the live tail renders inside the same transcript buffer the view reads', () => {
@@ -83,7 +101,7 @@ test('D2 the three existing card buttons reply with the request id on the live c
 test('D2 escape on a live approval cancels it instead of typing into a pane', () => {
   const send = read('src/chat_send.zig');
   assert.match(send, /pub fn chatStopAgent\(shell_index: u32\) bool \{[\s\S]{0,200}if \(chatLiveCancelApproval\(shell_index\)\) return true;/);
-  assert.match(send, /live\.approvalReplyLine\(std\.heap\.page_allocator, shell_id, std\.mem\.sliceTo\(&key\.sid, 0\), request\[0\.\.len\], \.cancel\)/);
+  assert.match(send, /live\.approvalReplyLine\(std\.heap\.page_allocator, shell_id, key\.provider\(\), std\.mem\.sliceTo\(&key\.sid, 0\), request\[0\.\.len\], \.cancel\)/);
 });
 
 test('D3 a live question shows the existing pills and answers one question at a time', () => {
@@ -92,7 +110,7 @@ test('D3 a live question shows the existing pills and answers one question at a 
   assert.match(session, /entry\.history\.status\.question = prompt;/);
   const send = read('src/chat_send.zig');
   assert.match(send, /live\.answerQuestion\(shell_id, index, /);
-  assert.match(send, /live\.questionAnswerLine\(shell_id, std\.heap\.page_allocator\)/);
+  assert.match(send, /live\.questionAnswerLine\(shell_id, std\.heap\.page_allocator, chatFileIdentityForShell\(shell_index\)\.provider\(\)\)/);
   const render = read('src/chat_render.zig');
   assert.match(render, /chatChoiceDigitKey\(wp\)/);
 });
