@@ -65,6 +65,9 @@ test('F1 and keyboard docs list both palette actions', () => {
 });
 
 test('idle shutdown keeps confirmed settings capability', () => {
+  assert.ok(live.includes('kind, "host.settings"'), 'host settings event support');
+  assert.ok(live.includes('pub fn applySettingsSnapshot'), 'settings snapshot support');
+  assert.ok(read('src/chat_session.zig').includes('pub fn chatSettingsEligible'), 'settings picker eligibility');
   const settingsEvent = live.split('kind, "host.settings"')[1].split('kind, "host.status"')[0];
   const hostStatus = live.split('kind, "host.status"')[1].split('\n    } else {')[0];
   const snapshot = live.split('pub fn applySettingsSnapshot')[1].split('\npub fn ')[0];
