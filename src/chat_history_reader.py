@@ -83,6 +83,22 @@ def conversation_path(agent, sid, cwd, home=None):
     if not SESSION_ID.fullmatch(sid):
         return None
     home = HOME if home is None else home
+    if agent == "pi":
+        configured = os.environ.get("PI_CODING_AGENT_SESSION_DIR") if home == HOME else None
+        root = Path(configured).expanduser() if configured else home / ".pi/agent/sessions"
+        if configured and not root.is_absolute():
+            root = Path(cwd) / root
+        folder = root if configured else root / ("--" + re.sub(r"[/\\\\:]", "-", cwd.lstrip("/\\\\")) + "--")
+        for path in folder.glob("*_" + sid + ".jsonl"):
+            if path.resolve().is_relative_to(root.resolve()) and path.is_file():
+                with path.open("r", encoding="utf-8") as source:
+                    try:
+                        header = json.loads(source.readline())
+                    except (ValueError, UnicodeError):
+                        continue
+                if isinstance(header, dict) and header.get("type") == "session" and header.get("id") == sid and header.get("cwd") == cwd:
+                    return path
+        return None
     roots = ([directory / "projects" for directory in claude_config_dirs(home)]
              if agent == "claude" else [home / ".codex/sessions"])
     denied = None
@@ -709,6 +725,10 @@ def conversation_event(event, agent):
         if event.get("origin") == "compact_seed":
             return None
         message = {"role": event["kind"], "content": event.get("text", "")}
+    elif agent == "pi":
+        if event.get("type") != "message":
+            return None
+        message = event.get("message") or {}
     elif agent == "claude":
         attachment = event.get("attachment") if event.get("type") == "attachment" else None
         if isinstance(attachment, dict) and attachment.get("type") == "queued_command" and not event.get("isSidechain"):
@@ -740,7 +760,7 @@ def conversation_event(event, agent):
         text = clean_command_markup(text)
     if not text.strip():
         return None
-    identity = message.get("id") or event.get("uuid") or ""
+    identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
@@ -1547,7 +1567,11 @@ def resolve_response_path(q, source=None, as_owner=False):
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
     if agent == "pi":
-        return agent, sid, None, empty_history_response(q, sid, tmux, agent)
+        try:
+            path = conversation_path(agent, sid, cwd or host_cwd(agent, sid)) if sid else None
+        except PermissionError:
+            return agent, sid, None, missing_response(q, "permission denied")
+        return (agent, sid, path, None) if path else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
     denied = False
     delegated = None
@@ -5384,7 +5408,7 @@ def settle_response(q, source=None, as_owner=False):
                         continue
                     if not isinstance(event, dict) or event.get("isMeta"):
                         continue
-                    if event.get("type") not in ("user", "attachment", "response_item"):
+                    if event.get("type") not in ("user", "attachment", "response_item", "message"):
                         continue
                     message = conversation_event(event, agent)
                     if message is None or message["role"] != "user":
@@ -5401,7 +5425,7 @@ def settle_response(q, source=None, as_owner=False):
                     if not hits:
                         padded = f" {text} "
                         hits = [i for i in open_targets if len(targets[i]) >= SETTLE_SUFFIX_MIN and f" {targets[i]} " in padded]
-                    for i in hits:
+                    for i in hits[:1] if agent == "pi" else hits:
                         rows[i].update(delivered_ms=stamp, line=line_number)
         rows = held_settlement(q, _sid, rows)
         return (f"@mp\t{rid}\tsettle\tok\t-\t{len(rows)}\n" +
@@ -5554,8 +5578,8 @@ def watch_changes(q, resolved, source, as_owner):
 
 def watch(source, as_owner=False):
     q = json.loads(sys.stdin.buffer.readline())
-    owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") else None
-    if not as_owner and q.get("tmux"):
+    owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") and q.get("provider") != "pi" else None
+    if not as_owner and q.get("tmux") and q.get("provider") != "pi":
         discovered = tmux_owner_process("codex" if q.get("codex") else "claude", q["tmux"], source)
         if discovered:
             owner = discovered[1]
@@ -5582,7 +5606,7 @@ def watch(source, as_owner=False):
         if wire != shown:
             print(json.dumps(dict(id=q["id"], wire=wire)), flush=True)
             shown = wire
-        if wire not in (missing_response(q, "session transcript not found"), empty_history_response(q, q["sid"], q["tmux"])):
+        if wire not in (missing_response(q, "session transcript not found"), empty_history_response(q, q["sid"], q["tmux"], agent)):
             return
         with selectors.DefaultSelector() as selector:
             selector.register(sys.stdin.fileno(), selectors.EVENT_READ)
@@ -5776,7 +5800,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 57
+RUNTIME_GENERATION = 58
 
 if __name__ == '__main__':
     import base64 as _base64
