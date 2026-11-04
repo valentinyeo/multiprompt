@@ -440,6 +440,10 @@ test "IGSH-1653 group names survive legacy snapshots and rebase explicit placeme
     var too_long = grouped;
     too_long.group = "x" ** 65;
     try std.testing.expectError(error.InvalidLayout, layout.validate(.{ .workspaces = &test_ws, .tabs = &.{too_long} }));
+    too_long.group = "🚀" ** 32;
+    try layout.validate(.{ .workspaces = &test_ws, .tabs = &.{too_long} });
+    too_long.group = "🚀" ** 33;
+    try std.testing.expectError(error.InvalidLayout, layout.validate(.{ .workspaces = &test_ws, .tabs = &.{too_long} }));
 }
 
 test "apply uses server ordering names and membership without mutating local" {

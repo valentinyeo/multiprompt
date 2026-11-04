@@ -1673,7 +1673,12 @@ pub fn applyServerLayout(json: []const u8) !void {
                 const len = try std.unicode.utf8ToUtf16Le(&wide, name);
                 var group_id: u32 = 0;
                 if (len > 0) {
+                    if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| {
+                        const current = app_state.groups[gi];
+                        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) group_id = current.id;
+                    }
                     for (app_state.groups[0..app_state.group_count]) |group| {
+                        if (group_id != 0) break;
                         if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) {
                             group_id = group.id;
                             break;

@@ -76,9 +76,7 @@ pub fn mergeVisits(a: Allocator, left: ?[]const u64, right: ?[]const u64) !?[]co
 fn validText(text: []const u8, max_units: usize) bool {
     if (text.len == 0 or !std.unicode.utf8ValidateSlice(text)) return false;
     for (text) |c| if (c < 32 or c == 127) return false;
-    var wide: [64]u16 = undefined;
-    const n = std.unicode.utf8ToUtf16Le(&wide, text) catch return false;
-    return n <= max_units;
+    return (std.unicode.calcUtf16LeLen(text) catch return false) <= max_units;
 }
 
 pub fn validate(layout: Layout) !void {

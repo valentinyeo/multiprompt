@@ -330,7 +330,21 @@ try {
     $failure = $true
     $results.verdict = 'fail'
     $results.failed_stage = $stage
+    $message = $_.Exception.Message
+    $results.failure_message = if ($message.StartsWith('Timed out:') -or $message.StartsWith('Could not switch to workspace')) { $message } else { $_.Exception.GetType().FullName }
 } finally {
+    foreach ($entry in @(@{ path = $log; name = 'desktop-a.log' }, @{ path = $logB; name = 'desktop-b.log' })) {
+        if ($entry.path -and (Test-Path $entry.path)) {
+            try {
+                $text = Read-Log $entry.path
+                foreach ($property in $secrets.PSObject.Properties) {
+                    if ($property.Value -is [string] -and $property.Value.Length -gt 20) { $text = $text.Replace($property.Value, '<redacted>') }
+                }
+                $text = $text -replace 'Bearer [A-Za-z0-9._-]+', 'Bearer <redacted>'
+                $text | Set-Content (Join-Path $Output $entry.name)
+            } catch {}
+        }
+    }
     foreach ($ownedProcess in @($appB, $app, $server)) {
         if ($ownedProcess) {
             try {
