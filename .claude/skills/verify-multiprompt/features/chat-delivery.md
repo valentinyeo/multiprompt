@@ -64,7 +64,8 @@ It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message 
 
 ### Instant saved chat (IGSH-1289)
 
-Dispatch `verify.yml` on the branch with `feature=chat-delivery` and `chat_instant_proof=true`.
+Dispatch `verify.yml` on the branch with `feature=chat-instant`.
+This feature selects the existing chat-delivery driver.
 The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
 It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer before releasing the connection.
 The independent oracle requires first paint below 1000 ms, two persisted client IDs in order, no matching messages in the pre-connect store, and exactly those IDs once in order in the production host store after release.

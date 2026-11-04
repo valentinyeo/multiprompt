@@ -32,11 +32,6 @@ on:
         required: false
         default: false
         type: boolean
-      chat_instant_proof:
-        description: Saved chat startup and ordered sends before connection
-        required: false
-        default: false
-        type: boolean
       chat_live_delivery_proof:
         description: Three busy sends and ten continuously visible replies within two seconds
         required: false
@@ -384,7 +379,7 @@ jobs:
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
-      CHAT_INSTANT_PROOF: ${{ inputs.chat_instant_proof && '1' || '' }}
+      CHAT_INSTANT_PROOF: ${{ inputs.feature == 'chat-instant' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
@@ -408,7 +403,7 @@ jobs:
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
-      FEATURE: ${{ matrix.feature }}
+      FEATURE: ${{ matrix.feature == 'chat-instant' && 'chat-delivery' || matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
       - name: Keep LF line endings

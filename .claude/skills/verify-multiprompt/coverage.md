@@ -145,7 +145,7 @@ A change that alters a mapped feature updates its map and this table in the same
 
 ## IGSH-1289 instant saved chat
 
-`chat-delivery` with `chat_instant_proof=true` checks saved history before a deliberately delayed connection, first paint below one second, and two pre-connect messages arriving once in order in the production host store. Windows execution pending. Existing send and view shortcuts are reused. No real SSH server or provider response is claimed.
+`chat-instant` checks saved history before a deliberately delayed connection, first paint below one second, and two pre-connect messages arriving once in order in the production host store. Windows execution pending. Existing send and view shortcuts are reused. No real SSH server or provider response is claimed.
 
 ## IGSH-815 full-session history
 
