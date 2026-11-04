@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { verify, MESSAGE, SID } = require('./chat-startup-failure-proof.cjs');
 const { discoverFeatures } = require('./verify-features.cjs');
 
 test('startup failure dispatch fits GitHub limits and selects its driver', () => {
@@ -30,6 +29,9 @@ test('startup failure dispatch fits GitHub limits and selects its driver', () =>
 });
 
 test('startup failure proof rejects duplicates, transcripts and missing events', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /CHAT_STARTUP_FAILURE_PROOF: \$\{\{ inputs\.feature == 'chat-startup-failure'/);
+  const { verify, MESSAGE, SID } = require('./chat-startup-failure-proof.cjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-proof-'));
   const put = (name, value) => {
     const file = path.join(root, name);
