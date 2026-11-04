@@ -144,8 +144,11 @@ calls `send_response_preserve_draft`:
 3. Read the prompt box. Text that is not ours aborts with `draft_present` after
    three short waits (0 s, 0.3 s, 0.7 s).
 4. Clear the box (`C-u`, then re-read), aborting with `draft_not_cleared`.
-5. `tmux paste-buffer -p -d ... ; send-keys Enter` in one tmux invocation.
-6. Put a displaced draft back into the box after delivery.
+5. `tmux paste-buffer -p -d ...`, wait 300 ms, then `tmux send-keys Enter`.
+6. Wait 300 ms and capture the prompt. Retry Enter while the box is full,
+   at most three Enter presses total. A full box returns `not_sent`; an
+   unavailable prompt returns `uncertain` without another Enter.
+7. Record delivery only after an empty prompt. Restore any displaced draft.
 
 States move `queued -> sent -> accepted/started/failed`, with a 15 second deadline
 on `sent`. The user sees the outcome as `Queued, session is busy`,
@@ -177,7 +180,7 @@ counts as handed off.
 | --- | --- | --- |
 | `tmux send-keys -t <s> 'cd <dir> && <program>' Enter` | `buildWorkspaceTmuxLaunchCmd`, `buildCodexTmuxLaunchCmd` | start the agent |
 | `tmux send-keys -t <s> ...` | `src/archive.zig` | respawn an archived tab |
-| `tmux paste-buffer ... ; send-keys Enter` | `send_response_preserve_draft` | deliver a chat message |
+| `tmux paste-buffer ...`, then delayed `send-keys Enter` and prompt capture | `send_response_preserve_draft` | deliver and check a chat message |
 | `tmux send-keys -t <s> C-u / C-k / C-x C-s` | reader stop, permission, queue keys | clear, stop, queue |
 | `tmux display-message -p '#S'` | `tools/vps-zigshell-session-hook.sh` | find the pane's session |
 

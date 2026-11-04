@@ -4786,7 +4786,18 @@ def send_response_preserve_draft(q):
             if draft or typed:
                 return dict(status='not_sent', reason='draft_not_cleared')
         try:
-            subprocess.run(['tmux', 'paste-buffer', '-p', '-d', '-b', buffer, '-t', target, ';', 'send-keys', '-t', target, 'Enter'], check=True, capture_output=True, timeout=5)
+            subprocess.run(['tmux', 'paste-buffer', '-p', '-d', '-b', buffer, '-t', target], check=True, capture_output=True, timeout=5)
+            time.sleep(0.3)
+            for _ in range(3):
+                subprocess.run(['tmux', 'send-keys', '-t', target, 'Enter'], check=True, capture_output=True, timeout=5)
+                time.sleep(0.3)
+                box = box_draft(target)
+                if box is None:
+                    return dict(status='uncertain', reason='prompt_unavailable')
+                if not box.strip():
+                    break
+            else:
+                return dict(status='not_sent', reason='input_not_submitted')
         except (OSError, subprocess.SubprocessError):
             return dict(status='uncertain', reason='handoff_interrupted')
         draft_note(name, typed='', sent=text, sent_at=time.time())
@@ -5295,7 +5306,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 53
+RUNTIME_GENERATION = 54
 
 if __name__ == '__main__':
     import base64 as _base64
