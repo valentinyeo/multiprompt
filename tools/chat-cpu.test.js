@@ -548,7 +548,7 @@ test('correctness rich: unchanged pre-fix code fails the oracle', () => {
 
 test('working bar production working timer is idle-free, row-only and preserves background start times', () => {
   const functions = ['chatWorkingTimesPoll', 'chatWorkingBarVisible', 'chatWorkingBarTick', 'chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorSync']
-    .map(n => body(source, n)).join('\n').replaceAll('@import("win32.zig").', '').replaceAll('@import("chat_render.zig").chatWorkingSync', 'chatWorkingSync');
+    .map(n => body(source, n)).join('\n').replaceAll('@import("win32.zig").', '').replaceAll('@import("chat_render.zig").chatWorkingSync', 'chatWorkingSync').replaceAll('@import("chat_send.zig").chatOutboxWorkingForShell', 'chatOutboxWorkingForShell');
   const prelude = `
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -583,8 +583,16 @@ fn chatViewLayout() struct { transcript: RECT, composer_card: RECT } { return .{
 fn InvalidateRect(_: HANDLE, rc: *const RECT, erase: i32) i32 { std.debug.assert(rc.left == 10 and rc.right == 100 and rc.top == 50 and rc.bottom == 80 and erase == 0); paints += 1; return 1; }
 fn chatWorkingSync() void {}
 fn chatWorkingIndicatorText() []const u16 { return g_chat_working_text[0..g_chat_screen_status_len]; }
+var pending_send = false;
+fn chatOutboxWorkingForShell(_: usize) bool { return pending_send; }
 `;
   const checks = `
+test "pending local sends show working before a channel or agent is active" {
+    pending_send = true;
+    try std.testing.expect(chatWorkingBarVisible());
+    pending_send = false;
+    try std.testing.expect(!chatWorkingBarVisible());
+}
 test "idle, edges, background tab, elapsed update and close" {
     chatWorkingTimesPoll(); chatWorkingIndicatorSync(); chatWorkingBarTick();
     try std.testing.expectEqual(@as(usize, 0), starts + stops + paints);

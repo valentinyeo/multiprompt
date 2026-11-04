@@ -94,7 +94,8 @@ fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
 }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn debugLog(_: []const u8) void {}
-const HistoryStub = struct { generation: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, message_synced: bool = false, message_snapshot: [33]u8 = @splat(0), message_cursor: u64 = 0, message_seq: u64 = 0, message_next_tick: u64 = 0 };
+const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 30_000;
+const HistoryStub = struct { send_retry_step: u8 = 0, send_next_tick: u64 = 0, generation: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, message_synced: bool = false, message_snapshot: [33]u8 = @splat(0), message_cursor: u64 = 0, message_seq: u64 = 0, message_next_tick: u64 = 0 };
 var g_history_stub: HistoryStub = .{};
 fn chatHistoryEntry(_: Key) ?*HistoryStub { return &g_history_stub; }
 fn chatOutboxKeyForShell(_: u32, buf: *[CHAT_OUTBOX_KEY_CAP]u8) []const u8 { buf[0] = 'k'; return buf[0..1]; }
@@ -240,7 +241,7 @@ test "channel write failure falls back once but a written request or retry never
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
-    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "VPS')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
         reset();

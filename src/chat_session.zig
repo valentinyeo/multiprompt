@@ -1068,7 +1068,7 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
     var ok = false;
     defer if (!ok) {
         chatHistoryChannelClose(ch);
-        ch.retry_at = GetTickCount64() + 60_000;
+        ch.retry_at = GetTickCount64() + 250;
     };
     if (ch.process == null and !chatHistoryChannelStart(host, ch)) return false;
     var written: DWORD = 0;
@@ -1097,6 +1097,8 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
             const reply = std.json.parseFromSlice(Reply, a, frame.items, .{ .ignore_unknown_fields = true }) catch return false;
             defer reply.deinit();
             if (reply.value.id != id) return false;
+            ch.retry_at = 0;
+            ok = true;
             if (reply.value.message_protocol == 1) {
                 const result = reply.value.result orelse return false;
                 const encoded = std.json.Stringify.valueAlloc(a, result, .{}) catch return false;
@@ -1115,23 +1117,6 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
         }
     }
     return false;
-}
-
-pub fn chatHistorySendForced(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
-    if (host < app_state.g_chat_history_channels.len) {
-        const deadline = GetTickCount64() + 5_000;
-        while (!app_state.g_chat_history_channel_mutex.tryLock()) {
-            if (GetTickCount64() >= deadline) return false;
-            Sleep(1);
-        }
-        {
-            const ch = &app_state.g_chat_history_channels[host];
-            ch.retry_at = 0;
-            chatHistoryChannelClose(ch);
-        }
-        app_state.g_chat_history_channel_mutex.unlock();
-    }
-    return chatHistoryPersistent(host, id, query, wire_limit, out, request_written);
 }
 
 fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64) ?[]u8 {

@@ -199,17 +199,15 @@ test "Chat View send: verify delay schedule grows then ends" {
     try std.testing.expectEqual(@as(?u32, null), chatSendVerifyDelayMs(6));
 }
 
-test "Chat View sync: a failed message poll backs off quietly and stops at one minute" {
-    try std.testing.expectEqual(@as(u64, 3000), chatMessageSyncRetryDelayMs(0));
-    try std.testing.expectEqual(@as(u64, 6000), chatMessageSyncRetryDelayMs(1));
-    try std.testing.expectEqual(@as(u64, 12000), chatMessageSyncRetryDelayMs(2));
-    try std.testing.expectEqual(@as(u64, 24000), chatMessageSyncRetryDelayMs(3));
-    try std.testing.expectEqual(@as(u64, 48000), chatMessageSyncRetryDelayMs(4));
-    try std.testing.expectEqual(@as(u64, 60000), chatMessageSyncRetryDelayMs(5));
-    try std.testing.expectEqual(@as(u64, 60000), chatMessageSyncRetryDelayMs(200));
+test "Chat View sync retries from 250 milliseconds to 30 seconds" {
+    try std.testing.expectEqual(@as(u64, 250), chatMessageSyncRetryDelayMs(0));
+    try std.testing.expectEqual(@as(u64, 500), chatMessageSyncRetryDelayMs(1));
+    try std.testing.expectEqual(@as(u64, 1000), chatMessageSyncRetryDelayMs(2));
+    try std.testing.expectEqual(@as(u64, 30000), chatMessageSyncRetryDelayMs(7));
+    try std.testing.expectEqual(@as(u64, 30000), chatMessageSyncRetryDelayMs(200));
     var previous: u64 = 0;
     var step: u8 = 0;
-    while (step < 5) : (step += 1) {
+    while (step < 7) : (step += 1) {
         const delay = chatMessageSyncRetryDelayMs(step);
         try std.testing.expect(delay > previous);
         previous = delay;
@@ -875,6 +873,11 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         if (json_reader.field(mobj, "wire_id") != .null) _ = json_reader.copyString(mobj, "wire_id", &entry.message_wire_id);
                         entry.retry_nonce = json_reader.uintDefault(mobj, "retry_nonce", 0);
                         entry.reset_pending = json_reader.uintDefault(mobj, "reset_pending", 0) != 0;
+                        if (entry.message_v1 and entry.message_phase[0] == 0 and !entry.reset_pending and entry.state != .cancelled) {
+                            entry.state = .queued;
+                            entry.write_started = false;
+                            entry.channel_sent = false;
+                        }
                         const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
                         const saved_ms = if (entry.anchor.sent_ms > 0) entry.anchor.sent_ms else entry.anchor.after_ms;
                         const saved_deadline = @min(json_reader.uintDefault(mobj, "d", 0), max_ms);
@@ -989,6 +992,18 @@ pub fn chatOutboxCountForShell(idx: u32) usize {
     const key = chatOutboxKeyForShell(idx, &key_buf);
     if (key.len == 0) return 0;
     return chatOutboxCountIn(&app_state.g_chat_outbox, key);
+}
+
+pub fn chatOutboxWorkingForShell(idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return false;
+    for (app_state.g_chat_outbox.items) |entry| {
+        if (entry.state != .queued and entry.state != .sending) continue;
+        if (std.mem.eql(u8, entry.key[0..entry.key_len], key)) return true;
+    }
+    return false;
 }
 
 pub fn chatEchoCountNotSentForShell(idx: u32) usize {
@@ -1927,8 +1942,11 @@ fn chatLogSendPath(shell_index: u32, entry: ?*const app_state.ChatOutboxEntry, r
 }
 
 fn chatUpgradeToHostMessage(shell_index: u32, entry: *app_state.ChatOutboxEntry) bool {
-    if (entry.message_v1) return true;
     const identity = chatFileIdentityForShell(shell_index);
+    if (entry.message_v1) {
+        if (entry.message_sid[0] == 0) entry.message_sid = identity.sid;
+        return entry.message_sid[0] != 0;
+    }
     if (identity.sid[0] == 0 or identity.tmux[0] == 0) return false;
     var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
     defer random_io.deinit();
@@ -1958,7 +1976,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
             chatLogSendPath(shell_index, entry, route, "hold");
             return .write_failed;
         }
-        if (route == .host_message and !entry.message_v1) {
+        if (route == .host_message and (!entry.message_v1 or entry.message_sid[0] == 0)) {
             if (!chatUpgradeToHostMessage(shell_index, entry)) {
                 entry.state = .queued;
                 entry.write_started = false;
@@ -2040,6 +2058,11 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (app_state.g_chat_pending_reset) |pending| {
         const identity = chatFileIdentityForShell(shell_index);
         if (identity.host == pending.key.host and identity.codex == pending.key.codex and std.mem.eql(u8, &identity.sid, &pending.key.sid)) return false;
+    }
+    if (app_state.g_chat_outbox.items[e].message_v1) {
+        if (chatHistoryEntry(chatFileIdentityForShell(shell_index))) |history| {
+            if (GetTickCount64() < history.send_next_tick) return false;
+        }
     }
     if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
     if (chatOutboxFindSending(&app_state.g_chat_outbox) != null or app_state.g_chat_tmux_send_job != null) return false;
@@ -2617,6 +2640,21 @@ test "outbox reordered queues and raw Unicode use the old-version state fallback
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Raw 日🚀 \"key\":\"fake\" } ]"), list.items[0].text);
 }
 
+test "IGSH-1289 interrupted host submit reloads with its original identity" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| allocator.free(entry.text);
+        list.deinit(allocator);
+    }
+    chatOutboxParseJson(&list, allocator, "{\"version\":2,\"queues\":[{\"key\":\"tmux:0:test\",\"messages\":[{\"t\":\"first\",\"s\":1,\"x\":1,\"v1\":1,\"wire_id\":\"desktop-original\"},{\"t\":\"second\",\"s\":0,\"v1\":1}]}]}");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqual(ChatEchoState.queued, list.items[0].state);
+    try std.testing.expect(!list.items[0].write_started);
+    try std.testing.expectEqualStrings("desktop-original", std.mem.sliceTo(&list.items[0].message_wire_id, 0));
+    try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, "tmux:0:test", true));
+}
+
 test "IGSH-1266 restored Codex queue requires explicit binding" {
     const allocator = std.testing.allocator;
     const saved_outbox = app_state.g_chat_outbox;
@@ -2955,11 +2993,8 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
         if (!@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 65536, &response, &job.written)) {
-            response.clearRetainingCapacity();
-            if (!@import("chat_session.zig").chatHistorySendForced(job.key.host, id, query, 65536, &response, &job.written)) {
-                @import("diagnostics.zig").debugLog("[chat] submit not sent: the chat channel is not up yet, will retry");
-                return;
-            }
+            @import("diagnostics.zig").debugLog("[chat] submit not sent: the chat channel is not up yet, will retry");
+            return;
         }
         var parsed = json_reader.parse(a, response.items) catch {
             @import("diagnostics.zig").debugLog("[chat] submit reply did not parse, will retry");
@@ -3074,12 +3109,11 @@ fn chatMessageSyncStart(idx: u32) void {
     thread.detach();
 }
 
-const CHAT_MESSAGE_SYNC_POLL_MS: u64 = 3000;
-const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 60_000;
+const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 30_000;
 
 fn chatMessageSyncRetryDelayMs(retry_step: u8) u64 {
-    const shift: u6 = @intCast(@min(retry_step, 5));
-    return @min(CHAT_MESSAGE_SYNC_POLL_MS << shift, CHAT_MESSAGE_SYNC_RETRY_CAP_MS);
+    const shift: u6 = @intCast(@min(retry_step, 7));
+    return @min(@as(u64, 250) << shift, CHAT_MESSAGE_SYNC_RETRY_CAP_MS);
 }
 
 fn chatMessageSyncFinish() void {
@@ -3093,8 +3127,8 @@ fn chatMessageSyncFinish() void {
     if (history.generation != job.instance or history.message_generation != job.generation) return;
     if (!job.ok) {
         if (history.message_retry_step == 0) syncLog("chat-sync: message poll failed; retrying quietly");
-        history.message_retry_step +|= 1;
         history.message_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.message_retry_step);
+        history.message_retry_step +|= 1;
         if (!job.synced and job.snapshot[0] != 0) {
             history.message_snapshot = @splat(0);
             history.message_cursor = 0;
@@ -3274,11 +3308,16 @@ fn chatTmuxSendFinish() void {
             if (job.retry and job.message_state[0] != 0) entry.retry_nonce = 0;
             if (entry.message_phase[0] == 0 and entry.state == .sending) entry.state = if (job.message_state[0] != 0) .queued else .not_sent;
             if (job.message_state[0] == 0) {
+                history.send_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.send_retry_step);
+                history.send_retry_step +|= 1;
                 const patch = chatSubmitRetryPatch();
                 entry.write_started = patch.write_started;
                 entry.state = patch.state;
                 entry.retryable = patch.retryable;
                 @import("diagnostics.zig").debugLog("[chat] submit retry armed: the message is queued again");
+            } else {
+                history.send_next_tick = 0;
+                history.send_retry_step = 0;
             }
             entry.channel_sent_ms = @intCast(GetTickCount64());
         }

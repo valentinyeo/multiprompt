@@ -1063,6 +1063,10 @@ def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
         return 0
+    if (ROOT / "connection-held").exists():
+        record("connection-waits.jsonl", operation="connect held")
+        while (ROOT / "connection-held").exists():
+            time.sleep(0.05)
     command = " ".join(ARGS)
     declined = declined_remote(ARGS)
     if declined:

@@ -315,6 +315,7 @@ fn chatBlockDisplayRange(_: []const u16, b: ChatBlock) struct { start: usize, le
 var fake_now_ms: i64 = 2000;
 var fake_loaded_ms: i64 = 0;
 var fake_history: chat_history.History = .{};
+const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 30_000;
 const HistoryEntry = struct {
     loaded_ms: i64 = 0,
     generation: u64 = 1,
@@ -330,6 +331,8 @@ const HistoryEntry = struct {
     message_v1_owned: bool = false,
     message_next_tick: u64 = 0,
     message_retry_step: u8 = 0,
+    send_retry_step: u8 = 0,
+    send_next_tick: u64 = 0,
     history: chat_history.History = .{},
 };
 var history_entry = HistoryEntry{};
@@ -390,6 +393,17 @@ ${source.slice(pendingStart, pendingEnd)}
 }
 `;
 const acceptance = `
+test "IGSH-1289 pending sends work before connect without marking another chat working" {
+    defer reset();
+    reset();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first"), .queued);
+    try std.testing.expect(chatOutboxWorkingForShell(0));
+    try std.testing.expect(!chatOutboxWorkingForShell(1));
+    g_chat_outbox.items[0].state = .not_sent;
+    try std.testing.expect(!chatOutboxWorkingForShell(0));
+    g_chat_outbox.items[0].state = .cancelled;
+    try std.testing.expect(!chatOutboxWorkingForShell(0));
+}
 fn enqueue(text: []const u16, state: ChatEchoState) !void {
     try std.testing.expect(chatOutboxEnqueueInState(&g_chat_outbox, std.heap.page_allocator, "test", text, state));
     g_chat_outbox.items[g_chat_outbox.items.len - 1].anchor = chatEchoAnchorNow(0);
@@ -1524,7 +1538,7 @@ test "delivery: IGSH-1010 cancellation survives restart without retry or termina
 }
 
 `;
-const names = ['chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatOutboxHeldByLink', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
+const names = ['chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatMessageSyncRetryDelayMs', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatOutboxHeldByLink', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatOutboxWorkingForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
 const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
