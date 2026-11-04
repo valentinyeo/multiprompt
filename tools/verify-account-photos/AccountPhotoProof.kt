@@ -8,6 +8,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import dev.multiprompt.companion.MainActivity
@@ -45,7 +48,9 @@ class AccountPhotoProof {
         File(evidence, "phone.json").writeText(JSONObject()
             .put("status", if (renderedAt != null) "passed" else "failed")
             .put("rendered_at", renderedAt ?: JSONObject.NULL)
-            .put("error", error ?: JSONObject.NULL).toString())
+            .put("error", error ?: JSONObject.NULL)
+            .put("cached_pictures", File(instrumentation.targetContext.filesDir, "bot-photos").listFiles()?.count { it.extension == "png" } ?: 0)
+            .toString())
     }
 
     @Test
@@ -95,6 +100,9 @@ class AccountPhotoProof {
             val deadline = SystemClock.elapsedRealtime() + 60_000
             var image: Bitmap? = null
             while (SystemClock.elapsedRealtime() < deadline) {
+                if (compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty()) {
+                    compose.onNodeWithText("No").performClick()
+                }
                 val bounds = avatar.fetchSemanticsNode().boundsInWindow
                 val screen = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
                 val candidate = Bitmap.createBitmap(screen, bounds.left.toInt(), bounds.top.toInt(), bounds.width.toInt(), bounds.height.toInt())

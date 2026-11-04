@@ -73,6 +73,7 @@ function Focus {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
 }
 function Press([int[]]$Keys) {
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App does not own keyboard' }
     $opensPalette = $Keys.Count -eq 2 -and $Keys[0] -eq 0x11 -and $Keys[1] -eq 0x4b
     $offset = if ($opensPalette) { (Log).Length } else { 0 }
