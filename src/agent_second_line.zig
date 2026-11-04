@@ -3,10 +3,21 @@ const history = @import("chat_history.zig");
 const transcript = @import("chat_transcript.zig");
 const app_state = @import("app_state.zig");
 
+const Source = enum { unknown, question, task, tool, reply, console };
+
+const Freshness = struct {
+    content: u64 = 0,
+    status: u64 = 0,
+    turn: u64 = 0,
+    step: u64 = 0,
+    reply: u64 = 0,
+};
+
 pub const Line = struct {
     text: [96]u8 = @splat(0),
     len: usize = 0,
     question: bool = false,
+    source: Source = .unknown,
 };
 
 fn copy(line: *Line, text: []const u16) void {
@@ -57,6 +68,7 @@ pub fn select(status: *const transcript.Status, h: *const history.History, worki
         copy(&result, status.question.groups[0].questionSlice());
         if (result.len > 0) {
             result.question = true;
+            result.source = .question;
             return result;
         }
     }
@@ -64,7 +76,10 @@ pub fn select(status: *const transcript.Status, h: *const history.History, worki
         for (status.todos[0..status.total]) |todo| {
             if (todo.status != .in_progress) continue;
             copy(&result, todo.text[0..todo.len]);
-            if (result.len > 0) break;
+            if (result.len > 0) {
+                result.source = .task;
+                break;
+            }
         }
         if (result.len == 0) {
             var i = h.blocks.items.len;
@@ -74,10 +89,16 @@ pub fn select(status: *const transcript.Status, h: *const history.History, worki
                 if (block.role == .user or block.role == .prose) break;
                 if (block.role != .tool or block.tool_status != .running) continue;
                 copy(&result, h.text.items[block.start..][0..block.len]);
-                if (result.len > 0) break;
+                if (result.len > 0) {
+                    result.source = .tool;
+                    break;
+                }
             }
         }
-        if (result.len == 0) copy(&result, console_step);
+        if (result.len == 0) {
+            copy(&result, console_step);
+            if (result.len > 0) result.source = .console;
+        }
         if (result.len > 0) {
             if (elapsed_ms) |elapsed| {
                 const suffix = std.fmt.bufPrint(result.text[result.len..], " · {d}m", .{elapsed / 60000}) catch return result;
@@ -92,34 +113,34 @@ pub fn select(status: *const transcript.Status, h: *const history.History, worki
         const block = h.blocks.items[i];
         if ((block.role != .prose and block.role != .code) or !block.first) continue;
         copy(&result, h.text.items[block.start..][0..block.len]);
+        if (result.len > 0) result.source = .reply;
         return result;
     }
     return result;
 }
 
-fn selectFresh(status: *const transcript.Status, h: *const history.History, working: bool, elapsed_ms: ?u64, step: []const u16, reply: []const u16, allow_question: bool, loaded_ms: u64, working_since_ms: u64, step_changed_ms: u64, reply_changed_ms: u64) Line {
+fn selectFresh(status: *const transcript.Status, h: *const history.History, working: bool, elapsed_ms: ?u64, step: []const u16, reply: []const u16, allow_question: bool, freshness: Freshness) Line {
     const empty: history.History = .{};
-    const history_current = !working or working_since_ms == 0 or loaded_ms >= working_since_ms;
-    const current_step = if (working_since_ms == 0 or step_changed_ms >= working_since_ms) step else &.{};
-    const newer_step = working and current_step.len > 0 and step_changed_ms > loaded_ms;
-    const newer_reply = !working and reply.len > 0 and reply_changed_ms > loaded_ms;
-    if (history_current and allow_question and status.question.count > 0) {
+    const current_status = !working or freshness.turn == 0 or freshness.status >= freshness.turn;
+    const current_content = !working or freshness.turn == 0 or freshness.content >= freshness.turn;
+    const candidate = select(if (current_status) status else &empty.status, if (current_content) h else &empty, working, elapsed_ms, &.{}, allow_question);
+    if (working and candidate.question) return candidate;
+    const candidate_time = switch (candidate.source) {
+        .question, .task => freshness.status,
+        .tool, .reply => freshness.content,
+        .unknown, .console => 0,
+    };
+    const console = if (working) step else reply;
+    const console_time = if (working) freshness.step else freshness.reply;
+    const current_console = !working or freshness.turn == 0 or console_time >= freshness.turn;
+    if (current_console and console.len > 0 and (candidate.len == 0 or console_time > candidate_time)) {
+        if (working) return select(&empty.status, &empty, true, elapsed_ms, console, false);
         var result: Line = .{};
-        copy(&result, status.question.groups[0].questionSlice());
-        if (result.len > 0) {
-            result.question = true;
-            return result;
-        }
-    }
-    if (newer_reply) {
-        var result: Line = .{};
-        copy(&result, reply);
+        copy(&result, console);
+        if (result.len > 0) result.source = .console;
         return result;
     }
-    if (!history_current or newer_step) return select(&empty.status, &empty, working, elapsed_ms, current_step, false);
-    var result = select(status, h, working, elapsed_ms, current_step, allow_question);
-    if (!working and result.len == 0) copy(&result, reply);
-    return result;
+    return candidate;
 }
 
 pub fn forShell(index: u32) Line {
@@ -133,6 +154,7 @@ pub fn forShell(index: u32) Line {
         const question_index = @min(shell.chat_question_index, prompt.count - 1);
         copy(&line, prompt.groups[question_index].questionSlice());
         line.question = line.len > 0;
+        if (line.question) line.source = .question;
         if (line.question) return line;
     }
     const allow_question = !live.attached(shell.shell_id);
@@ -141,11 +163,16 @@ pub fn forShell(index: u32) Line {
     const elapsed: ?u64 = if (shell.working_since_ms == 0) null else now -| shell.working_since_ms;
     const step = shell.console_step[0..shell.console_step_len];
     const reply = shell.console_reply[0..shell.console_reply_len];
+    var freshness: Freshness = .{ .turn = shell.working_since_ms, .step = shell.console_step_changed_ms, .reply = shell.console_reply_changed_ms };
     for (app_state.g_chat_histories.items) |entry| {
-        if (!entry.retired and history.sameSession(entry.key, key)) return selectFresh(&entry.history.status, &entry.history, working, elapsed, step, reply, allow_question, entry.preview_loaded_ms, shell.working_since_ms, shell.console_step_changed_ms, shell.console_reply_changed_ms);
+        if (!entry.retired and history.sameSession(entry.key, key)) {
+            freshness.content = entry.preview_loaded_ms;
+            freshness.status = entry.preview_status_ms;
+            return selectFresh(&entry.history.status, &entry.history, working, elapsed, step, reply, allow_question, freshness);
+        }
     }
     const empty: history.History = .{};
-    return selectFresh(&empty.status, &empty, working, elapsed, step, reply, allow_question, 0, shell.working_since_ms, shell.console_step_changed_ms, shell.console_reply_changed_ms);
+    return selectFresh(&empty.status, &empty, working, elapsed, step, reply, allow_question, freshness);
 }
 
 test "semantic second line chooses question task reply or nothing" {
@@ -215,7 +242,7 @@ test "console reply requires an assistant prose marker" {
         try std.testing.expectEqual(@as(usize, 0), consoleReply(std.unicode.utf8ToUtf16LeStringLiteral(input), &out));
     }
     const empty: history.History = .{};
-    const fallback = selectFresh(&empty.status, &empty, false, null, &.{}, out[0..len], true, 0, 0, 0, 1);
+    const fallback = selectFresh(&empty.status, &empty, false, null, &.{}, out[0..len], true, .{ .content = 0, .status = 0, .turn = 0, .step = 0, .reply = 1 });
     try std.testing.expectEqualStrings("Ready.", fallback.text[0..fallback.len]);
 }
 
@@ -232,32 +259,43 @@ test "freshness selects current turn and newer console output" {
     h.status.total = 1;
     const step = std.unicode.utf8ToUtf16LeStringLiteral("New step");
     const reply = std.unicode.utf8ToUtf16LeStringLiteral("New reply");
-    var line = selectFresh(&h.status, &h, true, 60000, step, reply, true, 100, 200, 210, 90);
+    var line = selectFresh(&h.status, &h, true, 60000, step, reply, true, .{ .content = 100, .status = 100, .turn = 200, .step = 210, .reply = 90 });
     try std.testing.expectEqualStrings("New step · 1m", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, true, null, step, reply, true, 100, 200, 90, 90);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 100, .status = 100, .turn = 200, .step = 90, .reply = 90 });
     try std.testing.expectEqual(@as(usize, 0), line.len);
-    line = selectFresh(&h.status, &h, true, null, step, reply, true, 300, 200, 210, 90);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 300, .status = 300, .turn = 200, .step = 210, .reply = 90 });
     try std.testing.expectEqualStrings("Old task", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, true, null, step, reply, true, 100, 50, 110, 90);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 100, .status = 100, .turn = 50, .step = 110, .reply = 90 });
     try std.testing.expectEqualStrings("New step", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, false, null, step, reply, true, 100, 0, 0, 110);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, .{ .content = 100, .status = 100, .turn = 0, .step = 0, .reply = 110 });
     try std.testing.expectEqualStrings("New reply", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, false, null, step, reply, true, 200, 0, 0, 110);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, .{ .content = 200, .status = 200, .turn = 0, .step = 0, .reply = 110 });
     try std.testing.expectEqualStrings("Old reply", line.text[0..line.len]);
     const question = std.unicode.utf8ToUtf16LeStringLiteral("Continue?");
     @memcpy(h.status.question.groups[0].question[0..question.len], question);
     h.status.question.groups[0].question_len = question.len;
     h.status.question.count = 1;
-    line = selectFresh(&h.status, &h, false, null, step, reply, true, 100, 0, 0, 110);
-    try std.testing.expect(line.question);
-    try std.testing.expectEqualStrings("Continue?", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, false, null, step, reply, false, 100, 0, 0, 110);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, .{ .content = 100, .status = 100, .turn = 0, .step = 0, .reply = 110 });
     try std.testing.expect(!line.question);
     try std.testing.expectEqualStrings("New reply", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, true, null, step, reply, true, 100, 200, 210, 90);
-    try std.testing.expect(!line.question);
-    try std.testing.expectEqualStrings("New step", line.text[0..line.len]);
-    line = selectFresh(&h.status, &h, true, null, step, reply, true, 200, 100, 210, 90);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, .{ .content = 100, .status = 120, .reply = 110 });
     try std.testing.expect(line.question);
     try std.testing.expectEqualStrings("Continue?", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, false, null, step, reply, false, .{ .content = 100, .status = 100, .turn = 0, .step = 0, .reply = 110 });
+    try std.testing.expect(!line.question);
+    try std.testing.expectEqualStrings("New reply", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 100, .status = 100, .turn = 200, .step = 210, .reply = 90 });
+    try std.testing.expect(!line.question);
+    try std.testing.expectEqualStrings("New step", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 200, .status = 200, .turn = 100, .step = 210, .reply = 90 });
+    try std.testing.expect(line.question);
+    try std.testing.expectEqualStrings("Continue?", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 100, .status = 220, .turn = 100, .step = 210 });
+    try std.testing.expect(line.question);
+    try std.testing.expectEqualStrings("Continue?", line.text[0..line.len]);
+    h.status.question.count = 0;
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, .{ .content = 100, .status = 220, .turn = 150, .step = 210 });
+    try std.testing.expectEqualStrings("Old task", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, .{ .content = 100, .status = 220, .reply = 210 });
+    try std.testing.expectEqualStrings("New reply", line.text[0..line.len]);
 }

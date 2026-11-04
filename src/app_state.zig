@@ -2932,6 +2932,7 @@ pub const ChatHistoryEntry = struct {
     cache_cancelled: std.atomic.Value(bool) = .init(false),
     loaded_ms: i64 = 0,
     preview_loaded_ms: u64 = 0,
+    preview_status_ms: u64 = 0,
     disk_loaded: bool = false,
     loading_disk: bool = false,
     before: u64 = 0,

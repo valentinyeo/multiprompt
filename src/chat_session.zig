@@ -1282,6 +1282,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             entry.stalled = false;
             entry.loaded_ms = 0;
             entry.preview_loaded_ms = 0;
+            entry.preview_status_ms = 0;
             debugLog("[chat] no transcript yet: this is a new chat, showing the empty state");
             ok = true;
         } else if (chat_history.missingReason(wire.items, id)) |reason| {
@@ -1466,6 +1467,10 @@ pub fn chatFileOnReady() void {
         if (entry.result) |history| {
             const preview_index = findShellById(entry.key.shell_id);
             const old_preview = if (preview_index) |idx| @import("agent_second_line.zig").forShell(idx) else null;
+            const preview_status_changed = !std.meta.eql(entry.history.status.question, history.status.question) or
+                !std.meta.eql(entry.history.status.todos, history.status.todos) or entry.history.status.total != history.status.total;
+            const preview_content_changed = !entry.unchanged and !entry.prepended and
+                (entry.incremental or !std.mem.eql(u16, entry.history.text.items, history.text.items));
             const belongs_to_active = chat_history.sameSession(key, entry.key);
             if (belongs_to_active and !disk) @import("chat_live.zig").historyCaughtUp(entry.key.shell_id);
             if (entry.staged) {
@@ -1519,7 +1524,8 @@ pub fn chatFileOnReady() void {
             entry.before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (!has_messages) entry.history.start else 0;
             if (!disk and !history.more) {
                 entry.loaded_ms = @intCast(GetTickCount64());
-                if (!entry.unchanged) entry.preview_loaded_ms = history.received_ms;
+                if (preview_content_changed) entry.preview_loaded_ms = history.received_ms;
+                if (preview_status_changed) entry.preview_status_ms = if (history.received_ms != 0) history.received_ms else GetTickCount64();
             }
             entry.key.sid = history.sid;
             entry.result = null;
