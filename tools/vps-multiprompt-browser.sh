@@ -242,6 +242,7 @@ import json
 import math
 import os
 import subprocess
+import shlex
 import struct
 import sys
 import time
@@ -279,7 +280,8 @@ def request(*args):
     if remaining <= 0:
         raise TimeoutError()
     try:
-        run = subprocess.run(["bash", wrapper, *args], capture_output=True, text=True,
+        command = ["bash", wrapper, *args]
+        run = subprocess.run(shlex.join(command) if os.name == "nt" else command, capture_output=True, text=True,
                              timeout=remaining,
                              env={**os.environ, "TMUX": "", "ZSB_SESSION": session, "ZSB_PORT": port,
                                   "ZSB_TIMEOUT": str(remaining)})
@@ -423,7 +425,13 @@ def close_page():
         if len(matches) != 1:
             raise ValueError("ambiguous cleanup; refusing to close unrelated tabs")
         tab_id = str(matches[0]["id"])
-    request("close-tab", tab_id)
+    try:
+        request("close-tab", tab_id)
+    except ValueError as exc:
+        if "refusing to close the last tab in a multiprompt browser pane" not in str(exc):
+            raise
+        request("navigate", "about:blank", "--new-tab")
+        request("close-tab", tab_id)
     if any(str(tab["id"]) == tab_id for tab in tabs()):
         raise ValueError("selftest tab still exists after close")
 

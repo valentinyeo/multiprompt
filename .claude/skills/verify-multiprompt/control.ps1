@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -115,7 +115,7 @@ try {
     foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
-    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {
+    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
         $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
     }
@@ -150,7 +150,7 @@ try {
         New-Item -ItemType Directory -Force $skillRoot | Out-Null
         [IO.File]::WriteAllText((Join-Path $skillRoot 'SKILL.md'), "---`nname: pill-proof`ndescription: isolated skill color proof`n---`nReply with the given text.")
     }
-    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {
+    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
         $extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
         $extensionRoot = [IO.Path]::GetFullPath((Split-Path $extension))
@@ -357,22 +357,22 @@ try {
         Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
         $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
     }
-    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls')) {
-        if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed')) {
+    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
+        if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed', 'live-chat-pane')) {
             $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
             $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
         }
         if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires the configured browser executable' }
         $warmupJob = New-Object VerifyJob
         $arguments = '--user-data-dir="' + $profile + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --app="data:text/html,<title>Multiprompt verification browser ready</title>"'
-        if ($Feature -in @('browser-switch-speed', 'chat-switch-speed')) { $arguments += ' --load-extension="' + $extension + '" --disable-extensions-except="' + $extension + '" --silent-debugger-extension-api' }
+        if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'live-chat-pane')) { $arguments += ' --load-extension="' + $extension + '" --disable-extensions-except="' + $extension + '" --silent-debugger-extension-api' }
         $warmup = $warmupJob.Start($edge, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
         Wait-Until {
             $warmup.Refresh()
             if ($warmup.HasExited) { throw 'Browser setup process exited before readiness' }
             $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt verification browser ready'
         } 'isolated browser rendered setup page before the pane adoption deadline starts' 60
-        if ($Feature -in @('browser-switch-speed', 'chat-switch-speed')) { Wait-SwitchNativeHost }
+        if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'live-chat-pane')) { Wait-SwitchNativeHost }
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
     }
@@ -513,6 +513,9 @@ try {
         }
         'browser-pane-stuck' {
             . (Join-Path $PSScriptRoot 'control-feature-browser-pane-stuck.ps1')
+        }
+        'live-chat-pane' {
+            . (Join-Path $PSScriptRoot 'control-feature-live-chat-pane.ps1')
         }
         'browser-own-profile' {
             . (Join-Path $PSScriptRoot 'control-feature-browser-own-profile.ps1')

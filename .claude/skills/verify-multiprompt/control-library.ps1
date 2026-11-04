@@ -152,6 +152,12 @@ function Read-BrowserPane {
     return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
 }
 
+function Read-BrowserPaneFor([uint32]$TabShellId) {
+    $state = Read-Inbox
+    if ($null -eq $state) { return $null }
+    return @($state.shells | Where-Object { $_.sid -eq $TabShellId })[0]
+}
+
 function Wait-SwitchNativeHost {
     Wait-Until {
         $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', 'multiprompt-browser-isolated', [IO.Pipes.PipeDirection]::Out)
@@ -610,12 +616,12 @@ function Palette([string]$Query) {
     Type-Text $Query
 }
 
-function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
+function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace', [switch]$AllowPlainOk) {
     Doctor
     Assert-Foreground
-    Record ('zsb ' + ($Arguments -join ' '))
+    Record ('zsb ' + $Session + ' ' + ($Arguments -join ' '))
     $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))
-    $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")
+    $wire = [Text.Encoding]::UTF8.GetBytes("ZSB:${Session}:${payload}`n")
     [IO.File]::WriteAllBytes((Join-Path $Evidence ($Name + '.request.bin')), $wire)
     $client = New-Object Net.Sockets.TcpClient
     $reply = New-Object IO.MemoryStream
@@ -638,6 +644,7 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name) {
         } while ($count -gt 0)
         $raw = [Text.Encoding]::UTF8.GetString($reply.ToArray())
         [IO.File]::WriteAllText((Join-Path $Evidence ($Name + '.reply.json')), $raw)
+        if ($AllowPlainOk -and $raw.Trim() -ceq 'ok') { return @{ ok = $true; acknowledgement = $raw.Trim() } }
         $response = $raw | ConvertFrom-Json
         if ($response.ok -ne $true) { throw "zsb rejected $Name`: $raw" }
         return $response
