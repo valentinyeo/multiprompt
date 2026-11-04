@@ -1,0 +1,51 @@
+name: History reader lifecycle
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - src/chat_history_reader.py
+      - tools/chat-history-reader-test.py
+      - tools/chat-history-reader.test.js
+      - tools/verify-history-reader.cjs
+      - .github/workflows/chat-history-reader-proof.yml
+  push:
+    branches: [master]
+    paths:
+      - src/chat_history_reader.py
+      - tools/chat-history-reader-test.py
+      - tools/chat-history-reader.test.js
+      - tools/verify-history-reader.cjs
+      - .github/workflows/chat-history-reader-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  history-reader:
+    name: history-reader (${{ matrix.attempt }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        attempt: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Run the original check and verify lifecycle
+        run: node tools/verify-history-reader.cjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: history-reader-${{ matrix.attempt }}
+          path: evidence/history-reader.json
+          if-no-files-found: error
