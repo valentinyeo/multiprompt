@@ -546,7 +546,7 @@ pub fn replyPresent(shell_id: u32) bool {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
-        if (!live.used or live.shell_id != shell_id or live.state != .running) continue;
+        if (!live.used or live.shell_id != shell_id) continue;
         if (live.reply_in_history) return true;
         for (live.items.items) |item| {
             if (item.kind == .text and item.text.items.len > 0) return true;
@@ -856,7 +856,8 @@ test "IGSH-1668 reply visibility follows the current live turn" {
         "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"item.started\",\"item\":\"tool\",\"payload\":{\"tool\":\"Search\"}}}]}}",
         "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"text.delta\",\"item\":\"reply\",\"payload\":{\"text\":\"Answer\"}}}]}}",
         "{\"result\":{\"events\":[{\"seq\":6,\"event\":{\"kind\":\"text.done\",\"item\":\"reply\",\"payload\":{\"text\":\"Answer\"}}}]}}",
-        "{\"result\":{\"events\":[{\"seq\":7,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t2\"}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":7,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\"}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":8,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t2\"}}]}}",
     };
     for (events[0..5], 0..) |event, i| {
         try std.testing.expect(applyPage(shell_id, sid, event));
@@ -868,6 +869,9 @@ test "IGSH-1668 reply visibility follows the current live turn" {
     try std.testing.expect(replyPresent(shell_id));
     try std.testing.expect(running(shell_id));
     try std.testing.expect(applyPage(shell_id, sid, events[6]));
+    try std.testing.expect(replyPresent(shell_id));
+    try std.testing.expect(!running(shell_id));
+    try std.testing.expect(applyPage(shell_id, sid, events[7]));
     try std.testing.expect(!replyPresent(shell_id));
     try std.testing.expect(running(shell_id));
 }

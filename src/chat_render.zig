@@ -1949,7 +1949,7 @@ var g_note_logged = false;
 
 fn chatWorkingDotsVisible() bool {
     if (!@import("window_layout.zig").chatStopVisible()) return false;
-    if (app_state.active_shell >= app_state.shell_count) return true;
+    if (@import("chat_send.zig").chatOutboxWorkingForShell(app_state.active_shell)) return true;
     return !@import("chat_live.zig").replyPresent(app_state.shells[app_state.active_shell].shell_id);
 }
 
@@ -7626,9 +7626,16 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try std.testing.expect(g_working_rect == null);
         const end = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"completed\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, end));
+        app_state.shells[0].activity = .active;
         session.chatFileOnReady();
         layout.chatWorkingIndicatorSync();
         try liveWorkingProofFrame(dc, case.files[5], bytes, info.header, started, case.name, "turn-ended");
+        try std.testing.expect(g_working_rect == null);
+        try std.testing.expect(layout.chatStopVisible());
+        app_state.g_chat_outbox.items[0].state = .queued;
+        layout.chatWorkingIndicatorSync();
+        try std.testing.expect(g_working_rect != null);
+        app_state.shells[0].activity = .idle;
         std.heap.page_allocator.free(app_state.g_chat_outbox.items[0].text);
         app_state.g_chat_outbox.clearRetainingCapacity();
     }
