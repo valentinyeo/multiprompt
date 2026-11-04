@@ -60,6 +60,7 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 }
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -616,6 +617,7 @@ foreach ($plan in $plans) {
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
@@ -662,7 +664,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+            . "$PSScriptRoot/working-live.ps1"
+        } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
         } elseif ($isInstant) {
             . "$PSScriptRoot/instant-chat.ps1"
@@ -1368,6 +1372,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-working-live-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_INSTANT_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-instant-proof.cjs" $Evidence
     exit $LASTEXITCODE

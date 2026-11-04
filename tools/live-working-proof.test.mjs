@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { observe, parseStages } from './live-working-proof.mjs';
+assert.ok(fs.existsSync(new URL('./live-working-proof.mjs', import.meta.url)), 'Live event painter observations must be available');
+const { observe, parseStages, validate } = await import('./live-working-proof.mjs');
 
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/IGSH-1668/observations.json', import.meta.url), 'utf8'));
 const log = Object.entries(fixture.cases).flatMap(([name, value]) => fixture.stages.map((stage, i) =>
@@ -38,4 +39,30 @@ test('rejects incomplete and duplicate evidence', () => {
   assert.throws(() => observe(log.replace(/IGSH1668 case=history stage=tick[^\n]+\n/, ''), imageFor), /Missing native stage history\/tick/);
   assert.throws(() => observe(log.split('\n').filter(line => !line.includes('case=empty')).join('\n'), imageFor), /Missing native case empty/);
   assert.throws(() => parseStages(`${log}\n${log.split('\n')[0]}`), /Duplicate native stage empty\/queued/);
+});
+
+test('requires a running timer, a painted reply and no remaining dots', () => {
+  const result = observe(log, imageFor);
+  assert.throws(() => validate(result), /dots remain with reply text/);
+  for (const value of Object.values(result.cases)) {
+    value.observations.startedDotsWithinOneSecondOfSyntheticEnqueue = true;
+    value.observations.animated = true;
+    value.observations.dotsOnReplyDelta = false;
+    value.stages['reply-delta'].slot = false;
+    value.stages['reply-delta'].blocks = value.stages['turn-started'].blocks + 1;
+  }
+  assert.doesNotThrow(() => validate(result));
+  result.cases.empty.stages['turn-started'].timer = false;
+  assert.throws(() => validate(result), /did not start animation timer/);
+  result.cases.empty.stages['turn-started'].timer = true;
+  result.cases.empty.stages['reply-delta'].blocks = 0;
+  assert.throws(() => validate(result), /reply did not reach transcript/);
+});
+
+test('live-ready synchronizes busy state before starting the painter timer', () => {
+  const source = fs.readFileSync(new URL('../src/chat_session.zig', import.meta.url), 'utf8');
+  const ready = source.slice(source.indexOf('pub fn chatFileOnReady()'), source.indexOf('var read_ready:', source.indexOf('pub fn chatFileOnReady()')));
+  const working = ready.indexOf('chatLiveSyncWorking();');
+  const indicator = ready.indexOf('chatWorkingIndicatorSync();');
+  assert.ok(working >= 0 && indicator > working, 'Live working state must reach the timer before indicator synchronization');
 });

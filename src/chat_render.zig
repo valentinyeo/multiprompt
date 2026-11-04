@@ -1947,9 +1947,15 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
 var g_working_rect: ?RECT = null;
 var g_note_logged = false;
 
+fn chatWorkingDotsVisible() bool {
+    if (!@import("window_layout.zig").chatStopVisible()) return false;
+    if (app_state.active_shell >= app_state.shell_count) return true;
+    return !@import("chat_live.zig").replyPresent(app_state.shells[app_state.active_shell].shell_id);
+}
+
 pub fn chatWorkingSync() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
-    if ((g_working_rect != null) != @import("window_layout.zig").chatStopVisible()) {
+    if ((g_working_rect != null) != chatWorkingDotsVisible()) {
         var rc: RECT = std.mem.zeroes(RECT);
         chatViewClientRect(&rc);
         chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
@@ -1964,7 +1970,7 @@ pub fn chatWorkingSync() void {
 
 fn chatPaintWorking(hdc: HANDLE, now: u64) void {
     const source = g_working_rect orelse return;
-    if (!@import("window_layout.zig").chatStopVisible()) return;
+    if (!chatWorkingDotsVisible()) return;
     var rc = source;
     rc.top -= app_state.g_chat_scroll_y;
     rc.bottom -= app_state.g_chat_scroll_y;
@@ -2509,7 +2515,7 @@ pub fn chatRelayout(client_width: i32) void {
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
-    if (@import("window_layout.zig").chatStopVisible()) {
+    if (chatWorkingDotsVisible()) {
         y += chatBlockGapBefore(has_previous or app_state.g_chat_echo_layout_count > 0 or g_shell_rect_count > 0, .prose, true, .single);
         const sample = std.unicode.utf8ToUtf16LeStringLiteral("Ready.");
         var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
@@ -7604,6 +7610,10 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try std.testing.expect(live.applyPage(shell_id, sid, begin));
         session.chatFileOnReady();
         try liveWorkingProofFrame(dc, case.files[2], bytes, info.header, started, case.name, "turn-started");
+        try std.testing.expect(live.running(shell_id));
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect != null);
+        try std.testing.expect(app_state.g_chat_working_timer_running);
         w.Sleep(300);
         layout.chatWorkingBarTick();
         try liveWorkingProofFrame(dc, case.files[3], bytes, info.header, started, case.name, "tick");
@@ -7611,6 +7621,9 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try std.testing.expect(live.applyPage(shell_id, sid, reply));
         session.chatFileOnReady();
         try liveWorkingProofFrame(dc, case.files[4], bytes, info.header, started, case.name, "reply-delta");
+        try std.testing.expect(live.running(shell_id));
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect == null);
         const end = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"completed\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, end));
         session.chatFileOnReady();

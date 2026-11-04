@@ -384,6 +384,7 @@ jobs:
       CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_INSTANT_PROOF: ${{ inputs.feature == 'chat-instant' && '1' || '' }}
+      CHAT_WORKING_LIVE_PROOF: ${{ inputs.feature == 'chat-working-live' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
@@ -412,7 +413,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
       - name: Select instant chat driver
-        if: env.CHAT_INSTANT_PROOF == '1'
+        if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1'
         shell: pwsh
         run: Add-Content $env:GITHUB_ENV 'FEATURE=chat-delivery'
       - name: Keep LF line endings
@@ -448,6 +449,9 @@ jobs:
       - name: Check inline working pixel oracle
         continue-on-error: true
         run: node --test tools/chat-working-proof.test.mjs tools/live-working-proof.test.mjs
+      - name: Check hosted working evidence contract
+        if: env.CHAT_WORKING_LIVE_PROOF == '1'
+        run: node --test tools/chat-working-live-proof.test.mjs
       - name: Check unread divider contracts
         continue-on-error: true
         run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs

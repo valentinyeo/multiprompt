@@ -1026,9 +1026,47 @@ def reader_namespace():
         sys.modules["fcntl"] = locking
         namespace["events_wake"] = lambda: None
         record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
-        if state().get("name") in ("instant-chat", "startup-failure"):
+        if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
-            record("instant-boundary.jsonl", notification="poll fallback", dispatch="store arrival only")
+            record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
+    if state().get("name") == "working-live":
+        fixture_path = Path(__file__).with_name("working-host.py")
+        assert fixture_path.is_file(), "Hosted working provider fixture is missing"
+        spec = importlib.util.spec_from_file_location("working_host", fixture_path)
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
+        original_deliver = namespace["host_deliver"]
+
+        def working_deliver(provider, sid, token, attempt, epoch, text, **kwargs):
+            result = original_deliver(provider, sid, token, attempt, epoch, text, **kwargs)
+            if provider == "claude" and sid == fixture.SID and result.get("status") == "sent":
+                entry = dict(id=token, attempt=attempt)
+                session = dict(sends=[entry], state={}, inflight=entry)
+                namespace["host_accept"](provider, sid, "verify-agent", session, dict(type="standin"), token)
+            return result
+
+        namespace["host_deliver"] = working_deliver
+        original_push = namespace["events_push"]
+
+        def working_push(subscriptions):
+            pages = [(sub, namespace["message_events_page"](sub["provider"], sub["sid"], sub["after"]))
+                     for sub in subscriptions.values() if sub["sid"] == fixture.SID]
+            original_push(subscriptions)
+            for sub, page in pages:
+                if page["events"]:
+                    record("working-host.jsonl", stage="pushed", sid=sub["sid"], events=page["events"])
+
+        namespace["events_push"] = working_push
+        original_request = namespace["serve_request"]
+
+        def working_request(line, source, subscriptions, lock):
+            query = json.loads(line)
+            original_request(line, source, subscriptions, lock)
+            if query.get("op") == "events_subscribe" and query.get("sid") == fixture.SID:
+                record("working-host.jsonl", stage="subscribed", sid=fixture.SID, provider=query.get("provider"))
+
+        namespace["serve_request"] = working_request
     if state().get("name") == "startup-failure":
         original = namespace["serve_request"]
         sid = "a1b2c3d4-1593-4000-8000-000000001593"
