@@ -1647,14 +1647,13 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     for (listing.value.keys) |key| {
         if (key.status == .pending and !std.mem.eql(u8, key.device_id, listing.value.device_id)) pending = true;
     }
+    const previous_bytes = g_account_pending_device_keys;
+    const previous = if (previous_bytes) |old| account_keys.parseListing(a, old) catch return else null;
+    defer if (previous) |old| old.deinit();
     const retained = if (pending) std.heap.page_allocator.dupe(u8, bytes) catch return else null;
-    if (g_account_pending_device_keys) |previous| std.heap.page_allocator.free(previous);
     g_account_pending_device_keys = retained;
+    defer if (previous_bytes) |old| std.heap.page_allocator.free(old);
     if (!pending) return;
-    if (!user_initiated) {
-        showHeaderNoticeAscii("A device waits for approval: Ctrl+K > Account: Approve devices", 86400000, false);
-        return;
-    }
     g_account_key_prompt_active = true;
     app_state.g_account_busy = true;
     var submitted = false;
@@ -1665,6 +1664,15 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     var decisions: std.ArrayList(account_keys.Decision) = .empty;
     for (listing.value.keys) |key| {
         if (key.status != .pending or std.mem.eql(u8, key.device_id, listing.value.device_id)) continue;
+        if (!user_initiated) {
+            var seen = false;
+            if (previous) |old| {
+                for (old.value.keys) |prior| {
+                    if (prior.status == .pending and std.mem.eql(u8, prior.device_id, key.device_id) and std.mem.eql(u8, prior.public_key, key.public_key)) seen = true;
+                }
+            }
+            if (seen) continue;
+        }
         const text = std.fmt.allocPrint(a, "Approve this device? {s} asks to reach your servers.\n\nYes: approve. No: deny. Cancel: close. Open Ctrl+K > Account: Approve devices to return.", .{key.name}) catch return;
         const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
         const answer = MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Approve devices"), 3 | 0x20);
