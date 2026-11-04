@@ -4030,7 +4030,7 @@ pub var g_chat_full_settle_attempts: [CHAT_OUTBOX_TOTAL_MAX]ChatFullSettleAttemp
 pub const ISSUE_268_CHAT_FIND = @import("chat_find.zig").ISSUE_268_CHAT_FIND;
 pub const SEARCH_CHAT_FIND_OFFSET: usize = 6397;
 pub const WM_APP_CHAT_FIND: u32 = WM_APP + 202;
-pub const WM_APP_CHAT_MODE_RESULT: u32 = WM_APP + 212;
+pub const WM_APP_CHAT_MODE_RESULT: u32 = WM_APP + 213;
 pub const TIMER_CHAT_FIND: usize = 107;
 pub const CHAT_FIND_TOP_H: i32 = 52;
 pub const ChatFindJob = struct {
