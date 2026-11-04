@@ -1443,11 +1443,19 @@ fn prepareChangelogLayout(width: i32, compact: bool) void {
     const row = rowHeight();
     const hdc = @import("win32.zig").GetDC(app_state.g_main_hwnd);
     if (hdc == null) changelog_layout_width = -1;
-    defer if (hdc != null) _ = @import("win32.zig").ReleaseDC(app_state.g_main_hwnd, hdc);
+    defer {
+        if (hdc != null) {
+            _ = @import("win32.zig").ReleaseDC(app_state.g_main_hwnd, hdc);
+        }
+    }
     const usable = @max(1, width - uiScaled(if (compact) 32 else 152));
     const font = bodyFont();
     const old_font = if (hdc != null and font != null) SelectObject(hdc, font) else null;
-    defer if (old_font != null) _ = SelectObject(hdc, old_font);
+    defer {
+        if (old_font != null) {
+            _ = SelectObject(hdc, old_font);
+        }
+    }
     changelog_row_tops[0] = 0;
     for (CHANGELOG, 0..) |entry, idx| {
         if (entry.items.len == 0) {
