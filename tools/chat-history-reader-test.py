@@ -4070,9 +4070,15 @@ class IGSH_1652_LeftoverBoxTest(unittest.TestCase):
         self.assertEqual(state['sent'], [self.text])
         self.assertEqual(state['box'], '')
 
+    def test_new_unknown_text_after_empty_capture_is_not_sent(self):
+        result, state = self.send(self.leftover, first_blank=True)
+        self.assertEqual(result['status'], 'not_sent')
+        self.assertEqual(state['sent'], [])
+        self.assertEqual(state['box'], self.leftover)
+
     def test_genuine_multiline_human_draft_is_restored_without_sending_it(self):
         human = 'Unfinished human draft' + self.leftover
-        reader.draft_note('fixture', typed='', sent='Some other old message')
+        reader.draft_note('fixture', typed='', sent=self.old)
         result, state = self.send(human)
         self.assertEqual(result['status'], 'sent')
         self.assertEqual(state['sent'], [self.text])
