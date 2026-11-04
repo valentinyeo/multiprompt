@@ -355,7 +355,7 @@ pub const History = struct {
         var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (previous.next()) |old| {
             if (old.len == 0) continue;
-            const key = try rowIdentity(scratch, old);
+            const key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, old, .{ .ignore_unknown_fields = true });
             if (key.end > key.offset) try sources.put(.{ .segment = key.segment, .offset = key.offset, .end = key.end }, {});
             if (key.end > key.offset) {
                 if (max_offset) |last| {
@@ -374,7 +374,7 @@ pub const History = struct {
         var added_rows: std.ArrayList([]const u8) = .empty;
         while (incoming.next()) |line| {
             if (line.len == 0) continue;
-            const key = try rowIdentity(scratch, line);
+            const key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, line, .{ .ignore_unknown_fields = true });
             try added_rows.append(scratch, line);
             overlap = overlap or (key.end > key.offset and sources.contains(.{ .segment = key.segment, .offset = key.offset, .end = key.end }));
             if (key.end <= key.offset) {
@@ -499,9 +499,9 @@ pub const History = struct {
     }
 
     const SourcePosition = struct {
-        segment: u64,
-        offset: u64,
-        end: u64,
+        segment: u64 = 0,
+        offset: u64 = 0,
+        end: u64 = 0,
 
         const Context = struct {
             pub fn hash(_: @This(), key: SourcePosition) u64 {
@@ -2052,4 +2052,41 @@ test "IGSH-1019 copying a request ID returns the original ID not its display has
     var missing = h.blocks.items[0];
     missing.message_id = 0;
     try std.testing.expectEqual(@as(?[]u16, null), try h.requestIdAlloc(a, missing));
+}
+
+test "IGSH-1674 appending positioned rows does not decode settled message bodies" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t12800\t9\t0\tclaude\tterm-1\n");
+    for (0..128) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"{s}\"}}\n", .{ i * 100, (i + 1) * 100, "\\\"" ** 4096 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, wire.items, 1, key);
+    var next = try h.suffix(a);
+    defer next.deinit(a);
+    try next.apply(a, "@mp\t2\thistory\tok\tsid\t12800\t12900\t9\t0\tclaude\tterm-1\n{\"role\":\"user\",\"text\":\"new prompt\",\"offset\":12800,\"end\":12900}\n@@MP_END@@\n", 2, key);
+    try h.rows.ensureUnusedCapacity(a, next.rows.items.len);
+    try h.text.ensureUnusedCapacity(a, next.text.items.len);
+    try h.blocks.ensureUnusedCapacity(a, next.blocks.items.len);
+    const first = h.blocks.items[0];
+    var buffer: [128 * 1024]u8 = undefined;
+    var bounded = std.heap.FixedBufferAllocator.init(&buffer);
+    const appended = blk: {
+        h.appendParsed(bounded.allocator(), &next) catch break :blk false;
+        break :blk true;
+    };
+    try std.testing.expect(appended);
+    try std.testing.expectEqual(@as(usize, 129), h.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 4096), first.len);
+    try std.testing.expect(std.mem.allEqual(u16, h.text.items[first.start..][0..first.len], '"'));
+    const last = h.blocks.items[128];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), h.text.items[last.start..][0..last.len]);
+    try std.testing.expectEqual(@as(u64, 12800), last.source_offset);
 }
