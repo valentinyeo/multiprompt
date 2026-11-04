@@ -39,6 +39,7 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.match(driver, /@\('light', 'amoled'\)/);
   assert.match(driver, /graphite2 = 'unavailable in shipped themes'/);
   assert.match(driver, /Read-Inbox/);
+  assert.match(driver, /Restart-ChatView 1[^]*?Restart did not retain the renamed session[^]*?\$sid = \$restored\.tabs\[\$restored\.active_tab\]\.shell_id\s+Rename-WaitSaved \$current/);
   assert.match(driver, /function Rename-Snapshot\([\s\S]*?Rename-WaitChatView\s+Snapshot \$Name/);
   assert.match(driver, /tabs\[\$state\.active_tab\]\.cv/);
   assert.match(driver, /ZigShellChatTranscript/);

@@ -86,6 +86,9 @@
             $current = 'Command name'
             Rename-WaitSaved $current
             Restart-ChatView 1
+            $restored = Read-Session
+            if (@($restored.tabs).Count -ne 1 -or $restored.tabs[$restored.active_tab].name -cne $current) { throw 'Restart did not retain the renamed session' }
+            $sid = $restored.tabs[$restored.active_tab].shell_id
             Rename-WaitSaved $current
             Rename-Snapshot 'rename-restarted'
             $result.checks += @{ name = 'inline-rename'; themes = @('light', 'amoled'); title = $true; sidebar = $true; cancel = $true; blur = $true; palette = $true; slash = $true; restart = $true; graphite2 = 'unavailable in shipped themes'; remoteAgent = 'not exercised in offline CMD session' }
