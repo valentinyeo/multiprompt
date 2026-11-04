@@ -1061,7 +1061,7 @@ fn chatPendingResetStart(idx: u32) void {
     if (app_state.g_chat_tmux_send_job != null) return;
     const pending = app_state.g_chat_pending_reset orelse return;
     const key = chatFileIdentityForShell(idx);
-    if (key.host != pending.key.host or key.codex != pending.key.codex or !std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
+    if (key.host != pending.key.host or key.codex != pending.key.codex or key.pi != pending.key.pi or !std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
     const a = std.heap.page_allocator;
     const job = a.create(app_state.ChatTmuxSendJob) catch return;
     job.* = .{ .key = key, .echo_id = 0, .text = a.alloc(u16, 0) catch { a.destroy(job); return; }, .retry = false, .message_v1 = true, .message_reset = true, .message_nonce = pending.nonce, .request_nonce = pending.request_nonce };
@@ -2056,7 +2056,7 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (e >= app_state.g_chat_outbox.items.len) return false;
     if (app_state.g_chat_pending_reset) |pending| {
         const identity = chatFileIdentityForShell(shell_index);
-        if (identity.host == pending.key.host and identity.codex == pending.key.codex and std.mem.eql(u8, &identity.sid, &pending.key.sid)) return false;
+        if (identity.host == pending.key.host and identity.codex == pending.key.codex and identity.pi == pending.key.pi and std.mem.eql(u8, &identity.sid, &pending.key.sid)) return false;
     }
     if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
     if (chatOutboxFindSending(&app_state.g_chat_outbox) != null or app_state.g_chat_tmux_send_job != null) return false;
@@ -3080,7 +3080,7 @@ fn chatMessageSyncStart(idx: u32) void {
     const key = chatFileIdentityForShell(idx);
     if (key.sid[0] == 0 or key.tmux[0] == 0) return;
     if (app_state.g_chat_pending_reset) |pending| {
-        if (key.host == pending.key.host and key.codex == pending.key.codex and std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
+        if (key.host == pending.key.host and key.codex == pending.key.codex and key.pi == pending.key.pi and std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
     }
     const history = chatHistoryEntry(key) orelse return;
     history.message_v1_owned = true;
@@ -3575,7 +3575,7 @@ fn chatLiveApprovalAnswer(shell_index: u32, action: @import("chat_permission.zig
     var request: [96]u8 = undefined;
     const len = live.requestId(shell_id, .approval, &request) orelse return false;
     const key = chatFileIdentityForShell(shell_index);
-    const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, std.mem.sliceTo(&key.sid, 0), request[0..len], live.decisionFor(action)) catch return false;
+    const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0), request[0..len], live.decisionFor(action)) catch return false;
     if (!chatLiveReply(line)) return false;
     app_state.shells[shell_index].permission_answered = true;
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
@@ -3590,7 +3590,7 @@ fn chatLiveInterrupt(shell_index: u32) bool {
     const shell_id = app_state.shells[shell_index].shell_id;
     if (!live.running(shell_id)) return false;
     const key = chatFileIdentityForShell(shell_index);
-    const line = live.interruptLine(std.heap.page_allocator, shell_id, std.mem.sliceTo(&key.sid, 0)) catch return false;
+    const line = live.interruptLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0)) catch return false;
     if (!chatLiveReply(line)) return false;
     var log: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] interrupt sent shell={d}", .{shell_id}) catch "");
@@ -3604,7 +3604,7 @@ pub fn chatLiveCancelApproval(shell_index: u32) bool {
     var request: [96]u8 = undefined;
     const len = live.requestId(shell_id, .approval, &request) orelse return false;
     const key = chatFileIdentityForShell(shell_index);
-    const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, std.mem.sliceTo(&key.sid, 0), request[0..len], .cancel) catch return false;
+    const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0), request[0..len], .cancel) catch return false;
     return chatLiveReply(line);
 }
 
@@ -3683,7 +3683,7 @@ fn chatLiveQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_h
     var buffer: [512]u8 = undefined;
     const len = chatLiveAnswerLabels(group, digit, selected, &buffer) orelse return false;
     if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
-    if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| {
+    if (live.questionAnswerLine(shell_id, std.heap.page_allocator, chatFileIdentityForShell(shell_index).provider())) |line| {
         if (!chatLiveReply(line)) return false;
     }
     debugLog("[chat] question answered live");
@@ -3711,7 +3711,7 @@ fn chatLiveQuestionText(text: []const u16) bool {
     const index = app_state.shells[shell_index].chat_question_index;
     if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
     chatQuestionAdvance(shell_index, index);
-    if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| _ = chatLiveReply(line);
+    if (live.questionAnswerLine(shell_id, std.heap.page_allocator, chatFileIdentityForShell(shell_index).provider())) |line| _ = chatLiveReply(line);
     app_state.shells[shell_index].chat_question_other = false;
     app_state.shells[shell_index].chat_question_other_sent = false;
     return true;
@@ -3730,9 +3730,9 @@ fn chatLivePlanReply(text: []const u16) bool {
     const written = std.unicode.utf16LeToUtf8(&buffer, text) catch 0;
     const value = std.mem.trim(u8, buffer[0..written], " \t\r\n");
     const line = if (value.len == 0 or std.ascii.eqlIgnoreCase(value, "implement"))
-        live.planReplyLine(std.heap.page_allocator, shell_id, sid, request[0..len], .implement, null) catch return false
+        live.planReplyLine(std.heap.page_allocator, shell_id, key.provider(), sid, request[0..len], .implement, null) catch return false
     else
-        live.planReplyLine(std.heap.page_allocator, shell_id, sid, request[0..len], .feedback, value) catch return false;
+        live.planReplyLine(std.heap.page_allocator, shell_id, key.provider(), sid, request[0..len], .feedback, value) catch return false;
     if (!chatLiveReply(line)) return false;
     live.closeRequest(shell_id);
     if (app_state.g_chat_composer_hwnd != null) _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
