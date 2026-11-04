@@ -2128,7 +2128,7 @@ fn chatChoicesReuseFor(sig: [5]u64, old: [5]u64, reuse: usize) usize {
     return @min(reuse, @min(old_anchor, new_anchor));
 }
 
-fn chatChoicesLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
+fn chatChoicesLayout(width: i32, start_y: i32) i32 {
     const gap = uiScaled(CHOICE_GAP);
     var y = start_y + gap;
     g_choice_title_top = y;
@@ -2152,6 +2152,8 @@ fn chatChoicesLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
         } else if (g_choice.chosen) |chosen| {
             y += uiScaled(12);
             const text = g_choice.group.options[chosen].titleSlice();
+            const hdc = GetDC(app_state.g_chat_transcript_hwnd) orelse return y;
+            defer _ = ReleaseDC(app_state.g_chat_transcript_hwnd, hdc);
             var rc = chatMeasureEchoRect(hdc, text, width, y, false);
             rc.left += app_state.g_chat_content_left;
             rc.right += app_state.g_chat_content_left;
@@ -2475,9 +2477,9 @@ pub fn chatRelayout(client_width: i32) void {
         app_state.g_chat_layout_rects[i] = rc;
         chatImgStoreLayout(i, block_imgs);
         y = rc.bottom;
-        if (g_choice.present and !g_choice.prompt and g_choice.anchor == i) y = chatChoicesLayout(hdc, width, y);
+        if (g_choice.present and !g_choice.prompt and g_choice.anchor == i) y = chatChoicesLayout(width, y);
     }
-    if (g_choice.present and g_choice.prompt) y = chatChoicesLayout(hdc, width, y) else if (!g_choice.present) g_choice_rect_count = 0;
+    if (g_choice.present and g_choice.prompt) y = chatChoicesLayout(width, y) else if (!g_choice.present) g_choice_rect_count = 0;
     app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
     const old_echo_count = app_state.g_chat_echo_layout_count;
     const old_echo_ids = app_state.g_chat_echo_layout_ids;

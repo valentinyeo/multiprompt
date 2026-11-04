@@ -479,7 +479,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
     for (const [name, mutate] of [
-      ['permission outside transcript', text => text.replace('pub fn chatWorkingIndicatorH() i32 {\n    return 0;', 'pub fn chatWorkingIndicatorH() i32 {\n    return if (chatPermissionVisible()) uiScaled(36) else 0;')],
+      ['permission outside transcript', text => text.replace('fn chatWorkingIndicatorH() i32 {\n    return 0;', 'fn chatWorkingIndicatorH() i32 {\n    return if (chatPermissionVisible()) uiScaled(36) else 0;')],
       ['microphone overlap', text => text.replace('.right = mic_btn.left - uiScaled(12),', '.right = mic_btn.right,')],
       ['send before microphone', text => text.replace('const send_btn = slots.send;', 'const send_btn = RECT{ .left = composer_card.left, .top = slots.send.top, .right = composer_card.left + send_size, .bottom = slots.send.bottom };')],
       ['native focus inset', text => text.replace('const target_x = target.left;', 'const target_x = target.left + uiScaled(10);')],

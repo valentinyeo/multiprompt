@@ -546,6 +546,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
+    if ($null -ne $process -and $process.HasExited) { $result.exitCode = $process.ExitCode }
     if ($script:window -ne [IntPtr]::Zero) {
         try { Snapshot 'failure' } catch { $result.captureError = $_.Exception.Message }
     }
