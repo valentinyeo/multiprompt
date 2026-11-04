@@ -49,5 +49,8 @@ test('header evidence and shortcut routing cover both chat inputs', () => {
   assert.match(composer, /msg == WM_KEYDOWN and chatToolStepsKeyDown\(wp\)\) \{\s*dropPendingActivationChar\(hwnd, 0x0A\);/);
   assert.match(composer, /vk == 0x4A and ctrl and shift and !alt/);
   assert.match(composer, /!chatComposerOwnsKey\(WM_KEYDOWN, 0x4A, true, false, 0\)/);
-  assert.match(shortcuts, /wp == WM_KEYDOWN and @import\("chat_composer\.zig"\)\.chatToolStepsKeyDown\(kb\.vkCode\)/);
+  const keyReader = composer.slice(composer.indexOf('pub fn chatToolStepsKeyDown('), composer.indexOf('test "tool steps shortcut'));
+  assert.doesNotMatch(keyReader, /GetAsyncKeyState|isCtrlDown/);
+  for (const key of ['0x11', '0x10', '@as(i32, VK_MENU)']) assert.ok(keyReader.includes(`GetKeyState(${key})`));
+  assert.match(shortcuts, /wp == WM_KEYDOWN and @import\("chat_composer\.zig"\)\.chatToolStepsKey\(kb\.vkCode, isCtrlDown\(\), GetAsyncKeyState\(0x10\) < 0, isAltDown\(kb\.flags\)\)/);
 });
