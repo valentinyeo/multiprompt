@@ -94,6 +94,8 @@ The five baseline UI areas are sessions, workspace organization, Inbox, command 
 
 - [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
 
+- [Hidden agent steps](chat-hidden-steps.md): grey group counts with real open/close clicks and source-preserving command/output disclosure.
+
 ### SSH reconnect maps
 
 - [SSH tab reconnect](ssh-tab-reconnect.md): background transport loss without layout/focus disruption; case A.

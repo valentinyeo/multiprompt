@@ -634,6 +634,22 @@ pub fn chatComposerOwnsKey(wp: WPARAM, vkCode: DWORD, ctrl: bool, alt: bool, fla
     };
 }
 
+pub fn chatToolStepsKey(vk: WPARAM, ctrl: bool, shift: bool, alt: bool) bool {
+    return vk == 0x4A and ctrl and shift and !alt;
+}
+
+pub fn chatToolStepsKeyDown(vk: WPARAM) bool {
+    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+    return chatToolStepsKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
+}
+
+test "tool steps shortcut does not consume plain control J" {
+    try std.testing.expect(chatToolStepsKey(0x4A, true, true, false));
+    try std.testing.expect(!chatToolStepsKey(0x4A, true, false, false));
+    try std.testing.expect(!chatToolStepsKey(0x4A, true, true, true));
+    try std.testing.expect(!chatComposerOwnsKey(WM_KEYDOWN, 0x4A, true, false, 0));
+}
+
 pub fn chatPaletteToggleKey(vk: WPARAM, ctrl: bool, shift: bool, alt: bool) bool {
     return vk == 0x4B and ctrl and !shift and !alt;
 }
@@ -1559,8 +1575,12 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         _ = SendMessageW(hwnd, 0x00B1, 0, -1);
         return 0;
     }
-    if (msg == 0x0102 and wp == 0x01) return 0;
+    if (msg == 0x0102 and (wp == 0x01 or (wp == 0x0A and chatToolStepsKeyDown(0x4A)))) return 0;
     if (chatImagePasteIntercept(msg, wp)) return 0;
+    if (msg == WM_KEYDOWN and chatToolStepsKeyDown(wp)) {
+        @import("chat_render.zig").chatToggleAllTools();
+        return 0;
+    }
     if (msg == WM_KEYDOWN and chatCopyCodeKeyDown(wp)) {
         chatCopyLatestCode();
         return 0;
@@ -1816,6 +1836,10 @@ pub fn closeChatView() void {
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].chat_view_on) @import("browser_pane.zig").cancelPinnedBrowserEntry(app_state.shells[app_state.active_shell].shell_id);
     _ = @import("chat_session.zig").chatReadMark(false);
     chatDraftFlush();
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count]) |*block| {
+        if (block.role == .tool) block.tool_open = false;
+    }
+    app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_active = false;
     @import("window_layout.zig").chatWorkingIndicatorSync();
     app_state.g_chat_browser_swap.cancel();
