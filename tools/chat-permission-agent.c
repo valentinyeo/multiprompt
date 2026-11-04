@@ -70,7 +70,8 @@ int main(int argc, char **argv) {
             GetConsoleScreenBufferInfo(output, &info);
             FillConsoleOutputCharacterW(output, L' ', (DWORD)info.dwSize.X * info.dwSize.Y, origin, &written);
             SetConsoleCursorPosition(output, origin);
-            WriteConsoleW(output, L"Permission answered.\r\n", 22, &written, NULL);
+            const WCHAR answered[] = L"Claude Code\r\nPermission answered.\r\n";
+            WriteConsoleW(output, answered, (DWORD)(sizeof(answered) / sizeof(WCHAR) - 1), &written, NULL);
 
         }
         if (GetFileAttributesW(L"permission-next.txt") != INVALID_FILE_ATTRIBUTES) {
