@@ -1012,6 +1012,8 @@ def reader_namespace():
         slash_host = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(slash_host)
         slash_host.install(namespace, ROOT, record)
+        if os.name == "nt":
+            namespace["events_wake"] = lambda: None
     if os.name == "nt" and state().get("name") in ("instant-chat", "startup-failure"):
         import msvcrt
         import types

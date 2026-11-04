@@ -1,3 +1,4 @@
+$result.seedBoundary = 'Two isolated saved remote tabs and one transcript round seeded before launch. SSH, host ownership and agent transport are stand-ins. Windows uses the reader polling fallback instead of Linux filesystem notifications. No real agent, credentials or shared session.'
 $result.slashBoundary = @{
     app = 'Real Windows app, keyboard input, autocomplete, palette, send routing and asynchronous mode requests'
     reader = 'App-supplied reader, real host_reply and host_handle_request validation and host_set_mode'
