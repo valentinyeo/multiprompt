@@ -18,7 +18,8 @@ test('Inbox agent names use available space without workspace labels', () => {
   assert.doesNotMatch(bounds, /workspace|row\.ws/);
   assert.match(bounds, /\.right = right/);
   assert.match(row, /json_reader\.wide\(row\.name\[0\.\.row\.name_len\]/);
-  assert.doesNotMatch(row, /workspace|g_inbox_ws|ws_buf|ws_rc/);
+  assert.doesNotMatch(row, /workspace|g_inbox_ws|ws_buf|ws_rc|name_width|name_right/);
+  assert.match(row, /\.right = name\.right/);
 });
 
 test('second-line captures wait for the app-published working step and finished reply', () => {

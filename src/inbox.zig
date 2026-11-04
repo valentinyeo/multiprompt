@@ -1549,9 +1549,7 @@ pub fn paintInbox(hdc: HANDLE) void {
         const name_len = json_reader.wide(row.name[0..row.name_len], &name_buf);
         _ = SelectObject(hdc, if (row.att) semibold else @import("drawing.zig").uiFontBot(.name));
         _ = SetTextColor(hdc, bright);
-        const name_width = inboxTextWidth(hdc, name_buf[0..name_len]);
-        const name_right = @min(name.right, text_left + name_width);
-        var name_rc = RECT{ .left = text_left, .top = y + uiScaled(8), .right = name_right, .bottom = y + uiScaled(27) };
+        var name_rc = RECT{ .left = text_left, .top = y + uiScaled(8), .right = name.right, .bottom = y + uiScaled(27) };
         _ = @import("dwrite_text.zig").draw(hdc, &name_buf, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
         if (name.show_age) {
             var time_buf: [24]u16 = undefined;
