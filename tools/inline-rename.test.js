@@ -6,7 +6,7 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const rename = read('src/rename.zig');
 const main = read('src/main.zig');
 const send = read('src/chat_send.zig');
-const driver = read('.claude/skills/verify-multiprompt/control-feature-inline-rename.ps1');
+
 
 test('inline editor keeps the stable shell identity and commits canonically', () => {
   assert.match(rename, /g_edit_sid = app_state\.shells\[idx\]\.shell_id/);
@@ -28,6 +28,9 @@ test('slash rename consumes locally before normal message routing', () => {
 });
 
 test('hosted journey drives both names and records its boundaries', () => {
+  const file = '.claude/skills/verify-multiprompt/control-feature-inline-rename.ps1';
+  assert.ok(fs.existsSync(path.join(__dirname, '..', file)), 'hosted rename journey exists');
+  const driver = read(file);
   for (const action of ['title-before', 'title-edit', 'title-after', 'sidebar-before', 'sidebar-edit', 'sidebar-after', '/rename Command name', 'Restart-ChatView 1']) assert.ok(driver.includes(action), action);
   assert.match(driver, /@\('light', 'amoled'\)/);
   assert.match(driver, /graphite2 = 'unavailable in shipped themes'/);

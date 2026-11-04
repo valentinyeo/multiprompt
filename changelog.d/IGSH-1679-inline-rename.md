@@ -1,1 +1,1 @@
-Rename chats in place or with /rename.
+Rename chats directly in their title or sidebar.
