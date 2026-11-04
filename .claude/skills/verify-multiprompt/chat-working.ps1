@@ -35,6 +35,14 @@ $probe = {
 }
 $captureSecondLines = {
     param([string]$State)
+    Wait-Until {
+        $target = $initial.tabs[$initial.active_tab].shell_id
+        $row = @((Read-Inbox).shells | Where-Object { $_.sid -eq $target })
+        if ($row.Count -ne 1) { return $false }
+        if ($State -eq 'finished') { return $row[0].pv -ceq 'Ready.' -and $row[0].act -eq 0 }
+        $row[0].pv.StartsWith('Inspecting files') -and $row[0].pv -match ' · \d+m$'
+    } ("IGSH-1665 $State semantic second line published") -Seconds 45
+    $result.checks += @{ name = "IGSH-1665-$State-second-line"; preview = @((Read-Inbox).shells | Where-Object { $_.sid -eq $initial.tabs[$initial.active_tab].shell_id })[0].pv }
     foreach ($theme in @(@{ query = 'light'; saved = 'light' }, @{ query = 'amoled'; saved = 'amoled' }, @{ query = 'edge grey'; saved = 'edgegray' })) {
         Select-Theme $theme.query ("second-line-$State-$($theme.saved)-theme") $theme.saved
         Snapshot ("second-line-$State-$($theme.saved)-sidebar")
