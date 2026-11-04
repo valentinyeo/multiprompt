@@ -2061,9 +2061,9 @@ test "IGSH-1674 appending positioned rows does not decode settled message bodies
     defer wire.deinit(a);
     try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t12800\t9\t0\tclaude\tterm-1\n");
     for (0..128) |i| {
-        const row = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"{s}\"}}\n", .{ i * 100, (i + 1) * 100, "\\\"" ** 4096 });
-        defer a.free(row);
-        try wire.appendSlice(a, row);
+        const row_bytes = try std.fmt.allocPrint(a, "{{\"role\":\"user\",\"offset\":{d},\"end\":{d},\"text\":\"{s}\"}}\n", .{ i * 100, (i + 1) * 100, "\\\"" ** 4096 });
+        defer a.free(row_bytes);
+        try wire.appendSlice(a, row_bytes);
     }
     try wire.appendSlice(a, "@@MP_END@@\n");
     var h: History = .{};
