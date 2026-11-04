@@ -58,4 +58,6 @@ test('live slash screenshot journey drives every requested command and checks in
   assert.ok(fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8').includes("'chat-slash.ps1'"));
   const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
   assert.match(workflow, /Build the Windows app once for this push[^]*?run: zig build -Drelease=false -Dcpu=x86_64_v3/);
+  assert.ok(workflow.includes('version: ${{ steps.identity.outputs.version }}'));
+  assert.ok(workflow.includes("$version = '${{ needs.build-app.outputs.version }}'"));
 });
