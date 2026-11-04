@@ -42,6 +42,7 @@ $offset = (Read-SharedText $script:slashLog).Length
 Send-Slash '/plan'
 Wait-SlashPalette 12000 $offset
 Snapshot 'slash-plan-picker'
+Snapshot 'action'
 Press @(0x0D) 'Enter: choose Plan mode'
 Wait-SlashMode 'plan'
 Snapshot 'slash-plan-applied'
@@ -82,4 +83,5 @@ if (Test-Path $outboxPath) {
     if ($outboxText -match '/(plan|permissions|model|resume|rewind)') { throw 'A local slash command leaked into the message outbox' }
 }
 Snapshot 'slash-after'
+Snapshot 'after'
 $result.checks += @{ name = 'live-chat-slash'; commands = @('/plan', '/permissions', '/model', '/resume', '/rewind'); modes = @('plan', 'manual', 'acceptEdits'); controls = $controls.Count; target = 'live-slash'; screenshots = $true; ordinarySends = 0 }

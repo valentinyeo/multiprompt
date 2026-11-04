@@ -1774,6 +1774,7 @@ pub fn showHeaderNoticeAscii(msg: []const u8, ms: u64, beep: bool) void {
     for (msg[0..app_state.g_cap_msg_len], 0..) |c, i| app_state.g_cap_msg_text[i] = c;
     app_state.g_cap_msg_text[app_state.g_cap_msg_len] = 0;
     app_state.g_cap_msg_until = GetTickCount64() + ms;
+    @import("chat_float.zig").syncChatRegion();
     if (app_state.g_main_hwnd != null) {
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         _ = SetTimer(app_state.g_main_hwnd, TIMER_CAP_MSG, @intCast(ms + 100), null);

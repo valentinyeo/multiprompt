@@ -30,6 +30,12 @@ test('live commands are routed before the outbox and keep the draft on refusal',
   assert.match(finish, /std\.meta\.eql\(job\.key, chatFileIdentityForShell\(app_state\.active_shell\)\)/);
 });
 
+test('command notices refresh transcript clipping before repainting the header', () => {
+  const source = fs.readFileSync(path.join(root, 'src/console.zig'), 'utf8');
+  const notice = source.slice(source.indexOf('pub fn showHeaderNoticeAscii('), source.indexOf('pub fn notifyTabCapReached('));
+  assert.match(notice, /g_cap_msg_until =[^]*syncChatRegion\(\);[^]*InvalidateRect\(/);
+});
+
 test('new picker targets and completion message avoid registered bands', async () => {
   const { checkRouting } = await import(pathToFileURL(path.join(root, 'tools/check-routing-ids.mjs')).href);
   const sources = {};
