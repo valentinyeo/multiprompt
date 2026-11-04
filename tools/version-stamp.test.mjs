@@ -742,7 +742,7 @@ test('IGSH-1131 pending notes include only changed unpublished product fragments
 
 test('IGSH-1243 build reads ticketed commits between published tags', async t => {
   const { releaseNotes } = await import('./release-notes.mjs');
-  for (const subject of ['IGSH-1111: Repair checks', 'Repair checks']) {
+  for (const subject of ['IGSH-1111: Repair checks', 'IGSH-1111, IGSH-1112: Repair checks', 'Repair checks']) {
     const r = repo(t);
     r.git('tag', 'v0.29.1');
     r.write({ 'tools/repair.txt': 'Updated checks.\n' });

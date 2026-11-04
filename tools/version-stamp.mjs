@@ -176,7 +176,7 @@ export function buildChangelog(files, tag, history = [], commits = []) {
     const ciTickets = [];
     if (!reviewed) {
       for (const commit of stepCommits || []) {
-        const ticket = reviewedCommits[commit.sha] ?? /^([A-Z][A-Z0-9]*-\d+)(?::|\s)/.exec(commit.subject)?.[1];
+        const ticket = reviewedCommits[commit.sha] ?? /^([A-Z][A-Z0-9]*-\d+)(?::|,|\s)/.exec(commit.subject)?.[1];
         if (!ticket) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
         if (ciTicket.test(ticket)) {
           if (!ciTickets.includes(ticket)) ciTickets.push(ticket);
