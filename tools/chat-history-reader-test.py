@@ -6600,5 +6600,40 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.assertEqual(len(self.events('turn.ended')), 1)
 
 
+class ShardDiscoveryTest(unittest.TestCase):
+    def test_shards_cover_full_suite_without_splitting_classes(self):
+        loader = unittest.TestLoader()
+        module = sys.modules[__name__]
+
+        def ids(suite):
+            return {test.id() for group in suite for test in group}
+
+        with patch.dict(os.environ):
+            os.environ.pop('HISTORY_READER_SHARD', None)
+            full = ids(loader.loadTestsFromModule(module))
+            shards = []
+            for index in range(2):
+                os.environ['HISTORY_READER_SHARD'] = f'{index}/2'
+                shards.append(ids(loader.loadTestsFromModule(module)))
+            self.assertFalse(shards[0] & shards[1])
+            self.assertEqual(shards[0] | shards[1], full)
+            classes = [{test_id.rsplit('.', 1)[0] for test_id in shard} for shard in shards]
+            self.assertFalse(classes[0] & classes[1])
+            for invalid in ('', '2/2', '-1/2', '0/1', '0/3', '01/2', 'bad'):
+                os.environ['HISTORY_READER_SHARD'] = invalid
+                with self.subTest(shard=invalid), self.assertRaises(ValueError):
+                    load_tests(loader, unittest.TestSuite(), None)
+
+
+def load_tests(loader, tests, pattern):
+    shard = os.environ.get('HISTORY_READER_SHARD')
+    if shard is None:
+        return tests
+    if shard not in ('0/2', '1/2'):
+        raise ValueError('HISTORY_READER_SHARD must be 0/2 or 1/2')
+    index = int(shard[0])
+    return unittest.TestSuite(group for i, group in enumerate(tests) if i % 2 == index)
+
+
 if __name__ == '__main__':
     unittest.main()

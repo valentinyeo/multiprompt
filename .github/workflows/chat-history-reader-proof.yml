@@ -72,7 +72,7 @@ jobs:
           fs.mkdirSync('evidence', { recursive: true });
           fs.writeFileSync('evidence/history-reader.json', JSON.stringify(evidence, null, 2) + '\n');
           assert.equal(run.status, 0, 'original history reader check must pass');
-          assert.ok(count && evidence.tests >= 378, 'all unique history cases and distinct fixture variants must execute');
+          assert.ok(count && evidence.tests >= 380, 'all unique history cases and distinct fixture variants must execute');
           assert.equal(leftovers.length, 0, 'history check left owned background processes running');
           assert.ok(elapsedMs < 60000, `history reader check took ${elapsedMs}ms, limit is 60000ms`);
           console.log(`HISTORY_READER_PROOF_OK ${JSON.stringify(evidence)}`);
