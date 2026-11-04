@@ -245,9 +245,9 @@ try {
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-wide'
     Check 'other-bot-pixels-unchanged' ((Capture-Avatar (Index-Name 'Photo Beta') 'other-after') -eq $otherBefore)
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
-    Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b); Press @(0x1b)
+    Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
     Focus; Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
-    [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.pinned_top -eq $true })
+    [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.PSObject.Properties['pinned_top'] -and $tab.pinned_top -eq $true })
     Assert-Avatar 'pinned' (Index-For $firstId) 'pinned-wide'
     Focus; Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
     [void](Wait-For 'unpinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; -not $tab.PSObject.Properties['pinned_top'] -or -not $tab.pinned_top })
