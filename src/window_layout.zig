@@ -453,7 +453,7 @@ pub fn paintChatView(hdc: HANDLE) void {
         _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
     if (@import("chat_session.zig").chatSettingsEligible()) {
-        const selected = @import("chat_live.zig").settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
+        const selected: @import("chat_live.zig").Settings = @import("chat_live.zig").settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
         const model: []const u8 = switch (selected.model) { .unknown => "Default", .opus => "Opus", .sonnet => "Sonnet", .haiku => "Haiku" };
         const effort: []const u8 = switch (selected.effort) { .unknown => "Default", .low => "Low", .medium => "Medium", .high => "High" };
         var text: [96]u8 = undefined;

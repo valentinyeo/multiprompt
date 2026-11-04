@@ -35,7 +35,7 @@ test('all six settings are searchable, painted and dispatched', () => {
     }
   }
   assert.ok(main.indexOf("if (target >= SEARCH_CHAT_MODEL_OPUS_OFFSET") < main.indexOf("if (target >= SEARCH_ADDFAVICON_OFFSET"));
-  assert.match(sidebar, /const is_chat_action = is_chat_setting or/);
+  assert.match(sidebar, /const is_chat_action = [^;]*\bis_chat_setting\b/);
   assert.match(palette, /chatSettingsEligible\(\)/);
   assert.match(read('src/chat_session.zig'), /privateActionsAllowed\(\)/);
   assert.match(read('src/chat_session.zig'), /settingsKnown\(key.shell_id\)/);
