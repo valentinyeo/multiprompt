@@ -2194,7 +2194,14 @@ fn chatChoiceDigitKey(wp: usize) bool {
 
 fn chatChoiceClick(index: usize) void {
     if (g_choice.permission) {
-        if (index < 3) _ = @import("chat_send.zig").chatPermissionAnswer(app_state.active_shell, @enumFromInt(index));
+        if (index < 3) {
+            const shell = &app_state.shells[app_state.active_shell];
+            const answered = shell.permission_answered;
+            const pending = shell.permission_presentation.state == .pending;
+            const accepted = @import("chat_send.zig").chatPermissionAnswer(app_state.active_shell, @enumFromInt(index));
+            var log: [160]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "permission-choice index={d} accepted={} answered={} pending={}", .{ index, accepted, answered, pending }) catch "permission-choice");
+        }
         return;
     }
     const group = &g_choice.group;
@@ -5933,6 +5940,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             chatNavClear();
             if (chatTableMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatEchoRetryAt(GET_X(lp), GET_Y(lp))) return 0;
+            if (g_choice.permission) {
+                var log: [160]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&log, "permission-pointer x={d} y={d} scroll={d} live={}", .{ GET_X(lp), GET_Y(lp), app_state.g_chat_scroll_y, g_choice.live }) catch "permission-pointer");
+            }
             if (chatChoiceAt(GET_X(lp), GET_Y(lp))) |index| {
                 chatChoiceClick(index);
                 return 0;
