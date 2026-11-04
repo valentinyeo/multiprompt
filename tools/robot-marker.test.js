@@ -48,4 +48,5 @@ test('Windows journey records both workspaces, placements and marker states with
   assert.match(driver, /Snapshot "robot-dots-\$theme-\$view-\$placement-read"/);
   assert.match(driver, /Snapshot "robot-dots-\$theme-\$view-\$placement-unread"/);
   assert.match(driver, /theme = 'Graphite 2'; reason = 'not shipped'/);
+  assert.match(driver, /-not \$state.tabs\[\$tabIndex\]\.PSObject.Properties\[\$field\] -or -not \$state.tabs\[\$tabIndex\]\.\$field/);
 });

@@ -35,7 +35,7 @@
                         if ($placement -eq 'pinned') {
                             Focus-Palette 'unpin from top' 6293
                             Press @(0x0D) 'Enter: restore robot row'
-                            Wait-Until { $state = Read-Session; if ($view -eq 'starred') { -not $state.tabs[$tabIndex].starred_pinned_top } else { -not $state.tabs[$tabIndex].pinned_top } } 'robot unpinned in current workspace'
+                            Wait-Until { $state = Read-Session; $field = if ($view -eq 'starred') { 'starred_pinned_top' } else { 'pinned_top' }; -not $state.tabs[$tabIndex].PSObject.Properties[$field] -or -not $state.tabs[$tabIndex].$field } 'robot unpinned in current workspace'
                         }
                     }
                 }
