@@ -216,6 +216,23 @@ try {
     $results.desktop_seconds_to_show_opened_session = [Math]::Round($openSeconds, 2)
     if ($openSeconds -gt 10) { throw "Desktop took $openSeconds seconds to show the opened session" }
 
+    $stage = 'named live chat account import'
+    $liveSession = 'live-0123456789ab8def81230123456789ab'
+    $liveSid = '01234567-89ab-8def-8123-0123456789ab'
+    $start = [DateTime]::UtcNow
+    $liveOpened = Invoke-Layout $secrets.admin_key @('open', $liveSession, '--workspace', 'Runners', '--title', 'Named live chat', '--no-tmux')
+    if ($liveOpened.code -ne 0) { throw 'Could not publish the live account tab' }
+    [void](Wait-For 'native import saves live identity and Chat View' {
+        try {
+            $snapshot = Get-Content "$settings/session-journey-a.json" -Raw | ConvertFrom-Json
+            $tabs = @($snapshot.tabs | Where-Object { $_.tmux_session -ceq $liveSession })
+            $tabs.Count -eq 1 -and $tabs[0].csid -ceq $liveSid -and $tabs[0].cv -eq $true -and $tabs[0].name -ceq 'Named live chat'
+        } catch { $false }
+    } 15)
+    $liveSeconds = ([DateTime]::UtcNow - $start).TotalSeconds
+    if ($liveSeconds -gt 10) { throw "Native live import took $liveSeconds seconds" }
+    $results.named_live_import = @{ verdict = 'pass'; seconds = [Math]::Round($liveSeconds, 2); boundary = 'real account import; no remote host or phone' }
+
     $stage = 'second device authentication'
     $tokenBody = @{ grant_type = 'refresh_token'; refresh_token = $secrets.second_refresh_token } | ConvertTo-Json -Compress
     $tokenB = Invoke-RestMethod -Method Post -Uri "https://$hostName/oauth/token" -ContentType 'application/json' -Body $tokenBody

@@ -1657,6 +1657,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
             shell.face = tab.face;
             shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
