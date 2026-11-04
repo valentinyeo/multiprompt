@@ -115,6 +115,37 @@ try {
     $oneBefore = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-before' -Session $one.tmux
     if ($oneBefore.session -cne $one.tmux -or $oneBefore.pane -cne 'closed') { throw ('zsb status from the ' + $one.tmux + ' chat did not report its own closed pane: ' + (ConvertTo-Json -InputObject $oneBefore -Compress)) }
     Snapshot 'action'
+    $selftestEnvironment = @{}
+    foreach ($name in @('ZSB_SESSION', 'ZSB_PORT', 'TMUX', 'PATH')) {
+        $selftestEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    $selftestJob = New-Object VerifyJob
+    try {
+        $bash = Join-Path (Split-Path (Split-Path (Get-Command git.exe).Source)) 'bin/bash.exe'
+        $env:PATH = (Split-Path $bash) + ';' + $env:PATH
+        $env:TMUX = ''
+        $env:ZSB_SESSION = $one.tmux
+        $env:ZSB_PORT = [string]$script:liveChatPort
+        Record ('Run the shipped zsb selftest for ' + $one.tmux)
+        $selftestProcess = $selftestJob.Start($bash, ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))), (Join-Path $Evidence 'chat-one-selftest.stdout.log'), (Join-Path $Evidence 'chat-one-selftest.stderr.log'), '--noprofile --norc tools/vps-multiprompt-browser.sh selftest')
+        if (-not $selftestProcess.WaitForExit(210000)) { throw 'Live chat pane selftest exceeded its deadline' }
+        $selftestProcess.Refresh()
+        if ($selftestProcess.ExitCode -ne 0) { throw 'Live chat pane selftest failed; see retained selftest output' }
+        $selftest = (Get-Content (Join-Path $Evidence 'chat-one-selftest.stdout.log') -First 1) | ConvertFrom-Json
+        if ($selftest.ok -ne $true -or $selftest.session -cne $one.tmux -or $selftest.tab_name -cne $one.name -or $selftest.active -ne $true -or $selftest.visible -ne $true) { throw 'Selftest did not pass on the visible live chat pane with its own name' }
+        foreach ($step in @('open', 'text', 'type', 'click', 'screenshot', 'hosting', 'close')) {
+            if ($selftest.steps.$step.pass -ne $true) { throw ('Live chat selftest did not prove ' + $step) }
+        }
+        Save-Json $selftest 'chat-one-selftest.json'
+        $result.checks += @{ name = 'chat-one-selftest'; session = $one.tmux; tabName = $selftest.tab_name; steps = $selftest.steps }
+        Snapshot 'chat-one-selftest'
+    } finally {
+        $null = $selftestJob.Stop()
+        $selftestJob.Dispose()
+        foreach ($name in $selftestEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $selftestEnvironment[$name], 'Process')
+        }
+    }
     $oneOpen = Invoke-Zsb @('open', $one.page) $script:liveChatPort 'chat-one-open' -Session $one.tmux -AllowPlainOk
     Wait-Until {
         $pane = Read-BrowserPaneFor $one.shellId
