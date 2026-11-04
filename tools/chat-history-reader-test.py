@@ -4013,6 +4013,78 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         self.assertEqual(len([command for command in commands if 'paste-buffer' in command]), 1)
         self.assertTrue(any('C-u' in command for command in commands))
 
+class IGSH_1652_LeftoverBoxTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        patch.object(reader.time, 'sleep').start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', 'sid.jsonl')).start()
+        self.old = 'https://example.com/picture.png'
+        self.leftover = '\n' + '\u00a0' * 8 + self.old
+        self.text = 'Please capture the bottom of the screen'
+
+    def send(self, box, first_blank=False):
+        state = dict(box=box, buffer='', sent=[], captures=0)
+        def run(command, **kwargs):
+            stdout = ''
+            if 'capture-pane' in command:
+                state['captures'] += 1
+                shown = '' if first_blank and state['captures'] == 1 else state['box']
+                stdout = '\u276f ' + shown + '\n' + '\u2500' * 20 + '\n'
+            elif 'load-buffer' in command:
+                state['buffer'] = kwargs['input'].decode('utf-8')
+            elif 'paste-buffer' in command:
+                state['box'] = state['buffer'] + state['box']
+            elif 'send-keys' in command:
+                if command[-1] in ('C-u', 'C-k'):
+                    state['box'] = state['box'].rsplit('\n', 1)[0] if '\n' in state['box'] else ''
+                elif command[-1] == 'Enter':
+                    state['sent'].append(state['box'])
+                    state['box'] = ''
+                elif '-l' in command:
+                    state['box'] += command[-1]
+            return types.SimpleNamespace(returncode=0, stdout=stdout)
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            result = reader.send_response_preserve_draft(dict(tmux='fixture', sid='sid', text=self.text))
+        return result, state
+
+    def test_wrapped_nbsp_link_is_detected_and_normalized_for_comparison(self):
+        shown = '\u276f ' + self.leftover + '\n' + '\u2500' * 20 + '\n'
+        draft = reader.box_draft_text(shown)
+        self.assertEqual(reader.squashed(draft), self.old)
+        self.assertFalse(reader.own_draft(draft, self.text, ''))
+
+    def test_old_app_link_is_never_restored_as_a_human_draft(self):
+        reader.draft_note('fixture', typed='', sent=self.old, sent_at=time.time() - 7200)
+        result, state = self.send(self.leftover)
+        self.assertEqual(result['status'], 'sent')
+        self.assertEqual(state['sent'], [self.text])
+        self.assertEqual(state['box'], '')
+
+    def test_empty_first_capture_never_glues_old_link_to_new_message(self):
+        reader.draft_note('fixture', typed='', sent=self.old, sent_at=time.time() - 7200)
+        result, state = self.send(self.leftover, first_blank=True)
+        self.assertEqual(result['status'], 'sent')
+        self.assertEqual(state['sent'], [self.text])
+        self.assertEqual(state['box'], '')
+
+    def test_new_unknown_text_after_empty_capture_is_not_sent(self):
+        result, state = self.send(self.leftover, first_blank=True)
+        self.assertEqual(result['status'], 'not_sent')
+        self.assertEqual(state['sent'], [])
+        self.assertEqual(state['box'], self.leftover)
+
+    def test_genuine_multiline_human_draft_is_restored_without_sending_it(self):
+        human = 'Unfinished human draft' + self.leftover
+        reader.draft_note('fixture', typed='', sent=self.old)
+        result, state = self.send(human)
+        self.assertEqual(result['status'], 'sent')
+        self.assertEqual(state['sent'], [self.text])
+        self.assertEqual(state['box'], human)
+
+
 class IGSH_1647_PictureLinkSendTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

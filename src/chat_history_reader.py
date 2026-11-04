@@ -4716,9 +4716,9 @@ def squashed(text):
     return "".join(text.split())
 
 
-def own_draft(box, text, typed):
+def own_draft(box, text, typed, sent=''):
     shown = squashed(box)
-    return not shown or squashed(text).startswith(shown) or bool(typed) and squashed(typed).startswith(shown)
+    return not shown or squashed(text).startswith(shown) or bool(typed) and squashed(typed).startswith(shown) or bool(sent) and shown == squashed(sent)
 
 
 def late_draft_echo(tmux, text):
@@ -4761,20 +4761,22 @@ def send_response_preserve_draft(q):
         draft = box_draft(target)
         if draft is None:
             return dict(status='not_sent', reason='prompt_unavailable')
-        typed = draft_record(name).get('typed')
+        record = draft_record(name)
+        typed, sent = record.get('typed'), record.get('sent')
         typed = typed if isinstance(typed, str) else ''
-        displaced = draft if draft and not own_draft(draft, text, typed) else ''
+        sent = sent if isinstance(sent, str) else ''
+        displaced = draft if draft and not own_draft(draft, text, typed, sent) else ''
         if displaced:
             draft_note(name, displaced=displaced, displaced_at=time.time())
 
         def known(box):
-            return own_draft(box, text, typed) or bool(displaced) and squashed(box) in squashed(displaced)
-        for wait in ((0, 0.3, 0.7) if draft or typed else ()):
+            return own_draft(box, text, typed, sent) or bool(displaced) and squashed(box) in squashed(displaced)
+        for wait in (0, 0.3, 0.7):
             time.sleep(wait)
             box = prompt_box_text(target)
             if box and not known(box):
                 return dict(status='not_sent', reason='draft_present')
-            if not box:
+            if not box and (draft or typed):
                 subprocess.run(['tmux', 'send-keys', '-t', target, 'C-u'], check=True, capture_output=True, timeout=5)
                 box = prompt_box_text(target)
                 if box and not known(box):
@@ -4783,8 +4785,7 @@ def send_response_preserve_draft(q):
             if box_is_empty(box):
                 break
         else:
-            if draft or typed:
-                return dict(status='not_sent', reason='draft_not_cleared')
+            return dict(status='not_sent', reason='draft_not_cleared')
         try:
             subprocess.run(['tmux', 'paste-buffer', '-p', '-d', '-b', buffer, '-t', target], check=True, capture_output=True, timeout=5)
             time.sleep(0.3)
@@ -5306,7 +5307,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 54
+RUNTIME_GENERATION = 55
 
 if __name__ == '__main__':
     import base64 as _base64

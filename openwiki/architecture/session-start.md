@@ -141,9 +141,13 @@ calls `send_response_preserve_draft`:
 
 1. `tmux load-buffer` with the text.
 2. `resolve_tmux_agent` again; a different session id means `session_changed`.
-3. Read the prompt box. Text that is not ours aborts with `draft_present` after
-   three short waits (0 s, 0.3 s, 0.7 s).
-4. Clear the box (`C-u`, then re-read), aborting with `draft_not_cleared`.
+3. Read the prompt box. Preserve unrelated human text as a displaced draft.
+   Whitespace-normalized text matching our last sent message is old app text,
+   not a human draft; do not restore it.
+4. Re-read and clear the box (`C-u`, then re-read), even when the first capture
+   was empty. Use up to three short waits (0 s, 0.3 s, 0.7 s). Unknown text
+   appearing during clearing aborts with `draft_present`; a box that cannot
+   be cleared aborts with `draft_not_cleared`.
 5. `tmux paste-buffer -p -d ...`, wait 300 ms, then `tmux send-keys Enter`.
 6. Wait 300 ms and capture the prompt. Retry Enter while the box is full,
    at most three Enter presses total. A full box returns `not_sent`; an
