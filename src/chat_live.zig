@@ -263,8 +263,10 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.held = self.state == .running and !self.reply_in_history;
         self.state = .idle;
         self.ended = statusOf(strOf(payload, "status"));
+    } else if (std.mem.eql(u8, kind, "host.status") and std.mem.eql(u8, strOf(payload, "state"), "ready") and self.turn_len == 0 and self.state == .running) {
+        self.state = .idle;
     } else if (std.mem.eql(u8, kind, "host.status") and std.mem.eql(u8, strOf(payload, "state"), "stopped")) {
-        self.held = self.state == .running;
+        self.held = self.held or self.state == .running;
         self.state = .idle;
     } else {
         changed = false;
@@ -474,12 +476,21 @@ fn adopt(live: *Live, shell_id: u32, host: u8, sid: []const u8) *Live {
     return live;
 }
 
+pub fn starting(shell_id: u32, host: u8, sid: []const u8) bool {
+    if (shell_id == 0 or sid.len == 0 or sid.len > 48) return false;
+    mutex.lock();
+    defer mutex.unlock();
+    const live = claim(shell_id, host, sid) orelse return false;
+    live.state = .running;
+    live.touch();
+    return true;
+}
+
 pub fn begin(shell_id: u32, host: u8, sid: []const u8) u64 {
     if (shell_id == 0 or sid.len == 0 or sid.len >= MAX_ID) return 0;
     mutex.lock();
     defer mutex.unlock();
     const live = claim(shell_id, host, sid) orelse return 0;
-    if (live.after == 0) live.clear(std.heap.page_allocator);
     return live.after;
 }
 
@@ -629,6 +640,7 @@ pub fn historyCaughtUp(shell_id: u32) void {
     defer mutex.unlock();
     for (&slots) |*live| {
         if (!live.used or live.shell_id != shell_id) continue;
+        if (std.mem.eql(u8, live.turn[0..live.turn_len], "startup-failure")) continue;
         if (live.held) {
             live.held = false;
             live.touch();
@@ -1133,6 +1145,44 @@ test "IGSH-1266 a new turn drops the last turn so the live tail shows only the r
     const tail = tailFor(98, &text, 0, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("New"), text[0..tail.text_len]);
+}
+
+test "IGSH-1593 startup runs until ready and survives first subscription" {
+    const sid = "11111111-2222-3333-4444-123456789abc";
+    try std.testing.expect(starting(91, 0, sid));
+    defer release(91);
+    try std.testing.expect(running(91));
+    try std.testing.expectEqual(@as(u64, 0), begin(91, 0, sid));
+    try std.testing.expect(running(91));
+    const ready = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"ready\"}}}]}}";
+    try std.testing.expect(applyPage(91, sid, ready));
+    try std.testing.expect(!running(91));
+}
+
+test "IGSH-1593 startup failure survives empty history and replay" {
+    const sid = "11111111-2222-3333-4444-123456789abc";
+    try std.testing.expect(starting(90, 0, sid));
+    defer release(90);
+    _ = begin(90, 0, sid);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"startup-failure\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.done\",\"turn\":\"startup-failure\",\"item\":\"startup-failure\",\"payload\":{\"text\":\"Could not start chat.\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(90, sid, page));
+    historyCaughtUp(90);
+    const ended = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"startup-failure\",\"payload\":{\"status\":\"failed\"}}}]}}";
+    try std.testing.expect(applyPage(90, sid, ended));
+    try std.testing.expect(!running(90));
+    try std.testing.expect(held(90));
+    var text: [128]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    historyCaughtUp(90);
+    try std.testing.expect(!applyPage(90, sid, page));
+    const tail = tailFor(90, &text, 0, &blocks, &.{});
+    try std.testing.expectEqual(@as(usize, 1), tail.blocks);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Could not start chat."), text[0..tail.text_len]);
+    try std.testing.expectEqual(@as(usize, 0), tailFor(90, &text, 0, &blocks, blocks[0..1]).blocks);
+    try std.testing.expect(!running(90));
 }
 
 test "IGSH-1266 a host that turns ready mid-turn keeps the live reply on screen" {

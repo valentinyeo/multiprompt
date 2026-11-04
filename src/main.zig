@@ -1480,6 +1480,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = ReleaseCapture();
         }
     }
+    if (msg == WM_APP_NEW_TAB_DEFAULT) debugLog(if (app_state.g_account_locked) "new-chat message refused: account locked" else "new-chat message received");
     if (@import("window_frame.zig").handle(hwnd, msg, wp, lp)) |result| return result;
     if (msg == WM_LBUTTONDOWN and @import("settings_panel.zig").isOpen()) {
         @import("settings_panel.zig").close();
@@ -3626,12 +3627,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_NEW_TAB_DEFAULT => {
             if (app_state.shell_count >= MAX_SHELLS) {
+                debugLog("new-chat refused: tab limit");
                 notifyTabCapReached();
                 return 0;
             }
             if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
             if (app_state.g_inbox_active) closeInbox(hwnd);
             if (if (wp == 1) spawnWorkspacePlainClaudeSession() else spawnWorkspaceTmuxSession()) {
+                debugLog("new-chat session spawned");
                 applyPendingGroup();
                 _ = InvalidateRect(hwnd, null, 0);
                 app_state.g_refocus_remaining = 4;
@@ -3639,11 +3642,28 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (app_state.g_search_pick_repo_mode) {
+                debugLog("new-chat needs workspace folder: opening picker");
                 _ = PostMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
                 return 0;
             }
-            showHeaderNoticeAscii("Workspace folder unavailable", 3000, true);
-            _ = PostMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
+            switch (@import("command_palette.zig").g_start_fail) {
+                .capacity => {
+                    debugLog("new-chat refused: host capacity");
+                    showHeaderNoticeAscii("Cannot start chat: host is at capacity", 5000, true);
+                },
+                .launch_command => {
+                    debugLog("new-chat refused: launch preparation");
+                    showHeaderNoticeAscii("Cannot prepare the new session", 5000, true);
+                },
+                .spawn_shell => {
+                    debugLog("new-chat refused: shell launch");
+                    showHeaderNoticeAscii("Could not start the new session", 5000, true);
+                },
+                .none => {
+                    debugLog("new-chat refused: unknown reason");
+                    showHeaderNoticeAscii("Could not start the new session", 5000, true);
+                },
+            }
             return 0;
         },
         WM_APP_UI_BIGGER => {
@@ -5845,6 +5865,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) {
+                    debugLog("new-chat palette action");
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();

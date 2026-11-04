@@ -701,6 +701,19 @@ test "IGSH-1087 private typing bypasses chat and shell shortcuts except delibera
 }
 
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (nCode == HC_ACTION and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
+        const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (kb.vkCode == 0x54 and (isCtrlDown() or isAltDown(kb.flags)) and foregroundIsOurs()) {
+            var buf: [512]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&buf, "new-chat key entry ctrl={} alt={} shift={} win={} locked={} settings={} computer={} search={} find={} consumed={} shortcuts={} changelog={} picker={} snippet={} edit={} browser={} composer={} flags={X} wp={X}", .{
+                isCtrlDown(), isAltDown(kb.flags), GetAsyncKeyState(0x10) < 0, app_state.g_win_held, app_state.g_account_locked,
+                @import("settings_panel.zig").ownsForeground(), @import("computer_pane.zig").hasInputFocus(), app_state.g_search_active,
+                app_state.g_chat_find_open, computer_consumed_keys[0x54] or app_state.g_chat_find_consumed[0x54], app_state.g_shortcuts_active,
+                app_state.g_changelog_active, app_state.g_url_picker_active, app_state.g_snippet_create_active,
+                app_state.g_edit_hwnd != null, activeBrowserSurfaceHasForegroundFocus(), chatViewOwnsInput(), kb.flags, wp,
+            }) catch "new-chat key entry log overflow");
+        }
+    }
     if (app_state.g_account_locked) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
     app_state.g_last_kb_hook_tick = GetTickCount64();
     if (nCode == HC_ACTION) {
@@ -1149,8 +1162,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-            debugLog("hook: Alt+T seen, posting WM_APP_NEW_TAB_DEFAULT");
-            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0);
+            debugLog("new-chat Alt+T posting");
+            if (PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0) == 0) debugLog("new-chat key post failed");
             return 1;
         }
         if (wp == WM_KEYDOWN and isCtrlDown() and (kb.flags & 0x20) == 0 and
@@ -1159,8 +1172,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
             !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null)
         {
-            if (activeBrowserHasForegroundFocus()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
-            _ = PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0);
+            if (activeBrowserSurfaceHasForegroundFocus()) {
+                debugLog("new-chat browser owns Ctrl+T");
+                return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+            }
+            debugLog("new-chat Ctrl+T posting");
+            if (PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0) == 0) debugLog("new-chat key post failed");
             return 1;
         }
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x55 and foregroundIsOurs() and !app_state.g_inbox_active and !app_state.g_search_active and !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null) {

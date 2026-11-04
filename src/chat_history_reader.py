@@ -2685,6 +2685,9 @@ def host_start(provider, sid, source=None):
         return dict(status="refused", reason="unsupported_provider")
     if not host_enabled(provider, sid):
         return dict(status="refused", reason="host_disabled")
+    failure = host_session_state(provider, sid).get("startup_failure")
+    if isinstance(failure, dict) and failure.get("config") == host_config(provider, sid):
+        return dict(status="error", reason=failure.get("reason"), permanent=True)
     if host_alive(provider, sid) and host_request(provider, sid, dict(op="ping"), timeout=2).get("status") == "ok":
         return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
     host_clear_stale(provider, sid)
@@ -2700,6 +2703,9 @@ def host_start(provider, sid, source=None):
         exited = child.poll()
         if exited is not None:
             host_clear_stale(provider, sid)
+            failure = host_session_state(provider, sid).get("startup_failure")
+            if isinstance(failure, dict) and failure.get("config") == host_config(provider, sid):
+                return dict(status="error", reason=failure.get("reason"), permanent=True)
             return dict(status="error", reason=HOST_EXIT_REASONS.get(exited, "host_exited"), code=exited)
         time.sleep(0.2)
     return dict(status="error", reason="host_timeout")
@@ -2928,7 +2934,20 @@ def host_agent_env(provider, sid):
 
 
 def host_agent_start(provider, sid):
-    base = host_command(provider, sid)
+    cwd = host_cwd(provider, sid)
+    owner = conversation_owner(cwd)
+    cross_owner = owner is not None and owner[1] != HOME
+    if cross_owner:
+        config = host_config(provider, sid) or {}
+        command = config.get("command")
+        base = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else [host_binary_name(provider)]
+        extra = config.get("args")
+        base = base + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
+        mode = config.get("permission_mode")
+        if mode in HOST_PERMISSION_MODES:
+            base += ["--permission-mode", mode]
+    else:
+        base = host_command(provider, sid)
     if base is None:
         return None
     command = base + ["--print", "--input-format", "stream-json",
@@ -2936,9 +2955,41 @@ def host_agent_start(provider, sid):
                                             "--include-partial-messages", "--permission-prompt-tool", "stdio"]
     if provider == 'claude':
         command += ["--append-system-prompt", HOST_APPEND_PROMPT]
+    if cross_owner:
+        user, home = owner
+        env = {"PATH": "/usr/bin:/bin"}
+        prefix = ["sudo", "-n", "-H", "-u", user, "--", "/usr/bin/env", "-i", "HOME=" + str(home),
+                  "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider]
+        tmux = host_chat_name(provider, sid)
+        if tmux:
+            prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
+        shell = ["/bin/sh", "-l", "-c"]
+        setup = 'PATH="$HOME/.multiprompt-runtime:$HOME/.local/bin:$PATH"; export PATH; '
+        source = globals().get("READER_SOURCE")
+        if not isinstance(source, str) or not source:
+            raise RuntimeError("owner_unavailable")
+        check = ('import sys;n={"__name__":"host_owner_probe"};'
+                 'exec(compile(sys.stdin.read(),"<host-owner>","exec"),n);'
+                 'sys.exit(74 if n["conversation_path"](*sys.argv[1:]) is not None else 0)')
+        try:
+            probe = subprocess.run(prefix + shell + [setup + 'cd "$1" || exit 72; command -v "$2" >/dev/null || exit 73; exec python3 -c "$3" "$4" "$5" "$1"',
+                                                     "agent-preflight", cwd, command[0], check, provider, sid],
+                                   input=source, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   env=env, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("owner_unavailable")
+        if probe.returncode not in (0, 74):
+            raise RuntimeError({72: "cwd_unavailable", 73: "agent_not_found"}.get(probe.returncode, "owner_unavailable"))
+        command += ["--resume" if probe.returncode == 74 else "--session-id", sid]
+        command = prefix + shell + [setup + 'cd "$1" || exit 72; shift; exec "$@"', "agent-start", cwd] + command
+        try:
+            return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    env=env, start_new_session=True)
+        except OSError:
+            raise RuntimeError("owner_unavailable")
     command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
     return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            cwd=host_cwd(provider, sid), env=host_agent_env(provider, sid), start_new_session=True)
+                            cwd=cwd, env=host_agent_env(provider, sid), start_new_session=True)
 
 
 def host_agent_recorded_pid(provider, sid):
@@ -3004,7 +3055,7 @@ def host_session_state(provider, sid):
 
 def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
-                   messages={}, current={}, sends=[], turn=None, interrupted=False)
+                   messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False)
 
 
 def host_db(provider, sid, tmux, session):
@@ -3545,6 +3596,7 @@ def host_agent_event(provider, sid, tmux, session, raw):
     inflight = session.get("inflight")
     if kind == "system":
         if event.get("subtype") == "init":
+            session["ready"] = True
             if isinstance(event.get("session_id"), str):
                 session["state"]["native_session"] = event["session_id"]
             host_state_write(provider, sid, session["state"])
@@ -3637,6 +3689,20 @@ def host_accept_client(provider, sid, tmux, session, server):
             pass
 
 
+def host_startup_failure(provider, sid, tmux, state, reason):
+    state["startup_failure"] = dict(reason=reason, config=host_config(provider, sid))
+    host_state_write(provider, sid, state)
+    session = dict(state=state, turn="startup-failure")
+    text = {"cwd_unavailable": "Could not start chat: working folder unavailable.",
+            "agent_not_found": "Could not start chat: agent not found.",
+            "agent_unavailable": "Could not start chat: agent unavailable.",
+            "owner_unavailable": "Could not start chat as the workspace user."}[reason]
+    host_event(provider, sid, tmux, session, "turn.started")
+    host_event(provider, sid, tmux, session, "text.done", dict(text=text), "startup-failure")
+    host_event(provider, sid, tmux, session, "turn.ended", dict(status="failed"))
+    host_log(provider, sid, "host_error", dict(error=reason))
+
+
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
@@ -3654,10 +3720,14 @@ def host_loop(provider, sid, tmux, session, server, agent):
                     try:
                         chunk = agent.stdout.read1(65536)
                     except (OSError, ValueError):
-                        return
+                        chunk = b""
                     if chunk:
                         session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
+                        owner = conversation_owner(host_cwd(provider, sid))
+                        if not session["ready"]:
+                            reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
+                            host_startup_failure(provider, sid, tmux, session["state"], reason)
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
@@ -3676,6 +3746,10 @@ def host_main(provider, sid):
     lock = host_lock(provider, sid)
     if lock is None:
         return 1
+    failure = host_session_state(provider, sid).get("startup_failure")
+    if isinstance(failure, dict) and failure.get("config") == host_config(provider, sid):
+        host_release(lock)
+        return 5 if failure.get("reason") == "agent_not_found" else 4
     paths = host_paths(provider, sid)
     server = None
     agent = None
@@ -3686,6 +3760,7 @@ def host_main(provider, sid):
         except OSError:
             pass
         state = host_session_state(provider, sid)
+        state.pop("startup_failure", None)
         state.update(dict(provider=provider, sid=sid, tmux=tmux, pid=os.getpid(), started=time.time()))
         host_written(state)
         host_write(paths["owner"], dict(owner="host", pid=os.getpid(), at=time.time(), tmux=tmux))
@@ -3696,16 +3771,25 @@ def host_main(provider, sid):
         server.bind(str(paths["socket"]))
         os.chmod(paths["socket"], 0o600)
         server.listen(8)
-        agent = host_agent_start(provider, sid)
-        if agent is None:
-            host_log(provider, sid, "host_error", dict(error="agent_not_found", name=host_binary_name(provider)))
-            return 5
+        try:
+            agent = host_agent_start(provider, sid)
+            reason = "agent_not_found" if agent is None else None
+        except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
+            reason = "cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else (
+                "agent_not_found" if isinstance(error, FileNotFoundError) else "agent_unavailable")
+        except RuntimeError as error:
+            reason = str(error) if str(error) in ("cwd_unavailable", "agent_not_found", "owner_unavailable") else "owner_unavailable"
+        if reason:
+            host_startup_failure(provider, sid, tmux, state, reason)
+            return 5 if reason == "agent_not_found" else 4
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         state["agent_pid"] = agent.pid
         state["mode"] = (host_config(provider, sid) or {}).get("permission_mode") or "default"
         host_state_write(provider, sid, state)
         session = dict(state=state)
         host_loop(provider, sid, tmux, session, server, agent)
+        if state.get("startup_failure"):
+            return 4
         host_event(provider, sid, tmux, session, "host.status", dict(state="stopped"))
         return 0
     except (OSError, ValueError) as error:
@@ -3922,7 +4006,7 @@ def host_dispatch_start(provider, sid):
         return dict(status="owned")
     started = host_start(provider, sid)
     return dict(status="owned" if started.get("status") in ("started", "already") else "start_failed",
-                reason=started.get("reason"))
+                reason=started.get("reason"), permanent=started.get("permanent", False))
 
 
 def message_store_request(q):
@@ -4055,6 +4139,11 @@ def message_store_transaction(q):
                 if not fresh or fresh != ('queued', epoch):
                     return dict(epoch=fresh[1] if fresh else epoch, seq=seq, message=None)
                 if ready['status'] != 'owned':
+                    if ready.get('permanent'):
+                        db.execute("UPDATE shared_messages SET state='failed',receipt=? WHERE id=? AND state='queued'", ('host_' + ready['reason'], row[0]))
+                        row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row[0],)).fetchone())
+                        seq = message_event(db, provider, sid, row)
+                        return dict(epoch=epoch, seq=seq, message=row)
                     if ready['status'] == 'start_failed':
                         host_backoff_fail(provider, sid)
                     host_log(provider, sid, 'dispatch_wait', dict(ready=ready['status'], reason=ready.get('reason')))
@@ -5307,7 +5396,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 55
+RUNTIME_GENERATION = 58
 
 if __name__ == '__main__':
     import base64 as _base64
