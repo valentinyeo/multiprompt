@@ -549,6 +549,20 @@ test "IGSH-457 Starred workspace switch keeps the selected console on the shell 
     try std.testing.expect(g_starred_workspace);
     try std.testing.expectEqual(@as(u32, 1), active_shell);
 }
+test "IGSH-1655 live Alt+C leaves pending console layout and fonts untouched" {
+    const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
+    try std.testing.expect(spawnSession(.tmux, 0)); drain();
+    @memcpy(shells[0].tmux_session[0..9], "live-test");
+    shells[0].tmux_session_len = 9;
+    shells[0].chat_view_on = true;
+    shells[0].full_width_pending_console_resize = true;
+    g_chat_active = true;
+    const before = resets;
+    toggleChatView();
+    try std.testing.expect(g_chat_active and shells[0].chat_view_on);
+    try std.testing.expect(shells[0].full_width_pending_console_resize);
+    try std.testing.expectEqual(before, resets);
+}
 test "ordinary Chat exit never resets and pending full width ends on the shell font after queued work" {
     for ([_]bool{ false, true }) |pinned| {
         for ([_]bool{ false, true }) |full| {
