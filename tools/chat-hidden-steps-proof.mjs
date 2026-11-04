@@ -44,7 +44,7 @@ export function inspectPair(closed, opened, folded, before, after, restored) {
   }
   assert.deepEqual(before.transcript, after.transcript, 'opening preserves the owned viewport');
   assert.deepEqual(before.transcript, restored.transcript, 'closing preserves the owned viewport');
-  assert.ok(after.groups[1].top > before.groups[1].top + 20, 'opening exposes command and output rows');
+  assert.ok(after.groups[1].top - after.groups[0].bottom > before.groups[1].top - before.groups[0].bottom + 20, 'opening exposes command and output rows');
   const changed = changedPixels(closed, opened, before.transcript);
   assert.ok(changed > 100, 'opening must change real transcript pixels');
   assert.equal(changedPixels(closed, folded, before.transcript), 0, 'folding restores the closed transcript pixels');

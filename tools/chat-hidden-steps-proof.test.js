@@ -43,9 +43,35 @@ function inspect(api, value) {
   return api.inspectPair(value.closed, value.opened, value.folded, value.before, value.after, value.restored);
 }
 
+test('step driver reads the dictionary count field without PowerShell Count shadowing', () => {
+  const file = path.join(__dirname, 'verify-chat-delivery/hidden-steps.ps1');
+  assert.ok(fs.existsSync(file), 'hidden-step native driver exists');
+  const source = fs.readFileSync(file, 'utf8');
+  assert.ok(source.includes("$rows[0]['count'] -eq 2"));
+  assert.doesNotMatch(source, /\$rows\[\d\]\.count/);
+});
+
 test('step screenshot oracle accepts a visible grey line and real open-close pixels', async () => {
   const api = await oracle();
   assert.ok(inspect(api, sample()).changed > 100);
+});
+
+test('step screenshot oracle accepts bottom-anchored expansion without absolute row movement', async () => {
+  const api = await oracle();
+  const value = sample();
+  value.before.groups = [
+    { count: 2, open: false, left: 8, top: 90, right: 280, bottom: 118 },
+    { count: 1, open: false, left: 8, top: 190, right: 280, bottom: 218 },
+  ];
+  value.after.groups[1] = { count: 1, open: false, left: 8, top: 190, right: 280, bottom: 218 };
+  value.restored = structuredClone(value.before);
+  value.closed = image();
+  value.opened = image();
+  for (const row of value.before.groups) ink(value.closed, row);
+  for (const row of value.after.groups) ink(value.opened, row);
+  ink(value.opened, { left: 22, top: 65 });
+  value.folded = { ...value.closed, pixels: Buffer.from(value.closed.pixels) };
+  assert.ok(inspect(api, value).changed > 100);
 });
 
 test('step screenshot oracle rejects an invisible summary and incorrect group count', async () => {

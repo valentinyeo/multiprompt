@@ -29,7 +29,7 @@ function Steps-Frame([string]$Name, [bool]$FirstOpen, [bool]$SecondOpen) {
             $latest[[int]$g[1].Value] = @{first=[int]$g[1].Value; count=[int]$g[2].Value; open=([int]$g[3].Value -eq 1); left=[int]$g[4].Value; top=[int]$g[5].Value; right=[int]$g[6].Value; bottom=[int]$g[7].Value}
         }
         $rows = @($latest.Values | Sort-Object first)
-        if ($rows.Count -eq 2 -and $rows[0].count -eq 2 -and $rows[1].count -eq 1 -and $rows[0].open -eq $FirstOpen -and $rows[1].open -eq $SecondOpen) { $rows }
+        if ($rows.Count -eq 2 -and $rows[0]['count'] -eq 2 -and $rows[1]['count'] -eq 1 -and $rows[0].open -eq $FirstOpen -and $rows[1].open -eq $SecondOpen) { $rows }
     } 15
     if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Step disclosure changed the composer draft' }
     $bounds = $views[0].Current.BoundingRectangle

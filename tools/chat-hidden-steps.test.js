@@ -10,8 +10,8 @@ const session = fs.readFileSync('src/chat_session.zig', 'utf8');
 test('tool runs use a stable head across layout, painting, click and refresh', () => {
   assert.match(model, /pub fn toolGroup\(items: \[\]const Block, index: usize\) \?Range/);
   assert.match(model, /while \(start > 0 and items\[start - 1\]\.role == \.tool\)/);
-  assert.match(render, /toolGroup\(blocks, reuse - 1\).*reuse = group\.start/);
-  assert.match(render, /blocks\[group\.start\]\.tool_open/);
+  assert.match(render, /toolGroup\(tool_blocks, reuse - 1\).*reuse = group\.start/);
+  assert.match(render, /tool_blocks\[group\.start\]\.tool_open/);
   assert.match(render, /group\.end - group\.start/);
   assert.match(render, /if \(index != group\.start\) return null/);
   assert.match(find, /g_chat_blocks\[range\.start\]\.tool_open = true/);

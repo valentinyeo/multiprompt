@@ -2446,9 +2446,9 @@ pub fn chatRelayout(client_width: i32) void {
         }
     }
     app_state.g_chat_img_mutex.unlock();
-    const blocks = app_state.g_chat_blocks[0..app_state.g_chat_block_count];
+    const tool_blocks = app_state.g_chat_blocks[0..app_state.g_chat_block_count];
     if (reuse > 0) {
-        if (@import("chat_markdown.zig").toolGroup(blocks, reuse - 1)) |group| reuse = group.start;
+        if (@import("chat_markdown.zig").toolGroup(tool_blocks, reuse - 1)) |group| reuse = group.start;
     }
     var y: i32 = if (reuse > 0) app_state.g_chat_layout_rects[reuse - 1].bottom else app_state.g_chat_top_pad + (if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0);
     var has_previous = false;
@@ -2469,18 +2469,18 @@ pub fn chatRelayout(client_width: i32) void {
             chatImgStoreLayout(i, .{});
             continue;
         }
-        if (blocks[i].role == .tool) {
-            if (tool_group == null or i >= tool_group.?.end) tool_group = @import("chat_markdown.zig").toolGroup(blocks, i);
+        if (tool_blocks[i].role == .tool) {
+            if (tool_group == null or i >= tool_group.?.end) tool_group = @import("chat_markdown.zig").toolGroup(tool_blocks, i);
             const group = tool_group.?;
             const head = i == group.start;
             if (head) y += uiScaled(6);
             const top = y;
             if (head) y += uiScaled(28);
-            if (blocks[group.start].tool_open) {
-                const body = chatMeasureBlockRect(hdc, buf, blocks[i], .single, width, y, null);
+            if (tool_blocks[group.start].tool_open) {
+                const body = chatMeasureBlockRect(hdc, buf, tool_blocks[i], .single, width, y, null);
                 y = body.bottom;
             }
-            app_state.g_chat_layout_rects[i] = .{ .left = 0, .top = top, .right = if (head or blocks[group.start].tool_open) width else 0, .bottom = y };
+            app_state.g_chat_layout_rects[i] = .{ .left = 0, .top = top, .right = if (head or tool_blocks[group.start].tool_open) width else 0, .bottom = y };
             chatImgStoreLayout(i, .{});
             has_previous = true;
             continue;
@@ -4162,13 +4162,15 @@ fn chatToolAt(x: i32, y: i32) ?usize {
 
 pub fn chatToggleAllTools() void {
     var open = false;
+    var count: usize = 0;
     const blocks = app_state.g_chat_blocks[0..app_state.g_chat_block_count];
     for (blocks, 0..) |block, i| {
-        if (block.role == .tool and (i == 0 or blocks[i - 1].role != .tool) and !block.tool_open) {
-            open = true;
-            break;
+        if (block.role == .tool and (i == 0 or blocks[i - 1].role != .tool)) {
+            count += 1;
+            open = open or !block.tool_open;
         }
     }
+    if (count == 0) return;
     for (blocks, 0..) |*block, i| {
         if (block.role == .tool and (i == 0 or blocks[i - 1].role != .tool)) block.tool_open = open;
     }
@@ -6706,6 +6708,23 @@ test "IGSH-436 production table layout reuses its cached build" {
     const second = chatTableLayout(dc, text, 0, 688) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(first, second);
     try std.testing.expectEqual(before + 1, app_state.g_chat_tables.builds);
+}
+
+test "tool disclosure without steps keeps automatic scrolling unchanged" {
+    const old_count = app_state.g_chat_block_count;
+    const old_up = app_state.g_chat_scrolled_up;
+    const old_reuse = app_state.g_chat_layout_reuse;
+    defer {
+        app_state.g_chat_block_count = old_count;
+        app_state.g_chat_scrolled_up = old_up;
+        app_state.g_chat_layout_reuse = old_reuse;
+    }
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_scrolled_up = false;
+    app_state.g_chat_layout_reuse = 7;
+    chatToggleAllTools();
+    try std.testing.expect(!app_state.g_chat_scrolled_up);
+    try std.testing.expectEqual(@as(usize, 7), app_state.g_chat_layout_reuse);
 }
 
 test "tool groups fold, open and retain their streaming header" {
