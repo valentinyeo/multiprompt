@@ -159,7 +159,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert command[command.index('--resume')+1] == sid, command
     assert command[-2:] == ['--resume', sid] and [command[i+1] for i, part in enumerate(command) if part == '--permission-mode'] == ['plan'], command
     session['ready'] = False
-    assert r['host_handle_request'](provider, sid, tmux, session, dict(op='deliver'))['status'] == 'busy'
+    assert r['host_handle_request'](provider, sid, tmux, session, dict(op='deliver'))['reason'] == 'invalid_text'
     import selectors
     class Output:
         def __init__(self, *events): self.events = list(events)
@@ -203,12 +203,78 @@ with tempfile.TemporaryDirectory() as directory:
         return replacement
     with patch.object(selectors, 'DefaultSelector', Selector), patch.object(r['subprocess'], 'Popen', replacement_spawn):
         r['host_loop'](provider, sid, tmux, session2, object(), original)
-    assert [reply['status'] for reply in replies] == ['ok', 'busy', 'busy', 'sent'], replies
+    assert [reply['status'] for reply in replies] == ['ok', 'busy', 'refused', 'sent'], replies
     command = calls[-1]
     assert command[command.index('--model')+1] == 'haiku', command
     assert command[command.index('--effort')+1] == 'low', command
     assert command[command.index('--resume')+1] == sid, command
     assert len(original.stdin.lines) == 0 and len(replacement.stdin.lines) == 1
+    class DelayedOutput:
+        def __init__(self, process, *messages):
+            self.process, self.messages = process, list(messages)
+        def read1(self, size):
+            assert self.process.stdin.lines, 'init emitted before first user input'
+            return (json.dumps(self.messages.pop(0)) + '\n').encode()
+    class DelayedProcess:
+        def __init__(self, *messages):
+            self.stdin = Input()
+            self.stdout = DelayedOutput(self, *messages)
+            self.pid = 101
+    initial = DelayedProcess(dict(type='system', subtype='init'), dict(type='result', subtype='success'))
+    next_agent = DelayedProcess(dict(type='system', subtype='init'))
+    steps[:] = ['client', 'agent', 'agent', 'client', 'client', 'agent', 'client']
+    actions = []
+    def delayed_client(p, s, t, current, server):
+        if len(actions) == 0:
+            assert not current['ready']
+            actions.append(r['host_handle_request'](p, s, t, current, dict(op='deliver', id='synthetic-message-first', attempt='one', epoch=1, text='first')))
+        elif len(actions) == 1:
+            actions.append(r['host_handle_request'](p, s, t, current, dict(op='set_model', model='opus')))
+        elif len(actions) == 2:
+            assert not current['ready'] and current['agent'] is next_agent
+            assert current['applied_settings'] != current['settings']
+            actions.append(r['host_handle_request'](p, s, t, current, dict(op='deliver', id='synthetic-message-next', attempt='two', epoch=1, text='next')))
+        else:
+            assert current['ready'] and current['applied_settings'] == current['settings']
+            current['stop'] = True
+    r['host_accept_client'] = delayed_client
+    def delayed_spawn(command, **kwargs):
+        calls.append(command)
+        return next_agent
+    with patch.object(selectors, 'DefaultSelector', Selector), patch.object(r['subprocess'], 'Popen', delayed_spawn):
+        r['host_loop'](provider, sid, tmux, dict(state={}), object(), initial)
+    assert [action['status'] for action in actions] == ['sent', 'ok', 'sent'], actions
+    assert len(initial.stdin.lines) == len(next_agent.stdin.lines) == 1
+    assert calls[-1][calls[-1].index('--model')+1] == 'opus'
+    r['host_accept_client'] = client
+    config = r['host_config'](provider, sid)
+    config['model'] = 'haiku'
+    r['host_write'](r['host_paths'](provider, sid)['config'], config)
+    first_agent = DelayedProcess()
+    selected_agent = DelayedProcess(dict(type='system', subtype='init'))
+    steps[:] = ['client', 'client', 'agent', 'client']
+    actions.clear()
+    def preinit_client(p, s, t, current, server):
+        if not actions:
+            assert not current['ready']
+            actions.append(r['host_handle_request'](p, s, t, current, dict(op='set_effort', effort='medium')))
+            assert r['host_handle_request'](p, s, t, current, dict(op='deliver'))['status'] == 'busy'
+        elif len(actions) == 1:
+            assert current['agent'] is selected_agent and not current['ready']
+            actions.append(r['host_handle_request'](p, s, t, current, dict(op='deliver', id='synthetic-message-before-init', attempt='three', epoch=1, text='next')))
+        else:
+            assert current['ready']
+            current['stop'] = True
+    r['host_accept_client'] = preinit_client
+    def preinit_spawn(command, **kwargs):
+        calls.append(command)
+        return selected_agent
+    with patch.object(selectors, 'DefaultSelector', Selector), patch.object(r['subprocess'], 'Popen', preinit_spawn):
+        r['host_loop'](provider, sid, tmux, dict(state={}), object(), first_agent)
+    assert [action['status'] for action in actions] == ['ok', 'sent'], actions
+    assert not first_agent.stdin.lines and len(selected_agent.stdin.lines) == 1
+    assert calls[-1][calls[-1].index('--effort')+1] == 'medium'
+    r['host_accept_client'] = client
     config = r['host_config'](provider, sid)
     config['effort'] = 'high'
     r['host_write'](r['host_paths'](provider, sid)['config'], config)
