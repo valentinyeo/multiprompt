@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+assert.ok(fs.existsSync(path.join(__dirname, 'chat-model-proof.cjs')), 'model proof checker is available');
 const { verify } = require('./chat-model-proof.cjs');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 

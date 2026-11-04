@@ -43,6 +43,30 @@ if os.name == "nt" and os.environ.get("CHAT_MODEL_PROOF") == "1":
     import time
     import types
 
+    if not hasattr(socket, "AF_UNIX"):
+        socket.AF_UNIX = 0x7FFE
+        _socket = socket.socket
+
+        class FixtureSocket(_socket):
+            def __init__(self, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None):
+                self.fixture_unix = family == socket.AF_UNIX
+                super().__init__(socket.AF_INET if self.fixture_unix else family, type, proto, fileno)
+
+            def bind(self, address):
+                if not self.fixture_unix:
+                    return super().bind(address)
+                super().bind(("127.0.0.1", 0))
+                with open(address, "w", encoding="ascii") as target:
+                    target.write(str(self.getsockname()[1]))
+
+            def connect(self, address):
+                if self.fixture_unix:
+                    with open(address, encoding="ascii") as source:
+                        address = ("127.0.0.1", int(source.read()))
+                return super().connect(address)
+
+        socket.socket = FixtureSocket
+
     tempfile.tempdir = os.environ["MP_VERIFY_SOCKET_TEMP"]
     _kill = os.kill
     _kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
