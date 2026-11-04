@@ -24,6 +24,10 @@ Preconditions:
 - The isolated data directory contains no tab named `Verification session`.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=sessions`. The Windows invocation selects `control.ps1 -Feature sessions`.
+- **Repository picker.** Use a branch build with Zig available on the hosted runner. Before launch, the driver compiles an SSH-only stand-in and sets the isolated SSH path. It returns `/work/projects/alpha` and `/work/projects/beta` for discovery and holds tmux transports open. This is not real SSH, tmux or an agent.
+- **Ctrl+T.** Wait for the stand-in's discovery response, capture the picker, filter `beta`, press Enter, and require the saved active tab to have beta as its cwd and Chat View enabled. Inspect the picker screenshots: the discovery receipt alone does not prove the custom-painted rows appeared.
+- **Cancel.** Close the chat, choose `New Claude in terminal`, cancel the picker and close the palette. Ctrl+T then selects `alpha` and must save a chat tab with alpha as cwd. Close it, choose `New Claude in terminal` again, select `beta`, and require beta cwd with Chat View disabled. Missing `cv` means false in the saved format.
+- **Evidence.** Inspect the picker and resulting screenshots, saved session, per-process SSH invocations and `result.json`. A timeout before selection is a harness or setup failure, not proof of the product bug. The existing CMD journey runs afterward.
 - **Create.** Ctrl+K, type `new cmd`, capture `action.png`, then Enter. The helper requires saved tab count to increase by exactly one.
 - **Rename.** Press F2, Ctrl+A, type `Verification session`, Enter. The saved session must contain exactly one tab with that name.
 - **Execute.** Type `echo verified-from-real-cmd>"<isolated scratch>/user-created.txt"` in the active console and press Enter. The helper substitutes its actual scratch path, records the literal typed command in `actions.json`, and requires that file's content to be `verified-from-real-cmd`.

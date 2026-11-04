@@ -1,41 +1,60 @@
 
-            $commandsPath = Join-Path $scratch 'roaming/ZigShell/commands.json'
-            New-Item -ItemType Directory -Force -Path (Split-Path $commandsPath) | Out-Null
-            $folder = '/tmp/multiprompt-harness-folder'
-            $names = @('Other', 'Workspace 1', 'Workspace 2', 'Starred', 'Main', 'Software Factory', 'Verification')
-            $entries = @(foreach ($name in $names) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; folder_host = '0'; default = $true; workspace = $name; cwd = $folder } })
-            $json = [ordered]@{ commands = $entries } | ConvertTo-Json -Depth 5
-            [IO.File]::WriteAllText($commandsPath, $json, (New-Object Text.UTF8Encoding($false)))
-            Start-Sleep -Milliseconds 500
-            $beforeClaude = @( (Read-Session).tabs ).Count
+            $beforeClaude = @((Read-Session).tabs).Count
             Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
-            Start-Sleep -Milliseconds 2000
-            $entry = 'Ctrl+T'
-            if (@( (Read-Session).tabs ).Count -ne $beforeClaude + 1) {
-                $entry = 'palette New Claude chat'
-                Palette 'New Claude chat'
-                Press @(0x0D) 'Enter: New Claude chat'
-                Start-Sleep -Milliseconds 2000
-            }
-            Wait-Until { @( (Read-Session).tabs ).Count -eq $beforeClaude + 1 } 'new Claude chat tab saved'
+            Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'listing-*.txt').Count -gt 0 } 'repository discovery response'
+            $repoLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            Wait-Until { (Get-Content -LiteralPath $repoLog -Raw) -match '\[palette\] rows chars=0 count=3 ids=6702 6710 6711' } 'picker shows both repository rows'
+            Snapshot 'repo-picker-rows'
+            Type-Text 'beta'
+            Snapshot 'ctrl-t-beta-picker'
+            Press @(0x0D) 'Enter: select beta'
             Wait-Until {
                 $state = Read-Session
-                if ($null -eq $state) { return $false }
+                if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
                 $tab = @($state.tabs)[$state.active_tab]
-                $null -ne $tab -and $tab.PSObject.Properties['cv'] -and $tab.cv -eq $true
-            } 'new Claude tab saved in Chat View'
+                $tab.cwd -eq '/work/projects/beta' -and $tab.cv -eq $true
+            } 'Ctrl+T beta chat saved'
+            Snapshot 'ctrl-t-beta-chat'
+            $result.checks += @{ name = 'ctrl-t-beta-chat'; cwd = '/work/projects/beta'; cv = $true }
+            Press @(0x11, 0x57) 'Ctrl+W: close beta chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta chat closed'
+
+            Palette 'new claude in terminal'
+            Press @(0x0D) 'Enter: New Claude in terminal'
+            Snapshot 'terminal-picker-cancel'
+            Press @(0x1B) 'Esc: cancel repository picker'
+            Press @(0x1B) 'Esc: close palette'
+            if (@((Read-Session).tabs).Count -ne $beforeClaude) { throw 'Cancelling the picker created a tab' }
+            Press @(0x11, 0x54) 'Ctrl+T: new Claude chat after cancel'
+            Type-Text 'alpha'
+            Snapshot 'ctrl-t-alpha-picker'
+            Press @(0x0D) 'Enter: select alpha'
             Wait-Until {
-                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                $transcript = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
-                $composer = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
-                $shown = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $transcript) | Where-Object { -not $_.Current.IsOffscreen }).Count -ge 1
-                $shown -and @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composer) | Where-Object { -not $_.Current.IsOffscreen }).Count -ge 1
-            } 'Chat View transcript and composer visible for the new Claude tab'
-            Snapshot 'ctrl-t-chat-view'
-            $result.checks += @{ name = 'ctrl-t-chat-view'; entry = $entry; tabsBefore = $beforeClaude; tabsAfter = @( (Read-Session).tabs ).Count; commands = 'harness workspace folder seeded' }
-            Press @(0x11, 0x57) 'Ctrl+W: close the new Claude tab'
-            Wait-Until { @( (Read-Session).tabs ).Count -eq $beforeClaude } 'new Claude tab closed'
-            Remove-Item -LiteralPath $commandsPath -Force
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                $tab = @($state.tabs)[$state.active_tab]
+                $tab.cwd -eq '/work/projects/alpha' -and $tab.cv -eq $true
+            } 'Ctrl+T alpha chat after cancel saved'
+            Snapshot 'ctrl-t-alpha-chat'
+            $result.checks += @{ name = 'cancel-then-ctrl-t-alpha'; cwd = '/work/projects/alpha'; cv = $true }
+            Press @(0x11, 0x57) 'Ctrl+W: close alpha chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'alpha chat closed'
+
+            Palette 'new claude in terminal'
+            Press @(0x0D) 'Enter: New Claude in terminal'
+            Type-Text 'beta'
+            Snapshot 'terminal-beta-picker'
+            Press @(0x0D) 'Enter: select beta terminal'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                $tab = @($state.tabs)[$state.active_tab]
+                $tab.cwd -eq '/work/projects/beta' -and (-not $tab.PSObject.Properties['cv'] -or $tab.cv -eq $false)
+            } 'beta terminal saved'
+            Snapshot 'terminal-beta'
+            $result.checks += @{ name = 'terminal-beta'; cwd = '/work/projects/beta'; cv = $false }
+            Press @(0x11, 0x57) 'Ctrl+W: close beta terminal'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta terminal closed'
 
             $before = @( (Read-Session).tabs ).Count
             Palette 'new cmd'
