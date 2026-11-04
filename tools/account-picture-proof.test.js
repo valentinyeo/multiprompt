@@ -21,7 +21,7 @@ test('shared Windows verification uses a portable CPU target', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   const command = workflow.slice(workflow.indexOf('- name: Build the Windows app once for this push')).split('\n').find(line => line.includes('run: zig build'));
   assert.match(command, /-Dtarget=x86_64-windows-gnu\b/);
-  assert.match(command, /-Dcpu=baseline\b/);
+  assert.match(command, /-Dcpu=x86_64_v3\b/);
 });
 
 test('live picture proof measures the actual upload-to-render interval', t => {
