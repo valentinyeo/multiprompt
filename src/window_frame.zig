@@ -71,6 +71,7 @@ fn hover(hwnd: w.HANDLE, button: ?Button) void {
 }
 
 fn maximizedClientRect(proposed: w.RECT, work: w.RECT) w.RECT {
+    if (proposed.left > work.left or proposed.top > work.top or proposed.right < work.right or proposed.bottom < work.bottom) return proposed;
     return .{
         .left = @max(proposed.left, work.left),
         .top = @max(proposed.top, work.top),
@@ -84,10 +85,10 @@ pub fn handle(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) ?w.LRESUL
         0x0083 => {
             if (lp == 0) return 0;
             const client: *w.RECT = @ptrFromInt(@as(usize, @bitCast(lp)));
-            if (w.IsZoomed(hwnd) != 0) {
+            if (w.IsZoomed(hwnd) != 0 and w.IsIconic(hwnd) == 0) {
                 var monitor = std.mem.zeroes(w.MONITORINFO);
                 monitor.cbSize = @sizeOf(w.MONITORINFO);
-                if (w.GetMonitorInfoW(w.MonitorFromWindow(hwnd, w.MONITOR_DEFAULTTONEAREST), &monitor) != 0) {
+                if (w.GetMonitorInfoW(w.MonitorFromRect(client, w.MONITOR_DEFAULTTONEAREST), &monitor) != 0) {
                     client.* = maximizedClientRect(client.*, monitor.rcWork);
                 }
             }

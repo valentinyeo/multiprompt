@@ -128,7 +128,7 @@ try {
     $graphics.Dispose()
     $bitmap.Dispose()
     $log = -join (Get-Content -LiteralPath (Join-Path $env:APPDATA 'ZigShell/debug.log') -Raw)
-    if (-not $log.Contains('Multiprompt froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
+    if (-not $log.Contains('Multi Bot froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
     if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Next-start notice was not consumed' }
     if (@(Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
     if ($Service) {
@@ -157,6 +157,25 @@ try {
         Write-Host 'FREEZE_LIVE_UPLOAD_OK'
     }
     @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
+    Stop-Process -Id $app.Id -Force
+    if (-not $app.WaitForExit(5000)) { throw 'Original freeze journey process did not exit' }
+    $app.Dispose()
+    $app = $null
+    $baseline = Join-Path $env:RUNNER_TEMP ('background-baseline-' + [guid]::NewGuid().ToString('N') + '.exe')
+    try {
+        Invoke-WebRequest 'https://github.com/valentinyeo/multiprompt/releases/download/v0.28.1450/multiprompt-x64.exe' -OutFile $baseline
+        $manifest = (Invoke-WebRequest 'https://github.com/valentinyeo/multiprompt/releases/download/v0.28.1450/SHA256SUMS.txt').Content
+        $checksum = [regex]::Match($manifest, '(?m)^([a-fA-F0-9]{64})\s+\*?multiprompt-x64\.exe\r?$')
+        if (-not $checksum.Success -or (Get-FileHash $baseline -Algorithm SHA256).Hash -ne $checksum.Groups[1].Value) { throw 'Background baseline checksum mismatch' }
+        $redEvidence = Join-Path $Evidence 'background-red'
+        $red = & pwsh -NoProfile -File "$PSScriptRoot/background-freeze-journey.ps1" -Exe $baseline -Evidence $redEvidence 2>&1
+        $redCode = $LASTEXITCODE
+        $red | Set-Content (Join-Path $Evidence 'background-red-output.txt')
+        $redResult = Get-Content (Join-Path $redEvidence 'result.json') -Raw | ConvertFrom-Json
+        if ($redCode -eq 0 -or $redResult.phase -ne 'geometry' -or $redResult.geometry.ClientWidth -ne 8 -or ($red -join "`n") -notmatch 'WM_NCCALCSIZE clipped the proposal from \d+ to 8 pixels') { throw 'Background geometry red control failed for an unexpected reason' }
+        $global:LASTEXITCODE = 0
+    } finally { Remove-Item -LiteralPath $baseline -Force -ErrorAction SilentlyContinue }
+    & "$PSScriptRoot/background-freeze-journey.ps1" -Exe $Exe -Evidence (Join-Path $Evidence 'background')
     Write-Host 'FREEZE_JOURNEY_OK'
 } finally {
     if ($thread -ne [IntPtr]::Zero) { [void][FreezeJourney]::ResumeThread($thread); [void][FreezeJourney]::CloseHandle($thread) }

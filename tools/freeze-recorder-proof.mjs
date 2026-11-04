@@ -11,6 +11,11 @@ export function validateFreezeReport(text) {
   const duration = /^unresponsive_ms: (\d+)$/.exec(lines.shift());
   assert.ok(duration && Number(duration[1]) > 5000);
   assert.equal(lines.shift(), 'thread_context: captured');
+  if (lines[0]?.startsWith('reason:')) assert.match(lines.shift(), /^reason: [12]$/);
+  if (lines[0]?.startsWith('frame_size:')) {
+    assert.match(lines.shift(), /^frame_size: -?\d+ -?\d+$/);
+    assert.match(lines.shift(), /^client_size: -?\d+ -?\d+$/);
+  }
   assert.match(lines.shift(), /^instruction: (?:multiprompt\.exe|ntdll\.dll|kernelbase\.dll|kernel32\.dll|user32\.dll|win32u\.dll|gdi32\.dll|gdi32full\.dll|dwrite\.dll)\+0x[0-9A-F]+$/);
   assert.equal(lines.shift(), 'stack_rvas:');
   let frames = 0;

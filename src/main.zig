@@ -1455,6 +1455,13 @@ fn showPickRepoFailure(saving_folder: bool) void {
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }
+    if (msg == WM_ACTIVATEAPP) {
+        const active = wp != 0 and IsIconic(hwnd) == 0;
+        freeze_recorder.activation(active);
+        if (active) _ = InvalidateRect(hwnd, null, 0);
+    } else if ((msg == WM_SIZE and wp == 1) or (msg == 0x0018 and wp == 0)) {
+        freeze_recorder.activation(false);
+    }
     if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
@@ -1572,6 +1579,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         switch (msg) {
             WM_PAINT => {
                 paintAccountLock(hwnd);
+                freeze_recorder.painted();
                 return 0;
             },
             WM_ERASEBKGND => return 1,
@@ -1741,6 +1749,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = EndPaint(hwnd, &ps);
                 return 0;
             }
+            defer freeze_recorder.painted();
             var client_rc: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &client_rc);
             const client_w = client_rc.right - client_rc.left;
