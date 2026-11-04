@@ -2024,6 +2024,17 @@ fn chatOutboxReadyToType(channel: bool, direct: bool, busy: bool, screen_working
     return true;
 }
 
+fn chatOutboxHeldByLink(link_down: bool, message_v1: bool, channel: bool) bool {
+    return link_down and !(message_v1 and channel);
+}
+
+test "Chat View send: a host message is not held while the tab console reconnects" {
+    try std.testing.expect(!chatOutboxHeldByLink(true, true, true));
+    try std.testing.expect(chatOutboxHeldByLink(true, false, true));
+    try std.testing.expect(chatOutboxHeldByLink(true, true, false));
+    try std.testing.expect(!chatOutboxHeldByLink(false, false, false));
+}
+
 fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (e >= app_state.g_chat_outbox.items.len) return false;
     if (app_state.g_chat_pending_reset) |pending| {
@@ -2032,8 +2043,8 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     }
     if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
     if (chatOutboxFindSending(&app_state.g_chat_outbox) != null or app_state.g_chat_tmux_send_job != null) return false;
-    if (chatLinkLooksDown(shell_index)) return false;
     const channel = chatTmuxSendEligible(shell_index);
+    if (chatOutboxHeldByLink(chatLinkLooksDown(shell_index), app_state.g_chat_outbox.items[e].message_v1, channel)) return false;
     const direct = chatShouldUseDirectInput(shell_index);
     const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
     const first = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key, channel or direct) orelse return false;
@@ -2133,7 +2144,7 @@ pub fn chatOutboxTick() void {
         for (0..app_state.g_chat_outbox.items.len) |e| {
             const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
             const idx = chatOutboxShellForKey(key) orelse continue;
-            if (chatLinkLooksDown(idx)) continue;
+            if (chatOutboxHeldByLink(chatLinkLooksDown(idx), app_state.g_chat_outbox.items[e].message_v1, chatTmuxSendEligible(idx))) continue;
             if (chatOutboxTrySendEntry(idx, e)) {
                 sshOutboxFlushed(idx);
                 break;
@@ -2156,7 +2167,7 @@ pub fn chatOutboxFlushActiveNow() void {
     }
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
-    const claude_buffer = !chatLinkLooksDown(app_state.active_shell) and (chatTmuxSendEligible(app_state.active_shell) or chatShouldUseDirectInput(app_state.active_shell));
+    const claude_buffer = chatTmuxSendEligible(app_state.active_shell) or (!chatLinkLooksDown(app_state.active_shell) and chatShouldUseDirectInput(app_state.active_shell));
     const e = chatOutboxFirstSendableIndexIn(&app_state.g_chat_outbox, key, claude_buffer) orelse {
         showHeaderNoticeAscii("No queued messages for this tab", 3000, false);
         return;
@@ -3163,6 +3174,30 @@ test "ISSUE-349 an explicit tmux send error falls back, a timeout does not" {
     try std.testing.expect(!chatTmuxSendRejected(""));
 }
 
+fn chatResetConfirmed(server_ok: bool, pending: app_state.ChatPendingReset, nonce: u64, request_nonce: u64) bool {
+    return server_ok and pending.nonce != 0 and pending.nonce == nonce and pending.request_nonce == request_nonce;
+}
+
+fn chatResetGiveUp(pending: *app_state.ChatPendingReset) bool {
+    pending.unconfirmed +|= 1;
+    return pending.unconfirmed >= 12;
+}
+
+test "Chat View reset: a reset the server confirmed clears even after the chat history was rebuilt" {
+    const pending = app_state.ChatPendingReset{ .nonce = 41, .request_nonce = 42 };
+    try std.testing.expect(chatResetConfirmed(true, pending, 41, 42));
+    try std.testing.expect(!chatResetConfirmed(false, pending, 41, 42));
+    try std.testing.expect(!chatResetConfirmed(true, pending, 41, 7));
+    try std.testing.expect(!chatResetConfirmed(true, .{}, 0, 0));
+}
+
+test "Chat View reset: a reset the server never confirms stops holding sends" {
+    var pending = app_state.ChatPendingReset{ .nonce = 41, .request_nonce = 42 };
+    var tries: u8 = 0;
+    while (!chatResetGiveUp(&pending)) tries += 1;
+    try std.testing.expectEqual(@as(u8, 11), tries);
+}
+
 fn chatTmuxSendFinish() void {
     const job = app_state.g_chat_tmux_send_job orelse return;
     if (!job.finished.load(.acquire)) return;
@@ -3175,8 +3210,7 @@ fn chatTmuxSendFinish() void {
     if (job.message_reset) {
         const current = chatFileIdentityForShell(idx);
         const pending_reset = app_state.g_chat_pending_reset orelse return;
-        const current_history = chatHistoryEntry(current) orelse return;
-        if (job.message_state[0] == '1' and std.meta.eql(current, job.key) and current_history.generation == job.history_instance and current_history.message_generation == job.message_generation and pending_reset.nonce == job.message_nonce and pending_reset.request_nonce == job.request_nonce) {
+        if (chatResetConfirmed(job.message_state[0] == '1', pending_reset, job.message_nonce, job.request_nonce)) {
             var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
             const key = chatOutboxKeyForShell(idx, &key_buf);
             var i: usize = 0;
@@ -3193,6 +3227,7 @@ fn chatTmuxSendFinish() void {
                 return;
             }
             chatOutboxChanged();
+            if (!chatResetSameChat(pending_reset.key, current)) return;
             if (chatHistoryEntry(current)) |history| {
                 history.message_epoch = job.reset_result_epoch;
                 history.message_generation +%= 1;
@@ -3201,7 +3236,11 @@ fn chatTmuxSendFinish() void {
                 history.message_cursor = 0;
                 history.message_seq = 0;
             }
-        } else {
+        } else if (chatResetGiveUp(&app_state.g_chat_pending_reset.?)) {
+            app_state.g_chat_pending_reset = null;
+            for (app_state.g_chat_outbox.items) |*entry| entry.reset_pending = false;
+            _ = saveChatOutbox();
+            chatOutboxChanged();
             showHeaderNoticeAscii("Reset unconfirmed. Messages remain here", 5000, true);
         }
         return;

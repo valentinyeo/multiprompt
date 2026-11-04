@@ -330,6 +330,7 @@ fn chatOutboxShellForKey(_: []const u8) ?u32 { return 0; }
 fn chatEchoMatchActive() void {}
 fn chatOutboxFindSending(_: anytype) ?usize { return 0; }
 fn chatLinkLooksDown(_: u32) bool { return false; }
+fn chatTmuxSendEligible(_: u32) bool { return false; }
 fn chatOutboxTrySendEntry(_: u32, _: usize) bool { return false; }
 fn chatHoldLegacyCodex() bool { return false; }
 fn chatMessageSyncFinish() void {}
@@ -340,6 +341,7 @@ fn chatPendingResetStart(_: u32) void {}
 fn sshOutboxFlushed(_: u32) void {}
 fn chatFullSettleStart() void {}
 fn armChatOutboxTimerIfNeeded() void {}
+${body('chatOutboxHeldByLink')}
 ${body('chatOutboxTick')}
 test "ISSUE-501 injected clock jump" {
     fake_wall += ${jump};

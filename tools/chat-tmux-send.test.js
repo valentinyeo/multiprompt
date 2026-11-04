@@ -73,7 +73,8 @@ const ChatTmuxSendJob = struct {
     message_state: [16]u8 = @splat(0), message_wire_id: [81]u8 = @splat(0),
     finished: std.atomic.Value(bool) = .init(true),
 };
-const ChatPendingReset = struct { key: Key = .{}, nonce: u64 = 0, request_nonce: u64 = 0 };
+const ChatPendingReset = struct { key: Key = .{}, nonce: u64 = 0, request_nonce: u64 = 0, unconfirmed: u8 = 0 };
+fn chatResetSameChat(_: Key, _: Key) bool { return true; }
 var g_chat_pending_reset: ?ChatPendingReset = null;
 const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 fn chatLogSendPath(_: u32, _: ?*const Entry, _: ChatSendRoute, _: []const u8) void {}
@@ -239,7 +240,7 @@ test "channel write failure falls back once but a written request or retry never
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
-    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "VPS')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
         reset();
