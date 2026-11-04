@@ -157,7 +157,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert command[command.index('--model')+1] == 'haiku', command
     assert command[command.index('--effort')+1] == 'high', command
     assert command[command.index('--resume')+1] == sid, command
-    assert command[-2:] == ['--resume', sid] and [command[i+1] for i, part in enumerate(command) if part == '--permission-mode'] == ['acceptEdits', 'plan'], command
+    assert command[-2:] == ['--resume', sid] and [command[i+1] for i, part in enumerate(command) if part == '--permission-mode'] == ['plan'], command
     session['ready'] = False
     assert r['host_handle_request'](provider, sid, tmux, session, dict(op='deliver'))['status'] == 'busy'
     import selectors
@@ -222,6 +222,40 @@ with tempfile.TemporaryDirectory() as directory:
     assert [reply['status'] for reply in replies] == ['ok', 'busy']
     assert not failed.stdin.lines
     assert r['host_settings'](provider, sid)['effort'] == 'low'
+    for other in ('codex', 'pi'):
+        other_sid = 'synthetic-' + other
+        other_config = dict(enabled=True, tmux=tmux, cwd=directory, command=['synthetic-agent'],
+                            args=['--model', 'native-model'], model='haiku', effort='low')
+        r['host_write'](r['host_paths'](other, other_sid)['config'], other_config)
+        for operation, key, value in (('set_model', 'model', 'opus'), ('set_effort', 'effort', 'high')):
+            request = dict(provider=other, sid=other_sid, op=operation, **{key:value})
+            assert r['host_reply'](request)['reason'] == 'unsupported_provider'
+            other_session = dict(state={})
+            r['host_session_reset'](other_session)
+            assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['reason'] == 'unsupported_provider'
+        assert r['host_config'](other, other_sid) == other_config
+        r['host_agent_start'] = original_start
+        with patch.object(r['subprocess'], 'Popen', spawn):
+            r['host_agent_start'](other, other_sid)
+        assert calls[-1] == r['HOST_ADAPTERS'][other]['argv'](other, other_sid, ['synthetic-agent', '--model', 'native-model']), calls[-1]
+        other_session = dict(state={})
+        r['host_session_reset'](other_session)
+        other_session['settings'] = dict(model='haiku', effort='low')
+        other_session['ready'] = True
+        result = r['host_handle_request'](other, other_sid, tmux, other_session, dict(op='deliver'))
+        assert result.get('reason') == 'invalid_text', result
+        before = len(events)
+        native = Process()
+        steps[:] = ['client']
+        def native_client(p, s, t, session, server):
+            assert 'settings' not in session and 'starting_settings' not in session
+            session['stop'] = True
+        r['host_accept_client'] = native_client
+        with patch.object(selectors, 'DefaultSelector', Selector):
+            r['host_loop'](other, other_sid, tmux, dict(state={}), object(), native)
+        assert not any(kind == 'host.settings' for kind, payload in events[before:])
+        snapshot = r['message_store_request'](dict(message_protocol=1, provider=other, sid=other_sid, tmux=tmux, op='message_snapshot'))
+        assert not any('host_settings' in item for item in snapshot['items']), snapshot
 print('settings verified')
 `;
   const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });

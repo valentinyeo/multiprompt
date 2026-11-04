@@ -20,6 +20,7 @@ const prelude = `
 const std = @import("std");
 fn chatCancelFinish() void {}
 fn chatLivePlanReply(_: []const u16) bool { return false; }
+fn chatSettingsPending(_: u32) bool { return false; }
 fn chatLiveQuestionText(_: []const u16) bool { return false; }
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -1606,6 +1607,7 @@ function runHarness(control = false) {
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
     let functions = names.map(body).join('\n')
+      .replaceAll('@import("chat_session.zig").chatSettingsPending', 'chatSettingsPending')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')

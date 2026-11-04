@@ -334,7 +334,8 @@ pub fn chatViewLayout() ChatViewLayout {
     var rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const gap = uiScaled(14);
-    const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
+    const settings_h = if (@import("chat_session.zig").chatSettingsEligible()) uiScaled(20) else 0;
+    const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH() + settings_h;
     const slot = @import("window_layout.zig").activePaneContentRect(rc);
     const content = chat_style.contentColumn(slot.left, slot.right - slot.left, uiScaled(960));
     const left = content.left;
@@ -384,7 +385,7 @@ pub fn chatViewLayout() ChatViewLayout {
             .left = composer_card.left + uiScaled(14),
             .top = composer_card.top + chatReplyBarH() + uiScaled(12),
             .right = mic_btn.left - uiScaled(12),
-            .bottom = composer_card.bottom - uiScaled(10),
+            .bottom = composer_card.bottom - uiScaled(10) - settings_h,
         },
         .send_btn = send_btn,
         .attach_btn = attach_btn,

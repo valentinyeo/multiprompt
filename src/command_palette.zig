@@ -131,6 +131,12 @@ const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_B
 const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
 const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
 const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
+const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
+const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
+const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
 const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
@@ -890,6 +896,12 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_INBOX_EXCLUDE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
         SEARCH_KEEPALIVE_OFFSET => "keep alive",
         SEARCH_CHAT_VIEW_OFFSET => "chat view live chat switch terminal alt c",
+        SEARCH_CHAT_MODEL_OPUS_OFFSET => "chat view: model opus",
+        SEARCH_CHAT_MODEL_SONNET_OFFSET => "chat view: model sonnet",
+        SEARCH_CHAT_MODEL_HAIKU_OFFSET => "chat view: model haiku",
+        SEARCH_CHAT_EFFORT_LOW_OFFSET => "chat view: effort low",
+        SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => "chat view: effort medium",
+        SEARCH_CHAT_EFFORT_HIGH_OFFSET => "chat view: effort high",
         SEARCH_CHAT_ALLOW_OFFSET => "chat view allow",
         SEARCH_CHAT_ALWAYS_OFFSET => "chat view always allow",
         SEARCH_CHAT_DENY_OFFSET => "chat view deny",
@@ -1227,6 +1239,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) return 2;
@@ -4887,6 +4900,32 @@ pub fn updateSearchResults() void {
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_OFFSET;
             app_state.g_search_result_count += 1;
+        }
+        if (@import("chat_session.zig").chatSettingsEligible()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Opus", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_OPUS_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sonnet", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SONNET_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Haiku", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Effort Low", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EFFORT_LOW_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Effort Medium", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Effort High", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EFFORT_HIGH_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))

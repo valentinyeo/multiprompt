@@ -272,6 +272,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
+| Ctrl+K "Chat View: Model Opus / Sonnet / Haiku" | Choose the model for the next message in a live Claude chat |
+| Ctrl+K "Chat View: Effort Low / Medium / High" | Choose the effort for the next message in a live Claude chat |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
 | 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |
