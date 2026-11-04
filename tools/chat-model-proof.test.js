@@ -54,6 +54,25 @@ test('fixture launches the embedded production host and adapts Windows pipes onl
   assert.doesNotMatch(agent, /model_effort_settings_applied/);
 });
 
+test('synthetic agent runs and records its selected model and effort', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'model-agent-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const transcript = path.join(root, 'history.jsonl');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({ transcript }));
+  const argv = ['--session-id', 'a1b2c3d4-0682-4000-8000-000000000682', '--model', 'haiku', '--effort', 'high'];
+  const { spawnSync } = require('node:child_process');
+  const result = spawnSync('python3', [path.join(__dirname, 'verify-chat-delivery/model-agent.py'), ...argv], {
+    input: JSON.stringify({ type: 'user', message: { content: 'fixture input' } }) + '\n',
+    env: { ...process.env, MP_VERIFY_STATE: root }, encoding: 'utf8', timeout: 10000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const events = result.stdout.trim().split(/\r?\n/).map(JSON.parse);
+  assert.equal(events[0].model, 'haiku');
+  assert.equal(events.at(-1).type, 'result');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'model-argv.jsonl'), 'utf8')).argv, argv);
+  assert.equal(fs.readFileSync(transcript, 'utf8').trim().split(/\r?\n/).length, 2);
+});
+
 test('requires independent settings, process flags, host log, history and cleanup', t => {
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
