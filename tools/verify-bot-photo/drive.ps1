@@ -26,6 +26,7 @@ $settings = Join-Path $profile 'roaming/ZigShell'
 $env:APPDATA = Join-Path $profile 'roaming'
 $env:LOCALAPPDATA = Join-Path $profile 'local'
 $env:USERPROFILE = Join-Path $profile 'home'
+$env:HOME = $env:USERPROFILE
 $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '0'
@@ -192,8 +193,12 @@ function Assert-Normalized([string]$Path, [bool]$Tall = $false) {
 }
 function Start-App {
     $script:job = [VerifyJob]::new()
-    $script:app = $job.Start($Exe, $profile, (Join-Path $Evidence "stdout-$($checks.Count).log"), (Join-Path $Evidence "stderr-$($checks.Count).log"), '--no-window-restore')
-    $script:main = Wait-For 'owned main' { $h = [ChatDeliveryDesktop]::Window([uint32]$app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    $script:app = $job.Start($Exe, $profile, (Join-Path $Evidence "stdout-$($checks.Count).log"), (Join-Path $Evidence "stderr-$($checks.Count).log"), '--single-window --no-window-restore')
+    $script:main = Wait-For 'owned main' {
+        if ($app.HasExited) { throw ('App exited before its main window: ' + $app.ExitCode) }
+        $h = [ChatDeliveryDesktop]::Window([uint32]$app.Id)
+        if ($h -ne [IntPtr]::Zero) { $h }
+    }
     Focus
     [void](Wait-For 'local tabs restored' { try { @((State).tabs).Count -ge 2 -and (Log) -match 'launch step=browser' } catch { $false } })
 }
@@ -328,7 +333,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
-    if ($main -ne [IntPtr]::Zero) { try { Shot 'failure' } catch {} }
+    try { Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup = 0 }
     if (Test-Path (Join-Path $settings 'session.json')) { Copy-Item (Join-Path $settings 'session.json') (Join-Path $Evidence 'session.json') }

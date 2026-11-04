@@ -1514,16 +1514,14 @@ test('capable writers update colors and stale writes return the winner', async (
 });
 
 test('bot photos are scoped, worker-owned, revisioned and preserved across layout writes', async () => {
-  const { remotePhotoKey } = await import('../bot-photo.js');
   const { token } = await enroll();
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
-  const key = await remotePhotoKey(0, 'ONE');
-  const path = '/v1/bot-photos/' + key;
+  const photoDigest = 'a936777b1a0df6e68accdbe08a2ae964dce9f9a354e51b3919887423bbf25cb7';
+  const path = '/v1/bot-photos/' + photoDigest;
   const headers = { ...auth(token), 'X-Layout-Features': 'bot_photo' };
   const photoPut = (path, headers, value = png) => request(path, { method: 'PUT', headers, body: JSON.stringify({ png: value }) });
   const seeded = { ...layout, workspaces: [{ name: 'Other' }, { name: 'Private' }], tabs: [layout.tabs[0], { ...layout.tabs[0], tmux_session: 'two', tmux_host: 1, workspace: 'Private' }] };
   await db.prepare('UPDATE layouts SET revision=1,layout=? WHERE account=?').bind(JSON.stringify(seeded), 'owner@example.com').run();
-  await db.prepare('DELETE FROM bot_photos').run();
   assert.equal((await request(path)).status, 401);
   assert.equal((await request(path, { headers })).status, 404);
   assert.equal((await photoPut(path, headers, 'bad')).status, 400);
@@ -1544,7 +1542,7 @@ test('bot photos are scoped, worker-owned, revisioned and preserved across layou
   await db.prepare('INSERT INTO service_keys (hash,account,kind,workspace,label,created) VALUES (?,?,?,?,?,?)').bind(await hash(workspaceKey), 'owner@example.com', 'workspace', 'Other', 'test', 1).run();
   const workspaceHeaders = { Authorization: 'Bearer ' + workspaceKey };
   assert.equal((await request(path, { headers: workspaceHeaders })).status, 200);
-  const otherPath = '/v1/bot-photos/' + await remotePhotoKey(1, 'two');
+  const otherPath = '/v1/bot-photos/0fecfd7fa5ffea8501fdde02b83964c0113518f48ca995b9021e30e3836719f8';
   for (const method of ['GET', 'PUT', 'DELETE']) {
     const response = await request(otherPath, { method, headers: workspaceHeaders, ...(method === 'PUT' ? { body: JSON.stringify({ png }) } : {}) });
     assert.equal(response.status, 404);
@@ -1568,13 +1566,11 @@ test('bot photos are scoped, worker-owned, revisioned and preserved across layou
 });
 
 test('bot photo revision survives closing and reopening a tab and legacy layout writes', async () => {
-  const { remotePhotoKey } = await import('../bot-photo.js');
   const { token } = await enroll();
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
-  const path = '/v1/bot-photos/' + await remotePhotoKey(0, layout.tabs[0].tmux_session);
+  const path = '/v1/bot-photos/a936777b1a0df6e68accdbe08a2ae964dce9f9a354e51b3919887423bbf25cb7';
   const headers = { ...auth(token), 'X-Layout-Features': 'bot_photo' };
   await db.prepare('UPDATE layouts SET revision=1,layout=? WHERE account=?').bind(JSON.stringify(layout), 'owner@example.com').run();
-  await db.prepare('DELETE FROM bot_photos WHERE account=?').bind('owner@example.com').run();
   const uploaded = await request(path, { method: 'PUT', headers, body: JSON.stringify({ png }) });
   assert.equal(uploaded.status, 200);
   const photo = (await uploaded.json()).photo;
