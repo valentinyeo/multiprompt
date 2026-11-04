@@ -168,7 +168,7 @@ jobs:
     env:
       COMPANION: ${{ github.workspace }}/companion
       MULTIPROMPT_DIR: ${{ github.workspace }}
-      FIXTURE: ${{ runner.temp }}/photo-fixture
+      FIXTURE: ${{ github.workspace }}-photo-fixture
       EVIDENCE: ${{ github.workspace }}/phone-evidence
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
