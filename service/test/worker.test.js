@@ -106,13 +106,15 @@ test('lost refresh reply and concurrent retries remain usable within bounded gra
   const { token } = await enroll();
   const grant = { grant_type: 'refresh_token', refresh_token: token.refresh_token };
   assert.equal((await request('/oauth/token', post(grant))).status, 200);
-  const responses = await Promise.all([request('/oauth/token', post(grant)), request('/oauth/token', post(grant))]);
+  const responses = await Promise.all([0, 1].map(async () => {
+    const response = await request('/oauth/token', post(grant));
+    return { status: response.status, reply: await response.json() };
+  }));
   assert.deepEqual(responses.map(r => r.status), [200, 200]);
   const grace = await db.prepare('SELECT * FROM refresh_grace WHERE hash=?').bind(await hash(token.refresh_token)).first();
   assert.equal(grace.device, token.device_id);
   assert.ok(grace.expires <= Math.floor(Date.now() / 1000) + 600);
-  for (const response of responses) {
-    const reply = await response.json();
+  for (const { reply } of responses) {
     assert.equal((await request('/v1/layout', { headers: auth(reply) })).status, 200);
     assert.equal((await request('/oauth/token', post({ ...grant, refresh_token: reply.refresh_token }))).status, 200);
   }
