@@ -3884,7 +3884,7 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         patch.object(reader.time, 'sleep').start()
 
     def pane(self, box, stale=0):
-        state = dict(box=box, stale=stale, shown=box)
+        state = dict(box=box, stale=stale, shown=box, buffer='')
         calls = []
 
         def run(command, **kwargs):
@@ -3896,8 +3896,12 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
                 else:
                     state['shown'] = state['box']
                 stdout = '\u276f ' + state['shown'] + '\n' + '\u2500' * 20 + '\n'
-            elif 'send-keys' in command and 'paste-buffer' not in command:
-                if command[-1] in ('C-u', 'C-k'):
+            elif 'load-buffer' in command:
+                state['buffer'] = kwargs['input'].decode('utf-8')
+            elif 'paste-buffer' in command:
+                state['box'] += state['buffer']
+            elif 'send-keys' in command:
+                if command[-1] in ('C-u', 'C-k', 'Enter'):
                     state['box'] = ''
                 elif '-l' in command:
                     state['box'] += command[-1]
@@ -3989,9 +3993,9 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
                 commands = [call.args[0] for call in calls.call_args_list]
                 handoffs = [command for command in commands if 'paste-buffer' in command]
                 self.assertEqual(len(handoffs), 0 if draft else 1)
-                self.assertEqual(sum(command.count('Enter') for command in commands), 0 if draft else 1)
+                self.assertEqual(sum(command.count('Enter') for command in commands), 0 if draft or fail else 1)
                 self.assertFalse(any('C-u' in command or 'C-k' in command or '-l' in command for command in commands))
-                self.assertFalse(any('send-keys' in command and 'paste-buffer' not in command for command in commands))
+                self.assertFalse(any('send-keys' in command and 'paste-buffer' in command for command in commands))
                 self.assertFalse(any('delete-buffer' in command and 'send-keys' in command for command in commands))
 
     def test_own_mirrored_draft_is_cleared_and_sent(self):
@@ -4000,7 +4004,7 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         def run(command, **kwargs):
             return types.SimpleNamespace(returncode=0, stdout='')
         with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', '/synthetic/sid.jsonl')), \
-                patch.object(reader, 'box_draft', return_value='https://example.com/a.png This\nhappens'), \
+                patch.object(reader, 'box_draft', side_effect=['https://example.com/a.png This\nhappens', '']), \
                 patch.object(reader, 'prompt_box_text', side_effect=lambda target: next(boxes)), \
                 patch.object(reader.subprocess, 'run', side_effect=run) as calls:
             result = reader.send_response_preserve_draft(request)
@@ -4008,6 +4012,92 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         commands = [call.args[0] for call in calls.call_args_list]
         self.assertEqual(len([command for command in commands if 'paste-buffer' in command]), 1)
         self.assertTrue(any('C-u' in command for command in commands))
+
+class IGSH_1647_PictureLinkSendTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', 'sid.jsonl')).start()
+        self.text = 'Please check https://example.com/picture.png'
+        self.state = dict(box='', buffer='', clock=0, ready=0, enters=0, pasted=0, sent=[])
+        patch.object(reader.time, 'sleep', side_effect=self.sleep).start()
+        patch.object(reader.subprocess, 'run', side_effect=self.run_tmux).start()
+
+    def sleep(self, seconds):
+        self.state['clock'] += seconds
+
+    def run_tmux(self, command, **kwargs):
+        state = self.state
+        stdout = ''
+        if 'load-buffer' in command:
+            state['buffer'] = kwargs['input'].decode('utf-8')
+        if 'paste-buffer' in command:
+            state['box'] += state['buffer']
+            state['ready'] = state['clock'] + 0.3
+            state['pasted'] += 1
+        if 'send-keys' in command and command[-1] == 'Enter':
+            state['enters'] += 1
+            if state['clock'] >= state['ready']:
+                state['sent'].append(state['box'])
+                state['box'] = ''
+        if 'capture-pane' in command:
+            stdout = '\u276f ' + state['box'] + '\n' + '\u2500' * 20 + '\n'
+        return types.SimpleNamespace(returncode=0, stdout=stdout)
+
+    def send(self):
+        return reader.send_response_preserve_draft(dict(tmux='fixture', sid='sid', text=self.text))
+
+    def test_picture_link_is_submitted_once_and_box_ends_empty(self):
+        self.assertEqual(self.send()['status'], 'sent')
+        self.assertEqual(self.state['box'], '')
+        self.assertEqual(self.state['sent'], [self.text])
+        self.assertEqual(self.state['pasted'], 1)
+        self.assertEqual(self.state['enters'], 1)
+
+    def test_swallowed_enter_retries_without_pasting_twice(self):
+        original = self.run_tmux
+        def run(command, **kwargs):
+            if 'send-keys' in command and command[-1] == 'Enter' and self.state['enters'] == 0:
+                self.state['enters'] += 1
+                return types.SimpleNamespace(returncode=0, stdout='')
+            return original(command, **kwargs)
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(self.send()['status'], 'sent')
+        self.assertEqual(self.state['box'], '')
+        self.assertEqual(self.state['sent'], [self.text])
+        self.assertEqual(self.state['pasted'], 1)
+        self.assertEqual(self.state['enters'], 2)
+
+    def test_missing_prompt_is_uncertain_without_another_enter(self):
+        original = self.run_tmux
+        def run(command, **kwargs):
+            result = original(command, **kwargs)
+            if 'capture-pane' in command and self.state['enters']:
+                result.stdout = 'Working'
+            return result
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(self.send()['status'], 'uncertain')
+        self.assertEqual(self.state['sent'], [self.text])
+        self.assertEqual(self.state['enters'], 1)
+        self.assertNotIn('sent', reader.draft_record('fixture'))
+
+    def test_full_box_is_not_sent_after_three_enters(self):
+        original = self.run_tmux
+        def run(command, **kwargs):
+            if 'send-keys' in command and command[-1] == 'Enter':
+                self.state['enters'] += 1
+                return types.SimpleNamespace(returncode=0, stdout='')
+            return original(command, **kwargs)
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(self.send()['status'], 'not_sent')
+        self.assertEqual(self.state['box'], self.text)
+        self.assertEqual(self.state['sent'], [])
+        self.assertEqual(self.state['enters'], 3)
+        self.assertEqual(self.state['pasted'], 1)
+        self.assertNotIn('sent', reader.draft_record('fixture'))
+
 
 FAKE_AGENT = r'''#!/usr/bin/env python3
 import json, os, sys
