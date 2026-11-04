@@ -55,5 +55,5 @@ test('live slash screenshot journey drives every requested command and checks in
   assert.match(text, /ordinarySends = 0/);
   assert.match(text, /Snapshot 'slash-plan-picker'/);
   assert.match(text, /Snapshot 'slash-permissions-picker'/);
-  assert.ok(fs.readFileSync('.claude/skills/verify-multiprompt/chat-options.ps1', 'utf8').includes("'chat-slash.ps1'"));
+  assert.ok(fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8').includes("'chat-slash.ps1'"));
 });
