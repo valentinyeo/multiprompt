@@ -1,12 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { readFileSync, existsSync } = require('node:fs');
 
 const control = readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8');
 const sessions = readFileSync('.claude/skills/verify-multiprompt/control-feature-sessions.ps1', 'utf8');
-const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
-
 test('sessions installs the SSH boundary before launch', () => {
+  assert.ok(existsSync('tools/verify-repo-picker/ssh.c'), 'repository picker boundary source must exist');
+  const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
   const setup = control.indexOf("if ($Feature -eq 'sessions') {");
   const launch = control.indexOf('$process = $job.Start(');
   assert.ok(setup > 0 && setup < launch);
