@@ -23,6 +23,15 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
     sid, tmux = uid(), 'room-agent'
     r['host_write'](r['host_paths']('claude', sid)['config'], dict(enabled=True, tmux=tmux))
     r['resolve_tmux_agent'] = lambda *a, **k: None
+    with patch.object(room_bridge, 'runtime_request', return_value=dict(id=1, message_protocols=[1])):
+        legacy = room_bridge.RoomBridge(rooms)
+        assert not legacy.execute(dict(op='capabilities', room_messages=1))['live_send']
+        try:
+            legacy.execute(dict(op='post_human'))
+            raise AssertionError('old runtime allowed room sending')
+        except room_bridge.RoomError as error:
+            assert error.code == 'unsupported_remote_capability'
+        legacy.close()
     calls = []
     def rpc(query):
         calls.append(query)
@@ -31,7 +40,7 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         if query['op'] == 'events_subscribe':
             return dict(id=1, message_protocol=1, result=r['message_events_page']('claude', query['sid'], query['after']))
         return dict(id=1, message_protocol=1, result=r['message_store_request'](query))
-    with patch.object(room_bridge, 'runtime_request', rpc), patch.object(room_bridge, 'host_status', return_value=dict(enabled=True, provider='claude', sid=sid, tmux=tmux)):
+    with patch.object(room_bridge, 'runtime_request', rpc), patch.object(room_bridge, 'host_status', return_value=dict(enabled=True, provider='claude', sid=sid, tmux=tmux)) as status:
         bridge = room_bridge.RoomBridge(rooms)
         host = bridge.execute(dict(op='capabilities'))['host_uuid']
         assert bridge.execute(dict(op='capabilities', room_messages=1))['live_send']
@@ -48,8 +57,8 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         assert bridge.execute(first) == a
         bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
         for delivery, text in [(a['deliveries'][0], first['text']), (b['deliveries'][0], second['text'])]:
-            status = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=delivery['id']))
-            assert status['message']['text'] == text
+            saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=delivery['id']))
+            assert saved['message']['text'] == text
         logs = []
         state = {}
         session = dict(state=state)
@@ -77,7 +86,10 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         deliver(b['deliveries'][0])
         reply('Answer two')
         events_request = dict(op='events', host_uuid=host, room_id=room, after=0, limit=200)
+        status.return_value['enabled'] = False
+        submitted_before = sum(q.get('op') == 'message_submit' for q in calls)
         page = bridge.execute(events_request)
+        assert sum(q.get('op') == 'message_submit' for q in calls) == submitted_before, 'disabled host received a new submission'
         replies = [e for e in page['events'] if e['type'] == 'agent_reply']
         assert [(e['parent_event_id'], e['text']) for e in replies] == [(a['event']['id'], 'Answer one'), (b['event']['id'], 'Answer two')], replies
         assert all(e['member_id'] == member_id for e in replies)
@@ -138,7 +150,7 @@ for line in sys.stdin:
         continue
     content = message['message']['content']
     text = content if isinstance(content, str) else ''.join(part.get('text', '') for part in content)
-    reply = dict(type='assistant', message=dict(id='fixture-' + sid, content=[dict(type='text', text='reply:' + sid + ':' + text)]))
+    reply = dict(type='assistant', message=dict(id='fixture-' + sid, content=[dict(type='text', text='reply:' + sid + ':' + text + ':' + str(index)) for index in range(300)]))
     print(json.dumps(reply), flush=True)
     print(json.dumps(dict(type='result', subtype='success')), flush=True)
 '''
@@ -193,7 +205,8 @@ with tempfile.TemporaryDirectory() as home:
         bindings = {member['alias']: member['id'] for member in bridge.store.members(room)}
         for member, (request, receipt) in zip(members, receipts):
             reply = by_parent[receipt['event']['id']]
-            assert reply['text'] == 'reply:' + member['provider_sid'] + ':' + request['text'], reply
+            expected = '\n\n'.join('reply:' + member['provider_sid'] + ':' + request['text'] + ':' + str(index) for index in range(300))
+            assert reply['text'] == expected, 'reply parts changed order across canonical pages'
             assert reply['member_id'] == bindings[member['alias']]
             assert bridge.execute(request) == receipt
         bridge.close()

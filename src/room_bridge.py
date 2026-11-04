@@ -178,8 +178,9 @@ class RoomBridge:
             work = self.store.execute(dict(op='delivery_work', room_id=room_id, delivery_id=delivery['id']))
             if work['provider'] != 'claude' or work['host_uuid'] != self.store.host_uuid or work['session_identity'] != 'claude:' + work['provider_sid']:
                 continue
+            progress = self.store.db.execute('SELECT * FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()
             status = host_status(work['provider_sid'])
-            if not status['enabled']:
+            if not status['enabled'] and progress['after_seq'] is None:
                 continue
             tmux = status.get('tmux')
             if not isinstance(tmux, str) or re.fullmatch(r'[A-Za-z0-9_.:-]{1,80}', tmux) is None:
@@ -192,9 +193,10 @@ class RoomBridge:
                 if not isinstance(initial, dict) or type(initial.get('seq')) is not int or initial['seq'] < 0:
                     fail('runtime_unavailable')
                 self.store.db.execute('UPDATE reply_progress SET after_seq=? WHERE delivery_id=? AND after_seq IS NULL', (initial['seq'], work['message_id']))
-            submitted = runtime_request(dict(identity, op='message_submit', message_id=work['message_id'], text=work['text'], room_scope=scope)).get('result')
-            if not isinstance(submitted, dict) or not isinstance(submitted.get('message'), dict) or submitted['message'].get('id') != work['message_id']:
-                fail('runtime_unavailable')
+            if status['enabled']:
+                submitted = runtime_request(dict(identity, op='message_submit', message_id=work['message_id'], text=work['text'], room_scope=scope)).get('result')
+                if not isinstance(submitted, dict) or not isinstance(submitted.get('message'), dict) or submitted['message'].get('id') != work['message_id']:
+                    fail('runtime_unavailable')
             progress = self.store.db.execute('SELECT * FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()
             page = runtime_request(dict(op='events_subscribe', provider='claude', sid=work['provider_sid'], after=progress['after_seq'])).get('result')
             if not isinstance(page, dict) or not isinstance(page.get('events'), list) or type(page.get('next_after')) is not int or page['next_after'] < progress['after_seq']:
