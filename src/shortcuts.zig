@@ -367,7 +367,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File)", .header = false },
     .{ .a = "Right-click Claude message / Ctrl+K reactions", .b = "Send a quoted reaction; show its badge", .header = false },
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty.", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open or fold all tool groups; click a steps line to toggle one group", .header = false },
+    .{ .a = "Ctrl+Shift+J in Chat View", .b = "Open or fold all tool groups", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
@@ -1083,6 +1084,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
         }
         if ((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and isAltDown(kb.flags) and chatViewOwnsInput() and chatComposerOwnsKey(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags), kb.flags)) altqLog("hook_gate_swallow vk={X} wp={X} alt={} ctrl={}", .{ kb.vkCode, wp, isAltDown(kb.flags), isCtrlDown() });
+        if (chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus() and wp == WM_KEYDOWN and
+            @import("chat_composer.zig").chatToolStepsKey(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags)))
+        {
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOOL_STEPS, 0, 0);
+            return 1;
+        }
         if (chatViewOwnsInput() and chatComposerOwnsKey(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags), kb.flags)) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0xBA and foregroundIsOurs() and !app_state.g_snippet_create_active) {
             app_state.g_sysmenu_pending = false;

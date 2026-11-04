@@ -56,6 +56,9 @@ const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 =
 var shells = [_]Shell{ .{}, .{} };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
+var g_chat_blocks = [_]struct { role: enum { tool }, tool_open: bool = false }{.{ .role = .tool }};
+var g_chat_block_count: usize = 1;
+var g_chat_layout_reuse: usize = 0;
 var g_chat_active = true;
 var g_restoring = false;
 var g_startup_progress = false;
@@ -206,9 +209,11 @@ test "pending state is consumed for a shell with no process without resetting" {
     try std.testing.expectEqual(@as(usize, 0), theme_resets);
     try std.testing.expect(visible[10]);
 }
-test "closing chat stops receiving before revealing the console" {
+test "closing chat stops receiving and folds steps before revealing the console" {
     prepare(false, false);
+    g_chat_blocks[0].tool_open = true;
     closeChatView();
+    try std.testing.expect(!g_chat_blocks[0].tool_open);
     try std.testing.expectEqual(@as(usize, 1), stream_stops);
     try std.testing.expect(visible[10]);
 }
