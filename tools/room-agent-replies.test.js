@@ -116,3 +116,112 @@ test('room replies retain their exact parent and session without publishing priv
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /ROOM_SCOPED_REPLIES_PASS/);
 });
+
+const processProgram = String.raw`
+import hashlib, json, os, signal, sys, tempfile, time, uuid
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd() / 'src'))
+import room_bridge
+outer = {}
+exec(compile(Path('src/chat_history_reader.py').read_text(), 'reader', 'exec'), outer)
+assert 'ROOM_MESSAGE_PROTOCOL = 1' in outer['READER_SOURCE'], 'scoped runtime required'
+source = outer['READER_SOURCE'].encode()
+nonce = uuid.uuid4().hex
+os.environ['MULTIPROMPT_ROOM_PROOF'] = nonce
+agent_source = '''import json, sys
+args = sys.argv[1:]
+sid = args[args.index('--resume') + 1] if '--resume' in args else args[args.index('--session-id') + 1]
+print(json.dumps(dict(type='system', subtype='init', session_id=sid)), flush=True)
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get('type') != 'user':
+        continue
+    content = message['message']['content']
+    text = content if isinstance(content, str) else ''.join(part.get('text', '') for part in content)
+    reply = dict(type='assistant', message=dict(id='fixture-' + sid, content=[dict(type='text', text='reply:' + sid + ':' + text)]))
+    print(json.dumps(reply), flush=True)
+    print(json.dumps(dict(type='result', subtype='success')), flush=True)
+'''
+def owned():
+    found = []
+    marker = ('MULTIPROMPT_ROOM_PROOF=' + nonce).encode()
+    for process in Path('/proc').glob('[0-9]*'):
+        try:
+            if int(process.name) != os.getpid() and marker in (process / 'environ').read_bytes().split(b'\0'):
+                found.append(int(process.name))
+        except (OSError, ValueError):
+            pass
+    return found
+with tempfile.TemporaryDirectory() as home:
+    os.environ['HOME'] = home
+    runtime = Path(home) / '.multiprompt-runtime'
+    runtime.mkdir(mode=0o700)
+    digest = hashlib.sha256(source).hexdigest()
+    for name, data in [('reader.py', source), (digest + '.py', source), ('active.json', json.dumps(dict(protocol=1, generation=outer['RUNTIME_GENERATION'], sha256=digest)).encode())]:
+        file = runtime / name
+        file.write_bytes(data)
+        file.chmod(0o600)
+    script = Path(home) / 'fixture_agent.py'
+    script.write_text(agent_source)
+    r = {}
+    exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
+    bridge = room_bridge.RoomBridge(Path(home) / 'rooms')
+    try:
+        capabilities = bridge.execute(dict(op='capabilities', room_messages=1))
+        assert capabilities['live_send'], capabilities
+        host = capabilities['host_uuid']
+        members = []
+        for alias in ['alpha', 'beta']:
+            sid = str(uuid.uuid4())
+            r['host_write'](r['host_paths']('claude', sid)['config'], dict(enabled=True, tmux='proof-' + alias, command=[sys.executable, str(script)]))
+            members.append(dict(alias=alias, display_name=alias.title(), host_uuid=host, provider='claude', provider_sid=sid, session_identity='claude:' + sid))
+        room = bridge.execute(dict(op='create', command_id=str(uuid.uuid4()), host_uuid=host, name='Proof', members=members))['event']['room_id']
+        receipts = []
+        for member in members:
+            request = dict(op='post_human', command_id=str(uuid.uuid4()), host_uuid=host, room_id=room, expected_revision=1, text='Question @' + member['alias'], recipients=[member['alias']])
+            receipts.append((request, bridge.execute(request)))
+        query = dict(op='events', host_uuid=host, room_id=room, after=0, limit=200)
+        deadline = time.monotonic() + 40
+        while True:
+            page = bridge.execute(query)
+            replies = [event for event in page['events'] if event['type'] == 'agent_reply']
+            if len(replies) == 2:
+                break
+            assert time.monotonic() < deadline, 'real host reply timeout'
+            time.sleep(0.1)
+        by_parent = {event['parent_event_id']: event for event in replies}
+        bindings = {member['alias']: member['id'] for member in bridge.store.members(room)}
+        for member, (request, receipt) in zip(members, receipts):
+            reply = by_parent[receipt['event']['id']]
+            assert reply['text'] == 'reply:' + member['provider_sid'] + ':' + request['text'], reply
+            assert reply['member_id'] == bindings[member['alias']]
+            assert bridge.execute(request) == receipt
+        bridge.close()
+        bridge = room_bridge.RoomBridge(Path(home) / 'rooms')
+        assert bridge.execute(query) == page
+        print('ROOM_REAL_HOST_PROCESS_PASS')
+    finally:
+        bridge.close()
+        for pid in owned():
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 3
+        while owned() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        for pid in owned():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        assert not owned(), 'owned fixture processes remain'
+`;
+
+test('real selected runtime and host processes produce scoped room replies', { skip: process.platform !== 'linux' }, () => {
+  const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
+  assert.ok(source.includes('ROOM_MESSAGE_PROTOCOL = 1'), 'scoped canonical room protocol is available');
+  const result = spawnSync('python3', ['-'], { cwd: root, input: processProgram, encoding: 'utf8', timeout: 90000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /ROOM_REAL_HOST_PROCESS_PASS/);
+});

@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import os
@@ -76,8 +77,15 @@ def host_status(sid):
 def runtime_request(query):
     reader = selected_reader()
     try:
+        source = private_file(reader.parent, 'reader.py', 4 * 1024 * 1024)
+        info = json.loads(private_file(reader.parent, 'active.json', 4096))
+        if not isinstance(info, dict) or hashlib.sha256(source).hexdigest() != info.get('sha256'):
+            fail('runtime_unavailable')
+        source = ('ENGINE_INFO = ' + repr(info) + '\n').encode('utf-8') + source
+        bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
+        input = base64.b64encode(source) + b'\n' + (encoded(dict(query, id=1)) + '\n').encode('utf-8')
         with tempfile.TemporaryFile() as output:
-            completed = subprocess.run([sys.executable, str(reader), '--serve'], input=(encoded(dict(query, id=1)) + '\n').encode('utf-8'), stdout=output, stderr=subprocess.DEVNULL, timeout=2, check=False)
+            completed = subprocess.run([sys.executable, '-u', '-c', bootstrap, '--serve'], input=input, stdout=output, stderr=subprocess.DEVNULL, timeout=2, check=False)
             if completed.returncode != 0 or output.tell() > 524288:
                 fail('runtime_unavailable')
             output.seek(0)
@@ -231,7 +239,7 @@ class RoomBridge:
                     text = '\n\n'.join(part[1] for part in parts)
                     if payload.get('status') == 'completed' and text.strip():
                         response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
-                        self.store.command(dict(op='agent_reply', room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))
+                        self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))
                     done = True
                     break
             if not done and page['next_after'] != after:
