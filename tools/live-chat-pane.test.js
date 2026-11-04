@@ -18,6 +18,11 @@ test('live chat journey runs the shipped selftest and verifies every step and th
   }
   assert.match(driver, /\$selftest\.steps\.\$step\.pass -ne \$true/);
   assert.match(driver, /Snapshot 'chat-one-selftest'/);
+  assert.match(driver, /http\.server[^\n]+, \$true\)/);
+  assert.match(driver, /tools\/vps-multiprompt-browser\.sh selftest', \$true\)/);
+  const native = fs.readFileSync(path.join(path.dirname(file), 'control-native.cs'), 'utf8');
+  assert.match(native, /4u \| \(noWindow \? 0x08000000u : 0u\)/);
+  assert.match(native, /return Start\(exe, directory, stdout, stderr, arguments, false\)/);
 });
 
 test('live chat routing preserves the shared workspace default and uses the real browser setup', () => {

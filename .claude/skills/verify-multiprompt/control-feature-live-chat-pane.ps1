@@ -80,7 +80,7 @@ try {
         $chat.other = 'http://127.0.0.1:19284/' + $chat.tmux + '-second.html'
         [IO.File]::WriteAllText((Join-Path $pageRoot ($chat.tmux + '-second.html')), ('<!doctype html><title>' + $chat.marker + ' second</title><body style="background:#654321;color:#fff;font:48px sans-serif"><h1>' + $chat.marker + ' second</h1></body>'))
     }
-    $pageJob.Start((Get-Command python.exe).Source, $pageRoot, (Join-Path $Evidence 'live-chat-page.stdout.log'), (Join-Path $Evidence 'live-chat-page.stderr.log'), '-m http.server 19284 --bind 127.0.0.1') | Out-Null
+    $pageJob.Start((Get-Command python.exe).Source, $pageRoot, (Join-Path $Evidence 'live-chat-page.stdout.log'), (Join-Path $Evidence 'live-chat-page.stderr.log'), '-m http.server 19284 --bind 127.0.0.1', $true) | Out-Null
     Wait-Until { foreach ($chat in $chats) { try { if (-not (Invoke-WebRequest -UseBasicParsing $chat.page).Content.Contains($chat.marker)) { return $false } } catch { return $false } }; $true } 'both live chat test pages'
     $one = $chats[0]
     $two = $chats[1]
@@ -127,7 +127,7 @@ try {
         $env:ZSB_SESSION = $one.tmux
         $env:ZSB_PORT = [string]$script:liveChatPort
         Record ('Run the shipped zsb selftest for ' + $one.tmux)
-        $selftestProcess = $selftestJob.Start($bash, ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))), (Join-Path $Evidence 'chat-one-selftest.stdout.log'), (Join-Path $Evidence 'chat-one-selftest.stderr.log'), '--noprofile --norc tools/vps-multiprompt-browser.sh selftest')
+        $selftestProcess = $selftestJob.Start($bash, ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))), (Join-Path $Evidence 'chat-one-selftest.stdout.log'), (Join-Path $Evidence 'chat-one-selftest.stderr.log'), '--noprofile --norc tools/vps-multiprompt-browser.sh selftest', $true)
         if (-not $selftestProcess.WaitForExit(210000)) { throw 'Live chat pane selftest exceeded its deadline' }
         $selftestProcess.Refresh()
         if ($selftestProcess.ExitCode -ne 0) { throw 'Live chat pane selftest failed; see retained selftest output' }
