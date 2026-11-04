@@ -90,10 +90,10 @@ async function runSelftest(failure) {
               page.title = failure === 'build-title' ? 'Example Domain' : document.title;
               page.built = true;
             }
-          } else if (args[1] === "document.getElementById('zsb-input').value") {
+          } else if (args[1] === 'document.getElementById("zsb-input").value') {
             result = input;
           } else {
-            assert.equal(args[1], "document.getElementById('zsb-result').textContent");
+            assert.equal(args[1], 'document.getElementById("zsb-result").textContent');
             result = clicked ? 'clicked' : 'not clicked';
           }
           break;
