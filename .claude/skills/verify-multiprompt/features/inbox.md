@@ -7,11 +7,12 @@ Open the session list across workspaces, change a session's read/unread state, a
 - `inbox-open`: show the Inbox for the owned app instance.
 - `inbox-unread`: toggle the selected session's blue-dot state through the list.
 - `inbox-return`: close the Inbox without closing the session.
+- `inbox-button`: hide the sidebar button while Inbox is open and restore it on return.
 - `inbox-mute`: mute a tab through Ctrl+K, prove it leaves Inbox but stays in the workspace, then unmute it and prove it is listed again.
 
 ## How to get to it (user POV)
 
-- Click the sidebar Inbox button or press Ctrl+Shift+I to toggle Inbox. This journey uses Ctrl+Shift+I.
+- Click the sidebar Inbox button to open Inbox. The button is hidden while Inbox is open and returns on close. Ctrl+Shift+I still toggles Inbox.
 - Alt+I opens Inbox and selects All; pressing it inside returns to All.
 - Ctrl+K `Inbox: Frequent` opens the Frequent split, a distinct entry path not covered by this journey.
 - In Inbox, j/k or arrow navigation selects sessions; Tab/h/l changes splits; Ctrl+F or `/` searches; `u` toggles read/unread; Enter opens a session; q/Esc closes Inbox.
@@ -31,7 +32,8 @@ Preconditions:
 - **Muted Inbox.** Press Ctrl+Shift+I, require published `inbox_active` (or the legacy `Inbox - ` title), then press Alt+I for All. Capture `muted.png`, showing Inbox without the session. Record `inbox-muted-hidden` in `result.json` with the sid, `listed=false`, and the title.
 - **Muted return.** Press Esc and require Inbox to close. Require the same session to remain in Read-Session with the same tab count as before muting. Capture `muted-returned.png`, showing the muted tab still in its workspace.
 - **Unmute.** Press Ctrl+K, type `unmute tab`, then Enter. Require the same sid to reappear in Read-Inbox and record `inbox-unmuted-listed` with the sid and `listed=true`.
-- **Proof.** Inspect `action.png`, `after.png`, and `returned.png` for the selected session, blue dot, and workspace return; inspect `muted.png` and `muted-returned.png` for Inbox absence and tab survival. `result.json` records attention before/after, the mute/unmute checks, and Inbox window titles. `data/roaming/ZigShell/inbox-default.json` and `session.json` are app-published side effects, not harness-created fixtures.
+- **Button.** After unmuting, select Light and AMOLED through the Themes palette. For each, capture `inbox-button-<theme>-closed.png` and `inbox-button-<theme>-open.png`. Check the former button region is blank while open and the sidebar glyph is visible while closed. Click the former region, close Inbox, click the restored sidebar button, and capture `inbox-button-<theme>-returned.png`. Require published `inbox_active` transitions. Pixel coordinates use the app-published sidebar width, UI scale, window DPI and native frame offsets.
+- **Proof.** Inspect `action.png`, `after.png`, and `returned.png` for the selected session, blue dot, and workspace return; inspect `muted.png` and `muted-returned.png` for Inbox absence and tab survival. Inspect both button states in each theme. `result.json` records pixel counts and transitions alongside attention and mute/unmute checks. Graphite 2 is not a shipped theme, so it is recorded as unavailable rather than substituted. `data/roaming/ZigShell/inbox-default.json` and `session.json` are app-published side effects, not harness-created fixtures. The extended journey has not yet run.
 
 ## Gotchas
 

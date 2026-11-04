@@ -1895,7 +1895,9 @@ test "workspace pills and Inbox button have disjoint hit areas" {
     try std.testing.expect(workspaceStripHitTest(button.left, WS_PILL_TOP) == null);
     try std.testing.expect(inboxButtonHitTest(button.left, WS_PILL_TOP));
     app_state.g_inbox_active = true;
-    try std.testing.expect(inboxButtonHitTest(inboxButtonRect(true).left, WS_PILL_TOP));
+    try std.testing.expect(!inboxButtonHitTest(inboxButtonRect(true).left, WS_PILL_TOP));
+    app_state.g_inbox_active = false;
+    try std.testing.expect(inboxButtonHitTest(button.left, WS_PILL_TOP));
 }
 
 pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
