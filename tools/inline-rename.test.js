@@ -17,6 +17,7 @@ test('inline editor keeps the stable shell identity and commits canonically', ()
   assert.match(rename, /SendMessageW\(app_state\.g_edit_hwnd, 0x00B1, 0, @bitCast\(@as\(isize, -1\)\)\)/);
   assert.match(main, /WM_APP_COMMIT_RENAME => \{\s*if \(lp != 0/);
   assert.match(rename, /if \(wp == 0x1B\) \{\s*app_state\.g_focus_user_action_tick = renameCommitActionTick/);
+  assert.match(rename, /fn startRenameInternal[^]*?g_focus_user_action_tick = renameCommitActionTick\(app_state\.g_focus_user_action_tick, GetTickCount64\(\), foregroundIsOurs\(\)\);\s*if \(!focusGuard/);
   assert.match(rename, /in_title and !app_state\.g_chat_active\) name_rc\.bottom - name_rc\.top/);
   assert.match(main, /if \(tab_idx != app_state\.active_shell or @import\("room_frontend\.zig"\)\.isActive\(\)\) @import\("console\.zig"\)\.switchToShellByUser\(tab_idx\)/);
 });

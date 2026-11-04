@@ -271,6 +271,7 @@ pub fn startThreadTitleRename() void {
 }
 
 fn startRenameInternal(idx: u32, thread_title: bool) void {
+    app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());
     if (!focusGuard(app_state.g_main_hwnd)) return;
     commitRename();
     if (idx >= app_state.shell_count) return;
