@@ -33,7 +33,7 @@ test('hosted-console foreground handoff remains an app activation', () => {
   const event = focus.slice(focus.indexOf('fn foregroundWinEventProc('), focus.indexOf('fn browserOrphanWinEventProc('));
   assert.match(event, /const ours = foregroundHwndIsOurs\(hwnd\)/);
   assert.match(event, /freeze_recorder.zig"\)\.activation\(ours and IsIconic\(app_state.g_main_hwnd\) == 0\)/);
-  assert.match(event, /if \(ours\) _ = InvalidateRect\(app_state.g_main_hwnd, null, 0\)/);
+  assert.match(event, /if \(ours or repaint_ring\) _ = InvalidateRect\(app_state.g_main_hwnd, null, 0\)/);
 });
 
 test('maximized clipping selects the proposed monitor and rejects minimized frames', () => {

@@ -1,10 +1,10 @@
 # IGSH-1651 gates
 
 - [x] A test fails today and passes with the fix. Windows run 41810436539 failed the pending-frame test; candidate run 41811555235 passed test-windows (1).
-- [ ] Live Windows proof: after time in the background, the app answers at once. Background/minimize/restore journey pending.
+- [x] Live Windows proof: after time in the background, the app answers at once. Native Windows run 41816144201 passed five foreground/minimize/restore cycles with unchanged bounds; this is an isolated offline desktop, not the user's live installation.
 - [ ] CI green.
 - [ ] Full CI green on this PR. https://github.com/valentinyeo/multiprompt/pull/743
-- [ ] A freeze with a responsive message loop but missing paints saves a report. Ordered redraw-suppression journey pending.
+- [x] A freeze with a responsive message loop but missing paints saves a report. Native run 41816144201 saved exactly one paint-reason report while WM_NULL remained responsive and the hosted console held foreground; redraw recovery and both cancellation checks passed.
 
 # Work order
 
@@ -26,5 +26,5 @@
 - The supplied incident continues processing window actions through normal taskbar closure. Missing slow-paint log entries alone do not prove missing paints. Geometry clipping is a concrete defect matching the collapsed client, but the exact operating-system transition from the incident remains inferred.
 - Release RVAs disassemble to dialog-font callbacks. Raw stack scanning does not establish an active call chain. The symbol twin has a different layout; its required matching PDB is not a published asset. These addresses do not prove a synchronous-call deadlock.
 - Transcript loading runs on a worker. Its long elapsed time is not evidence of a UI-thread wait. Browser mask suspension stops mask timers, not main-window redraw. Composer redraw suspension has deferred restoration.
-- Allowed local checks: node --test tools/background-freeze.test.js tools/window-controls.test.js yielded 11 passes, 1 hosted-PowerShell skip. zig ast-check accepted all three changed Zig files. Native unit tests and desktop journeys have not run locally.
+- Allowed local checks: node --test tools/background-freeze.test.js tools/window-controls.test.js yielded 12 passes, 1 hosted-PowerShell skip. zig ast-check accepted all four changed Zig files. Native unit tests and desktop journeys have not run locally.
 - No local builds, Wine or benchmarks. No board writes, version bump or merge. Native proof runs only on GitHub-hosted Windows. Synthetic geometry and paint suppression do not prove the exact live incident or physical multi-monitor movement.
