@@ -21,6 +21,8 @@ public static class PhotoDialogOwner {
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr dialog, int id);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int length);
@@ -59,6 +61,7 @@ $main = [IntPtr]::Zero
 $switchJob = $null
 $switchApp = $null
 $switchWindow = [IntPtr]::Zero
+$lastDialog = [IntPtr]::Zero
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false)) }
 function Wait-For([string]$Name, [scriptblock]$Test) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -125,7 +128,8 @@ function Dialog {
     return $dialog
 }
 function Picker-State([IntPtr]$Dialog) {
-    return @{ foreground=[ChatDeliveryDesktop]::GetForegroundWindow().ToInt64(); main=$main.ToInt64(); dialog=$Dialog.ToInt64(); owner=[PhotoDialogOwner]::GetWindow($Dialog, 4).ToInt64(); visible=[PhotoDialogOwner]::IsWindowVisible($Dialog); enabled=[PhotoDialogOwner]::IsWindowEnabled($Dialog); mainEnabled=[PhotoDialogOwner]::IsWindowEnabled($main) }
+    $focus = [ChatDeliveryDesktop]::Focus($main)
+    return @{ foreground=$focus[0]; focus=$focus[1]; focusClass=[ChatDeliveryDesktop]::Class([IntPtr]$focus[1]); altDown=([PhotoDialogOwner]::GetAsyncKeyState(0x12) -lt 0); dialogClass=[ChatDeliveryDesktop]::Class($Dialog); main=$main.ToInt64(); dialog=$Dialog.ToInt64(); owner=[PhotoDialogOwner]::GetWindow($Dialog, 4).ToInt64(); visible=[PhotoDialogOwner]::IsWindowVisible($Dialog); enabled=[PhotoDialogOwner]::IsWindowEnabled($Dialog); mainEnabled=[PhotoDialogOwner]::IsWindowEnabled($main) }
 }
 function Switch-Picker([IntPtr]$Dialog) {
     for ($cycle = 1; $cycle -le 3; $cycle++) {
@@ -152,10 +156,26 @@ function Pick([string]$Path, [bool]$SwitchAway = $false) {
     $start = (Log).Length
     Look 'bot face' 'upload image' 7193
     $dialog = Dialog
+    $script:lastDialog = $dialog
+    Save (Picker-State $dialog) (Join-Path $Evidence "picker-$($checks.Count)-opened.json")
     if ($SwitchAway) { Switch-Picker $dialog }
     if ($Path -eq '') {
         [ChatDeliveryDesktop]::Chord(@(0x1b))
-        [void](Wait-For 'cancelled dialog closed' { -not [PhotoDialogOwner]::IsWindow($dialog) })
+        try {
+            [void](Wait-For 'cancelled dialog closed' { -not [PhotoDialogOwner]::IsWindow($dialog) })
+        } catch {
+            Save (Picker-State $dialog) (Join-Path $Evidence 'cancel-key-failure.json')
+            $button = [PhotoDialogOwner]::GetDlgItem($dialog, 2)
+            if ($button -ne [IntPtr]::Zero) {
+                $rect = [ChatDeliveryDesktop+Rect]::new()
+                if ([ChatDeliveryDesktop]::GetClientRect($button, [ref]$rect)) {
+                    [ChatDeliveryDesktop]::PressClient($button, [uint32]$app.Id, [int]($rect.Right / 2), [int]($rect.Bottom / 2))
+                    Start-Sleep -Milliseconds 700
+                    Save @{ dialogClosed=(-not [PhotoDialogOwner]::IsWindow($dialog)); state=(Picker-State $dialog) } (Join-Path $Evidence 'cancel-click-diagnostic.json')
+                }
+            }
+            throw
+        }
         Check 'cancel-reenables-main-window' ([PhotoDialogOwner]::IsWindowEnabled($main))
         if ($SwitchAway) {
             Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x1b)
@@ -292,6 +312,8 @@ try {
     Look 'bot face' 'tall one eye' 7145
     Look 'bot color' 'sage' 7162
     $otherBefore = Capture-Avatar (Index-Name 'Photo Beta') 'other-before'
+    Pick ''
+    Check 'cancel-without-alt-tab' ([PhotoDialogOwner]::IsWindowEnabled($main))
     Pick $wide $true
     $first = Wait-For 'first stored image' { $a = @(Assets); if ($a.Count -eq 1) { $a[0] } }
     $firstId = Wait-For 'first local identity' { $tab = @((State).tabs | Where-Object { $_.name -ceq 'Photo Alpha' -and $_.PSObject.Properties['avatar_local_id'] }); if ($tab.Count -eq 1 -and $tab[0].avatar_local_id -match '^[0-9a-f]{32}$') { $tab[0].avatar_local_id } }
@@ -400,7 +422,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
-    try { Shot 'failure' } catch {}
+    try { Save (Picker-State $lastDialog) (Join-Path $Evidence 'failure-state.json'); Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup = 0 }
     if ($null -ne $switchJob) {
