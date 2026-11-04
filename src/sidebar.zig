@@ -3667,13 +3667,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
-                        var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - (if (is_chat_tools) @as(i32, 140) else 8), .bottom = ry + row_h };
+                        var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        if (is_chat_tools) {
-                            _ = SelectObject(hdc, palette_hint_font);
-                            var hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = paletteDrawText(hdc, L("Ctrl+Shift+J"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                        }
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
