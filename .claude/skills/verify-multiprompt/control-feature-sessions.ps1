@@ -24,7 +24,8 @@
             $result.checks += @{ name = 'ctrl-t-notes-only-chat'; cwd = '/work/projects/notes-only'; cv = $true; host = 2 }
             Press @(0x11, 0x57) 'Ctrl+W: close notes-only chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'notes-only chat closed'
-            Press @(0x11, 0x32) 'Ctrl+2: return to the seeded third-server session'
+            Palette 'Second'
+            Press @(0x0D) 'Enter: return to the seeded third-server session'
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal choice'
 
             Palette 'new claude in terminal'
@@ -48,7 +49,8 @@
             $result.checks += @{ name = 'cancel-then-ctrl-t-zz-last-folder'; cwd = '/work/projects/zz-last-folder'; cv = $true; host = 2 }
             Press @(0x11, 0x57) 'Ctrl+W: close zz-last-folder chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'zz-last-folder chat closed'
-            Press @(0x11, 0x32) 'Ctrl+2: return to the seeded third-server session'
+            Palette 'Second'
+            Press @(0x0D) 'Enter: return to the seeded third-server session'
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal session'
 
             Palette 'new claude in terminal'
