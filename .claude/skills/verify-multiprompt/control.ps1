@@ -242,7 +242,13 @@ try {
         & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
-        $result.repoPickerBoundary = 'Synthetic SSH repository listing and console-backed tmux; no real SSH, tmux server or agent verified.'
+        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; tabs = @(
+            @{ kind = 'tmux'; name = 'First'; manual = $true; tmux_host = 0; tmux_session = 'first'; workspace = 0; cv = $false; pid = 0 },
+            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cv = $false; pid = 0 }
+        ) }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        Save-Json $seed 'seed-session.json'
+        $result.repoPickerBoundary = 'Two saved synthetic tmux tabs in Other, host 0 then active host 2; synthetic SSH repository listing and console-backed tmux; no real SSH, tmux server or agent verified.'
     }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
@@ -354,7 +360,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('browser-own-profile', 'tab-names', 'inbox-order')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed

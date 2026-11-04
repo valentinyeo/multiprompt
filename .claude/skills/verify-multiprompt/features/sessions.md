@@ -20,13 +20,14 @@ Open a real local console tab, give it a recognizable name and execute a command
 
 Preconditions:
 
-- Baseline Doctor passes with a live CMD tab and a readable saved session.
+- Doctor passes with a live restored tab and a readable saved session.
 - The isolated data directory contains no tab named `Verification session`.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=sessions`. The Windows invocation selects `control.ps1 -Feature sessions`.
-- **Repository picker.** Use a branch build with Zig available on the hosted runner. Before launch, the driver compiles an SSH-only stand-in and sets the isolated SSH path. It returns `/work/projects/alpha` and `/work/projects/beta` for discovery and holds tmux transports open. This is not real SSH, tmux or an agent.
-- **Ctrl+T.** Wait for the stand-in's discovery response, capture the picker, filter `beta`, press Enter, and require the saved active tab to have beta as its cwd and Chat View enabled. Inspect the picker screenshots: the discovery receipt alone does not prove the custom-painted rows appeared.
-- **Cancel.** Close the chat, choose `New Claude in terminal`, cancel the picker and close the palette. Ctrl+T then selects `alpha` and must save a chat tab with alpha as cwd. Close it, choose `New Claude in terminal` again, select `beta`, and require beta cwd with Chat View disabled. Missing `cv` means false in the saved format.
+- **Repository picker.** Use a branch build with Zig available on the hosted runner. Before launch, seed two saved tmux tabs in Other, host 0 followed by host 2, with workspace 0 and the second tab active. Capture `seed-session.json`. Launch with restore enabled. The SSH-only stand-in returns `/work/projects/alpha` and `/work/projects/beta` and holds tmux transports open. This is not real SSH, tmux or an agent.
+- **Ctrl+T.** Wait for the app-saved second tab to be active on host 2; capture `sessions-initial.json` without selecting another host. Wait for discovery, capture the picker, filter `beta`, press Enter, and require the saved active tab to have beta as its cwd, Chat View enabled and host 2. Inspect the picker screenshots: the discovery receipt alone does not prove the custom-painted rows appeared.
+- **Cancel.** Close the chat and require host 2 remains active. Choose `New Claude in terminal`, cancel the picker and close the palette; require host 2 remains active. Ctrl+T selects `alpha` and must save a chat tab with alpha as cwd on host 2. Close it, require host 2 active, choose `New Claude in terminal` again, select `beta`, and require beta cwd on host 2 with Chat View disabled. Missing `cv` means false in the saved format.
+- **Scope.** This tests a mixed-host wrong-server hypothesis, not the original disappeared-row report. No hosted run has yet proved this new setup.
 - **Evidence.** Inspect the picker and resulting screenshots, saved session, per-process SSH invocations and `result.json`. A timeout before selection is a harness or setup failure, not proof of the product bug. The existing CMD journey runs afterward.
 - **Create.** Ctrl+K, type `new cmd`, capture `action.png`, then Enter. The helper requires saved tab count to increase by exactly one.
 - **Rename.** Press F2, Ctrl+A, type `Verification session`, Enter. The saved session must contain exactly one tab with that name.

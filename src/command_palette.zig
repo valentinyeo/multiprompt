@@ -5677,6 +5677,37 @@ test "IGSH-1266 no declared folder opens the pick repo list and spawns nothing" 
     try std.testing.expectEqual(@as(u32, 0), app_state.shell_count);
 }
 
+test "IGSH-1447 new picker uses the active remote host only in its workspace" {
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_workspace = [3]u8{ app_state.shells[0].workspace, app_state.shells[1].workspace, app_state.shells[2].workspace };
+    const saved_host = [3]u8{ app_state.shells[0].tmux_host, app_state.shells[1].tmux_host, app_state.shells[2].tmux_host };
+    const saved_len = .{ app_state.shells[0].tmux_session_len, app_state.shells[1].tmux_session_len, app_state.shells[2].tmux_session_len };
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        inline for (0..3) |i| {
+            app_state.shells[i].workspace = saved_workspace[i];
+            app_state.shells[i].tmux_host = saved_host[i];
+            app_state.shells[i].tmux_session_len = saved_len[i];
+        }
+    }
+    app_state.shell_count = 3;
+    app_state.active_shell = 2;
+    app_state.g_single_window = true;
+    app_state.shells[0].workspace = 1;
+    app_state.shells[0].tmux_host = 1;
+    app_state.shells[1].workspace = 0;
+    app_state.shells[1].tmux_host = 0;
+    app_state.shells[2].workspace = 0;
+    app_state.shells[2].tmux_host = 2;
+    for (0..3) |i| app_state.shells[i].tmux_session_len = 1;
+    try std.testing.expectEqual(@as(u8, 1), workspaceHostForNewTab(1));
+    try std.testing.expectEqual(@as(u8, 2), workspaceHostForNewTab(0));
+}
+
 test "repo picker keeps terminal intent only for its current request" {
     defer closePickRepo();
     pickRepoOpen(true, false, 0, true);
