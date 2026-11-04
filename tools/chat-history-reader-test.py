@@ -31,14 +31,6 @@ class HistoryReaderTest(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
-        held_queue_db = reader.held_queue_db
-
-        def database(tmux):
-            db = held_queue_db(tmux)
-            self.addCleanup(db.close)
-            return db
-
-        patch.object(reader, 'held_queue_db', side_effect=database).start()
         self.path = self.home / '.claude/projects/-work-demo/sid.jsonl'
         self.path.parent.mkdir(parents=True)
         self.query = dict(id=7, codex=False, sid='sid', tmux='term-1', cwd='/work/demo',
