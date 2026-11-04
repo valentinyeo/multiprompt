@@ -410,7 +410,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/browser-switch-speed.test.js/);
-  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane'\)\)/);
+  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'\)\)/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
   assert.match(map, /on demand only/);
@@ -511,7 +511,7 @@ test('frozen returns require five fresh app-published freezes per view, native c
 });
 
 function assertsSwitchExtension(driver) {
-  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'",
     "$extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }",
@@ -552,7 +552,7 @@ test('new measurement code adds no removable code comments', async () => {
 
 function assertsRealBridge(driver, yaml) {
   yaml = yaml.slice(yaml.indexOf('\n  verify:\n'));
-  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'",
     "Join-Path $config 'chrome-exe.txt'", "Join-Path $config 'browser-engine.txt'",

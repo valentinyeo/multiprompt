@@ -288,8 +288,7 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.ok(cli.includes('request = f"ZSB:{session}:{payload}\\n"'));
   assert.ok(cli.includes('sock.sendall((request if endpoint else f"AUTH:{token}:" + request).encode())'));
   assert.ok(transport.includes('[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))'));
-  assert.ok(transport.includes("[string]$Session = 'workspace'"));
-  assert.ok(transport.includes('[Text.Encoding]::UTF8.GetBytes("ZSB:${Session}:${payload}`n")'));
+  assert.ok(transport.includes('[Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")'));
   assert.match(transport, /Doctor\s+Assert-Foreground\s+Record/);
   assert.match(transport, /ConnectAsync\('127\.0\.0\.1', \$Port\)/);
   assert.match(transport, /connecting\.Wait\(5000\)/);
@@ -1053,7 +1052,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /function Activate-OwnedFrame \{[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'))"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
