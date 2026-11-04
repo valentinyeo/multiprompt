@@ -310,6 +310,7 @@ fn clear() void {
 }
 var test_outbox_key: []const u8 = "test";
 fn chatOutboxKeyForShell(_: u32, buf: []u8) []const u8 { @memcpy(buf[0..test_outbox_key.len], test_outbox_key); return buf[0..test_outbox_key.len]; }
+fn chatEchoRowLanded(_: anytype) bool { return false; }
 fn chatOutboxLegacyKeyForShell(_: u32, buf: []u8) []const u8 { return buf[0..0]; }
 fn chatBlockDisplayRange(_: []const u16, b: ChatBlock) struct { start: usize, len: usize } { return .{ .start = b.start, .len = b.len }; }
 var fake_now_ms: i64 = 2000;
@@ -1576,7 +1577,7 @@ function runHarness(control = false) {
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
       let match = oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '');
       if (body('chatConfirmedAdd').includes('block: ChatBlock')) {
-        match = match.replace('chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi].start, g_chat_blocks[mi].len, g_chat_blocks[mi].stamp_ms);', 'chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi]);');
+        match = match.replace('chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi].start, g_chat_blocks[mi].len, g_chat_blocks[mi].stamp_ms);', 'chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi], e);');
       }
       functions = functions.replace(body('chatEchoMatchActive'), match) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
@@ -1584,6 +1585,9 @@ function runHarness(control = false) {
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'question-old' ? 'IGSH-1063' : control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+test('IGSH-1415 the pending layout drops a local copy the transcript already carries', () => {
+  assert.match(body('chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
+});
 test('correctness repeats and unreadable: executed production outbox, write reservation and matching handle restart, busy/idle, repeated text and cache reload', () => {
   const result = runHarness();
   assert.equal(result.status, 0, result.stdout + result.stderr);

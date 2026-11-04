@@ -236,6 +236,7 @@ const chatOutboxIndexById = @import("chat_send.zig").chatOutboxIndexById;
 const chatEchoSendAgain = @import("chat_send.zig").chatEchoSendAgain;
 const chatEchoRemove = @import("chat_send.zig").chatEchoRemove;
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
+const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const repositionActive = @import("window_layout.zig").repositionActive;
@@ -2362,6 +2363,7 @@ pub fn chatRelayout(client_width: i32) void {
             for (app_state.g_chat_outbox.items) |e| {
                 if (app_state.g_chat_echo_layout_count >= app_state.g_chat_echo_layout.len) break;
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or g_reaction_view.hidesPending(e.id)) continue;
+                if (chatEchoRowLanded(e)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, e.state == .not_sent, g_reaction_view.projectedPending(e.id));
                 if (e.state == .cancelled) rc.bottom += uiScaled(CHAT_STATUS_H);

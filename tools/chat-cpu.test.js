@@ -251,6 +251,7 @@ fn chatMeasureBlockRect(_: HANDLE, _: []const u16, _: ChatBlock, _: chat_style.B
 }
 fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
 fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
+fn chatEchoRowLanded(_: anytype) bool { return false; }
 fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }
 fn chatMeasureProjectedBlockRect(hdc: HANDLE, text: []const u16, block: ChatBlock, pos: chat_style.BubblePos, w: i32, y: i32, imgs: ?*ChatImgLayout, _: ?*const chat_reaction.Projection) RECT {
     return chatMeasureBlockRect(hdc, text, block, pos, w, y, imgs);
@@ -297,6 +298,9 @@ test "prefix rectangles survive repeated layout and suffix updates; resize and f
 test('production layout measures only changed suffixes and caches unchanged geometry', () => {
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('IGSH-1415 a local copy the transcript already carries is not laid out', () => {
+  assert.match(body(source, 'chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
 });
 test('ISSUE-268 oldest match has room below the find bar and closing removes that room', () => {
   const check = `

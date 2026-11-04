@@ -24,6 +24,7 @@ pub const Item = struct {
     kind: ItemKind = .text,
     status: ItemStatus = .running,
     done: bool = false,
+    key: u64 = 0,
     text: std.ArrayList(u8) = .empty,
 
     pub fn idSlice(self: *const Item) []const u8 {
@@ -66,6 +67,8 @@ pub const Request = struct {
     }
 };
 
+pub const SENT_KEYS: usize = 4;
+
 pub const Live = struct {
     used: bool = false,
     shell_id: u32 = 0,
@@ -75,6 +78,10 @@ pub const Live = struct {
     after: u64 = 0,
     turn: [MAX_ID]u8 = @splat(0),
     turn_len: usize = 0,
+    sent_id: [81]u8 = @splat(0),
+    sent_id_len: usize = 0,
+    sent_keys: [SENT_KEYS]u64 = @splat(0),
+    sent_key_count: usize = 0,
     state: State = .idle,
     ended: ItemStatus = .ok,
     revision: u64 = 0,
@@ -98,6 +105,8 @@ pub const Live = struct {
         self.reply_in_history = false;
         self.after = 0;
         self.turn_len = 0;
+        self.sent_id_len = 0;
+        self.sent_key_count = 0;
         self.state = .idle;
         self.ended = .ok;
         self.request = .{};
@@ -125,6 +134,7 @@ pub const Live = struct {
         try self.items.append(a, .{ .kind = kind });
         const added = &self.items.items[self.items.items.len - 1];
         added.setId(id);
+        added.key = if (id.len == 0) 0 else chat_markdown.rowKey(id);
         return added;
     }
 };
@@ -187,6 +197,24 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.state = .running;
         self.turn_len = @min(turn.len, self.turn.len);
         @memcpy(self.turn[0..self.turn_len], turn[0..self.turn_len]);
+        self.sent_id_len = 0;
+        self.sent_key_count = 0;
+        const sent = strOf(payload, "message_id");
+        self.sent_id_len = @min(sent.len, self.sent_id.len);
+        @memcpy(self.sent_id[0..self.sent_id_len], sent[0..self.sent_id_len]);
+        if (fieldOf(payload, "uuids")) |listed| switch (listed) {
+            .array => |array| for (array.items) |entry| {
+                if (self.sent_key_count >= self.sent_keys.len) break;
+                const uuid = switch (entry) {
+                    .string => |text| text,
+                    else => continue,
+                };
+                if (uuid.len == 0) continue;
+                self.sent_keys[self.sent_key_count] = chat_markdown.rowKey(uuid);
+                self.sent_key_count += 1;
+            },
+            else => {},
+        };
     } else if (std.mem.eql(u8, kind, "text.delta") or std.mem.eql(u8, kind, "thinking.delta")) {
         const target = try self.itemFor(a, item_id, if (std.mem.eql(u8, kind, "text.delta")) .text else .thinking);
         try target.setText(a, strOf(payload, "text"));
@@ -520,11 +548,12 @@ fn prefixOf(kind: ItemKind) []const u16 {
     };
 }
 
-pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_markdown.Block) Tail {
+pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_markdown.Block, seen: []const chat_markdown.Block) Tail {
     var out = Tail{};
     for (self.items.items) |*item| {
         if (out.blocks >= blocks.len) break;
         if (item.text.items.len == 0) continue;
+        if (!chat_markdown.drawnOnce(item.key, seen)) continue;
         if (out.text_len > 0) {
             if (out.text_len >= text.len) break;
             text[out.text_len] = '\n';
@@ -550,6 +579,7 @@ pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_ma
             },
             .markdown = true,
             .first = out.blocks == 0,
+            .row_key = item.key,
             .tool_status = switch (item.status) {
                 .running => .running,
                 .failed => .@"error",
@@ -562,13 +592,27 @@ pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_ma
     return out;
 }
 
-pub fn tailFor(shell_id: u32, text: []u16, offset: usize, blocks: []chat_markdown.Block) Tail {
+pub fn tailFor(shell_id: u32, text: []u16, offset: usize, blocks: []chat_markdown.Block, seen: []const chat_markdown.Block) Tail {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
-        if (live.used and live.shell_id == shell_id) return if (live.state == .running or live.held) tailInto(live, text, offset, blocks) else .{};
+        if (live.used and live.shell_id == shell_id) return if (live.state == .running or live.held) tailInto(live, text, offset, blocks, seen) else .{};
     }
     return .{};
+}
+
+pub fn sentRowKeys(shell_id: u32, message_id: []const u8, out: []u64) usize {
+    if (message_id.len == 0) return 0;
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        if (!std.mem.eql(u8, live.sent_id[0..live.sent_id_len], message_id)) return 0;
+        const n = @min(live.sent_key_count, out.len);
+        @memcpy(out[0..n], live.sent_keys[0..n]);
+        return n;
+    }
+    return 0;
 }
 
 pub fn held(shell_id: u32) bool {
@@ -847,7 +891,7 @@ test "D1 a reconnect replays from the last seen seq and skips what it already ha
     try std.testing.expectEqual(@as(u64, 9), begin(99, 0, "11111111-2222-3333-4444-555555555555"));
     var text: [128]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
-    const tail = tailFor(99, &text, 0, &blocks);
+    const tail = tailFor(99, &text, 0, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hello"), text[0..tail.text_len]);
 }
@@ -865,7 +909,7 @@ test "D1 thinking and text deltas keep their arrival order" {
     try std.testing.expectEqual(ItemKind.text, live.items.items[1].kind);
     var text: [128]u16 = @splat(0);
     var blocks: [8]chat_markdown.Block = undefined;
-    const tail = tailInto(&live, &text, 40, &blocks);
+    const tail = tailInto(&live, &text, 40, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 2), tail.blocks);
     try std.testing.expectEqual(@as(usize, 40), blocks[0].start);
     try std.testing.expectEqual(chat_markdown.Role.tool, blocks[0].role);
@@ -954,7 +998,7 @@ test "D4 a proposed plan renders as an assistant block behind a plan ready line"
     try std.testing.expectEqual(RequestKind.plan, live.request.kind);
     var text: [256]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
-    const tail = tailInto(&live, &text, 0, &blocks);
+    const tail = tailInto(&live, &text, 0, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqual(chat_markdown.Role.prose, blocks[0].role);
     const body = text[blocks[0].start..][0..blocks[0].len];
@@ -1077,16 +1121,16 @@ test "IGSH-1266 a new turn drops the last turn so the live tail shows only the r
     var text: [128]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
     try std.testing.expect(held(98));
-    try std.testing.expectEqual(@as(usize, 1), tailFor(98, &text, 0, &blocks).blocks);
+    try std.testing.expectEqual(@as(usize, 1), tailFor(98, &text, 0, &blocks, &.{}).blocks);
     historyCaughtUp(98);
-    try std.testing.expectEqual(@as(usize, 0), tailFor(98, &text, 0, &blocks).blocks);
+    try std.testing.expectEqual(@as(usize, 0), tailFor(98, &text, 0, &blocks, &.{}).blocks);
     const new_turn = "{\"result\":{\"events\":[" ++
         "{\"seq\":4,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-2\",\"payload\":{}}}," ++
         "{\"seq\":5,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t-2\",\"item\":\"b:text:0\",\"payload\":{\"text\":\"New\"}}}" ++
         "]}}";
     try std.testing.expect(applyPage(98, sid, new_turn));
     try std.testing.expect(running(98));
-    const tail = tailFor(98, &text, 0, &blocks);
+    const tail = tailFor(98, &text, 0, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("New"), text[0..tail.text_len]);
 }
@@ -1105,7 +1149,7 @@ test "IGSH-1266 a host that turns ready mid-turn keeps the live reply on screen"
     try std.testing.expect(running(97));
     var text: [64]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
-    const tail = tailFor(97, &text, 0, &blocks);
+    const tail = tailFor(97, &text, 0, &blocks, &.{});
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Live"), text[0..tail.text_len]);
     const stopped = "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
     try std.testing.expect(applyPage(97, sid, stopped));
@@ -1133,7 +1177,50 @@ test "IGSH-1266 history that lands before the turn ends does not leave a second 
     try std.testing.expect(!held(95));
     var text: [64]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
-    try std.testing.expectEqual(@as(usize, 0), tailFor(95, &text, 0, &blocks).blocks);
+    try std.testing.expectEqual(@as(usize, 0), tailFor(95, &text, 0, &blocks, &.{}).blocks);
+}
+
+test "IGSH-1415 a reply the transcript already carries is drawn once while the turn runs" {
+    const sid = "11111111-2222-3333-4444-777777777777";
+    _ = begin(94, 0, sid);
+    defer release(94);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.done\",\"turn\":\"t-1\",\"item\":\"msg_ab:text:0\",\"payload\":{\"text\":\"Reply\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(94, sid, page));
+    var text: [64]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    const landed = [_]chat_markdown.Block{.{ .start = 0, .len = 5, .role = .prose, .row_key = chat_markdown.rowKey("msg_ab") }};
+    try std.testing.expectEqual(@as(usize, 0), tailFor(94, &text, 0, &blocks, &landed).blocks);
+    try std.testing.expectEqual(@as(usize, 1), tailFor(94, &text, 0, &blocks, &.{}).blocks);
+}
+
+test "IGSH-1415 a live step the transcript has not carried yet stays on screen" {
+    const sid = "11111111-2222-3333-4444-666666666666";
+    _ = begin(93, 0, sid);
+    defer release(93);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t-1\",\"item\":\"msg_cd:text:0\",\"payload\":{\"text\":\"Later\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(93, sid, page));
+    var text: [64]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    const landed = [_]chat_markdown.Block{.{ .start = 0, .len = 5, .role = .prose, .row_key = chat_markdown.rowKey("msg_ab") }};
+    try std.testing.expectEqual(@as(usize, 1), tailFor(93, &text, 0, &blocks, &landed).blocks);
+}
+
+test "IGSH-1415 a sent message carries the transcript row key of the turn it started" {
+    const sid = "11111111-2222-3333-4444-555555555555";
+    _ = begin(92, 0, sid);
+    defer release(92);
+    const page = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{\"message_id\":\"mp-1\",\"uuids\":[\"u-1\",\"u-2\"]}}}]}}";
+    try std.testing.expect(applyPage(92, sid, page));
+    var keys: [SENT_KEYS]u64 = undefined;
+    try std.testing.expectEqual(@as(usize, 2), sentRowKeys(92, "mp-1", &keys));
+    try std.testing.expectEqual(chat_markdown.rowKey("u-1"), keys[0]);
+    try std.testing.expectEqual(@as(usize, 0), sentRowKeys(92, "mp-2", &keys));
 }
 
 test "IGSH-1266 an empty thinking item does not hide the reply after it" {
@@ -1148,7 +1235,7 @@ test "IGSH-1266 an empty thinking item does not hide the reply after it" {
     try std.testing.expect(applyPage(96, sid, page));
     var text: [64]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
-    const tail = tailFor(96, &text, 0, &blocks);
+    const tail = tailFor(96, &text, 0, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Reply"), text[0..tail.text_len]);
 }

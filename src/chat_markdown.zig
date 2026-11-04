@@ -23,6 +23,7 @@ pub const Block = struct {
     tool_status: ToolStatus = .running,
     tool_id: u64 = 0,
     message_id: u64 = 0,
+    row_key: u64 = 0,
     reaction_reference: u64 = 0,
     detail_start: usize = 0,
     detail_len: usize = 0,
@@ -38,6 +39,19 @@ pub const Block = struct {
 pub const Range = struct { start: usize, end: usize };
 pub const Style = struct { bold: bool = false, italic: bool = false, code: bool = false };
 pub const Span = struct { text: Range, style: Style = .{}, target: ?Range = null };
+
+pub fn rowKey(id: []const u8) u64 {
+    const base = if (std.mem.indexOf(u8, id, ":text:")) |at| id[0..at] else id;
+    return std.hash.Wyhash.hash(0, base);
+}
+
+pub fn drawnOnce(key: u64, seen: []const Block) bool {
+    if (key == 0) return true;
+    for (seen) |block| {
+        if (block.row_key == key) return false;
+    }
+    return true;
+}
 
 fn trim(s: []const u16) []const u16 {
     return std.mem.trim(u16, s, &.{ ' ', '\t', '\r' });
