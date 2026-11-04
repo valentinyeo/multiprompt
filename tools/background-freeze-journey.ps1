@@ -25,6 +25,7 @@ public static class BackgroundFreezeJourney {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent, IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr window);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
@@ -196,7 +197,8 @@ function Return-Main([string]$Stage, [bool]$Restore = $false) {
     return $elapsed
 }
 function Save-Shot([string]$Name) {
-    if ([BackgroundFreezeJourney]::GetForegroundWindow() -ne $main -or [BackgroundFreezeJourney]::IsIconic($main)) { throw 'Screenshot requires the foreground main window' }
+    $foreground = [BackgroundFreezeJourney]::GetForegroundWindow()
+    if (($foreground -ne $main -and -not [BackgroundFreezeJourney]::IsChild($main, $foreground)) -or [BackgroundFreezeJourney]::IsIconic($main)) { throw 'Screenshot requires the foreground app or its hosted console' }
     $rect = Read-Bounds
     $origin = [BackgroundFreezeJourney+Point]::new()
     if (-not [BackgroundFreezeJourney]::ClientToScreen($main, [ref]$origin)) { throw 'Screenshot client origin unavailable' }
@@ -214,6 +216,7 @@ function Save-Shot([string]$Name) {
 }
 function Inject-PaintSuppression {
     Assert-Owned
+    [void](Return-Main 'paint-fixture-focus')
     if ([BackgroundFreezeJourney]::IsIconic($main) -or [BackgroundFreezeJourney]::GetForegroundWindow() -ne $main) { throw 'Paint fixture requires the restored foreground main' }
     foreach ($message in @(@(0x001C, 0), @(0x000B, 0), @(0x001C, 1))) {
         if (-not [BackgroundFreezeJourney]::PostMessage($main, $message[0], [UIntPtr]$message[1], [IntPtr]::Zero)) { throw 'Cannot post ordered paint suppression fixture' }

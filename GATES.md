@@ -1,6 +1,6 @@
 # IGSH-1651 gates
 
-- [ ] A test fails on the original cause and passes with the fix. Windows regression run pending.
+- [x] A test fails today and passes with the fix. Windows run 41810436539 failed the pending-frame test; candidate run 41811555235 passed test-windows (1).
 - [ ] Live Windows proof: after time in the background, the app answers at once. Background/minimize/restore journey pending.
 - [ ] CI green.
 - [ ] Full CI green on this PR. https://github.com/valentinyeo/multiprompt/pull/743
