@@ -6018,6 +6018,16 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_LBUTTONDBLCLK => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            if (g_choice.present) {
+                for (g_choice_rects[0..g_choice_rect_count]) |rc| {
+                    if (pointInRect(rc, GET_X(lp), GET_Y(lp) + app_state.g_chat_scroll_y)) return 0;
+                }
+                if (g_choice.permission) {
+                    if (g_permission_echo_rect) |rc| {
+                        if (pointInRect(rc, GET_X(lp), GET_Y(lp) + app_state.g_chat_scroll_y)) return 0;
+                    }
+                }
+            }
             _ = KillTimer(hwnd, selection_offer_timer);
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {

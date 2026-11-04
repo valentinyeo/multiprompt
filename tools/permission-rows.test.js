@@ -33,6 +33,17 @@ test('IGSH-1599 permissions use transcript choices instead of a separate compose
   assert.match(body('src/chat_render.zig', 'chatChoicesRefresh'), /permission/);
 });
 
+test('IGSH-1599 double-clicking visible answer rows cannot trigger the blank-space view toggle', () => {
+  const render = read('src/chat_render.zig');
+  const start = render.indexOf('WM_LBUTTONDBLCLK => {');
+  assert.ok(start >= 0);
+  const handler = render.slice(start, render.indexOf('const toggle = @import("dblclick_toggle.zig");', start));
+  assert.match(handler, /g_choice\.present/);
+  assert.match(handler, /for \(g_choice_rects\[0\.\.g_choice_rect_count\]\)/);
+  assert.match(handler, /pointInRect\(rc, GET_X\(lp\), GET_Y\(lp\) \+ app_state\.g_chat_scroll_y\)\) return 0;/);
+  assert.match(handler, /g_permission_echo_rect/);
+});
+
 test('IGSH-1599 approved permission wording stays distinct from provider digits', () => {
   const permission = read('src/chat_permission.zig');
   for (const text of ['Approve', 'Always allow this session', 'Decline', 'Run it once.', 'Don’t ask again in this chat.', 'Skip it. Say why in the chat.']) {
