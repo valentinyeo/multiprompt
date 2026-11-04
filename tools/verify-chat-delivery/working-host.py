@@ -48,10 +48,13 @@ def install(namespace, root, record):
         if not matches(provider, sid):
             return previous_deliver(provider, sid, token, attempt, epoch, text)
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
-        session = {'turn': 'standin-turn'}
+        session = {'turn': 'standin-turn', 'state': {},
+                   'sends': [dict(id=token, attempt=attempt, accepted=False)]}
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))
         record('working-host.jsonl', stage='turn.started', sid=sid, id=token)
+        namespace['host_accept'](provider, sid, 'verify-agent', session, dict(type='standin-accepted'), token)
+        record('working-host.jsonl', stage='accepted', sid=sid, id=token)
         if session.get('db') is not None:
             session['db'].close()
             del session['db']

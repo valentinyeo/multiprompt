@@ -38,6 +38,7 @@ function verify(root) {
   assert.ok(dots(readBmp(path.join(dir, 'pre-send-busy.bmp')), json('area.json')), 'Pre-send busy dots missing');
   const push = rows.find(row => row.stage === 'pushed' && row.events.some(({event}) => event.kind === 'turn.started' && event.turn === 'standin-turn'));
   assert.ok(push, 'Dispatched turn.started was not pushed to the subscription');
+  assert.ok(rows.some(row => row.stage === 'pushed' && row.events.some(({event}) => event.id === delivered.id && event.state === 'accepted')), 'Provider acceptance did not reach the subscription');
   const replyPush = rows.find(row => row.stage === 'pushed' && row.events.some(({event}) => event.kind === 'text.delta' && event.payload.text === reply));
   assert.ok(replyPush, 'Reply delta was not pushed');
   assert.ok(!rows.some(row => row.stage === 'pushed' && row.events.some(({event}) => event.kind === 'turn.ended')), 'Turn ended before reply proof');
@@ -51,12 +52,10 @@ function verify(root) {
   if (reference) for (const frame of frames.filter(frame => frame.phase === 'reply' && !frame.dots)) {
     const image = frame.image;
     const bg = (area.top * image.width + area.left) * 4;
-    const top = Math.max(area.top, Math.min(...reference.dots.map(dot => dot.top)) - 10);
-    const bottom = Math.min(area.bottom, Math.max(...reference.dots.map(dot => dot.bottom)) + 15);
     let count = 0;
-    for (let y = top; y < bottom; y++) for (let x = reference.dots[0].left; x < Math.min(area.right, reference.dots[0].left + 100); x++) {
+    for (let y = area.top; y < area.bottom; y++) for (let x = area.left; x < Math.min(area.right, area.left + 180); x++) {
       const offset = (y * image.width + x) * 4;
-      if ([0, 1, 2].some(c => Math.abs(image.pixels[offset + c] - image.pixels[bg + c]) > 75)) count++;
+      if ([0, 1, 2].some(c => Math.abs(image.pixels[offset + c] - image.pixels[bg + c]) > 75 && Math.abs(image.pixels[offset + c] - reference.image.pixels[offset + c]) > 30)) count++;
     }
     frame.replyPixels = count;
   }

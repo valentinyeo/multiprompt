@@ -43,6 +43,7 @@ test('rejects incomplete and duplicate evidence', () => {
 
 test('requires a running timer, a painted reply and no remaining dots', () => {
   const result = observe(log, imageFor);
+  for (const value of Object.values(result.cases)) value.stages['reply-delta'].blocks = value.stages['turn-started'].blocks + 1;
   assert.throws(() => validate(result), /dots remain with reply text/);
   for (const value of Object.values(result.cases)) {
     value.observations.startedDotsWithinOneSecondOfSyntheticEnqueue = true;
