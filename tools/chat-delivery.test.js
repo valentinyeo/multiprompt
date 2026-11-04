@@ -417,7 +417,7 @@ fn transcript(text: []const u16, stamp: i64) void {
     g_chat_blocks[0] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = stamp };
     g_chat_block_count = 1;
 }
-test "IGSH-1655 only terminal tabs get an Alt+C hint after a dialog command" {
+test "delivery: IGSH-1655 only terminal tabs get an Alt+C hint after a dialog command" {
     defer clear();
     const command = std.unicode.utf8ToUtf16LeStringLiteral("/settings");
     for ([_][]const u8{ "live-test", "term-test" }, 0..) |session, index| {

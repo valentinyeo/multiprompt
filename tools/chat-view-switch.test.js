@@ -44,6 +44,7 @@ test('IGSH-1655 shortcut help and terminal-only notices agree with live-chat beh
   const notice = send.indexOf('Opened in the terminal, press Alt+C to see it');
   assert.ok(notice >= 0);
   assert.match(send.slice(notice - 500, notice), /canToggle\(/);
+  assert.match(read('tools/chat-delivery.test.js'), /test "delivery: IGSH-1655 only terminal tabs get an Alt\+C hint/);
 });
 
 test('IGSH-1655 live Alt+C is swallowed before browser focus or debounce changes', () => {
