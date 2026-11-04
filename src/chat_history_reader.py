@@ -3897,7 +3897,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["set_mode"](provider, sid, session, request["mode"])
     if operation != "deliver":
         return dict(status="error", reason="invalid_op")
-    if provider == "claude" and "settings" in session and (not session.get("ready") or session.get("applied_settings") != session["settings"]):
+    if provider == "claude" and "settings" in session and (session.get("agent") is None or session.get("starting_settings") != session["settings"]):
         return dict(status="busy", reason="settings_pending")
     token, attempt, epoch, text = request.get("id"), request.get("attempt"), request.get("epoch"), request.get("text")
     if not isinstance(text, str) or not text.strip() or "\x00" in text:
@@ -4663,7 +4663,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
-            if (provider == "claude" and session["ready"] and session["settings"] != session["applied_settings"]
+            if (provider == "claude" and session["settings"] != session["starting_settings"]
                     and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
                 selector.unregister(agent.stdout)
                 host_agent_stop(agent)
