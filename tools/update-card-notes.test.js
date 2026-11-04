@@ -368,7 +368,8 @@ test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () 
     { sha: '8f52c2a6cf81d617d61bf6c439ec29719d850062', subject: 'Add AGENTS.md pointing every agent at CLAUDE.md (#737)' },
     { sha: '246972c5', subject: 'IGSH-1610: Approve a device even when one SSH host is unreachable (#738)' },
   ];
-  const generated = buildChangelog(files, 'v0.28.1448', [], commits);
+  let generated;
+  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits); });
   const latest = releaseNotes(generated, 'v0.28.1448').releases[0];
   assert.deepEqual(latest.changes, ['Devices can be approved when one host is offline.']);
   assert.match(generated, /\.ticket = "IGSH-1615"/);
