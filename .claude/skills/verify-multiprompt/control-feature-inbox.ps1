@@ -45,6 +45,11 @@
             Press @(0x0D) 'Enter: unmute the current tab'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells | Where-Object { $_.sid -eq $sid }).Count -eq 1 } 'unmuted session listed in published Inbox'
             $result.checks += @{ name = 'inbox-unmuted-listed'; sid = $sid; listed = $true }
+            if ((Read-Session).hide_pills) {
+                Focus-Palette 'workspace switcher' 6213
+                Press @(0x0D) 'Enter: show workspace switcher for Inbox button proof'
+                Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills } 'workspace switcher shown and saved for Inbox button proof'
+            }
             $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
             Wait-Until { (Test-Path $snapshotPath) -and (Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width -ge 100 } 'app publishes sidebar width'
             $sidebarLogical = [int](Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width
