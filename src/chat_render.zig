@@ -7476,6 +7476,120 @@ fn channelDistance(a: u32, b: u32) u32 {
     return out;
 }
 
+fn liveWorkingProofFrame(dc: HANDLE, name: LPCWSTR, bytes: []const u8, header: anytype, started: u64, stage: []const u8) !void {
+    const w = @import("win32.zig");
+    const bounds = RECT{ .left = 0, .top = 0, .right = 800, .bottom = 600 };
+    chatPaintTranscriptContent(dc, 800, 600, bounds);
+    _ = struct { extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL; }.GdiFlush();
+    try scrollProofSave(name, bytes, header);
+    std.debug.print("IGSH1668 stage={s} elapsed_ms={d} live={any} screen={any} visible={any} slot={any} timer={any} blocks={d}\n", .{
+        stage, GetTickCount64() -| started, @import("chat_live.zig").running(app_state.shells[0].shell_id),
+        app_state.g_chat_screen_working, @import("window_layout.zig").chatStopVisible(), g_working_rect != null,
+        app_state.g_chat_working_timer_running, app_state.g_chat_block_count,
+    });
+}
+
+test "IGSH-1668 hosted live events reach the native working painter" {
+    const w = @import("win32.zig");
+    var enabled: [8]u8 = undefined;
+    if (w.GetEnvironmentVariableA("MULTIPROMPT_LIVE_WORKING_PROOF", &enabled, enabled.len) == 0) return;
+    const live = @import("chat_live.zig");
+    const session = @import("chat_session.zig");
+    const layout = @import("window_layout.zig");
+    const shell_id = 1668001;
+    const sid = "11111111-2222-3333-4444-166800000001";
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("live working proof"), 0, 0, 0, 800, 600, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const info: w.BITMAPINFO = .{ .header = .{ .width = 800, .height = -600 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const bytes = @as([*]const u8, @ptrCast(bits.?))[0 .. 800 * 600 * 4];
+    const saved = .{
+        .shell = app_state.shells[0], .count = app_state.shell_count, .active = app_state.active_shell,
+        .chat = app_state.g_chat_active, .main = app_state.g_main_hwnd, .transcript = app_state.g_chat_transcript_hwnd,
+        .outbox = app_state.g_chat_outbox, .working = app_state.g_chat_screen_working,
+        .status = app_state.g_chat_screen_status_len, .permission = app_state.g_chat_permission,
+        .permission_sid = app_state.g_chat_permission_sid, .timer = app_state.g_chat_working_timer_running,
+    };
+    app_state.g_chat_outbox = .empty;
+    defer {
+        _ = w.KillTimer(hwnd, w.TIMER_CHAT_WORKING);
+        live.release(shell_id);
+        session.chatHistoryForget(shell_id);
+        for (app_state.g_chat_outbox.items) |item| std.heap.page_allocator.free(item.text);
+        app_state.g_chat_outbox.deinit(std.heap.page_allocator);
+        app_state.g_chat_outbox = saved.outbox;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_transcript_hwnd = saved.transcript;
+        app_state.g_chat_screen_working = saved.working;
+        app_state.g_chat_screen_status_len = saved.status;
+        app_state.g_chat_permission = saved.permission;
+        app_state.g_chat_permission_sid = saved.permission_sid;
+        app_state.g_chat_working_timer_running = saved.timer;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+        g_working_rect = null;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].shell_id = shell_id;
+    app_state.shells[0].chat_id = shell_id;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.g_chat_screen_working = false;
+    app_state.g_chat_screen_status_len = 0;
+    app_state.g_chat_permission.count = 0;
+    app_state.g_chat_working_timer_running = false;
+    app_state.g_chat_scroll_y = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_layout_reuse = 0;
+    _ = live.begin(shell_id, 0, sid);
+    var entry = app_state.ChatOutboxEntry{ .id = 1668, .state = .queued };
+    entry.text = try std.heap.page_allocator.dupe(u16, std.unicode.utf8ToUtf16LeStringLiteral("Please reply."));
+    const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &entry.key);
+    entry.key_len = @intCast(key.len);
+    app_state.g_chat_outbox.append(std.heap.page_allocator, entry) catch |err| {
+        std.heap.page_allocator.free(entry.text);
+        return err;
+    };
+    const started = GetTickCount64();
+    layout.chatWorkingIndicatorSync();
+    try liveWorkingProofFrame(dc, L("live-working-queued.bmp"), bytes, info.header, started, "queued");
+    app_state.g_chat_outbox.items[0].state = .delivered;
+    app_state.g_chat_outbox.items[0].channel_sent = true;
+    layout.chatWorkingIndicatorSync();
+    try liveWorkingProofFrame(dc, L("live-working-accepted.bmp"), bytes, info.header, started, "accepted-before-event");
+    const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{}}}]}}";
+    try std.testing.expect(live.applyPage(shell_id, sid, begin));
+    session.chatFileOnReady();
+    try liveWorkingProofFrame(dc, L("live-working-busy-0.bmp"), bytes, info.header, started, "turn-started");
+    w.Sleep(300);
+    layout.chatWorkingBarTick();
+    try liveWorkingProofFrame(dc, L("live-working-busy-1.bmp"), bytes, info.header, started, "tick");
+    const reply = "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t1\",\"item\":\"reply\",\"payload\":{\"text\":\"Ready.\"}}}]}}";
+    try std.testing.expect(live.applyPage(shell_id, sid, reply));
+    session.chatFileOnReady();
+    try liveWorkingProofFrame(dc, L("live-working-reply-delta.bmp"), bytes, info.header, started, "reply-delta");
+    const end = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"completed\"}}}]}}";
+    try std.testing.expect(live.applyPage(shell_id, sid, end));
+    session.chatFileOnReady();
+    layout.chatWorkingIndicatorSync();
+    try liveWorkingProofFrame(dc, L("live-working-answered.bmp"), bytes, info.header, started, "turn-ended");
+}
+
 test "IGSH-924 working dots reserve the next reply rectangle and disappear for idle or input" {
     const w = @import("win32.zig");
     const hwnd = w.CreateWindowExW(0, L("STATIC"), L("inline working"), 0, 0, 0, 800, 600, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;

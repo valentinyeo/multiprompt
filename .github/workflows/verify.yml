@@ -651,6 +651,21 @@ jobs:
         run: |
           zig cc -target x86_64-windows-gnu -O2 tools/chat-local-agent.c -o verify-bin/claude.exe
           if ($LASTEXITCODE -ne 0) { throw 'Local Claude console stand-in build failed' }
+      - name: Investigate live working events with the native transcript painter
+        if: env.FEATURE == 'chat-working' && env.RELEASE_TAG == ''
+        shell: powershell
+        env:
+          MULTIPROMPT_LIVE_WORKING_PROOF: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          cmd /c 'zig build test-live-working --summary all > evidence\live-working-native.log 2>&1'
+          $nativeExit = $LASTEXITCODE
+          Get-Content evidence/live-working-native.log | Write-Output
+          Get-ChildItem live-working-*.bmp -ErrorAction SilentlyContinue | Copy-Item -Destination evidence/
+          if ($nativeExit -ne 0) { throw 'Live working native investigation failed; see retained log and frames' }
+          node tools/live-working-proof.mjs evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Live working evidence analysis failed' }
       - name: Render received Markdown with the real Windows painter
         if: (env.FEATURE == 'chat-view' || env.FEATURE == 'chat-view-everywhere') && env.RELEASE_TAG == ''
         shell: powershell

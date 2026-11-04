@@ -23,6 +23,10 @@ The existing gray theme is Edge Grey, not Graphite 2. These captures do not clai
 The stand-in supplies Inspecting files and Ready, not needs-you questions or real provider activity.
 Native layout tests additionally compare the placeholder rectangle against a real one-line reply, including input-wait suppression.
 
+Branch builds also run `test-live-working` before the console journey. The isolated Windows test passes synthetic queued and delivered outbox states and live `turn.started`, `text.delta`, and `turn.ended` event pages through the production reducer, ready callback, layout and native transcript painter. It saves `live-working-*.bmp`, `live-working-native.log`, and `live-working-observations.json`. Inspect queued, accepted-before-event, busy, reply-delta, and answered frames. The JSON records visibility, slot, timer, painted dots, animation and elapsed time from synthetic enqueue. These observations are diagnostic, not acceptance assertions.
+
+The native test does not send input, run a transport, contact a provider, or pump the application window's event loop. It calls the production timer tick after a 300 ms wait. The delivered state is a constructed boundary, not proof of transport acceptance. It cannot establish send-to-paint latency or clean app-process teardown. The separate console journey exercises real input and owned cleanup, but not live events. Neither replaces a real live-agent journey.
+
 ## Gotchas
 
 No provider is contacted. Only the console boundary is replaced.
