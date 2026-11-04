@@ -54,6 +54,53 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_pi_native_history_survives_restart_and_settles_repeated_text(self):
+        self.query.update(provider='pi', follow=True)
+        root = self.home / '.pi/agent/sessions'
+        folder = root / '--work-demo--'
+        path = folder / '2024-12-03T14-00-00_sid.jsonl'
+        stamp = '2024-12-03T14:00:00.000Z'
+        entries = [dict(type='session', version=3, id='sid', cwd='/work/demo', timestamp=stamp)]
+        for index, role in enumerate(('user', 'assistant', 'user', 'assistant')):
+            content = 'same' if role == 'user' else [dict(type='text', text='PONG')]
+            entries.append(dict(type='message', id='entry' + str(index), parentId=None if index == 0 else 'entry' + str(index - 1),
+                                timestamp=stamp, message=dict(role=role, content=content)))
+        with patch.dict(os.environ, {'PI_CODING_AGENT_SESSION_DIR': ''}), \
+                patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('unexpected discovery')):
+            fields, rows = self.read()
+            self.assertEqual(fields[9], 'pi')
+            self.assertFalse([row for row in rows if row.get('role') in ('user', 'assistant')])
+            folder.mkdir(parents=True)
+            path.write_text(''.join(json.dumps(entry) + '\n' for entry in entries))
+            self.query.update(cached_sid='', inode=0, offset=0)
+            fields, rows = self.read()
+            self.assertEqual(fields[9], 'pi')
+            messages = [row for row in rows if row.get('role') in ('user', 'assistant')]
+            self.assertEqual([(row['role'], row['text'], row['id']) for row in messages],
+                             [('user', 'same', 'entry0'), ('assistant', 'PONG', 'entry1'),
+                              ('user', 'same', 'entry2'), ('assistant', 'PONG', 'entry3')])
+            self.query.update(cached_sid='', inode=0, offset=0)
+            self.assertEqual([row['id'] for row in self.read()[1] if row.get('role') in ('user', 'assistant')],
+                             ['entry0', 'entry1', 'entry2', 'entry3'])
+            query = dict(self.query, op='settle', texts=['same', 'same'], after_ms=0)
+            lines = reader.settle_response(query).splitlines()
+            self.assertEqual(lines[0], '@mp\t7\tsettle\tok\t-\t2')
+            self.assertEqual([json.loads(line)['line'] for line in lines[1:3]], [2, 4])
+
+    def test_pi_custom_session_directory_is_confined_and_cwd_specific(self):
+        root = self.home / 'custom'
+        root.mkdir()
+        path = root / 'time_sid.jsonl'
+        path.write_text(json.dumps(dict(type='session', id='sid', cwd='/work/demo')) + '\n')
+        with patch.dict(os.environ, {'PI_CODING_AGENT_SESSION_DIR': str(root)}):
+            self.assertEqual(reader.conversation_path('pi', 'sid', '/work/demo'), path)
+            self.assertIsNone(reader.conversation_path('pi', 'sid', '/work/other'))
+            path.unlink()
+            outside = self.home / 'outside.jsonl'
+            outside.write_text(json.dumps(dict(type='session', id='sid', cwd='/work/demo')) + '\n')
+            path.symlink_to(outside)
+            self.assertIsNone(reader.conversation_path('pi', 'sid', '/work/demo'))
+
     def test_held_queue_rejects_unbound_workspace_neighbour(self):
         self.assertTrue(callable(getattr(reader, 'enqueue_response', None)), 'safe held-send boundary is missing')
         self.write(self.event('unrelated completed turn'))
