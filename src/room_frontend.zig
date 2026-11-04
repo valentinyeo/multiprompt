@@ -213,6 +213,32 @@ fn saveDraft() bool {
     return true;
 }
 
+fn clearPostedDraft(location: RoomLocation, request: []const u8) bool {
+    const a = std.heap.page_allocator;
+    var parsed = std.json.parseFromSlice(std.json.Value, a, request, .{}) catch return false;
+    defer parsed.deinit();
+    const message = textField(parsed.value, "text") orelse return false;
+    const posted = std.unicode.utf8ToUtf16LeAlloc(a, message) catch return false;
+    defer a.free(posted);
+    const current: ?RoomLocation = if (buffered_location) |value| value else if (front == .selected) front.selected else null;
+    if (created and current != null and sameLocation(current.?, location)) {
+        const buffer = a.alloc(u16, 65537) catch return false;
+        defer a.free(buffer);
+        const draft = view.draft(buffer) orelse return false;
+        if (std.mem.eql(u16, draft, posted) and !view.setDraft(std.unicode.utf8ToUtf16LeStringLiteral(""))) return false;
+        if (!saveDraft()) return false;
+    }
+    for (drafts.items, 0..) |entry, index| {
+        if (sameLocation(entry.location, location) and std.mem.eql(u16, entry.text, posted)) {
+            a.free(entry.text);
+            _ = drafts.orderedRemove(index);
+            break;
+        }
+    }
+    markUiDirty();
+    return true;
+}
+
 fn restoreDraft(location: RoomLocation) void {
     for (drafts.items) |entry| if (sameLocation(entry.location, location)) { _ = view.setDraft(entry.text); return; };
 }
@@ -1265,7 +1291,7 @@ fn commandVisible(item: *const PendingCommand) bool {
 }
 
 fn validReceiptBindings(item: *const PendingCommand, payload: std.json.Value) bool {
-    if (item.kind == .create) return true;
+    if (item.kind != .edit) return true;
     if (payload != .object) return false;
     const event = payload.object.get("event") orelse return false;
     if (event != .object) return false;
@@ -1293,7 +1319,11 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
         .finished => |finished| {
             var result = finished;
             defer result.deinit();
-            if (result.kind == (if (item.kind == .create) rooms.RequestKind.create else .edit) and result.value.value == .object) {
+            if (result.kind == (switch (item.kind) {
+                .create => rooms.RequestKind.create,
+                .edit => .edit,
+                .post => .post,
+            }) and result.value.value == .object) {
                 const payload = result.value.value.object.get("result") orelse .null;
                 if (validReceiptBindings(item, payload)) {
                     evidence = std.json.Stringify.valueAlloc(item.arena.allocator(), payload, .{}) catch null;
@@ -1305,7 +1335,11 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
             }
         },
         .failed => |failure| {
-            if (failure.kind == (if (item.kind == .create) rooms.RequestKind.create else .edit) and failure.reason == .remote and failure.code_len > 0) {
+            if (failure.kind == (switch (item.kind) {
+                .create => rooms.RequestKind.create,
+                .edit => .edit,
+                .post => .post,
+            }) and failure.reason == .remote and failure.code_len > 0) {
                 const code = failure.code[0..failure.code_len];
                 if (!std.mem.eql(u8, code, "different_host") and !std.mem.eql(u8, code, "command_conflict")) {
                     evidence = std.json.Stringify.valueAlloc(item.arena.allocator(), .{ .@"error" = code }, .{}) catch null;
@@ -1333,7 +1367,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
             return;
         };
     }
-    if (state == .accepted and !enqueueRefresh(item.location)) {
+    if (state == .accepted and ((item.kind == .post and !clearPostedDraft(.{ .store = item.location, .room_id = item.room_id }, item.request)) or !enqueueRefresh(item.location))) {
         item.evidence = evidence;
         item.evidence_state = state;
         evidence_attempts = 0;
@@ -1390,7 +1424,9 @@ fn driveRestore(c: *rooms.Controller) bool {
                     return true;
                 },
                 .accepted => {
-                    if (!enqueueRefresh(location)) {
+                    var room_id: [36]u8 = undefined;
+                    if (value.record().kind == .post) @memcpy(&room_id, value.record().room_id);
+                    if ((value.record().kind == .post and !clearPostedDraft(.{ .store = location, .room_id = room_id }, value.record().request)) or !enqueueRefresh(location)) {
                         recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
                         _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
                         return false;
@@ -1459,7 +1495,8 @@ pub fn pollTimer(id: usize) bool {
     const current_route = configuredRoute(route_slot);
     const current_key = if (current_route) |route| routeKey(route) else @as([64]u8, @splat(0));
     const fresh = request_generation == account_generation and current_route != null and std.mem.eql(u8, &current_key, &route_key);
-    const mutation = switch (completion) { .failed => |failure| failure.kind == .create or failure.kind == .edit, .finished => |result| result.kind == .create or result.kind == .edit, .pending => false };
+    const mutation = switch (completion) { .failed => |failure| failure.kind == .create or failure.kind == .edit or failure.kind == .post, .finished => |result| result.kind == .create or result.kind == .edit or result.kind == .post, .pending => false,
+    };
     if (mutation and pending_command != null) {
         finishCommand(c, completion, fresh);
         if (!fresh) { discardBuilding(); clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); accountReady(); }
@@ -1543,11 +1580,7 @@ pub fn pollTimer(id: usize) bool {
                 return true;
             }
             if (result.kind == .capabilities) {
-                const version = payload.object.get("room_protocol") orelse .null;
-                const store = payload.object.get("store_only") orelse .null;
-                const live = payload.object.get("live_send") orelse .null;
-                const uuid = payload.object.get("host_uuid") orelse .null;
-                if (version != .integer or version.integer != 1 or store != .bool or !store.bool or live != .bool or live.bool or uuid != .string or !c.bindHost(uuid.string) or !savePin(uuid.string)) {
+                if (!c.acceptCapabilities(payload) or !savePin(&c.host_uuid)) {
                     scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
                 clearCatalog();
@@ -1701,13 +1734,17 @@ pub fn retryCommand(location: StoreLocation) !void {
     const record = entry.record();
     if (record.state != .prepared and record.state != .uncertain) return error.TerminalCommand;
     const item = try std.heap.page_allocator.create(PendingCommand);
-    item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = record.kind, .id = undefined, .revision = record.revision, .request = "", .token = .{ .generation = 0, .serial = 0, .kind = if (record.kind == .create) .create else .edit }, .generation = selection_generation, .bindings = &.{} };
+    item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = record.kind, .id = undefined, .revision = record.revision, .request = "", .token = .{ .generation = 0, .serial = 0, .kind = switch (record.kind) {
+        .create => .create,
+        .edit => .edit,
+        .post => .submit,
+    } }, .generation = selection_generation, .bindings = &.{} };
     var retained = false;
     defer if (!retained) { item.arena.deinit(); std.heap.page_allocator.destroy(item); };
     const a = item.arena.allocator();
     @memcpy(&item.id, record.command_id);
     item.request = try a.dupe(u8, record.request);
-    if (record.kind == .edit) {
+    if (record.kind != .create) {
         @memcpy(&item.room_id, record.room_id);
         const bindings = try a.alloc(PendingBinding, record.bindings.len);
         for (record.bindings, 0..) |binding, index| bindings[index] = .{ .alias = try a.dupe(u8, binding.alias), .id = try a.dupe(u8, binding.id) };
@@ -1724,6 +1761,7 @@ pub fn retryCommandEvidence() !void {
     const evidence = item.evidence orelse return error.NotFound;
     try journal.update(item.scope, &item.id, item.evidence_state, evidence);
     if (item.evidence_state == .accepted) {
+        if (item.kind == .post and !clearPostedDraft(.{ .store = item.location, .room_id = item.room_id }, item.request)) return error.DraftNotSaved;
         if (!enqueueRefresh(item.location)) return error.RefreshQueueFull;
         if (commandScope(item.location) != null) if (controller) |*c| {
             if (item.kind == .edit and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
@@ -1733,17 +1771,27 @@ pub fn retryCommandEvidence() !void {
     freePending(item);
 }
 
+fn encodeCommand(a: std.mem.Allocator, kind: journal.Kind, location: StoreLocation, id: []const u8, room_id: []const u8, revision: u64, value: []const u16, members: []const rooms.Member, bindings: []const PendingBinding) ![]const u8 {
+    const content = try std.unicode.utf16LeToUtf8Alloc(a, value);
+    defer a.free(content);
+    const limit: usize = if (kind == .post) 65536 else 256;
+    if (content.len == 0 or content.len > limit or std.mem.indexOfScalar(u8, content, 0) != null) return error.InvalidText;
+    return switch (kind) {
+        .create => std.json.Stringify.valueAlloc(a, .{ .op = "create", .host_uuid = location.store_uuid[0..], .command_id = id, .name = content, .members = members }, .{}),
+        .edit => std.json.Stringify.valueAlloc(a, .{ .op = "edit", .host_uuid = location.store_uuid[0..], .command_id = id, .room_id = room_id, .expected_revision = revision, .name = content, .members = members }, .{}),
+        .post => blk: {
+            const plan = try @import("room_message.zig").plan(content, bindings);
+            break :blk std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .host_uuid = location.store_uuid[0..], .command_id = id, .room_id = room_id, .expected_revision = revision, .text = content, .recipients = plan.recipients() }, .{});
+        },
+    };
+}
+
 fn matchesPending(item: *const PendingCommand, kind: journal.Kind, room_id: []const u8, revision: u64, name: []const u16, ids: []const []const u8) bool {
-    if (kind != item.kind or revision != item.revision or commandScope(item.location) == null or selection_generation != item.generation or (kind == .create and front != .create) or (kind == .edit and (front != .selected or !std.mem.eql(u8, room_id, &item.room_id) or !sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id })))) return false;
-    var buf: [768]u8 = undefined;
-    const len = std.unicode.utf16LeToUtf8(&buf, name) catch return false;
-    if (len == 0 or len > 256 or ids.len > 64) return false;
+    if (kind != item.kind or revision != item.revision or commandScope(item.location) == null or selection_generation != item.generation or (kind == .create and front != .create) or (kind != .create and (front != .selected or !std.mem.eql(u8, room_id, &item.room_id) or !sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id })))) return false;
+    if (ids.len > 64) return false;
     var members: [64]rooms.Member = undefined;
     for (ids, 0..) |id, index| members[index] = candidateMember(id) orelse return false;
-    const bytes = if (kind == .create)
-        std.json.Stringify.valueAlloc(std.heap.page_allocator, .{ .op = "create", .host_uuid = item.location.store_uuid[0..], .command_id = item.id[0..], .name = buf[0..len], .members = members[0..ids.len] }, .{}) catch return false
-    else
-        std.json.Stringify.valueAlloc(std.heap.page_allocator, .{ .op = "edit", .host_uuid = item.location.store_uuid[0..], .command_id = item.id[0..], .room_id = room_id, .expected_revision = revision, .name = buf[0..len], .members = members[0..ids.len] }, .{}) catch return false;
+    const bytes = encodeCommand(std.heap.page_allocator, kind, item.location, &item.id, room_id, revision, name, members[0..ids.len], item.bindings) catch return false;
     defer std.heap.page_allocator.free(bytes);
     return std.mem.eql(u8, bytes, item.request);
 }
@@ -1786,9 +1834,7 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
         const current = owned_model orelse return .failed;
         if (!std.mem.eql(u8, current.value.room_id, room_id) or current.value.revision != revision) return .failed;
     }
-    var name_buf: [768]u8 = undefined;
-    const name_len = std.unicode.utf16LeToUtf8(&name_buf, name) catch return .failed;
-    if (name_len == 0 or name_len > 256 or std.mem.indexOfScalar(u8, name_buf[0..name_len], 0) != null) return .failed;
+    if (kind == .post and !c.live_send) return .unsupported;
     const item = std.heap.page_allocator.create(PendingCommand) catch return .failed;
     item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = kind, .id = undefined, .revision = revision, .request = "", .token = token, .generation = selection_generation, .bindings = &.{} };
     var retained = false;
@@ -1808,8 +1854,14 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
             };
         }
     }
+    if (kind == .post) {
+        const current = owned_model orelse return .failed;
+        for (current.bindings.items) |binding| {
+            bindings.append(a, .{ .alias = a.dupe(u8, binding.member.alias) catch return .failed, .id = a.dupe(u8, binding.id) catch return .failed }) catch return .failed;
+        }
+    }
     item.bindings = bindings.items;
-    if (kind == .edit) @memcpy(&item.room_id, room_id);
+    if (kind != .create) @memcpy(&item.room_id, room_id);
     var existing = (journal.load(scope) catch return .failed);
     defer if (existing) |*value| value.deinit();
     if (existing) |*value| {
@@ -1819,10 +1871,7 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
             @memcpy(&item.id, record.command_id);
         } else item.id = journal.newCommandId() orelse return .failed;
     } else item.id = journal.newCommandId() orelse return .failed;
-    item.request = if (kind == .create)
-        std.json.Stringify.valueAlloc(a, .{ .op = "create", .host_uuid = location.store_uuid[0..], .command_id = item.id[0..], .name = name_buf[0..name_len], .members = members.items }, .{}) catch return .failed
-    else
-        std.json.Stringify.valueAlloc(a, .{ .op = "edit", .host_uuid = location.store_uuid[0..], .command_id = item.id[0..], .room_id = room_id, .expected_revision = revision, .name = name_buf[0..name_len], .members = members.items }, .{}) catch return .failed;
+    item.request = encodeCommand(a, kind, location, &item.id, room_id, revision, name, members.items, item.bindings) catch return .failed;
     journal.prepare(scope, kind, &item.id, room_id, revision, item.request, item.bindings) catch return .failed;
     c.launchPrepared(kind, &item.id, room_id, revision) catch return .failed;
     pending_command = item;
@@ -1837,8 +1886,8 @@ fn createRoom(_: *anyopaque, token: room_view.ActionToken, name: []const u16, id
 fn editRoom(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64, name: []const u16, ids: []const []const u8) room_view.ActionResult {
     return beginCommand(.edit, token, room_id, revision, name, ids);
 }
-fn submit(_: *anyopaque, _: room_view.ActionToken, _: []const u8, _: u64, _: []const u16) room_view.ActionResult {
-    return .unsupported;
+fn submit(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64, text: []const u16) room_view.ActionResult {
+    return beginCommand(.post, token, room_id, revision, text, &.{});
 }
 fn restart(_: *anyopaque, _: room_view.ActionToken, _: []const u8, _: []const u8) room_view.ActionResult {
     return .unsupported;

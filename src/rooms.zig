@@ -1,6 +1,5 @@
 const std = @import("std");
 const transport = @import("room_transport.zig");
-const room_view = @import("room_view.zig");
 
 const allocator = std.heap.page_allocator;
 
@@ -13,7 +12,7 @@ pub const Member = struct {
     session_identity: []const u8,
 };
 
-pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, status };
+pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status };
 pub const Result = struct {
     kind: RequestKind,
     value: std.json.Parsed(std.json.Value),
@@ -43,6 +42,7 @@ pub const Controller = struct {
     has_account: bool = false,
     host_uuid: [36]u8 = undefined,
     has_host_uuid: bool = false,
+    live_send: bool = false,
     job: ?*transport.Job = null,
     kind: RequestKind = .capabilities,
     journal_lock: ?@import("room_journal.zig").Lock = null,
@@ -122,13 +122,31 @@ pub const Controller = struct {
         defer entry.deinit();
         const record = entry.record();
         if (record.kind != kind or record.revision != revision or !std.mem.eql(u8, record.command_id, command_id) or !std.mem.eql(u8, record.room_id, room_id) or (record.state != .prepared and record.state != .uncertain)) return error.WrongCommand;
+        if (kind == .post and !self.live_send) return error.Unsupported;
         try journal.updateLocked(&guard, command_id, .uncertain, "");
-        if (!self.launchBytes(if (kind == .create) .create else .edit, record.request)) return error.LaunchRefused;
+        if (!self.launchBytes(switch (kind) {
+            .create => .create,
+            .edit => .edit,
+            .post => .post,
+        }, record.request)) return error.LaunchRefused;
         self.journal_lock = guard;
     }
 
     pub fn capabilities(self: *Controller) bool {
+        self.live_send = false;
         return self.launch(.capabilities, .{ .op = "capabilities" });
+    }
+
+    pub fn acceptCapabilities(self: *Controller, payload: std.json.Value) bool {
+        self.live_send = false;
+        if (payload != .object) return false;
+        const version = payload.object.get("room_protocol") orelse return false;
+        const store = payload.object.get("store_only") orelse return false;
+        const live = payload.object.get("live_send") orelse return false;
+        const uuid = payload.object.get("host_uuid") orelse return false;
+        if (version != .integer or version.integer != 1 or store != .bool or live != .bool or store.bool == live.bool or uuid != .string or !self.bindHost(uuid.string)) return false;
+        self.live_send = live.bool;
+        return true;
     }
 
     pub fn catalog(self: *Controller, after: u64, through: ?u64) bool {
@@ -181,14 +199,6 @@ pub const Controller = struct {
         return self.launchTypedPrepared(.edit, command_id, room_id, revision, .{ .op = "edit", .host_uuid = self.host_uuid[0..], .command_id = command_id, .room_id = room_id, .expected_revision = revision, .name = name, .members = members });
     }
 
-    pub fn submit(_: *Controller) room_view.ActionResult {
-        return .unsupported;
-    }
-
-    pub fn restart(_: *Controller) room_view.ActionResult {
-        return .unsupported;
-    }
-
     pub fn shutdown(self: *Controller) void {
         const job = self.job orelse return;
         job.cancelled.store(true, .release);
@@ -213,7 +223,7 @@ pub const Controller = struct {
             if (self.journal_lock) |*guard| guard.deinit();
             self.journal_lock = null;
         }
-        const mutation = self.kind == .create or self.kind == .edit;
+        const mutation = self.kind == .create or self.kind == .edit or self.kind == .post;
         if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .outcome_unknown = mutation } };
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
@@ -251,6 +261,23 @@ test "room controller pins remote UUID before catalog operations" {
     try std.testing.expect(controller.bindHost("10000000-0000-4000-8000-000000000001"));
     try std.testing.expectEqualStrings("10000000-0000-4000-8000-000000000001", &controller.host_uuid);
     try std.testing.expect(!controller.bindHost("20000000-0000-4000-8000-000000000002"));
-    try std.testing.expectEqual(room_view.ActionResult.unsupported, controller.submit());
-    try std.testing.expectEqual(room_view.ActionResult.unsupported, controller.restart());
+    try std.testing.expect(!controller.live_send);
+}
+
+test "room capability negotiation accepts store-only and live peers without widening scope" {
+    const a = std.testing.allocator;
+    var legacy = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"10000000-0000-4000-8000-000000000001\",\"store_only\":true,\"live_send\":false}", .{});
+    defer legacy.deinit();
+    var live = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"10000000-0000-4000-8000-000000000001\",\"store_only\":false,\"live_send\":true}", .{});
+    defer live.deinit();
+    var foreign = try std.json.parseFromSlice(std.json.Value, a, "{\"room_protocol\":1,\"host_uuid\":\"20000000-0000-4000-8000-000000000002\",\"store_only\":false,\"live_send\":true}", .{});
+    defer foreign.deinit();
+    var controller = Controller.init(0);
+    try std.testing.expect(controller.acceptCapabilities(legacy.value));
+    try std.testing.expect(!controller.live_send);
+    try std.testing.expect(controller.acceptCapabilities(live.value));
+    try std.testing.expect(controller.live_send);
+    try std.testing.expect(!controller.acceptCapabilities(foreign.value));
+    try std.testing.expect(!controller.live_send);
+    try std.testing.expectEqualStrings("10000000-0000-4000-8000-000000000001", &controller.host_uuid);
 }
