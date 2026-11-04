@@ -139,3 +139,51 @@ print('validated owner command uses isolated environment and argument boundaries
   const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
+
+test('cross-owner preflight finds agents in every supported home folder', () => {
+  const program = String.raw`
+import os, sys, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+outer = {}
+exec(compile(${JSON.stringify(source)}, 'reader', 'exec'), outer)
+r = {}
+exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
+with tempfile.TemporaryDirectory(prefix='synthetic home ') as directory:
+    root = Path(directory)
+    target = root / 'target home'
+    workspace = target / 'workspace'
+    workspace.mkdir(parents=True)
+    r['host_cwd'] = lambda *args: str(workspace)
+    r['HOME'] = root / 'reader'
+    r['conversation_owner'] = lambda value: ('synthetic_owner', target)
+    r['READER_SOURCE'] = outer['READER_SOURCE']
+    provider, sid = 'claude', 'synthetic-session'
+    r['host_write'](r['host_paths'](provider, sid)['config'], dict(enabled=True, cwd=str(workspace), args=['argument with spaces', 'literal;$value']))
+    original_run = r['subprocess'].run
+    original_popen = r['subprocess'].Popen
+    def target_probe(args, **kwargs):
+        index = args.index('-c')
+        with patch.object(r['subprocess'], 'Popen', original_popen):
+            return original_run(['/bin/sh', '-c', *args[index + 1:]], input=kwargs['input'], text=True,
+                                env={'HOME': str(target), 'PATH': '/usr/bin:/bin'},
+                                stdout=r['subprocess'].DEVNULL, stderr=r['subprocess'].DEVNULL)
+    for folder in r['HOST_BINARY_FOLDERS']:
+        binary = target / folder.removeprefix('~/') / 'claude'
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text('#!/bin/sh\nexit 0\n')
+        binary.chmod(0o755)
+        with patch.object(r['subprocess'], 'run', side_effect=target_probe), \
+             patch.object(r['subprocess'], 'Popen', return_value=SimpleNamespace(pid=123)) as launch:
+            r['host_agent_start'](provider, sid)
+        args = launch.call_args.args[0]
+        script = args[args.index('-c') + 1]
+        assert 'literal;$value' not in script and 'argument with spaces' not in script
+        assert 'literal;$value' in args and 'argument with spaces' in args
+        assert launch.call_args.kwargs['env'] == {'PATH': '/usr/bin:/bin'}
+        binary.unlink()
+`;
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
