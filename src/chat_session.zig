@@ -1522,11 +1522,9 @@ pub fn chatFileOnReady() void {
                 if (block.role != .tool) break true;
             } else false;
             entry.before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (!has_messages) entry.history.start else 0;
-            if (!disk and !history.more) {
-                entry.loaded_ms = @intCast(GetTickCount64());
-                if (preview_content_changed) entry.preview_loaded_ms = history.received_ms;
-                if (preview_status_changed) entry.preview_status_ms = if (history.received_ms != 0) history.received_ms else GetTickCount64();
-            }
+            if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
+            if (!disk and !history.more and preview_content_changed) entry.preview_loaded_ms = history.received_ms;
+            if (!disk and !history.more and preview_status_changed) entry.preview_status_ms = if (history.received_ms != 0) history.received_ms else GetTickCount64();
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;
