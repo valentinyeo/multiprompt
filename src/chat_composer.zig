@@ -1575,9 +1575,10 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         _ = SendMessageW(hwnd, 0x00B1, 0, -1);
         return 0;
     }
-    if (msg == 0x0102 and (wp == 0x01 or (wp == 0x0A and chatToolStepsKeyDown(0x4A)))) return 0;
+    if (msg == 0x0102 and wp == 0x01) return 0;
     if (chatImagePasteIntercept(msg, wp)) return 0;
     if (msg == WM_KEYDOWN and chatToolStepsKeyDown(wp)) {
+        dropPendingActivationChar(hwnd, 0x0A);
         @import("chat_render.zig").chatToggleAllTools();
         return 0;
     }

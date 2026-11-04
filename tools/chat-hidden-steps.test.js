@@ -46,7 +46,7 @@ test('header evidence and shortcut routing cover both chat inputs', () => {
   const shortcuts = fs.readFileSync('src/shortcuts.zig', 'utf8');
   assert.match(render, /\[chat\] steps first=\{d\} count=\{d\} open=\{d\} header=\{d\},\{d\},\{d\},\{d\}/);
   assert.match(render, /WM_KEYDOWN => \{\s*if \(@import\("chat_composer\.zig"\)\.chatToolStepsKeyDown\(wp\)\)/);
-  assert.match(composer, /msg == WM_KEYDOWN and chatToolStepsKeyDown\(wp\)/);
+  assert.match(composer, /msg == WM_KEYDOWN and chatToolStepsKeyDown\(wp\)\) \{\s*dropPendingActivationChar\(hwnd, 0x0A\);/);
   assert.match(composer, /vk == 0x4A and ctrl and shift and !alt/);
   assert.match(composer, /!chatComposerOwnsKey\(WM_KEYDOWN, 0x4A, true, false, 0\)/);
   assert.match(shortcuts, /wp == WM_KEYDOWN and @import\("chat_composer\.zig"\)\.chatToolStepsKeyDown\(kb\.vkCode\)/);
