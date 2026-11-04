@@ -358,8 +358,6 @@ const paletteHeaderIndex = @import("command_palette.zig").paletteHeaderIndex;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const sessionOverviewKindLabel = @import("archive.zig").sessionOverviewKindLabel;
 const drawAttentionDot = @import("archive.zig").drawAttentionDot;
-const drawFavoriteDot = @import("archive.zig").drawFavoriteDot;
-const FAVORITE_DOT_D = @import("archive.zig").FAVORITE_DOT_D;
 const paintAllSessions = @import("archive.zig").paintAllSessions;
 const sidebarContentH = @import("console.zig").sidebarContentH;
 const sidebarVisibleH = @import("console.zig").sidebarVisibleH;
@@ -2050,14 +2048,14 @@ fn paletteSessionView(target: usize) ?PaletteSessionView {
     return null;
 }
 
-fn drawStarBadge(hdc: HANDLE, rect: RECT, avatar_size: i32, background: DWORD) void {
+fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
     const badge = @import("star_badge_geometry.zig");
-    const g = badge.geometry(rect.right, rect.bottom, avatar_size, uiScaled);
+    const g = badge.geometry(rect.right, rect.bottom, uiScaled);
     const left = g.center_x - @divTrunc(g.diameter, 2);
     const top = g.center_y - @divTrunc(g.diameter, 2);
     const smooth = @import("smooth.zig");
     smooth.fillEllipse(hdc, .{ .left = left - g.ring, .top = top - g.ring, .right = left + g.diameter + g.ring, .bottom = top + g.diameter + g.ring }, background);
-    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, RGB(240, 196, 75));
+    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) { .disconnected => RGB(255, 145, 55), .unread => RGB(137, 180, 248), .favorite => RGB(240, 196, 75) });
 }
 
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
@@ -2089,12 +2087,9 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
         debugLog(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, appearance);
-    if (shell.favorite) {
+    if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) selectedSessionBackground() else themeSidebarBg();
-        drawStarBadge(hdc, avatar_rect, 36, background);
-    }
-    if (shell.needs_attention or shell.disconnected) {
-        drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(3) else left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+        drawRobotMarker(hdc, avatar_rect, marker, background);
     }
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
@@ -2136,11 +2131,10 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
-    if (shell.favorite) {
+    if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected and !@import("room_frontend.zig").isActive()) RGB(53, 53, 53) else themeSidebarBg();
-        drawStarBadge(hdc, avatar_rect, 56, background);
+        drawRobotMarker(hdc, avatar_rect, marker, background);
     }
-    if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(4) else left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
@@ -2353,7 +2347,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const session = app_state.g_inbox_rows[row.shell_idx];
                 _ = SelectObject(hdc, font_title);
                 _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220)));
-                drawFavoriteDot(hdc, 12, y + @divTrunc(tabRowH(), 2));
+                if (session.att) drawAttentionDot(hdc, 12, y + @divTrunc(tabRowH(), 2), uiScaled(4), RGB(137, 180, 248));
                 var name: [193]u16 = undefined;
                 const name_len = @import("json_reader.zig").wide(session.name[0..session.name_len], &name);
                 var name_rc = RECT{ .left = 24, .top = y, .right = SIDEBAR_W() - 8, .bottom = y + tabRowH() };
@@ -2433,11 +2427,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
                     }
                     if (!photo_drawn) avatar.draw(hdc, avatar_rect, avatar.forShell(&app_state.shells[i]));
-                    if (app_state.shells[i].disconnected or app_state.shells[i].needs_attention) drawAttentionDot(hdc, left + size - 2, top + size - 2, uiScaled(3), if (app_state.shells[i].disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
-                } else if (app_state.shells[i].disconnected) {
-                    drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, RGB(255, 145, 55));
-                } else if (app_state.shells[i].needs_attention) {
-                    drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, customColorOr("attention", RGB(60, 120, 220)));
                 } else {
                     _ = SelectObject(hdc, font_title);
                     _ = SetTextColor(hdc, if (isRemoteShellKind(app_state.shells[i].kind)) RGB(230, 140, 40) else RGB(150, 150, 150));
@@ -2449,8 +2438,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     var draft_rc = RECT{ .left = 0, .top = y + tabRowH() - uiScaled(14), .right = sw, .bottom = y + tabRowH() };
                     _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_CENTER | DT_NOPREFIX);
                 }
-                if (app_state.shells[i].favorite) {
-                    drawFavoriteDot(hdc, 9, y + 10);
+                if (@import("star_badge_geometry.zig").marker(app_state.shells[i].disconnected, app_state.shells[i].needs_attention, app_state.shells[i].favorite, app_state.g_starred_workspace)) |marker| {
+                    const background = if (i == app_state.active_shell and !@import("room_frontend.zig").isActive()) themeConsoleBg() else themeSidebarBg();
+                    drawRobotMarker(hdc, avatar_rect, marker, background);
                 }
             }
         }
@@ -2896,7 +2886,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             debugLog(std.fmt.bufPrint(&log, "[palette-avatar] target={d} face={d} color={d} favorite={d} rect={d},{d},{d},{d}", .{ result_idx, view.appearance.face, view.appearance.color, @intFromBool(view.favorite), x, y, x + size, y + size }) catch "[palette-avatar] unavailable");
                         }
                         @import("bot_avatar.zig").draw(hdc, avatar_rc, view.appearance);
-                        if (view.favorite) drawStarBadge(hdc, avatar_rc, 24, row_color);
+                        if (view.favorite and !app_state.g_starred_workspace) drawRobotMarker(hdc, avatar_rc, .favorite, row_color);
                     }
 
                     if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {

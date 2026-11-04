@@ -424,6 +424,13 @@ pub fn build(b: *std.Build) void {
         if (std.mem.eql(u8, source, "src/workspace_view.zig") or std.mem.eql(u8, source, "src/bot_photo_sync.zig")) test_step.dependOn(&run_tests.step);
     }
     vps_test_step.dependOn(account_test_step);
+    const robot_marker_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/star_badge_geometry.zig"),
+        .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(robot_marker_tests).step);
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/robot-marker.test.js" }).step);
     const session_layout_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/session_layout.zig"),
         .target = target,

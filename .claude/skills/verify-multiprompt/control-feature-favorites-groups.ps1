@@ -7,6 +7,42 @@
             if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
             Press @(0x12, 0x53) 'Alt+S: favorite initial CMD session'
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].favorite -eq $true } 'favorite true saved in session.json'
+            $markerSid = (Read-Session).tabs[$tabIndex].shell_id
+            foreach ($theme in @('light', 'amoled')) {
+                Select-Theme $theme ("robot-dots-$theme-theme")
+                foreach ($view in @('home', 'starred')) {
+                    if ($view -eq 'home') { Press @(0x12, 0x32) 'Alt+2: Home robot markers' }
+                    else { Press @(0x12, 0x31) 'Alt+1: Starred robot markers' }
+                    Wait-Until { $state = Read-Session; $null -ne $state -and $state.starred_view -eq ($view -eq 'starred') -and $state.tabs[$state.active_tab].shell_id -eq $markerSid } 'robot marker workspace and session selected'
+                    foreach ($placement in @('row', 'pinned')) {
+                        if ($placement -eq 'pinned') {
+                            Focus-Palette 'pin to top' 6293
+                            Press @(0x0D) 'Enter: pin robot'
+                            Wait-Until { $state = Read-Session; if ($view -eq 'starred') { $state.tabs[$tabIndex].starred_pinned_top -eq $true } else { $state.tabs[$tabIndex].pinned_top -eq $true } } 'robot pinned in current workspace'
+                        }
+                        Wait-Until { $item = @((Read-Inbox).shells | Where-Object { $_.sid -eq $markerSid }); $item.Count -eq 1 -and -not $item[0].att } 'favorite robot initially read'
+                        Snapshot "robot-dots-$theme-$view-$placement-read"
+                        Press @(0x12, 0x55) 'Alt+U: mark favorite robot unread'
+                        Wait-Until { $item = @((Read-Inbox).shells | Where-Object { $_.sid -eq $markerSid }); $item.Count -eq 1 -and $item[0].att } 'favorite robot published unread'
+                        Snapshot "robot-dots-$theme-$view-$placement-unread"
+                        Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox to clear unread'
+                        Wait-Until { (Read-Inbox).inbox_active -eq $true } 'Inbox open for robot unread reset'
+                        Press @(0x12, 0x49) 'Alt+I: All Inbox sessions'
+                        Press @(0x55) 'U: mark robot read'
+                        Wait-Until { $item = @((Read-Inbox).shells | Where-Object { $_.sid -eq $markerSid }); $item.Count -eq 1 -and -not $item[0].att } 'robot published read again'
+                        Press @(0x1B) 'Escape: return to robot'
+                        Wait-Until { (Read-Inbox).inbox_active -eq $false } 'Inbox closed after robot unread reset'
+                        if ($placement -eq 'pinned') {
+                            Focus-Palette 'unpin from top' 6293
+                            Press @(0x0D) 'Enter: restore robot row'
+                            Wait-Until { $state = Read-Session; if ($view -eq 'starred') { -not $state.tabs[$tabIndex].starred_pinned_top } else { -not $state.tabs[$tabIndex].pinned_top } } 'robot unpinned in current workspace'
+                        }
+                    }
+                }
+            }
+            $result.checks += @{ name = 'IGSH-1534-robot-dots'; themes = @('light', 'amoled'); views = @('home', 'starred'); placements = @('row', 'pinned'); states = @('read', 'unread') }
+            $result.checks += @{ name = 'IGSH-1534-unavailable-theme'; theme = 'Graphite 2'; reason = 'not shipped' }
+            Press @(0x12, 0x32) 'Alt+2: return home for grouping'
             Palette 'move to group'
             Press @(0x0D) 'Enter: Move to Group submenu in home workspace'
             Type-Text 'new group'
