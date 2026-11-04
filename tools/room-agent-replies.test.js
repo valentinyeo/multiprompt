@@ -34,7 +34,8 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
     with patch.object(room_bridge, 'runtime_request', rpc), patch.object(room_bridge, 'host_status', return_value=dict(enabled=True, provider='claude', sid=sid, tmux=tmux)):
         bridge = room_bridge.RoomBridge(rooms)
         host = bridge.execute(dict(op='capabilities'))['host_uuid']
-        assert bridge.execute(dict(op='capabilities'))['live_send']
+        assert bridge.execute(dict(op='capabilities', room_messages=1))['live_send']
+        assert not bridge.execute(dict(op='capabilities'))['live_send']
         member = dict(alias='alpha', display_name='Alpha', host_uuid=host, provider='claude', provider_sid=sid, session_identity='claude:' + sid)
         def create():
             return bridge.execute(dict(op='create', host_uuid=host, command_id=uid(), name='Room', members=[member]))['event']['room_id']
@@ -102,6 +103,11 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         bridge.close()
 print('ROOM_SCOPED_REPLIES_PASS')
 `;
+
+test('existing room store and bridge contracts remain compatible', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync('python3', ['-m', 'unittest', 'discover', '-s', 'tools', '-p', 'room_*test.py'], { cwd: root, encoding: 'utf8', timeout: 60000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
 
 test('room replies retain their exact parent and session without publishing private turns', { skip: process.platform === 'win32' }, () => {
   const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
