@@ -3517,6 +3517,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         return host_refuse("no_chat")
     if not session.get("ready"):
         return dict(status="busy", reason="agent_starting")
+    if provider == "codex" and not isinstance(session.get("native_turn"), str) and "turn" in session["rpc"].values():
+        return dict(status="busy", reason="turn_starting")
     binding = dict(v=1, mode=adapter["binding"], host=os.getpid(), session=sid)
     try:
         claim = host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding)
@@ -3983,7 +3985,7 @@ def host_pi_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     if kind == "response":
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
-        if event.get("command") != "prompt":
+        if event.get("command") != "prompt" or not isinstance(event.get("id"), str):
             return
         if event.get("success") is False:
             host_log(provider, sid, "pi_prompt", dict(success=False, disposition=data.get("disposition")))
@@ -3994,15 +3996,17 @@ def host_pi_event(provider, sid, tmux, session, event):
             return
         if data.get("disposition") == "handled":
             host_log(provider, sid, "pi_prompt", dict(success=True, disposition="handled"))
+            host_accept(provider, sid, tmux, session, event, event.get("id"))
             if not session.get("pi_run"):
-                host_accept(provider, sid, tmux, session, event)
                 host_turn_end(provider, sid, tmux, session, dict(status="completed", stop_reason="handled", usage={}),
                               dict(subtype="prompt_handled"))
             return
         host_accept(provider, sid, tmux, session, event, event.get("id"))
     elif kind == "agent_start":
         session["pi_run"] = True
-        host_accept(provider, sid, tmux, session, event)
+        inflight = session.get("inflight")
+        if isinstance(inflight, dict):
+            host_accept(provider, sid, tmux, session, event, inflight["id"])
     elif kind == "message_start":
         session["pi_message"] += 1
     elif kind == "message_update":
@@ -5772,7 +5776,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 56
+RUNTIME_GENERATION = 57
 
 if __name__ == '__main__':
     import base64 as _base64
