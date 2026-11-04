@@ -56,4 +56,6 @@ test('live slash screenshot journey drives every requested command and checks in
   assert.match(text, /Snapshot 'slash-plan-picker'/);
   assert.match(text, /Snapshot 'slash-permissions-picker'/);
   assert.ok(fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8').includes("'chat-slash.ps1'"));
+  const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
+  assert.match(workflow, /Build the Windows app once for this push[^]*?run: zig build -Drelease=false -Dcpu=x86_64_v3/);
 });
