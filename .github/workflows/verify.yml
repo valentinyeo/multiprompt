@@ -886,6 +886,20 @@ jobs:
             }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
+      - name: Save paired session views
+        if: success() && steps.desktop-driver.outcome == 'success' && env.CHAT_HAX_PROOF == '1'
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $first = [Drawing.Image]::FromFile("$pwd/evidence/hax-runner-0.png")
+          $second = [Drawing.Image]::FromFile("$pwd/evidence/hax-runner-1.png")
+          $pair = [Drawing.Bitmap]::new($first.Width + $second.Width, [Math]::Max($first.Height, $second.Height))
+          $graphics = [Drawing.Graphics]::FromImage($pair)
+          try {
+            $graphics.DrawImage($first, 0, 0)
+            $graphics.DrawImage($second, $first.Width, 0)
+            $pair.Save("$pwd/evidence/session-pair.png", [Drawing.Imaging.ImageFormat]::Png)
+          } finally { $graphics.Dispose(); $pair.Dispose(); $first.Dispose(); $second.Dispose() }
       - name: Build isolated footer update fixture
         if: success() && steps.desktop-driver.outcome == 'success' && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1' && env.RELEASE_TAG != ''
         shell: pwsh
