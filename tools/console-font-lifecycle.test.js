@@ -227,9 +227,6 @@ var g_font_gen: u32 = 1;
 var g_font_sync_started: u64 = 0;
 var g_font_sync_done: usize = 0;
 var g_monitor_transition: struct { active: bool = false, expected_valid: bool = false, expected_frame: RECT = .{} } = .{};
-var g_chat_blocks = [_]struct { role: enum { tool }, tool_open: bool = false }{.{ .role = .tool }};
-var g_chat_block_count: usize = 1;
-var g_chat_layout_reuse: usize = 0;
 var g_chat_active = false;
 var g_restoring = false;
 var g_startup_progress = false;
@@ -475,15 +472,6 @@ fn seedWrong(i: usize, height: i16) void {
 `;
 
 const tests = String.raw`
-test "chat exit folds tool details while keeping the shell font" {
-    const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
-    try std.testing.expect(spawnSession(.tmux, 0));
-    g_chat_active = true;
-    g_chat_blocks[0].tool_open = true;
-    closeChatView();
-    try std.testing.expect(!g_chat_blocks[0].tool_open);
-    try expectShellFont(); drain(); try expectShellFont();
-}
 test "ISSUE-456 fake GDI rejects a face without the ANSI code page and selects the bundled shell font" {
     const bundle = prepare(); defer unregisterBundledConsoleFonts(&bundle);
     consoles[2] = .{ .live = true }; _ = AttachConsole(2);

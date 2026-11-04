@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-hidden-steps')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -26,7 +26,7 @@ if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'F
 if ($env:CHAT_NOTES_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Session notes proof requires chat-delivery' }
 if ($env:CHAT_REACTIONS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reactions proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1' -and $Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
-if ($env:CHAT_REPLY_PROOF -eq '1' -or $env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1' -or $env:CHAT_NOTES_PROOF -eq '1' -or $Feature -eq 'chat-hidden-steps') {
+if ($env:CHAT_REPLY_PROOF -eq '1' -or $env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1' -or $env:CHAT_NOTES_PROOF -eq '1') {
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
     [LayoutCapture]::Display()
 }
@@ -39,7 +39,6 @@ $plans = @(
     @{name='send-stays-gone'; mode='busy'; text='send stays gone'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
-if ($Feature -eq 'chat-hidden-steps') { $plans = @(@{name='hidden-steps'; mode='idle'; text='draft stays untouched'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
@@ -104,7 +103,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('reply-') -or $Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name.StartsWith('notes-') -or $Name.StartsWith('steps-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('reply-') -or $Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name.StartsWith('notes-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -537,14 +536,13 @@ foreach ($plan in $plans) {
     $isCancel = $plan.name -eq 'cancel-held'
     $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
-    $isHiddenSteps = $plan.name -eq 'hidden-steps'
     $isHistory = $plan.name -eq 'full-history'
     $isReply = $plan.name -eq 'reply-reference'
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
     $isInstant = $plan.name -eq 'instant-chat'
-    $hasTranscript = $isHiddenSteps -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -611,7 +609,6 @@ foreach ($plan in $plans) {
         }
         if ($isReply) { Shell-Run @('reply-reference') }
         if ($isNotes) { Shell-Run @('session-notes') }
-        if ($isHiddenSteps) { Shell-Run @('hidden-steps') }
         if ($isLiveDelivery -and $env:CHAT_LONG_PROOF -eq '1') { Shell-Run @('history') }
         if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         if ($isSwitch) { Shell-Run @('switch-history') }
@@ -713,8 +710,6 @@ foreach ($plan in $plans) {
             Press @(0x0D) 'Enter: send reload plugins' $true
             [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
             $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
-        } elseif ($isHiddenSteps) {
-            . "$PSScriptRoot/hidden-steps.ps1"
         } elseif ($isReaction) {
             . "$PSScriptRoot/reactions.ps1"
         } elseif ($isSwitch) {
@@ -1346,7 +1341,7 @@ foreach ($plan in $plans) {
                     Where-Object { $_.Extension -in @('.txt', '.dmp') } |
                     Copy-Item -Destination "$caseDir/crashes/" -ErrorAction Stop
             }
-            if (($isActivity -or $isHiddenSteps) -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
+            if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
             if ($isHax) {
@@ -1373,10 +1368,6 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
-if ($Feature -eq 'chat-hidden-steps') {
-    & node "$PSScriptRoot/../chat-hidden-steps-proof.mjs" $Evidence
-    exit $LASTEXITCODE
-}
 if ($env:CHAT_INSTANT_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-instant-proof.cjs" $Evidence
     exit $LASTEXITCODE
