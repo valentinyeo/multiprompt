@@ -6147,6 +6147,26 @@ class IGSH_1544_CodexHostTest(HostProviderCase):
     def params(self, method):
         return [line.get('params') or {} for line in self.sent() if line.get('method') == method]
 
+    def test_codex_waits_for_turn_start_before_claiming_the_next_send(self):
+        output = io.BytesIO()
+        session = dict(state={})
+        reader.host_session_reset(session, types.SimpleNamespace(stdin=output))
+        session.update(ready=True, thread=self.thread)
+        first = dict(op='deliver', id='codex_pending_message_01', attempt='a1', epoch=1, text='first')
+        second = dict(op='deliver', id='codex_pending_message_02', attempt='a2', epoch=1, text='second')
+        with patch.object(reader, 'host_attempt', return_value=dict(status='claimed')) as attempt, \
+                patch.object(reader, 'host_turn_started'), patch.object(reader, 'host_apply', return_value=True):
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, first)['status'], 'sent')
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, second),
+                             dict(status='busy', reason='turn_starting'))
+            self.assertEqual(attempt.call_count, 2)
+            self.assertEqual([json.loads(line)['method'] for line in output.getvalue().splitlines()], ['turn/start'])
+            reader.host_codex_response(self.provider, self.sid, self.tmux, session,
+                                       dict(id=1, result=dict(turn=dict(id='turn-1'))))
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, second)['status'], 'sent')
+            self.assertEqual([json.loads(line)['method'] for line in output.getvalue().splitlines()],
+                             ['turn/start', 'turn/steer'])
+
     def test_codex_runs_on_the_plan_login_with_no_api_key_and_no_model_override(self):
         os.environ.update(OPENAI_API_KEY='fixture-key', CODEX_API_KEY='fixture-key', OPENAI_BASE_URL='http://127.0.0.1:9')
         self.enable()
@@ -6254,6 +6274,25 @@ class IGSH_1545_PiHostTest(HostProviderCase):
 
     def prompts(self):
         return [line for line in self.sent() if line.get('type') == 'prompt']
+
+    def test_pi_start_does_not_accept_an_unacknowledged_follow_up(self):
+        session = dict(state={})
+        reader.host_session_reset(session, types.SimpleNamespace(stdin=io.BytesIO()))
+        session['ready'] = True
+        first = dict(op='deliver', id='pi_pending_message_0001', attempt='a1', epoch=1, text='first')
+        second = dict(op='deliver', id='pi_pending_message_0002', attempt='a2', epoch=1, text='second')
+        with patch.object(reader, 'host_attempt', return_value=dict(status='claimed')), \
+                patch.object(reader, 'host_turn_started'), patch.object(reader, 'host_apply', return_value=True) as apply:
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, first)['status'], 'sent')
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, second)['status'], 'sent')
+            reader.host_pi_event(self.provider, self.sid, self.tmux, session, dict(type='agent_start'))
+            self.assertEqual([(entry['id'], entry['accepted']) for entry in session['sends']],
+                             [(first['id'], True), (second['id'], False)])
+            reader.host_pi_event(self.provider, self.sid, self.tmux, session,
+                                 dict(type='response', command='prompt', id=second['id'], success=False))
+            facts = [call.args[3][0] for call in apply.call_args_list]
+            self.assertEqual([(fact['id'], fact['kind']) for fact in facts],
+                             [(first['id'], 'accepted'), (second['id'], 'not_sent')])
 
     def test_pi_runs_deepseek_flash_on_opencode_go_and_never_the_openrouter_default(self):
         self.enable()
