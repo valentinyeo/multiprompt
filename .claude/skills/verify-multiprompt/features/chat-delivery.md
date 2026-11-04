@@ -1,5 +1,10 @@
 # Chat delivery
 
+## Startup failure without a transcript
+
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=chat-delivery -f startup_failure_proof=true`. The isolated saved tmux tab has a known session ID and no provider transcript. The remote-shell stand-in calls the app-supplied reader's production `host_startup_failure` after the real event subscription. The host startup failure is simulated; no real host or provider is started. The reader persists and pushes its real events. Native keyboard selection and copy require one plain failure, and `startup-failure-visible.png` captures the real desktop after the stand-in stops. Inspect the screenshot, copied text, event evidence and cleanup before claiming proof.
+
+
 ## Sub-features
 
 - `busy-send`: a message typed in the real Chat View composer reaches an agent buffer as exactly that text followed by Enter within 15 seconds while the scripted agent remains busy (`esc to interrupt`).

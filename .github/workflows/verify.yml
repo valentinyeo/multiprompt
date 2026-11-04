@@ -87,6 +87,11 @@ on:
         required: false
         default: false
         type: boolean
+      startup_failure_proof:
+        description: Show a stopped host startup failure without a provider transcript
+        required: false
+        default: false
+        type: boolean
       missing_note_proof:
         description: Open a tab with no transcript and require the plain not-available note, never terminal text
         required: false
@@ -395,6 +400,7 @@ jobs:
       CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
       CHAT_HAX_PROOF: ${{ inputs.hax_sessions_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
+      CHAT_STARTUP_FAILURE_PROOF: ${{ inputs.startup_failure_proof && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
