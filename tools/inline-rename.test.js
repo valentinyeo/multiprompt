@@ -41,6 +41,7 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.match(driver, /function Rename-Snapshot\([\s\S]*?Rename-WaitChatView\s+Snapshot \$Name/);
   assert.match(driver, /tabs\[\$state\.active_tab\]\.cv/);
   assert.match(driver, /ZigShellChatTranscript/);
-  assert.match(driver, /Wait-WorkspaceSurface \$state\.active_workspace \$state\.active_tab \$false/);
+  assert.match(driver, /Click the first sidebar session name/);
+  assert.doesNotMatch(driver, /Alt\+C:.*shell view/);
   assert.doesNotMatch(driver, /^\s+Snapshot ["']rename-/m);
 });

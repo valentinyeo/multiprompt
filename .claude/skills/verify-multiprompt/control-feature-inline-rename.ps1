@@ -34,14 +34,12 @@
             $sid = (Read-Session).tabs[(Read-Session).active_tab].shell_id
             $current = (Read-Session).tabs[(Read-Session).active_tab].name
             Rename-WaitChatView
-            Press @(0x12, 0x43) 'Alt+C: find sidebar name geometry in shell view'
-            $state = Read-Session
-            Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
-            Press @(0x71) 'F2: open sidebar rename'
+            $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+            Doctor
+            Record 'Click the first sidebar session name in the isolated single-session workspace'
+            [VerifyNative]::ClickClient($script:window, [int](100 * $scale), [int](120 * $scale))
             $sidePoint = Rename-EditPoint $current
-            Press @(0x1B) 'Esc: cancel geometry probe'
-            Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
-            Press @(0x12, 0x43) 'Alt+C: return to Chat View'
+            Press @(0x1B) 'Esc: cancel sidebar geometry probe'
             Rename-WaitChatView
             foreach ($theme in @('light', 'amoled')) {
                 Select-Theme $theme "rename-$theme-theme"
