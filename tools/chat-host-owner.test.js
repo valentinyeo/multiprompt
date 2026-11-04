@@ -97,6 +97,7 @@ with tempfile.TemporaryDirectory() as directory:
         for _ in range(3):
             assert r['host_start'](provider, sid).get('permanent') is True
         assert len(r['message_events_page'](provider, sid, 0)['events']) == len(events)
+    assert 'codex' in r['HOST_PROVIDERS']
     stream = io.BytesIO()
     session = dict(state={})
     r['host_session_reset'](session, SimpleNamespace(stdin=stream))
