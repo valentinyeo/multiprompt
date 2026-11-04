@@ -372,7 +372,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -578,7 +578,10 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
-    if ($null -ne $process -and $process.HasExited) { $result.exitCode = $process.ExitCode }
+    if ($null -ne $process) {
+        $process.Refresh()
+        if ($process.HasExited) { $result.exitCode = $process.ExitCode }
+    }
     if ($script:window -ne [IntPtr]::Zero) {
         try { Snapshot 'failure' } catch { $result.captureError = $_.Exception.Message }
     }

@@ -438,7 +438,7 @@ pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
 fn chatModeThread(job: *ChatModeJob) void {
     const a = std.heap.page_allocator;
     defer chat_mode_busy.store(false, .release);
-    const request = @import("chat_slash.zig").modeRequest(a, job.key.shell_id, if (job.key.codex) "codex" else "claude", std.mem.sliceTo(&job.key.sid, 0), job.mode) catch {
+    const request = @import("chat_slash.zig").modeRequest(a, job.key.shell_id, job.key.provider(), std.mem.sliceTo(&job.key.sid, 0), job.mode) catch {
         chatModePostResult(job);
         return;
     };
