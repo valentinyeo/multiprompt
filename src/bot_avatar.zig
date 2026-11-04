@@ -151,7 +151,7 @@ test "Android and desktop share raw UTF-8 bot identity" {
     try std.testing.expectEqual(Appearance{ .face = 15, .color = 0 }, Appearance.forSession("agent-one"));
     try std.testing.expectEqual(Appearance{ .face = 13, .color = 0 }, Appearance.forSession("agent-two"));
     try std.testing.expectEqual(Appearance{ .face = 9, .color = 0 }, Appearance.forSession("机器人"));
-    var shell: state.Shell = std.mem.zeroes(state.Shell);
+    var shell = state.empty_shell;
     @memcpy(shell.tmux_session[0..9], "agent-one");
     shell.tmux_session_len = 9;
     const first = forShell(&shell);
