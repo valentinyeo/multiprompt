@@ -4337,6 +4337,23 @@ def stop_fixture_host_loop(test, thread, session):
 
 
 class FixtureLifecycleTest(unittest.TestCase):
+    def test_discovery_does_not_repeat_methods_with_the_same_fixture(self):
+        loader = unittest.TestLoader()
+        seen = {}
+        for case in globals().values():
+            if not isinstance(case, type) or not issubclass(case, unittest.TestCase):
+                continue
+            for name in loader.getTestCaseNames(case):
+                key = (getattr(case, name), case.setUp, getattr(case, 'enable', None))
+                self.assertNotIn(key, seen, '%s.%s duplicates %s' % (case.__name__, name, seen.get(key)))
+                seen[key] = '%s.%s' % (case.__name__, name)
+
+        base = set(loader.getTestCaseNames(AgentHostTest))
+        self.assertEqual(len(base), 23)
+        self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
+        self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
+        self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
+
     def test_failed_host_fixture_stops_its_thread_and_process_before_restoring_home(self):
         import socket as module
         owned = {}
@@ -4385,7 +4402,7 @@ class FixtureLifecycleTest(unittest.TestCase):
         self.assertIsNotNone(owned['process'].poll())
 
 
-class AgentHostTest(unittest.TestCase):
+class AgentHostFixture:
     provider = 'claude'
     sid = 'host-fixture-session'
     tmux = 'fixture-chat'
@@ -4482,6 +4499,8 @@ class AgentHostTest(unittest.TestCase):
             db.execute("UPDATE shared_messages SET state='queued',deadline=NULL WHERE id=?", (token,))
         db.close()
 
+
+class AgentHostTest(AgentHostFixture, unittest.TestCase):
     def test_host_delivers_once_with_receipt(self):
         self.enable()
         token = self.seed()
@@ -5186,7 +5205,7 @@ class HandsOverChatTest(unittest.TestCase):
         self.assertEqual(reader.host_resume('claude', self.sid, self.tmux), dict(status='error', reason='host_timeout'))
 
 
-class HostWorkerDeliveryTest(AgentHostTest):
+class HostWorkerDeliveryTest(AgentHostFixture, unittest.TestCase):
     def test_a_hosted_chat_delivers_without_a_pane_agent_or_locator(self):
         self.enable()
         db = reader.message_store_db(self.tmux)
@@ -5249,7 +5268,7 @@ class EmptyHostedChatTest(unittest.TestCase):
         self.assertEqual(wire.splitlines()[0].split('\t')[3], 'missing')
 
 
-class AgentHostReviewTest(AgentHostTest):
+class AgentHostReviewTest(AgentHostFixture, unittest.TestCase):
     second = 'host_fixture_message_02'
 
     def test_a_locked_store_does_not_kill_the_shared_channel(self):
@@ -5480,7 +5499,7 @@ for raw in sys.stdin:
         finish(subtype='error_during_execution', stop_reason=None, cost=0)
 '''
 
-class HostEventStreamTest(unittest.TestCase):
+class HostEventStreamFixture:
     provider = 'claude'
     sid = 'host-stream-session'
     tmux = 'stream-chat'
@@ -5514,6 +5533,8 @@ class HostEventStreamTest(unittest.TestCase):
         db.close()
         return [row for row in rows if kind is None or row.get('kind') == kind]
 
+
+class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
     def test_text_and_thinking_deltas_coalesce_into_one_full_text_row_then_complete(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='thinking', thinking=''))),
@@ -5680,7 +5701,7 @@ class ServeEventPushTest(unittest.TestCase):
 
 
 
-class AgentHostStreamTest(AgentHostTest):
+class AgentHostStreamFixture(AgentHostFixture):
     def setUp(self):
         super().setUp()
         self.agent.write_text(FAKE_CLAUDE)
@@ -5702,6 +5723,8 @@ class AgentHostStreamTest(AgentHostTest):
         db.close()
         return [row for row in rows if kind is None or row.get('kind') == kind]
 
+
+class AgentHostStreamTest(AgentHostStreamFixture, unittest.TestCase):
     def test_a_hosted_turn_streams_thinking_text_and_its_end_into_the_event_log(self):
         self.fake('stream')
         os.environ['FAKE_AGENT_PACE'] = '0.5'
@@ -5754,7 +5777,11 @@ class AgentHostStreamTest(AgentHostTest):
 
 
 
-class HostControlTest(HostEventStreamTest):
+class AgentHostStreamContractTest(AgentHostStreamFixture, AgentHostTest):
+    pass
+
+
+class HostControlFixture(HostEventStreamFixture):
     def writes(self):
         return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
 
@@ -5771,6 +5798,8 @@ class HostControlTest(HostEventStreamTest):
     def reply(self, **request):
         return reader.host_handle_request(self.provider, self.sid, self.tmux, self.session, request)
 
+
+class HostControlTest(HostControlFixture, unittest.TestCase):
     def test_a_control_request_is_parked_and_turned_into_an_approval_request(self):
         request_id = self.approval(suggestions=[dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
                                                      behavior='allow', destination='localSettings')])
@@ -5960,10 +5989,12 @@ class HostControlTest(HostEventStreamTest):
 
 
 
-class AgentHostControlTest(AgentHostStreamTest):
+class AgentHostControlFixture(AgentHostStreamFixture):
     def answer(self, **request):
         return reader.host_reply(dict(provider=self.provider, sid=self.sid, **request))
 
+
+class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
     def test_an_approval_request_reaches_the_event_log_and_the_answer_runs_the_tool(self):
         self.fake('approval')
         self.seed()
@@ -6093,7 +6124,7 @@ class AgentHostControlTest(AgentHostStreamTest):
 
 
 
-class HostInterruptTest(HostControlTest):
+class HostInterruptTest(HostControlFixture, unittest.TestCase):
     def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),
@@ -6118,7 +6149,7 @@ class HostInterruptTest(HostControlTest):
         self.assertTrue(self.session['stop'])
 
 
-class AgentHostInterruptTest(AgentHostControlTest):
+class AgentHostInterruptTest(AgentHostControlFixture, unittest.TestCase):
     def test_stop_interrupts_the_turn_and_the_host_takes_the_next_message(self):
         self.fake('slow')
         self.seed(text='first prompt')
@@ -6139,7 +6170,7 @@ class AgentHostInterruptTest(AgentHostControlTest):
         self.assertEqual([row['payload']['status'] for row in self.events('turn.ended')], ['interrupted', 'interrupted'])
 
 
-class AgentHostMidTurnSendTest(AgentHostControlTest):
+class AgentHostMidTurnSendTest(AgentHostControlFixture, unittest.TestCase):
     def test_a_second_message_starts_its_own_turn_in_the_event_log(self):
         self.fake('silent')
         self.seed(text='first prompt')
