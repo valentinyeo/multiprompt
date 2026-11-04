@@ -638,11 +638,6 @@ pub fn chatToolStepsKey(vk: WPARAM, ctrl: bool, shift: bool, alt: bool) bool {
     return vk == 0x4A and ctrl and shift and !alt;
 }
 
-pub fn chatToolStepsKeyDown(vk: WPARAM) bool {
-    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
-    return chatToolStepsKey(vk, (GetKeyState(0x11) & down) != 0, (GetKeyState(0x10) & down) != 0, (GetKeyState(@as(i32, VK_MENU)) & down) != 0);
-}
-
 test "tool steps shortcut does not consume plain control J" {
     try std.testing.expect(chatToolStepsKey(0x4A, true, true, false));
     try std.testing.expect(!chatToolStepsKey(0x4A, true, false, false));
@@ -1577,11 +1572,6 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
     }
     if (msg == 0x0102 and wp == 0x01) return 0;
     if (chatImagePasteIntercept(msg, wp)) return 0;
-    if (msg == WM_KEYDOWN and chatToolStepsKeyDown(wp)) {
-        dropPendingActivationChar(hwnd, 0x0A);
-        @import("chat_render.zig").chatToggleAllTools();
-        return 0;
-    }
     if (msg == WM_KEYDOWN and chatCopyCodeKeyDown(wp)) {
         chatCopyLatestCode();
         return 0;

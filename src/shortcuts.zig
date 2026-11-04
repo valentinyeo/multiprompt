@@ -1084,7 +1084,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
         }
         if ((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and isAltDown(kb.flags) and chatViewOwnsInput() and chatComposerOwnsKey(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags), kb.flags)) altqLog("hook_gate_swallow vk={X} wp={X} alt={} ctrl={}", .{ kb.vkCode, wp, isAltDown(kb.flags), isCtrlDown() });
-        if (chatViewOwnsInput() and wp == WM_KEYDOWN and @import("chat_composer.zig").chatToolStepsKey(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags))) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        if (chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus() and wp == WM_KEYDOWN and
+            @import("chat_composer.zig").chatToolStepsKey(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags)))
+        {
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOOL_STEPS, 0, 0);
+            return 1;
+        }
         if (chatViewOwnsInput() and chatComposerOwnsKey(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags), kb.flags)) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0xBA and foregroundIsOurs() and !app_state.g_snippet_create_active) {
             app_state.g_sysmenu_pending = false;

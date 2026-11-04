@@ -6108,10 +6108,6 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_KEYDOWN => {
-            if (@import("chat_composer.zig").chatToolStepsKeyDown(wp)) {
-                chatToggleAllTools();
-                return 0;
-            }
             if (chatCopyCodeKeyDown(wp)) {
                 chatCopyLatestCode();
                 return 0;

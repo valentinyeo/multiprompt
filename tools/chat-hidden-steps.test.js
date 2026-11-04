@@ -45,12 +45,11 @@ test('header evidence and shortcut routing cover both chat inputs', () => {
   const composer = fs.readFileSync('src/chat_composer.zig', 'utf8');
   const shortcuts = fs.readFileSync('src/shortcuts.zig', 'utf8');
   assert.match(render, /\[chat\] steps first=\{d\} count=\{d\} open=\{d\} header=\{d\},\{d\},\{d\},\{d\}/);
-  assert.match(render, /WM_KEYDOWN => \{\s*if \(@import\("chat_composer\.zig"\)\.chatToolStepsKeyDown\(wp\)\)/);
-  assert.match(composer, /msg == WM_KEYDOWN and chatToolStepsKeyDown\(wp\)\) \{\s*dropPendingActivationChar\(hwnd, 0x0A\);/);
   assert.match(composer, /vk == 0x4A and ctrl and shift and !alt/);
   assert.match(composer, /!chatComposerOwnsKey\(WM_KEYDOWN, 0x4A, true, false, 0\)/);
-  const keyReader = composer.slice(composer.indexOf('pub fn chatToolStepsKeyDown('), composer.indexOf('test "tool steps shortcut'));
-  assert.doesNotMatch(keyReader, /GetAsyncKeyState|isCtrlDown/);
-  for (const key of ['0x11', '0x10', '@as(i32, VK_MENU)']) assert.ok(keyReader.includes(`GetKeyState(${key})`));
-  assert.match(shortcuts, /wp == WM_KEYDOWN and @import\("chat_composer\.zig"\)\.chatToolStepsKey\(kb\.vkCode, isCtrlDown\(\), GetAsyncKeyState\(0x10\) < 0, isAltDown\(kb\.flags\)\)/);
+  assert.doesNotMatch(composer + render, /chatToolStepsKeyDown/);
+  assert.match(shortcuts, /chatViewOwnsInput\(\) and foregroundIsOurs\(\) and !activeBrowserHasForegroundFocus\(\) and wp == WM_KEYDOWN and\s*@import\("chat_composer\.zig"\)\.chatToolStepsKey\(kb\.vkCode, isCtrlDown\(\), GetAsyncKeyState\(0x10\) < 0, isAltDown\(kb\.flags\)\)/);
+  assert.match(shortcuts, /WM_APP_CHAT_TOOL_STEPS, 0, 0\);\s*return 1;/);
+  const main = fs.readFileSync('src/main.zig', 'utf8');
+  assert.match(main, /WM_APP_CHAT_TOOL_STEPS => \{\s*if \(!chatViewOwnsInput\(\)\) return 0;\s*@import\("chat_render\.zig"\)\.chatToggleAllTools\(\);/);
 });
