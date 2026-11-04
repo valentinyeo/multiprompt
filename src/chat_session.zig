@@ -1281,6 +1281,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             entry.missing_message = @splat(0);
             entry.stalled = false;
             entry.loaded_ms = 0;
+            entry.preview_loaded_ms = 0;
             debugLog("[chat] no transcript yet: this is a new chat, showing the empty state");
             ok = true;
         } else if (chat_history.missingReason(wire.items, id)) |reason| {
@@ -1432,6 +1433,8 @@ pub fn chatFileOnReady() void {
         if (live_revision != g_chat_live_seen_revision) {
             g_chat_live_seen_revision = live_revision;
             active_changed = true;
+            chatLiveSyncWorking();
+            preview_changed = true;
             @import("window_layout.zig").chatWorkingIndicatorSync();
             if (live.held(live_shell)) chatFileRequest(key);
         }
@@ -1514,7 +1517,10 @@ pub fn chatFileOnReady() void {
                 if (block.role != .tool) break true;
             } else false;
             entry.before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (!has_messages) entry.history.start else 0;
-            if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
+            if (!disk and !history.more) {
+                entry.loaded_ms = @intCast(GetTickCount64());
+                if (!entry.unchanged) entry.preview_loaded_ms = history.received_ms;
+            }
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;

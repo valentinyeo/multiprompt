@@ -114,11 +114,6 @@ const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const asciiContainsQueryInsensitive = @import("command_palette.zig").asciiContainsQueryInsensitive;
 const SetTimer = @import("win32.zig").SetTimer;
 const KillTimer = @import("win32.zig").KillTimer;
-const etaRemainingMs = @import("notifications.zig").etaRemainingMs;
-const etaElapsedMs = @import("notifications.zig").etaElapsedMs;
-const etaOverdueColor = @import("notifications.zig").etaOverdueColor;
-const formatEtaRemaining = @import("notifications.zig").formatEtaRemaining;
-const etaFillFraction = @import("notifications.zig").etaFillFraction;
 const INBOX_MAX_WS = @import("app_state.zig").INBOX_MAX_WS;
 const INBOX_MAX_ROWS = @import("app_state.zig").INBOX_MAX_ROWS;
 const InboxRow = @import("app_state.zig").InboxRow;
@@ -1567,9 +1562,7 @@ pub fn paintInbox(hdc: HANDLE) void {
             _ = @import("dwrite_text.zig").draw(hdc, &time_buf, @intCast(time_len), &time_rc, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT);
             if (row.att) drawAttentionDot(hdc, layout.right - uiScaled(18), y + uiScaled(17), @max(1, uiScaled(4)), blue);
         }
-        const eta_valid = row.act == 1 and row.eta_total_ms > 0 and row.eta_deadline_tick != 0;
-        const show_eta = eta_valid and (app_state.g_eta_numbers_on or app_state.g_eta_progress_on) and width >= uiScaled(320);
-        const preview_right = if (show_eta) layout.right - uiScaled(146) else layout.right - uiScaled(14);
+        const preview_right = layout.right - uiScaled(14);
         const pv = row.pv[0..row.pv_len];
         const preview = pv;
         var preview_buf: [96]u16 = undefined;
@@ -1578,30 +1571,7 @@ pub fn paintInbox(hdc: HANDLE) void {
         _ = SetTextColor(hdc, if (row.pv_question) blue else muted);
         var preview_rc = RECT{ .left = text_left, .top = y + uiScaled(29), .right = @max(text_left, preview_right), .bottom = y + uiScaled(48) };
         _ = @import("dwrite_text.zig").draw(hdc, &preview_buf, @intCast(preview_len), &preview_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        if (show_eta) {
-            const remaining = etaRemainingMs(row.eta_deadline_tick, GetTickCount64());
-            const bar_right = layout.right - uiScaled(14);
-            const bar_left = bar_right - uiScaled(60);
-            if (app_state.g_eta_progress_on) {
-                const track = RECT{ .left = bar_left, .top = y + uiScaled(36), .right = bar_right, .bottom = y + uiScaled(40) };
-                @import("smooth.zig").fillRoundRect(hdc, track, uiScaled(2), selected_bg);
-                const frac = if (remaining < 0) @as(f32, 1) else etaFillFraction(etaElapsedMs(row.eta_total_ms, remaining), row.eta_total_ms);
-                const fill: i32 = @intFromFloat(@as(f32, @floatFromInt(bar_right - bar_left)) * frac);
-                @import("smooth.zig").fillRoundRect(hdc, .{ .left = bar_left, .top = track.top, .right = bar_left + fill, .bottom = track.bottom }, uiScaled(2), if (remaining < 0) etaOverdueColor() else blue);
-            }
-            if (app_state.g_eta_numbers_on) {
-                var eta_buf: [16]u8 = undefined;
-                const eta = formatEtaRemaining(remaining, &eta_buf);
-                var text_buf: [32]u8 = undefined;
-                const text = if (remaining < 0) eta else std.fmt.bufPrint(&text_buf, "{s} left", .{eta}) catch eta;
-                var eta_wide: [32]u16 = undefined;
-                const eta_len = asciiToU16(text, &eta_wide);
-                _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
-                _ = SetTextColor(hdc, if (remaining < 0) etaOverdueColor() else muted);
-                var eta_rc = RECT{ .left = layout.right - uiScaled(146), .top = y + uiScaled(29), .right = if (app_state.g_eta_progress_on) bar_left - uiScaled(8) else bar_right, .bottom = y + uiScaled(48) };
-                _ = @import("dwrite_text.zig").draw(hdc, &eta_wide, @intCast(eta_len), &eta_rc, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
-            }
-        }
+
     }
     if (width > 0 and h > uiScaled(40)) {
         const selected_top = if (vis > 0 and layout.max_rows > 0) layout.top + @as(i32, @intCast(app_state.g_inbox_sel - layout.scroll)) * layout.stride else -1;

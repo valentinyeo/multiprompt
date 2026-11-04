@@ -1601,6 +1601,31 @@ test "inbox preview preserves unicode within byte budget" {
     try std.testing.expectEqualSlices(u8, &([_]u8{'a'} ** 89), output[0..boundary_length]);
 }
 
+fn updateConsoleStep(shell: *app_state.Shell, step: []const u16, saw_ai_working: bool, now: u64) bool {
+    const different = !std.mem.eql(u16, shell.console_step[0..shell.console_step_len], step);
+    const new_turn = step.len > 0 and saw_ai_working and shell.working_since_ms > shell.console_step_changed_ms;
+    if (!different and !new_turn) return false;
+    @memcpy(shell.console_step[0..step.len], step);
+    shell.console_step_len = step.len;
+    shell.console_step_changed_ms = now;
+    return true;
+}
+
+test "console step is recertified once after each working start" {
+    var shell = app_state.empty_shell;
+    const step = std.unicode.utf8ToUtf16LeStringLiteral("Thinking");
+    try std.testing.expect(updateConsoleStep(&shell, step, true, 100));
+    shell.working_since_ms = 101;
+    try std.testing.expect(updateConsoleStep(&shell, step, true, 102));
+    try std.testing.expectEqual(@as(u64, 102), shell.console_step_changed_ms);
+    try std.testing.expect(!updateConsoleStep(&shell, step, true, 150));
+    shell.working_since_ms = 200;
+    try std.testing.expect(!updateConsoleStep(&shell, step, false, 201));
+    try std.testing.expect(updateConsoleStep(&shell, step, true, 202));
+    try std.testing.expect(!updateConsoleStep(&shell, step, true, 250));
+    try std.testing.expectEqual(@as(u64, 202), shell.console_step_changed_ms);
+}
+
 fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool {
     if (pid == 0 or i >= app_state.shell_count) return false;
     _ = FreeConsole();
@@ -1715,14 +1740,11 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
     }
 
     app_state.shells[i].console_working = saw_ai_working;
-    if (!std.mem.eql(u16, app_state.shells[i].console_step[0..app_state.shells[i].console_step_len], step[0..step_len])) {
-        @memcpy(app_state.shells[i].console_step[0..step_len], step[0..step_len]);
-        app_state.shells[i].console_step_len = step_len;
-        changed = true;
-    }
+    if (updateConsoleStep(&app_state.shells[i], step[0..step_len], saw_ai_working, GetTickCount64())) changed = true;
     if (!std.mem.eql(u16, app_state.shells[i].console_reply[0..app_state.shells[i].console_reply_len], reply[0..reply_len])) {
         @memcpy(app_state.shells[i].console_reply[0..reply_len], reply[0..reply_len]);
         app_state.shells[i].console_reply_len = reply_len;
+        app_state.shells[i].console_reply_changed_ms = GetTickCount64();
         changed = true;
     }
     if (saw_ai_working and app_state.shells[i].needs_attention and app_state.shells[i].last_blue_dot_source != .notification) {
@@ -2205,7 +2227,7 @@ pub fn pollShellNames() void {
     if (now >= g_second_line_refresh_ms) {
         g_second_line_refresh_ms = now + 60_000;
         for (app_state.shells[0..app_state.shell_count]) |*shell| {
-            if (shell.activity == .active or shell.console_working) {
+            if (shell.activity == .active or shell.console_working or @import("chat_live.zig").running(shell.shell_id)) {
                 changed = true;
                 break;
             }

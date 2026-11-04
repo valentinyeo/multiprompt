@@ -51,12 +51,6 @@ pub fn consoleReply(line: []const u16, out: []u16) usize {
     return len;
 }
 
-fn withConsoleReply(selected: Line, working: bool, reply: []const u16) Line {
-    var result = selected;
-    if (!working and result.len == 0) copy(&result, reply);
-    return result;
-}
-
 pub fn select(status: *const transcript.Status, h: *const history.History, working: bool, elapsed_ms: ?u64, console_step: []const u16, allow_question: bool) Line {
     var result: Line = .{};
     if (allow_question and status.question.count > 0) {
@@ -103,6 +97,31 @@ pub fn select(status: *const transcript.Status, h: *const history.History, worki
     return result;
 }
 
+fn selectFresh(status: *const transcript.Status, h: *const history.History, working: bool, elapsed_ms: ?u64, step: []const u16, reply: []const u16, allow_question: bool, loaded_ms: u64, working_since_ms: u64, step_changed_ms: u64, reply_changed_ms: u64) Line {
+    const empty: history.History = .{};
+    const history_current = !working or working_since_ms == 0 or loaded_ms >= working_since_ms;
+    const current_step = if (working_since_ms == 0 or step_changed_ms >= working_since_ms) step else &.{};
+    const newer_step = working and current_step.len > 0 and step_changed_ms > loaded_ms;
+    const newer_reply = !working and reply.len > 0 and reply_changed_ms > loaded_ms;
+    if (history_current and allow_question and status.question.count > 0) {
+        var result: Line = .{};
+        copy(&result, status.question.groups[0].questionSlice());
+        if (result.len > 0) {
+            result.question = true;
+            return result;
+        }
+    }
+    if (newer_reply) {
+        var result: Line = .{};
+        copy(&result, reply);
+        return result;
+    }
+    if (!history_current or newer_step) return select(&empty.status, &empty, working, elapsed_ms, current_step, false);
+    var result = select(status, h, working, elapsed_ms, current_step, allow_question);
+    if (!working and result.len == 0) copy(&result, reply);
+    return result;
+}
+
 pub fn forShell(index: u32) Line {
     const shell = &app_state.shells[index];
     const session = @import("chat_session.zig");
@@ -117,16 +136,16 @@ pub fn forShell(index: u32) Line {
         if (line.question) return line;
     }
     const allow_question = !live.attached(shell.shell_id);
-    const working = shell.activity == .active or shell.console_working;
+    const working = if (live.attached(shell.shell_id)) live.running(shell.shell_id) else shell.activity == .active or shell.console_working;
     const now = @import("win32.zig").GetTickCount64();
     const elapsed: ?u64 = if (shell.working_since_ms == 0) null else now -| shell.working_since_ms;
     const step = shell.console_step[0..shell.console_step_len];
     const reply = shell.console_reply[0..shell.console_reply_len];
     for (app_state.g_chat_histories.items) |entry| {
-        if (!entry.retired and history.sameSession(entry.key, key)) return withConsoleReply(select(&entry.history.status, &entry.history, working, elapsed, step, allow_question), working, reply);
+        if (!entry.retired and history.sameSession(entry.key, key)) return selectFresh(&entry.history.status, &entry.history, working, elapsed, step, reply, allow_question, entry.preview_loaded_ms, shell.working_since_ms, shell.console_step_changed_ms, shell.console_reply_changed_ms);
     }
     const empty: history.History = .{};
-    return withConsoleReply(select(&empty.status, &empty, working, elapsed, step, allow_question), working, reply);
+    return selectFresh(&empty.status, &empty, working, elapsed, step, reply, allow_question, 0, shell.working_since_ms, shell.console_step_changed_ms, shell.console_reply_changed_ms);
 }
 
 test "semantic second line chooses question task reply or nothing" {
@@ -195,9 +214,50 @@ test "console reply requires an assistant prose marker" {
     inline for (.{ "❯ user prompt", "● Bash(ls)", "● Read(file)", "✻ Thinking… (esc to interrupt)", "● agent | term-1 781MB 15:42", "● ❯ user prompt", "plain text", "● " }) |input| {
         try std.testing.expectEqual(@as(usize, 0), consoleReply(std.unicode.utf8ToUtf16LeStringLiteral(input), &out));
     }
-    const fallback = withConsoleReply(.{}, false, out[0..len]);
+    const empty: history.History = .{};
+    const fallback = selectFresh(&empty.status, &empty, false, null, &.{}, out[0..len], true, 0, 0, 0, 1);
     try std.testing.expectEqualStrings("Ready.", fallback.text[0..fallback.len]);
-    try std.testing.expectEqual(@as(usize, 0), withConsoleReply(.{}, true, out[0..len]).len);
-    const known = withConsoleReply(fallback, false, std.unicode.utf8ToUtf16LeStringLiteral("Other"));
-    try std.testing.expectEqualStrings("Ready.", known.text[0..known.len]);
+}
+
+test "freshness selects current turn and newer console output" {
+    const a = std.testing.allocator;
+    var h: history.History = .{};
+    defer h.deinit(a);
+    try h.text.appendSlice(a, std.unicode.utf8ToUtf16LeStringLiteral("Old reply"));
+    try h.blocks.append(a, .{ .start = 0, .len = h.text.items.len, .role = .prose, .first = true });
+    const task = std.unicode.utf8ToUtf16LeStringLiteral("Old task");
+    @memcpy(h.status.todos[0].text[0..task.len], task);
+    h.status.todos[0].len = task.len;
+    h.status.todos[0].status = .in_progress;
+    h.status.total = 1;
+    const step = std.unicode.utf8ToUtf16LeStringLiteral("New step");
+    const reply = std.unicode.utf8ToUtf16LeStringLiteral("New reply");
+    var line = selectFresh(&h.status, &h, true, 60000, step, reply, true, 100, 200, 210, 90);
+    try std.testing.expectEqualStrings("New step · 1m", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, 100, 200, 90, 90);
+    try std.testing.expectEqual(@as(usize, 0), line.len);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, 300, 200, 210, 90);
+    try std.testing.expectEqualStrings("Old task", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, 100, 50, 110, 90);
+    try std.testing.expectEqualStrings("New step", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, 100, 0, 0, 110);
+    try std.testing.expectEqualStrings("New reply", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, 200, 0, 0, 110);
+    try std.testing.expectEqualStrings("Old reply", line.text[0..line.len]);
+    const question = std.unicode.utf8ToUtf16LeStringLiteral("Continue?");
+    @memcpy(h.status.question.groups[0].question[0..question.len], question);
+    h.status.question.groups[0].question_len = question.len;
+    h.status.question.count = 1;
+    line = selectFresh(&h.status, &h, false, null, step, reply, true, 100, 0, 0, 110);
+    try std.testing.expect(line.question);
+    try std.testing.expectEqualStrings("Continue?", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, false, null, step, reply, false, 100, 0, 0, 110);
+    try std.testing.expect(!line.question);
+    try std.testing.expectEqualStrings("New reply", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, 100, 200, 210, 90);
+    try std.testing.expect(!line.question);
+    try std.testing.expectEqualStrings("New step", line.text[0..line.len]);
+    line = selectFresh(&h.status, &h, true, null, step, reply, true, 200, 100, 210, 90);
+    try std.testing.expect(line.question);
+    try std.testing.expectEqualStrings("Continue?", line.text[0..line.len]);
 }
