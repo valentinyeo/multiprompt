@@ -1577,7 +1577,7 @@ function runHarness(control = false) {
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
       let match = oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '');
       if (body('chatConfirmedAdd').includes('block: ChatBlock')) {
-        match = match.replace('chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi].start, g_chat_blocks[mi].len, g_chat_blocks[mi].stamp_ms);', 'chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi]);');
+        match = match.replace('chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi].start, g_chat_blocks[mi].len, g_chat_blocks[mi].stamp_ms);', 'chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi], e);');
       }
       functions = functions.replace(body('chatEchoMatchActive'), match) + '\n' + oldBody('chatEchoRepresentedBlock');
     }

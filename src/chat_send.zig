@@ -1315,7 +1315,7 @@ fn chatConfirmedDropKey(key: []const u8) void {
     }
 }
 
-fn chatConfirmedAdd(key: []const u8, text: []const u16, block: ChatBlock) void {
+fn chatConfirmedAdd(key: []const u8, text: []const u16, block: ChatBlock, e: ChatOutboxEntry) void {
     if (key.len == 0 or text.len == 0) return;
     while (chatConfirmedCountIn(key) >= CHAT_CONFIRMED_MAX_PER_KEY) {
         const victim = chatConfirmedFirstIndexIn(key) orelse break;
@@ -1331,6 +1331,8 @@ fn chatConfirmedAdd(key: []const u8, text: []const u16, block: ChatBlock) void {
     c.stamp_ms = block.stamp_ms;
     c.message_id = block.message_id;
     c.text_hash = chat_echo.textHash(text);
+    c.message_sid = e.message_sid;
+    c.message_wire_id = e.message_wire_id;
     app_state.g_chat_confirmed.append(std.heap.page_allocator, c) catch {};
 }
 
@@ -1443,7 +1445,7 @@ fn chatEchoConfirmWithBlock(ei: usize, block: ChatBlock) void {
     var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const klen: usize = e.key_len;
     @memcpy(key_copy[0..klen], e.key[0..klen]);
-    chatConfirmedAdd(key_copy[0..klen], e.text, block);
+    chatConfirmedAdd(key_copy[0..klen], e.text, block, e);
     chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, ei);
     _ = saveChatOutbox();
     chatOutboxChanged();
@@ -1542,7 +1544,7 @@ pub fn chatEchoMatchActive() void {
         if (chatEchoAssignedBlock(&assignment, e.id)) |mi| {
             var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
             @memcpy(key_copy[0..e.key_len], e.key[0..e.key_len]);
-            chatConfirmedAdd(key_copy[0..e.key_len], e.text, app_state.g_chat_blocks[mi]);
+            chatConfirmedAdd(key_copy[0..e.key_len], e.text, app_state.g_chat_blocks[mi], e);
             if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
             chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
             changed = true;
@@ -3043,6 +3045,9 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     }
     if (!std.mem.eql(u8, phase, "queued") and !std.mem.eql(u8, phase, "sent") and !std.mem.eql(u8, phase, "failed")) return false;
     if (found == null) {
+        for (app_state.g_chat_confirmed.items) |c| {
+            if (token.len != 0 and std.mem.eql(u8, c.key[0..c.key_len], key) and std.mem.eql(u8, &c.message_sid, &identity.sid) and std.mem.eql(u8, std.mem.sliceTo(&c.message_wire_id, 0), token)) return true;
+        }
         const text = json_reader.string(json_reader.field(message, "text")) orelse return false;
         const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch return false;
         defer std.heap.page_allocator.free(wide);
@@ -3401,7 +3406,7 @@ fn chatTmuxSettle() void {
             },
             .delivered => {
                 const block = history.history.blocks.items[matched.?];
-                chatConfirmedAdd(entry.key[0..entry.key_len], entry.text, block);
+                chatConfirmedAdd(entry.key[0..entry.key_len], entry.text, block, entry.*);
                 chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
                 changed = true;
                 continue;
