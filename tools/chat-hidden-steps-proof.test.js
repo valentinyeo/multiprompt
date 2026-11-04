@@ -48,6 +48,7 @@ test('step driver reads the dictionary count field without PowerShell Count shad
   assert.ok(fs.existsSync(file), 'hidden-step native driver exists');
   const source = fs.readFileSync(file, 'utf8');
   assert.ok(source.includes("$rows[0]['count'] -eq 2"));
+  assert.ok(source.includes("Sort-Object { $_['first'] }"));
   assert.doesNotMatch(source, /\$rows\[\d\]\.count/);
 });
 
