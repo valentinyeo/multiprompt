@@ -4,6 +4,30 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { verify, MESSAGE, SID } = require('./chat-startup-failure-proof.cjs');
+const { discoverFeatures } = require('./verify-features.cjs');
+
+test('startup failure dispatch fits GitHub limits and selects its driver', () => {
+  const root = path.join(__dirname, '..');
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  const dispatch = workflow.split('  workflow_call:')[0];
+  const inputs = [...dispatch.matchAll(/^      ([a-z_]+):$/gm)].map(match => match[1]);
+  assert.ok(inputs.length <= 25, `workflow_dispatch has ${inputs.length} inputs`);
+  assert.ok(!inputs.includes('startup_failure_proof'));
+  assert.match(workflow, /CHAT_STARTUP_FAILURE_PROOF: \$\{\{ inputs\.feature == 'chat-startup-failure'/);
+  assert.ok(discoverFeatures().available.includes('chat-startup-failure'));
+  const control = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  assert.match(control, /ValidateSet\([^\n]*'chat-startup-failure'/);
+  assert.match(control, /'chat-startup-failure' \{[\s\S]*?verify-chat-delivery\/drive\.ps1/);
+  const verifyJob = workflow.split('\n  verify:\n')[1];
+  for (const step of ['Install Zig 0.16.0', 'Compile chat delivery remote-shell boundary']) {
+    const block = verifyJob.split(`- name: ${step}`)[1].split('\n      - ')[0];
+    assert.match(block, /env\.FEATURE == 'chat-startup-failure'/);
+  }
+  const python = verifyJob.split('- uses: actions/setup-python@')[1].split('\n      - ')[0];
+  assert.match(python, /env\.FEATURE == 'chat-startup-failure'/);
+  const delivery = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/chat-delivery.md'), 'utf8');
+  assert.equal((delivery.match(/^## /gm) || []).length, 4);
+});
 
 test('startup failure proof rejects duplicates, transcripts and missing events', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-proof-'));
