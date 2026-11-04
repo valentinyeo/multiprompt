@@ -157,23 +157,49 @@ class HistoryReaderTest(unittest.TestCase):
                      20: (1, ['bash']), children[1].pid: (20, [str(binary)])}
             def panes(command, **kwargs):
                 return subprocess.CompletedProcess(command, 0, '10\n' if '=first-tab' in command else '20\n', '')
+            for path in paths:
+                os.utime(path, ns=(1_000_000_000, 1_000_000_000))
             with patch.object(reader, 'process_table', return_value=table), \
                     patch.object(reader.subprocess, 'run', side_effect=panes):
-                for changed in (paths[1], paths[0], paths[1]):
+                for tick, changed in enumerate((paths[1], paths[0], paths[1]), 2):
                     with changed.open('a') as output:
                         output.write('\n')
+                    os.utime(changed, ns=(tick * 1_000_000_000, tick * 1_000_000_000))
                     for index, name in enumerate(('first-tab', 'second-tab')):
                         sid = ('first', 'second')[index]
                         wire = reader.response(dict(self.query, codex=True, sid='', tmux=name,
                                                     cwd=str(self.home), follow=True))
+                        self.assertNotIn(('second', 'first')[index] + ' reply', wire, 'codex neighbour ownership')
                         self.assertIn('\thistory\tok\t' + sid + '\t', wire)
                         self.assertIn(sid + ' reply', wire)
-                        self.assertNotIn(('second', 'first')[index] + ' reply', wire)
+            print('IGSH-1229 GREEN PROVEN: current Codex sessions stay separate after neighbouring writes')
         finally:
             for child in children:
                 child.stdin.close()
                 child.wait(timeout=5)
                 child.stdout.close()
+
+    def historical_igsh1229_resolver(self):
+        fixture = ROOT / 'tools/fixtures/IGSH-1229/historical-resolver.py'
+        namespace = {}
+        exec(compile(fixture.read_text(encoding='utf-8'), str(fixture), 'exec'), namespace)
+        names = ('codex_transcript_for_cwd', 'claude_transcript_for_cwd', 'resolve_tmux_agent')
+        return {name: types.FunctionType(namespace[name].__code__, reader.__dict__, name,
+                                         namespace[name].__defaults__) for name in names}
+
+    def test_igsh1229_historical_codex_selects_neighbour(self):
+        replacements = self.historical_igsh1229_resolver()
+        with patch.dict(reader.__dict__, replacements):
+            with self.assertRaisesRegex(AssertionError, 'codex neighbour ownership'):
+                self.test_igsh1229_live_native_processes_keep_separate_histories()
+        print('IGSH-1229 RED PROVEN: historical Codex resolver selected the neighbouring conversation')
+
+    def test_igsh1229_historical_claude_selects_neighbour(self):
+        replacements = self.historical_igsh1229_resolver()
+        with patch.dict(reader.__dict__, replacements):
+            with self.assertRaisesRegex(AssertionError, 'claude neighbour ownership'):
+                self.test_unknown_claude_identity_never_shows_same_folder_neighbour()
+        print('IGSH-1229 RED PROVEN: historical unidentified Claude resolver selected the neighbouring conversation')
 
     def test_igsh1229_native_codex_same_cwd_uses_owned_fds(self):
         root = self.home / '.codex/sessions/2026/10/30'
@@ -1704,11 +1730,12 @@ class HistoryReaderTest(unittest.TestCase):
                 patch.object(reader, 'open_claude_transcript', return_value=None), \
                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
                 patch.object(reader, 'tmux_owner_process', return_value=None):
-            self.assertIsNone(reader.resolve_tmux_agent('claude', 'term-1'))
+            self.assertIsNone(reader.resolve_tmux_agent('claude', 'term-1'), 'claude neighbour ownership')
             self.assertIsNone(reader.resolve_tmux_agent('claude', 'term-1', require_bound=True))
             wire = reader.response(self.query)
         self.assertIn('history\tmissing', wire)
         self.assertNotIn('neighbour reply', wire)
+        print('IGSH-1229 GREEN PROVEN: current unidentified Claude sessions refuse neighbouring history')
 
     def test_new_session_without_transcript_never_shows_a_neighbours_chat(self):
         self.write(self.event())
@@ -3976,6 +4003,17 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         with patch.object(reader.time, 'time', return_value=time.time() + reader.DRAFT_ECHO_SECONDS + 1):
             self.draft('full message', run)
         self.assertEqual(state['box'], 'full message')
+
+    def test_igsh1229_unbound_or_changed_session_preserves_terminal_draft(self):
+        for bound in (None, ('other', '/synthetic/other.jsonl')):
+            with self.subTest(bound=bound):
+                state, calls, run = self.pane('unfinished draft')
+                with patch.object(reader, 'resolve_tmux_agent', return_value=bound), \
+                        patch.object(reader.subprocess, 'run', side_effect=run):
+                    result = reader.send_response_preserve_draft(dict(tmux='fixture', sid='sid', text='new message'))
+                self.assertEqual((result['status'], result['reason']), ('not_sent', 'session_changed'))
+                self.assertEqual(state['box'], 'unfinished draft')
+                self.assertFalse(any('paste-buffer' in command or 'send-keys' in command for command in calls))
 
     def test_preserve_draft_handoff_boundaries(self):
         request = dict(tmux='fixture', sid='sid', text='synthetic prompt')
