@@ -352,7 +352,7 @@ export default {
           const alive = device.keyHash ? ['EXISTS (SELECT 1 FROM service_keys WHERE hash=? AND revoked=0)', [device.keyHash]] : ['EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)', [device.id, device.account]];
           const condition = 'EXISTS (SELECT 1 FROM layouts WHERE account=? AND revision=?) AND ' + alive[0];
           const mutation = request.method === 'PUT'
-            ? db.prepare('INSERT INTO bot_photos (account,key,png) SELECT ?,?,? WHERE ' + condition + ' ON CONFLICT(account,key) DO UPDATE SET png=excluded.png').bind(device.account, key, png, device.account, row.revision, ...alive[1])
+            ? db.prepare('INSERT INTO bot_photos (account,key,png,revision) SELECT ?,?,?,? WHERE ' + condition + ' ON CONFLICT(account,key) DO UPDATE SET png=excluded.png,revision=excluded.revision').bind(device.account, key, png, row.revision + 1, device.account, row.revision, ...alive[1])
             : db.prepare('DELETE FROM bot_photos WHERE account=? AND key=? AND ' + condition).bind(device.account, key, device.account, row.revision, ...alive[1]);
           const result = await db.batch([
             mutation,
@@ -407,9 +407,11 @@ export default {
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
+        const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
-          if (previous?.photo !== undefined) tab.photo = previous.photo;
+          const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
+          if (photo !== undefined) tab.photo = photo;
           else delete tab.photo;
           if (!layoutFeature(req, 'bot_appearance')) {
             for (const field of ['face', 'color']) {

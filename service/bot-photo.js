@@ -32,6 +32,8 @@ export function validPhotoPng(encoded) {
     if ((crc ^ 0xffffffff) >>> 0 !== view.getUint32(offset + 8 + length)) return false;
     if (first) {
       if (type !== 'IHDR' || length !== 13 || view.getUint32(offset + 8) < 1 || view.getUint32(offset + 8) > 256 || view.getUint32(offset + 12) < 1 || view.getUint32(offset + 12) > 256) return false;
+      const depths = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
+      if (!depths[bytes[offset + 17]]?.includes(bytes[offset + 16]) || bytes[offset + 18] !== 0 || bytes[offset + 19] !== 0 || bytes[offset + 20] > 1) return false;
       first = false;
     } else if (type === 'IHDR') return false;
     if (type === 'IDAT') imageData = true;

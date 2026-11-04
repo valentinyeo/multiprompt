@@ -72,6 +72,6 @@ CREATE TABLE IF NOT EXISTS service_keys (
 );
 
 CREATE TABLE IF NOT EXISTS bot_photos (
- account TEXT NOT NULL, key TEXT NOT NULL, png TEXT NOT NULL,
+ account TEXT NOT NULL, key TEXT NOT NULL, png TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision > 0),
  PRIMARY KEY (account,key)
 );

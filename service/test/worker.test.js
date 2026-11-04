@@ -1566,3 +1566,36 @@ test('bot photos are scoped, worker-owned, revisioned and preserved across layou
   assert.equal((await request(path, { headers })).status, 404);
   assert.equal((await (await request('/v1/layout', { headers })).json()).layout.tabs[0].photo, undefined);
 });
+
+test('bot photo revision survives closing and reopening a tab and legacy layout writes', async () => {
+  const { remotePhotoKey } = await import('../bot-photo.js');
+  const { token } = await enroll();
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
+  const path = '/v1/bot-photos/' + await remotePhotoKey(0, layout.tabs[0].tmux_session);
+  const headers = { ...auth(token), 'X-Layout-Features': 'bot_photo' };
+  await db.prepare('UPDATE layouts SET revision=1,layout=? WHERE account=?').bind(JSON.stringify(layout), 'owner@example.com').run();
+  await db.prepare('DELETE FROM bot_photos WHERE account=?').bind('owner@example.com').run();
+  const uploaded = await request(path, { method: 'PUT', headers, body: JSON.stringify({ png }) });
+  assert.equal(uploaded.status, 200);
+  const photo = (await uploaded.json()).photo;
+  const initial = await (await request('/v1/layout', { headers })).json();
+  const closed = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: initial.revision, layout: { ...initial.layout, tabs: [] } }) });
+  assert.equal(closed.status, 200);
+  const closedLayout = await closed.json();
+  const reopened = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: closedLayout.revision, layout: { ...closedLayout.layout, tabs: [{ ...layout.tabs[0], tmux_session: layout.tabs[0].tmux_session.toUpperCase(), photo: 999 }] } }) });
+  assert.equal(reopened.status, 200);
+  const restored = await reopened.json();
+  assert.equal(restored.layout.tabs[0].photo, photo);
+  assert.deepEqual(await (await request(path, { headers })).json(), { png });
+  const legacy = await (await request('/v1/layout', { headers: auth(token) })).json();
+  assert.equal(legacy.layout.tabs[0].photo, undefined);
+  const legacyWrite = await request('/v1/layout', { method: 'PUT', headers: auth(token), body: JSON.stringify({ base_revision: legacy.revision, layout: legacy.layout }) });
+  assert.equal(legacyWrite.status, 200);
+  assert.equal((await (await request('/v1/layout', { headers })).json()).layout.tabs[0].photo, photo);
+  assert.equal((await request(path, { method: 'DELETE', headers })).status, 200);
+  const deleted = await (await request('/v1/layout', { headers })).json();
+  const forged = await request('/v1/layout', { method: 'PUT', headers, body: JSON.stringify({ base_revision: deleted.revision, layout: { ...deleted.layout, tabs: [{ ...deleted.layout.tabs[0], photo }] } }) });
+  assert.equal(forged.status, 200);
+  assert.equal((await forged.json()).layout.tabs[0].photo, undefined);
+  assert.equal((await request(path, { headers })).status, 404);
+});

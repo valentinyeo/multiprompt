@@ -104,7 +104,19 @@ test "pictures migrate, retry, replace and reset without duplicate successful up
     try std.testing.expectEqual(@as(usize, 5), fixture.sends);
     try sync.run(a, "account-a", &tabs, &fixture);
     try std.testing.expectEqual(@as(usize, 5), fixture.sends);
-    var restarted = Sync{};
+    const saved = try std.json.Stringify.valueAlloc(a, sync, .{});
+    defer a.free(saved);
+    const parsed = try std.json.parseFromSlice(Sync, a, saved, .{});
+    defer parsed.deinit();
+    var restarted = parsed.value;
+    try restarted.run(a, "account-a", &tabs, &fixture);
+    try std.testing.expectEqual(@as(usize, 5), fixture.sends);
+    fixture.bytes = "after restart";
     try restarted.run(a, "account-a", &tabs, &fixture);
     try std.testing.expectEqual(@as(usize, 6), fixture.sends);
+    fixture.bytes = null;
+    var migrated_reset = Sync{};
+    try migrated_reset.run(a, "account-a", &tabs, &fixture);
+    try std.testing.expect(fixture.last_delete);
+    try std.testing.expectEqual(@as(usize, 7), fixture.sends);
 }
