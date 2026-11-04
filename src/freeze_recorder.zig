@@ -173,15 +173,30 @@ fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
     var paint_detector: PaintDetector = .{};
     var token: u32 = 1;
     var started = awakeMillis();
+    const session_clock = started;
+    const session_timestamp = unixTime();
+    var health = @import("watchdog_health.zig").Tracker.init(started);
+    var health_sequence: u32 = 0;
     if (PostMessageW(g_window, g_message, token, 0) == 0) return 0;
     while (win.WaitForSingleObject(g_stop, 500) == 0x102) {
         if (win.IsWindow(g_window) == 0) break;
         const now = awakeMillis();
         const responsive = g_ack.load(.acquire) == token;
-        if (detector.probe(responsive, started, now)) record(.freeze, now -| detector.missed_since.?, .heartbeat);
+        var freezes: u32 = 0;
+        if (detector.probe(responsive, started, now)) {
+            freezes += 1;
+            record(.freeze, now -| detector.missed_since.?, .heartbeat);
+        }
         const demand = g_paint_demand.load(.acquire);
-        if (responsive and paint_detector.probe(demand, now) and g_paint_demand.load(.acquire) == demand) record(.freeze, now -| (demand - 1), .paint);
+        if (responsive and paint_detector.probe(demand, now) and g_paint_demand.load(.acquire) == demand) {
+            freezes += 1;
+            record(.freeze, now -| (demand - 1), .paint);
+        }
         if (g_blank_pending.swap(false, .acq_rel)) record(.blank_chat, 0, .blank_chat);
+        if (health.sample(now, responsive, freezes)) {
+            publishHealth(session_timestamp, session_clock, health_sequence, health.snapshot);
+            health_sequence +%= 1;
+        }
         if (responsive) {
             token +%= 1;
             started = now;
@@ -189,6 +204,18 @@ fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
         }
     }
     return 0;
+}
+
+fn unixTime() i64 {
+    var time: std.os.windows.FILETIME = undefined;
+    GetSystemTimeAsFileTime(&time);
+    return @intCast(((@as(u64, time.dwHighDateTime) << 32) | time.dwLowDateTime) / 10_000_000 - 11_644_473_600);
+}
+
+fn publishHealth(session_timestamp: i64, session_clock: u64, sequence: u32, health: @import("watchdog_health.zig").Snapshot) void {
+    var id_buffer: [64]u8 = undefined;
+    const id = std.fmt.bufPrint(&id_buffer, "watchdog-{d}-{d}-{d}-{d}", .{ session_timestamp, win.GetCurrentProcessId(), session_clock, sequence }) catch return;
+    upload.queueWatchdog(id, g_version, unixTime(), health);
 }
 
 const Location = struct {
