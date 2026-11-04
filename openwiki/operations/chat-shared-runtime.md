@@ -60,6 +60,23 @@
   the message gets an id and a receipt like any message from the desktop.
 - `--tmux <session>` overrides the chat the host is bound to.
 
+## Workspace accounts and startup failures
+
+New chats use the account owning their workspace folder.
+The folder must be inside that account's home.
+Other folders keep the server's login account.
+The server must allow password-free account switching.
+Only the agent switches accounts.
+The host and message store keep their account.
+Agent commands use the workspace account's login environment.
+They never inherit the host account's credentials.
+
+A failed startup shows one chat line.
+It does not keep restarting the agent.
+Changing the chat configuration permits another startup attempt.
+Existing message requests and live events remain compatible.
+Ctrl+T, Alt+T, and the existing palette action remain unchanged.
+
 ## Limits
 
 - Older launchers still run their embedded reader.

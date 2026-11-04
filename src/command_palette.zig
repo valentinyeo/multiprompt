@@ -2191,6 +2191,7 @@ pub fn spawnWorkspaceTerminalSession() bool {
 }
 
 fn spawnWorkspaceSession(with_agent: bool, plain_claude: bool) bool {
+    g_start_fail = .none;
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
     var cwd_len: u32 = 0;
@@ -2227,6 +2228,11 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
     const host_sid: ?[]const u8 = if (!plain_claude and agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
+    if (!plain_claude and newTabOpensChatView(program) and host_sid == null) {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: session identity unavailable");
+        return false;
+    }
     const live_chat = host_sid != null and newTabOpensChatView(program);
     var session_buf: [64]u8 = undefined;
     const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
@@ -2245,7 +2251,7 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
-    app_state.g_pending_chat_view = live_chat;
+    app_state.g_pending_chat_view = false;
     const ok = spawnShellWithSession(.tmux, session, null, null);
     app_state.g_pending_chat_view = false;
     app_state.g_pending_tmux_host = 0;
@@ -2269,8 +2275,20 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
+        if (live_chat) {
+            const live = @import("chat_live.zig");
+            const shell = &app_state.shells[ns];
+            shell.chat_view_on = true;
+            const started = live.starting(shell.shell_id, host, host_sid.?);
+            if (app_state.active_shell == ns) {
+                if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
+                app_state.g_chat_screen_working = live.running(shell.shell_id);
+                shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, app_state.g_chat_screen_working, GetTickCount64());
+                @import("window_layout.zig").chatWorkingIndicatorSync();
+                if (!started) @import("console.zig").showHeaderNoticeAscii("Could not monitor chat startup", 5000, true);
+            }
+        }
         publishInboxState();
-        if (live_chat and app_state.active_shell == ns and !app_state.g_chat_active) @import("chat_composer.zig").openChatView();
         saveSession();
     }
     return ok;

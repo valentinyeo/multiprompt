@@ -62,7 +62,7 @@ fn safePath(value: []const u8) bool {
 pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
     if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid)) return null;
     const mode = " --permission-mode bypassPermissions";
-    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c {s} 'python3 {s} host enable claude {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start claude {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, cwd, READER, sid, session, cwd, mode, READER, sid, session }) catch null;
+    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host enable claude {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start claude {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, sid, session, cwd, mode, READER, sid, session }) catch null;
 }
 
 pub const MoveTarget = enum { terminal, chat };
@@ -123,7 +123,7 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
 test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude under it" {
     var out: [1024]u8 = undefined;
     const command = launchCommand(&out, "live-abc", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("tmux new-session -d -s live-abc -c ~/projects 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc", command);
+    try std.testing.expectEqualStrings("tmux new-session -d -s live-abc -c ~ 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc", command);
     try std.testing.expect(std.mem.indexOf(u8, command, "handover") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "claude --session-id") == null);
