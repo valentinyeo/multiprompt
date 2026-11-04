@@ -476,13 +476,13 @@ test('changed code is comment-free and the user-facing fragment follows the chan
   ]) assert.equal(strip(read(file), language).commentLines, 0, file);
   const fragment = readChangelogEntry('IGSH-566').trim();
   assert.equal(fragment.split('\n').length, 1);
-  assert.equal(fragment, 'The browser pane stays in place: it can no longer be dragged away or maximized to full screen.');
+  assert.equal(fragment, 'IGSH-566 Browser pane: cannot be dragged or maximized');
   assert.match(read('openwiki/browser/routing-state-machine.md'), /cannot be dragged away or maximized to full screen/);
 });
 
 test('launch-scale feature map and changelog describe first launch and restored startup verification', () => {
   for (const marker of ['normal scale', 'first launch', 'relaunch', 'GetDpiForWindow', 'rcMonitor', 'browser-pane-locked-launch-initial.json', 'browser-pane-locked-launch-restored.json', 'Shortcuts', '20 ms', '0x8035', 'overlayAtLaunch', 'browser-pane-locked-launch-restored-overlay.json', 'single-monitor', 'fallback cannot change DPI']) assert.ok(map.includes(marker), marker);
   const fragment = readChangelogEntry('IGSH-601').trim();
-  assert.equal(fragment, 'The browser pane opens at its normal size after a relaunch on a two-monitor setup.');
+  assert.equal(fragment, 'IGSH-601 Multiprompt: browser pane opens zoomed in after relaunch');
   assert.equal(fragment.split('\n').length, 1);
 });

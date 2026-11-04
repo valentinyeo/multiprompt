@@ -248,6 +248,6 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-716 |'));
   const changelog = readChangelogEntry('IGSH-716').trim();
   assert.equal(changelog.split('\n').length, 1);
-  assert.match(changelog, /Alt\+Q.*Find.*no browser pane/);
+  assert.equal(changelog, 'IGSH-716 Multiprompt: after a restart the chat box sometimes has no focus and Alt+Q does nothing');
   assert.doesNotMatch(changelog, /\.zig|WM_APP|ISSUE-|JSON/);
 });

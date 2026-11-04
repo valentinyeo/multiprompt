@@ -124,8 +124,9 @@ test('existing freeze deadlines, exemptions and UI-thread completion wiring rema
   assert.match(workflow, /node --test [^\n]*tools\/frozen-wake.test.js/);
   const release = read('src/changelog.zig').match(/\.ver = "0\.28\.836", \.items = &\.\{([^]*?)\n    \} \}/)[1];
   const released = [...release.matchAll(/\.\{\s*\.text = ("(?:\\.|[^"\\])*"),\s*\.ticket = "IGSH-606"\s*\}/g)].map(match => JSON.parse(match[1]));
-  assert.deepEqual(released, ['Browser session switching now has a dedicated speed check.', 'Switching back to a sleeping browser pane starts waking it immediately, before the session view is drawn.']);
-  assert.deepEqual(readChangelogEntry('IGSH-606').trim().split('\n').filter(line => !released.includes(line)), ['Switching chat sessions with the browser open now shows the browser page faster.']);
+  const title = 'IGSH-606 Multiprompt: Ctrl+Tab between sessions is slow when the browser pane is showing';
+  assert.deepEqual(released, [title, title]);
+  assert.deepEqual(readChangelogEntry('IGSH-606').trim().split('\n'), [title, title, title]);
 });
 
 test('wake changes introduce no code comments', async () => {
