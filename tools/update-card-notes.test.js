@@ -347,7 +347,8 @@ test('IGSH-1243 builds one linked line for each commit ticket', async () => {
   assert.match(generated, /\.text = "Chats open sooner\. Drafts stay visible\.", \.ticket = "IGSH-2"/);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }]), /bad123.*leading ticket ID/);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], []), /fragment has no matching commit ticket/);
-  const shared = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'ddd', subject: 'IGSH-3, IGSH-2: Ship both' }]);
+  let shared = '';
+  assert.doesNotThrow(() => { shared = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'ddd', subject: 'IGSH-3, IGSH-2: Ship both' }]); });
   assert.match(shared, /\.text = "Chats open sooner\. Drafts stay visible\.", \.ticket = "IGSH-2"/);
   const noFragments = { ...files };
   delete noFragments[path.posix.join('changelog.d', 'IGSH-2-chat.md')];
