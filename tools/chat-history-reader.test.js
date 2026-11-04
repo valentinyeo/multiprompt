@@ -7,7 +7,9 @@ test('embedded read-only remote reader: bounded first load, lazy history, deltas
   const run = spawnSync('python3', ['tools/chat-history-reader-test.py'], { encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /Ran \d+ tests/);
+  assert.doesNotMatch(run.stderr, /ResourceWarning/);
   assert.match(run.stdout, /CPU707 first-load source_bytes=\d+ read_bytes=\d+ ms=/);
+  console.log(`HISTORY_READER_SUITE_OK ${run.stderr.match(/Ran \d+ tests/)[0]}`);
 });
 
 test('remote reader preserves paging without truncating message history', () => {
