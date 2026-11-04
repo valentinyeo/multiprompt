@@ -1,0 +1,118 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
+const source = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
+const state = fs.readFileSync(path.join(root, 'src/app_state.zig'), 'utf8');
+
+function body(name) {
+  const start = source.indexOf(`fn ${name}(`);
+  assert.notEqual(start, -1, name);
+  const end = source.indexOf('\n}', start);
+  assert.notEqual(end, -1, name);
+  return source.slice(start, end + 2);
+}
+
+function reducerFrom(zig) {
+  let code = zig.slice(zig.indexOf('{') + 1, zig.lastIndexOf('}'));
+  const messageLine = 'const message = if (wrapped == .null) value else wrapped;';
+  assert.ok(code.includes(messageLine));
+  code = code.replace(messageLine, 'const message = wrapped === null ? value : wrapped;');
+  code = code.replace(/const (token|phase) = (.*) orelse return true;/g, 'const $1 = $2 ?? null; if ($1 === null) return true;');
+  code = code
+    .replace('var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;', 'const key_buf = null;')
+    .replace('chatOutboxKeyForShell(idx, &key_buf)', 'chatOutboxKeyForShell(idx, key_buf)')
+    .replace('var found: ?usize = null;', 'let found = null;')
+    .replace('for (app_state.g_chat_outbox.items, 0..) |entry, i| {', 'for (const [i, entry] of app_state.g_chat_outbox.items.entries()) {')
+    .replace('for (app_state.g_chat_confirmed.items) |c| {', 'for (const c of app_state.g_chat_confirmed.items) {')
+    .replaceAll('std.mem.eql(u8, entry.key[0..entry.key_len], key)', 'entry.key === key')
+    .replaceAll('std.mem.eql(u8, c.key[0..c.key_len], key)', 'c.key === key')
+    .replaceAll('std.mem.eql(u8, &entry.message_sid, &identity.sid)', 'entry.message_sid === identity.sid')
+    .replaceAll('std.mem.eql(u8, &c.message_sid, &identity.sid)', 'c.message_sid === identity.sid')
+    .replaceAll('std.mem.eql(u8, std.mem.sliceTo(&entry.message_wire_id, 0), token)', 'entry.message_wire_id === token')
+    .replaceAll('std.mem.eql(u8, std.mem.sliceTo(&c.message_wire_id, 0), token)', 'c.message_wire_id === token')
+    .replaceAll('std.mem.eql(u8, phase, "', 'equal(phase, "')
+    .replaceAll('token.len', 'token.length')
+    .replaceAll(' and ', ' && ')
+    .replaceAll(' or ', ' || ')
+    .replace('if (found) |i| chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);', 'if (found !== null) chatOutboxRemoveAtIn(app_state.g_chat_outbox, found);')
+    .replace('const text = json_reader.string(json_reader.field(message, "text")) orelse return false;', 'const text = json_reader.string(json_reader.field(message, "text")); if (text === null) return false;')
+    .replace('const wide = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, text) catch return false;', 'const wide = text;')
+    .replace('defer std.heap.page_allocator.free(wide);', '')
+    .replace('chatOutboxEnqueueInStateLimit(&app_state.g_chat_outbox, std.heap.page_allocator, key, wide, .queued, false)', 'chatOutboxEnqueueInStateLimit(app_state.g_chat_outbox, key, wide)')
+    .replaceAll('app_state.g_chat_outbox.items.len', 'app_state.g_chat_outbox.items.length')
+    .replaceAll('&app_state.g_chat_outbox.items[found.?]', 'app_state.g_chat_outbox.items[found]')
+    .replace('_ = json_reader.copyString(message, "id", &entry.message_wire_id);', 'json_reader.copyString(message, "id", entry, "message_wire_id");')
+    .replace('_ = json_reader.copyString(message, "state", &entry.message_phase);', 'json_reader.copyString(message, "state", entry, "message_phase");')
+    .replace('entry.state = if (equal(phase, "failed")) .not_sent else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : "queued";');
+  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'equal', code);
+}
+
+function harness(zig = body('chatMessageReduce')) {
+  const app = { g_chat_outbox: { items: [] }, g_chat_confirmed: { items: [] } };
+  const reduce = reducerFrom(zig);
+  return {
+    app,
+    send: (shell, value) => reduce(shell, value, app, {
+      field: (object, field) => object && object[field] !== undefined ? object[field] : null,
+      string: value => typeof value === 'string' ? value : null,
+      copyString: (object, field, entry, target) => { entry[target] = object[field]; },
+    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text }); return true; }, (a, b) => a === b),
+  };
+}
+
+test('confirmation stores identity at every transcript claim', () => {
+  const add = body('chatConfirmedAdd');
+  const confirmedStruct = state.slice(state.indexOf('pub const ChatConfirmedEcho = struct {'), state.indexOf('\n};', state.indexOf('pub const ChatConfirmedEcho = struct {')));
+  for (const field of ['message_sid', 'message_wire_id']) {
+    assert.match(confirmedStruct, new RegExp(`\\b${field}:`));
+    assert.match(add, new RegExp(`c\\.${field} = e\\.${field};`));
+  }
+  assert.match(body('chatEchoConfirmWithBlock'), /chatConfirmedAdd\(key_copy\[0\.\.klen\], e\.text, block, e\);/);
+  assert.match(body('chatEchoMatchActive'), /chatConfirmedAdd\(key_copy\[0\.\.e\.key_len\], e\.text, app_state\.g_chat_blocks\[mi\], e\);/);
+  assert.match(source, /chatConfirmedAdd\(entry\.key\[0\.\.entry\.key_len\], entry\.text, block, entry\.\*\);/);
+  assert.equal((source.match(/chatConfirmedAdd\(/g) || []).length, 4);
+});
+
+test('production reducer without replay guard recreates confirmed messages', () => {
+  const original = body('chatMessageReduce');
+  const withoutGuard = original.replace(/        for \(app_state\.g_chat_confirmed\.items\) \|c\| \{\n            if .* return true;\n        \}\n/, '');
+  const h = harness(withoutGuard);
+  const shell = { key: 'tab-a', sid: 'session-a' };
+  const message = { id: 'wire-0', text: 'same text', state: 'queued' };
+  assert.equal(h.send(shell, message), true);
+  h.app.g_chat_confirmed.items.push(h.app.g_chat_outbox.items.shift());
+  assert.equal(h.send(shell, message), true);
+  assert.equal(h.app.g_chat_outbox.items.length, 1);
+});
+
+test('production reducer ignores confirmed replays but accepts distinct messages', () => {
+  const h = harness();
+  const shell = { key: 'tab-a', sid: 'session-a' };
+  const messages = Array.from({ length: 5 }, (_, i) => ({ id: `wire-${i}`, text: 'same text', state: 'queued' }));
+  for (const message of messages) {
+    assert.equal(h.send(shell, { message }), true);
+    assert.equal(h.app.g_chat_outbox.items.length, 1);
+    h.app.g_chat_confirmed.items.push(h.app.g_chat_outbox.items.shift());
+  }
+  for (const phase of ['queued', 'sent', 'failed']) {
+    for (let repeat = 0; repeat < 2; repeat++) {
+      for (const message of messages) assert.equal(h.send(shell, { ...message, state: phase }), true);
+      assert.equal(h.app.g_chat_outbox.items.length, 0, `stale ${phase} snapshot recreated messages`);
+    }
+  }
+  for (const [target, message] of [
+    [shell, { ...messages[0], id: 'new-id' }],
+    [{ ...shell, sid: 'session-b' }, messages[0]],
+    [{ ...shell, key: 'tab-b' }, messages[0]],
+    [shell, { ...messages[0], id: 'new-message', text: 'new text' }],
+  ]) assert.equal(h.send(target, message), true);
+  assert.equal(h.app.g_chat_outbox.items.length, 4);
+  assert.equal(h.send(shell, { id: 'new-id', state: 'failed' }), true);
+  assert.equal(h.app.g_chat_outbox.items[0].state, 'not_sent');
+  assert.equal(h.send(shell, { id: 'new-id', state: 'accepted' }), true);
+  assert.equal(h.app.g_chat_outbox.items.length, 3);
+  assert.equal(h.send(shell, { id: 'unknown', state: 'unexpected' }), false);
+});
