@@ -23,15 +23,13 @@ test('desktop relay strips only fixture authentication and preserves chat reques
   await once(app, 'listening');
   t.after(() => app.close());
   const ready = path.join(dir, 'ready.json');
-  const watcher = fs.watch(dir);
-  const created = once(watcher, 'change');
-  t.after(() => watcher.close());
-  const relay = spawn(process.platform === 'win32' ? 'python' : 'python3', [script, '--app-port', String(app.address().port), '--ready', ready], { stdio: 'ignore' });
+  const relay = spawn(process.platform === 'win32' ? 'python' : 'python3', [script, '--app-port', String(app.address().port), '--ready', ready], { stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => {
+    const exited = once(relay, 'exit');
     relay.kill();
-    await once(relay, 'exit');
+    await exited;
   });
-  await created;
+  await once(relay.stdout, 'data');
   const { port } = JSON.parse(fs.readFileSync(ready, 'utf8'));
   async function request(wire) {
     const socket = net.connect(port, '127.0.0.1');
