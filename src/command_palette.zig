@@ -3116,7 +3116,9 @@ pub fn updateSearchResults() void {
             }
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
                 const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to shell" else "Switch to chat view";
-                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                if (@import("chat_view.zig").canToggle(app_state.shells[ti].tmux_session[0..app_state.shells[ti].tmux_session_len]) and
+                    (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])))
+                {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_VIEW;
                     app_state.g_search_result_count += 1;
                 }
@@ -4767,7 +4769,10 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (show_chat_view and app_state.g_search_result_count < app_state.g_search_results.len) {
+        if (show_chat_view and app_state.active_shell < app_state.shell_count and
+            @import("chat_view.zig").canToggle(app_state.shells[app_state.active_shell].tmux_session[0..app_state.shells[app_state.active_shell].tmux_session_len]) and
+            app_state.g_search_result_count < app_state.g_search_results.len)
+        {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_OFFSET;
             app_state.g_search_result_count += 1;
         }

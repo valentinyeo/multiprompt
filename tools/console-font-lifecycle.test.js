@@ -166,6 +166,7 @@ const Shell = struct {
     base_font_face: [32]u16 = makeFace("Courier New"), base_font_family: u32 = 0, base_font_weight: u32 = 700,
     font_gen: u32 = 0, workspace: u8 = 0, last_active: u64 = 0, last_viewed: u64 = 0,
     chat_view_on: bool = false, pinned_top: bool = false, full_width_pending_console_resize: bool = false,
+    tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
     favorite: bool = false, inbox_excluded: bool = false, muted: bool = false,
 };

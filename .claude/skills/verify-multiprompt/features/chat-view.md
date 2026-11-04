@@ -16,7 +16,8 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - `local-route-blank-prompt`: the same regression tests preserve blank and nonbreaking-space prompts even without attribute data.
 - `local-route-typed`: normal-attribute draft text, including an inverse cursor after it, keeps a Chat View send queued without writing to stdin.
 - `stop-in-box`: while a local console-backed Claude stand-in shows a working line, Stop is a send-sized square inside the message box with no Send beside it; typing swaps Send into the same slot and hides Stop, clicking Send empties the draft, and Esc still reaches the agent.
-- `chat-view-toggle`: open, close and reopen the native Chat View with unchanged tab selection.
+- `chat-view-toggle`: open, close and reopen the native Chat View of a terminal tab with unchanged tab selection.
+- `live-chat-toggle-disabled` (IGSH-1655): the hosted production-toggle harness calls the real toggle twice on a `live-` parking tab and requires chat to stay active, its transcript and composer visible, its parking console hidden and its history stream untouched. A `term-` tab must still close and reopen. This is an isolated native boundary test, not a live agent session.
 - `received-markdown-render`: native Windows tests render a synthetic received envelope through the production bubble painter, including a heading, bold text, a list, a table, a link, inline code and a fenced code block, plus separate short list, heading and link bubbles.
 - `received-markdown-selection-copy`: native tests check source-coordinate selection and copying rendered text rather than Markdown syntax.
 - `pending-message-selection-copy`: native tests check that messages still waiting to send can be selected, selected together with sent messages, and copied, and that the selection survives streamed transcript updates.
@@ -28,8 +29,9 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 
 ## How to get to it (user POV)
 
-- Press Alt+C to switch the active tab between its console and Chat View.
-- Ctrl+K, `chat view`, offers the palette alternative; this journey uses Alt+C.
+- In a terminal tab, press Alt+C to switch between its console and Chat View.
+- Ctrl+K, `chat view`, offers the terminal-tab palette alternative; this journey uses Alt+C.
+- Live chats have no terminal. Alt+C does nothing, and their view-toggle palette row is hidden.
 - Received agent messages appear automatically in a real agent conversation, with a blue bubble and a `from` label. No new formatting action is required.
 - Select text and use Ctrl+C or the message Copy action to copy visible text.
 - Select part of a message and press Enter without Ctrl, Shift or Alt to quote only that selection in the composer (IGSH-717); Enter without a transcript selection keeps its existing behavior.

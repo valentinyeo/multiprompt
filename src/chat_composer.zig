@@ -2243,6 +2243,7 @@ test "chat draft safe name is file-name safe and collision-free" {
 pub fn toggleChatView() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
+    if (!@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len])) return;
     shell.chat_view_on = app_state.g_chat_active;
     @import("chat_view.zig").toggle(shell);
     if (shell.chat_view_on) openChatView() else closeChatView();

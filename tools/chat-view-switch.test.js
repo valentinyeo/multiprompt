@@ -36,3 +36,19 @@ test('IGSH-1655 both palette toggle entries exclude live parking tabs', () => {
   const global = palette.slice(palette.indexOf('if (show_chat_view and'), palette.indexOf('if (show_chat_view and') + 600);
   assert.match(global, /canToggle\(app_state\.shells\[app_state\.active_shell\]\.tmux_session\[0\.\.app_state\.shells\[app_state\.active_shell\]\.tmux_session_len\]\)/);
 });
+
+test('IGSH-1655 shortcut help and terminal-only notices agree with live-chat behavior', () => {
+  const shortcuts = read('src/shortcuts.zig');
+  assert.match(shortcuts, /\.a = "Alt\+C", \.b = "[^"\n]*off for live chats/);
+  const send = read('src/chat_send.zig');
+  const notice = send.indexOf('Opened in the terminal, press Alt+C to see it');
+  assert.ok(notice >= 0);
+  assert.match(send.slice(notice - 500, notice), /canToggle\(/);
+});
+
+test('IGSH-1655 live Alt+C is swallowed before browser focus or debounce changes', () => {
+  const shortcuts = read('src/shortcuts.zig');
+  const claim = shortcuts.indexOf('if (!claimBrowserTogglePress(true, kb.time, &app_state.g_chat_toggle_chord_held');
+  const before = shortcuts.slice(claim - 450, claim);
+  assert.match(before, /!@import\("chat_view.zig"\)\.canToggle\([^\n]+\)\) return 1;/);
+});

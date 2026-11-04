@@ -30,7 +30,7 @@ const DWORD = u32;
 const BROWSER_SPLIT_DEFAULT_PERMILLE = 350;
 ${kind}
 ${savedTab}
-const Shell = struct { chat_view_on: bool = false, pinned_top: bool = false };
+const Shell = struct { chat_view_on: bool = false, pinned_top: bool = false, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0 };
 var shells = [_]Shell{ .{}, .{ .pinned_top = true } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
