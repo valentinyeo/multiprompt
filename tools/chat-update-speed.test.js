@@ -27,6 +27,8 @@ test('speed evidence retains failed baseline timings without treating them as ca
   assert.equal(result.before.allCpuMs.median, 129);
   assert.equal(result.after.bestCpuMs.median, 28);
   assert.equal(result.passed, true);
+  assert.equal(result.improved, true);
+  assert.equal(compare(Array(5).fill(fixed), Array(5).fill(fixed)).improved, false);
   assert.equal(compare(Array(5).fill(old), Array(5).fill(old)).passed, false);
 });
 

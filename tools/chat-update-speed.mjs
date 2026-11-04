@@ -30,7 +30,9 @@ export function compare(before, after) {
   const workload = before[0];
   if ([...before, ...after].some(run => run.messages !== workload.messages || run.rows !== workload.rows)) throw new Error('Sides measured different histories');
   const summarize = runs => ({ bestCpuMs: stats(runs.map(run => run.best)), allCpuMs: stats(runs.flatMap(run => run.cpu)), wallMs: stats(runs.flatMap(run => run.wall)), parseCpuMs: stats(runs.map(run => run.parseCpu)), budgetFailures: runs.filter(run => run.budgetFailure).length, exits: runs.map(run => run.exit) });
-  return { before: summarize(before), after: summarize(after), messages: workload.messages, bytes: workload.rows, passed: after.every(run => run.exit === 0 && run.best < 100 && run.parseCpu < 3000 && run.reconcileCpu < 1000) };
+  const baseline = summarize(before);
+  const candidate = summarize(after);
+  return { before: baseline, after: candidate, messages: workload.messages, bytes: workload.rows, improved: candidate.bestCpuMs.max < baseline.bestCpuMs.min, passed: after.every(run => run.exit === 0 && run.best < 100 && run.parseCpu < 3000 && run.reconcileCpu < 1000) };
 }
 
 export function summarize(directory) {
@@ -48,6 +50,7 @@ export function summarize(directory) {
   fs.writeFileSync(path.join(directory, 'comparison.json'), JSON.stringify(result, null, 2) + '\n');
   console.log(JSON.stringify(result, null, 2));
   if (!result.passed) throw new Error('Candidate failed the unchanged CPU707 limits or output checks');
+  if (!result.improved) throw new Error('No improvement beyond the measured run-to-run range');
   console.log('CHAT_UPDATE_SPEED_OK');
   return result;
 }
