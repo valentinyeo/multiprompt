@@ -49,8 +49,8 @@ $offset = (Read-SharedText $script:slashLog).Length
 Send-Slash '/permissions'
 Wait-SlashPalette 12000 $offset
 Snapshot 'slash-permissions-picker'
-Type-Text ' ask'
-Wait-SlashPalette 12001 $offset
+Press @(0x28) 'Down: select Ask mode'
+Snapshot 'slash-permissions-ask'
 Press @(0x0D) 'Enter: choose Ask mode'
 Wait-SlashMode 'manual'
 Snapshot 'slash-permissions-applied'
@@ -62,7 +62,7 @@ foreach ($command in @('/model', '/resume', '/rewind')) {
 Press @(0x11, 0x41) 'Ctrl+A: clear the unsupported command'
 Press @(0x08) 'Backspace: clear without sending'
 $offset = (Read-SharedText $script:slashLog).Length
-Palette 'chat permission mode accept edits'
+Palette 'accept edits'
 Wait-SlashPalette 12002 $offset
 Snapshot 'slash-permissions-palette'
 Press @(0x0D) 'Enter: choose Accept edits from Ctrl+K'
