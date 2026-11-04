@@ -129,3 +129,4 @@ These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconn
 Keep these implementation anchors here, not in the user-facing recipes. Refresh them when the source moves.
 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
+- [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.

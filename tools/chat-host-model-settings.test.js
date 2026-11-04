@@ -328,3 +328,172 @@ print('settings verified')
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /settings verified/);
 });
+
+const liveProof = process.env.MULTIPROMPT_LIVE_MODEL_PROOF === '1' && !!process.env.MULTIPROMPT_LIVE_MODEL_PROOF_OUTPUT;
+const liveProgram = String.raw`
+import json, os, re, signal, subprocess, sys, tempfile, time, uuid
+from pathlib import Path
+
+output = Path(os.environ['MULTIPROMPT_LIVE_MODEL_PROOF_OUTPUT'])
+auth_dir = os.environ.get('CLAUDE_CONFIG_DIR') or str(Path.home() / '.claude')
+path = os.environ.get('PATH', '/usr/bin:/bin')
+evidence = dict(status='failed', stage='setup', steps=[])
+child = None
+temporary = None
+def timed_out(signum, frame):
+    raise RuntimeError('timeout')
+signal.signal(signal.SIGALRM, timed_out)
+signal.alarm(540)
+try:
+    if not output.is_absolute() or output.exists():
+        raise RuntimeError('output_unavailable')
+    temporary = tempfile.TemporaryDirectory()
+    home = temporary.name
+    env = dict(HOME=home, PATH=path, CLAUDE_CONFIG_DIR=auth_dir, LANG='C.UTF-8', NO_COLOR='1')
+    os.environ.clear()
+    os.environ.update(env)
+    evidence['stage'] = 'subscription_auth'
+    auth = subprocess.run(['claude', 'auth', 'status', '--json'], env=env, capture_output=True, timeout=20)
+    if auth.returncode != 0 or not auth.stdout:
+        raise RuntimeError('subscription_unavailable')
+    status = json.loads(auth.stdout)
+    if (status.get('loggedIn') is not True or status.get('authMethod') != 'claude.ai'
+            or status.get('apiProvider') != 'firstParty' or status.get('subscriptionType') not in ('max', 'pro')):
+        raise RuntimeError('subscription_required')
+    outer = {}
+    exec(compile(${JSON.stringify(source)}, 'reader', 'exec'), outer)
+    r = {}
+    exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
+    sid = str(uuid.uuid4())
+    provider, tmux = 'claude', 'live-proof'
+    cwd = str(Path(home) / 'workspace')
+    Path(cwd).mkdir()
+    config = dict(enabled=True, tmux=tmux, cwd=cwd,
+                  args=['--tools', '', '--setting-sources', '', '--strict-mcp-config', '--disable-slash-commands'])
+    r['host_write'](r['host_paths'](provider, sid)['config'], config)
+    evidence['stage'] = 'host_start'
+    child = os.fork()
+    if child == 0:
+        try:
+            devnull = os.open(os.devnull, os.O_RDWR)
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            os._exit(r['host_main'](provider, sid))
+        except BaseException:
+            os._exit(1)
+    def until(predicate, seconds):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.25)
+        raise RuntimeError('timeout')
+    until(lambda: r['host_owned'](provider, sid) and r['host_request'](provider, sid, dict(op='ping'), timeout=1).get('status') == 'ok', 30)
+    store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux)
+    def request(op, **kwargs):
+        result = r['host_reply'](dict(provider=provider, sid=sid, op=op, **kwargs))
+        if result.get('status') != 'ok':
+            raise RuntimeError('settings_rejected')
+    def command_matches(model, effort):
+        pid = r['host_session_state'](provider, sid).get('agent_pid')
+        if not isinstance(pid, int):
+            return False
+        try:
+            args = Path('/proc/' + str(pid) + '/cmdline').read_bytes().decode().split('\0')
+        except (OSError, UnicodeError):
+            return False
+        return ('--model' in args and args[args.index('--model') + 1] == model
+                and (effort is None or ('--effort' in args and args[args.index('--effort') + 1] == effort)))
+    def transcript():
+        file = r['conversation_path'](provider, sid, cwd)
+        if file is None:
+            return []
+        try:
+            return [json.loads(line) for line in file.read_text(encoding='utf-8').splitlines() if line.strip()]
+        except (OSError, ValueError):
+            return []
+    steps = [('haiku', None, 'Remember the word cobalt for this conversation. Reply OK.'),
+             ('sonnet', 'low', 'Reply OK.'), ('sonnet', 'medium', 'Reply OK.'),
+             ('sonnet', 'high', 'Reply with the word I asked you to remember.')]
+    for index, (model, effort, text) in enumerate(steps):
+        evidence['stage'] = 'turn_' + str(index + 1)
+        request('set_model', model=model)
+        if effort is not None:
+            request('set_effort', effort=effort)
+        until(lambda: command_matches(model, effort), 45)
+        before = r['message_events_page'](provider, sid, 0)['next_after']
+        prior_assistants = sum(1 for row in transcript() if row.get('type') == 'assistant' and isinstance(row.get('message'), dict))
+        token = 'proof-' + uuid.uuid4().hex
+        r['message_store_request'](dict(store, op='message_submit', message_id=token, text=text))
+        def finished():
+            r['message_store_request'](dict(store, op='message_dispatch'))
+            rows = r['message_events_page'](provider, sid, before)['events']
+            return any(row['event'].get('kind') == 'turn.ended' and row['event'].get('payload', {}).get('status') == 'completed' for row in rows)
+        until(finished, 90)
+        def assistants():
+            rows = transcript()
+            return [row for row in rows if row.get('type') == 'assistant' and isinstance(row.get('message'), dict)]
+        messages = until(lambda: assistants() if len(assistants()) > prior_assistants else None, 15)
+        message = messages[-1]['message']
+        model_id = message.get('model', '')
+        if not isinstance(model_id, str) or not re.fullmatch(r'claude-[a-z0-9.-]{1,100}', model_id) or model not in model_id:
+            raise RuntimeError('model_not_verified')
+        if index == 3:
+            content = message.get('content') or []
+            if not any(isinstance(part, dict) and 'cobalt' in str(part.get('text', '')).lower() for part in content):
+                raise RuntimeError('history_not_verified')
+        records = r['host_log_tail'](provider, sid, limit=1000)
+        applied = [row.get('detail') for row in records if row.get('event') == 'model_effort_settings_applied'
+                   and isinstance(row.get('detail'), dict) and row['detail'].get('model') == model
+                   and row['detail'].get('effort') == (effort or 'default')]
+        if not applied:
+            raise RuntimeError('settings_not_applied')
+        evidence['steps'].append(dict(model=model_id, effort=effort or 'default', reply='received',
+                                      applied=dict(model=model, effort=effort or 'default')))
+    evidence.update(status='passed', stage='complete', history='verified', messages=4)
+except BaseException as error:
+    evidence['error'] = str(error) if isinstance(error, RuntimeError) and re.fullmatch(r'[a-z_]+', str(error)) else 'verification_failed'
+finally:
+    if child:
+        try:
+            r['host_request'](provider, sid, dict(op='stop'), timeout=3)
+        except BaseException:
+            pass
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                done, _ = os.waitpid(child, os.WNOHANG)
+            except ChildProcessError:
+                done = child
+            if done:
+                break
+            time.sleep(0.1)
+        else:
+            try:
+                pid = r['host_session_state'](provider, sid).get('agent_pid')
+                args = Path('/proc/' + str(pid) + '/cmdline').read_bytes().split(b'\0')
+                if sid.encode() in args and b'--print' in args:
+                    os.killpg(pid, signal.SIGTERM)
+            except (OSError, TypeError, ValueError):
+                pass
+            os.kill(child, signal.SIGTERM)
+            os.waitpid(child, 0)
+    if temporary is not None:
+        temporary.cleanup()
+    try:
+        fd = os.open(str(output), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as target:
+            json.dump(evidence, target)
+    except (OSError, ValueError):
+        evidence['status'] = 'failed'
+sys.exit(0 if evidence['status'] == 'passed' else 1)
+`;
+test('live proof harness parses without credentials', () => {
+  const result = spawnSync('python3', ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'], { input: liveProgram, encoding: 'utf8', timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr);
+});
+test('subscription host settings live proof', { skip: !liveProof, timeout: 600000 }, () => {
+  const result = spawnSync('python3', ['-'], { input: liveProgram, encoding: 'utf8', timeout: 590000 });
+  assert.equal(result.status, 0, 'Live proof failed. Inspect the sanitized evidence file.');
+});
