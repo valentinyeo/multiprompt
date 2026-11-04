@@ -41,6 +41,7 @@ pub const Response = struct {
     removal_supported: bool = false,
     colors_supported: bool = false,
     appearance_supported: bool = false,
+    photos_supported: bool = false,
     pub fn deinit(self: Response) void {
         std.crypto.secureZero(u8, self.bytes);
         a.free(self.bytes);
@@ -99,6 +100,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     var removal_supported = false;
     var colors_supported = false;
     var appearance_supported = false;
+    var photos_supported = false;
     var header_buf: [8192]u16 = @splat(0);
     size = @sizeOf(@TypeOf(header_buf));
     if (WinHttpQueryHeaders(req, 22, null, &header_buf, &size, null) != 0) {
@@ -108,6 +110,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
         removal_supported = layoutSupportsRemoval(raw);
         colors_supported = layoutSupportsColors(raw);
         appearance_supported = layoutSupportsAppearance(raw);
+        photos_supported = layoutSupports(raw, "bot_photo");
     }
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
@@ -116,7 +119,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     while (GetTickCount64() < deadline) {
         var n: u32 = 0;
         if (WinHttpReadData(req, &chunk, chunk.len, &n) == 0) return error.Network;
-        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported };
+        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported, .photos_supported = photos_supported };
         if (out.items.len + n >= 1024 * 1024) return error.TooLarge;
         try out.appendSlice(a, chunk[0..n]);
     }

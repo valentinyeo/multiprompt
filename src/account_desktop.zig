@@ -237,6 +237,18 @@ var g_pending_loaded = false;
 var g_pending_bytes: ?[]u8 = null;
 var g_pending_write_mutex: app_state.SpinMutex = .{};
 var g_sync_log_at: u64 = 0;
+var g_photo_sync: @import("bot_photo_sync.zig").Sync = .{};
+const PhotoContext = struct {
+    access: []const u8,
+    pub fn read(_: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
+        return @import("bot_photo.zig").readForSync(digest);
+    }
+    pub fn send(self: @This(), method: []const u8, path: []const u8, body: []const u8) !u32 {
+        const response = try account_client.request(method, path, self.access, body);
+        defer response.deinit();
+        return response.status;
+    }
+};
 
 fn syncLogThrottled(msg: []const u8) void {
     const now = GetTickCount64();
@@ -1135,6 +1147,13 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     }
 }
 
+fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const session_layout.Tab) !void {
+    const a = std.heap.page_allocator;
+    const account = try account_client.field(credential, "account_id");
+    defer freeSecret(account);
+    try g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
+}
+
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const a = std.heap.page_allocator;
     var renewed = job.kind == .login;
@@ -1326,6 +1345,11 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
     reply.appearance_confirmable = appearance_confirmable;
+    if (remote.photos_supported) {
+        accountSyncPhotos(access, response.bytes, final_layout.value.tabs) catch {
+            debugLog("account-sync: picture upload deferred");
+        };
+    }
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };

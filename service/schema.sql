@@ -70,3 +70,8 @@ CREATE TABLE IF NOT EXISTS service_keys (
  workspace TEXT, label TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER,
  revoked INTEGER NOT NULL DEFAULT 0, CHECK ((kind='workspace') = (workspace IS NOT NULL))
 );
+
+CREATE TABLE IF NOT EXISTS bot_photos (
+ account TEXT NOT NULL, key TEXT NOT NULL, png TEXT NOT NULL,
+ PRIMARY KEY (account,key)
+);

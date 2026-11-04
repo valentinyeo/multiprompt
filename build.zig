@@ -302,7 +302,7 @@ pub fn build(b: *std.Build) void {
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
-    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js", "tools/workspace-colors.test.js" }).step);
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js", "tools/workspace-colors.test.js", "tools/account-bot-photos.test.js" }).step);
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&pane_spacing_tests.step);
     vps_test_step.dependOn(&pane_spacing_tests.step);
@@ -413,7 +413,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
-    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig", "src/tmux_closed.zig" }) |source| {
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/bot_photo_sync.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig", "src/tmux_closed.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -421,7 +421,7 @@ pub fn build(b: *std.Build) void {
         }) });
         const run_tests = b.addRunArtifact(tests);
         account_test_step.dependOn(&run_tests.step);
-        if (std.mem.eql(u8, source, "src/workspace_view.zig")) test_step.dependOn(&run_tests.step);
+        if (std.mem.eql(u8, source, "src/workspace_view.zig") or std.mem.eql(u8, source, "src/bot_photo_sync.zig")) test_step.dependOn(&run_tests.step);
     }
     vps_test_step.dependOn(account_test_step);
     const session_layout_tests = b.addTest(.{ .root_module = b.createModule(.{

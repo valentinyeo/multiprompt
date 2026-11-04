@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Bot face offers a local image and Reset. Images use a centered circle. Reset keeps the chosen face and color.
+Bot face offers an image and Reset. Images use a centered circle. Reset keeps the chosen face and color. Remote session pictures upload through background account sync, including existing local pictures. Offline changes retry when sync resumes.
 
 ## How to get to it (user POV)
 
@@ -15,3 +15,7 @@ Dispatch `verify.yml` with `feature=bot-photo`. The Windows-only driver uses iso
 ## Gotchas
 
 This journey uses offline local tabs. It does not verify account sync, remote services, or Android. Review `result.json` and screenshots before claiming success.
+
+Account protocol checks run in the Test workflow. The Worker suite exercises D1 persistence, feature negotiation, layout-write preservation, concurrent writes, reset, and account/workspace isolation. `bot_photo_sync.zig` tests production upload scheduling with an explicit disk/HTTP stand-in for migration, retry, replace, reset, account changes and restart. These do not prove signed-in desktop-to-phone delivery.
+
+For live proof, use two signed-in devices on one account. Upload a synthetic picture through the desktop palette and require the matching phone session picture within 60 seconds. Replace it, then reset it and require the chosen face to return within 60 seconds each time. Repeat an offline upload after reconnect and a pre-upgrade picture after restart. Never publish private pictures or account credentials.
