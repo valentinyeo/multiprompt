@@ -2075,7 +2075,7 @@ test "IGSH-1674 appending positioned rows does not decode settled message bodies
     try h.rows.ensureUnusedCapacity(a, next.rows.items.len);
     try h.text.ensureUnusedCapacity(a, next.text.items.len);
     try h.blocks.ensureUnusedCapacity(a, next.blocks.items.len);
-    const first = h.blocks.items[0];
+    const settled_block = h.blocks.items[0];
     var buffer: [128 * 1024]u8 = undefined;
     var bounded = std.heap.FixedBufferAllocator.init(&buffer);
     const appended = blk: {
@@ -2084,8 +2084,8 @@ test "IGSH-1674 appending positioned rows does not decode settled message bodies
     };
     try std.testing.expect(appended);
     try std.testing.expectEqual(@as(usize, 129), h.blocks.items.len);
-    try std.testing.expectEqual(@as(usize, 4096), first.len);
-    try std.testing.expect(std.mem.allEqual(u16, h.text.items[first.start..][0..first.len], '"'));
+    try std.testing.expectEqual(@as(usize, 4096), settled_block.len);
+    try std.testing.expect(std.mem.allEqual(u16, h.text.items[settled_block.start..][0..settled_block.len], '"'));
     const last = h.blocks.items[128];
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), h.text.items[last.start..][0..last.len]);
     try std.testing.expectEqual(@as(u64, 12800), last.source_offset);
