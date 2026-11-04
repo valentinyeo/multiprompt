@@ -352,30 +352,38 @@ pub const History = struct {
         var max_offset: ?u64 = null;
         var trailing_start: usize = 0;
         var row_index: usize = 0;
-        var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
-        while (previous.next()) |old| {
-            if (old.len == 0) continue;
-            const key = try rowIdentity(scratch, old);
-            if (key.end > key.offset) try sources.put(.{ .segment = key.segment, .offset = key.offset, .end = key.end }, {});
-            if (key.end > key.offset) {
-                if (max_offset) |last| {
-                    if (key.offset < last) trailing_start = row_index;
-                } else trailing_start = row_index;
-                max_offset = key.offset;
-            } else if (max_offset == null) {
-                trailing_start = row_index + 1;
-            }
-            row_index += 1;
-        }
         var incoming = std.mem.splitScalar(u8, added, '\n');
-        var overlap = false;
-        var ordered = false;
-        var all_positioned = true;
         var added_rows: std.ArrayList([]const u8) = .empty;
+        var added_keys: std.ArrayList(RowIdentity) = .empty;
+        var has_positioned = false;
         while (incoming.next()) |line| {
             if (line.len == 0) continue;
             const key = try rowIdentity(scratch, line);
             try added_rows.append(scratch, line);
+            try added_keys.append(scratch, key);
+            has_positioned = has_positioned or key.end > key.offset;
+        }
+        if (has_positioned) {
+            var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
+            while (previous.next()) |old| {
+                if (old.len == 0) continue;
+                const key = try rowIdentity(scratch, old);
+                if (key.end > key.offset) try sources.put(.{ .segment = key.segment, .offset = key.offset, .end = key.end }, {});
+                if (key.end > key.offset) {
+                    if (max_offset) |last| {
+                        if (key.offset < last) trailing_start = row_index;
+                    } else trailing_start = row_index;
+                    max_offset = key.offset;
+                } else if (max_offset == null) {
+                    trailing_start = row_index + 1;
+                }
+                row_index += 1;
+            }
+        }
+        var overlap = false;
+        var ordered = false;
+        var all_positioned = true;
+        for (added_keys.items) |key| {
             overlap = overlap or (key.end > key.offset and sources.contains(.{ .segment = key.segment, .offset = key.offset, .end = key.end }));
             if (key.end <= key.offset) {
                 all_positioned = false;

@@ -16,7 +16,8 @@ function prepare(source) {
   const request = section(source, 'accountRequest');
   const tail = request.slice(request.indexOf('    var remote = try account_client.request("GET", "/v1/layout"'));
   let production = section(source, 'accountSyncHosts') + '\n' + section(source, 'accountApplyHostAddresses') + '\n' +
-    'fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {\n    const a = std.heap.page_allocator;\n    const access = "fixture";\n' + tail;
+    'fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {\n    const a = std.heap.page_allocator;\n    const access = "fixture";\n' +
+    (tail.includes('response.bytes') ? '    const response = .{ .bytes = "" };\n' : '') + tail;
   production = production.replaceAll('app_state.', '')
     .replaceAll('@import("console.zig").appendSshExe', 'appendSshExe')
     .replaceAll('@import("file_io.zig").win32WidePath', 'win32WidePath')
