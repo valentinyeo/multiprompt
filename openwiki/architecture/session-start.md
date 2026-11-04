@@ -18,7 +18,7 @@ Four entries reach one handler:
 - `Ctrl+K`, then the `Start new session` row (`SEARCH_TABCTX_START_SESSION`,
   routing id 7184 in `src/app_state.zig`). The same row appears in the tab
   context palette band.
-- The palette's `New Codex session` row, which takes a separate path.
+- The palette's `New Codex chat` and `New Pi chat` rows, which start live chats with their own provider.
 
 `WM_APP_NEW_TAB_DEFAULT` (`src/main.zig`) closes the all-sessions and inbox
 overlays, then calls `spawnWorkspaceTmuxSession` in `src/command_palette.zig`.
@@ -61,9 +61,8 @@ tmux attach -t term-<hex>
 
 That is the first place a command is typed into a pane. The program reaches the
 pane through `send-keys`, one keystroke string plus a separate `Enter`, so
-whatever the user sees in the prompt box races with it. `New Codex session`
-builds the same shape in `buildCodexTmuxLaunchCmd`, with
-`codex -c tui.terminal_title=["thread-title"]` as the program.
+whatever the user sees in the prompt box races with it. The Codex and Pi chat rows
+no longer use this path; they start a live chat host (see step 6 below).
 
 ### 3. The tab process
 
@@ -182,7 +181,7 @@ counts as handed off.
 
 | Command | Where | Why |
 | --- | --- | --- |
-| `tmux send-keys -t <s> 'cd <dir> && <program>' Enter` | `buildWorkspaceTmuxLaunchCmd`, `buildCodexTmuxLaunchCmd` | start the agent |
+| `tmux send-keys -t <s> 'cd <dir> && <program>' Enter` | `buildWorkspaceTmuxLaunchCmd` | start the agent |
 | `tmux send-keys -t <s> ...` | `src/archive.zig` | respawn an archived tab |
 | `tmux paste-buffer ...`, then delayed `send-keys Enter` and prompt capture | `send_response_preserve_draft` | deliver and check a chat message |
 | `tmux send-keys -t <s> C-u / C-k / C-x C-s` | reader stop, permission, queue keys | clear, stop, queue |
@@ -246,8 +245,11 @@ terminal Claude sits under it.
 5. When the app has to recreate a missing `live-` session, `attachCommand` starts
    it on `exec sleep infinity` instead of a shell. The host settings outlive the
    tmux session, so the next send starts the host again on the same id.
-6. Codex and Pi keep today's terminal start: `buildCodexTmuxLaunchCmd` and the
-   `send-keys` variants are untouched, and their Chat View path is unchanged.
+6. `New Codex chat` and `New Pi chat` start the same live chat through
+   `spawnHostedChatSession` in `src/command_palette.zig`, using
+   `agent_host.launchCommandFor` with provider `codex` or `pi` and a fresh sid. The
+   chat header and avatar use agent kind 2 (Codex) or 3 (Pi). Live event streaming
+   stays Claude-only; Codex and Pi poll `message_snapshot` and `message_events`.
 
 ### Switch
 
@@ -270,6 +272,8 @@ starts nothing until the user picks.
 - The declared folder is a `commands.json` default entry for the workspace
   (`default: true`, `workspace`, `cwd`, optional `folder_host`). The last matching
   entry wins, so setting the folder again replaces an earlier choice.
+- Without a declared folder, the picker uses the active tmux tab's server when it
+  belongs to the requested workspace; otherwise it uses the existing workspace fallback.
 - `Ctrl+K` -> **Pick repo...** lists git repo roots on the workspace server: repo
   roots of open tabs first, then repos one level under `~/projects`. Typing filters
   the paths, Enter starts the session kind that asked for the pick (Claude, Codex,
@@ -280,8 +284,8 @@ starts nothing until the user picks.
   shows the current folder when one is set.
 - The list paints from cache and refreshes in the background over the same one-shot
   SSH path the tmux cache uses, so the palette never blocks.
-- Codex, Pi and every other program keep the typed terminal start once the folder is
-  known.
+- Other programs keep the typed terminal start once the folder is known. Codex and
+  Pi start live chats like Claude.
 
 ### Scripts and the runtime bundle
 

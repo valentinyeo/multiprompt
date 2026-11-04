@@ -990,6 +990,8 @@ fn chatPermissionSendFailedApply() void {
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
         if (shell.shell_id != shell_id) continue;
         shell.permission_answered = false;
+        if (shell.permission_presentation.state == .picked) shell.permission_presentation.state = .pending;
+        @import("chat_render.zig").chatPermissionChanged();
         shell.chat_question_other_sent = false;
         shell.chat_question_identity = 0;
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();
@@ -1016,9 +1018,29 @@ pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWO
         app_state.g_chat_permission.allow != (if (menu) |m| m.allow else null) or
         app_state.g_chat_permission.always != (if (menu) |m| m.always else null) or
         app_state.g_chat_permission.deny != (if (menu) |m| m.deny else null);
+    const shell = &app_state.shells[shell_index];
+    var presentation_changed = false;
+    if (menu) |*m| {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(std.mem.sliceAsBytes(m.question[0..m.question_len]));
+        hasher.update(std.mem.sliceAsBytes(m.command[0..m.command_len]));
+        for (m.options[0..m.count]) |*option| hasher.update(std.mem.sliceAsBytes(option.text[0..option.len]));
+        const identity = hasher.final();
+        if (shell.permission_presentation.identity != identity or shell.permission_presentation.state == .absent or (app_state.g_chat_permission_sid == shell.shell_id and app_state.g_chat_permission.count == 0)) {
+            shell.permission_presentation.open(identity, m);
+            shell.permission_answered = false;
+            presentation_changed = true;
+        }
+    } else {
+        if (shell.permission_presentation.state == .pending) {
+            shell.permission_presentation.state = .absent;
+            presentation_changed = true;
+        }
+        shell.permission_answered = false;
+    }
     app_state.g_chat_permission = menu orelse .{};
-    app_state.g_chat_permission_sid = app_state.shells[shell_index].shell_id;
-    if (menu == null) app_state.shells[shell_index].permission_answered = false;
+    app_state.g_chat_permission_sid = shell.shell_id;
+    if (presentation_changed) @import("chat_render.zig").chatPermissionChanged();
     if (changed and app_state.g_chat_active) {
         if (menu == null) @import("diagnostics.zig").debugLog("[chat] permission cleared");
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();

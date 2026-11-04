@@ -71,7 +71,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+K → "Token Ladder: Auto / Burn Claude / Burn Codex": picks which AI plan to use up now. Auto lets the Token Ladder decide; the active choice is tagged "current". The usage panel at the bottom of the sidebar shows the result in its top line ("BURN CLAUDE | auto") and lists the plans the ladder watches.
 - Ctrl+K → "Token Ladder: Open Dashboard": opens the ladder's usage page in the browser pane.
 - Ctrl+K -> "Inbox: Never Show This Session" / "Inbox: Show This Session Again" (also right-click a tab): permanently exclude or restore that tab in the cross-workspace Inbox, its needs-reply counts, and the inbox button badge. The sidebar blue dot, spinner, and ETA remain unchanged. No dedicated shortcut: Alt+I opens Inbox, Alt+E files a tab temporarily, Alt+U marks it unread, and Ctrl+Shift+U toggles unread-only; an additional modifier chord for this infrequent setting would compete with shell/browser shortcuts.
-- Sidebar inbox button (in the workspace strip): Click to toggle the cross-workspace Inbox. The button shows the local needs-reply count across workspaces and stays clickable to close the Inbox. Alt+I opens the Inbox or selects the ALL split; Ctrl+Shift+I toggles the Inbox too. The `★ Favorites` split immediately after ALL shows starred sessions from every window, in the same order and row style as ALL. The Frequent split comes first, before All and Favorites. It shows sessions you sent input to in the last 24 hours, plus watch-only sessions you explicitly selected and kept in front for ten focused seconds at least three times in six hours. Switches alone, attention stepping, Inbox step-jumps, automatic focus and old usage history do not qualify. Qualifying input determines order, otherwise the newest look does; newest appears at the bottom. The selected split survives migration.
+- Sidebar inbox button (in the workspace strip): Click to open the cross-workspace Inbox. The button shows the local needs-reply count across workspaces and is hidden while Inbox is open and returns when it closes. Alt+I opens the Inbox or selects the ALL split; Ctrl+Shift+I toggles the Inbox. The `★ Favorites` split immediately after ALL shows starred sessions from every window, in the same order and row style as ALL. The Frequent split comes first, before All and Favorites. It shows sessions you sent input to in the last 24 hours, plus watch-only sessions you explicitly selected and kept in front for ten focused seconds at least three times in six hours. Switches alone, attention stepping, Inbox step-jumps, automatic focus and old usage history do not qualify. Qualifying input determines order, otherwise the newest look does; newest appears at the bottom. The selected split survives migration.
 - Alt+J / Alt+K: Jump to the next / previous Inbox session from Chat View, the terminal, or the docked browser. Outside an Inbox context, cycle workspaces including Starred. The old Ctrl+Shift+J/K aliases are retired.
 - Ctrl+Shift+T: Reopen last closed tab
 - Ctrl+Shift+U: Toggle the GLOBAL unread-only filter (sidebar + inbox, one state, v0.28.227): sidebar shows only blue-dot tabs + the active tab (an UNREAD ONLY badge shows beside the new tab plus); inbox filters rows/splits as before. Not persisted. Tab cycling and Ctrl+1-9 skip filtered tabs. Jump-to-next-unread lives on via Alt+J/K and the Ctrl+K "Next unread" row / Ctrl+K+Enter
@@ -152,7 +152,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
-| Sidebar inbox button | Click or Ctrl+Shift+I to toggle; Alt+I opens / selects All |
+| Sidebar inbox button | Click to open; Ctrl+Shift+I toggles; Alt+I opens / selects All |
 | Ctrl+F or / | Reduce Inbox to matching sessions |
 | j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
@@ -223,8 +223,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+T | New Claude live chat in this workspace folder (also Alt+T outside the palette and the sidebar plus) |
 | Ctrl+K -&gt; New Claude session | Start a Claude live chat in this workspace folder; same as Ctrl+T and the sidebar plus |
 | Ctrl+K -&gt; New Claude in terminal | Start Claude the old way, typed into a terminal in this workspace folder |
-| Ctrl+K -&gt; New Codex chat | Open a Codex session in this workspace folder |
-| Ctrl+K -&gt; New Pi chat | Open a Pi session in this workspace folder |
+| Ctrl+K -&gt; New Codex chat | Start a Codex live chat in this workspace folder, same chat view as Claude |
+| Ctrl+K -&gt; New Pi chat | Start a Pi live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
@@ -254,7 +254,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | + button / Ctrl+V in Chat View | Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File) |
 | Right-click Claude message / Ctrl+K reactions | Send a quoted reaction; show its badge |
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty. |
-| Ctrl+K "Chat View: Open or fold all tool steps" | Open every tool step's details, or fold them all; click one tool line to toggle it |
+| Ctrl+K "Chat View: Open or fold all tool steps" | Open or fold all tool groups; click a steps line to toggle one group |
+| Ctrl+Shift+J in Chat View | Open or fold all tool groups |
 | Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the title; also click the todo count |
 | Ctrl+Shift+D in Chat View | Copy latest code block (also its Copy button or Ctrl+K) |
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |
@@ -266,13 +267,14 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages, Enter opens the right-click options, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
+| /plan or /permissions in live chat / Ctrl+K "Chat permission mode" | Choose Plan, Ask, or Accept edits for this chat; /plan selects Plan first |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
-| Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Answer the live permission prompt: allow |
-| Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Answer the live permission prompt: always allow |
-| Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Answer the live permission prompt: deny |
+| 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
+| 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
+| 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |
 | Esc (Chat View, while working) / Stop button / Ctrl+K "Chat View: Stop the agent" | Send Esc to the agent to stop its current run |
 | Ctrl+K "Chat View: Reset this chat" / right-click tab | Clear local bubbles and cache; reload history, keep unsent composer text |
 | Ctrl+K "Chat View: Clear Offline Queue" | Drop this tab's queued offline Chat View messages |

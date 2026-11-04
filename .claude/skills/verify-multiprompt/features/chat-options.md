@@ -6,7 +6,7 @@ Only a pending structured question creates answer cards. Claude Code supplies As
 
 ## How to get to it (user POV)
 
-Open Chat View with Alt+C on a connected session awaiting a structured question. Click a choice, or select several choices and Submit. Choose Other to type an answer.
+For a terminal session, open Chat View with Alt+C. Live chats already show Chat View. Click a choice, or select several choices and Submit. Choose Other to type an answer.
 
 Verification:
 

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-hidden-steps', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -28,9 +28,20 @@ switch ($Feature) {
             if ($LASTEXITCODE -ne 0) { throw 'Full-session history verification failed' }
             return
         }
+        'chat-hidden-steps' {
+            & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            if ($LASTEXITCODE -ne 0) { throw 'Hidden steps verification failed' }
+            return
+        }
         'chat-messages-only' {
             & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             if ($LASTEXITCODE -ne 0) { throw 'Messages-only verification failed' }
+            return
+        }
+        'chat-startup-failure' {
+            $env:CHAT_STARTUP_FAILURE_PROOF = '1'
+            & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            if ($LASTEXITCODE -ne 0) { throw 'Chat startup failure verification failed' }
             return
         }
         'chat-delivery' {
@@ -112,7 +123,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
@@ -223,9 +234,28 @@ try {
         [IO.File]::WriteAllText((Join-Path $uploadConfigDir 'config.toml'), "api_base_url = `"http://127.0.0.1:$((Get-Content -LiteralPath $receiverPortFile -Raw).Trim())`"`nupload_secret = `"verify-only-upload-secret`"`n")
         New-Item -ItemType File -Force (Join-Path $script:uploadReceiverDir 'uploads.jsonl') | Out-Null
     }
+    if ($Feature -eq 'permission-rows') {
+        $env:MP_PERMISSION_ROOT = $scratch
+        Copy-Item (Join-Path $PSScriptRoot '../../../src/testdata/chat-permission-claude.txt') (Join-Path $scratch 'permission-menu.txt')
+    }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    if ($Feature -eq 'sessions') {
+        $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
+        New-Item -ItemType Directory -Force $env:MP_VERIFY_STATE, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $ssh = Join-Path $scratch 'ssh.exe'
+        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
+        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; tabs = @(
+            @{ kind = 'tmux'; name = 'First'; manual = $true; tmux_host = 0; tmux_session = 'first'; workspace = 0; cv = $false; pid = 0 },
+            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cv = $false; pid = 0 }
+        ) }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        Save-Json $seed 'seed-session.json'
+        $result.repoPickerBoundary = 'Two saved synthetic tmux tabs in Other, host 0 then active host 2; synthetic SSH repository listing and console-backed tmux; no real SSH, tmux server or agent verified.'
+    }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
         New-Item -ItemType Directory -Force $bindingState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -241,10 +271,10 @@ try {
         Save-Json $bindingSeed 'seed-session.json'
         $result.seedBoundary = 'One saved bare SSH tab with no terminal binding. Only SSH is replaced by an owned console showing an existing named terminal session. The real app resolves its public pane-info request, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
     }
-    if ($Feature -in @('chat-switch-speed', 'chat-options')) {
+    if ($Feature -in @('chat-switch-speed', 'chat-options', 'chat-slash')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $remoteNames = @(if ($Feature -eq 'chat-options') { 'verify-agent-1' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
+        $remoteNames = @(if ($Feature -eq 'chat-slash') { 'verify-agent-1'; 'live-slash' } elseif ($Feature -eq 'chat-options') { 'verify-agent-1' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
         $remotePanes = [ordered]@{}
         $remoteSids = [ordered]@{}
         for ($i = 0; $i -lt $remoteNames.Count; $i++) {
@@ -264,7 +294,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Measured-shape transcript seeding failed' }
             Copy-Item -LiteralPath $shapeFile (Join-Path $Evidence 'chat-shapes.json')
             Copy-Item -LiteralPath (Join-Path $remoteState 'chat-shape-manifest.json') (Join-Path $Evidence 'chat-shape-manifest.json')
-        } elseif ($Feature -eq 'chat-options') {
+        } elseif ($Feature -in @('chat-options', 'chat-slash')) {
             & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 1
         } else {
             & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
@@ -282,6 +312,14 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Ordinary list fixture failed' }
         }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
+        if ($Feature -eq 'chat-slash') {
+            $remoteDocument.name = 'chat-slash'
+            $remoteDocument.slashProof = $true
+            [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            $remoteTabs[1].cv = $true
+            $remoteTabs[1].csid = $remoteSids['live-slash']
+            $remoteTabs[1].claude_session = $true
+        }
         $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $remoteTabs } -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
@@ -336,7 +374,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('browser-own-profile', 'tab-names', 'inbox-order')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -446,8 +484,14 @@ try {
         'chat-skill-pill' {
             . (Join-Path $PSScriptRoot 'chat-skill-pill.ps1')
         }
+        'chat-slash' {
+            . (Join-Path $PSScriptRoot 'chat-slash.ps1')
+        }
         'chat-options' {
             . (Join-Path $PSScriptRoot 'chat-options.ps1')
+        }
+        'permission-rows' {
+            . (Join-Path $PSScriptRoot 'permission-rows.ps1')
         }
         'chat-composer-text' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-composer-text.ps1')
@@ -539,6 +583,10 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
+    if ($null -ne $process) {
+        $process.Refresh()
+        if ($process.HasExited) { $result.exitCode = $process.ExitCode }
+    }
     if ($script:window -ne [IntPtr]::Zero) {
         try { Snapshot 'failure' } catch { $result.captureError = $_.Exception.Message }
     }

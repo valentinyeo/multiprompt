@@ -48,11 +48,6 @@ pub fn collectHoles(out: *HoleList) void {
         if (title.meta.len > 0) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
     }
     if (chat_composer.chatNewMessagesRect()) |pill| out.addFloating(pill, drawing.uiScaled(13));
-    if (window_layout.chatPermissionVisible()) {
-        for (std.meta.tags(@import("chat_permission.zig").Action)) |action| {
-            if (window_layout.chatPermissionRect(action)) |rc| out.addFloating(rc, drawing.uiScaled(6));
-        }
-    }
 }
 
 fn signature(window: RECT, holes: *const HoleList) u64 {

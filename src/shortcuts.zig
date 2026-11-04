@@ -277,7 +277,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+Left / Alt+Right", .b = "Cycle prev / next workspace", .header = false },
     .{ .a = "Ctrl+N / Alt+N pill", .b = "New workspace", .header = false },
     .{ .a = "Inbox (Alt+I)", .b = "", .header = true },
-    .{ .a = "Sidebar inbox button", .b = "Click or Ctrl+Shift+I to toggle; Alt+I opens / selects All", .header = false },
+    .{ .a = "Sidebar inbox button", .b = "Click to open; Ctrl+Shift+I toggles; Alt+I opens / selects All", .header = false },
     .{ .a = "Ctrl+F or /", .b = "Reduce Inbox to matching sessions", .header = false },
     .{ .a = "j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9", .b = "Move / top / bottom / jump row", .header = false },
     .{ .a = "Tab / h / l", .b = "Switch workspace split", .header = false },
@@ -336,8 +336,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+T", .b = "New Claude live chat in this workspace folder (also Alt+T outside the palette and the sidebar plus)", .header = false },
     .{ .a = "Ctrl+K -> New Claude session", .b = "Start a Claude live chat in this workspace folder; same as Ctrl+T and the sidebar plus", .header = false },
     .{ .a = "Ctrl+K -> New Claude in terminal", .b = "Start Claude the old way, typed into a terminal in this workspace folder", .header = false },
-    .{ .a = "Ctrl+K -> New Codex chat", .b = "Open a Codex session in this workspace folder", .header = false },
-    .{ .a = "Ctrl+K -> New Pi chat", .b = "Open a Pi session in this workspace folder", .header = false },
+    .{ .a = "Ctrl+K -> New Codex chat", .b = "Start a Codex live chat in this workspace folder, same chat view as Claude", .header = false },
+    .{ .a = "Ctrl+K -> New Pi chat", .b = "Start a Pi live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },
@@ -367,7 +367,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File)", .header = false },
     .{ .a = "Right-click Claude message / Ctrl+K reactions", .b = "Send a quoted reaction; show its badge", .header = false },
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty.", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open or fold all tool groups; click a steps line to toggle one group", .header = false },
+    .{ .a = "Ctrl+Shift+J in Chat View", .b = "Open or fold all tool groups", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
@@ -379,13 +380,14 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Up / Down / Enter in Chat View", .b = "Up in an empty message box focuses the newest message; Up/Down move between messages, Enter opens the right-click options, Esc or typing returns to the box", .header = false },
     .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
+    .{ .a = "/plan or /permissions in live chat / Ctrl+K \"Chat permission mode\"", .b = "Choose Plan, Ask, or Accept edits for this chat; /plan selects Plan first", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
     .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
-    .{ .a = "Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Answer the live permission prompt: allow", .header = false },
-    .{ .a = "Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Answer the live permission prompt: always allow", .header = false },
-    .{ .a = "Alt+D in Chat View / Ctrl+K \"Chat View: Deny\"", .b = "Answer the live permission prompt: deny", .header = false },
+    .{ .a = "1 or Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Approve the pending permission once", .header = false },
+    .{ .a = "2 or Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Always allow the pending permission this session", .header = false },
+    .{ .a = "3 or Alt+D in Chat View / Ctrl+K \"Chat View: Deny\"", .b = "Decline the pending permission", .header = false },
     .{ .a = "Esc (Chat View, while working) / Stop button / Ctrl+K \"Chat View: Stop the agent\"", .b = "Send Esc to the agent to stop its current run", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Reset this chat\" / right-click tab", .b = "Clear local bubbles and cache; reload history, keep unsent composer text", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Clear Offline Queue\"", .b = "Drop this tab's queued offline Chat View messages", .header = false },
@@ -1083,6 +1085,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
         }
         if ((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and isAltDown(kb.flags) and chatViewOwnsInput() and chatComposerOwnsKey(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags), kb.flags)) altqLog("hook_gate_swallow vk={X} wp={X} alt={} ctrl={}", .{ kb.vkCode, wp, isAltDown(kb.flags), isCtrlDown() });
+        if (chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus() and wp == WM_KEYDOWN and
+            @import("chat_composer.zig").chatToolStepsKey(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags)))
+        {
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOOL_STEPS, 0, 0);
+            return 1;
+        }
         if (chatViewOwnsInput() and chatComposerOwnsKey(wp, kb.vkCode, isCtrlDown(), isAltDown(kb.flags), kb.flags)) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0xBA and foregroundIsOurs() and !app_state.g_snippet_create_active) {
             app_state.g_sysmenu_pending = false;

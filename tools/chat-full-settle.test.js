@@ -29,8 +29,9 @@ const ChatEchoState = chat_echo.OutboxState;
 const CHAT_OUTBOX_KEY_CAP = 256;
 const CHAT_OUTBOX_TOTAL_MAX = 400;
 const chat_transcript = struct { const Identity = struct {
-    shell_id: u32 = 1, host: u8 = 0, codex: bool = false,
+    shell_id: u32 = 1, host: u8 = 0, codex: bool = false, pi: bool = false,
     sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0), cwd: [192]u8 = @splat(0),
+    pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; }
 }; };
 var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;
 var g_chat_full_settle_job: ?*ChatFullSettleJob = null;
@@ -236,4 +237,9 @@ test('outbox tick owns full settlement completion and startup behind the switch'
   assert.match(body('chatOutboxTick'), /if \(ISSUE_349_FULL_SETTLE\) chatFullSettleStart\(\)/);
   assert.match(body('chatFullSettleStart'), /std\.Thread\.spawn\([^]*chatFullSettleThread/);
   assert.match(body('armChatOutboxTimerIfNeeded'), /g_chat_full_settle_job != null/);
+});
+
+test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
+  const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
+  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
 });

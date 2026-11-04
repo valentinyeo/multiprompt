@@ -195,6 +195,9 @@ const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_S
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
+const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
+const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
+const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
 const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
@@ -928,6 +931,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_FOCUS_MESSAGES_OFFSET => "chat view focus messages keyboard up down enter options reply copy",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
+        SEARCH_CHAT_MODE_PLAN_OFFSET => "chat permission mode: plan",
+        SEARCH_CHAT_MODE_MANUAL_OFFSET => "chat permission mode: ask",
+        SEARCH_CHAT_MODE_EDITS_OFFSET => "chat permission mode: accept edits",
         SEARCH_SKILLS_BACK_OFFSET => "back",
         SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
         SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) words.computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
@@ -1237,6 +1243,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
     if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) return 1;
     if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
+    if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET) return 7;
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
         SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
@@ -1645,6 +1652,10 @@ pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
 }
 
 pub fn workspaceHostForNewTab(ws: u8) u8 {
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        if ((!app_state.g_single_window or shell.workspace == ws) and shell.tmux_session_len > 0) return shell.tmux_host;
+    }
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (app_state.g_single_window and shell.workspace != ws) continue;
@@ -2213,7 +2224,98 @@ pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
 pub var g_start_fail: StartFail = .none;
 pub var g_pick_row_gone: bool = false;
 
-fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
+fn workspaceHomeCandidate(configured: []const u8, known: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, configured, "~/") or !std.mem.startsWith(u8, known, "/home/")) return null;
+    const end = std.mem.indexOfScalarPos(u8, known, 6, '/') orelse return null;
+    if (end == 6 or std.mem.eql(u8, known[6..end], ".") or std.mem.eql(u8, known[6..end], "..")) return null;
+    var known_parts = std.mem.splitScalar(u8, known[1..], '/');
+    while (known_parts.next()) |part| {
+        if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    const suffix = configured[1..];
+    if (!std.mem.startsWith(u8, known[end..], suffix)) return null;
+    if (known.len > end + suffix.len and known[end + suffix.len] != '/') return null;
+    var parts = std.mem.splitScalar(u8, configured[2..], '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    return known[0..end];
+}
+
+test "workspace home candidates require the configured folder" {
+    try std.testing.expectEqualStrings("/home/owner", workspaceHomeCandidate("~/projects/sample", "/home/owner/projects/sample/sub") orelse return error.TestUnexpectedResult);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/sample", "/home/owner/projects/samples") == null);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/../sample", "/home/owner/projects/../sample") == null);
+    try std.testing.expect(workspaceHomeCandidate("~/projects/sample", "/srv/projects/sample") == null);
+}
+
+fn resolveWorkspaceLiveCwd(workspace: u8, host: u8, cwd: []const u8, out: *[256]u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, cwd, "~/")) return cwd;
+    var home: ?[]const u8 = null;
+    var ambiguous = false;
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.workspace != workspace) continue;
+        if (std.mem.startsWith(u8, shell.tmux_session[0..shell.tmux_session_len], "live-") or std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], "live")) continue;
+        if ((@import("capacity.zig").remoteHostForShell(shell) orelse continue) != host) continue;
+        const known = @import("vps.zig").shellKnownRemotePath(shell, host) orelse continue;
+        const candidate = workspaceHomeCandidate(cwd, known) orelse continue;
+        if (i == app_state.active_shell) return std.fmt.bufPrint(out, "{s}{s}", .{ candidate, cwd[1..] }) catch null;
+        if (home) |previous| {
+            if (!std.mem.eql(u8, previous, candidate)) ambiguous = true;
+        } else home = candidate;
+    }
+    if (ambiguous) return null;
+    const selected = home orelse return cwd;
+    return std.fmt.bufPrint(out, "{s}{s}", .{ selected, cwd[1..] }) catch null;
+}
+
+test "workspace live cwd selects matching terminal and rejects ambiguity" {
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_cache_count = app_state.g_tmux_cache_count;
+    defer {
+        app_state.shells[0..3].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_tmux_cache_count = saved_cache_count;
+    }
+    app_state.g_tmux_cache_count = 0;
+    app_state.shell_count = 3;
+    for (0..3) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].kind = .vps;
+        app_state.shells[i].workspace = 1;
+    }
+    const paths = [_][]const u8{ "/home/one/projects/sample", "/home/two/projects/sample/sub", "/home/other/projects/sample" };
+    for (paths, 0..) |path, i| {
+        @memcpy(app_state.shells[i].cached_cwd[0..path.len], path);
+        app_state.shells[i].cached_cwd_len = @intCast(path.len);
+    }
+    app_state.shells[2].workspace = 2;
+    var out: [256]u8 = undefined;
+    app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/two/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.active_shell = 2;
+    try std.testing.expect(resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) == null);
+    app_state.shells[1].kind = .vps2;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 2, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].kind = .tmux;
+    app_state.shells[1].tmux_host = 0;
+    const failed_path = "/home/reader/projects/sample";
+    @memcpy(app_state.shells[1].cached_cwd[0..failed_path.len], failed_path);
+    app_state.shells[1].cached_cwd_len = failed_path.len;
+    @memcpy(app_state.shells[1].tmux_session[0..8], "live-bad");
+    app_state.shells[1].tmux_session_len = 8;
+    app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shell_count = 0;
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+}
+
+fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
     g_start_fail = .none;
     const workspace = activeWorkspaceSlot();
     const program = workspaceSessionProgram(configured_program, with_agent);
@@ -2234,6 +2336,12 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         return false;
     }
     const live_chat = host_sid != null and newTabOpensChatView(program);
+    var resolved_cwd: [256]u8 = undefined;
+    const cwd = if (live_chat) resolveWorkspaceLiveCwd(workspace, host, input_cwd, &resolved_cwd) orelse {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: workspace home ambiguous or path too long");
+        return false;
+    } else input_cwd;
     var session_buf: [64]u8 = undefined;
     const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
     var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
@@ -2311,116 +2419,87 @@ pub fn activeRemoteContextForCodexTmux(out_host: *u8, out_cwd: *[256]u8, out_cwd
     return remotePathSafeForShell(out_cwd[0..@as(usize, @intCast(out_cwd_len.*))]);
 }
 
-fn buildCodexTmuxLaunchCmd(out: *[512]u8, session: []const u8, cwd: []const u8) ?[]const u8 {
-    if (!remotePathSafeForShell(cwd)) return null;
-    var len: usize = 0;
-    var ok = appendAsciiBuf(out, &len, "tmux new-session -d -s ");
-    ok = ok and appendAsciiBuf(out, &len, session);
-    ok = ok and appendAsciiBuf(out, &len, " 2>/dev/null; tmux send-keys -t ");
-    ok = ok and appendAsciiBuf(out, &len, session);
-    ok = ok and appendAsciiBuf(out, &len, " 'cd ");
-    ok = ok and appendAsciiBuf(out, &len, cwd);
-    ok = ok and appendAsciiBuf(out, &len, " && codex -c tui.terminal_title=[\\\"thread-title\\\"]' Enter; tmux attach -t ");
-    ok = ok and appendAsciiBuf(out, &len, session);
-    if (!ok or len == 0) return null;
-    return out[0..len];
-}
+fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
+    const agent_host = @import("agent_host.zig");
+    var host: u8 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
+    const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
+    const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
+    const reason = if (provider == .codex) "new Codex session" else "new Pi session";
+    if (!capacityAdmitNewAgent(host, workspace, .user, reason)) return false;
 
-test "Codex tmux launch exposes the renamed thread in the terminal title" {
-    var out: [512]u8 = std.mem.zeroes([512]u8);
-    const cmd = buildCodexTmuxLaunchCmd(&out, "codex-test", "/srv/project") orelse return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, cmd, "codex -c tui.terminal_title=[\\\"thread-title\\\"]") != null);
-}
+    var sid_buf: [36]u8 = undefined;
+    const sid = agent_host.mintSessionId(&sid_buf) orelse return false;
+    var session_buf: [64]u8 = undefined;
+    const session = buildLiveChatSessionName(&session_buf);
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    const launch_cmd = agent_host.launchCommandFor(&host_buf, provider, session, cwd, sid) orelse return false;
+    if (launch_cmd.len > app_state.g_pending_tmux_cmd.len) return false;
 
-fn buildCodexTmuxSessionName(out: *[64]u8) []const u8 {
-    return std.fmt.bufPrint(out, "codex-{x}", .{GetTickCount64()}) catch "codex";
+    @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
+    app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
+    app_state.g_pending_tmux_host = host;
+    app_state.g_pending_chat_view = false;
+    const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_chat_view = false;
+    app_state.g_pending_tmux_host = 0;
+    app_state.g_pending_tmux_cmd_len = 0;
+
+    if (ok and app_state.shell_count > 0) {
+        const ns: usize = app_state.shell_count - 1;
+        const ts_len = @min(session.len, app_state.shells[ns].tmux_session.len - 1);
+        @memcpy(app_state.shells[ns].tmux_session[0..ts_len], session[0..ts_len]);
+        app_state.shells[ns].tmux_session_len = @intCast(ts_len);
+        app_state.shells[ns].tmux_host = host;
+        app_state.shells[ns].ai_agent = provider.aiAgent();
+        setShellName(&app_state.shells[ns], provider.label());
+        app_state.shells[ns].name_source = .default;
+        const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
+        @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
+        app_state.shells[ns].claude_sid_len = @intCast(sid_len);
+        const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
+        @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
+        app_state.shells[ns].cached_cwd_len = @intCast(n);
+        const live = @import("chat_live.zig");
+        const shell = &app_state.shells[ns];
+        shell.chat_view_on = true;
+        const started = live.starting(shell.shell_id, host, sid);
+        if (app_state.active_shell == ns) {
+            if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
+            app_state.g_chat_screen_working = live.running(shell.shell_id);
+            shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, app_state.g_chat_screen_working, GetTickCount64());
+            @import("window_layout.zig").chatWorkingIndicatorSync();
+            if (!started) @import("console.zig").showHeaderNoticeAscii("Could not monitor chat startup", 5000, true);
+        }
+        publishInboxState();
+        saveSession();
+    }
+
+    return ok;
 }
 
 pub fn spawnCodexTmuxSession() bool {
-    var host: u8 = 0;
-    var cwd_buf: [256]u8 = undefined;
-    var cwd_len: u32 = 0;
-    if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
-    const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
-    const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!capacityAdmitNewAgent(host, workspace, .user, "new Codex session")) return false;
-
-    var session_buf: [64]u8 = undefined;
-    const session = buildCodexTmuxSessionName(&session_buf);
-    var cmd_buf: [512]u8 = std.mem.zeroes([512]u8);
-    const launch_cmd = buildCodexTmuxLaunchCmd(&cmd_buf, session, cwd) orelse return false;
-
-    @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
-    app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
-    app_state.g_pending_tmux_host = host;
-    const ok = spawnShellWithSession(.tmux, session, null, null);
-    app_state.g_pending_tmux_host = 0;
-    app_state.g_pending_tmux_cmd_len = 0;
-
-    if (ok and app_state.shell_count > 0) {
-        const ns: usize = app_state.shell_count - 1;
-        const ts_len = @min(session.len, app_state.shells[ns].tmux_session.len - 1);
-        @memcpy(app_state.shells[ns].tmux_session[0..ts_len], session[0..ts_len]);
-        app_state.shells[ns].tmux_session_len = @intCast(ts_len);
-        app_state.shells[ns].tmux_host = host;
-        app_state.shells[ns].ai_agent = 2;
-        setShellName(&app_state.shells[ns], "Codex");
-        app_state.shells[ns].name_source = .default;
-        const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
-        @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
-        app_state.shells[ns].cached_cwd_len = @intCast(n);
-        publishInboxState();
-        saveSession();
-    }
-
-    return ok;
+    return spawnHostedChatSession(.codex);
 }
 
 pub fn spawnPiTmuxSession() bool {
-    var host: u8 = 0;
-    var cwd_buf: [256]u8 = undefined;
-    var cwd_len: u32 = 0;
-    if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
-    const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
-    const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!capacityAdmitNewAgent(host, workspace, .user, "new Pi session")) return false;
-
-    var session_buf: [64]u8 = undefined;
-    const session = buildWorkspaceTmuxSessionName(&session_buf);
-    var cmd_buf: [512]u8 = undefined;
-    const launch_cmd = buildWorkspaceTmuxLaunchCmd(&cmd_buf, session, cwd, "pi") orelse return false;
-
-    @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
-    app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
-    app_state.g_pending_tmux_host = host;
-    const ok = spawnShellWithSession(.tmux, session, null, null);
-    app_state.g_pending_tmux_host = 0;
-    app_state.g_pending_tmux_cmd_len = 0;
-
-    if (ok and app_state.shell_count > 0) {
-        const ns: usize = app_state.shell_count - 1;
-        const ts_len = @min(session.len, app_state.shells[ns].tmux_session.len - 1);
-        @memcpy(app_state.shells[ns].tmux_session[0..ts_len], session[0..ts_len]);
-        app_state.shells[ns].tmux_session_len = @intCast(ts_len);
-        app_state.shells[ns].tmux_host = host;
-        app_state.shells[ns].ai_agent = 3;
-        setShellName(&app_state.shells[ns], "Pi");
-        app_state.shells[ns].name_source = .default;
-        const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
-        @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
-        app_state.shells[ns].cached_cwd_len = @intCast(n);
-        publishInboxState();
-        saveSession();
-    }
-
-    return ok;
+    return spawnHostedChatSession(.pi);
 }
 
-test "IGSH-1266 a new Pi chat types pi in the workspace folder" {
-    var out: [512]u8 = undefined;
-    const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-pi", "~/projects", "pi") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("tmux new-session -d -s term-pi -c ~/projects 2>/dev/null; tmux send-keys -t term-pi 'cd ~/projects && pi' Enter; tmux attach -t term-pi", launched);
-    try std.testing.expect(!@import("agent_host.zig").eligible("pi"));
+test "IGSH-1546 Codex and Pi chats are live chats that never type into a terminal" {
+    const agent_host = @import("agent_host.zig");
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    var session_buf: [64]u8 = undefined;
+    const session = buildLiveChatSessionName(&session_buf);
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const pi = agent_host.launchCommandFor(&host_buf, .pi, session, "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(pi.len <= app_state.g_pending_tmux_cmd.len);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(!agent_host.eligible("pi"));
+    try std.testing.expect(!newTabOpensChatView("pi"));
 }
 
 fn clampSearchSelectionAndScroll() void {
@@ -3890,6 +3969,21 @@ pub fn updateSearchResults() void {
             labelsMatchQuery(&[_][]const u8{ "chat view focus messages", "select message", "message options", "up" }, app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (@import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: plan", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_PLAN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: ask", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_MANUAL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: accept edits", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_EDITS_OFFSET;
             app_state.g_search_result_count += 1;
         }
     }
@@ -5704,6 +5798,37 @@ test "IGSH-1266 no declared folder opens the pick repo list and spawns nothing" 
     try std.testing.expect(app_state.g_search_pick_repo_mode);
     try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
     try std.testing.expectEqual(@as(u32, 0), app_state.shell_count);
+}
+
+test "IGSH-1447 new picker uses the active remote host only in its workspace" {
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_single = app_state.g_single_window;
+    const saved_workspace = [3]u8{ app_state.shells[0].workspace, app_state.shells[1].workspace, app_state.shells[2].workspace };
+    const saved_host = [3]u8{ app_state.shells[0].tmux_host, app_state.shells[1].tmux_host, app_state.shells[2].tmux_host };
+    const saved_len = .{ app_state.shells[0].tmux_session_len, app_state.shells[1].tmux_session_len, app_state.shells[2].tmux_session_len };
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.g_single_window = saved_single;
+        inline for (0..3) |i| {
+            app_state.shells[i].workspace = saved_workspace[i];
+            app_state.shells[i].tmux_host = saved_host[i];
+            app_state.shells[i].tmux_session_len = saved_len[i];
+        }
+    }
+    app_state.shell_count = 3;
+    app_state.active_shell = 2;
+    app_state.g_single_window = true;
+    app_state.shells[0].workspace = 1;
+    app_state.shells[0].tmux_host = 1;
+    app_state.shells[1].workspace = 0;
+    app_state.shells[1].tmux_host = 0;
+    app_state.shells[2].workspace = 0;
+    app_state.shells[2].tmux_host = 2;
+    for (0..3) |i| app_state.shells[i].tmux_session_len = 1;
+    try std.testing.expectEqual(@as(u8, 1), workspaceHostForNewTab(1));
+    try std.testing.expectEqual(@as(u8, 2), workspaceHostForNewTab(0));
 }
 
 test "repo picker keeps terminal intent only for its current request" {

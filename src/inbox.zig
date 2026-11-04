@@ -110,8 +110,6 @@ const clearSearchBackdrop = @import("rename.zig").clearSearchBackdrop;
 const uiScaled = @import("drawing.zig").uiScaled;
 const uiFontInboxTitle = @import("drawing.zig").uiFontInboxTitle;
 const browserInboxState = @import("drawing.zig").browserInboxState;
-const paintInboxButtonTooltip = @import("drawing.zig").paintInboxButtonTooltip;
-const paintInboxButton = @import("drawing.zig").paintInboxButton;
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const asciiContainsQueryInsensitive = @import("command_palette.zig").asciiContainsQueryInsensitive;
 const SetTimer = @import("win32.zig").SetTimer;
@@ -1456,7 +1454,7 @@ pub fn paintInbox(hdc: HANDLE) void {
         if (tab.id == app_state.g_inbox_tab) selected_tab = i;
     }
     const width = @max(0, layout.right - layout.left);
-    const tabs_left = @max(layout.left, @import("browser_pane.zig").inboxButtonRect(true).right + uiScaled(8));
+    const tabs_left = layout.left;
     const tabs_width = @max(0, layout.right - tabs_left);
     var first: usize = 0;
     var used: i32 = 0;
@@ -1648,8 +1646,6 @@ pub fn paintInbox(hdc: HANDLE) void {
     } else {
         _ = DrawTextW(hdc, hint, -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
     }
-    paintInboxButton(hdc, true);
-    paintInboxButtonTooltip(hdc, true);
 }
 
 pub fn openInbox(hwnd: HANDLE) void {

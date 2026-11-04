@@ -35,6 +35,9 @@ function audit(source) {
   assert.match(sync, /key.status != \.revoked or account_keys.isCleaned\(state.items, key.public_key\)/);
   assert.ok(sync.indexOf('account_keys.removeCommand(') < sync.indexOf('writeDpapiFile("account-keys-cleaned.dat"'));
   assert.match(sync, /if \(!try accountRunKeyCommand\(a, ssh, aliases, try account_keys.removeCommand\(a, key.public_key\), reply\)\) continue;/);
+  const hosts = section(source, 'accountKnownKeyHosts');
+  assert.match(hosts, /SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE/);
+  assert.match(hosts, /if \(!account_hosts.shouldImport\(alias, resolved\)\) try aliases.append\(a, alias\)/);
   const remote = section(source, 'accountRunKeyCommand');
   assert.match(remote, /-o BatchMode=yes -o ConnectTimeout=10/);
   assert.match(remote, /_ = try accountSshOutput\(self.a, command, 30000\)/);
@@ -97,6 +100,9 @@ function auditBackground(source) {
   assert.match(publish, /else if \(!has_public\) return error\.MissingPublicKey;/);
   const prompt = section(source, 'accountPromptDeviceKeys');
   assert.match(prompt, /if \(g_account_key_prompt_active or app_state\.g_account_busy\) return;/);
+  assert.match(prompt, /prior.status == \.pending and std.mem.eql\(u8, prior.device_id, key.device_id\) and std.mem.eql\(u8, prior.public_key, key.public_key\)/);
+  assert.match(prompt, /if \(seen\) continue;/);
+  assert.match(prompt, /defer if \(previous_bytes\) \|old\| std.heap.page_allocator.free\(old\);/);
   assert.match(prompt, /g_account_key_prompt_active = true;/);
   assert.ok(prompt.indexOf('g_account_key_prompt_active = true;') < prompt.indexOf('MessageBoxW('));
   assert.match(prompt, /defer if \(!submitted\) \{\s*g_account_key_prompt_active = false;\s*app_state\.g_account_busy = false;/);
@@ -118,6 +124,7 @@ test('background keys throttle failed attempts, publish only on change or explic
     ['else if (!has_public) return error.MissingPublicKey;', ''],
     ['if (err == error.MissingPublicKey) accountDeviceKeyError', 'if (false) accountDeviceKeyError'],
     ['if (g_account_key_prompt_active or app_state.g_account_busy) return;', ''],
+    ['if (seen) continue;', ''],
     ['g_account_key_prompt_active = true;', ''],
     ['submitted = app_state.g_account_busy;', 'submitted = true;'],
     ['g_account_key_prompt_active and job.kind != .decide_keys', 'false'],
@@ -128,7 +135,7 @@ test('background keys throttle failed attempts, publish only on change or explic
   }
 });
 
-test('ISSUE-451 executed production replies keep background approvals non-modal and explicit Cancel quiet', () => {
+test('IGSH-1657 executed production replies prompt on discovery and allow explicit retry', () => {
   const os = require('node:os');
   const path = require('node:path');
   const { spawnSync } = require('node:child_process');
@@ -157,14 +164,14 @@ fn chatReadMark(_: bool) bool { return false; }
 }`;
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (fixture + '\n' + (prompt + '\n' + deliver).replaceAll('app_state.', '')).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'IGSH-1657'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
     const backgroundModal = dispatch.replace('reply.job.kind == .device_keys', 'true');
     assert.notEqual(backgroundModal, dispatch);
     fs.writeFileSync(file, (fixture + '\n' + (prompt + '\n' + deliver.replace(dispatch, backgroundModal)).replaceAll('app_state.', '')).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const negative = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'ISSUE-451'], { encoding: 'utf8', timeout: 120000 });
+    const negative = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'IGSH-1657'], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0);
-    assert.match(negative.stderr, /background pending device replies[^]*FAIL/);
+    assert.match(negative.stderr, /discovery Cancel and explicit retry[^]*FAIL/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

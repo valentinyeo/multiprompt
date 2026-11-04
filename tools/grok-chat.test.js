@@ -23,11 +23,11 @@ function gate(name, check, file, before, after = 'REMOVED') {
   });
 }
 
-gate('progress/working strip is neither painted nor reserved; permissions retain space', s => {
-  assert.doesNotMatch(body(s.window_layout, 'paintChatView'), /g_chat_working_applied|workingBarText|[Pp]rogress/);
-  assert.match(body(s.window_layout, 'chatWorkingIndicatorH'), /return if \(chatPermissionVisible\(\)\) uiScaled\(36\) else 0;/);
+gate('progress and permission strips reserve no space outside the transcript', s => {
+  assert.doesNotMatch(body(s.window_layout, 'paintChatView'), /g_chat_working_applied|workingBarText|[Pp]rogress|paintChatPermission/);
+  assert.match(body(s.window_layout, 'chatWorkingIndicatorH'), /return 0;/);
   requires(body(s.chat_composer, 'chatViewLayout'), 'composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight()');
-}, 'window_layout', 'return if (chatPermissionVisible()) uiScaled(36) else 0;', 'return uiScaled(22);');
+}, 'window_layout', 'pub fn chatWorkingIndicatorH() i32 {\n    return 0;', 'pub fn chatWorkingIndicatorH() i32 {\n    return 22;');
 
 for (const [label, token] of [['Archive', 'chatArchiveButton'], ['Remind me', 'chatRemindButton'], ['Wait', 'chatWaitButton']]) {
   gate(`${label} control has no paint, hit target or reserved slot`, s => {
@@ -55,6 +55,6 @@ gate('timestamps are absent and reserve no row; attribution survives and no Read
 gate('chat bubbles and composer use rounded corners rather than the old four pixels', s => {
   assert.match(s.app_state, /CHAT_BUBBLE_RADIUS = 20;/);
   requires(body(s.window_layout, 'chatSurfaceRadius'), 'uiScaled(CHAT_BUBBLE_RADIUS)');
-  requires(body(s.chat_render, 'chatPaintBlock'), 'uiScaled(CHAT_BUBBLE_RADIUS)');
+  requires(body(s.chat_render, 'chatPaintProjectedBlock'), 'uiScaled(CHAT_BUBBLE_RADIUS)');
   requires(body(s.window_layout, 'paintChatButton'), 'const radius = rc.bottom - rc.top;');
 }, 'app_state', 'CHAT_BUBBLE_RADIUS = 20;', 'CHAT_BUBBLE_RADIUS = 4;');

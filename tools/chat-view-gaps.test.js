@@ -60,6 +60,9 @@ function execute(t, name, code, modules = [], filter = '', flags = []) {
 test('ISSUE-400 a failed permission key does not consume the only answer attempt', (t) => {
   const production = body('chatPermissionAnswer')
     .replaceAll('@import("chat_permission.zig")', 'permission')
+    .replaceAll('@import("chat_live.zig").approvalOpen', 'approvalOpen')
+    .replaceAll('@import("chat_render.zig").chatPermissionChanged', 'chatPermissionChanged')
+    .replaceAll('@import("chat_render.zig").chatPermissionPicked', 'chatPermissionPicked')
     .replaceAll('@import("chat_capture.zig").captureChatTranscript', 'captureChatTranscript')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate');
   const result = execute(t, 'send-permission', String.raw`
@@ -75,13 +78,23 @@ var g_chat_active = true;
 var clean_chat: bool = false;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
-var shells = [_]struct { permission_answered: bool = false }{.{}};
+var shells = [_]struct { shell_id: u32 = 11, permission_answered: bool = false, permission_presentation: struct { state: union(enum) { absent, pending, picked: permission.Action } = .absent } = .{} }{.{}};
 var g_chat_permission: permission.PermissionMenu = .{ .count = 3, .allow = '1', .always = '2', .deny = '3' };
 var attempts: usize = 0;
 var transport_ok = false;
 fn captureChatTranscript(_: u32, _: []u16, _: bool) ?usize { return 0; }
 fn chatWorkingIndicatorInvalidate() void {}
-fn chatLiveApprovalAnswer(_: u32, _: permission.Action) bool { return false; }
+var live_ok = false;
+var live_answers: usize = 0;
+fn chatLiveApprovalAnswer(_: u32, _: permission.Action) bool {
+    if (!live_ok) return false;
+    live_answers += 1;
+    shells[0].permission_answered = true;
+    return true;
+}
+fn approvalOpen(_: u32) bool { return false; }
+fn chatPermissionChanged() void {}
+fn chatPermissionPicked(index: u32, action: permission.Action) void { shells[index].permission_presentation.state = .{ .picked = action }; }
 fn chatAgentKey(_: u32, _: u8) bool { attempts += 1; return transport_ok; }
 test "audit failed permission send can be retried" {
     try std.testing.expect(!chatPermissionAnswer(0, .allow));
@@ -89,6 +102,13 @@ test "audit failed permission send can be retried" {
     const retried = chatPermissionAnswer(0, .allow);
     std.debug.print("first send failed; answered={}; successful retry={}; actual key attempts={d}\n", .{shells[0].permission_answered, retried, attempts});
     try std.testing.expect(retried);
+    try std.testing.expectEqual(@as(usize, 2), attempts);
+    shells[0].permission_answered = false;
+    shells[0].permission_presentation.state = .pending;
+    live_ok = true;
+    try std.testing.expect(chatPermissionAnswer(0, .allow));
+    try std.testing.expect(!chatPermissionAnswer(0, .allow));
+    try std.testing.expectEqual(@as(usize, 1), live_answers);
     try std.testing.expectEqual(@as(usize, 2), attempts);
 }
 ` + production, ['chat_permission.zig'], 'audit failed');
@@ -101,6 +121,7 @@ test('ISSUE-400 failed remote permission sends restore only the matching shell a
     .replaceAll('std.heap.page_allocator', 'allocator')
     .replaceAll('@import("chat_session.zig").chatHistoryPersistent', 'chatHistoryPersistent');
   const apply = fileBody('chat_capture.zig', 'chatPermissionSendFailedApply')
+    .replaceAll('@import("chat_render.zig").chatPermissionChanged', 'chatPermissionChanged')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate');
   assert.match(fileBody('chat_capture.zig', 'chatPermissionCaptureRows'), /\{\s*chatPermissionSendFailedApply\(\);\s*if \(shell_index != app_state\.active_shell\) return;/);
   const result = execute(t, 'remote-permission', String.raw`
@@ -115,7 +136,7 @@ const Identity = struct { shell_id: u32, host: u8 = 0, tmux: [16:0]u8 = @splat(0
 const app_state = struct {
     var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
     var shell_count: u32 = 2;
-    var shells = [_]struct { shell_id: u32, permission_answered: bool = true, chat_question_other_sent: bool = true, chat_question_identity: u64 = 123 }{
+    var shells = [_]struct { shell_id: u32, permission_answered: bool = true, permission_presentation: struct { state: enum { absent, pending, picked } = .picked } = .{}, chat_question_other_sent: bool = true, chat_question_identity: u64 = 123 }{
         .{ .shell_id = 22 }, .{ .shell_id = 11 },
     };
 };
@@ -123,6 +144,7 @@ var allocator = std.testing.allocator;
 var persistent_ok = false;
 var reply_ok = false;
 var invalidations: usize = 0;
+fn chatPermissionChanged() void {}
 fn debugLog(_: []const u8) void {}
 fn chatWorkingIndicatorInvalidate() void { invalidations += 1; }
 fn chatHistoryPersistent(_: u8, _: u32, _: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?usize) bool {
@@ -142,6 +164,7 @@ test "failed remote permission is retryable by stable shell id" {
         try std.testing.expect(!app_state.shells[1].chat_question_other_sent);
         try std.testing.expectEqual(@as(u64, 0), app_state.shells[1].chat_question_identity);
         try std.testing.expect(!app_state.shells[1].permission_answered);
+        try std.testing.expect(app_state.shells[1].permission_presentation.state == .pending);
         try std.testing.expect(app_state.shells[0].permission_answered);
         try std.testing.expectEqual(@as(u32, 0), app_state.g_chat_permission_send_failed.load(.acquire));
         try std.testing.expectEqual(before + 1, invalidations);
@@ -936,6 +959,7 @@ test "IGSH-870 newest reply survives tail gap and older pages restore all messag
 test('IGSH-1063 typed question progress repaints without waiting for a transcript message', (t) => {
   const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows')
     .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
+    .replaceAll('@import("chat_render.zig").chatPermissionChanged', 'chatPermissionChanged')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate')
     .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
   const result = execute(t, 'question-progress', String.raw`
@@ -943,7 +967,7 @@ const std = @import("std");
 const DWORD = u32;
 const app_state = struct {
     var active_shell: u32 = 0;
-    var shells = [_]struct { shell_id: u32, permission_answered: bool = false, chat_question_other_sent: bool = false }{ .{ .shell_id = 11 }, .{ .shell_id = 22 } };
+    var shells = [_]struct { shell_id: u32, permission_answered: bool = false, permission_presentation: if (@hasDecl(@import("chat_permission.zig"), "Presentation")) @import("chat_permission.zig").Presentation else struct { state: enum { absent, pending, picked } = .absent } = .{}, chat_question_other_sent: bool = false }{ .{ .shell_id = 11 }, .{ .shell_id = 22 } };
     var g_chat_raw: [4]u16 = @splat(' ');
     var g_chat_permission: @import("chat_permission.zig").PermissionMenu = .{};
     var g_chat_permission_sid: u32 = 11;
@@ -952,6 +976,7 @@ const app_state = struct {
     const WM_APP_CHAT_IMAGE_READY = 456;
 };
 var repaints: usize = 0;
+fn chatPermissionChanged() void {}
 fn chatPermissionSendFailedApply() void {}
 fn chatQuestionCaptureRows(_: u32, _: []const []const u16) void {}
 fn chatWorkingIndicatorInvalidate() void {}

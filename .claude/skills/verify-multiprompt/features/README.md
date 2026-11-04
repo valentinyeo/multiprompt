@@ -29,6 +29,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remote switch speed](../diagnostics/remote-switch-speed.md): dedicated Windows baseline/candidate workflow, 20 session switches and 20 workspace switches, 2,000 rendered messages, native paint gaps, one-core CPU, and two-second recovery.
 
 - [Account servers](../diagnostics/account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
+- [Device approval](../diagnostics/device-approval.md): deterministic production prompt and key-rollout checks; live desktop and phone screenshots remain separate acceptance proof.
 
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 
@@ -50,6 +51,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.
 - [Chat options](chat-options.md): only structured provider questions become cards, with multiple selection and Other; ordinary reply lists stay text.
+- [Permission rows](permission-rows.md): hosted console-boundary clicks, shortcuts, receipts and screenshots; visual review remains required.
+- [Live chat commands](chat-slash.md): Plan and permission modes through the composer and Ctrl+K; unsupported commands never enter the outbox.
 - [Chat composer text](chat-composer-text.md): real typed message-box text is measured with system smoothing OFF; native production-painter evidence spans three UI scales and three DPIs, with v0.28.858 as the live red control.
 - [Chat code font](chat-code-font.md): a real console fenced code block draws Nordwand Mono cells 2 pt smaller than before, the app logs the selected code face, and the branch painter proves overflowing diff rows stay smooth on DirectWrite.
 - [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.
@@ -81,6 +84,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat switch speed](chat-switch-speed.md) (on demand only): 20 Ctrl+N switches across five seeded remote Claude sessions in Chat View with the browser pane closed and open; fail above a 150 ms median click-to-chat-shown time or any 100 ms window hang.
 - [Own browser profile](browser-own-profile.md): a workspace listed in `browser-own-profile.txt` opens its pane in its own empty Chrome profile and pipe, while other workspaces keep the shared profile untouched, including after restart.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
+- [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
 - [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.
@@ -91,6 +95,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Successful remote/AI/browser journeys still need their real prerequisites and are not verified by this map; the browser recovery journey deliberately has no extension attached.
 
 - [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
+
+- [Hidden agent steps](chat-hidden-steps.md): grey group counts with real open/close clicks and source-preserving command/output disclosure.
 
 ### SSH reconnect maps
 

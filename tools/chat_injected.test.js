@@ -185,69 +185,46 @@ test "injected production folded rows and open body preserve ordinary user bubbl
     g_light_theme = false;
     bg = 0;
 }
-test "ISSUE-270 production folded and open diff rows fill the card without wrapping" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("Edited foo +4 -2-a\\n+b\\n c\\n+d\\n-e\\n+f\\n g");
-    const summary = std.unicode.utf8ToUtf16LeStringLiteral("Edited foo +4 -2").len;
-    var tool = ChatBlock{ .start = 0, .len = summary, .role = .tool, .diff_start = summary, .diff_len = text.len - summary };
-    for ([_]bool{ false, true }) |light| {
-        g_light_theme = light;
-        for ([_]bool{ false, true }) |open| {
-            tool.tool_open = open;
-            const rect = chatMeasureBlockRect(0, text, tool, .single, 160, 40, null);
-            const rows: usize = if (open) 7 else 6;
-            try std.testing.expectEqual(40 + 28 + @as(i32, @intCast(rows)) * chat_diff.row_height, rect.bottom);
-            diff_fill_count = 0;
-            chatPaintBlock(0, text, tool, .single, rect);
-            try std.testing.expectEqual(rows, diff_fill_count);
-            try std.testing.expectEqual(if (light) chat_diff.removed_light else chat_diff.removed_dark, diff_fills[0].color);
-            try std.testing.expectEqual(if (light) chat_diff.added_light else chat_diff.added_dark, diff_fills[1].color);
-            try std.testing.expectEqual(chatCodePanelColor(), diff_fills[2].color);
-            for (diff_fills[0..rows], 0..) |row, i| {
-                try std.testing.expectEqual(rect.left, row.rc.left);
-                try std.testing.expectEqual(rect.right, row.rc.right);
-                try std.testing.expectEqual(rect.top + 28 + @as(i32, @intCast(i)) * chat_diff.row_height, row.rc.top);
-                try std.testing.expectEqual(chat_diff.row_height, row.rc.bottom - row.rc.top);
-            }
-            try std.testing.expectEqual(rect.bottom, diff_fills[rows - 1].rc.bottom);
-        }
-    }
-    g_light_theme = false;
+test "production tool output uses bounded neutral rows" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Edited foo-a\\n+b\\n c\\n+d\\n-e\\n+f\\n g");
+    const summary = std.unicode.utf8ToUtf16LeStringLiteral("Edited foo").len;
+    const tool = ChatBlock{ .start = 0, .len = summary, .role = .tool, .diff_start = summary, .diff_len = text.len - summary };
+    const rect = chatMeasureBlockRect(0, text, tool, .single, 160, 40, null);
+    try std.testing.expectEqual(@as(i32, 40 + 22 + 4 * chat_diff.row_height), rect.bottom);
+    diff_fill_count = 0;
+    chatPaintBlock(0, text, tool, .single, rect);
+    try std.testing.expectEqual(@as(usize, 0), diff_fill_count);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("+d"), metadata[0..metadata_len]);
 }
-test "ISSUE-263 production tool geometry painting folding hit testing and open-all" {
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("Ran testsinput\\n\\noutput");
+test "production group header hit testing and open all" {
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Ran testsoutput");
     const summary_len = std.unicode.utf8ToUtf16LeStringLiteral("Ran tests").len;
-    var tool = ChatBlock{ .start = 0, .len = summary_len, .role = .tool, .first = true, .detail_start = summary_len, .detail_len = text.len - summary_len };
-    const folded = chatMeasureBlockRect(0, text, tool, .single, 160, 40, null);
-    try std.testing.expectEqual(@as(i32, 28), folded.bottom - folded.top);
-    headers = 0;
-    drawn_len = 0;
+    const tool = ChatBlock{ .start = 0, .len = summary_len, .role = .tool, .detail_start = summary_len, .detail_len = text.len - summary_len };
+    const rect = chatMeasureBlockRect(0, text, tool, .single, 160, 40, null);
+    try std.testing.expectEqual(@as(i32, 42), rect.bottom - rect.top);
     for ([_]chat_markdown.ToolStatus{ .running, .ok, .@"error" }) |status| {
-        tool.tool_status = status;
-        chatPaintBlock(0, text, tool, .single, folded);
-        try std.testing.expectEqual(@as(usize, 0), headers);
-        try std.testing.expectEqual(@as(usize, 0), drawn_len);
-        try std.testing.expectEqualSlices(u16, text[0..summary_len], metadata[0..metadata_len]);
+        var item = tool;
+        item.tool_status = status;
+        diff_fill_count = 0;
+        chatPaintBlock(0, text, item, .single, rect);
+        try std.testing.expectEqual(@as(usize, 0), diff_fill_count);
+        try std.testing.expectEqualSlices(u16, text[summary_len..], metadata[0..metadata_len]);
     }
-    tool.tool_open = true;
-    const expanded = chatMeasureBlockRect(0, text, tool, .single, 160, 40, null);
-    try std.testing.expect(expanded.bottom > folded.bottom);
-    chatPaintBlock(0, text, tool, .single, expanded);
-    try std.testing.expectEqualSlices(u16, text[summary_len..], drawn[0..drawn_len]);
     g_chat_blocks[0] = tool;
-    g_chat_block_count = 1;
-    g_chat_layout_rects[0] = expanded;
+    g_chat_blocks[1] = tool;
+    g_chat_blocks[2] = .{ .start = 0, .len = 1, .role = .prose };
+    g_chat_block_count = 3;
+    g_chat_layout_rects[0] = .{ .left = 0, .top = 40, .right = 160, .bottom = 68 };
+    g_chat_layout_rects[1] = .{ .left = 0, .top = 68, .right = 160, .bottom = 110 };
     g_chat_scroll_y = 20;
     g_chat_content_left = 30;
     try std.testing.expectEqual(@as(?usize, 0), chatToolAt(40, 25));
-    try std.testing.expectEqual(@as(?usize, null), chatToolAt(29, 25));
     try std.testing.expectEqual(@as(?usize, null), chatToolAt(40, 50));
-    g_chat_blocks[1] = .{ .start = 0, .len = 1, .role = .prose };
-    g_chat_block_count = 2;
-    chatToggleAllTools();
-    try std.testing.expect(!g_chat_blocks[0].tool_open);
     chatToggleAllTools();
     try std.testing.expect(g_chat_blocks[0].tool_open);
     try std.testing.expect(!g_chat_blocks[1].tool_open);
+    chatToggleAllTools();
+    try std.testing.expect(!g_chat_blocks[0].tool_open);
     try std.testing.expectEqual(@as(usize, 2), relayouts);
 }
 

@@ -33,6 +33,7 @@ const reviewedReleases = {
 
 const reviewedCommits = {
   '8f52c2a6cf81d617d61bf6c439ec29719d850062': 'IGSH-1615',
+  '303734dbef8add073075166d2ea8e0d4a091646c': ['IGSH-1544', 'IGSH-1545', 'IGSH-1546'],
 };
 
 const checksOnly = checks;
@@ -176,13 +177,14 @@ export function buildChangelog(files, tag, history = [], commits = []) {
     const ciTickets = [];
     if (!reviewed) {
       for (const commit of stepCommits || []) {
-        const ticket = reviewedCommits[commit.sha] ?? /^([A-Z][A-Z0-9]*-\d+)(?::|\s)/.exec(commit.subject)?.[1];
-        if (!ticket) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
-        if (ciTicket.test(ticket)) {
-          if (!ciTickets.includes(ticket)) ciTickets.push(ticket);
-          continue;
+        const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/.exec(commit.subject)?.[1];
+        const tickets = reviewedCommits[commit.sha] ? [reviewedCommits[commit.sha]].flat() : (lead?.split(/,\s*/) || []);
+        if (!tickets.length) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
+        for (const ticket of tickets) {
+          if (ciTicket.test(ticket)) {
+            if (!ciTickets.includes(ticket)) ciTickets.push(ticket);
+          } else if (!notes.has(ticket)) notes.set(ticket, checksOnly);
         }
-        if (!notes.has(ticket)) notes.set(ticket, checksOnly);
       }
     }
     const fragmentNotes = new Map();

@@ -228,6 +228,8 @@ jobs:
           console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
           NODE
   build-app:
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
     needs: journeys
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
@@ -262,6 +264,7 @@ jobs:
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Identify the shared executable revision
+        id: identity
         if: inputs.tag == ''
         shell: pwsh
         run: |
@@ -269,6 +272,7 @@ jobs:
           $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
           "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
@@ -395,6 +399,7 @@ jobs:
       CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
       CHAT_HAX_PROOF: ${{ inputs.hax_sessions_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
+      CHAT_STARTUP_FAILURE_PROOF: ${{ inputs.feature == 'chat-startup-failure' && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
@@ -433,7 +438,7 @@ jobs:
           if-no-files-found: error
       - name: Check verification contracts
         continue-on-error: true
-        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/live-chat-pane.test.js tools/live-chat-pane-relay.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
+        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-hidden-steps.test.js tools/chat-hidden-steps-proof.test.js tools/live-chat-pane.test.js tools/live-chat-pane-relay.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
       - name: Check remote sync proof oracle
         continue-on-error: true
         run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
@@ -499,12 +504,12 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/title-bar.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
           }
-          if ($env:FEATURE -in @('chat-delivery', 'chat-messages-only', 'chat-full-history')) {
+          if ($env:FEATURE -in @('chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'chat-hidden-steps')) {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-chat-delivery/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.USAGE_PACE_PROOF == '1'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'permission-rows' || env.USAGE_PACE_PROOF == '1'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -538,6 +543,10 @@ jobs:
           $tag = if ($env:VERIFY_APP_REVISION) { (git -C app-source describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim() } else { (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim() }
           if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
           $version = $Matches[1]
+          if (-not $env:VERIFY_APP_REVISION -and $env:FEATURE -ne 'safe-updates' -and $env:CHAT_SHAPE_PROOF -ne '1' -and $env:CHAT_SWITCH_PROFILE -ne '1') {
+            $version = '${{ needs.build-app.outputs.version }}'
+            if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Shared executable version missing' }
+          }
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Download the shared Windows app build
@@ -603,7 +612,7 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'live-chat-pane'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'chat-hidden-steps' || env.FEATURE == 'live-chat-pane'
         with:
           python-version: '3.12'
       - name: Prepare usage pace SSH boundary
@@ -625,13 +634,18 @@ jobs:
           python tools/verify-chat-delivery/chat-switch-evidence-test.py
           if ($LASTEXITCODE -ne 0) { throw 'Chat switch evidence contracts failed' }
       - name: Compile chat delivery remote-shell boundary
-        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'chat-hidden-steps'
         shell: pwsh
         run: |
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
           if ($LASTEXITCODE -ne 0) { throw 'Chat delivery boundary compile failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'Fake tmux compile failed' }
+      - name: Build permission console stand-in
+        if: env.FEATURE == 'permission-rows'
+        run: |
+          zig cc -target x86_64-windows-gnu -O2 tools/chat-permission-agent.c -o verify-bin/claude.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Permission stand-in build failed' }
       - name: Build local Claude console stand-in
         if: env.FEATURE == 'chat-view' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working'
         run: |

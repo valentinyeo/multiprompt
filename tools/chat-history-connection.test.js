@@ -27,8 +27,9 @@ const SpinMutex = struct {
 };
 const chat_transcript = struct {
     const Identity = struct {
-        host: u8 = 0, shell_id: u32 = 1, codex: bool = false,
+        host: u8 = 0, shell_id: u32 = 1, codex: bool = false, pi: bool = false,
         sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0), cwd: [192]u8 = @splat(0),
+    pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; }
     };
 };
 const chat_history = struct {
@@ -362,4 +363,9 @@ test "wrong stream identity closes without publishing rows" {
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
+  const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
+  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
 });

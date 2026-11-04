@@ -54,6 +54,53 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_pi_native_history_survives_restart_and_settles_repeated_text(self):
+        self.query.update(provider='pi', follow=True)
+        root = self.home / '.pi/agent/sessions'
+        folder = root / '--work-demo--'
+        path = folder / '2024-12-03T14-00-00_sid.jsonl'
+        stamp = '2024-12-03T14:00:00.000Z'
+        entries = [dict(type='session', version=3, id='sid', cwd='/work/demo', timestamp=stamp)]
+        for index, role in enumerate(('user', 'assistant', 'user', 'assistant')):
+            content = 'same' if role == 'user' else [dict(type='text', text='PONG')]
+            entries.append(dict(type='message', id='entry' + str(index), parentId=None if index == 0 else 'entry' + str(index - 1),
+                                timestamp=stamp, message=dict(role=role, content=content)))
+        with patch.dict(os.environ, {'PI_CODING_AGENT_SESSION_DIR': ''}), \
+                patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('unexpected discovery')):
+            fields, rows = self.read()
+            self.assertEqual(fields[9], 'pi')
+            self.assertFalse([row for row in rows if row.get('role') in ('user', 'assistant')])
+            folder.mkdir(parents=True)
+            path.write_text(''.join(json.dumps(entry) + '\n' for entry in entries))
+            self.query.update(cached_sid='', inode=0, offset=0)
+            fields, rows = self.read()
+            self.assertEqual(fields[9], 'pi')
+            messages = [row for row in rows if row.get('role') in ('user', 'assistant')]
+            self.assertEqual([(row['role'], row['text'], row['id']) for row in messages],
+                             [('user', 'same', 'entry0'), ('assistant', 'PONG', 'entry1'),
+                              ('user', 'same', 'entry2'), ('assistant', 'PONG', 'entry3')])
+            self.query.update(cached_sid='', inode=0, offset=0)
+            self.assertEqual([row['id'] for row in self.read()[1] if row.get('role') in ('user', 'assistant')],
+                             ['entry0', 'entry1', 'entry2', 'entry3'])
+            query = dict(self.query, op='settle', texts=['same', 'same'], after_ms=0)
+            lines = reader.settle_response(query).splitlines()
+            self.assertEqual(lines[0], '@mp\t7\tsettle\tok\t-\t2')
+            self.assertEqual([json.loads(line)['line'] for line in lines[1:3]], [2, 4])
+
+    def test_pi_custom_session_directory_is_confined_and_cwd_specific(self):
+        root = self.home / 'custom'
+        root.mkdir()
+        path = root / 'time_sid.jsonl'
+        path.write_text(json.dumps(dict(type='session', id='sid', cwd='/work/demo')) + '\n')
+        with patch.dict(os.environ, {'PI_CODING_AGENT_SESSION_DIR': str(root)}):
+            self.assertEqual(reader.conversation_path('pi', 'sid', '/work/demo'), path)
+            self.assertIsNone(reader.conversation_path('pi', 'sid', '/work/other'))
+            path.unlink()
+            outside = self.home / 'outside.jsonl'
+            outside.write_text(json.dumps(dict(type='session', id='sid', cwd='/work/demo')) + '\n')
+            path.symlink_to(outside)
+            self.assertIsNone(reader.conversation_path('pi', 'sid', '/work/demo'))
+
     def test_held_queue_rejects_unbound_workspace_neighbour(self):
         self.assertTrue(callable(getattr(reader, 'enqueue_response', None)), 'safe held-send boundary is missing')
         self.write(self.event('unrelated completed turn'))
@@ -4635,7 +4682,7 @@ class AgentHostTest(unittest.TestCase):
         self.assertFalse(reader.host_cli(['status', self.provider, self.sid])['enabled'])
         self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux])['status'], 'enabled')
         self.assertTrue(reader.host_enabled(self.provider, self.sid))
-        self.assertEqual(reader.host_cli(['status', 'codex', self.sid])['status'], 'refused')
+        self.assertEqual(reader.host_cli(['status', 'kimi', self.sid])['status'], 'refused')
 
 
 class AgentFeedbackCliTest(unittest.TestCase):
@@ -5002,7 +5049,7 @@ class HostSendTest(unittest.TestCase):
 
     def test_empty_text_and_a_foreign_session_are_refused(self):
         self.assertEqual(reader.host_send('claude', self.sid, '   ')['reason'], 'invalid_text')
-        self.assertEqual(reader.host_send('codex', self.sid, 'hello')['reason'], 'unsupported_provider')
+        self.assertEqual(reader.host_send('kimi', self.sid, 'hello')['reason'], 'unsupported_provider')
         self.assertEqual(self.queries, [])
 
     def test_the_send_cli_takes_the_text_and_the_chat(self):
@@ -6010,6 +6057,365 @@ class AgentHostMidTurnSendTest(AgentHostControlTest):
         self.assertEqual(self.host_events('delivered')[-1]['detail']['id'], 'host_fixture_message_02')
 
 
+
+
+FAKE_RPC = r'''#!/usr/bin/env python3
+import json, os, sys
+log = os.environ['FAKE_AGENT_LOG']
+with open(os.environ['FAKE_RPC_SCRIPT']) as stream:
+    script = json.load(stream)
+offset = int(os.environ.get('FAKE_RPC_OFFSET', '0'))
+seen = {}
+def record(value):
+    with open(log, 'a') as stream:
+        stream.write(json.dumps(value) + '\n')
+def read():
+    raw = sys.stdin.readline()
+    if not raw:
+        sys.exit(0)
+    line = json.loads(raw)
+    record(dict(kind='in', line=line))
+    return line
+def play(key, line):
+    steps = script.get(key)
+    if not steps:
+        return
+    count = seen.get(key, 0)
+    seen[key] = count + 1
+    waited = None
+    for step in steps[min(count + offset, len(steps) - 1)]:
+        if '$wait' in step:
+            while True:
+                got = read()
+                if (got.get('id') == step['$wait'] and 'method' not in got) or got.get('type') == step['$wait']:
+                    waited = got.get('id')
+                    break
+                if got.get('method') in script:
+                    play(got['method'], got)
+            continue
+        text = json.dumps(step).replace('"$ID"', json.dumps(line.get('id'))).replace('"$WID"', json.dumps(waited))
+        sys.stdout.write(text + '\n')
+        sys.stdout.flush()
+record(dict(kind='start', args=sys.argv[1:], env={name: name in os.environ for name in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL')},
+            host=os.environ.get('MULTIBOT_HOST')))
+play('$start', {})
+while True:
+    line = read()
+    play(line.get('method') or line.get('type'), line)
+'''
+
+
+class HostProviderCase(unittest.TestCase):
+    provider = None
+    fixture = None
+    sid = 'host-provider-session'
+    tmux = 'provider-chat'
+    text = 'Reply with exactly PONG'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.agent = self.home / 'fake-rpc.py'
+        self.agent.write_text(FAKE_RPC)
+        self.log = self.home / 'fake-rpc.log'
+        patch.dict(os.environ, dict(FAKE_AGENT_LOG=str(self.log), FAKE_RPC_SCRIPT=str(ROOT / self.fixture),
+                                    HOME=str(self.home))).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        self.addCleanup(self.stop_hosts)
+
+    def stop_hosts(self):
+        if self.provider in reader.HOST_PROVIDERS:
+            reader.host_stop(self.provider, self.sid, force=True)
+
+    def enable(self, **extra):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        config = dict(enabled=True, tmux=self.tmux, command=[sys.executable, str(self.agent)], cwd=str(self.home))
+        config.update(extra)
+        reader.host_write(reader.host_paths(self.provider, self.sid)['config'], config)
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider=self.provider,
+                                                 sid=self.sid, op='message_' + op, **values))
+
+    def send(self, token, text=None):
+        self.request('submit', message_id=token, text=text or self.text)
+        self.wait_for(lambda: self.request('dispatch') and (self.message(token) or {}).get('state') != 'queued')
+
+    def message(self, token):
+        return self.request('status', message_id=token)['message']
+
+    def wait_for(self, predicate, timeout=20):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.05)
+        self.fail('timed out; host=%s; agent=%s' % (reader.host_log_tail(self.provider, self.sid, 20),
+                                                   self.log.read_text()[-3000:] if self.log.exists() else None))
+
+    def rows(self, kind):
+        try:
+            rows = [json.loads(line) for line in self.log.read_text().splitlines() if line.strip()]
+        except OSError:
+            return []
+        return [row for row in rows if row.get('kind') == kind]
+
+    def sent(self):
+        return [row['line'] for row in self.rows('in')]
+
+    def events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider=? AND sid=? ORDER BY seq", (self.provider, self.sid))]
+        db.close()
+        return [row for row in rows if row.get('kind') == kind and (kind is not None)] if kind else rows
+
+    def control(self, **request):
+        return reader.host_request(self.provider, self.sid, request)
+
+    def worker_delivers(self, token):
+        self.enable()
+        self.request('submit', message_id=token, text=self.text)
+        worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
+        worker.start()
+        self.assertEqual(self.wait_for(lambda: (self.message(token) or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        return worker
+
+
+class IGSH_1544_CodexHostTest(HostProviderCase):
+    provider = 'codex'
+    fixture = 'tools/fixtures/IGSH-1544/codex-app-server.json'
+    thread = '019a0000-0000-7000-8000-00000000c0de'
+
+    def params(self, method):
+        return [line.get('params') or {} for line in self.sent() if line.get('method') == method]
+
+    def test_codex_waits_for_turn_start_before_claiming_the_next_send(self):
+        output = io.BytesIO()
+        session = dict(state={})
+        reader.host_session_reset(session, types.SimpleNamespace(stdin=output))
+        session.update(ready=True, thread=self.thread)
+        first = dict(op='deliver', id='codex_pending_message_01', attempt='a1', epoch=1, text='first')
+        second = dict(op='deliver', id='codex_pending_message_02', attempt='a2', epoch=1, text='second')
+        with patch.object(reader, 'host_attempt', return_value=dict(status='claimed')) as attempt, \
+                patch.object(reader, 'host_turn_started'), patch.object(reader, 'host_apply', return_value=True):
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, first)['status'], 'sent')
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, second),
+                             dict(status='busy', reason='turn_starting'))
+            self.assertEqual(attempt.call_count, 2)
+            self.assertEqual([json.loads(line)['method'] for line in output.getvalue().splitlines()], ['turn/start'])
+            reader.host_codex_response(self.provider, self.sid, self.tmux, session,
+                                       dict(id=1, result=dict(turn=dict(id='turn-1'))))
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, second)['status'], 'sent')
+            self.assertEqual([json.loads(line)['method'] for line in output.getvalue().splitlines()],
+                             ['turn/start', 'turn/steer'])
+
+    def test_codex_runs_on_the_plan_login_with_no_api_key_and_no_model_override(self):
+        os.environ.update(OPENAI_API_KEY='fixture-key', CODEX_API_KEY='fixture-key', OPENAI_BASE_URL='http://127.0.0.1:9')
+        self.enable()
+        self.send('codex_fixture_message_01')
+        self.wait_for(lambda: self.events('approval.request'))
+        start = self.rows('start')[0]
+        self.assertEqual(start['args'], ['app-server'])
+        self.assertEqual(start['env'], dict(OPENAI_API_KEY=False, CODEX_API_KEY=False, OPENAI_BASE_URL=False))
+        self.assertEqual(start['host'], reader.host_key(self.provider, self.sid))
+        self.assertEqual([line.get('method') for line in self.sent()[:4]], ['initialize', 'initialized', 'thread/start', 'turn/start'])
+        for line in self.sent():
+            self.assertNotIn('model', line.get('params') or {})
+            self.assertNotIn('modelProvider', line.get('params') or {})
+        thread = self.params('thread/start')[0]
+        self.assertEqual((thread['approvalPolicy'], thread['sandbox']), ('on-request', 'workspace-write'))
+        self.assertEqual(thread['developerInstructions'], reader.HOST_APPEND_PROMPT)
+        self.assertEqual(thread['cwd'], str(self.home))
+        self.assertNotIn('ephemeral', thread)
+        turn = self.params('turn/start')[0]
+        self.assertEqual(turn['threadId'], self.thread)
+        self.assertEqual(turn['input'], [dict(type='text', text=self.text, text_elements=[])])
+        self.assertEqual(turn['sandboxPolicy']['type'], 'workspaceWrite')
+        self.assertEqual(self.wait_for(lambda: reader.host_session_state(self.provider, self.sid).get('native_session')), self.thread)
+        policies = [row for row in reader.host_log_tail(self.provider, self.sid, 50) if row['event'] == 'codex_permissions']
+        self.assertEqual(policies[0]['detail']['approval'], 'on-request')
+
+    def test_codex_streams_a_turn_and_round_trips_an_approval(self):
+        self.enable()
+        token = 'codex_fixture_message_01'
+        self.send(token)
+        request = self.wait_for(lambda: self.events('approval.request'))[0]
+        self.assertEqual(request['payload']['request_id'], 'codex-0')
+        self.assertEqual(request['payload']['tool'], 'Bash')
+        self.assertEqual(request['payload']['input']['command'], 'ls')
+        self.assertEqual(self.wait_for(lambda: (self.message(token) or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        self.assertEqual(self.control(op='question_reply', request_id='codex-0', answers={})['reason'], 'unsupported_request')
+        self.assertEqual(self.control(op='approval_reply', request_id='codex-0', decision='accept')['status'], 'ok')
+        ended = self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(ended[0]['payload']['status'], 'completed')
+        self.assertIn(dict(jsonrpc='2.0', id=0, result=dict(decision='accept')), self.sent())
+        refused = [line for line in self.sent() if line.get('id') == 1 and 'method' not in line]
+        self.assertEqual(refused[0]['error']['code'], -32601)
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['PONG'])
+        self.assertEqual([row['payload']['text'] for row in self.events('thinking.done')], ['Checking the folder'])
+        self.assertEqual([row['item'] for row in self.events('item.started')], ['call-1'])
+        done = self.events('item.done')[0]
+        self.assertEqual((done['item'], done['payload']['status'], done['payload']['output']), ('call-1', 'completed', 'notes.txt\n'))
+        self.assertEqual(self.events('approval.resolved')[0]['payload']['decision'], 'accept')
+        db = reader.message_store_db(self.tmux)
+        binding = db.execute("SELECT binding,outcome FROM message_attempts WHERE provider='codex' AND sid=?", (self.sid,)).fetchone()
+        db.close()
+        self.assertEqual((json.loads(binding[0])['mode'], binding[1]), ('codex_app_server_turn', 'sent'))
+
+    def test_codex_submit_alone_is_delivered_by_the_message_worker(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        self.worker_delivers('codex_worker_message_01')
+        self.assertEqual([line['params']['input'][0]['text'] for line in self.sent() if line.get('method') == 'turn/start'], [self.text])
+
+    def test_codex_steers_a_running_turn_and_fails_a_refused_steer(self):
+        self.enable()
+        self.send('codex_fixture_message_01')
+        self.wait_for(lambda: self.events('approval.request'))
+        self.send('codex_fixture_message_02', 'also check the tests')
+        self.assertEqual(self.wait_for(lambda: (self.message('codex_fixture_message_02') or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        steer = self.params('turn/steer')[0]
+        self.assertEqual((steer['threadId'], steer['expectedTurnId']), (self.thread, 'turn-1'))
+        self.assertEqual(steer['input'], [dict(type='text', text='also check the tests', text_elements=[])])
+        self.send('codex_fixture_message_03', 'and the docs')
+        self.assertEqual(self.wait_for(lambda: (self.message('codex_fixture_message_03') or {}).get('state') == 'failed' and 'ok'), 'ok')
+        self.assertEqual(len(self.params('turn/start')), 1)
+        self.assertEqual(self.control(op='approval_reply', request_id='codex-0', decision='accept')['status'], 'ok')
+        self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
+        self.assertEqual(self.message('codex_fixture_message_02')['state'], 'accepted')
+
+    def test_codex_history_with_a_provider_field_answers_as_codex(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        self.enable()
+        query = dict(id=8, codex=True, provider='codex', sid=self.sid, tmux=self.tmux, cwd=str(self.home), follow=True)
+        agent, sid, path, wire = reader.resolve_response_path(query)
+        self.assertEqual((agent, path), ('codex', None))
+        self.assertEqual(wire.split('\n')[0].split('\t')[9], 'codex')
+
+    def test_codex_maps_permission_modes_onto_approval_policy_and_sandbox(self):
+        self.enable(permission_mode='bypassPermissions')
+        self.send('codex_fixture_message_01')
+        self.wait_for(lambda: self.events('approval.request'))
+        thread = self.params('thread/start')[0]
+        self.assertEqual((thread['approvalPolicy'], thread['sandbox']), ('never', 'danger-full-access'))
+        self.assertEqual(self.params('turn/start')[0]['sandboxPolicy'], dict(type='dangerFullAccess'))
+        self.assertEqual(self.control(op='approval_reply', request_id='codex-0', decision='decline')['status'], 'ok')
+        self.wait_for(lambda: self.events('turn.ended'))
+        self.assertIn(dict(jsonrpc='2.0', id=0, result=dict(decision='decline')), self.sent())
+        self.assertEqual(self.control(op='interrupt')['reason'], 'no_active_turn')
+        self.assertEqual(self.control(op='set_permission_mode', mode='plan')['status'], 'ok')
+        self.send('codex_fixture_message_02', 'second prompt')
+        self.wait_for(lambda: len(self.events('turn.ended')) == 2)
+        second = self.params('turn/start')[1]
+        self.assertEqual((second['approvalPolicy'], second['sandboxPolicy']), ('untrusted', dict(type='readOnly', networkAccess=False)))
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['PONG', 'Done'])
+
+
+class IGSH_1545_PiHostTest(HostProviderCase):
+    provider = 'pi'
+    fixture = 'tools/fixtures/IGSH-1545/pi-rpc.json'
+
+    def prompts(self):
+        return [line for line in self.sent() if line.get('type') == 'prompt']
+
+    def test_pi_start_does_not_accept_an_unacknowledged_follow_up(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        session = dict(state={})
+        reader.host_session_reset(session, types.SimpleNamespace(stdin=io.BytesIO()))
+        session['ready'] = True
+        first = dict(op='deliver', id='pi_pending_message_0001', attempt='a1', epoch=1, text='first')
+        second = dict(op='deliver', id='pi_pending_message_0002', attempt='a2', epoch=1, text='second')
+        with patch.object(reader, 'host_attempt', return_value=dict(status='claimed')), \
+                patch.object(reader, 'host_turn_started'), patch.object(reader, 'host_apply', return_value=True) as apply:
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, first)['status'], 'sent')
+            self.assertEqual(reader.host_handle_request(self.provider, self.sid, self.tmux, session, second)['status'], 'sent')
+            reader.host_pi_event(self.provider, self.sid, self.tmux, session, dict(type='agent_start'))
+            self.assertEqual([(entry['id'], entry['accepted']) for entry in session['sends']],
+                             [(first['id'], True), (second['id'], False)])
+            reader.host_pi_event(self.provider, self.sid, self.tmux, session,
+                                 dict(type='response', command='prompt', id=second['id'], success=False))
+            facts = [call.args[3][0] for call in apply.call_args_list]
+            self.assertEqual([(fact['id'], fact['kind']) for fact in facts],
+                             [(first['id'], 'accepted'), (second['id'], 'not_sent')])
+
+    def test_pi_runs_deepseek_flash_on_opencode_go_and_never_the_openrouter_default(self):
+        self.enable()
+        self.send('pi_fixture_message_0001')
+        self.wait_for(lambda: self.rows('start'))
+        self.assertEqual(self.rows('start')[0]['args'],
+                         ['--mode', 'rpc', '--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash',
+                          '--session-id', self.sid, '--append-system-prompt', reader.HOST_APPEND_PROMPT])
+
+    def test_pi_streams_a_turn_cancels_dialogs_and_ends_on_agent_settled(self):
+        self.enable(permission_mode='plan')
+        token = 'pi_fixture_message_0001'
+        self.send(token)
+        ended = self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(ended[0]['payload']['status'], 'completed')
+        self.assertEqual(ended[0]['payload']['stop_reason'], 'stop')
+        self.assertEqual(self.prompts(), [dict(id=token, type='prompt', message=self.text)])
+        self.assertIn(dict(type='extension_ui_response', id='ui-ask', cancelled=True), self.sent())
+        self.assertFalse([line for line in self.sent() if line.get('id') == 'ui-status'])
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['PONG'])
+        self.assertEqual([row['payload']['text'] for row in self.events('thinking.done')], ['Short answer'])
+        done = self.events('item.done')[0]
+        self.assertEqual((done['item'], done['payload']['output']), ('tool-1', 'notes.txt'))
+        self.assertEqual(self.message(token)['state'], 'accepted')
+        self.assertEqual(reader.host_session_state(self.provider, self.sid).get('native_session'), self.sid)
+        self.assertEqual(self.control(op='set_permission_mode', mode='manual')['reason'], 'pi_always_full_access')
+        self.assertEqual(self.control(op='approval_reply', request_id='x', decision='accept')['reason'], 'unsupported_request')
+        self.assertEqual(self.control(op='interrupt')['status'], 'ok')
+        self.wait_for(lambda: dict(type='abort') in self.sent())
+
+    def test_pi_submit_alone_is_delivered_by_the_message_worker(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        self.worker_delivers('pi_worker_message_0001')
+        self.assertEqual(self.prompts(), [dict(id='pi_worker_message_0001', type='prompt', message=self.text)])
+        self.wait_for(lambda: self.events('turn.ended'))
+
+    def test_pi_marks_a_refused_follow_up_failed_and_finishes_the_run(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        os.environ['FAKE_RPC_OFFSET'] = '2'
+        self.enable()
+        self.send('pi_fixture_message_0001', 'first prompt')
+        self.wait_for(lambda: len(self.prompts()) == 1)
+        self.send('pi_fixture_message_0002', 'second prompt')
+        self.assertEqual(self.wait_for(lambda: (self.message('pi_fixture_message_0002') or {}).get('state') == 'failed' and 'ok'), 'ok')
+        self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
+        self.assertEqual(self.message('pi_fixture_message_0001')['state'], 'accepted')
+
+    def test_pi_history_answers_empty_with_the_pi_agent(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        query = dict(id=7, codex=False, provider='pi', sid=self.sid, tmux=self.tmux, cwd=str(self.home), follow=True)
+        agent, sid, path, wire = reader.resolve_response_path(query)
+        self.assertEqual((agent, sid, path), ('pi', self.sid, None))
+        self.assertEqual(wire.split('\n')[0].split('\t')[9], 'pi')
+
+    def test_pi_settle_answers_with_a_settle_reply(self):
+        self.assertIn(self.provider, reader.HOST_PROVIDERS)
+        query = dict(id=9, op='settle', codex=False, provider='pi', sid=self.sid, tmux=self.tmux, cwd=str(self.home),
+                     texts=['hello pi'], after_ms=0)
+        lines = reader.settle_response(query).split('\n')
+        self.assertEqual(lines[0], '@mp\t9\tsettle\tok\t-\t1')
+        self.assertEqual(json.loads(lines[1]), dict(i=0, delivered_ms=0, line=0))
+
+    def test_pi_sends_a_second_message_as_a_follow_up_while_a_run_is_active(self):
+        os.environ['FAKE_RPC_OFFSET'] = '1'
+        self.enable()
+        self.send('pi_fixture_message_0001', 'first prompt')
+        self.wait_for(lambda: len(self.prompts()) == 1)
+        self.send('pi_fixture_message_0002', 'second prompt')
+        self.wait_for(lambda: self.events('turn.ended'))
+        first, second = self.prompts()
+        self.assertNotIn('streamingBehavior', first)
+        self.assertEqual((second['message'], second.get('streamingBehavior')), ('second prompt', 'followUp'))
+        self.assertEqual(self.message('pi_fixture_message_0001')['state'], 'accepted')
+        self.assertEqual(self.message('pi_fixture_message_0002')['state'], 'accepted')
+        self.assertEqual(len(self.events('turn.ended')), 1)
 
 
 if __name__ == '__main__':

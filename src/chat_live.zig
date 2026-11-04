@@ -346,14 +346,16 @@ fn appendQuoted(out: *std.ArrayList(u8), a: std.mem.Allocator, value: []const u8
     try out.appendSlice(a, quoted);
 }
 
-fn openLine(a: std.mem.Allocator, id: u32, op: []const u8, sid: []const u8) !std.ArrayList(u8) {
+fn openLine(a: std.mem.Allocator, id: u32, op: []const u8, provider: []const u8, sid: []const u8) !std.ArrayList(u8) {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
     const head = try std.fmt.allocPrint(a, "{{\"id\":{d},\"op\":", .{id});
     defer a.free(head);
     try out.appendSlice(a, head);
     try appendQuoted(&out, a, op);
-    try out.appendSlice(a, ",\"provider\":\"claude\",\"sid\":");
+    try out.appendSlice(a, ",\"provider\":");
+    try appendQuoted(&out, a, provider);
+    try out.appendSlice(a, ",\"sid\":");
     try appendQuoted(&out, a, sid);
     return out;
 }
@@ -363,8 +365,8 @@ fn finish(out: *std.ArrayList(u8), a: std.mem.Allocator) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-pub fn subscribeLine(a: std.mem.Allocator, id: u32, sid: []const u8, after: u64) ![]u8 {
-    var out = try openLine(a, id, "events_subscribe", sid);
+pub fn subscribeLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, after: u64) ![]u8 {
+    var out = try openLine(a, id, "events_subscribe", provider, sid);
     errdefer out.deinit(a);
     const tail = try std.fmt.allocPrint(a, ",\"after\":{d}", .{after});
     defer a.free(tail);
@@ -372,8 +374,8 @@ pub fn subscribeLine(a: std.mem.Allocator, id: u32, sid: []const u8, after: u64)
     return finish(&out, a);
 }
 
-pub fn unsubscribeLine(a: std.mem.Allocator, id: u32, sid: []const u8, after: u64) ![]u8 {
-    var out = try openLine(a, id, "events_unsubscribe", sid);
+pub fn unsubscribeLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, after: u64) ![]u8 {
+    var out = try openLine(a, id, "events_unsubscribe", provider, sid);
     errdefer out.deinit(a);
     const tail = try std.fmt.allocPrint(a, ",\"after\":{d}", .{after});
     defer a.free(tail);
@@ -381,14 +383,14 @@ pub fn unsubscribeLine(a: std.mem.Allocator, id: u32, sid: []const u8, after: u6
     return finish(&out, a);
 }
 
-pub fn interruptLine(a: std.mem.Allocator, id: u32, sid: []const u8) ![]u8 {
-    var out = try openLine(a, id, "interrupt", sid);
+pub fn interruptLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8) ![]u8 {
+    var out = try openLine(a, id, "interrupt", provider, sid);
     errdefer out.deinit(a);
     return finish(&out, a);
 }
 
-pub fn approvalReplyLine(a: std.mem.Allocator, id: u32, sid: []const u8, request_id: []const u8, decision: Decision) ![]u8 {
-    var out = try openLine(a, id, "approval_reply", sid);
+pub fn approvalReplyLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, request_id: []const u8, decision: Decision) ![]u8 {
+    var out = try openLine(a, id, "approval_reply", provider, sid);
     errdefer out.deinit(a);
     try out.appendSlice(a, ",\"request_id\":");
     try appendQuoted(&out, a, request_id);
@@ -399,8 +401,8 @@ pub fn approvalReplyLine(a: std.mem.Allocator, id: u32, sid: []const u8, request
 
 pub const Answer = struct { question: []const u8, answer: []const u8 };
 
-pub fn questionReplyLine(a: std.mem.Allocator, id: u32, sid: []const u8, request_id: []const u8, answers: []const Answer, dismissed: bool) ![]u8 {
-    var out = try openLine(a, id, "question_reply", sid);
+pub fn questionReplyLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, request_id: []const u8, answers: []const Answer, dismissed: bool) ![]u8 {
+    var out = try openLine(a, id, "question_reply", provider, sid);
     errdefer out.deinit(a);
     try out.appendSlice(a, ",\"request_id\":");
     try appendQuoted(&out, a, request_id);
@@ -416,8 +418,8 @@ pub fn questionReplyLine(a: std.mem.Allocator, id: u32, sid: []const u8, request
     return finish(&out, a);
 }
 
-pub fn planReplyLine(a: std.mem.Allocator, id: u32, sid: []const u8, request_id: []const u8, action: PlanAction, feedback: ?[]const u8) ![]u8 {
-    var out = try openLine(a, id, "plan_reply", sid);
+pub fn planReplyLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, request_id: []const u8, action: PlanAction, feedback: ?[]const u8) ![]u8 {
+    var out = try openLine(a, id, "plan_reply", provider, sid);
     errdefer out.deinit(a);
     try out.appendSlice(a, ",\"request_id\":");
     try appendQuoted(&out, a, request_id);
@@ -658,6 +660,10 @@ pub fn approvalMenu(shell_id: u32, out: *chat_permission.PermissionMenu) bool {
         if (!live.used or live.shell_id != shell_id) continue;
         if (!live.request.open or live.request.kind != .approval) return false;
         var menu: chat_permission.PermissionMenu = .{};
+        const question = std.unicode.utf8ToUtf16LeStringLiteral("Do you want to proceed?");
+        menu.question_len = question.len;
+        @memcpy(menu.question[0..question.len], question);
+        menu.command_len = std.unicode.utf8ToUtf16Le(&menu.command, live.request.titleSlice()) catch 0;
         const texts = [_][]const u8{ "Approve", "Always allow this session", "Decline" };
         for (texts, 0..) |value, index| {
             const units = std.unicode.utf8ToUtf16Le(&menu.options[index].text, value) catch return false;
@@ -766,7 +772,7 @@ pub fn answersDone(shell_id: u32) bool {
     return false;
 }
 
-pub fn questionAnswerLine(shell_id: u32, a: std.mem.Allocator) ?[]u8 {
+pub fn questionAnswerLine(shell_id: u32, a: std.mem.Allocator, provider: []const u8) ?[]u8 {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
@@ -780,18 +786,18 @@ pub fn questionAnswerLine(shell_id: u32, a: std.mem.Allocator) ?[]u8 {
                 .answer = live.answers[index][0..live.answer_lens[index]],
             };
         }
-        return questionReplyLine(a, shell_id, live.sidSlice(), live.request.idSlice(), pairs[0..live.prompt.count], false) catch null;
+        return questionReplyLine(a, shell_id, provider, live.sidSlice(), live.request.idSlice(), pairs[0..live.prompt.count], false) catch null;
     }
     return null;
 }
 
-pub fn dismissedQuestionLine(shell_id: u32, a: std.mem.Allocator) ?[]u8 {
+pub fn dismissedQuestionLine(shell_id: u32, a: std.mem.Allocator, provider: []const u8) ?[]u8 {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
         if (!live.used or live.shell_id != shell_id) continue;
         if (!live.request.open or live.request.kind != .question) return null;
-        return questionReplyLine(a, shell_id, live.sidSlice(), live.request.idSlice(), &.{}, true) catch null;
+        return questionReplyLine(a, shell_id, provider, live.sidSlice(), live.request.idSlice(), &.{}, true) catch null;
     }
     return null;
 }
@@ -833,19 +839,19 @@ test "D3 answers are stored per question and only a full set builds the reply" {
     try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"question.request\",\"payload\":{\"request_id\":\"req_5\",\"questions\":[" ++
         "{\"question\":\"Which colour?\",\"options\":[{\"label\":\"Lime\"},{\"label\":\"Orange\"}]}," ++
         "{\"question\":\"Which devices?\",\"multiSelect\":true,\"options\":[{\"label\":\"Desktop\"},{\"label\":\"Phone\"}]}]}}}]}}"));
-    try std.testing.expect(questionAnswerLine(77, a) == null);
+    try std.testing.expect(questionAnswerLine(77, a, "claude") == null);
     try std.testing.expect(answerQuestion(77, 0, "Lime"));
-    try std.testing.expect(questionAnswerLine(77, a) == null);
+    try std.testing.expect(questionAnswerLine(77, a, "claude") == null);
     try std.testing.expect(answerQuestion(77, 1, "Desktop, Phone"));
     try std.testing.expect(answersDone(77));
-    const line = questionAnswerLine(77, a).?;
+    const line = questionAnswerLine(77, a, "claude").?;
     defer a.free(line);
     try std.testing.expectEqualStrings(
         "{\"id\":77,\"op\":\"question_reply\",\"provider\":\"claude\",\"sid\":\"11111111-2222-3333-4444-666666666666\",\"request_id\":\"req_5\",\"answers\":{\"0\":\"Lime\",\"1\":\"Desktop, Phone\"},\"dismissed\":false}",
         line,
     );
     try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"question.resolved\",\"payload\":{\"request_id\":\"req_5\",\"answers\":{},\"dismissed\":false}}}]}}"));
-    try std.testing.expect(questionAnswerLine(77, a) == null);
+    try std.testing.expect(questionAnswerLine(77, a, "claude") == null);
     try std.testing.expect(!questionsOpen(77));
 }
 
@@ -857,7 +863,7 @@ test "D3 a question longer than a display line still answers under its id" {
     try std.testing.expect(applyPage(78, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"question.request\",\"payload\":{\"request_id\":\"req_long\",\"questions\":[" ++
         "{\"question\":\"Which of these three approaches should I take for the retry loop in the chat reader when the host keeps restarting in the middle of a turn while the desktop is asleep and the socket never comes back\",\"options\":[{\"label\":\"Lime\"},{\"label\":\"Orange\"}]}]}}}]}}"));
     try std.testing.expect(answerQuestion(78, 0, "Lime"));
-    const line = questionAnswerLine(78, a).?;
+    const line = questionAnswerLine(78, a, "claude").?;
     defer a.free(line);
     try std.testing.expect(std.mem.endsWith(u8, line, ",\"answers\":{\"0\":\"Lime\"},\"dismissed\":false}"));
 }
@@ -969,6 +975,8 @@ test "D2 the approval card reuses the three existing buttons and their action ma
     var menu: chat_permission.PermissionMenu = .{};
     try std.testing.expect(approvalMenu(4242, &menu));
     try std.testing.expectEqual(@as(usize, 3), menu.count);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Do you want to proceed?"), menu.question[0..menu.question_len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Run ls"), menu.command[0..menu.command_len]);
     try std.testing.expectEqual(@as(?u8, '1'), menu.allow);
     try std.testing.expectEqual(@as(?u8, '2'), menu.always);
     try std.testing.expectEqual(@as(?u8, '3'), menu.deny);
@@ -1047,13 +1055,13 @@ test "D1 an unknown kind changes nothing" {
 
 test "D1 the subscribe line carries the replay cursor on the existing channel" {
     const a = std.testing.allocator;
-    const line = try subscribeLine(a, 88, "a1b2c3d4-0000-1111-2222-333344445555", 1420);
+    const line = try subscribeLine(a, 88, "claude", "a1b2c3d4-0000-1111-2222-333344445555", 1420);
     defer a.free(line);
     try std.testing.expectEqualStrings(
         "{\"id\":88,\"op\":\"events_subscribe\",\"provider\":\"claude\",\"sid\":\"a1b2c3d4-0000-1111-2222-333344445555\",\"after\":1420}",
         line,
     );
-    const stop = try unsubscribeLine(a, 88, "a1b2c3d4-0000-1111-2222-333344445555", 1420);
+    const stop = try unsubscribeLine(a, 88, "claude", "a1b2c3d4-0000-1111-2222-333344445555", 1420);
     defer a.free(stop);
     try std.testing.expectEqualStrings(
         "{\"id\":88,\"op\":\"events_unsubscribe\",\"provider\":\"claude\",\"sid\":\"a1b2c3d4-0000-1111-2222-333344445555\",\"after\":1420}",
@@ -1063,16 +1071,16 @@ test "D1 the subscribe line carries the replay cursor on the existing channel" {
 
 test "D2 the approval reply sends the exact decision word for its button" {
     const a = std.testing.allocator;
-    const accept = try approvalReplyLine(a, 89, "sid-1", "req_1", .accept);
+    const accept = try approvalReplyLine(a, 89, "claude", "sid-1", "req_1", .accept);
     defer a.free(accept);
     try std.testing.expectEqualStrings(
         "{\"id\":89,\"op\":\"approval_reply\",\"provider\":\"claude\",\"sid\":\"sid-1\",\"request_id\":\"req_1\",\"decision\":\"accept\"}",
         accept,
     );
-    const session = try approvalReplyLine(a, 89, "sid-1", "req_1", .accept_for_session);
+    const session = try approvalReplyLine(a, 89, "claude", "sid-1", "req_1", .accept_for_session);
     defer a.free(session);
     try std.testing.expect(std.mem.endsWith(u8, session, "\"decision\":\"acceptForSession\"}"));
-    const cancel = try approvalReplyLine(a, 89, "sid-1", "req_1", .cancel);
+    const cancel = try approvalReplyLine(a, 89, "claude", "sid-1", "req_1", .cancel);
     defer a.free(cancel);
     try std.testing.expect(std.mem.endsWith(u8, cancel, "\"decision\":\"cancel\"}"));
 }
@@ -1083,13 +1091,13 @@ test "D3 the question reply sends every answer keyed by its question" {
         .{ .question = "Which colour?", .answer = "Lime" },
         .{ .question = "Which devices?", .answer = "Desktop, Phone" },
     };
-    const line = try questionReplyLine(a, 90, "sid-1", "req_2", &answers, false);
+    const line = try questionReplyLine(a, 90, "claude", "sid-1", "req_2", &answers, false);
     defer a.free(line);
     try std.testing.expectEqualStrings(
         "{\"id\":90,\"op\":\"question_reply\",\"provider\":\"claude\",\"sid\":\"sid-1\",\"request_id\":\"req_2\",\"answers\":{\"Which colour?\":\"Lime\",\"Which devices?\":\"Desktop, Phone\"},\"dismissed\":false}",
         line,
     );
-    const dismissed = try questionReplyLine(a, 90, "sid-1", "req_2", &.{}, true);
+    const dismissed = try questionReplyLine(a, 90, "claude", "sid-1", "req_2", &.{}, true);
     defer a.free(dismissed);
     try std.testing.expectEqualStrings(
         "{\"id\":90,\"op\":\"question_reply\",\"provider\":\"claude\",\"sid\":\"sid-1\",\"request_id\":\"req_2\",\"answers\":{},\"dismissed\":true}",
@@ -1099,13 +1107,13 @@ test "D3 the question reply sends every answer keyed by its question" {
 
 test "D4 the plan reply is implement with no text and feedback with text" {
     const a = std.testing.allocator;
-    const implement = try planReplyLine(a, 91, "sid-1", "req_3", .implement, null);
+    const implement = try planReplyLine(a, 91, "claude", "sid-1", "req_3", .implement, null);
     defer a.free(implement);
     try std.testing.expectEqualStrings(
         "{\"id\":91,\"op\":\"plan_reply\",\"provider\":\"claude\",\"sid\":\"sid-1\",\"request_id\":\"req_3\",\"action\":\"implement\"}",
         implement,
     );
-    const feedback = try planReplyLine(a, 91, "sid-1", "req_3", .feedback, "use a queue instead");
+    const feedback = try planReplyLine(a, 91, "claude", "sid-1", "req_3", .feedback, "use a queue instead");
     defer a.free(feedback);
     try std.testing.expectEqualStrings(
         "{\"id\":91,\"op\":\"plan_reply\",\"provider\":\"claude\",\"sid\":\"sid-1\",\"request_id\":\"req_3\",\"action\":\"feedback\",\"feedback\":\"use a queue instead\"}",
@@ -1113,9 +1121,30 @@ test "D4 the plan reply is implement with no text and feedback with text" {
     );
 }
 
+test "Codex and Pi live requests retain the selected provider" {
+    const a = std.testing.allocator;
+    for ([_][]const u8{ "codex", "pi" }) |provider| {
+        const subscribe = try subscribeLine(a, 7, provider, "sid", 42);
+        defer a.free(subscribe);
+        const expected_subscribe = try std.fmt.allocPrint(a, "{{\"id\":7,\"op\":\"events_subscribe\",\"provider\":\"{s}\",\"sid\":\"sid\",\"after\":42}}", .{provider});
+        defer a.free(expected_subscribe);
+        try std.testing.expectEqualStrings(expected_subscribe, subscribe);
+        const approval = try approvalReplyLine(a, 7, provider, "sid", "req", .accept);
+        defer a.free(approval);
+        const expected_approval = try std.fmt.allocPrint(a, "{{\"id\":7,\"op\":\"approval_reply\",\"provider\":\"{s}\",\"sid\":\"sid\",\"request_id\":\"req\",\"decision\":\"accept\"}}", .{provider});
+        defer a.free(expected_approval);
+        try std.testing.expectEqualStrings(expected_approval, approval);
+        const interrupt = try interruptLine(a, 7, provider, "sid");
+        defer a.free(interrupt);
+        const expected_interrupt = try std.fmt.allocPrint(a, "{{\"id\":7,\"op\":\"interrupt\",\"provider\":\"{s}\",\"sid\":\"sid\"}}", .{provider});
+        defer a.free(expected_interrupt);
+        try std.testing.expectEqualStrings(expected_interrupt, interrupt);
+    }
+}
+
 test "D5 the interrupt op asks the host to stop the turn without killing it" {
     const a = std.testing.allocator;
-    const line = try interruptLine(a, 92, "sid-1");
+    const line = try interruptLine(a, 92, "claude", "sid-1");
     defer a.free(line);
     try std.testing.expectEqualStrings("{\"id\":92,\"op\":\"interrupt\",\"provider\":\"claude\",\"sid\":\"sid-1\"}", line);
 }
@@ -1173,6 +1202,10 @@ test "IGSH-1593 startup failure survives empty history and replay" {
     const ended = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"startup-failure\",\"payload\":{\"status\":\"failed\"}}}]}}";
     try std.testing.expect(applyPage(90, sid, ended));
     try std.testing.expect(!running(90));
+    const stopped = "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
+    try std.testing.expect(applyPage(90, sid, stopped));
+    historyCaughtUp(90);
+    try std.testing.expectEqual(@as(u64, 4), begin(90, 0, sid));
     try std.testing.expect(held(90));
     var text: [128]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
