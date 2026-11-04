@@ -75,7 +75,7 @@ class AccountPhotoProof {
                         val matches = (0 until tabs.length()).map { tabs.getJSONObject(it) }
                             .filter { it.optString("tmux_session") == "runner-1" && it.optInt("tmux_host", -1) == 0 }
                         check(matches.size == 1)
-                        matches.single().put("name", "Phone ready")
+                        matches.single().put("name", "Phone ready").put("manual", true)
                         val result = auth.request("PUT", "/v1/layout", JSONObject()
                             .put("base_revision", reply.json.getLong("revision"))
                             .put("layout", layout))

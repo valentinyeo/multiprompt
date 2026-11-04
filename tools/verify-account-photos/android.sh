@@ -16,7 +16,8 @@ host_key=$(awk '{print $2}' "$FIXTURE/host-key.pub")
 printf '::add-mask::%s\n' "$private_key"
 printf '::add-mask::%s\n' "$host_key"
 package=dev.multiprompt.companion.debug
-gateway=$(adb shell ip route | awk '/^default/ { gsub("\r", ""); print $3; exit }')
+unset PHOTO_PROOF_CREDENTIAL
+gateway=$(adb shell ip -4 route show table all | awk '/^default via/ { gsub("\r", ""); print $3; exit }')
 [[ -n "$gateway" ]]
 adb install -r -g "$COMPANION/app/build/outputs/apk/debug/app-debug.apk"
 adb install -r "$COMPANION/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"

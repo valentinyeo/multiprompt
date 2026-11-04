@@ -148,7 +148,7 @@ jobs:
           zig build -Dtarget=x86_64-windows-gnu --summary all
           if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed' }
       - name: Upload the picture through the app
-        shell: pwsh
+        shell: powershell
         env:
           PHOTO_PROOF_CREDENTIAL: ${{ secrets.IGSH_1612_PHOTO_PROOF }}
         run: ./tools/verify-account-photos/desktop.ps1 -Exe "$PWD/zig-out/bin/multiprompt.exe" -Evidence "$PWD/desktop-evidence"

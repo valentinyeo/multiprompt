@@ -74,7 +74,12 @@ function Focus {
 }
 function Press([int[]]$Keys) {
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App does not own keyboard' }
-    [ChatDeliveryDesktop]::Chord($Keys)
+    $opensPalette = $Keys.Count -eq 2 -and $Keys[0] -eq 0x11 -and $Keys[1] -eq 0x4b
+    $offset = if ($opensPalette) { (Log).Length } else { 0 }
+    [VerifyNative]::Chord($Keys)
+    if ($opensPalette) {
+        [void](Wait-For 'palette opened' { $trace = Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=[1-9]\d*' })
+    }
 }
 function Query([string]$Text, [int]$Target) {
     $before = (Log).Length
