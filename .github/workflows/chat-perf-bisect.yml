@@ -191,6 +191,24 @@ jobs:
             free -m
             printf '\nReleaseFast, baseline CPU, original CPU707 test; no budget edits.\n'
           } > evidence/environment.txt
+      - name: Prove the native allocation regression
+        run: |
+          (cd after && zig test src/chat_history.zig --test-filter 'IGSH-1674') > evidence/after-regression.log 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('after/src/chat_history.zig').read_text()
+          marker = 'test "IGSH-1674 appending positioned rows does not decode settled message bodies"'
+          fixture = source[source.index(marker):]
+          with Path('before/src/chat_history.zig').open('a') as target:
+              target.write('\n' + fixture)
+          PY
+          set +e
+          (cd before && zig test src/chat_history.zig --test-filter 'IGSH-1674') > evidence/before-regression.log 2>&1
+          code=$?
+          set -e
+          test "$code" -eq 1
+          grep -F 'FAIL (TestUnexpectedResult)' evidence/before-regression.log
+          grep -F 'expect(appended)' evidence/before-regression.log
       - name: Measure five alternating pairs
         run: |
           for sample in 1 2 3 4 5; do
