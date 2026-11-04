@@ -62,6 +62,18 @@ For long second-host session and workspace timing, run the [remote switch perfor
 
 It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message the driver types, presses Enter, then runs the gating step `send-stays-gone` (10 seconds of 250 ms samples of the composer text and the draft files). It also records whether the fake Claude queue ended with the sent text (`reached`), which is a gate, and, after every fourth message, whether the fake took the queue (`tookQueue`); the fake then goes busy again so the Chat View queue list never exceeds its 16 rows. At the end the step `outbox-snapshot` saves the Chat View outbox. `check-evidence.js` re-derives the 20 texts and 20 real Enter presses from the raw files and fails if any send did not reach the fake Claude within 10 seconds or if the sent texts were not enqueued exactly once in send order (IGSH-986), so neither a build that throws text away nor one that leaves sends pending can pass. To prove the case can fail, run it against a build from before IGSH-930, where shell text pulled back into the box on every poll.
 
+### Instant saved chat (IGSH-1289)
+
+Dispatch `verify.yml` on the branch with `feature=chat-instant`.
+This feature selects the existing chat-delivery driver.
+The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
+It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer before releasing the connection.
+The independent oracle requires first paint below 1000 ms, two persisted client IDs in order, no matching messages in the pre-connect store, and exactly those IDs once in order in the production host store after release.
+It also checks the absent startup sync banner and zero owned processes after cleanup.
+Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-delivered.png`, `startup-timing.json`, `offline-outbox.json`, and both store snapshots in `verify-chat-delivery`.
+The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
+Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
+
 ## Gotchas
 
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.

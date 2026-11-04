@@ -17,7 +17,7 @@ test('IGSH-1266 a submit that never landed is queued again instead of staying st
   const send = read('src/chat_send.zig');
   assert.match(send, /pub fn chatSubmitRetryPatch\(\) ChatSubmitPatch/, 'the retry patch exists');
   assert.match(send, /\.\{ \.write_started = false, \.state = \.queued, \.retryable = false \}/, 'the patch clears write_started and requeues');
-  assert.match(send, /if \(job\.message_state\[0\] == 0\) \{\s*const patch = chatSubmitRetryPatch\(\);/, 'the finish path applies it when the submit did not land');
+  assert.match(send, /if \(job\.message_state\[0\] == 0\) \{\s*history\.send_next_tick = GetTickCount64\(\) \+ chatMessageSyncRetryDelayMs\(history\.send_retry_step\);\s*history\.send_retry_step \+\|= 1;\s*const patch = chatSubmitRetryPatch\(\);\s*entry\.write_started = patch\.write_started;\s*entry\.state = patch\.state;\s*entry\.retryable = patch\.retryable;/, 'the finish path backs off and applies the retry patch when the submit did not land');
   assert.match(send, /\[chat\] submit not sent: the chat channel is not up yet, will retry/, 'the silent return now logs');
   assert.match(send, /\[chat\] submit skipped: the tab has no session id yet/, 'the missing sid path now logs');
   assert.match(send, /\[chat\] submit ack mismatch, will retry/, 'the ack mismatch path now logs');
@@ -29,7 +29,7 @@ test('IGSH-1266 the send path is decided at send time, not at enqueue time', () 
   assert.match(send, /pub fn chatSendRoute\(kind: @import\("app_state\.zig"\)\.ShellKind, ai_agent: u8, sid_present: bool\) ChatSendRoute/, 'one routing rule');
   assert.match(send, /if \(chatMessageGoesToHost\(kind, ai_agent\)\) return if \(sid_present\) \.host_message else \.wait_for_start;/, 'a hosted tab without a sid waits');
   assert.match(send, /if \(kind == \.tmux and ai_agent == 0\) return \.wait_for_start;/, 'a tmux tab that has not started its agent waits');
-  assert.match(send, /if \(route == \.host_message and !entry\.message_v1\) \{/, 'the entry is upgraded at send time');
+  assert.match(send, /if \(route == \.host_message and \(!entry\.message_v1 or entry\.message_sid\[0\] == 0\)\) \{\s*if \(!chatUpgradeToHostMessage\(shell_index, entry\)\) \{\s*entry\.state = \.queued;\s*entry\.write_started = false;\s*return \.write_failed;/, 'the entry is upgraded at send time or stays queued');
   assert.match(send, /fn chatUpgradeToHostMessage\(shell_index: u32, entry: \*app_state\.ChatOutboxEntry\) bool/, 'the upgrade helper exists');
   assert.match(send, /\[chat\] send path=\{s\} stage=\{s\} v1=\{\} ai_agent=\{d\} sid_present=\{\} host=\{d\} wire_id=\{s\}/, 'one line per attempt with the fields');
   assert.match(send, /\[chat\] send legacy reply=\{s\} written=\{\}/, 'the legacy branch logs its reply');

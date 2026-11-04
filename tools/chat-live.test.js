@@ -57,7 +57,9 @@ test('D1 working dots follow the live turn through the working the bar already r
   assert.match(session, /app_state\.g_chat_screen_working = working;/);
   assert.match(session, /shell\.working_since_ms = @import\("chat_working\.zig"\)\.workingSince\(shell\.working_since_ms, working, GetTickCount64\(\)\);/);
   const layout = read('src/window_layout.zig');
-  assert.match(layout, /app_state\.g_chat_screen_working or app_state\.g_chat_screen_status_len > 0\);/);
+  assert.match(layout, /app_state\.g_chat_screen_working or app_state\.g_chat_screen_status_len > 0 or @import\("chat_send\.zig"\)\.chatOutboxWorkingForShell\(app_state\.active_shell\)\);/);
+  const send = read('src/chat_send.zig');
+  assert.match(send, /if \(entry\.state != \.queued and entry\.state != \.sending\) continue;\s*if \(std\.mem\.eql\(u8, entry\.key\[0\.\.entry\.key_len\], key\)\) return true;/);
 });
 
 test('D2 a live approval fills the existing permission card and clears when it resolves', () => {

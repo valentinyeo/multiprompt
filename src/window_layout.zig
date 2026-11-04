@@ -367,7 +367,7 @@ pub fn chatWorkingTimesPoll() void {
 
 pub fn chatWorkingBarVisible() bool {
     return app_state.ISSUE_265_WORKING_BAR and app_state.g_chat_active and app_state.active_shell < app_state.shell_count and
-        (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0);
+        (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0 or @import("chat_send.zig").chatOutboxWorkingForShell(app_state.active_shell));
 }
 
 pub fn chatStopVisible() bool {

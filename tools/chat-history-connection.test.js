@@ -135,16 +135,24 @@ test "connection reuse is per host and chunked JSON replies preserve escaped tra
     try std.testing.expectEqual(@as(usize, 3), terminations);
     try std.testing.expectEqual(@as(usize, 9), closes);
 }
-test "death hang malformed stale error and truncated replies fall back and restart only after backoff" {
+test "transport failures restart after backoff but chat errors keep the shared channel" {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(std.heap.page_allocator);
     inline for (.{ .dead, .hang, .malformed, .wrong_id, .reader_error, .truncated }) |failure| {
         reset(); mode = failure;
         try std.testing.expect(fetch(0, &out));
         try std.testing.expectEqualStrings("fallback", out.items);
+        if (failure == .reader_error) {
+            try std.testing.expect(g_chat_history_channels[0].process != null);
+            try std.testing.expectEqual(@as(usize, 0), terminations);
+            mode = .good;
+            try std.testing.expect(fetch(0, &out));
+            try std.testing.expectEqual(@as(usize, 1), starts);
+            continue;
+        }
         try std.testing.expect(g_chat_history_channels[0].process == null);
         try std.testing.expectEqual(@as(usize, 1), terminations);
-        try std.testing.expectEqual(now + 60_000, g_chat_history_channels[0].retry_at);
+        try std.testing.expectEqual(now + 250, g_chat_history_channels[0].retry_at);
         try std.testing.expect(g_chat_history_channels[0].input == null);
         try std.testing.expect(g_chat_history_channels[0].output == null);
         try std.testing.expectEqual(@as(usize, 3), closes);
@@ -159,7 +167,7 @@ test "death hang malformed stale error and truncated replies fall back and resta
         try std.testing.expectEqual(@as(u64, 0), g_chat_history_channels[0].retry_at);
     }
 }
-test "unreachable host and short writes fall back; oversized frame closes the channel" {
+test "unreachable host and short writes fall back; oversized chat reply keeps the channel" {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(std.heap.page_allocator);
     reset(); fail_start = true;
@@ -170,7 +178,8 @@ test "unreachable host and short writes fall back; oversized frame closes the ch
     try std.testing.expectEqual(@as(usize, 1), terminations);
     reset();
     try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7}", 1, &out, null));
-    try std.testing.expectEqual(@as(usize, 1), terminations);
+    try std.testing.expectEqual(@as(usize, 0), terminations);
+    try std.testing.expect(g_chat_history_channels[0].process != null);
 }
 test "send write reservation distinguishes prewrite failure from lost acknowledgement" {
     var out: std.ArrayList(u8) = .empty;

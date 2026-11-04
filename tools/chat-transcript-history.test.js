@@ -637,7 +637,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.match(fn('chatReaderBundle'), /@embedFile\("chat_history_reader.py"\)/);
   assert.match(fn('chatHistoryChannelStart'), /chatReaderBundle/);
   assert.match(fn('chatHistoryFetchOnce'), /chatReaderBundle/);
-  assert.match(fn('chatHistoryPersistent'), /60_000/);
+  assert.match(fn('chatHistoryPersistent'), /chatHistoryChannelClose\(ch\);\s*ch\.retry_at = GetTickCount64\(\) \+ 250;/);
   assert.match(fn('chatHistoryFetchOnce'), /60_000/);
   assert.doesNotMatch(fn('chatHistoryFetch'), /fetchAcPersistent|mp_complete/);
   assert.match(fn('chatPaintTranscriptContent'), /Could not load the conversation, retrying/);

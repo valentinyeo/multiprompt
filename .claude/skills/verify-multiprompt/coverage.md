@@ -143,6 +143,10 @@ A change that alters a mapped feature updates its map and this table in the same
 
 | IGSH-766 | Quiet group headlines without fills, rails or chevrons; headline clicks hide and restore members with saved collapse state. | group-rail | journey updated; GitHub Windows execution pending | This pass uses source checks only; run the identical driver on v0.28.861 for no-fill/no-rail/flush-left failures, then the branch for all four sidebar-headline markers. |
 
+## IGSH-1289 instant saved chat
+
+`chat-instant` checks saved history before a deliberately delayed connection, first paint below one second, and two pre-connect messages arriving once in order in the production host store. Windows execution pending. Existing send and view shortcuts are reused. No real SSH server or provider response is claimed.
+
 ## IGSH-815 full-session history
 
 `chat-full-history` exercises 50 known messages in a tool-heavy synthetic session through the production Windows reader/layout/copy path, then repeats after restart. Red/green GitHub evidence pending; no live Claude session is claimed.

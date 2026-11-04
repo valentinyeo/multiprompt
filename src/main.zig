@@ -9041,6 +9041,7 @@ pub fn main(init: std.process.Init) void {
     _ = syncMainWindowDpi(hwnd, 0);
     applyTitleBarTheme();
     launch_cache.restore();
+    if (launch_cache.cached) loadChatOutbox();
     _ = ShowWindow(hwnd, @import("launch_plan.zig").firstShowCommand());
     _ = InvalidateRect(hwnd, null, 1);
     _ = @import("win32.zig").UpdateWindow(hwnd);
@@ -9272,7 +9273,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 const restored = restoreSession();
                 if (app_state.g_account_base) |server| applyServerLayout(server) catch {};
                 loadSnoozedWorkspaces();
-                loadChatOutbox();
+                if (!launch_cache.cached) loadChatOutbox();
                 if (!IS_DEV and app_state.g_instance_name_len == 0) {
                     var seen_buf: [64]u8 = undefined;
                     const seen = readChangelogSeen(&seen_buf);

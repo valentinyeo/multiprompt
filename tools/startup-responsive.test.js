@@ -154,6 +154,24 @@ test('ISSUE-543 cached clicks survive restoration without consuming a new title 
   assert.ok(body(cache, 'bindRestoredChat').indexOf('entry.history.text.items.len != 0') < body(cache, 'bindRestoredChat').indexOf('appendSlice'));
 });
 
+test('IGSH-1289 restores saved tmux history before opening and binds it before deferred refresh', () => {
+  const restore = body(read('src/launch_cache.zig'), 'restore');
+  const chat = restore.slice(restore.indexOf('if (s.chat)'));
+  assert.doesNotMatch(chat, /kind\s*!=\s*\.tmux/);
+  for (const value of ['s.text', 's.blocks']) {
+    assert.ok(chat.indexOf(value) >= 0 && chat.indexOf(value) < chat.indexOf('openChatView()'));
+  }
+  assert.ok(chat.indexOf('openChatView()') < chat.indexOf('bindRestoredChat()'));
+  assert.ok(restore.indexOf('cached = true') < restore.indexOf('bindRestoredChat()'));
+  assert.match(body(read('src/chat_session.zig'), 'chatDeferTranscriptLoad'), /launch_cache.zig"\)\.pending and @import\("launch_cache.zig"\)\.queue.next <= 2\) return/);
+});
+
+test('IGSH-1289 loads pending sends before exposing the cached composer and never reloads over new sends', () => {
+  const main = read('src/main.zig');
+  assert.match(body(main, 'main'), /launch_cache\.restore\(\);\s*if \(launch_cache\.cached\) loadChatOutbox\(\);\s*_ = ShowWindow/);
+  assert.match(body(main, 'initializeDeferred'), /loadSnoozedWorkspaces\(\);\s*if \(!launch_cache\.cached\) loadChatOutbox\(\);/);
+});
+
 test('ISSUE-543 startup retries contested registry ownership without waiting on the UI thread', () => {
   const registry = read('src/workspaces.zig');
   assert.match(body(registry, 'lockWorkspaceRegistry'), /lockWorkspaceRegistryWithTimeout\(if \(app_state\.g_main_hwnd != null and @import\("launch_cache.zig"\)\.pending and !app_state\.g_account_locked\) 0 else 5000\)/);
