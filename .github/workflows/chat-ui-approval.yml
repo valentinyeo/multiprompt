@@ -81,4 +81,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: node tools/check-chat-ui-approval.cjs

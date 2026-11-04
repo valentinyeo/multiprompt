@@ -19,7 +19,8 @@ test('chat UI approval guard', async t => {
     assert.match(tests, /permissions:\s*\n\s+contents: read\s*\n/);
     assert.doesNotMatch(tests, /HYPERTASK_AGENT_TOKEN|secrets\.|statuses: write/);
     assert.match(approval, /github\.event\.pull_request\.base\.sha/);
-    assert.doesNotMatch(approval, /pull_request\.head/);
+    assert.doesNotMatch(approval, /ref:.*pull_request\.head/);
+    assert.match(approval, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha/);
     assert.match(approval, /statuses: write/);
     assert.match(approval, /HYPERTASK_AGENT_TOKEN: \$\{\{ secrets\.HYPERTASK_AGENT_TOKEN \}\}/);
     assert.match(approval, /node tools\/check-chat-ui-approval\.cjs/);
@@ -93,7 +94,7 @@ test('chat UI approval guard', async t => {
     ]) assert.equal(await check('', [file]), false);
     assert.equal(await check('', [{ filename: 'tools/check-chat-ui-approval.cjs', status: 'added' }], null), true);
     for (const filename of ['CLAUDE.md', 'AGENTS.md', 'GATES.md', 'tools/chat-ui-approval.test.js']) assert.equal(await check('', [{ filename, status: 'modified' }], null), true);
-    for (const filename of ['src/telemetry_panel.zig', 'src/chat_float.zig', 'src/chat_skill.zig', 'src/chat_composer_text.zig', 'src/chat_markdown.zig', 'src/chat_capture.zig', 'src/fonts.zig', 'src/font_probe.zig', 'SRC/sidebar.zig', 'src/message_menu.zig']) assert.equal(await check('', [{ filename, status: 'modified' }]), false, filename);
+    for (const filename of ['src/telemetry_panel.zig', 'src/chat_float.zig', 'src/chat_skill.zig', 'src/chat_composer_text.zig', 'src/chat_markdown.zig', 'src/chat_capture.zig', 'src/fonts.zig', 'src/font_probe.zig', 'SRC/sidebar.zig', 'src/message_menu.zig', 'src/room_view.zig', 'src/bot_photo.zig', 'src/update_card.zig']) assert.equal(await check('', [{ filename, status: 'modified' }]), false, filename);
     assert.equal(await check('', [{ filename: 'src/capacity.zig', status: 'modified', changes: 2, patch: '@@ -1 +1 @@\n-oldAdmission()\n+newAdmission()' }], null), true);
     assert.equal(await check('', [{ filename: 'src/capacity.zig', status: 'modified', changes: 2, patch: '@@ -1 +1 @@\n-oldDraw()\n+newDraw()' }]), false);
     for (const symbol of ['chat_block', 'chat_capture', 'cache', 'tailFor', 'classification']) assert.equal(await check('', [{ filename: 'src/chat_session.zig', status: 'modified', changes: 2, patch: `@@ -1 +1 @@\n-old\n+${symbol}` }]), false, symbol);
@@ -116,6 +117,19 @@ test('chat UI approval guard', async t => {
     assert.match(logs[0], /UI approval: ticket URL/);
     assert.doesNotMatch(logs[0], /token/);
   });
+  await t.test('edited PR clears stale success before a failed PR read', async () => {
+    const events = [];
+    const fetchApi = async (url, options) => {
+      if (url.endsWith(`/statuses/${'a'.repeat(40)}`)) {
+        events.push(JSON.parse(options.body).state);
+        return { ok: true, json: async () => ({}) };
+      }
+      events.push('failed PR read');
+      throw new Error('unavailable');
+    };
+    await assert.rejects(main({ env: { GITHUB_REPOSITORY: 'example/repo', GH_TOKEN: 'token', PR_NUMBER: '1', PR_HEAD_SHA: 'a'.repeat(40) }, fetchApi }), /unavailable/);
+    assert.deepEqual(events, ['pending', 'failed PR read']);
+  });
   await t.test('authenticated drawing approval posts success without exposing evidence', async () => {
     const events = [];
     const logs = [];
@@ -131,7 +145,7 @@ test('chat UI approval guard', async t => {
       else throw new Error('unexpected request');
       return { ok: true, json: async () => data };
     };
-    assert.equal(await main({ env: { GITHUB_REPOSITORY: 'example/repo', GH_TOKEN: 'github-token', HYPERTASK_AGENT_TOKEN: 'board-token', PR_NUMBER: '1' }, fetchApi, log: value => logs.push(value) }), true);
+    assert.equal(await main({ env: { GITHUB_REPOSITORY: 'example/repo', GH_TOKEN: 'github-token', HYPERTASK_AGENT_TOKEN: 'board-token', PR_NUMBER: '1', PR_HEAD_SHA: 'a'.repeat(40) }, fetchApi, log: value => logs.push(value) }), true);
     assert.deepEqual(events, ['pending', 'success']);
     assert.doesNotMatch(logs.join('\n'), /token|synthetic evidence|IGSH-42/);
   });

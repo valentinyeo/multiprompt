@@ -1,5 +1,5 @@
-const pureUI = /^(?:chat_(?:render|style|code|diff|image|options|permission|find_ui|scrollbar|table_measure|float|skill|composer_text|markdown|capture)|sidebar|drawing|window_layout|themes|dwrite_text|smooth|bot_avatar|ui_words|telemetry_panel|fonts|font_probe|message_menu)(?:[._/]|$)/i;
-const mixedUI = /^(?:chat_session|main|app_state|chat_composer|composer|capacity)(?:[._/]|$)/i;
+const pureUI = /^(?:chat_(?:render|style|code|diff|image|options|permission|find_ui|scrollbar|table_measure|float|skill|composer_text|markdown|capture)|sidebar|drawing|window_layout|themes|dwrite_text|smooth|bot_avatar|bot_photo|room_view|update_card|ui_words|telemetry_panel|fonts|font_probe|message_menu)(?:[._/]|$)/i;
+const mixedUI = /^(?:chat_session|main|app_state|chat_composer|composer|capacity|archive|inbox|usage_card)(?:[._/]|$)/i;
 const uiSymbol = /(?:draw|paint|render|layout|sidebar|composer|chat[_A-Z]*(?:view|ui|style|color|font|width|height|rect|pixel|scroll|block|capture)|cache|tailFor|classification|\b(?:rect|font|color|colour|pixel|dpi|invalidate|redraw|hwnd)\b)/i;
 const policy = /^(?:tools\/check-chat-ui-approval\.cjs|\.github\/workflows\/[^/]*(?:chat-ui-approval|chat-guard)[^/]*\.ya?ml)$/i;
 const newUI = /(?:^|[_/.-])(?:sidebar|render|drawing|draw|paint|layout|ui)(?:[_/.-]|$)/i;
@@ -206,17 +206,20 @@ async function main({ env = process.env, fetchApi = fetch, log = console.log } =
   };
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
   const base = `https://api.github.com/repos/${repo}`;
+  const status = (sha, state, description) => request(`${base}/statuses/${sha}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ state, context: 'chat-ui-approval', description }) });
+  const eventHead = env.PR_HEAD_SHA;
+  if (eventHead && !/^[a-f0-9]{40}$/.test(eventHead)) throw new Error('invalid event head');
+  if (eventHead) await status(eventHead, 'pending', 'Checking UI approval');
   const pr = await request(`${base}/pulls/${number}`, { headers });
   if (!/^[a-f0-9]{40}$/.test(pr?.head?.sha || '')) throw new Error('invalid head');
-  const status = (state, description) => request(`${base}/statuses/${pr.head.sha}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ state, context: 'chat-ui-approval', description }) });
-  await status('pending', 'Checking UI approval');
+  if (pr.head.sha !== eventHead) await status(pr.head.sha, 'pending', 'Checking UI approval');
   let passed = false;
   try {
     const boardApi = boardToken ? path => request(`https://api.hypertask.ai/api/mcp${path}`, { headers: { Authorization: `Bearer ${boardToken}` } }) : null;
     const githubApi = page => request(`${base}/pulls/${number}/files?per_page=100&page=${page}`, { headers });
     passed = await checkApproval({ pr, githubApi, boardApi });
   } catch { passed = false; }
-  await status(passed ? 'success' : 'failure', passed ? 'Approval check passed' : 'Add UI approval: ticket URL with authenticated owner approval');
+  await status(pr.head.sha, passed ? 'success' : 'failure', passed ? 'Approval check passed' : 'Add UI approval: ticket URL with authenticated owner approval');
   log(passed ? 'Chat UI approval check passed' : 'Chat UI approval check failed. Add UI approval: ticket URL with authenticated owner approval.');
   return passed;
 }
