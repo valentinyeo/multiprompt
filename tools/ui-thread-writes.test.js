@@ -45,7 +45,6 @@ test('IGSH-1170 production UI save rejects failed admission without synchronous 
   const entry = source.slice(start, end);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-save-admission-'));
   try {
-    fs.writeFileSync(path.join(dir, 'app_state.zig'), 'pub usingnamespace @import("test.zig");\n');
     const production = entry.replaceAll('@import("app_state.zig")', '@This()').replaceAll('@import("win32.zig")', '@This()');
     fs.writeFileSync(path.join(dir, 'test.zig'), String.raw`
 const std = @import("std");

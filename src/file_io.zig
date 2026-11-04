@@ -247,8 +247,14 @@ pub fn flushPendingWrites() void {
 }
 
 pub fn writeFileAtomicW(path: []const u8, bytes: []const u8) bool {
-    if (bytes.len > 0 and uiThreadBusy()) {
+    if (uiThreadBusy()) {
         if (queueWrite(path, bytes)) return true;
+        const app_state = @import("app_state.zig");
+        if (!app_state.g_app_closing and app_state.g_main_hwnd != null and !g_save_failure_pending.swap(true, .acq_rel)) {
+            const w = @import("win32.zig");
+            if (app_state.FocusNative.PostMessageW(app_state.g_main_hwnd, w.WM_APP_APP_SAVE_FAILED, 0, 0) == 0) g_save_failure_pending.store(false, .release);
+        }
+        return false;
     }
     return writeFileAtomicSync(path, bytes);
 }
