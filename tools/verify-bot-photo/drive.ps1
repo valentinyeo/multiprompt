@@ -231,16 +231,16 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool
     Focus
     if (-not $tab.PSObject.Properties['favorite'] -or -not $tab.favorite) {
         Press @(0x12, 0x53)
-        [void](Wait-For 'favorite saved' { @((State).tabs)[(Index-For $Id)].favorite })
+        [void](Wait-For 'favorite saved' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['favorite'] -and $saved.favorite })
     }
     Press @(0x12, 0x31)
-    [void](Wait-For 'Starred workspace' { (State).starred_view })
+    [void](Wait-For 'Starred workspace' { $saved = State; $saved.PSObject.Properties['starred_view'] -and $saved.starred_view })
     if (-not $wasChat) {
         Press @(0x12, 0x43)
-        [void](Wait-For 'chat title visible' { @((State).tabs)[(Index-For $Id)].cv })
+        [void](Wait-For 'chat title visible' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['cv'] -and $saved.cv })
     }
     Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
-    [void](Wait-For 'Starred tile pinned' { @((State).tabs)[(Index-For $Id)].starred_pinned_top })
+    [void](Wait-For 'Starred tile pinned' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['starred_pinned_top'] -and $saved.starred_pinned_top })
     Shot "$Name-starred-header"
     if ($Generated) { Assert-Generated $index "$Name-starred" 'pinned' } else { Assert-Avatar 'pinned' $index "$Name-starred" $Tall }
     $failures = @()
@@ -260,7 +260,7 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool
     [void](Wait-For 'home workspace' { -not (State).starred_view })
     if (-not $wasChat) {
         Press @(0x12, 0x43)
-        [void](Wait-For 'shell view restored' { -not @((State).tabs)[(Index-For $Id)].cv })
+        [void](Wait-For 'shell view restored' { $saved = @((State).tabs)[(Index-For $Id)]; -not $saved.PSObject.Properties['cv'] -or -not $saved.cv })
     }
     if ($failures.Count -gt 0) { throw ($failures -join '; ') }
 }
