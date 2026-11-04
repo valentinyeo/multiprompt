@@ -17,6 +17,13 @@ function run(t, left = desktop, right = phone) {
   return spawnSync(process.execPath, [checker, path.join(dir, 'desktop.json'), path.join(dir, 'phone.json')], { encoding: 'utf8' });
 }
 
+test('shared Windows verification uses a portable CPU target', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const command = workflow.slice(workflow.indexOf('- name: Build the Windows app once for this push')).split('\n').find(line => line.includes('run: zig build'));
+  assert.match(command, /-Dtarget=x86_64-windows-gnu\b/);
+  assert.match(command, /-Dcpu=baseline\b/);
+});
+
 test('live picture proof measures the actual upload-to-render interval', t => {
   const result = run(t);
   assert.equal(result.status, 0, result.stderr);

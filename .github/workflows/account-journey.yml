@@ -49,7 +49,7 @@ jobs:
         if: inputs.tag == ''
         shell: pwsh
         run: |
-          zig build -Dtarget=x86_64-windows-gnu --summary all
+          zig build -Dtarget=x86_64-windows-gnu -Dcpu=baseline --summary all
           if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
           New-Item -ItemType Directory -Force bin | Out-Null
           Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
@@ -145,7 +145,7 @@ jobs:
       - name: Build the desktop app
         shell: pwsh
         run: |
-          zig build -Dtarget=x86_64-windows-gnu --summary all
+          zig build -Dtarget=x86_64-windows-gnu -Dcpu=baseline --summary all
           if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed' }
       - name: Upload the picture through the app
         shell: powershell
