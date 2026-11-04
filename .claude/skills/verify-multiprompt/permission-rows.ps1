@@ -57,6 +57,9 @@ Snapshot 'pending'
 Wait-ChatFocus 'Edit' 'permission-composer'
 Type-Text 'Keep this draft'
 Wait-Until { [VerifyNative]::EditText($composer) -ceq 'Keep this draft' } 'draft typed'
+$permissionKeyOffset = (Read-SharedText $keys).Length
+$permissionKeyDowns = @([regex]::Matches((Read-SharedText $events), 'KEY .*down=1')).Count
+function Read-PermissionKeys { (Read-SharedText $keys).Substring($permissionKeyOffset) }
 $expectedKeys = ''
 foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; index=1; digit='2' }, @{ entry='click'; index=2; digit='4' }, @{ entry='key'; index=0; digit='1' }, @{ entry='key'; index=1; digit='2' }, @{ entry='key'; index=2; digit='4' })) {
     $choices = Read-PermissionChoices
@@ -73,7 +76,7 @@ foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; in
         Press @((0x31 + $case.index)) ('Permission shortcut ' + ($case.index + 1))
     }
     $expectedKeys += $case.digit
-    Wait-Until { (Read-SharedText $keys) -ceq $expectedKeys } 'exact provider digit received' 45
+    Wait-Until { [string]::Equals((Read-PermissionKeys), $expectedKeys, [StringComparison]::Ordinal) } 'exact provider digit received' 45
     Wait-Until { $c = Read-PermissionChoices; $null -ne $c -and $c.chosen -eq $case.index } 'picked row recorded' 45
     Snapshot ($case.entry + '-' + ($case.index + 1) + '-picked')
     if ($case.entry -eq 'click' -and [VerifyNative]::EditText($composer) -cne 'Keep this draft') { throw 'Click changed the existing draft' }
@@ -81,9 +84,9 @@ foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; in
     Assert-Foreground
     [VerifyNative]::ClickClient($transcript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
     Start-Sleep -Milliseconds 700
-    if ((Read-SharedText $keys) -cne $expectedKeys) { throw 'Picked permission sent twice' }
+    if (-not [string]::Equals((Read-PermissionKeys), $expectedKeys, [StringComparison]::Ordinal)) { throw 'Picked permission sent twice' }
     $keyDowns = @([regex]::Matches((Read-SharedText $events), 'KEY .*down=1'))
-    if ($keyDowns.Count -ne $expectedKeys.Length) { throw 'Unexpected extra console keydown' }
+    if ($keyDowns.Count -ne $permissionKeyDowns + $expectedKeys.Length) { throw 'Unexpected extra console keydown' }
     if ($case.entry -eq 'click' -and $case.index -eq 2) {
         [VerifyNative]::ClickClient($composer, 8, 8)
         Press @(0x11, 0x41) 'Select draft'
