@@ -356,6 +356,26 @@ test('IGSH-1243 builds one linked line for each commit ticket', async () => {
   assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /needs plain ticketed lines/);
 });
 
+test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const files = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.1446";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1446", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    [path.posix.join('changelog.d', 'IGSH-1610-device.md')]: 'Devices can be approved when one host is offline.\n',
+  };
+  const commits = [
+    { sha: '8f52c2a6cf81d617d61bf6c439ec29719d850062', subject: 'Add AGENTS.md pointing every agent at CLAUDE.md (#737)' },
+    { sha: '246972c5', subject: 'IGSH-1610: Approve a device even when one SSH host is unreachable (#738)' },
+  ];
+  let generated;
+  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits); });
+  const latest = releaseNotes(generated, 'v0.28.1448').releases[0];
+  assert.deepEqual(latest.changes, ['Devices can be approved when one host is offline.']);
+  assert.match(generated, /\.ticket = "IGSH-1615"/);
+  assert.throws(() => buildChangelog(files, 'v0.28.1448', [], [{ sha: '8f52c2a6', subject: commits[0].subject }, commits[1]]), /8f52c2a6.*leading ticket ID/);
+});
+
 test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => {
   const { execFileSync } = require('node:child_process');
   const { buildChangelog } = await import('./version-stamp.mjs');

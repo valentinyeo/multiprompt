@@ -31,6 +31,10 @@ const reviewedReleases = {
   'v0.28.1339': ['1f91520248bd00bf99308dcec5717b3199574fdf', { 'IGSH-1266': 'A failed move to the terminal keeps your chat open.' }],
 };
 
+const reviewedCommits = {
+  '8f52c2a6cf81d617d61bf6c439ec29719d850062': 'IGSH-1615',
+};
+
 const checksOnly = checks;
 const ciTicket = /^HYCI-\d+$/;
 const releaseTicket = /^(?:IGSH|HYCI)-\d+$/;
@@ -172,13 +176,13 @@ export function buildChangelog(files, tag, history = [], commits = []) {
     const ciTickets = [];
     if (!reviewed) {
       for (const commit of stepCommits || []) {
-        const match = /^([A-Z][A-Z0-9]*-\d+)(?::|\s)/.exec(commit.subject);
-        if (!match) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
-        if (ciTicket.test(match[1])) {
-          if (!ciTickets.includes(match[1])) ciTickets.push(match[1]);
+        const ticket = reviewedCommits[commit.sha] ?? /^([A-Z][A-Z0-9]*-\d+)(?::|\s)/.exec(commit.subject)?.[1];
+        if (!ticket) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
+        if (ciTicket.test(ticket)) {
+          if (!ciTickets.includes(ticket)) ciTickets.push(ticket);
           continue;
         }
-        if (!notes.has(match[1])) notes.set(match[1], checksOnly);
+        if (!notes.has(ticket)) notes.set(ticket, checksOnly);
       }
     }
     const fragmentNotes = new Map();
