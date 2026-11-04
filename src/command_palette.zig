@@ -195,6 +195,9 @@ const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_S
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
+const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
+const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
+const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
 const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
@@ -928,6 +931,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_FOCUS_MESSAGES_OFFSET => "chat view focus messages keyboard up down enter options reply copy",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
+        SEARCH_CHAT_MODE_PLAN_OFFSET => "chat permission mode: plan",
+        SEARCH_CHAT_MODE_MANUAL_OFFSET => "chat permission mode: ask",
+        SEARCH_CHAT_MODE_EDITS_OFFSET => "chat permission mode: accept edits",
         SEARCH_SKILLS_BACK_OFFSET => "back",
         SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
         SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) words.computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
@@ -1237,6 +1243,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
     if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) return 1;
     if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
+    if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET) return 7;
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
         SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
@@ -3962,6 +3969,21 @@ pub fn updateSearchResults() void {
             labelsMatchQuery(&[_][]const u8{ "chat view focus messages", "select message", "message options", "up" }, app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (@import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: plan", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_PLAN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: ask", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_MANUAL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: accept edits", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_EDITS_OFFSET;
             app_state.g_search_result_count += 1;
         }
     }

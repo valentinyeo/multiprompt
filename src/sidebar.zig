@@ -248,6 +248,9 @@ const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_S
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
+const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
+const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
+const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
 const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
@@ -2704,6 +2707,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_focus_messages = result_idx == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
+                    const is_chat_mode = result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET or result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET or result_idx == SEARCH_CHAT_MODE_EDITS_OFFSET;
                     const is_chat_queue_send = result_idx == SEARCH_CHAT_QUEUE_SEND_OFFSET;
                     const is_chat_reset = result_idx == SEARCH_CHAT_RESET_OFFSET;
                     const is_chat_tab_url = result_idx == SEARCH_CHAT_TAB_URL_OFFSET;
@@ -2712,7 +2716,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_reply or is_chat_ac or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
+                    const is_chat_action = is_chat_tab_url or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -3715,6 +3719,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_hint_font);
                         var sa_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Ctrl+A"), -1, &sa_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_mode) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var mode_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        const label = if (result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET) L("Chat permission mode: Plan") else if (result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET) L("Chat permission mode: Ask") else L("Chat permission mode: Accept edits");
+                        _ = paletteDrawText(hdc, label, -1, &mode_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_ac) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

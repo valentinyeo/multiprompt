@@ -199,6 +199,12 @@ var g_voice_auto_sending = false;
 var g_voice_last_activity_tick: u64 = 0;
 var g_voice_utt_open = [_]struct { id: u64 = 0, consumed: bool = false }{.{}};
 var g_chat_ac_dialog_len: usize = 0;
+var g_chat_ac_dialog_shell_id: u32 = 0;
+var g_chat_ac_skill_command_len: usize = 0;
+var g_chat_ac_skill_shell_id: u32 = 0;
+var g_chat_ac_skill_command: [256]u16 = @splat(0);
+var mode_picker: ?bool = null;
+fn chatModeOpenPicker(plan: bool) void { mode_picker = plan; }
 var g_chat_ac_dialog_command: [256]u16 = @splat(0);
 var g_chat_draft_dirty = false;
 const TIMER_CHAT_REFRESH: u32 = 1;
@@ -293,6 +299,10 @@ fn clear() void {
     composer_text = &.{};
     terminal_notices = 0;
     g_chat_ac_dialog_len = 0;
+    g_chat_ac_dialog_shell_id = 0;
+    g_chat_ac_skill_command_len = 0;
+    g_chat_ac_skill_shell_id = 0;
+    mode_picker = null;
     shells[0].tmux_session_len = 0;
     chat_steer_prompt = false;
     active_shell = 0;
@@ -430,6 +440,26 @@ fn transcript(text: []const u16, stamp: i64) void {
     g_chat_last_len = text.len;
     g_chat_blocks[0] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = stamp };
     g_chat_block_count = 1;
+}
+test "delivery: IGSH-1522 live slash commands never enter the ordinary outbox" {
+    defer clear();
+    const wide = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{ wide("/plan"), wide("/permissions"), wide("/model"), wide("/resume"), wide("/rewind") }, 0..) |command, index| {
+        clear();
+        @memcpy(shells[0].tmux_session[0..9], "live-test");
+        shells[0].tmux_session_len = 9;
+        composer_text = command;
+        sendChatPrompt();
+        try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+        try std.testing.expectEqualSlices(u16, command, composer_text);
+        try std.testing.expectEqual(@as(usize, 0), terminal_notices);
+        if (index < 2) try std.testing.expectEqual(@as(?bool, index == 0), mode_picker) else try std.testing.expect(mode_picker == null);
+    }
+    clear();
+    composer_text = wide("/plan");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expect(mode_picker == null);
 }
 test "delivery: IGSH-1655 only terminal tabs get an Alt+C hint after a dialog command" {
     defer clear();

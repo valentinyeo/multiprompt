@@ -380,6 +380,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Up / Down / Enter in Chat View", .b = "Up in an empty message box focuses the newest message; Up/Down move between messages, Enter opens the right-click options, Esc or typing returns to the box", .header = false },
     .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
+    .{ .a = "/plan or /permissions in live chat / Ctrl+K \"Chat permission mode\"", .b = "Choose Plan, Ask, or Accept edits for this chat; /plan selects Plan first", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
     .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },

@@ -1007,6 +1007,13 @@ def reader_namespace():
     except Exception:
         pass
     namespace["start_held_worker"] = lambda *args: None
+    if state().get("slashProof"):
+        spec = importlib.util.spec_from_file_location("slash_host", Path(__file__).with_name("slash_host.py"))
+        slash_host = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(slash_host)
+        slash_host.install(namespace, ROOT, record)
+        if os.name == "nt":
+            namespace["events_wake"] = lambda: None
     if os.name == "nt" and state().get("name") in ("instant-chat", "startup-failure"):
         import msvcrt
         import types

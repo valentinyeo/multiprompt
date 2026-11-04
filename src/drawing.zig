@@ -699,10 +699,11 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const icon_w: i32 = uiScaled(34);
     const name = shell.name[0..shell.name_len];
     const text_w = measureTitleText(uiFontTitle(), name);
-    const max_w = @min(column.right - column.left - margin * 2, 2 * (right_limit - center));
+    const max_w = right_limit - column.left - margin;
     if (max_w < pad * 2 + uiScaled(40)) return null;
     const width = std.math.clamp(icon_w + text_w + pad * 2, pad * 2 + uiScaled(40), max_w);
-    layout.pill = .{ .left = center - @divTrunc(width, 2), .top = pill_top, .right = center - @divTrunc(width, 2) + width, .bottom = pill_top + pill_h };
+    const left = std.math.clamp(center - @divTrunc(width, 2), column.left + margin, right_limit - width);
+    layout.pill = .{ .left = left, .top = pill_top, .right = left + width, .bottom = pill_top + pill_h };
     layout.has_icon = icon_w > 0;
     const icon_size = uiScaled(28);
     const icon_top = pill_top + @divTrunc(pill_h - icon_size, 2);
@@ -973,7 +974,8 @@ test "IGSH-910 ETA and IGSH-1152 notice expiry preserve Chat View header pixels"
     Expire.calls = 0;
     app_state.g_gdip_api.fill_path = &Expire.fill;
     defer app_state.g_gdip_api.fill_path = Expire.next;
-    const notice = std.mem.span(L("Copied"));
+    try std.testing.expect(@import("focus.zig").SetWindowPos(window, null, 0, 0, 1000, height, 0x0016) != 0);
+    const notice = std.mem.span(L("This command is unavailable in live chat"));
     @memcpy(app_state.g_cap_msg_text[0..notice.len], notice);
     app_state.g_cap_msg_len = notice.len;
     app_state.g_cap_msg_until = std.math.maxInt(u64);
