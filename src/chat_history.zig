@@ -351,22 +351,7 @@ pub const History = struct {
         var sources = std.HashMap(SourcePosition, void, SourcePosition.Context, 80).init(scratch);
         var max_offset: ?u64 = null;
         var trailing_start: usize = 0;
-        var row_index: usize = 0;
-        var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
-        while (previous.next()) |old| {
-            if (old.len == 0) continue;
-            const key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, old, .{ .ignore_unknown_fields = true });
-            if (key.end > key.offset) try sources.put(.{ .segment = key.segment, .offset = key.offset, .end = key.end }, {});
-            if (key.end > key.offset) {
-                if (max_offset) |last| {
-                    if (key.offset < last) trailing_start = row_index;
-                } else trailing_start = row_index;
-                max_offset = key.offset;
-            } else if (max_offset == null) {
-                trailing_start = row_index + 1;
-            }
-            row_index += 1;
-        }
+        var scanned_sources = false;
         var incoming = std.mem.splitScalar(u8, added, '\n');
         var overlap = false;
         var ordered = false;
@@ -376,6 +361,25 @@ pub const History = struct {
             if (line.len == 0) continue;
             const key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, line, .{ .ignore_unknown_fields = true });
             try added_rows.append(scratch, line);
+            if (key.end > key.offset and !scanned_sources) {
+                var row_index: usize = 0;
+                var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
+                while (previous.next()) |old| {
+                    if (old.len == 0) continue;
+                    const old_key = try std.json.parseFromSliceLeaky(SourcePosition, scratch, old, .{ .ignore_unknown_fields = true });
+                    if (old_key.end > old_key.offset) try sources.put(.{ .segment = old_key.segment, .offset = old_key.offset, .end = old_key.end }, {});
+                    if (old_key.end > old_key.offset) {
+                        if (max_offset) |last| {
+                            if (old_key.offset < last) trailing_start = row_index;
+                        } else trailing_start = row_index;
+                        max_offset = old_key.offset;
+                    } else if (max_offset == null) {
+                        trailing_start = row_index + 1;
+                    }
+                    row_index += 1;
+                }
+                scanned_sources = true;
+            }
             overlap = overlap or (key.end > key.offset and sources.contains(.{ .segment = key.segment, .offset = key.offset, .end = key.end }));
             if (key.end <= key.offset) {
                 all_positioned = false;

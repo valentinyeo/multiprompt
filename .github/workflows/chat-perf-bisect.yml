@@ -170,7 +170,8 @@ jobs:
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Check the measurement reader
-        run: node --test after/tools/chat-update-speed.test.js
+        working-directory: after
+        run: node --test tools/chat-update-speed.test.js
       - name: Build the unchanged native workload
         env:
           BEFORE: ${{ inputs.before }}
