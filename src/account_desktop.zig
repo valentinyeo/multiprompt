@@ -1068,24 +1068,53 @@ fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutRep
     return aliases.toOwnedSlice(a);
 }
 
-fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !bool {
+fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !struct { complete: bool, skipped: []const u8 } {
     const Runner = struct {
         a: std.mem.Allocator,
         ssh: []const u8,
         escaped: []const u8,
+        skipped: ?*std.ArrayList([]const u8),
         pub fn apply(self: *@This(), alias: []const u8) !void {
-            errdefer debugLog2("account-keys: skipped unreachable SSH host:", alias);
+            errdefer {
+                debugLog2("account-keys: skipped unreachable SSH host:", alias);
+                if (self.skipped) |skipped| skipped.appendAssumeCapacity(alias);
+            }
             const command = try std.fmt.allocPrint(self.a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ self.ssh, alias, self.escaped });
             _ = try accountSshOutput(self.a, command, 30000);
         }
     };
-    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\"") };
+    var skipped: std.ArrayList([]const u8) = .empty;
+    if (reply.job.kind == .decide_keys) try skipped.ensureTotalCapacity(a, aliases.len);
+    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\""), .skipped = if (reply.job.kind == .decide_keys) &skipped else null };
     const rollout = account_keys.applyOnHosts(aliases, &runner);
     if (!rollout.reachedAny()) {
         accountDeviceKeyError(reply, "Could not update SSH access on any host. Check your connection and try again.");
-        return error.Process;
     }
-    return rollout.complete();
+    var labels: std.ArrayList(u8) = .empty;
+    if (skipped.items.len > 0) {
+        const known = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+        const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
+        for (skipped.items) |alias| {
+            if (labels.items.len > 0) try labels.appendSlice(a, ", ");
+            var name: []const u8 = "Server";
+            for (known, names, 0..) |target, fallback, slot| {
+                if (std.mem.eql(u8, alias, target)) {
+                    name = account_hosts.displayName(g_account_hosts_cache.hosts, @intCast(slot), fallback);
+                    break;
+                }
+            }
+            try labels.appendSlice(a, name);
+        }
+        if (!rollout.reachedAny()) {
+            if (reply.key_error) |old| {
+                const message = try std.fmt.allocPrint(std.heap.page_allocator, "Could not reach: {s}. Device not approved. Check your connection and try again.", .{labels.items});
+                std.heap.page_allocator.free(old);
+                reply.key_error = message;
+            }
+        }
+    }
+    if (!rollout.reachedAny()) return error.Process;
+    return .{ .complete = rollout.complete(), .skipped = labels.items };
 }
 
 fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutReply) !void {
@@ -1114,23 +1143,31 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
         defer decisions.deinit();
         for (decisions.value) |decision| {
             if (!account_keys.validDeviceId(decision.device_id) or !account_keys.validKey(decision.public_key)) return error.InvalidKey;
-            var current = false;
+            var device_name: ?[]const u8 = null;
             for (listing.value.keys) |key| {
-                if (key.status == .pending and std.mem.eql(u8, key.device_id, decision.device_id) and std.mem.eql(u8, key.public_key, decision.public_key) and !std.mem.eql(u8, key.device_id, listing.value.device_id)) current = true;
+                if (key.status == .pending and std.mem.eql(u8, key.device_id, decision.device_id) and std.mem.eql(u8, key.public_key, decision.public_key) and !std.mem.eql(u8, key.device_id, listing.value.device_id)) device_name = key.name;
             }
-            if (!current) return error.DeviceChanged;
+            const name = device_name orelse return error.DeviceChanged;
+            var skipped: []const u8 = "";
             if (decision.approve) {
                 const aliases = try accountKnownKeyHosts(a, ssh, reply);
                 if (aliases.len == 0) {
                     accountDeviceKeyError(reply, "No configured SSH hosts were found. The device was not approved.");
                     return error.InvalidHosts;
                 }
-                _ = try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
+                const outcome = try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
+                skipped = outcome.skipped;
             }
             const path = try std.fmt.allocPrint(a, "/v1/device-keys/{s}/{s}", .{ decision.device_id, if (decision.approve) "approve" else "deny" });
             const decided = try account_client.request("POST", path, access, "");
             defer decided.deinit();
             if (decided.status != 200) return error.DecideKey;
+            if (skipped.len > 0) {
+                const old = reply.bytes;
+                const message = try std.fmt.allocPrint(std.heap.page_allocator, "{s}{s} approved on reachable servers. Could not reach: {s}.\n", .{ if (old) |bytes| bytes else "", name, skipped });
+                if (old) |bytes| std.heap.page_allocator.free(bytes);
+                reply.bytes = message;
+            }
         }
         return;
     }
@@ -1142,7 +1179,8 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     if (cleaned) |bytes| try state.appendSlice(a, bytes);
     for (listing.value.keys) |key| {
         if (key.status != .revoked or account_keys.isCleaned(state.items, key.public_key) or aliases.len == 0) continue;
-        if (!try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply)) continue;
+        const outcome = try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply);
+        if (!outcome.complete) continue;
         try state.appendSlice(a, key.public_key);
         try state.append(a, '\n');
         if (!writeDpapiFile("account-keys-cleaned.dat", state.items)) return error.Storage;
@@ -1246,6 +1284,17 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (job.kind == .device_keys or job.kind == .decide_keys) {
         accountSyncDeviceKeys(access, job, reply) catch {
             accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
+            if (job.kind == .decide_keys) {
+                if (reply.bytes) |bytes| {
+                    const error_text = reply.key_error orelse "Could not update device approvals. Please try again.";
+                    if (std.fmt.allocPrint(std.heap.page_allocator, "{s}\n\n{s}", .{ error_text, bytes }) catch null) |combined| {
+                        if (reply.key_error) |old| std.heap.page_allocator.free(old);
+                        reply.key_error = combined;
+                    }
+                    std.heap.page_allocator.free(bytes);
+                }
+                reply.bytes = null;
+            }
         };
         return;
     }
@@ -1817,7 +1866,17 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             app_state.g_cap_msg_until = 0;
         }
     }
-    if (reply.job.kind == .device_keys or reply.job.kind == .decide_keys) return;
+    if (reply.job.kind == .decide_keys) {
+        if (reply.key_error == null and !reply.cancelled and !reply.unauthorized) {
+            if (reply.bytes) |notice| {
+                app_state.g_account_busy = true;
+                showSyncMessage(notice, false);
+                app_state.g_account_busy = false;
+            }
+        }
+        return;
+    }
+    if (reply.job.kind == .device_keys) return;
     const bytes = reply.bytes orelse {
         @import("room_frontend.zig").setAccount(null);
         accountSyncFailed(reply.has_token or app_state.g_account_has_token);
