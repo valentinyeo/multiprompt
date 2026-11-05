@@ -845,7 +845,7 @@ fn chatComposerScrollDragTo(hwnd: HANDLE, y: i32, grab: i32) void {
 fn chatComposerScrollMouse(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
     if (hwnd != app_state.g_chat_composer_hwnd) return false;
     switch (msg) {
-        WM_MOUSEWHEEL => {
+        0x020A => {
             const lines = chatComposerLines(hwnd);
             if (lines.total <= lines.visible) return false;
             const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
@@ -3189,9 +3189,11 @@ test "IGSH-1761 long pasted text leaves the composer scrolled so the caret line 
     _ = GetClientRect(edit, &client);
     chatComposerKeepCaretVisible();
     const lines = chatComposerLines(edit);
+    const probe_y = chatComposerCharY(edit, @intCast(len));
+    std.debug.print("IGSH-1761 first={d} visible={d} total={d} client_bottom={d} caret_y={any}\n", .{ lines.first, lines.visible, lines.total, client.bottom, probe_y });
     try std.testing.expect(lines.total > lines.visible);
     try std.testing.expect(lines.first > 0);
-    const caret_y = chatComposerCharY(edit, @intCast(len)) orelse return error.TestUnexpectedResult;
+    const caret_y = probe_y orelse return error.TestUnexpectedResult;
     try std.testing.expect(caret_y >= 0 and caret_y < client.bottom);
     try std.testing.expect(chatComposerThumb(edit, client.bottom - client.top) != null);
     _ = SendMessageW(edit, 0x00B1, 0, 0);
