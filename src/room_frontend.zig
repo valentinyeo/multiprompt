@@ -1379,6 +1379,14 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
         return;
     }
     if (visible) view.completeAction(item.token, if (state == .accepted) .accepted else .failed);
+    if (fresh and state == .uncertain and item.kind == .post) {
+        journal_checked_generation = null;
+        freePending(item);
+        scheduleDiscovery(c);
+        controller = null;
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        return;
+    }
     if (fresh and state == .accepted) {
         if (visible and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
         if (item.kind == .edit and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
@@ -1874,7 +1882,15 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
     } else item.id = journal.newCommandId() orelse return .failed;
     item.request = encodeCommand(a, kind, location, &item.id, room_id, revision, name, members.items, item.bindings) catch return .failed;
     journal.prepare(scope, kind, &item.id, room_id, revision, item.request, item.bindings) catch return .failed;
-    c.launchPrepared(kind, &item.id, room_id, revision) catch return .failed;
+    c.launchPrepared(kind, &item.id, room_id, revision) catch {
+        if (kind == .post) {
+            journal_checked_generation = null;
+            scheduleDiscovery(c);
+            controller = null;
+            _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        }
+        return .failed;
+    };
     pending_command = item;
     retained = true;
     _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
