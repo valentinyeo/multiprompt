@@ -34,14 +34,18 @@
     "resurrectArchivedByKey: showHeaderNoticeAscii(\"Archive cleanup failed\",4000,true)"
   ],
   "browser_pane.zig": [
+    "handleBrowserSigninDone: if(status==0)showHeaderNoticeAscii(\"Could not open Google sign-in; close remaining profile windows and retry\",8000,true)",
     "handleBrowserUrlQueryDone: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not pin this page\",4000,true)",
     "handleBrowserUrlQueryDone: @import(\"console.zig\").showHeaderNoticeAscii(\"This page address is too long\",4000,true)",
+    "launchBrowserForShellEx: if(user_initiated)showHeaderNoticeAscii(\"Close the Google sign-in window before reopening this profile\",5000,true)",
     "pinBrowserPage: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not pin this page\",4000,true)",
     "pinBrowserPage: @import(\"console.zig\").showHeaderNoticeAscii(if(err==error.TooLong)\"This page address is too long\"else\"Could not read this page\",4000,true)",
     "pinBrowserPage: if(!requestBrowserUrl(shell_id,.pin_page))@import(\"console.zig\").showHeaderNoticeAscii(\"Could not read this page\",4000,true)",
     "recoverBrowserUrlQuery: if(job.purpose==.pin_pageandbrowserUrlQueryOwner(job)!=null)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not read this page\",4000,true)",
     "savePinnedBrowserUrl: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not save this pinned page\",4000,true)",
     "signInGoogleForActiveTab: showHeaderNoticeAscii(\"Sign in to Google needs a Chrome profile tab\",5000,true)",
+    "signInGoogleForShell: deferif(!started)showHeaderNoticeAscii(\"Could not open Google sign-in; wait for profile panes and retry\",8000,true)",
+    "signInGoogleForShell: showHeaderNoticeAscii(\"Close the Google sign-in window before starting another sign-in\",5000,true)",
     "signInGoogleForShell: showHeaderNoticeAscii(\"Sign in to Google in the plain window, then close it\",8000,false)",
     "startDeferredBrowserUrlQuery: if(job.purpose==.pin_page)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not read this page\",4000,true)",
     "switchBrowserEngine: showHeaderNoticeAscii(\"Chrome browser bridge registration failed\",5000,true)",

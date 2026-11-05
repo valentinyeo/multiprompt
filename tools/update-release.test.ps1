@@ -26,11 +26,27 @@ function Wait-File([string]$Path) {
         Start-Sleep -Milliseconds 100
     }
 }
+function Read-SharedLog([string]$Path) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        try {
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            try {
+                $reader = New-Object IO.StreamReader($stream)
+                try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+            } finally { $stream.Dispose() }
+        } catch [IO.FileNotFoundException] { return '' }
+        catch [IO.IOException] {
+            if ([DateTime]::UtcNow -gt $deadline) { throw }
+            Start-Sleep -Milliseconds 25
+        }
+    } while ($true)
+}
 function Wait-CardView([string]$Path, [int]$From, [string]$View, [string[]]$Expected, [string]$Remaining) {
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         if ($cardProcess.HasExited) { throw 'Update card process exited before painting' }
-        $text = if (Test-Path -LiteralPath $Path) { [IO.File]::ReadAllText($Path) } else { '' }
+        $text = Read-SharedLog $Path
         $fresh = if ($text.Length -ge $From) { $text.Substring($From) } else { '' }
         $views = [regex]::Matches($fresh, '(?s)\[update\] card view=(collapsed|expanded) n=(\d+) first=([^\r\n]*)[^\n]*\n(.*?)\[update\] card remaining=([^\r\n]*)\r?\n')
         $matching = @($views | Where-Object { $_.Groups[1].Value -ceq $View })
@@ -61,21 +77,24 @@ function Click-CardMore($View) {
             Start-Sleep -Milliseconds ([int]$remaining)
         }
     }
-    $cardProcess.Refresh()
-    $hwnd = $cardProcess.MainWindowHandle
-    Assert ($hwnd -ne [IntPtr]::Zero -and [UpdateProof]::SetForegroundWindow($hwnd)) 'Could not focus update card window'
-    $point = New-Object UpdateProof+Point
-    $point.X = $View.moreX; $point.Y = $View.moreY
-    $client = New-Object UpdateProof+Rect
-    Assert ([UpdateProof]::GetClientRect($hwnd, [ref]$client)) 'Update card client bounds unavailable'
-    Assert ($point.X -ge 0 -and $point.Y -ge 0 -and $point.X -lt $client.R -and $point.Y -lt $client.B) 'More row is outside the client'
-    Assert ([UpdateProof]::ClientToScreen($hwnd, [ref]$point)) 'Cannot convert more row to screen coordinates'
-    Assert ([UpdateProof]::GetAncestor([UpdateProof]::WindowFromPoint($point), 2) -eq $hwnd) 'More row is obscured by another window'
-    Assert ([UpdateProof]::GetForegroundWindow() -eq $hwnd) 'Update card lost foreground before click'
-    Assert ([UpdateProof]::SetCursorPos($point.X, $point.Y)) 'Cannot move pointer to more row'
-    [UpdateProof]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
-    [UpdateProof]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
-    $script:lastCardClick = [Diagnostics.Stopwatch]::StartNew()
+    $dpiContext = [UpdateProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    Assert ($dpiContext -ne [IntPtr]::Zero) 'Cannot set per-monitor DPI awareness for card input'
+    try {
+        $cardProcess.Refresh()
+        $hwnd = $cardProcess.MainWindowHandle
+        Assert ($hwnd -ne [IntPtr]::Zero -and [UpdateProof]::SetForegroundWindow($hwnd)) 'Could not focus update card window'
+        $point = New-Object UpdateProof+Point
+        $point.X = $View.moreX; $point.Y = $View.moreY
+        $client = New-Object UpdateProof+Rect
+        Assert ([UpdateProof]::GetClientRect($hwnd, [ref]$client)) 'Update card client bounds unavailable'
+        Assert ($point.X -ge 0 -and $point.Y -ge 0 -and $point.X -lt $client.R -and $point.Y -lt $client.B) 'More row is outside the client'
+        Assert ([UpdateProof]::ClientToScreen($hwnd, [ref]$point)) 'Cannot convert more row to screen coordinates'
+        Assert ([UpdateProof]::WindowFromPoint($point) -eq $hwnd) 'More row is obscured by another window'
+        Assert ([UpdateProof]::GetForegroundWindow() -eq $hwnd) 'Update card lost foreground before click'
+        Assert ([UpdateProof]::SetCursorPos($point.X, $point.Y)) 'Cannot move pointer to more row'
+        [UpdateProof]::Click()
+        $script:lastCardClick = [Diagnostics.Stopwatch]::StartNew()
+    } finally { [void][UpdateProof]::SetThreadDpiAwarenessContext($dpiContext) }
 }
 function Select-Release([string]$Version) {
     $script:releaseFolder = Join-Path $Root $Version
@@ -127,7 +146,7 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p); [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern uint GetDoubleClickTime(); [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p); [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern uint GetDoubleClickTime(); [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; } [StructLayout(LayoutKind.Explicit)] public struct InputUnion { [FieldOffset(0)] public Mouse mouse; } [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public InputUnion data; } [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, Input[] inputs, int size); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context); public static void Click() { foreach (uint flags in new uint[] { 2, 4 }) { Input input = new Input(); input.data.mouse.flags = flags; if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed"); System.Threading.Thread.Sleep(35); } } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
@@ -145,6 +164,17 @@ try {
         }
         Assert ($timer.Elapsed.TotalSeconds -lt 20) 'Sign-in launch was blocked'
         if ($Evidence) {
+            $sharedLogFixture = Join-Path $Root 'shared-log-proof.txt'
+            $writer = [IO.File]::Open($sharedLogFixture, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            try {
+                $bytes = [Text.Encoding]::UTF8.GetBytes('first')
+                $writer.Write($bytes, 0, $bytes.Length); $writer.Flush()
+                Assert ((Read-SharedLog $sharedLogFixture) -ceq 'first') 'Shared log read failed while writer was open'
+                $bytes = [Text.Encoding]::UTF8.GetBytes(' second')
+                $writer.Write($bytes, 0, $bytes.Length); $writer.Flush()
+                Assert ((Read-SharedLog $sharedLogFixture) -ceq 'first second') 'Shared log read missed appended data'
+            } finally { $writer.Dispose(); Remove-Item -LiteralPath $sharedLogFixture -Force }
+            Passed 'shared log reads while writer remains open'
             $cardExe = Join-Path $Root 'card.exe'
             Copy-Item -LiteralPath $Verifier -Destination $cardExe -Force
             Select-Release 'v9.10.0'
@@ -231,7 +261,7 @@ try {
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
                 do {
-                    if ((Test-Path -LiteralPath $log) -and (-join (Get-Content $log -Raw)).Contains('update-card: launch path stamp captured')) { break }
+                    if ((Test-Path -LiteralPath $log) -and (Read-SharedLog $log).Contains('update-card: launch path stamp captured')) { break }
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not capture its launch stamp' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
@@ -245,7 +275,7 @@ try {
                 $message = [Convert]::ToUInt32($appMessage.Groups[1].Value.Substring(2), 16) + [uint32]$updateMessage.Groups[1].Value
                 Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, $message, [IntPtr]::Zero, [IntPtr]::Zero)) 'Update notification failed'
                 do {
-                    $cardLog = -join (Get-Content $log -Raw)
+                    $cardLog = Read-SharedLog $log
                     if ($cardLog.Contains('update-card: new version ready ' + $newVersion)) { break }
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Installed update was not offered on the card' }
                     Start-Sleep -Milliseconds 100
@@ -291,7 +321,10 @@ try {
                 Passed 'restart card reopens newer native app with session restored'
             } finally {
                 foreach ($proofFile in @($log, $sessionPath, (Join-Path $env:APPDATA 'ZigShell/inbox-default.json'))) {
-                    if (Test-Path $proofFile) { Copy-Item -LiteralPath $proofFile -Destination $Evidence -Force }
+                    if (Test-Path $proofFile) {
+                        if ($proofFile -eq $log) { [IO.File]::WriteAllText((Join-Path $Evidence 'debug.log'), (Read-SharedLog $log)) }
+                        else { Copy-Item -LiteralPath $proofFile -Destination $Evidence -Force }
+                    }
                 }
                 Get-Process | Where-Object { try { $processPath = $_.Path; $processPath -and $processPath.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) } catch { $false } } | Select-Object Id,Path,MainWindowTitle | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'restart-processes.json')
                 if ($cardProcess -and -not $cardProcess.HasExited) { $cardProcess.Kill(); $cardProcess.WaitForExit() }

@@ -49,11 +49,25 @@ function state() {
   };
 }
 
-function launchDecision(source, app_state, idx, computer = false) {
-  return runDecision(body(source, 'launchBrowserForShellEx').replaceAll('@import("computer_pane.zig").chosenFor', 'computerChosenFor'),
-    'if (app_state.g_app_closing', '    const launch_now',
-    { app_state, idx, webView2OwnsShell: () => false, computerChosenFor: () => computer });
+function launchDecision(source, app_state, idx, computer = false, signinBusy = false) {
+  const launch = body(source, 'launchBrowserForShellEx')
+    .replaceAll('@import("computer_pane.zig").chosenFor', 'computerChosenFor')
+    .replace('var launch_profile_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;', 'const launch_profile_buf = [];')
+    .replace('ownProfileTokenForLaunch(idx, &launch_profile_buf) orelse ""', 'ownProfileTokenForLaunch(idx)');
+  return runDecision(launch, 'if (app_state.g_app_closing', '    const launch_now', {
+    app_state, idx, webView2OwnsShell: () => false, computerChosenFor: () => computer,
+    ownProfileTokenForLaunch: index => app_state.shells[index].browser_profile_token,
+    browserSigninProfileBusy: () => signinBusy,
+    showHeaderNoticeAscii: () => {}, saveSession: () => {}, publishInboxState: () => {},
+  });
 }
+
+test('an active sign-in reservation prevents a controlled profile relaunch', () => {
+  const app = state();
+  assert.equal(launchDecision(pane, app, 1, false, true), undefined);
+  assert.equal(app.shells[1].browser_enabled, false);
+  assert.equal(app.shells[0].browser_enabled, true);
+});
 
 test('Computer selection prevents an ordinary browser relaunch', () => {
   assert.equal(launchDecision(pane, state(), 0, true), undefined);
