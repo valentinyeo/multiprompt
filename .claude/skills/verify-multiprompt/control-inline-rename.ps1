@@ -25,6 +25,15 @@
                 if (-not [VerifyNative]::GetWindowRect($h, [ref]$rect) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Rename Edit geometry unavailable' }
                 return @([int](($rect.Left + $rect.Right) / 2 - $origin.X), [int](($rect.Top + $rect.Bottom) / 2 - $origin.Y))
             }
+            function Rename-ClickNoEdit([int]$X, [int]$Y, [string]$Label) {
+                Record "Click $Label once and twice: no rename editor"
+                [VerifyNative]::ClickClient($script:window, $X, $Y)
+                Start-Sleep -Milliseconds 120
+                [VerifyNative]::ClickClient($script:window, $X, $Y)
+                Start-Sleep -Milliseconds 600
+                $h = [VerifyNative]::GetFocusedWindow($script:window)
+                if ($h -ne [IntPtr]::Zero -and [VerifyNative]::Class($h) -ceq 'Edit' -and [VerifyNative]::EditText($h) -ceq $current) { throw "Clicking $Label opened the rename editor" }
+            }
             function Rename-WaitSaved([string]$Name) {
                 Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$state.active_tab].name -ceq $Name } "saved session name $Name"
                 Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and @($inbox.shells | Where-Object { $_.sid -eq $sid -and $_.name -ceq $Name }).Count -eq 1 } "published Inbox name $Name"
@@ -42,8 +51,8 @@
             Rename-WaitChatView
             $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
             Doctor
-            Record 'Click the first sidebar session name in the isolated single-session workspace'
-            [VerifyNative]::ClickClient($script:window, [int](100 * $scale), [int](120 * $scale))
+            Rename-ClickNoEdit ([int](100 * $scale)) ([int](120 * $scale)) 'the first sidebar session name'
+            Press @(0x71) 'F2: locate the sidebar editor'
             $sidePoint = Rename-EditPoint $current
             Press @(0x1B) 'Esc: cancel sidebar geometry probe'
             Rename-WaitChatView
@@ -55,7 +64,8 @@
                 Press @(0x1B) 'Esc: cancel title geometry probe'
                 Rename-Snapshot "rename-$theme-title-before"
                 Doctor
-                [VerifyNative]::ClickClient($script:window, $titlePoint[0], $titlePoint[1])
+                Rename-ClickNoEdit $titlePoint[0] $titlePoint[1] 'the chat title'
+                Press @(0x71) 'F2: edit title with sidebar hidden'
                 [void](Rename-EditPoint $current)
                 Rename-Snapshot "rename-$theme-title-edit"
                 $current = "Title $theme"
@@ -70,7 +80,8 @@
                 if ([Math]::Abs($f2SidePoint[0] - $sidePoint[0]) -gt 10 -or [Math]::Abs($f2SidePoint[1] - $sidePoint[1]) -gt 10) { throw 'F2 did not open the sidebar editor' }
                 Press @(0x1B) 'Esc: cancel sidebar F2 probe'
                 Doctor
-                [VerifyNative]::ClickClient($script:window, $sidePoint[0], $sidePoint[1])
+                Rename-ClickNoEdit $sidePoint[0] $sidePoint[1] 'the sidebar session name'
+                Press @(0x71) 'F2: edit sidebar name'
                 [void](Rename-EditPoint $current)
                 Rename-Snapshot "rename-$theme-sidebar-edit"
                 $current = "Side $theme"
@@ -90,7 +101,7 @@
             Rename-WaitSaved $current
             Rename-Sidebar $false
             Doctor
-            [VerifyNative]::ClickClient($script:window, $sidePoint[0], $sidePoint[1])
+            Press @(0x71) 'F2: edit sidebar name for whitespace check'
             [void](Rename-EditPoint $current)
             Type-Text '   '
             Press @(0x0D) 'Enter: retain name after whitespace sidebar name'

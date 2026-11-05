@@ -2403,9 +2403,12 @@ HOST_HAX_BRIDGE = (
     "if '--hax-resume' in hax:\n"
     "    i=hax.index('--hax-resume');resume=hax[i+1];del hax[i:i+2]\n"
     "child=None\n"
+    "active=False\n"
     "out=threading.Lock()\n"
     "def emit(o):\n"
+    "    global active\n"
     "    with out:\n"
+    "        if o.get('type')=='bridge_end':active=False\n"
     "        sys.stdout.write(json.dumps(o,separators=(',',':'))+'\\n');sys.stdout.flush()\n"
     "def run(token,text):\n"
     "    global child,resume\n"
@@ -2444,8 +2447,9 @@ HOST_HAX_BRIDGE = (
     "    if not isinstance(message,dict):\n"
     "        continue\n"
     "    if message.get('type')=='prompt' and isinstance(message.get('id'),str) and isinstance(message.get('message'),str):\n"
-    "        if worker is not None and worker.is_alive():\n"
+    "        if active:\n"
     "            emit(dict(type='bridge_busy',id=message['id']));continue\n"
+    "        active=True\n"
     "        worker=threading.Thread(target=run,args=(message['id'],message['message']),daemon=True);worker.start()\n"
     "    elif message.get('type')=='abort' and child is not None:\n"
     "        try:\n"
@@ -6184,7 +6188,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 76
+RUNTIME_GENERATION = 77
 
 if __name__ == '__main__':
     import base64 as _base64
