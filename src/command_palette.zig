@@ -5420,7 +5420,7 @@ pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
     .{ .target = SEARCH_TABCTX_PIN_TOP, .label = "Pin" },
     .{ .target = SEARCH_TABCTX_WSMOVE, .label = "Move to workspace" },
     .{ .target = app_state.SEARCH_TABCTX_UNREAD, .label = "Mark as unread" },
-    .{ .target = SEARCH_RENAME_SYNC_OFFSET, .label = "Rename" },
+    .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
     .{ .target = app_state.SEARCH_TABCTX_COPY_ID, .label = "Copy chat ID" },
     .{ .target = app_state.SEARCH_TABCTX_HIDE, .label = "Hide from sidebar" },
     .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete" },

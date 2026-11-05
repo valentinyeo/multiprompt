@@ -1048,6 +1048,7 @@ pub const DRAG_MATERIALIZE_THRESH: i32 = 8;
 
 pub var g_edit_hwnd: HANDLE = null;
 pub var g_edit_tab: u32 = 0;
+pub var g_edit_sid: u32 = 0;
 pub var g_edit_orig_proc: isize = 0;
 pub var g_edit_is_group: bool = false;
 pub var g_edit_is_window: bool = false;
@@ -1675,6 +1676,7 @@ pub const SEARCH_BOT_PHOTO_RESET: usize = 7194;
 pub const SEARCH_TABCTX_UNREAD: usize = 7195;
 pub const SEARCH_TABCTX_COPY_ID: usize = 7196;
 pub const SEARCH_TABCTX_HIDE: usize = 7197;
+pub const SEARCH_TABCTX_RENAME: usize = 7198;
 pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
 pub const BOT_FACE_COUNT: usize = 21;
 pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;
