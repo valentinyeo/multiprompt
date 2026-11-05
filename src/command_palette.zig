@@ -322,6 +322,7 @@ const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_B
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
 const RepoRow = @import("vps.zig").RepoRow;
+const REPO_SCAN_ROWS = @import("app_state.zig").REPO_SCAN_ROWS;
 const repoRowsForHost = @import("vps.zig").repoRowsForHost;
 const SEARCH_CHAT_ATTACH_OFFSET = @import("app_state.zig").SEARCH_CHAT_ATTACH_OFFSET;
 const SEARCH_CHAT_DICTATION_OFFSET = @import("app_state.zig").SEARCH_CHAT_DICTATION_OFFSET;
@@ -1777,13 +1778,14 @@ fn repoRowMatchesQuery(row: *const RepoRow, query: []const u16) bool {
 
 var g_presented_repo_rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
 var g_presented_repo_count: u32 = 0;
+var g_repo_scan_rows: [REPO_SCAN_ROWS]RepoRow = undefined;
 
 pub fn pickRepoPresentedRows() []const RepoRow {
     return g_presented_repo_rows[0..g_presented_repo_count];
 }
 
 pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
-    var all: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    const all = &g_repo_scan_rows;
     const query = app_state.g_search_buf[0..app_state.g_search_len];
     const active = app_state.g_search_pick_repo_host;
     var count: u32 = 0;

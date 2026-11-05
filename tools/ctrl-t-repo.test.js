@@ -127,11 +127,13 @@ test('repository search executes production matching and ranking', () => {
   const lower = source.indexOf('pub fn u16ToLower(');
   const lowerEnd = source.indexOf('pub fn u16ContainsInsensitive', lower);
   assert.ok(start >= 0 && end > start && lower >= 0 && lowerEnd > lower);
+  assert.match(source, /var g_repo_scan_rows: \[REPO_SCAN_ROWS\]RepoRow = undefined;/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-search-'));
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, `const std = @import("std");
 const MAX_REPO_ROWS = 8;
+const REPO_SCAN_ROWS = 8;
 const RepoRow = struct { host: u8 = 0, path_len: u16 = 0, path: [255]u8 = [_]u8{0} ** 255, host_name_len: u8 = 0, host_name: [128]u8 = [_]u8{0} ** 128 };
 const app_state = struct {
     var g_search_pick_repo_host: u8 = 2;
