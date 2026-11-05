@@ -30,6 +30,20 @@ test('live picture proof measures the actual upload-to-render interval', t => {
   assert.deepEqual(JSON.parse(result.stdout), { status: 'passed', seconds: 5, photo_revision: 2 });
 });
 
+test('isolated paired apps prove both workspace colour directions', t => {
+  const left = { ...desktop, workspace_colors_required: true, workspace_colors: { workspace: 'Work', sent_color: 6, received_color: 4 } };
+  const right = { ...phone, workspace_colors_required: true, workspace_colors: { workspace: 'Work', sent_color: 4, received_color: 6 } };
+  assert.equal(run(t, left, right).status, 0);
+  for (const workspace_colors of [null, { ...left.workspace_colors, sent_color: 4 }, { ...left.workspace_colors, workspace: 'Notes' }]) {
+    assert.equal(run(t, { ...left, workspace_colors }, right).status, 1);
+  }
+  for (const workspace_colors of [null, { ...right.workspace_colors, received_color: 4 }, { ...right.workspace_colors, sent_color: 6 }]) {
+    assert.equal(run(t, left, { ...right, workspace_colors }).status, 1);
+  }
+  assert.equal(run(t, { ...left, workspace_colors_required: false }, right).status, 1);
+  assert.equal(run(t, left, { ...right, workspace_colors_required: false }).status, 1);
+});
+
 test('late or backwards phone pictures cannot pass', t => {
   for (const rendered_at of ['2026-01-01T00:01:00.001Z', '2025-12-31T23:59:59Z']) {
     assert.equal(run(t, desktop, { ...phone, rendered_at }).status, 1);

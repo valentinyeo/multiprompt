@@ -59,7 +59,7 @@ function Fetch([string]$Path) {
         $login = [Text.Encoding]::UTF8.GetString($stored) | ConvertFrom-Json
         [Array]::Clear($stored, 0, $stored.Length)
         if (!$login.PSObject.Properties['access_token']) { return $null }
-        return Invoke-RestMethod -Uri ($origin + $Path) -UserAgent 'multiprompt-account' -Headers @{ Authorization = 'Bearer ' + $login.access_token; 'X-Layout-Features' = 'bot_photo' } -TimeoutSec 15
+        return Invoke-RestMethod -Uri ($origin + $Path) -UserAgent 'multiprompt-account' -Headers @{ Authorization = 'Bearer ' + $login.access_token; 'X-Layout-Features' = 'workspace_color,bot_appearance,bot_photo,bot_palette8' } -TimeoutSec 15
     } catch { return $null }
 }
 function Shot([string]$Name) {
@@ -108,6 +108,34 @@ try {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
     Press @(0x11, 0x4b); Query 'phone ready' $index.value; Press @(0x0d)
     Shot 'desktop-before'
+    $result.workspace_colors_required = $origin -match '^https://[a-z0-9-]+\.trycloudflare\.com$'
+    if ($result.workspace_colors_required) {
+        [void](Wait-For 'phone workspace colour in account layout' {
+            $reply = Fetch '/v1/layout'
+            $reply -and @($reply.layout.workspaces | Where-Object { $_.name -ceq 'Work' -and $_.PSObject.Properties['color'] -and $_.color -eq 4 }).Count -eq 1
+        })
+        [void](Wait-For 'phone workspace colour in native desktop state' {
+            try {
+                $state = Get-Content $sessionPath -Raw | ConvertFrom-Json
+                @($state.workspaces | Where-Object { $_.name -ceq 'Work' -and $_.PSObject.Properties['color'] -and $_.color -eq 4 }).Count -eq 1
+            } catch { $false }
+        })
+        Shot 'desktop-colour-from-phone'
+        Press @(0x11, 0x4b); Query 'workspace color' 4003; Press @(0x0d)
+        Query 'mint' 7168; Press @(0x0d)
+        [void](Wait-For 'desktop workspace colour in account layout' {
+            $reply = Fetch '/v1/layout'
+            $reply -and @($reply.layout.workspaces | Where-Object { $_.name -ceq 'Work' -and $_.PSObject.Properties['color'] -and $_.color -eq 6 }).Count -eq 1
+        })
+        [void](Wait-For 'desktop workspace colour saved locally' {
+            try {
+                $state = Get-Content $sessionPath -Raw | ConvertFrom-Json
+                @($state.workspaces | Where-Object { $_.name -ceq 'Work' -and $_.PSObject.Properties['color'] -and $_.color -eq 6 }).Count -eq 1
+            } catch { $false }
+        })
+        Shot 'desktop-colour-to-phone'
+        $result.workspace_colors = @{ workspace = 'Work'; received_color = 4; sent_color = 6 }
+    }
     Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
     Query 'upload image' 7193; Press @(0x0d)
     $dialog = Wait-For 'owned image picker' {
