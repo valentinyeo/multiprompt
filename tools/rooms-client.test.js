@@ -5,6 +5,16 @@ const { spawnSync } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
 
+test('room input waits for the multiline composer instead of retaining the creation name field', () => {
+  assert.ok(fs.existsSync('tools/verify-rooms/drive.ps1'), 'The native room journey exists');
+  const driver = fs.readFileSync('tools/verify-rooms/drive.ps1', 'utf8');
+  assert.match(driver, /function Room-Composer\(\[IntPtr\]\$Room\)/);
+  assert.match(driver, /GetWindowLongW\(\$edit, -16\) -band 4/);
+  assert.match(driver, /Wait-For 'room composer'[^\n]*Room-Composer \$h/);
+  assert.match(driver, /Wait-For 'composer owns focus'/);
+  assert.match(driver, /Wait-For 'created room selected by the app'/);
+});
+
 for (const source of ['src/room_message.zig', 'src/room_journal.zig', 'src/rooms.zig']) {
   test(`desktop rooms protocol: ${source}`, () => {
     assert.ok(fs.existsSync('src/room_message.zig'), 'Rooms must plan explicit recipients before persisting a message');

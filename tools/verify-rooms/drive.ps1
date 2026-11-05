@@ -14,6 +14,13 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, System.Security, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class RoomNativeStyle {
+    [DllImport("user32.dll")] public static extern int GetWindowLongW(IntPtr window, int index);
+}
+'@
 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $profile = Join-Path $env:RUNNER_TEMP ('rooms-' + [guid]::NewGuid().ToString('N'))
@@ -108,6 +115,11 @@ function Room-Window {
     if ($app.HasExited) { throw ('App exited: '+$app.ExitCode) }
     $room = [VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'MultiPromptRoomView', 'Room')
     if ($room -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($room)) { return $room }
+}
+function Room-Composer([IntPtr]$Room) {
+    $edit = [ChatDeliveryDesktop]::Composer($Room)
+    if ($edit -ne [IntPtr]::Zero -and ([RoomNativeStyle]::GetWindowLongW($edit, -16) -band 4) -ne 0) { return $edit }
+    return [IntPtr]::Zero
 }
 function Witness {
     $path = Join-Path $env:MP_VERIFY_STATE 'witness.json'
@@ -212,8 +224,8 @@ try {
     Shot 'create-members'
     Press @(0x11,0x0d)
     [void](Wait-For 'room saved through remote store' { $w=Witness; $w -and @($w.rooms).Count -eq 1 -and @($w.rooms[0].members).Count -eq 2 })
-    $room = Wait-For 'room composer' { $h=Room-Window; if ($h -and [ChatDeliveryDesktop]::Composer($h) -ne [IntPtr]::Zero) { $h } }
-    $composer = [ChatDeliveryDesktop]::Composer($room)
+    $room = Wait-For 'room composer' { $h=Room-Window; if ($h -and (Room-Composer $h) -ne [IntPtr]::Zero) { $h } }
+    $composer = Room-Composer $room
     [void](Wait-For 'composer owns focus' { [ChatDeliveryDesktop]::Focus($main)[1] -eq $composer.ToInt64() })
     [void](Wait-For 'created room selected by the app' {
         try {
@@ -245,7 +257,7 @@ try {
     Stop-App
     Start-App
     $room = Wait-For 'selected room restored' { Room-Window }
-    $composer = Wait-For 'restored room composer' { $h=[ChatDeliveryDesktop]::Composer($room); if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Text($h) -ceq 'Keep this draft on old peers') { $h } }
+    $composer = Wait-For 'restored room composer' { $h=Room-Composer $room; if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Text($h) -ceq 'Keep this draft on old peers') { $h } }
     Check 'draft-restored' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Keep this draft on old peers')
     $witness = Witness
     Check 'room-and-members-restored' (@($witness.rooms).Count -eq 1 -and @($witness.rooms[0].members).Count -eq 2)
@@ -256,7 +268,7 @@ try {
     Start-App
     $room = Wait-For 'live room restored' { Room-Window }
     $composer = Wait-For 'live composer focus' {
-        $h = [ChatDeliveryDesktop]::Composer($room)
+        $h = Room-Composer $room
         if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Focus($main)[1] -eq $h.ToInt64()) { $h }
     }
     [void](Wait-For 'scoped room snapshot loaded' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
@@ -297,6 +309,7 @@ try {
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message
+    if ($app -and !$app.HasExited) { try { Shot 'failure' } catch {} }
     Save $result (Join-Path $Evidence 'result.json')
 } finally {
     try {

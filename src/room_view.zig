@@ -1249,16 +1249,16 @@ test "IGSH-1697 synthetic native create and room paint" {
             try std.testing.expectEqual(Mode.create, view.mode);
             try std.testing.expectEqual(action, view.pending.?);
             std.debug.print("IGSH-1697 {s} iteration {d}: pre-publication paint\n", .{ @tagName(response), iteration });
-            view.presented_revision = 99;
             try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
-            try std.testing.expectEqual(@as(u64, 0), view.presented_revision);
             try std.testing.expect(w.InvalidateRect(view.composer, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.composer) != 0);
 
             view.resetScope(&empty);
+            view.presented_revision = 99;
             try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
+            try std.testing.expectEqual(@as(u64, 0), view.presented_revision);
             create_arena.deinit();
             create_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             const r = room_arena.allocator();
