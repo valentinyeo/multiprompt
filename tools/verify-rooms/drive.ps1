@@ -305,6 +305,19 @@ try {
         try {
             if ($null -ne $accountJob) { $stopped=$accountJob.Stop(); $result.account_cleanup=$stopped.ActiveProcesses; $accountJob.Dispose() } else { $result.account_cleanup=0 }
         } finally {
+            if ($result.status -ne 'passed' -and $app -and !$app.HasExited) {
+                $result.phase='diagnostics: app stack'
+                Save $result (Join-Path $Evidence 'result.json')
+                $traceJob=[VerifyJob]::new()
+                try {
+                    $arguments='-NoProfile -NonInteractive -File "' + "$PSScriptRoot/trace.ps1" + '" -ProcessId ' + $app.Id + ' -Window ' + $main.ToInt64() + ' -Exe "' + $Exe + '" -Output "' + (Join-Path $Evidence 'native-trace.json') + '"'
+                    $tracer=$traceJob.Start((Get-Command powershell.exe).Source, $profile, (Join-Path $profile 'trace.stdout'), (Join-Path $profile 'trace.stderr'), $arguments, $true)
+                    if ($tracer.WaitForExit(20000)) { $result.trace_exit=$tracer.ExitCode } else { $result.trace_timeout=$true }
+                } catch { $result.trace_failed=$true } finally {
+                    $traceJob.Stop() | Out-Null
+                    $traceJob.Dispose()
+                }
+            }
             $result.phase='cleanup: app'
             Save $result (Join-Path $Evidence 'result.json')
             if ($null -ne $job) { $stopped=$job.Stop(); $result.cleanup=$stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup=0 }
