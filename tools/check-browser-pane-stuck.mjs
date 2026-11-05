@@ -40,7 +40,8 @@ function matrixContract(source) {
   assert.ok(features.pr.includes('appearance'), 'PR smoke includes appearance');
   assert.ok(features.full.includes('browser-pane-stuck'), 'master matrix includes browser recovery');
   assert.ok(source.includes('FEATURE: ${{ matrix.feature }}'));
-  assert.match(source, /^  pull_request:/m);
+  assert.match(source, /^  workflow_call:/m);
+  assert.match(read('.github/workflows/test.yml'), /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.doesNotMatch(source, /^\s+paths(?:-ignore)?:/m);
 }
 matrixContract(workflow);
