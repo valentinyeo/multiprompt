@@ -68,8 +68,30 @@ fn repositionActive() void {}
 fn showReconnectedConsole(_: u32) void {}
 fn invalidateReconnectContent(_: u32) void {}
 fn InvalidateRect(_: anytype, _: ?*anyopaque, _: u32) u32 { return 0; }
-fn saveSession() void {}
-var shells = [_]Shell{.{}};
+var save_calls: usize = 0;
+var publish_calls: usize = 0;
+var title_calls: usize = 0;
+var rename_calls: usize = 0;
+var rename_index: u32 = 0;
+var rename_shell_id: u32 = 0;
+var rename_name: [16384]u16 = undefined;
+var rename_name_len: usize = 0;
+var rename_sync = false;
+var private_actions_allowed = true;
+fn saveSession() void { save_calls += 1; }
+fn publishInboxState() void { publish_calls += 1; }
+fn updateMainWindowTitle() void { title_calls += 1; }
+fn privateActionsAllowed() bool { return private_actions_allowed; }
+fn applyCanonicalSessionRename(idx: u32, name: []const u16, sync: bool) bool {
+    rename_calls += 1;
+    rename_index = idx;
+    rename_shell_id = shells[idx].shell_id;
+    @memcpy(rename_name[0..name.len], name);
+    rename_name_len = name.len;
+    rename_sync = sync;
+    return true;
+}
+var shells = [_]Shell{ .{}, .{} };
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
 var g_chat_active = true;
@@ -308,6 +330,17 @@ fn clear() void {
     shells[0].tmux_session_len = 0;
     chat_steer_prompt = false;
     active_shell = 0;
+    shell_count = 1;
+    shells[1] = .{};
+    save_calls = 0;
+    publish_calls = 0;
+    title_calls = 0;
+    rename_calls = 0;
+    rename_index = 0;
+    rename_shell_id = 0;
+    rename_name_len = 0;
+    rename_sync = false;
+    private_actions_allowed = true;
     fake_now_ms = 2000;
     fake_loaded_ms = 0;
     history_entry.history.deinit(std.heap.page_allocator);
@@ -449,6 +482,49 @@ fn transcript(text: []const u16, stamp: i64) void {
     g_chat_last_len = text.len;
     g_chat_blocks[0] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = stamp };
     g_chat_block_count = 1;
+}
+test "delivery: IGSH-1679 rename uses the active shell without sending a message" {
+    clear();
+    defer clear();
+    shell_count = 2;
+    active_shell = 1;
+    shells[1].shell_id = 42;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("/rename  New name  ");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), rename_calls);
+    try std.testing.expectEqual(@as(u32, 1), rename_index);
+    try std.testing.expectEqual(@as(u32, 42), rename_shell_id);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("New name"), rename_name[0..rename_name_len]);
+    try std.testing.expect(rename_sync);
+    try std.testing.expectEqual(@as(usize, 1), save_calls);
+    try std.testing.expectEqual(@as(usize, 1), publish_calls);
+    try std.testing.expectEqual(@as(usize, 1), title_calls);
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+}
+test "delivery: IGSH-1679 blank and forbidden renames do not mutate" {
+    defer clear();
+    const wide = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{ wide("/rename   "), wide("/rename blocked") }, 0..) |command, index| {
+        clear();
+        private_actions_allowed = index == 0;
+        composer_text = command;
+        sendChatPrompt();
+        try std.testing.expectEqual(@as(usize, 0), rename_calls + save_calls + publish_calls + title_calls);
+        try std.testing.expectEqualSlices(u16, command, composer_text);
+        try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    }
+}
+test "delivery: IGSH-1679 ordinary composer text still uses the outbox" {
+    clear();
+    defer clear();
+    const message = std.unicode.utf8ToUtf16LeStringLiteral("ordinary message");
+    composer_text = message;
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, message, g_chat_outbox.items[0].text);
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    try std.testing.expectEqual(@as(usize, 0), rename_calls + save_calls + publish_calls + title_calls);
 }
 test "delivery: IGSH-1522 live slash commands never enter the ordinary outbox" {
     defer clear();
@@ -1899,6 +1975,10 @@ function runHarness(control = false) {
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
       .replaceAll('@import("inbox.zig").stampSessionUse', 'stampSessionUse')
+      .replaceAll('@import("inbox.zig").publishInboxState', 'publishInboxState')
+      .replaceAll('@import("archive.zig").applyCanonicalSessionRename', 'applyCanonicalSessionRename')
+      .replaceAll('@import("room_frontend.zig").privateActionsAllowed', 'privateActionsAllowed')
+      .replaceAll('@import("workspaces.zig").updateMainWindowTitle', 'updateMainWindowTitle')
       .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply')
       .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent')
       .replaceAll('@import("chat_composer.zig").chatShellDraftNoteSend', 'chatShellDraftNoteSend')

@@ -28,7 +28,7 @@ pub fn validate(intents: []const Intent) !void {
             if (face >= 20) return error.InvalidAppearance;
         }
         if (intent.color) |color| {
-            if (color >= 7) return error.InvalidAppearance;
+            if (color >= layout.color_count) return error.InvalidAppearance;
         }
         for (intents[0..i]) |previous| {
             if (same(previous.tmux_host, previous.tmux_session, intent)) return error.InvalidAppearance;
@@ -69,4 +69,13 @@ pub fn clone(a: std.mem.Allocator, intents: []const Intent) ![]Intent {
 pub fn free(a: std.mem.Allocator, intents: []Intent) void {
     for (intents) |intent| a.free(intent.tmux_session);
     a.free(intents);
+}
+
+test "IGSH-1533 pending color accepts white and auto but rejects eight" {
+    var intent = Intent{ .tmux_host = 0, .tmux_session = "one", .touched = color_bit, .color = 7 };
+    try validate(&.{intent});
+    intent.color = null;
+    try validate(&.{intent});
+    intent.color = 8;
+    try std.testing.expectError(error.InvalidAppearance, validate(&.{intent}));
 }

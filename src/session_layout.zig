@@ -2,12 +2,23 @@ const std = @import("std");
 const tmux_identity = @import("tmux_identity.zig");
 const Allocator = std.mem.Allocator;
 
+pub const color_count = 8;
+
+pub fn encodeTransferColor(color: ?u8) u8 {
+    const value = color orelse return 7;
+    return if (value == 7) 8 else value;
+}
+
+pub fn decodeTransferColor(value: u8) ?u8 {
+    return if (value < 7) value else if (value == 8) 7 else null;
+}
+
 pub const max_bytes = 1024 * 1024;
 pub const Host = @import("account_hosts.zig").Host;
 pub const Workspace = struct { name: []const u8, color: ?u8 = null };
 
 pub fn workspaceColor(order: usize, override: ?u8) u8 {
-    return override orelse @as(u8, @intCast(order % 7));
+    return override orelse @as(u8, @intCast(order % color_count));
 }
 pub const Tab = struct {
     kind: []const u8 = "tmux",
@@ -84,7 +95,7 @@ pub fn validate(layout: Layout) !void {
     if (layout.removed_hosts) |removed| try @import("account_hosts.zig").validateRemoved(removed);
     if (layout.hosts) |hosts| try @import("account_hosts.zig").validate(hosts);
     for (layout.workspaces, 0..) |ws, i| {
-        if (ws.color != null and ws.color.? >= 7) return error.InvalidLayout;
+        if (ws.color != null and ws.color.? >= color_count) return error.InvalidLayout;
         if (ws.name.len > 32 or !validText(ws.name, 32)) return error.InvalidLayout;
         for (layout.workspaces[0..i]) |old| if (std.mem.eql(u8, old.name, ws.name)) return error.InvalidLayout;
     }
@@ -96,7 +107,7 @@ pub fn validate(layout: Layout) !void {
             if (face >= 20) return error.InvalidLayout;
         }
         if (tab.color) |color| {
-            if (color >= 7) return error.InvalidLayout;
+            if (color >= color_count) return error.InvalidLayout;
         }
         if (tab.used) |used| if (used > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.input) |input| if (input > 9_007_199_254_740_991) return error.InvalidLayout;
@@ -126,7 +137,7 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
     if (parsed.value.settings == null and value.value.object.contains("settings")) return error.InvalidLayout;
     for (value.value.object.get("workspaces").?.array.items) |workspace| {
         if (workspace.object.get("color")) |color| {
-            if (color != .integer or color.integer < 0 or color.integer >= 7) return error.InvalidLayout;
+            if (color != .integer or color.integer < 0 or color.integer >= color_count) return error.InvalidLayout;
         }
     }
     for (value.value.object.get("tabs").?.array.items) |tab| {
@@ -134,7 +145,7 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
             if (face != .integer or face.integer < 0 or face.integer >= 20) return error.InvalidLayout;
         }
         if (tab.object.get("color")) |color| {
-            if (color != .integer or color.integer < 0 or color.integer >= 7) return error.InvalidLayout;
+            if (color != .integer or color.integer < 0 or color.integer >= color_count) return error.InvalidLayout;
         }
     }
     if (value.value.object.get("removed_hosts")) |removed| {
@@ -606,9 +617,9 @@ test "IGSH-1172 arbitrary workspace colors cycle validate and round trip" {
     var workspaces: [9]Workspace = undefined;
     for (names, 0..) |name, i| {
         workspaces[i] = .{ .name = name };
-        try std.testing.expectEqual(@as(u8, @intCast(i % 7)), workspaceColor(i, null));
+        try std.testing.expectEqual(@as(u8, @intCast(i % color_count)), workspaceColor(i, null));
     }
-    workspaces[1].color = 6;
+    workspaces[1].color = 7;
     const bytes = try encode(a, .{ .workspaces = &workspaces, .tabs = &.{} });
     defer a.free(bytes);
     const restored = try parse(a, bytes);
@@ -617,10 +628,35 @@ test "IGSH-1172 arbitrary workspace colors cycle validate and round trip" {
         try std.testing.expectEqualStrings(expected.name, actual.name);
         try std.testing.expectEqual(expected.color, actual.color);
     }
-    try std.testing.expectEqual(@as(u8, 6), workspaceColor(1, restored.value.workspaces[1].color));
-    workspaces[1].color = 7;
+    try std.testing.expectEqual(@as(u8, 7), workspaceColor(1, restored.value.workspaces[1].color));
+    workspaces[1].color = 8;
     try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &workspaces, .tabs = &.{} }));
     const legacy = try parse(a, "{\"workspaces\":[{\"name\":\"Cedar\"}],\"tabs\":[]}");
     defer legacy.deinit();
     try std.testing.expectEqual(@as(?u8, null), legacy.value.workspaces[0].color);
+}
+
+test "IGSH-1533 transfer colors retain legacy auto and reject out of range" {
+    for (0..color_count) |i| {
+        const color: u8 = @intCast(i);
+        try std.testing.expectEqual(@as(?u8, color), decodeTransferColor(encodeTransferColor(color)));
+    }
+    try std.testing.expectEqual(@as(u8, 7), encodeTransferColor(null));
+    try std.testing.expectEqual(@as(?u8, null), decodeTransferColor(7));
+    try std.testing.expectEqual(@as(u8, 8), encodeTransferColor(7));
+    try std.testing.expectEqual(@as(?u8, null), decodeTransferColor(9));
+}
+
+test "IGSH-1533 tab white and auto round trip and invalid color fails" {
+    const a = std.testing.allocator;
+    const white = try parse(a, "{\"workspaces\":[{\"name\":\"Other\",\"color\":7}],\"tabs\":[{\"name\":\"Agent\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\",\"color\":7}]}");
+    defer white.deinit();
+    try std.testing.expectEqual(@as(?u8, 7), white.value.tabs[0].color);
+    const bytes = try encode(a, white.value);
+    defer a.free(bytes);
+    const restored = try parse(a, bytes);
+    defer restored.deinit();
+    try std.testing.expectEqual(@as(?u8, 7), restored.value.tabs[0].color);
+    try std.testing.expectError(error.InvalidLayout, parse(a, "{\"workspaces\":[{\"name\":\"Other\",\"color\":8}],\"tabs\":[]}"));
+    try std.testing.expectError(error.InvalidLayout, parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"Agent\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\",\"color\":8}]}"));
 }

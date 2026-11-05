@@ -1130,7 +1130,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'initial transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Type-Composer $plan.text
             Press @(0x0D) 'Enter: send busy message' $true
-            [void](Wait-For 'exact message queued' { (Queue-View) -ceq ('queued:' + $plan.text) })
+            [void](Wait-For 'exact message queued' { @((Fake-State).queue) -ccontains $plan.text })
             [void](Wait-For 'composer remains empty' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' })
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
@@ -1141,21 +1141,54 @@ foreach ($plan in $plans) {
             [void](Wait-For 'transport settled while message remains queued' {
                 if (-not (Test-Path "$settings/chat-outbox.json")) { return $false }
                 $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
-                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text -and $_.s -eq 3 }).Count -eq 1
+                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text -and $_.v1 -eq 1 -and $_.phase -ceq 'accepted' }).Count -eq 1
             })
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-queued.json"
             Start-Sleep -Milliseconds 200
             Shot 'accepted-queued'
+            $copyMessage = {
+                $offset = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x4B) 'Ctrl+K: select transcript'
+                [void](Wait-For 'select-all palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+                $query = 'chat view select all'
+                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+                [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=[1-9]\d* target=6364(?:\s|$)') })
+                Press @(0x0D) 'Enter: select transcript'
+                [Windows.Forms.Clipboard]::Clear()
+                Press @(0x11, 0x43) 'Ctrl+C: copy transcript'
+                $copied = [Windows.Forms.Clipboard]::GetText()
+                Press @(0x1B) 'Esc: clear selection'
+                return $copied
+            }
+            $waitingCopy = & $copyMessage
+            [IO.File]::WriteAllText("$caseDir/waiting-copied.txt", $waitingCopy)
+            if ([regex]::Matches($waitingCopy, [regex]::Escape($plan.text)).Count -ne 1) { throw 'Waiting message must appear once' }
             Shell-Run @('accept')
             $frames = [Collections.Generic.List[object]]::new()
             for ($i = 0; $i -lt 16; $i++) {
                 $name = 'accepted-frame-' + $i
                 Shot $name
-                $captureMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-                $frames.Add(@{name=$name; ms=$captureMs})
+                $frames.Add(@{name=$name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()})
                 Start-Sleep -Milliseconds 80
             }
             $observation.frames = $frames.ToArray()
+            Shell-Run @('finish-accepted')
+            $transition = [Collections.Generic.List[object]]::new()
+            for ($i = 0; $i -lt 20; $i++) {
+                $name = 'accepted-transition-' + $i
+                Shot $name
+                $transition.Add(@{name=$name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()})
+                Start-Sleep -Milliseconds 80
+            }
+            $observation.transition = $transition.ToArray()
+            [void](Wait-For 'taken message reconciled with transcript' {
+                $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
+                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text }).Count -eq 0
+            })
+            $takenCopy = & $copyMessage
+            [IO.File]::WriteAllText("$caseDir/taken-copied.txt", $takenCopy)
+            if ([regex]::Matches($takenCopy, [regex]::Escape($plan.text)).Count -ne 1) { throw 'Taken message must appear once' }
+            Shot 'accepted-taken'
             $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isSendStays) {
