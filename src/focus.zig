@@ -429,6 +429,7 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     _ = eventTime;
     if (event != EVENT_SYSTEM_FOREGROUND) return;
     if (idObject != OBJID_WINDOW or idChild != 0) return;
+    @import("browser_pane.zig").syncUrlBarHotkey();
     @import("main.zig").sessionFrontChanged();
     if (focusGuardReturnFromPane(hwnd)) return;
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());

@@ -1363,7 +1363,6 @@ pub fn sessionFrontSelected() void {
 }
 
 pub fn sessionFrontChanged() void {
-    @import("browser_pane.zig").syncUrlBarHotkey();
     computer.sync();
     @import("room_frontend.zig").syncVisibility();
     @import("voice.zig").voiceManualFrontChanged();
