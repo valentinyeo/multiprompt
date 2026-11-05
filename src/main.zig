@@ -1253,6 +1253,7 @@ comptime {
         _ = @import("sidebar.zig");
         _ = @import("themes.zig");
         _ = @import("browser_pane.zig");
+        _ = @import("computer_pane.zig");
         _ = @import("capacity.zig");
         _ = @import("status_line.zig");
         _ = @import("update_card.zig");
