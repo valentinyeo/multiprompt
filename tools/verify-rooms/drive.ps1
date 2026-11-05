@@ -136,7 +136,7 @@ try {
     [IO.File]::AppendAllText($hostsFile, "`r`n127.0.0.1 $hostName`r`n")
     $accountState = Join-Path $profile 'account-state.json'
     $accountJob = [VerifyJob]::new()
-    $accountServer = $accountJob.Start((Get-Command node).Source, $profile, (Join-Path $profile 'account.stdout'), (Join-Path $profile 'account.stderr'), ('"' + "$repo/service/journey/server.mjs" + '" --bind=127.0.0.1 --port=443 --pfx="' + $pfx + '" --pfxpass=' + $passwordText + ' --state="' + $accountState + '"'))
+    $accountServer = $accountJob.Start((Get-Command node).Source, $repo, (Join-Path $profile 'account.stdout'), (Join-Path $profile 'account.stderr'), ('"' + "$repo/service/journey/server.mjs" + '" --bind=127.0.0.1 --port=443 --pfx="' + $pfx + '" --pfxpass=' + $passwordText + ' --state="' + $accountState + '"'))
     $passwordText = $null
     [void](Wait-For 'isolated account Worker' {
         if ($accountServer.HasExited) { throw 'Account fixture exited' }
@@ -257,6 +257,14 @@ try {
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message
+    try {
+        $accountError = Join-Path $profile 'account.stderr'
+        if (Test-Path $accountError) {
+            $diagnostic = [IO.File]::ReadAllText($accountError).Replace($profile, '<profile>').Replace($repo, '<repo>')
+            $diagnostic = [regex]::Replace($diagnostic, '[A-Za-z0-9_-]{43,}', '<redacted>')
+            Save @{exit_code=$(if ($accountServer -and $accountServer.HasExited) { $accountServer.ExitCode } else { $null }); error=$diagnostic.Substring(0, [Math]::Min(8000, $diagnostic.Length))} (Join-Path $Evidence 'account-error.json')
+        }
+    } catch {}
     try { $w=Witness; if ($w) { Save $w (Join-Path $Evidence 'witness.json') } } catch {}
     try {
         $reports = @(Get-ChildItem (Join-Path $settings 'crashes') -Filter 'crash-*.txt' -ErrorAction SilentlyContinue)
