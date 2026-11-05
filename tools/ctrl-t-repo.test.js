@@ -127,6 +127,7 @@ test('repository search executes production matching and ranking', () => {
   const lower = source.indexOf('pub fn u16ToLower(');
   const lowerEnd = source.indexOf('pub fn u16ContainsInsensitive', lower);
   assert.ok(start >= 0 && end > start && lower >= 0 && lowerEnd > lower);
+  assert.match(source, /var g_repo_scan_rows: \[REPO_SCAN_ROWS\]RepoRow = undefined;/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-search-'));
   try {
     const file = path.join(dir, 'test.zig');

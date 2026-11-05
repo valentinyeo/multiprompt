@@ -93,6 +93,7 @@ test('surviving shells cannot migrate roots to a new endpoint', t => {
   const row = vps.slice(vps.indexOf('pub const RepoRow = struct'), vps.indexOf('const MAX_REPO_ROWS'));
   const cache = vps.slice(vps.indexOf('const RepoStatus = enum'), vps.indexOf('var g_repo_caches:'));
   const listing = vps.slice(vps.indexOf('fn repoPathSafe('), vps.indexOf('pub fn repoRowAvailable('));
+  assert.match(cache, /rows: \[REPO_CACHE_ROWS\]RepoRow = undefined,/);
   const configure = vps.slice(vps.indexOf('fn repoConfigureCache('), vps.indexOf('pub fn requestRepoRefresh('));
   const publish = vps.slice(vps.indexOf('fn repoPublish('), vps.indexOf('fn repoFetchThread('));
   const file = path.join(root, 'identity.zig');

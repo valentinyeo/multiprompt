@@ -158,7 +158,7 @@ test('IGSH-1767 a folder past the displayed row limit stays discoverable and sea
   assert.match(vps, /rows: \[REPO_CACHE_ROWS\]RepoRow = undefined,/);
   const fetch = vps.slice(vps.indexOf('fn repoFetchThread('), vps.indexOf('fn repoConfigure('));
   assert.match(fetch, /alloc\(RepoRow, REPO_CACHE_ROWS\)/);
-  assert.doesNotMatch(fetch, /var rows: \[/);
+  assert.doesNotMatch(fetch, /var rows: \[[A-Za-z0-9_]/);
   const palette = fs.readFileSync('src/command_palette.zig', 'utf8');
   const filtered = palette.slice(palette.indexOf('pub fn pickRepoFilteredRows('), palette.indexOf('pub fn workspaceHostForNewTab'));
   assert.match(filtered, /const all = &g_repo_scan_rows;/);
