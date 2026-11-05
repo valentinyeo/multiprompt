@@ -78,6 +78,7 @@ fn chatResetSameChat(_: Key, _: Key) bool { return true; }
 var g_chat_pending_reset: ?ChatPendingReset = null;
 const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 fn chatLogSendPath(_: u32, _: ?*const Entry, _: ChatSendRoute, _: []const u8) void {}
+fn chatMessageCaptureAdmission(_: u32, _: *Entry) void {}
 const ChatSubmitPatch = struct { write_started: bool, state: @TypeOf(storage[0].state), retryable: bool };
 fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
     if (entry.message_v1) return true;

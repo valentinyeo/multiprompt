@@ -45,6 +45,7 @@ fn chatMessageGoesToHost(_: ShellKind, _: u8) bool { return false; }
 fn chatSendRoute(_: ShellKind, _: u8, _: bool) ChatSendRoute { return .terminal_send; }
 fn chatLogSendPath(_: u32, _: ?*const anyopaque, _: ChatSendRoute, _: []const u8) void {}
 fn chatUpgradeToHostMessage(_: u32, _: *ChatOutboxEntry) bool { return true; }
+fn chatMessageCaptureAdmission(_: u32, _: *ChatOutboxEntry) void {}
 var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;

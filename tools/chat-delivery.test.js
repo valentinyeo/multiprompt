@@ -115,6 +115,7 @@ const ChatTmuxSendJob = struct {
     history_instance: u64 = 0,
     message_generation: u64 = 0,
     message_epoch: u64 = 0,
+    message_admission_epoch: ?u64 = null,
     reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
@@ -309,6 +310,10 @@ fn clear() void {
     fake_now_ms = 2000;
     fake_loaded_ms = 0;
     history_entry.history.deinit(std.heap.page_allocator);
+    history_entry.message_synced = false;
+    history_entry.message_epoch = 0;
+    history_entry.key = .{ .shell_id = 1 };
+    g_chat_pending_reset = null;
     g_chat_screen_working = false;
     g_chat_read_open_pending = true;
     g_chat_read_open_ready = false;
@@ -1591,6 +1596,201 @@ test "delivery: IGSH-1010 cancellation survives restart without retry or termina
 }
 
 `;
+const admission1640 = String.raw`
+fn admissionSetup(epoch: u64) void {
+    history_entry.key = chatFileIdentityForShell(0);
+    history_entry.message_epoch = epoch;
+    history_entry.message_synced = true;
+}
+fn admissionEntry() !void {
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("request"), .queued);
+    const entry = &g_chat_outbox.items[g_chat_outbox.items.len - 1];
+    entry.message_v1 = true;
+    entry.message_sid = chatFileIdentityForShell(0).sid;
+    @memcpy(entry.message_wire_id[0..5], "id-01");
+}
+test "delivery: IGSH-1640 a live unknown admission is not invented during retry" {
+    clear();
+    defer clear();
+    defer { shells[0].kind = .cmd; shells[0].ai_agent = 0; }
+    shells[0].kind = .tmux;
+    shells[0].ai_agent = 1;
+    channel_enabled = true;
+    try admissionEntry();
+    admissionSetup(9);
+    const id = g_chat_outbox.items[0].id;
+    _ = sendTextToShellVerifiedAt(0, g_chat_outbox.items[0].text, id);
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+    try std.testing.expectEqual(id, g_chat_outbox.items[0].id);
+}
+test "delivery: IGSH-1640 the automatic tick releases an older stranded reservation" {
+    clear();
+    defer clear();
+    defer { shells[0].kind = .cmd; shells[0].ai_agent = 0; }
+    shells[0].kind = .tmux;
+    shells[0].ai_agent = 1;
+    channel_enabled = true;
+    admissionSetup(9);
+    try admissionEntry();
+    g_chat_outbox.items[0].message_admission_epoch = 8;
+    g_chat_outbox.items[0].state = .sending;
+    g_chat_outbox.items[0].write_started = true;
+    const id = g_chat_outbox.items[0].id;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(id, g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(?u64, 8), g_chat_outbox.items[0].message_admission_epoch);
+}
+test "delivery: IGSH-1640 durable enqueue admission round trips, including zero and unknown" {
+    clear();
+    defer clear();
+    admissionSetup(0);
+    try admissionEntry();
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    const id = g_chat_outbox.items[0].id;
+    try std.testing.expectEqual(@as(?u64, 0), g_chat_outbox.items[0].message_admission_epoch);
+    try std.testing.expect(saveChatOutbox());
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+    try reload();
+    try std.testing.expectEqual(id, g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(?u64, 0), g_chat_outbox.items[0].message_admission_epoch);
+    try std.testing.expect(g_chat_outbox.items[0].from_disk);
+    g_chat_outbox.items[0].message_admission_epoch = null;
+    try std.testing.expect(saveChatOutbox());
+    try reload();
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+    const legacy = "{\"version\":2,\"queues\":[{\"key\":\"test\",\"messages\":[{\"t\":\"legacy\",\"s\":0}]}]}";
+    chatOutboxFreeAll(std.heap.page_allocator);
+    chatOutboxParseJson(&g_chat_outbox, std.heap.page_allocator, legacy);
+    try std.testing.expect(g_chat_outbox.items[0].from_disk);
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+}
+test "delivery: IGSH-1640 enqueue captures before durable save" {
+    clear();
+    defer clear();
+    defer { shells[0].kind = .cmd; shells[0].ai_agent = 0; }
+    admissionSetup(17);
+    shells[0].kind = .tmux;
+    shells[0].ai_agent = 1;
+    const index = chatEchoEnqueueForShell(0, std.unicode.utf8ToUtf16LeStringLiteral("request"), .queued).?;
+    const id = g_chat_outbox.items[index].id;
+    try std.testing.expectEqual(@as(?u64, 17), g_chat_outbox.items[index].message_admission_epoch);
+    try reload();
+    try std.testing.expectEqual(id, g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(?u64, 17), g_chat_outbox.items[0].message_admission_epoch);
+    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
+}
+test "delivery: IGSH-1640 capture requires matching authoritative history and is stable" {
+    clear();
+    defer clear();
+    admissionSetup(12);
+    try admissionEntry();
+    history_entry.message_synced = false;
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+    history_entry.message_synced = true;
+    g_chat_outbox.items[0].message_sid[0] = 'x';
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    try std.testing.expectEqual(@as(?u64, null), g_chat_outbox.items[0].message_admission_epoch);
+    g_chat_outbox.items[0].message_sid = chatFileIdentityForShell(0).sid;
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    try std.testing.expectEqual(@as(?u64, 12), g_chat_outbox.items[0].message_admission_epoch);
+    history_entry.message_epoch = 13;
+    chatMessageCaptureAdmission(0, &g_chat_outbox.items[0]);
+    try std.testing.expectEqual(@as(?u64, 12), g_chat_outbox.items[0].message_admission_epoch);
+}
+test "delivery: IGSH-1640 older reservation persists recovery and rolls back failed save" {
+    clear();
+    defer clear();
+    admissionSetup(9);
+    try admissionEntry();
+    const entry = &g_chat_outbox.items[0];
+    entry.message_admission_epoch = 8;
+    entry.state = .sending;
+    entry.write_started = true;
+    entry.retryable = true;
+    const id = entry.id;
+    try std.testing.expect(saveChatOutbox());
+    persist_ok = false;
+    _ = chatOutboxRecoverOlderAdmission(0, 0);
+    try std.testing.expectEqual(ChatEchoState.sending, entry.state);
+    try std.testing.expect(entry.write_started and entry.retryable);
+    persist_ok = true;
+    _ = chatOutboxRecoverOlderAdmission(0, 0);
+    try std.testing.expectEqual(ChatEchoState.queued, entry.state);
+    try std.testing.expect(!entry.write_started and !entry.retryable);
+    try std.testing.expectEqual(id, entry.id);
+    try std.testing.expectEqual(@as(?u64, 8), entry.message_admission_epoch);
+    try reload();
+    try std.testing.expectEqual(id, g_chat_outbox.items[0].id);
+    try std.testing.expectEqual(@as(?u64, 8), g_chat_outbox.items[0].message_admission_epoch);
+    try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
+    try std.testing.expect(!g_chat_outbox.items[0].write_started and !g_chat_outbox.items[0].retryable);
+}
+test "delivery: IGSH-1640 recovery protects unknown current newer confirmed and pending" {
+    clear();
+    defer clear();
+    admissionSetup(9);
+    try admissionEntry();
+    const entry = &g_chat_outbox.items[0];
+    for ([_]?u64{ null, 9, 10 }) |epoch| {
+        entry.message_admission_epoch = epoch;
+        entry.state = .sending; entry.write_started = true; entry.retryable = true;
+        _ = chatOutboxRecoverOlderAdmission(0, 0);
+        try std.testing.expectEqual(ChatEchoState.sending, entry.state);
+        try std.testing.expect(entry.write_started and entry.retryable);
+    }
+    entry.message_admission_epoch = 8;
+    entry.state = .queued; entry.write_started = false; entry.retryable = false;
+    persist_ok = false;
+    _ = chatOutboxRecoverOlderAdmission(0, 0);
+    try std.testing.expectEqual(ChatEchoState.queued, entry.state);
+    try std.testing.expect(!entry.write_started and !entry.retryable);
+    persist_ok = true;
+    for (0..6) |case| {
+        entry.state = if (case == 3) .cancelled else .sending;
+        entry.write_started = true; entry.retryable = true;
+        entry.channel_pending = case == 0;
+        entry.reset_pending = case == 1;
+        entry.message_phase[0] = if (case == 2) 's' else 0;
+        entry.message_sid[0] = if (case == 4) 'x' else 's';
+        history_entry.message_synced = case != 5;
+        const state = entry.state;
+        _ = chatOutboxRecoverOlderAdmission(0, 0);
+        try std.testing.expectEqual(state, entry.state);
+        try std.testing.expect(entry.write_started and entry.retryable);
+    }
+}
+test "delivery: IGSH-1640 cancelled reducer retires only matching identity and late callback cannot resurrect" {
+    clear();
+    defer clear();
+    admissionSetup(9);
+    try admissionEntry();
+    const id = g_chat_outbox.items[0].id;
+    try admissionEntry();
+    @memcpy(g_chat_outbox.items[1].message_wire_id[0..5], "id-02");
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("native"), .queued);
+    const native_id = g_chat_outbox.items[2].id;
+    try g_chat_confirmed.append(std.heap.page_allocator, .{});
+    const json = try std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, "{\"id\":\"id-01\",\"state\":\"cancelled\"}", .{});
+    defer json.deinit();
+    try std.testing.expect(chatTmuxSendStart(0, g_chat_outbox.items[0].text, id, false, false, false));
+    g_chat_tmux_send_job.?.message_v1 = true;
+    g_chat_tmux_send_job.?.finished.store(true, .release);
+    try std.testing.expect(chatMessageReduce(0, json.value));
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqualStrings("id-02", std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0));
+    try std.testing.expectEqual(native_id, g_chat_outbox.items[1].id);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
+    chatTmuxSendFinish();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expect(chatOutboxIndexById(id) == null);
+}
+`;
 const parity1633 = String.raw`
 test "delivery: IGSH-1633 old sent messages cannot bury a live reply" {
     clear();
@@ -1666,7 +1866,7 @@ function runHarness(control = false) {
       const file = path.join(dir, 'chat_history.zig');
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
-    let functions = names.map(body).join('\n')
+    let functions = [...names, 'chatMessageCaptureAdmission', 'chatOutboxRecoverOlderAdmission'].map(body).join('\n')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
@@ -1713,10 +1913,23 @@ function runHarness(control = false) {
       }
       functions = functions.replace(body('chatEchoMatchActive'), match) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
-    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + parity1633 + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + admission1640 + parity1633 + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'sent-pile' || control === 'sent-pile-fixed' ? 'IGSH-1633' : control === 'question-old' ? 'IGSH-1063' : control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+test('IGSH-1640 admission is captured and recovered on production send paths', () => {
+  const enqueue = body('chatEchoEnqueueForShell');
+  assert.ok(enqueue.indexOf('message_sid =') < enqueue.indexOf('chatMessageCaptureAdmission('));
+  assert.ok(enqueue.indexOf('chatMessageCaptureAdmission(') < enqueue.indexOf('saveChatOutbox('));
+  const send = body('sendTextToShellVerifiedAt');
+  assert.ok(send.indexOf('chatUpgradeToHostMessage(') < send.indexOf('chatMessageCaptureAdmission('));
+  assert.ok(send.indexOf('chatMessageCaptureAdmission(') < send.indexOf('saveChatOutbox('));
+  const attempt = body('chatOutboxTrySendEntry');
+  assert.ok(attempt.indexOf('g_chat_pending_reset') < attempt.indexOf('chatOutboxRecoverOlderAdmission('));
+  assert.ok(attempt.indexOf('chatOutboxRecoverOlderAdmission(') < attempt.indexOf('chat_echo.mayType('));
+  assert.match(body('chatTmuxSendStart'), /message_admission_epoch/);
+  assert.match(body('chatTmuxSendThread'), /admission_epoch/);
+});
 test('IGSH-1415 the pending layout drops a local copy the transcript already carries', () => {
   assert.match(body('chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
 });
