@@ -1595,16 +1595,8 @@ pub fn paintInbox(hdc: HANDLE) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, faint);
     var footer = RECT{ .left = layout.left, .top = @max(0, h - uiScaled(30)), .right = layout.right, .bottom = h };
-    const hint = if (app_state.g_inbox_filter_active)
-        (if (app_state.g_unread_only) L("Unread only · Esc clear") else L("Esc clear search · Enter open · Up/Down move"))
-    else if (app_state.g_unread_only)
-        L("Unread only · Enter open · Ctrl+F search · E wait · U mark read · F2 rename · Esc close")
-    else
-        L("Enter open · Ctrl+F search · E wait · U mark read · F2 rename · Esc close");
     if (app_state.g_cap_msg_len > 0 and app_state.g_cap_msg_until > GetTickCount64()) {
         _ = DrawTextW(hdc, &app_state.g_cap_msg_text, @intCast(app_state.g_cap_msg_len), &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
-    } else {
-        _ = DrawTextW(hdc, hint, -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
     }
 }
 
