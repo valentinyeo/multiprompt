@@ -10,13 +10,15 @@ const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf
 const vps = fs.readFileSync(path.join(root, 'src/vps.zig'), 'utf8');
 
 test('reader expands relative home under its own login', () => {
-  const script = `source = open('src/chat_history_reader.py').read()
-outer = {}
+  const script = `from unittest.mock import patch
+source = open('src/chat_history_reader.py').read()
+outer = {'__name__': 'fixture'}
 exec(compile(source, '<reader>', 'exec'), outer)
-ns = {}
+ns = {'__name__': 'fixture'}
 exec(compile(outer['READER_SOURCE'], '<runtime>', 'exec'), ns)
-print(ns['host_folder']('~/projects/sample'))
-print(ns['host_folder']('/home/owner/projects/sample'))`;
+with patch('os.path.isdir', return_value=False), patch('os.listdir', return_value=[]):
+    print(ns['host_folder']('~/projects/sample'))
+    print(ns['host_folder']('/home/owner/projects/sample'))`;
   const result = spawnSync('python3', ['-c', script], { cwd: root, env: { ...process.env, HOME: '/home/reader' }, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.stdout.trim().split('\n'), ['/home/reader/projects/sample', '/home/owner/projects/sample']);

@@ -125,10 +125,12 @@
             if (Test-Path -LiteralPath $crashRoot) { $crashReports = @(Get-ChildItem -LiteralPath $crashRoot -Filter 'crash-*.txt' -File -ErrorAction SilentlyContinue).Count }
             if ($crashReports -ne 0) { throw 'Pick repo left a crash report behind' }
             Snapshot 'pick-repo-opened'
-            Press @(0x11, 0x57) 'Ctrl+W: close the tab Pick repo opened'
+            Palette 'close tab' '(7197|6232)'
+            Press @(0x0D) 'Enter: hide the tab Pick repo opened'
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore } 'Pick repo tab closed'
             $result.checks += @{ name = 'pick-repo-open'; shot = 'pick-repo-opened.png'; tabsBefore = $pickTabsBefore; tabsAfter = $openedTabs.Count; tabCwd = $pickedFolder; tabSelected = ($pickedActive -eq [int]$pickedTab.shell_id); crashReports = $crashReports }
-            Press @(0x11, 0x57) 'Ctrl+W: close the harness folder tab'
+            Palette 'close tab' '(7197|6232)'
+            Press @(0x0D) 'Enter: hide the harness folder tab'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
             Snapshot 'pick-repo-closed'
             Remove-Item -LiteralPath $repoCommands -Force

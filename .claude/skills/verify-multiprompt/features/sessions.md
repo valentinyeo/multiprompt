@@ -13,7 +13,7 @@ Open a real local console tab, give it a recognizable name and execute a command
 - Press Ctrl+K, type `new cmd`, and choose `New CMD Shell`.
 - The CMD spawn button and Ctrl+Shift+1 also open CMD; this journey covers the palette entry only.
 - Press F2 or double-click the active tab to rename it. This journey uses F2.
-- Type in the console and press Enter to execute. Ctrl+Tab / Ctrl+Shift+Tab cycle sessions; Ctrl+1 through Ctrl+9 select one. Ctrl+W quits the app without ending agents; `Hide from sidebar` removes a tab.
+- Type in the console and press Enter to execute. Ctrl+Tab / Ctrl+Shift+Tab cycle sessions; Ctrl+1 through Ctrl+9 select one; Ctrl+W quits the app.
 - Right-click a tab opens its tab-actions palette for pin, move and other actions; these are not exercised by this create/rename journey.
 
 ## Driving it with control.ps1

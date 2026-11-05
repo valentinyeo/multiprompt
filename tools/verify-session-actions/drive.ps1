@@ -40,11 +40,13 @@ $main = [IntPtr]::Zero
 $result = @{status='failed'; checks=$checks; error=$null; cleanup='pending'; boundary='Offline account; synthetic SSH, provider processes and transcripts; real native app and production session-end commands'}
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false)) }
 function Wait-For([string]$ConditionName, [scriptblock]$Check) {
+    Write-Host "[session-actions] wait: $ConditionName"
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($timer.Elapsed.TotalSeconds -lt 90)
     throw "Timed out: $ConditionName"
 }
 function Check([string]$Name, [bool]$Condition) {
+    Write-Host "[session-actions] check: $Name = $Condition"
     $checks.Add(@{name=$Name; passed=$Condition})
     if (!$Condition) { throw "Failed: $Name" }
 }
@@ -65,6 +67,7 @@ function Focus {
     })
 }
 function Press([int[]]$Keys) {
+    Write-Host ('[session-actions] press: ' + (($Keys | ForEach-Object { '0x{0:X2}' -f $_ }) -join '+'))
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
     if ($app.HasExited -or [ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell' -or [ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Keyboard owner mismatch' }
     $held=[Collections.Generic.List[int]]::new()
@@ -89,6 +92,7 @@ function Press([int[]]$Keys) {
     }
 }
 function Palette([string]$Query, [int]$Target) {
+    Write-Host "[session-actions] palette: $Query target=$Target"
     $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='palette'; query=$Query; target=$Target})
     Focus
     $offset = (Log).Length
@@ -100,6 +104,7 @@ function Palette([string]$Query, [int]$Target) {
     Press @(0x0d)
 }
 function Shot([string]$Name) {
+    Write-Host "[session-actions] screenshot: $Name"
     $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='screenshot'; name=$Name})
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -143,6 +148,7 @@ function Context([int]$Index) {
         if ($found) { return ,$found }
     }
     $offset = (Log).Length
+    Write-Host "[session-actions] right-click: tab $Index"
     [ChatDeliveryDesktop]::RightClickClient($main, [uint32]$app.Id, [int](($pair[0]+$pair[2])/2), [int](($pair[1]+$pair[3])/2))
     [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7197 7112(?:\s|$)' })
 }
@@ -216,6 +222,22 @@ try {
     Start-App
     Check 'quit-reopen-retains-both-chats' (@((Session).tabs | Where-Object { $_.name -in @('Alpha','Beta') }).Count -eq 2)
     Shot 'after-reopen'
+    Palette 'new cmd' 2000
+    [void](Wait-For 'local CMD tab created' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1 })
+    Palette 'copy chat id' 7196
+    $localId=[Windows.Forms.Clipboard]::GetText()
+    Check 'local-chat-id-minted' ($localId -match '^session:#[0-9a-f]{16}$' -and $localId -ne 'session:#0000000000000000')
+    [void](Wait-For 'local chat id saved' { $s=Session; $tab=@($s.tabs | Where-Object { $_.kind -eq 'cmd' }); $tab.Count -eq 1 -and $tab[0].chat_id -gt 0 })
+    Press @(0x11,0x57)
+    [void](Wait-For 'local ID restart quits' { $app.HasExited })
+    Stop-AppJob
+    Start-App
+    Palette 'copy chat id' 7196
+    Check 'local-chat-id-survives-restart' ([Windows.Forms.Clipboard]::GetText() -ceq $localId)
+    Palette 'close tab' 7197
+    [void](Wait-For 'local CMD tab hidden' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -eq 0 })
+    Check 'close-tab-alias-keeps-both-agents' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
+    Palette 'Alpha' 0
     Press @(0x12,0x58)
     Check 'Alt-X-does-not-end-an-agent' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
     Check 'Alt-X-does-not-close-a-chat' (@((Session).tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq 2)
@@ -236,8 +258,16 @@ try {
     }
     Context 1
     Shot 'right-click-seven-actions'
+    for ($i=0; $i -lt 3; $i++) { Press @(0x28) }
+    Press @(0x0d)
+    [void](Wait-For 'background rename opens inline editor' { $h=[VerifyNative]::GetFocusedWindow($main); $h -ne [IntPtr]::Zero -and [VerifyNative]::Class($h) -eq 'Edit' -and [VerifyNative]::EditText($h) -ceq 'Beta' })
+    Shot 'background-inline-rename'
+    Press @(0x0d)
+    [void](Wait-For 'background rename retains selected chat' { $s=Session; $s -and $s.tabs[$s.active_tab].name -ceq 'Alpha' -and @($s.tabs | Where-Object { $_.name -ceq 'Beta' }).Count -eq 1 })
+    Context 1
     $menu=[Drawing.Bitmap]::new((Join-Path $Evidence 'right-click-seven-actions.png'))
     $red=0
+    Write-Host "[session-actions] scan red pixels: $($menu.Width)x$($menu.Height)"
     try { for ($y=0; $y -lt $menu.Height; $y++) { for ($x=0; $x -lt $menu.Width; $x++) { $pixel=$menu.GetPixel($x,$y); if ($pixel.R -gt 140 -and $pixel.G -lt 110 -and $pixel.B -lt 110) { $red++ } } } } finally { $menu.Dispose() }
     Check 'delete-has-red-pixels' ($red -gt 10)
     for ($i=0; $i -lt 6; $i++) { Press @(0x28) }
