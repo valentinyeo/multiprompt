@@ -1567,7 +1567,7 @@ test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four 
   assert.match(read('tools/chat-local-agent.c'), /WriteConsoleW\(output, clear,[^\n]+\n\s*CONSOLE_SCREEN_BUFFER_INFO info;\s*if \(!GetConsoleScreenBufferInfo\(output, &info\)\) return 4;\s*COORD origin = \{0, info.srWindow.Bottom\}/);
 });
 
-test('IGSH-612 palette-order journey seeds only the usage fixture and fails releases on the selected row', () => {
+test('palette-order journey checks seeded usage and restored session ranking', () => {
   assert.match(control, /ValidateSet\([^\n)]*'palette-order'/);
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('palette-order'));
@@ -1579,8 +1579,19 @@ test('IGSH-612 palette-order journey seeds only the usage fixture and fails rele
   assert.match(journey, /\$ids\[0\] -ne 'h0'/);
   assert.match(journey, /text = 'chat view per tab'; id = 0/);
   assert.match(journey, /text = 'copy shell diagnostics'; id = 6247/);
-  assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
-  const fixture = read('tools/fixtures/IGSH-612/palette-usage.tsv').split('\r\n').filter(Boolean).map(line => line.split('\t'));
+  const restart = journey.indexOf("Restart-SessionRestore 'palette-ranking'");
+  assert.ok(restart > 0);
+  assert.doesNotMatch(journey.slice(0, restart), /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
+  const restored = journey.slice(restart);
+  assert.match(restored, /WriteAllText\(\(Join-Path \$config 'session\.json'\)/);
+  assert.match(restored, /WriteAllText\(\(Join-Path \$config 'windows\.json'\)/);
+  assert.match(restored, /name = 'Funeralprints'/);
+  assert.doesNotMatch(restored, /WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
+  assert.match(control, /tools\/fixtures\/IGSH-1743\/palette-usage\.tsv/);
+  const fixture = read('tools/fixtures/IGSH-1743/palette-usage.tsv').split('\r\n').filter(Boolean).map(line => line.split('\t'));
+  const original = read('tools/fixtures/IGSH-612/palette-usage.tsv').split('\r\n').filter(Boolean).map(line => line.split('\t'));
+  const replacements = { 2000: '6295', 2005: '6248', 2002: '6240' };
+  assert.deepEqual(fixture, original.map(([id, count, last]) => [replacements[id] ?? id, count, last]));
   assert.ok(fixture.length > 10);
   for (const [id, count, last] of fixture) {
     assert.match(id, /^\d+$/);

@@ -23,7 +23,7 @@ Open an empty Ctrl+K with a known usage history and check the Most used band, th
 Preconditions:
 
 - Baseline Doctor passes with the single initial CMD tab, so no recent session rows lead the list.
-- Before launch the harness copies `tools/fixtures/IGSH-612/palette-usage.tsv` to `%APPDATA%\ZigShell\palette-usage.tsv`. Each line is a command id, a use count and a last-used Windows file time.
+- Before launch the harness copies `tools/fixtures/IGSH-1743/palette-usage.tsv` to `%APPDATA%\ZigShell\palette-usage.tsv`. This revises the IGSH-612 fixture to use current empty-palette commands while retaining its counts and timestamps. Each line is a command id, a use count and a last-used Windows file time.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=palette-order`; Windows runs `control.ps1 -Feature palette-order`. Add `-f tag=<release>` to run the same journey against a release.
 - **Open.** Press Ctrl+K and wait for `[palette] ready chars=0`. Capture `action.png`.

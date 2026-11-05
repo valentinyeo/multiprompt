@@ -200,7 +200,7 @@ try {
         $scheme = if ($env:CAPTION_BROWSER_THEME -eq 'light') { 1 } else { 2 }
         @{ browser = @{ theme = @{ color_scheme = $scheme } } } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $profile 'Default/Preferences')
     }
-    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-612/palette-usage.tsv'
+    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-1743/palette-usage.tsv'
     if ($Feature -eq 'palette-order') {
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
