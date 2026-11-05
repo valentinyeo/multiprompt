@@ -36,6 +36,15 @@ test('IGSH-1507 the plain sign-in launch keeps the profile and drops every contr
   assert.match(matcher, /SIGNIN_HOST/, 'the matcher must pin the Google accounts host');
 });
 
+test('IGSH-1507 plain Chrome skips first-run and default-browser prompts', () => {
+  const body = functionBody(read('src/browser_signin.zig'), 'plainProfileLaunch');
+  const command = body.match(/std\.fmt\.bufPrint\(out, "((?:\\.|[^"\\])*)"/);
+  assert.ok(command, 'plain Chrome launch must format a command line');
+  for (const flag of ['--no-first-run', '--no-default-browser-check']) {
+    assert.ok(command[1].split(' ').includes(flag), `plain Chrome must include ${flag}`);
+  }
+});
+
 test('IGSH-1507 a rejected Google sign-in page turns the controlled pane into a plain window', () => {
   const pane = read('src/browser_pane.zig');
   assert.match(pane, /const browser_signin = @import\("browser_signin\.zig"\);|@import\("browser_signin\.zig"\)/);
