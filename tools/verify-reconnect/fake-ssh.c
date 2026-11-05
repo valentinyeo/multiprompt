@@ -72,6 +72,15 @@ int main(int argc, char **argv) {
     }
     char *victim = strstr(cmd, "tmux kill-session -t ");
     if (victim) {
+        snprintf(path, sizeof(path), "%s\\kill-offline", root);
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 255;
+        snprintf(path, sizeof(path), "%s\\kill-hold", root);
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+            char marker[MAX_PATH];
+            snprintf(marker, sizeof(marker), "%s\\kill-held-%lu.txt", root, GetCurrentProcessId());
+            FILE *held = fopen(marker, "wb"); if (!held) return 96; fputs(cmd, held); fclose(held);
+            while (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) Sleep(20);
+        }
         victim += strlen("tmux kill-session -t ");
         while (*victim == '\'' || *victim == '"') victim++;
         victim[strcspn(victim, " '\";\r\n")] = 0;
@@ -85,6 +94,8 @@ int main(int argc, char **argv) {
         int moved = 0;
         for (int attempt = 0; attempt < 50 && !moved; attempt++) { moved = MoveFileExA(path, target, MOVEFILE_REPLACE_EXISTING); if (!moved) Sleep(40); }
         if (!moved) return 94;
+        snprintf(path, sizeof(path), "%s\\kill-done-%lu.txt", root, GetCurrentProcessId());
+        FILE *done = fopen(path, "wb"); if (!done) return 97; fputs(victim, done); fclose(done);
         return 0;
     }
     if (strstr(cmd, "tmux list-sessions -F")) {

@@ -93,14 +93,13 @@ test('IGSH-1266 a kill that never reached the server is retried in the backgroun
 
   const end = body('src/archive.zig', 'pub fn endTmuxSessionAt(', 'pub fn endActiveTmuxSession(');
   assert.match(end, /const outcome = killRemoteTmuxSession\(/);
-  assert.match(end, /if \(outcome == \.retry\) queuePendingSessionKill\(/, 'an unreachable kill must be queued');
-  assert.ok(!/if \(outcome == \.retry\)[\s\S]*?showHeaderNoticeAscii/.test(end), 'a slow server must not raise a header notice');
+  assert.match(end, /outcome == \.retry and !queuePendingSessionKill\(/, 'an unreachable kill must be admitted before closing');
   assert.ok(end.indexOf('closeShellRemember(') > end.indexOf('queuePendingSessionKill('), 'the tab must close after the kill is queued');
   assert.ok(!end.includes('if (!killRemoteTmuxSession'), 'the tab must not stay open on a failed kill');
 
   const retry = body('src/archive.zig', 'pub fn retryPendingSessionKills(', 'fn remoteNameIsSafe(');
-  assert.ok(retry.includes('if (killRemoteTmuxSession(session, entry.host, entry.sid[0..entry.sid_len]) == .gone) {'));
-  assert.match(retry, /queuePendingSessionKill\(/, 'a failed retry must stay queued');
+  assert.match(retry, /g_pending_session_kills\.begin\(slot\)/);
+  assert.match(retry, /g_pending_session_kills\.finish\(pending\.token, outcome\)/, 'completion must update the original intent');
 
   const fetch = body('src/vps.zig', 'fn tmuxFetchThreadDual(', 'fn vpsPollCachePath(');
   assert.match(fetch, /@import\("archive\.zig"\)\.retryPendingSessionKills\(\);/);
@@ -108,7 +107,7 @@ test('IGSH-1266 a kill that never reached the server is retried in the backgroun
 
 test('IGSH-1266 the archive keeps its own guard when the server cannot be reached', () => {
   const archive = body('src/archive.zig', 'pub fn archiveTabAt(', 'pub fn archiveActiveTab(');
-  assert.ok(archive.includes('if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "") != .gone) {'));
+  assert.ok(archive.includes('if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "", null) != .gone) {'));
   assert.match(archive, /showHeaderNoticeAscii\("Could not kill remote tmux session", 4000, true\);/);
   assert.match(body('src/archive.zig', 'pub fn rejectPinnedSessionClose(', 'pub fn anyPinnedSession('), /app_state\.shells\[i\]\.pinned_top/);
 });
