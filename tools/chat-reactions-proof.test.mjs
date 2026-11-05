@@ -1,8 +1,73 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { inspect, assertBadge } from './chat-reactions-proof.mjs';
 import * as proof from './chat-reactions-proof.mjs';
+
+test('IGSH-1590 Windows reaction scheduling uses production polling and dispatch without duplicate workers', () => {
+  const boundary = new URL('./verify-chat-delivery/boundary.py', import.meta.url);
+  assert.match(fs.readFileSync(boundary, 'utf8'), /def install_reaction_worker\(namespace\):/);
+  const script = String.raw`
+import ast, pathlib, sqlite3, sys, tempfile, threading
+from contextlib import closing
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+worker = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'install_reaction_worker')
+with tempfile.TemporaryDirectory() as directory:
+    database = pathlib.Path(directory) / 'store.sqlite3'
+    def connect(tmux):
+        assert tmux == 'verify-agent'
+        return sqlite3.connect(database)
+    with closing(connect('verify-agent')) as db:
+        db.execute('CREATE TABLE shared_messages (id INTEGER, provider TEXT, sid TEXT, state TEXT)')
+        db.execute("INSERT INTO shared_messages VALUES (1,'claude','sid','queued')")
+        db.commit()
+    entered, release, first, second = (threading.Event() for _ in range(4))
+    records, delivered, polls = [], [], []
+    def poll(tmux, provider, sid):
+        assert (tmux, provider, sid) == ('verify-agent', 'claude', 'sid')
+        polls.append(sid)
+    def dispatch(query):
+        assert query['op'] == 'message_dispatch'
+        entered.set()
+        assert release.wait(5)
+        with closing(connect(query['tmux'])) as db:
+            row = db.execute("SELECT id FROM shared_messages WHERE state='queued' ORDER BY id LIMIT 1").fetchone()
+            if row:
+                delivered.append(row[0])
+                db.execute("UPDATE shared_messages SET state='accepted' WHERE id=?", row)
+                db.commit()
+        if row:
+            (first if row[0] == 1 else second).set()
+    scope = dict(record=lambda name, **row: records.append(row))
+    exec(compile(ast.Module(body=[worker], type_ignores=[]), '<reaction-worker>', 'exec'), scope)
+    namespace = dict(message_poll=poll, message_store_request=dispatch, message_store_db=connect)
+    scope['install_reaction_worker'](namespace)
+    query = dict(op='message_submit', tmux='verify-agent', provider='claude', sid='sid')
+    start = namespace['start_message_worker']
+    start(query, '')
+    assert entered.wait(5)
+    for i in range(10): start(query, '')
+    assert len([row for row in records if row['stage'] == 'started']) == 1
+    release.set()
+    assert first.wait(5)
+    with closing(connect('verify-agent')) as db:
+        db.execute("INSERT INTO shared_messages VALUES (2,'claude','sid','queued')")
+        db.commit()
+    start(query, '')
+    assert second.wait(5)
+    for thread in threading.enumerate():
+        if thread is not threading.current_thread():
+            thread.join(5)
+            assert not thread.is_alive()
+    assert delivered == [1, 2], delivered
+    assert len(polls) >= 2
+    assert not [row for row in records if row['stage'] == 'error'], records
+print('REACTION_WINDOWS_DISPATCH_PROVEN')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(boundary)], { encoding: 'utf8', timeout: 20000 }), /REACTION_WINDOWS_DISPATCH_PROVEN/);
+});
 
 const area = { left: 0, top: 0, right: 300, bottom: 300 };
 function fixture() {

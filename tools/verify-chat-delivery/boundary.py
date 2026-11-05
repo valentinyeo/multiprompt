@@ -977,6 +977,46 @@ def completion(remote):
     return 95
 
 
+def install_reaction_worker(namespace):
+    import threading
+    from contextlib import closing
+
+    workers = {}
+    lock = threading.Lock()
+
+    def start(query, source, only_if_work=False):
+        key = (query['provider'], query['sid'])
+        with lock:
+            if key in workers:
+                workers[key].set()
+                return
+            wake = threading.Event()
+            workers[key] = wake
+
+        def run():
+            try:
+                while True:
+                    wake.clear()
+                    namespace['message_poll'](query['tmux'], *key)
+                    namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    with closing(namespace['message_store_db'](query['tmux'])) as db:
+                        pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
+                    with lock:
+                        if not pending and not wake.is_set():
+                            del workers[key]
+                            return
+                    wake.wait(0.1)
+            except Exception as error:
+                record('reaction-worker.jsonl', stage='error', error=repr(error))
+                with lock:
+                    workers.pop(key, None)
+
+        record('reaction-worker.jsonl', stage='started', provider=key[0], sid=key[1], boundary='Windows thread; production poll and dispatch unchanged')
+        threading.Thread(target=run, daemon=True).start()
+
+    namespace['start_message_worker'] = start
+
+
 def reader_namespace():
     import base64
 
@@ -1026,6 +1066,8 @@ def reader_namespace():
         sys.modules["fcntl"] = locking
         namespace["events_wake"] = lambda: None
         record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
+        if state().get("name") == "reactions":
+            install_reaction_worker(namespace)
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
