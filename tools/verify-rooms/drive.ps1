@@ -75,10 +75,15 @@ function Focus {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
 }
 function Room-Window {
-    $root = [Windows.Automation.AutomationElement]::FromHandle($main)
-    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptRoomView')
-    $node = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
-    if ($node -and !$node.Current.IsOffscreen) { return [IntPtr]$node.Current.NativeWindowHandle }
+    if ($app.HasExited) { throw ('App exited: '+$app.ExitCode) }
+    try {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($main)
+        $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptRoomView')
+        $node = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($node -and !$node.Current.IsOffscreen) { return [IntPtr]$node.Current.NativeWindowHandle }
+    } catch [System.Management.Automation.MethodInvocationException] {
+        if ($_.Exception.InnerException -isnot [Windows.Automation.ElementNotAvailableException]) { throw }
+    } catch [Windows.Automation.ElementNotAvailableException] {}
 }
 function Witness {
     $path = Join-Path $env:MP_VERIFY_STATE 'witness.json'
@@ -166,6 +171,7 @@ try {
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message
+    try { $w=Witness; if ($w) { Save $w (Join-Path $Evidence 'witness.json') } } catch {}
     try { Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped=$job.Stop(); $result.cleanup=$stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup=0 }
