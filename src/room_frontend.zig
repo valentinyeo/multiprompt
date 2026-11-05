@@ -1446,7 +1446,10 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
         .pending => unreachable,
     };
     discardBuilding();
-    if (kind == .catalog) finishRefresh(c, false);
+    if (kind == .catalog) {
+        finishRefresh(c, false);
+        _ = enqueueRefresh(item.location);
+    }
     if (kind == .catalog_metadata) {
         if (metadata_read) |read| {
             if (read.catalog_generation == catalog_generation) for (catalog_rows.items) |*row| {

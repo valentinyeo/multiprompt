@@ -42,6 +42,7 @@ var pending_command: ?*Pending = null;
 var disposed: usize = 0;
 var discarded: usize = 0;
 var refresh_failed: usize = 0;
+var refresh_queued: usize = 0;
 var action_failed: usize = 0;
 var scope_valid = true;
 var visible = true;
@@ -65,6 +66,7 @@ const view = struct {
 fn freePending(_: *Pending) void { pending_command = null; }
 fn discardBuilding() void { discarded += 1; }
 fn finishRefresh(_: *rooms.Controller, success: bool) void { if (!success) refresh_failed += 1; }
+fn enqueueRefresh(_: u8) bool { refresh_queued += 1; return true; }
 fn scheduleDiscovery(_: *rooms.Controller) void { discovery += 1; }
 const app_state = struct { const g_main_hwnd = 0; };
 const TIMER_ROOM = 1;
@@ -78,6 +80,7 @@ fn reset(item: *Pending) void {
     disposed = 0;
     discarded = 0;
     refresh_failed = 0;
+    refresh_queued = 0;
     action_failed = 0;
     scope_valid = true;
     visible = true;
@@ -103,6 +106,7 @@ test "queued command waits for read then launches exactly once with original ide
     try std.testing.expectEqual(Kind.post, c.kind);
     try std.testing.expectEqual(@as(usize, 1), disposed);
     try std.testing.expectEqual(@as(usize, 1), refresh_failed);
+    try std.testing.expectEqual(@as(usize, 1), refresh_queued);
     try std.testing.expect(selection_waiting);
     try std.testing.expect(!launchQueuedCommand(c, .{ .finished = .{ .kind = .catalog } }, true));
     try std.testing.expectEqual(@as(usize, 1), c.launches);
