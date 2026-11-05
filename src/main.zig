@@ -1459,6 +1459,21 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
+fn browserFocusHotkey() void {
+    const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
+    if (pane_foreground) {
+        if (app_state.g_chat_find_open) @import("chat_find_ui.zig").close(false);
+        cancelPendingNativeBrowserFocus();
+        app_state.g_chat_browser_handoff_until = 0;
+        app_state.g_browser_focus_mode = false;
+        app_state.g_shell_focused = true;
+        @import("focus.zig").focusActiveShellFromHotkey();
+    } else {
+        _ = SetForegroundWindow(app_state.g_main_hwnd);
+        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FOCUS_TOGGLE, 0, 0);
+    }
+}
+
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }
     if (msg == WM_ACTIVATEAPP) {
@@ -8863,6 +8878,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_HOTKEY => {
+            if (wp == @as(WPARAM, @intCast(@import("win32.zig").HOTKEY_ID_BROWSER_FOCUS))) {
+                if (@import("browser_pane.zig").browser_focus_hotkey_registered and @import("browser_pane.zig").browserFocusHotkeyAllowed() and
+                    !isCtrlDown() and GetAsyncKeyState(0x10) >= 0 and GetAsyncKeyState(0x5B) >= 0 and GetAsyncKeyState(0x5C) >= 0 and
+                    @as(usize, @bitCast(lp)) == (0x51 << 16 | @import("win32.zig").MOD_ALT))
+                {
+                    app_state.g_focus_user_action_tick = GetTickCount64();
+                    browserFocusHotkey();
+                }
+                return 0;
+            }
             if (wp == @as(WPARAM, @intCast(@import("win32.zig").HOTKEY_ID_BROWSER_URL))) {
                 if (@import("browser_pane.zig").url_bar_hotkey_registered and @import("browser_pane.zig").urlBarHotkeyAllowed() and
                     @as(usize, @bitCast(lp)) == (0x4C << 16 | MOD_CONTROL | MOD_SHIFT))
@@ -8893,6 +8918,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_DESTROY => {
             @import("browser_pane.zig").unregisterUrlBarHotkey();
+            @import("browser_pane.zig").unregisterBrowserFocusHotkey();
             @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             @import("bot_photo.zig").shutdown();
             computer.shutdown();

@@ -1957,6 +1957,21 @@ fn activeBrowserShowsUrlBar() bool {
 
 pub var url_bar_hotkey_registered = false;
 var url_bar_hotkey_attempted = false;
+pub var browser_focus_hotkey_registered = false;
+var browser_focus_hotkey_attempted = false;
+
+pub fn browserFocusHotkeyAllowed() bool {
+    return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
+        !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+        !browserChromeHiddenForOverlay() and !app_state.g_search_active and app_state.active_shell < app_state.shell_count and
+        (app_state.shells[app_state.active_shell].browser_enabled or webView2OwnsActiveShell()) and foregroundIsOurs();
+}
+
+pub fn unregisterBrowserFocusHotkey() void {
+    if (browser_focus_hotkey_registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS);
+    browser_focus_hotkey_registered = false;
+    browser_focus_hotkey_attempted = false;
+}
 
 pub fn urlBarHotkeyAllowed() bool {
     return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
@@ -1973,7 +1988,13 @@ pub fn unregisterUrlBarHotkey() void {
     url_bar_hotkey_attempted = false;
 }
 
-pub fn syncUrlBarHotkey() void {
+pub fn syncBrowserHotkeys() void {
+    if (!browserFocusHotkeyAllowed()) {
+        unregisterBrowserFocusHotkey();
+    } else if (!browser_focus_hotkey_attempted) {
+        browser_focus_hotkey_attempted = true;
+        browser_focus_hotkey_registered = @import("win32.zig").RegisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS, @import("win32.zig").MOD_ALT | @import("win32.zig").MOD_NOREPEAT, 0x51) != 0;
+    }
     if (!urlBarHotkeyAllowed()) {
         unregisterUrlBarHotkey();
     } else if (!url_bar_hotkey_attempted) {
@@ -3979,6 +4000,7 @@ fn hideBrowserWindowHard(hwnd: HANDLE) void {
 pub fn hideAllBrowserChrome() void {
     if (app_state.g_chat_browser_swap.shell_id != 0 and !@import("computer_pane.zig").selected()) return;
     unregisterUrlBarHotkey();
+    unregisterBrowserFocusHotkey();
     hideBrowserFloatingChrome();
     for (0..app_state.shell_count) |i| {
         const bh = app_state.shells[i].browser_hwnd;
@@ -4138,7 +4160,7 @@ fn sweepBrowserOrphans(now: u64) void {
 
 pub fn updateBrowserVisibility() void {
     if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
-    defer syncUrlBarHotkey();
+    defer syncBrowserHotkeys();
     if (!@import("room_frontend.zig").privateActionsAllowed()) {
         hideAllBrowserChrome();
         return;

@@ -94,7 +94,7 @@ fn installHook() void { keyboard_hook_installed = true; }
 fn sessionFrontChanged() void {}
 var hotkey_syncs: usize = 0;
 var hotkey_scope_owned = false;
-fn syncUrlBarHotkey() void { hotkey_syncs += 1; hotkey_scope_owned = foregroundIsOurs(); }
+fn syncBrowserHotkeys() void { hotkey_syncs += 1; hotkey_scope_owned = foregroundIsOurs(); }
 var paint_demand_active = false;
 fn freezeActivation(active: bool) void { paint_demand_active = active; }
 fn focusGuardReturnFromPane(_: HANDLE) bool { return false; }
@@ -135,7 +135,7 @@ fn foregroundMovesTo(h: HANDLE) void {
 }
 ${body('armConsoleGeometrySettle')}
 ${body('settleConsoleGeometry')}
-${body('foregroundWinEventProc').replaceAll('@import("main.zig").', '').replaceAll('@import("freeze_recorder.zig").activation', 'freezeActivation').replaceAll('@import("browser_pane.zig").syncUrlBarHotkey', 'syncUrlBarHotkey')}
+${body('foregroundWinEventProc').replaceAll('@import("main.zig").', '').replaceAll('@import("freeze_recorder.zig").activation', 'freezeActivation').replaceAll('@import("browser_pane.zig").syncBrowserHotkeys', 'syncBrowserHotkeys')}
 ${optional('windowPosChangeMovesGeometry')}
 ${optional('paneRingState')}
 ${optional('paneRingRepaintNeeded')}

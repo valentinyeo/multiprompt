@@ -429,7 +429,7 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     _ = eventTime;
     if (event != EVENT_SYSTEM_FOREGROUND) return;
     if (idObject != OBJID_WINDOW or idChild != 0) return;
-    @import("browser_pane.zig").syncUrlBarHotkey();
+    @import("browser_pane.zig").syncBrowserHotkeys();
     @import("main.zig").sessionFrontChanged();
     if (focusGuardReturnFromPane(hwnd)) return;
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());
@@ -795,6 +795,18 @@ pub fn parkMainWindowBeforeActiveShellRemoval(idx: usize) bool {
 
 pub fn focusActiveShell() void {
     focusActiveShellInner(true);
+}
+
+pub fn focusActiveShellFromHotkey() void {
+    if (app_state.g_account_locked or @import("computer_pane.zig").selected() or !@import("room_frontend.zig").privateActionsAllowed() or
+        app_state.g_inbox_active or app_state.g_all_sessions_active or !foregroundIsOurs()) return;
+    if (app_state.g_chat_active and !chatViewOwnsInput()) return;
+    const target = if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard();
+    if (target == null or IsWindow(target) == 0 or !focusGuard(target)) return;
+    const foreground_target = if (app_state.g_chat_active) app_state.g_main_hwnd else target;
+    if (foreground_target == null) return;
+    _ = SetForegroundWindow(foreground_target);
+    if (GetForegroundWindow() == foreground_target) _ = SetFocus(target);
 }
 
 fn focusActiveShellSoft() void {
