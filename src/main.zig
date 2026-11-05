@@ -1530,6 +1530,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         handleLayoutReply(lp);
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE) {
+        @import("browser_pane.zig").handleBrowserSigninDone(@bitCast(lp), wp);
+        return 0;
+    }
     if (msg == @import("win32.zig").WM_APP_BROWSER_LIFECYCLE_DONE) {
         @import("browser_pane.zig").handleBrowserLifecycleDone(@ptrFromInt(@as(usize, @bitCast(lp))));
         return 0;
@@ -6999,7 +7003,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_TABCTX_GOOGLE_SIGNIN) {
-                    const signin_tab = findShellById(app_state.g_tabctx_sid);
+                    const signin_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
+                    const signin_tab = findShellById(signin_sid);
                     app_state.g_search_active = false;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
@@ -8732,6 +8737,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (!@import("room_frontend.zig").flushUi()) debugLog("Room UI flush failed on close");
             @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
+            @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             stopUpdateCardWatch();
             _ = KillTimer(hwnd, TIMER_BROWSER_HEALTH);
             _ = KillTimer(hwnd, TIMER_BROWSER_ENGINE_SWITCH);
@@ -8806,6 +8812,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             @import("bot_photo.zig").shutdown();
             computer.shutdown();
             @import("room_frontend.zig").deinit();

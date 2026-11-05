@@ -5017,6 +5017,15 @@ pub fn updateSearchResults() void {
             }
         }
         var show_browser_toggle = (app_state.g_search_len == 0);
+        if (app_state.active_shell < app_state.shell_count and
+            @import("browser_pane.zig").browserProfileToken(app_state.active_shell).len > 0 and
+            app_state.g_search_result_count < app_state.g_search_results.len and
+            labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GOOGLE_SIGNIN;
+            app_state.g_search_result_count += 1;
+        }
+
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
             const browser_labels = [_][]const u8{ "browser", "web", "edge", "pane", "open browser", "show browser", "recover browser", "retry browser", "retry browser pane", "close browser pane", "alt a", "alt b" };

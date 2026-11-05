@@ -41,7 +41,7 @@ pub fn plainProfileLaunch(out: []u8, exe: []const u8, user_data_dir: []const u8,
     if (exe.len == 0 or user_data_dir.len == 0) return null;
     if (!profileDirectorySafe(profile_directory)) return null;
     if (std.mem.indexOfScalar(u8, exe, '"') != null or std.mem.indexOfScalar(u8, user_data_dir, '"') != null) return null;
-    return std.fmt.bufPrint(out, "\"{s}\" --user-data-dir=\"{s}\" --profile-directory={s} --new-window {s}", .{
+    return std.fmt.bufPrint(out, "\"{s}\" --user-data-dir=\"{s}\" --profile-directory={s} --no-first-run --no-default-browser-check --new-window {s}", .{
         exe,
         user_data_dir,
         profile_directory,
@@ -70,6 +70,8 @@ test "IGSH-1507 the plain sign-in window keeps the profile and carries no contro
     try std.testing.expect(std.mem.indexOf(u8, command, "--user-data-dir=\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, dir) != null);
     try std.testing.expect(std.mem.indexOf(u8, command, "--profile-directory=Default") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, " --no-first-run ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, " --no-default-browser-check ") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, SIGNIN_URL) != null);
     try std.testing.expect(controlFlagIn(command) == null);
     try std.testing.expect(plainProfileLaunch(&out, exe, dir, "De fault") == null);
