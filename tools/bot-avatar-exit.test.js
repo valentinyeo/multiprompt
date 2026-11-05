@@ -34,7 +34,7 @@ test('avatar rejection step respects the GitHub PowerShell exit wrapper', t => {
   fs.writeFileSync(path.join(dir, 'tools/fixtures/IGSH-1192/bot-avatar-before.zig'), 'original binary clipping fixture\n');
   for (const scenario of cases) {
     fs.writeFileSync(sourceFile, source);
-    const script = `$ErrorActionPreference = 'stop'\nfunction zig {\n  $global:LASTEXITCODE = ${scenario.code}\n  '${scenario.output}'\n}\n${body}\nif ((Test-Path -LiteralPath variable:\\LASTEXITCODE)) { exit $LASTEXITCODE }\n`;
+    const script = `$ErrorActionPreference = 'stop'\nfunction zig {\n  $global:LASTEXITCODE = ${scenario.code}\n  '${scenario.output}'\n}\ntry {\n${body}\n} catch {\n  [Console]::Error.WriteLine($_.Exception.Message)\n  exit 1\n}\nif ((Test-Path -LiteralPath variable:\\LASTEXITCODE)) { exit $LASTEXITCODE }\n`;
     const scriptFile = path.join(dir, 'step.ps1');
     fs.writeFileSync(scriptFile, script);
     const result = spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', scriptFile], {
