@@ -145,23 +145,27 @@ for ($round = 1; $round -le 20; $round++) {
 Snapshot 'action'
 Leave-TypingBrowser
 $bar = Get-TypingUrlBar
-if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing before timeout case' }
-if ([VerifyNative]::IsDown(0x11) -or [VerifyNative]::IsDown(0x10)) { throw 'Unexpected held modifier before timeout case' }
+if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing before held-Ctrl case' }
+if ([VerifyNative]::IsDown(0x11) -or [VerifyNative]::IsDown(0x10)) { throw 'Unexpected held modifier before held-Ctrl case' }
 try {
     [VerifyNative]::KeyDown(0x11)
     [VerifyNative]::KeyDown(0x10)
     [VerifyNative]::KeyDown(0x4C)
     [VerifyNative]::KeyUp(0x4C)
     [VerifyNative]::KeyUp(0x10)
-    Wait-Until { (Get-TypingEditChild $bar) -ne [IntPtr]::Zero } 'held-Ctrl address request creates the owned Edit' 5 -PollMilliseconds 20
-    Wait-Until { (Get-TypingEditChild $bar) -eq [IntPtr]::Zero } 'expired held-Ctrl request discards its unfocused Edit' 5 -PollMilliseconds 20
+    $heldEdit = Wait-TypingEdit $bar
     if (-not [VerifyNative]::IsDown(0x11)) { throw 'Address handoff released the fixture-held Ctrl key' }
-    $result.checks += @{ name = 'held-ctrl-address-timeout'; discarded = $true; ctrlPreserved = $true }
+    $result.checks += @{ name = 'held-ctrl-address-focus'; ctrlPreserved = $true; edit = $heldEdit.ToInt64() }
 } finally {
     [VerifyNative]::KeyUp(0x4C)
     [VerifyNative]::KeyUp(0x10)
     [VerifyNative]::KeyUp(0x11)
 }
+[VerifyNative]::Text('abc')
+$heldText = [VerifyNative]::EditText($heldEdit)
+if ($heldText -cne 'abc') { throw "Held-Ctrl release expected address text abc, got '$heldText'" }
+$result.checks += @{ name = 'held-ctrl-release-typing'; text = $heldText }
+[VerifyNative]::Chord(@(0x1B))
 Page-TypingFocus
 Leave-TypingBrowser
 $bar = Get-TypingUrlBar

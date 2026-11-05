@@ -1955,6 +1955,33 @@ fn activeBrowserShowsUrlBar() bool {
     return sh.browser_pinned_url_len != 0 or (!sh.browser_native and !webView2OwnsActiveShell());
 }
 
+pub var url_bar_hotkey_registered = false;
+var url_bar_hotkey_attempted = false;
+
+pub fn urlBarHotkeyAllowed() bool {
+    return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
+        !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+        !browserChromeHiddenForOverlay() and !app_state.g_search_active and app_state.g_edit_hwnd == null and
+        app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled and
+        activeBrowserShowsUrlBar() and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0 and
+        IsWindowVisible(app_state.g_urlbar_hwnd) != 0 and foregroundIsOurs();
+}
+
+pub fn unregisterUrlBarHotkey() void {
+    if (url_bar_hotkey_registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_URL);
+    url_bar_hotkey_registered = false;
+    url_bar_hotkey_attempted = false;
+}
+
+pub fn syncUrlBarHotkey() void {
+    if (!urlBarHotkeyAllowed()) {
+        unregisterUrlBarHotkey();
+    } else if (!url_bar_hotkey_attempted) {
+        url_bar_hotkey_attempted = true;
+        url_bar_hotkey_registered = @import("win32.zig").RegisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_URL, @import("win32.zig").MOD_CONTROL | @import("win32.zig").MOD_SHIFT | @import("win32.zig").MOD_NOREPEAT, 0x4C) != 0;
+    }
+}
+
 pub fn calcBrowserLayout() ?BrowserLayout {
     if (app_state.g_main_hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return null;
     var rc: RECT = std.mem.zeroes(RECT);
@@ -4109,6 +4136,7 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
+    defer syncUrlBarHotkey();
     if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
     if (!@import("room_frontend.zig").privateActionsAllowed()) {
         hideAllBrowserChrome();
@@ -5914,7 +5942,7 @@ pub fn browserUrlFocusTick() void {
             IsWindow(url_focus_edit) != 0 and IsWindow(url_focus_parent) != 0 and
             app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
         {
-            SwitchToThisWindow(url_focus_parent, 1);
+            SwitchToThisWindow(url_focus_parent, 0);
         }
     }
     @import("focus.zig").focusGuardReadMouse();
@@ -5980,8 +6008,25 @@ pub fn startBrowserUrlBarEdit() void {
         url_focus_shell_id = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_focus_authorized_hwnd = edit_parent;
         app_state.g_focus_authorized_until = url_focus_deadline;
-        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
-        browserUrlFocusTick();
+        if (foregroundIsOurs()) {
+            _ = SetForegroundWindow(edit_parent);
+            @import("focus.zig").focusGuardReadMouse();
+            if (GetForegroundWindow() == edit_parent and app_state.g_edit_hwnd == url_focus_edit and
+                app_state.g_focus_input_tick == url_focus_input_tick and app_state.active_shell < app_state.shell_count and
+                app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id and
+                !app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed())
+            {
+                app_state.g_focus_authorized_hwnd = url_focus_edit;
+                app_state.g_focus_authorized_until = url_focus_deadline;
+                _ = SetFocus(url_focus_edit);
+            }
+        }
+        if (GetForegroundWindow() == edit_parent and GetFocus() == url_focus_edit) {
+            cancelUrlBarFocus();
+        } else {
+            _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
+            browserUrlFocusTick();
+        }
     }
 }
 

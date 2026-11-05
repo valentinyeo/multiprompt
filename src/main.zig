@@ -1363,6 +1363,7 @@ pub fn sessionFrontSelected() void {
 }
 
 pub fn sessionFrontChanged() void {
+    @import("browser_pane.zig").syncUrlBarHotkey();
     computer.sync();
     @import("room_frontend.zig").syncVisibility();
     @import("voice.zig").voiceManualFrontChanged();
@@ -8863,6 +8864,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_HOTKEY => {
+            if (wp == @as(WPARAM, @intCast(@import("win32.zig").HOTKEY_ID_BROWSER_URL))) {
+                if (@import("browser_pane.zig").url_bar_hotkey_registered and @import("browser_pane.zig").urlBarHotkeyAllowed() and
+                    @as(usize, @bitCast(lp)) == (0x4C << 16 | MOD_CONTROL | MOD_SHIFT))
+                {
+                    app_state.g_focus_user_action_tick = GetTickCount64();
+                    startBrowserUrlBarEdit();
+                }
+                return 0;
+            }
             if (wp == @as(WPARAM, @intCast(HOTKEY_ID_FOCUS))) {
                 if (!@import("room_frontend.zig").privateActionsAllowed() and foregroundIsOurs()) return 0;
                 toggleDictation();
@@ -8883,6 +8893,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            @import("browser_pane.zig").unregisterUrlBarHotkey();
             @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             @import("bot_photo.zig").shutdown();
             computer.shutdown();

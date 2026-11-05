@@ -140,6 +140,166 @@ test "old queued dismissal cannot discard the new unfocused editor" {
   }
 });
 
+test('address hotkey registers only for the owned visible custom bar', () => {
+  const root = path.join(__dirname, '..');
+  const pane = fs.readFileSync(path.join(root, 'src/browser_pane.zig'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
+  const start = pane.indexOf('pub var url_bar_hotkey_registered');
+  const end = pane.indexOf('\npub fn calcBrowserLayout(', start);
+  const handlerStart = main.indexOf('        WM_HOTKEY => {');
+  const handlerEnd = main.indexOf('        0x0011 => {', handlerStart);
+  assert.ok(start >= 0 && end > start && handlerStart >= 0 && handlerEnd > handlerStart);
+  const lifecycle = pane.slice(start, end)
+    .replaceAll('@import("win32.zig")', 'win32')
+    .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
+    .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
+  const handler = main.slice(handlerStart, handlerEnd)
+    .replaceAll('@import("win32.zig")', 'win32')
+    .replaceAll('@import("browser_pane.zig")', 'browser')
+    .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
+  const fixture = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const WPARAM = usize;
+const WM_HOTKEY: u32 = 1;
+const HOTKEY_ID_FOCUS: i32 = 1;
+const MOD_CONTROL: u32 = 2;
+const MOD_SHIFT: u32 = 4;
+const frame: HANDLE = @ptrFromInt(1);
+const bar: HANDLE = @ptrFromInt(2);
+var owned = true;
+var visible = true;
+var custom = true;
+var selected = false;
+var private_allowed = true;
+var overlay = false;
+var register_ok = true;
+var registrations: usize = 0;
+var unregistrations: usize = 0;
+var launches: usize = 0;
+const app_state = struct {
+    var g_main_hwnd: HANDLE = frame;
+    var g_urlbar_hwnd: HANDLE = bar;
+    var g_edit_hwnd: HANDLE = null;
+    var g_app_closing = false;
+    var g_account_locked = false;
+    var g_search_active = false;
+    var g_focus_user_action_tick: u64 = 0;
+    var active_shell: usize = 0;
+    var shell_count: usize = 1;
+    var shells = [_]struct { browser_enabled: bool }{.{ .browser_enabled = true }};
+};
+const win32 = struct {
+    const HOTKEY_ID_BROWSER_URL: i32 = 2;
+    const MOD_CONTROL: u32 = 2;
+    const MOD_SHIFT: u32 = 4;
+    const MOD_NOREPEAT: u32 = 0x4000;
+    fn RegisterHotKey(_: HANDLE, id: i32, mods: u32, key: u32) i32 {
+        std.debug.assert(id == HOTKEY_ID_BROWSER_URL and mods == 0x4006 and key == 0x4C);
+        registrations += 1;
+        return if (register_ok) 1 else 0;
+    }
+    fn UnregisterHotKey(_: HANDLE, id: i32) i32 {
+        std.debug.assert(id == HOTKEY_ID_BROWSER_URL);
+        unregistrations += 1;
+        return 1;
+    }
+};
+fn computerSelected() bool { return selected; }
+fn privateActionsAllowed() bool { return private_allowed; }
+fn browserChromeHiddenForOverlay() bool { return overlay; }
+fn activeBrowserShowsUrlBar() bool { return custom; }
+fn IsWindow(_: HANDLE) i32 { return 1; }
+fn IsWindowVisible(_: HANDLE) i32 { return if (visible) 1 else 0; }
+fn foregroundIsOurs() bool { return owned; }
+fn GetTickCount64() u64 { return 123; }
+fn startBrowserUrlBarEdit() void { launches += 1; }
+fn toggleDictation() void {}
+const browser = struct {
+${lifecycle}
+};
+fn dispatch(wp: WPARAM, lp: isize) isize {
+    switch (@as(u32, WM_HOTKEY)) {
+${handler}
+        else => return 1,
+    }
+}
+test "owned custom bar registers and foreign or hidden state unregisters" {
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(browser.url_bar_hotkey_registered);
+    try std.testing.expectEqual(@as(usize, 1), registrations);
+    _ = dispatch(2, 0x4C0006);
+    try std.testing.expectEqual(@as(usize, 1), launches);
+    try std.testing.expectEqual(@as(u64, 123), app_state.g_focus_user_action_tick);
+    owned = false;
+    _ = dispatch(2, 0x4C0006);
+    try std.testing.expectEqual(@as(usize, 1), launches);
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    try std.testing.expectEqual(@as(usize, 1), unregistrations);
+    owned = true; custom = false;
+    browser.syncUrlBarHotkey();
+    try std.testing.expectEqual(@as(usize, 1), registrations);
+    custom = true; visible = false;
+    browser.syncUrlBarHotkey();
+    try std.testing.expectEqual(@as(usize, 1), registrations);
+    visible = true;
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(browser.url_bar_hotkey_registered);
+    browser.unregisterUrlBarHotkey();
+    try std.testing.expectEqual(@as(usize, 2), unregistrations);
+}
+test "mode changes release the registered hotkey" {
+    browser.unregisterUrlBarHotkey();
+    owned = true; custom = true; visible = true; register_ok = true;
+    selected = false; private_allowed = true; app_state.g_account_locked = false;
+    browser.syncUrlBarHotkey();
+    selected = true;
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    selected = false;
+    browser.syncUrlBarHotkey();
+    app_state.g_account_locked = true;
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    app_state.g_account_locked = false;
+}
+test "registration refusal and invalid hotkey context do not dispatch" {
+    browser.unregisterUrlBarHotkey();
+    launches = 0;
+    owned = true; custom = true; visible = true;
+    register_ok = false;
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    _ = dispatch(2, 0x4C0006);
+    try std.testing.expectEqual(@as(usize, 0), launches);
+    owned = false;
+    browser.syncUrlBarHotkey();
+    owned = true; register_ok = true;
+    browser.syncUrlBarHotkey();
+    _ = dispatch(2, 0x4C0002);
+    selected = true;
+    _ = dispatch(2, 0x4C0006);
+    selected = false; app_state.g_account_locked = true;
+    _ = dispatch(2, 0x4C0006);
+    app_state.g_account_locked = false; private_allowed = false;
+    _ = dispatch(2, 0x4C0006);
+    try std.testing.expectEqual(@as(usize, 0), launches);
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(!browser.url_bar_hotkey_registered);
+}
+`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'url-hotkey-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, fixture);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, `${result.error || ''}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('URL focus waits for modifiers and cancels stale handoffs', () => {
   const browser = fs.readFileSync(path.join(__dirname, '../src/browser_pane.zig'), 'utf8');
   const start = browser.indexOf('var url_focus_edit:');
@@ -147,7 +307,14 @@ test('URL focus waits for modifiers and cancels stale handoffs', () => {
   assert.ok(start >= 0 && end > start);
   const discardStart = browser.indexOf('pub fn discardBrowserUrlBarEdit()');
   const discardEnd = browser.indexOf('\nfn suspendBrowserForShell(', discardStart);
-  assert.ok(discardStart >= 0 && discardEnd > discardStart);
+  const immediateStart = browser.indexOf('        if (foregroundIsOurs()) {', end);
+  const immediateEnd = browser.indexOf('\n    }\n}', immediateStart);
+  assert.ok(discardStart >= 0 && discardEnd > discardStart && immediateStart > end && immediateEnd > immediateStart);
+  const immediate = browser.slice(immediateStart, immediateEnd)
+    .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
+    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()')
+    .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
+    .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
   const production = (browser.slice(discardStart, discardEnd) + '\n' + browser.slice(start, end))
     .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
     .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()')
@@ -171,6 +338,8 @@ var owned = true;
 var computer_selected = false;
 var private_allowed = true;
 var guard_allowed = true;
+var immediate_allowed = false;
+var timers_started: usize = 0;
 var destroyed: HANDLE = null;
 var sync_count: usize = 0;
 var foreground_attempts: usize = 0;
@@ -192,6 +361,7 @@ const app_state = struct {
     var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 };
 fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
+fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { timers_started += 1; return timer_id; }
 fn altqLog(_: []const u8, _: anytype) void {}
 fn altqPtr(h: HANDLE) usize { return if (h) |value| @intFromPtr(value) else 0; }
 fn DestroyWindow(hwnd: HANDLE) i32 { destroyed = hwnd; return 1; }
@@ -207,8 +377,9 @@ fn GetAsyncKeyState(key: i32) i16 { return if (key == held) -32768 else 0; }
 fn focusGuard(_: HANDLE) bool { return guard_allowed; }
 fn GetForegroundWindow() HANDLE { return foreground; }
 fn GetFocus() HANDLE { return focused; }
-fn SetForegroundWindow(_: HANDLE) i32 {
+fn SetForegroundWindow(hwnd: HANDLE) i32 {
     foreground_attempts += 1;
+    if (immediate_allowed) { foreground = hwnd; return 1; }
     if (interrupt == 1) { foreground = foreign; owned = false; }
     if (interrupt == 2) app_state.g_focus_input_tick = 11;
     if (interrupt == 3) app_state.g_account_locked = true;
@@ -223,6 +394,10 @@ fn SwitchToThisWindow(h: HANDLE, activate: i32) void {
 fn SetFocus(h: HANDLE) HANDLE { const previous = focused; focused = h; return previous; }
 
 ${production}
+fn immediateFocus() void {
+    const edit_parent = parent;
+${immediate}
+}
 fn reset() void {
     url_focus_edit = edit;
     url_focus_parent = parent;
@@ -243,12 +418,25 @@ fn reset() void {
     computer_selected = false;
     private_allowed = true;
     guard_allowed = true;
+    immediate_allowed = false;
+    timers_started = 0;
     destroyed = null;
     sync_count = 0;
     foreground_attempts = 0;
     switch_count = 0;
     interrupt = 0;
     killed = 0;
+}
+test "immediate foreground activation focuses while Ctrl remains held" {
+    reset();
+    held = 0x11;
+    immediate_allowed = true;
+    immediateFocus();
+    try std.testing.expectEqual(parent, foreground);
+    try std.testing.expectEqual(edit, focused);
+    try std.testing.expectEqual(@as(i32, 0x11), held);
+    try std.testing.expectEqual(@as(usize, 0), timers_started);
+    try std.testing.expectEqual(@as(usize, 1), killed);
 }
 test "held modifiers defer; release focuses after foreground refusal" {
     for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
