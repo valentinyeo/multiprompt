@@ -282,7 +282,7 @@ test('documentation and changelog cover both commands and their safety contract'
   }
   const fragment = readChangelogEntry('IGSH-535').trim();
   assert.equal(fragment.split('\n').length, 1);
-  assert.match(fragment, /workspace/);
+  assert.equal(fragment, 'IGSH-535 Multiprompt CLI: open a tmux session as a tab in a named workspace group');
 });
 
 test('changed code contains no removable comments and the comment oracle rejects a positive control', async () => {

@@ -15,3 +15,4 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets:
       MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
+      HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
