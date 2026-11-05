@@ -28,6 +28,28 @@
             Press @(0x0D) 'Enter: return to the seeded third-server session'
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal choice'
 
+            foreach ($query in @('soft', 'factory soft')) {
+                Press @(0x11, 0x54) 'Ctrl+T: search repository by partial name'
+                Type-Text $query
+                $searchProof = if ($query -eq 'soft') { 'ctrl-t-soft' } else { 'ctrl-t-reversed-words' }
+                Snapshot ($searchProof + '-picker')
+                Press @(0x0D) 'Enter: select software-factory before path-only matches'
+                Wait-Until {
+                    $state = Read-Session
+                    if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                    $tab = @($state.tabs)[$state.active_tab]
+                    $tab.cwd -eq '/work/projects/software-factory' -and $tab.cv -eq $true -and $tab.tmux_host -eq 2
+                } 'partial repository query opens software-factory on the selected host'
+                Save-Json (Read-Session) ($searchProof + '-session.json')
+                Snapshot ($searchProof + '-chat')
+                $result.checks += @{ name = $searchProof; query = $query; cwd = '/work/projects/software-factory'; cv = $true; host = 2 }
+                Press @(0x11, 0x57) 'Ctrl+W: close software-factory chat'
+                Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'software-factory chat closed'
+                Palette 'Second'
+                Press @(0x0D) 'Enter: return to the seeded third-server session'
+                Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active after search proof'
+            }
+
             Palette 'new claude in terminal'
             Press @(0x0D) 'Enter: New Claude in terminal'
             Snapshot 'terminal-picker-cancel'
