@@ -195,6 +195,8 @@ def fake_submit(claude, text):
         if state().get("name") == "cancel-held":
             fake_event("assistant", message=dict(role="assistant", id="reply_" + uuid.uuid4().hex, content=[dict(type="text", text="Received " + text)]))
             claude.setdefault("turns", []).append([text, "Received " + text])
+        elif state().get("name") == "reactions" and text == "What should I do next?":
+            fake_event("assistant", message=dict(role="assistant", id="msg_followup", content=[dict(type="text", text="The next answer stays visible after reacting.")]))
 
 
 def fake_take(claude):

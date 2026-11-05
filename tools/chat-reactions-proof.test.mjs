@@ -203,6 +203,44 @@ test('floating title is not the first reply after the setup prompt', () => {
   assertBadge(frame);
 });
 
+test('ordinary follow-up requires the full newest pair, not just transcript data', () => {
+  const f = fixture();
+  f.fill(0, 0, 300, 300, 0x202020);
+  f.fill(20, 10, 250, 60, 0x555555);
+  f.fill(20, 80, 250, 160, 0x444444);
+  const frame = inspect(f.image, area);
+  assert.deepEqual(proof.assertFollowup(frame, area), { x: 50, y: 120 });
+  assert.throws(() => proof.assertFollowup({ ...frame, agent: [] }, area), /one ordinary answer/);
+  assert.throws(() => proof.assertFollowup({ ...frame, user: [] }, area), /question is visible/);
+  assert.throws(() => proof.assertFollowup(frame, { ...area, bottom: 155 }), /fully inside the viewport/);
+  assert.throws(() => proof.assertFollowup({ ...frame, agent: [...frame.agent, { ...frame.agent[0], top: 180, bottom: 230 }] }, area), /one ordinary answer/);
+  assert.throws(() => proof.assertFollowup({ ...frame, dim: [frame.user[0]] }, area), /not left queued/);
+});
+
+test('reaction fixture answers only an actual idle follow-up submission', () => {
+  const script = String.raw`
+import ast, pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+node = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'fake_submit')
+events, queued = [], []
+scope = dict(state=lambda: dict(name='reactions'), fake_event=lambda kind, **row: events.append((kind, row)), fake_queue_event=lambda *args: queued.append(args))
+exec(compile(ast.Module(body=[node], type_ignores=[]), '<reaction-followup>', 'exec'), scope)
+submit = scope['fake_submit']
+claude = dict(mode='busy', queue=[])
+submit(claude, 'What should I do next?')
+assert not events and len(queued) == 1
+claude['mode'] = 'idle'
+submit(claude, 'Something else')
+assert [kind for kind, row in events] == ['user']
+events.clear()
+submit(claude, 'What should I do next?')
+assert [kind for kind, row in events] == ['user', 'assistant']
+assert events[1][1]['message']['content'][0]['text'] == 'The next answer stays visible after reacting.'
+print('REACTION_ORDINARY_FOLLOWUP_PROVEN')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url))], { encoding: 'utf8', timeout: 20000 }), /REACTION_ORDINARY_FOLLOWUP_PROVEN/);
+});
+
 test('native three-dot more glyph is visible; a missing glyph still fails', () => {
   assert.equal(typeof proof.assertHoverActions, 'function');
   const image = { width: 400, height: 200, pixels: Buffer.alloc(400 * 200 * 4) };

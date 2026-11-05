@@ -152,3 +152,37 @@ Shot 'reactions-scroll-after'
 $wheel = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($scrollStart), '\[chat\] wheel delta=120 moved=(\d+) scale_px=\d+')
 if ($wheel.Count -ne 140 -or @($wheel | Where-Object { [int]$_.Groups[1].Value -le 0 }).Count -gt 0) { throw 'Timed wheels did not all move the real transcript' }
 Save @{method='synchronous WM_MOUSEWHEEL through production window procedure, RedrawWindow and GdiFlush'; messages=200; movedWheels=$wheel.Count; sourceBytes=(Get-Item $cache.FullName).Length; rounds=$measurements; cpuMs=$app.TotalProcessorTime.TotalMilliseconds} "$caseDir/emoji-scroll.json"
+
+[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+Clear-Composer
+Type-Composer 'What should I do next?'
+Press @(0x0D) 'Enter: send an ordinary follow-up after reacting'
+[void](Wait-For 'ordinary follow-up answer reached the real transcript cache' {
+    Get-ChildItem "$settings/chatcache/*.jsonl" | Where-Object { try { (Read-Shared $_.FullName).Contains('The next answer stays visible after reacting.') } catch [IO.FileNotFoundException] { $false } } | Select-Object -First 1
+})
+[void](Scroll-Transcript 2400)
+Shot 'reactions-followup-reading-older'
+$newestStart = Scroll-Transcript -30000
+$answerPoint = Wait-For 'ordinary follow-up question and answer painted at newest' {
+    Shot 'reactions-followup'
+    $ErrorActionPreference = 'Continue'
+    $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --followup 2> "$caseDir/oracle-followup-stderr.log"
+    if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
+}
+$newestWheel = [regex]::Match((Read-Shared "$settings/debug.log").Substring($newestStart), '\[chat\] wheel delta=-30000 moved=(\d+) scale_px=\d+')
+if (-not $newestWheel.Success -or [int]$newestWheel.Groups[1].Value -le 0) { throw 'Follow-up proof did not scroll to newest' }
+$observation.followupNewestMoved = [int]$newestWheel.Groups[1].Value
+[Windows.Forms.Clipboard]::Clear()
+$menuStart = (Read-Shared "$settings/debug.log").Length
+$actions.Add(@{case=$plan.name; input='real right-click newest ordinary answer'; x=$answerPoint.x; y=$answerPoint.y})
+[ChatDeliveryDesktop]::RightClickOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $answerPoint.x, $answerPoint.y)
+[void](Wait-For 'newest answer opens the real copy menu' {
+    (Read-Shared "$settings/debug.log").Substring($menuStart).Contains('[chat] message menu items=' + $menu)
+})
+[void](Wait-For 'owned newest-answer menu visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } })
+for ($key = 0; $key -lt 5; $key++) { Press @(0x28) 'Down: select Copy on the newest answer' }
+Press @(0x0D) 'Enter: copy the visible ordinary answer'
+[void](Wait-For 'visible ordinary answer copies exact text' { [Windows.Forms.Clipboard]::GetText() -ceq 'The next answer stays visible after reacting.' })
+$observation.followupCopied = [Windows.Forms.Clipboard]::GetText()
+[IO.File]::WriteAllText("$caseDir/followup-copied.txt", $observation.followupCopied)
+Shot 'reactions-followup-copied'

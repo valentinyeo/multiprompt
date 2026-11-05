@@ -63,6 +63,17 @@ export function assertBadge(frame, users = 1) {
   assert.ok(pill.ink > 8, 'badge glyph must actually be painted');
 }
 
+export function assertFollowup(frame, area) {
+  const question = frame.user.at(-1);
+  assert.ok(question, 'ordinary follow-up question is visible');
+  const answers = frame.agent.filter(reply => reply.top >= question.bottom);
+  assert.equal(answers.length, 1, 'one ordinary answer follows the newest question');
+  const [answer] = answers;
+  assert.ok(question.top > area.top && answer.bottom < area.bottom, 'newest question and answer are fully inside the viewport');
+  assert.equal(frame.dim.length, 0, 'follow-up is not left queued');
+  return { x: answer.left + 30, y: Math.floor((answer.top + answer.bottom) / 2) };
+}
+
 export function assertHoverActions(image, first) {
   const y = first.bottom - 14;
   for (let cell = 0; cell < 3; cell++) {
@@ -90,6 +101,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     assert.ok(frame.agent.length >= 2, 'fixture replies not painted');
     const first = frame.agent[0];
     console.log(JSON.stringify({ x: first.left + 30, y: first.top + 20 }));
+  } else if (process.argv[3] === '--followup') {
+    const area = json('reactions/area.json');
+    console.log(JSON.stringify(assertFollowup(inspect(readBmp(path.join(root, 'reactions-followup.bmp')), area), area)));
   } else if (process.argv[3] === '--frame') {
     const name = process.argv[4];
     assertBadge(inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), json('reactions/area.json')), name === 'fallback' ? 2 : 1);
@@ -120,6 +134,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       assert.equal(frames.before.pill.length, 0);
       for (const name of ['pending', 'delivered', 'restart']) assertBadge(frames[name]);
       assertBadge(frames.fallback, 2);
+      const question = 'What should I do next?';
+      const answer = 'The next answer stays visible after reacting.';
+      assert.equal(events.filter(e => e.type === 'user' && e.message?.content === question).length, 1, 'one real ordinary follow-up submission');
+      assert.equal(events.filter(e => e.type === 'assistant' && e.message?.id === 'msg_followup' && e.message?.content?.some?.(part => part.text === answer)).length, 1);
+      assert.equal(observation.followupCopied, answer, 'the visible newest answer copies its exact ordinary text');
+      assert.ok(observation.followupNewestMoved > 0, 'real scrolling reached the newest answer');
+      frames.followup = inspect(readBmp(path.join(root, 'reactions-followup.bmp')), area);
+      assertFollowup(frames.followup, area);
       fs.writeFileSync(path.join(root, 'reactions-proof.json'), JSON.stringify({ expected, frames }, null, 2));
       fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-reactions', status: 'passed', transportCount: sends.length, sameTargetAfterRestart: true }, null, 2));
       console.log('QUOTED_REACTION_BADGE_RESTART_PROVEN');
