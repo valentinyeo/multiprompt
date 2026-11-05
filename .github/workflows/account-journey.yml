@@ -112,6 +112,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
           npx wrangler deploy --dry-run --outdir .build
           if ($LASTEXITCODE -ne 0) { throw 'Worker build failed' }
+      - name: Check account journey diagnostics
+        shell: pwsh
+        run: |
+          . ./tools/account-journey/diagnostics.ps1
+          & ./tools/account-journey/diagnostics.test.ps1
       - name: Drive the real desktop against the account service
         shell: pwsh
         run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"

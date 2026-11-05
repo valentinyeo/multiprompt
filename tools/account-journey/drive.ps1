@@ -21,6 +21,7 @@ $cert = $null
 $rootCertAdded = $false
 $failure = $null
 $stage = 'setup'
+. "$PSScriptRoot/diagnostics.ps1"
 $results = [ordered]@{ native_roundtrip = @{ verdict = 'fail' } }
 $hostsFile = "$env:SystemRoot/System32/drivers/etc/hosts"
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
@@ -152,7 +153,7 @@ try {
     [void](Wait-For 'test account service' { Test-Path $state } 60)
     $secrets = Get-Content $state -Raw | ConvertFrom-Json
     $probe = & curl.exe -s "https://$hostName/v1/layout"
-    if ($probe -notmatch 'device_required') { throw "Service not reachable under the real hostname: $probe" }
+    if ($probe -notmatch 'device_required') { throw 'Service not reachable under the real hostname' }
     $results.service_probe = 'device_required over https with the real hostname'
 
     $credential = [Text.Encoding]::UTF8.GetBytes((@{refresh_token=$secrets.refresh_token} | ConvertTo-Json -Compress))
@@ -265,18 +266,24 @@ try {
     $mainB = Wait-For 'second app window' { $h = [ReconnectDesktop]::Window($appB.Id); if ($h -ne [IntPtr]::Zero) { $h } } 60
     [void](Wait-For 'second app baseline apply' { (Read-Log $logB) -match 'account-sync: applied workspaces=\S*Runners' } 60)
     $newName = 'saved' + [guid]::NewGuid().ToString('N').Substring(0, 16)
-    $stage = 'native baselines'
+    $stage = 'native baseline A session'
     [void](Wait-For 'A baseline session' { Session-Has $sessionA 'Runners' $newName } 30)
+    $stage = 'native baseline B session'
     [void](Wait-For 'B baseline session' { Session-Has $sessionB 'Runners' $newName } 30)
+    $stage = 'native baseline B workspace'
     Show-Workspace 'Runners' $mainB $appB.Id $sessionB
+    $stage = 'native baseline B rename'
     $editB = Open-Rename $mainB $appB.Id 'Runners'
     Shot 'native-b-before' $mainB $appB.Id
     Assert-Focus $mainB $appB.Id $editB
     [ReconnectDesktop]::Type(0x1B)
+    $stage = 'native baseline A workspace'
     Show-Workspace 'Runners' $main $app.Id $sessionA
+    $stage = 'native baseline A rename'
     $editA = Open-Rename $main $app.Id 'Runners'
     Shot 'native-a-before' $main $app.Id
     Assert-Focus $main $app.Id $editA
+    $stage = 'native baseline service'
     $baseline = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $headersB
     $baselineNames = @($baseline.layout.workspaces | ForEach-Object { $_.name })
     if (@($baselineNames | Where-Object { $_ -ceq 'Runners' }).Count -ne 1 -or @($baselineNames | Where-Object { $_ -ceq $newName }).Count -ne 0) { throw 'Service baseline mismatch' }
@@ -327,11 +334,12 @@ try {
     $results.native_roundtrip = [ordered]@{ verdict = 'pass'; device_ids = @('journey-device', 'journey-device-b'); instances = @('journey-a', 'journey-b'); pids = @($app.Id, $appB.Id); hwnds = @($main.ToInt64(), $mainB.ToInt64()); workspace = $newName; baseline_revision = $baselineRevision; published_revision = [long]$published.revision; seconds = [Math]::Round(([DateTime]::UtcNow - $nativeStart).TotalSeconds, 2) }
     $results.verdict = 'pass'
 } catch {
-    $failure = $true
+    $failure = $_
     $results.verdict = 'fail'
     $results.failed_stage = $stage
     $message = $_.Exception.Message
     $results.failure_message = if ($message.StartsWith('Timed out:') -or $message.StartsWith('Could not switch to workspace')) { $message } else { $_.Exception.GetType().FullName }
+    $results.error = Get-JourneyError $_
 } finally {
     foreach ($entry in @(@{ path = $log; name = 'desktop-a.log' }, @{ path = $logB; name = 'desktop-b.log' })) {
         if ($entry.path -and (Test-Path $entry.path)) {
@@ -353,19 +361,22 @@ try {
                     & taskkill.exe /PID $ownedProcess.Id /T /F 2>&1 | Out-Null
                     if (!$ownedProcess.WaitForExit(10000)) { throw 'Owned process did not exit' }
                 }
-            } catch { $failure = $true; $results.cleanup = 'failed' }
+            } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
         }
     }
-    try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { $failure = $true; $results.cleanup = 'failed' }
+    try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
     foreach ($envName in $originalEnv.Keys) { [Environment]::SetEnvironmentVariable($envName, $originalEnv[$envName], 'Process') }
     if ($cert) {
         try {
             if ($rootCertAdded -and (Test-Path "Cert:\LocalMachine\Root\$($cert.Thumbprint)")) { Remove-Item "Cert:\LocalMachine\Root\$($cert.Thumbprint)" -ErrorAction Stop }
             if (Test-Path "Cert:\LocalMachine\My\$($cert.Thumbprint)") { Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -ErrorAction Stop }
-        } catch { $failure = $true; $results.cleanup = 'failed' }
+        } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
     }
-    try { if (Test-Path $work) { Remove-Item $work -Recurse -Force -ErrorAction Stop } } catch { $failure = $true; $results.cleanup = 'failed' }
+    try { if (Test-Path $work) { Remove-Item $work -Recurse -Force -ErrorAction Stop } } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
     if ($failure) { $results.verdict = 'fail'; $results.native_roundtrip.verdict = 'fail' }
     $results | ConvertTo-Json -Depth 8 | Set-Content "$Output/result.json"
 }
-if ($failure) { throw "Account journey failed at $stage" }
+if ($failure) {
+    if ($results.error.redacted) { throw 'Account journey failed; sensitive exception details were redacted' }
+    throw $failure
+}
