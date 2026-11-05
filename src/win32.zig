@@ -691,6 +691,7 @@ pub extern "kernel32" fn GetLastError() callconv(WINAPI) DWORD;
 pub extern "kernel32" fn ExitProcess(UINT) callconv(WINAPI) noreturn;
 pub extern "kernel32" fn QueryFullProcessImageNameW(HANDLE, DWORD, [*]u16, *DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn TerminateProcess(HANDLE, UINT) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn ResumeThread(HANDLE) callconv(WINAPI) DWORD;
 pub extern "dwmapi" fn DwmSetWindowAttribute(HANDLE, DWORD, *const anyopaque, DWORD) callconv(WINAPI) i32;
 pub extern "dwmapi" fn DwmGetWindowAttribute(HANDLE, DWORD, *anyopaque, DWORD) callconv(WINAPI) i32;
 pub extern "advapi32" fn RegOpenCurrentUser(DWORD, *HANDLE) callconv(WINAPI) LONG;
@@ -1000,6 +1001,7 @@ pub const PROCESS_MEMORY_COUNTERS = extern struct {
 const WNDENUMPROC = *const fn (HANDLE, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn EnumWindows(WNDENUMPROC, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn SendMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
+pub extern "user32" fn PostMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn SendMessageTimeoutW(HANDLE, UINT, WPARAM, LPARAM, UINT, UINT, ?*usize) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CallWindowProcW(isize, HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CreatePopupMenu() callconv(WINAPI) HANDLE;

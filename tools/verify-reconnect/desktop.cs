@@ -41,7 +41,7 @@ public static class ReconnectDesktop {
     public static void Type(ushort vk) { Key(vk,false); Key(vk,true); }
     public static uint Owner(IntPtr h) { uint pid; GetWindowThreadProcessId(h,out pid); return pid; }
     public static string Class(IntPtr h) { var s=new StringBuilder(256); GetClassName(h,s,256); return s.ToString(); }
-    public static IntPtr Window(uint pid) { IntPtr found=IntPtr.Zero; EnumWindows((h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner); if(owner==pid && IsWindowVisible(h) && Class(h)!="ConsoleWindowClass") { found=h; return false; } return true; },IntPtr.Zero); return found; }
+    public static IntPtr Window(uint pid) { IntPtr found=IntPtr.Zero; EnumWindows((h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner); if(owner==pid && IsWindowVisible(h) && Class(h)=="ZigShell") { found=h; return false; } return true; },IntPtr.Zero); return found; }
     public static IntPtr InputSurface(IntPtr parent) { IntPtr found=IntPtr.Zero; EnumChildWindows(parent,(h,p)=>{ if(Class(h)=="ConsoleWindowClass" && IsWindowVisible(h)) { found=h; return false; } return true; },IntPtr.Zero); return found; }
     public static long[] Focus(IntPtr main) { uint pid; uint thread=GetWindowThreadProcessId(main,out pid); var g=new GUI(); g.cbSize=(uint)Marshal.SizeOf<GUI>(); if(!GetGUIThreadInfo(thread,ref g)) throw new Exception("GetGUIThreadInfo failed"); return new[]{GetForegroundWindow().ToInt64(),g.focus.ToInt64(),g.active.ToInt64()}; }
     static void Send(INPUT i) { if(SendInput(1,new[]{i},Marshal.SizeOf<INPUT>())!=1) throw new Exception("SendInput failed"); }

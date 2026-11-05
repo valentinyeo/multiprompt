@@ -1,1 +1,1 @@
-Copied local chat IDs stay the same after restart.
+Copied local chat IDs stay unchanged after restarts.

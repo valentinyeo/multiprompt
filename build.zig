@@ -350,7 +350,7 @@ pub fn build(b: *std.Build) void {
     const changelog_entry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/changelog-entry.test.js", "tools/changelog-fragment-reads.test.js" });
     test_step.dependOn(&changelog_entry_tests.step);
     vps_test_step.dependOn(&changelog_entry_tests.step);
-    const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js" });
+    const smooth_shapes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/smooth-shapes.test.js", "tools/room-empty-text.test.js" });
     test_step.dependOn(&smooth_shapes_tests.step);
     vps_test_step.dependOn(&smooth_shapes_tests.step);
     const root_images_tests = b.addSystemCommand(&.{ "node", "--test", "tools/root-images.test.js" });
@@ -628,6 +628,10 @@ pub fn build(b: *std.Build) void {
     chat_skill_tab_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_skill_tab_tests.step);
     vps_test_step.dependOn(&chat_skill_tab_tests.step);
+    const room_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/room-reply-grouping.test.js" });
+    room_reply_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&room_reply_tests.step);
+    vps_test_step.dependOn(&room_reply_tests.step);
     const chat_drafts_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-drafts.test.js" });
     chat_drafts_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drafts_tests.step);

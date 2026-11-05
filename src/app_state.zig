@@ -2587,9 +2587,9 @@ pub const VPS_PROBE_SCRIPT =
     "grep '^MemAvailable:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; " ++
     "grep '^SwapTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; " ++
     "grep '^SwapFree:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; " ++
-    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; " ++
-    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; " ++
-    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; " ++
+    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
+    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
+    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "printf '\\n'; ";
 pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null";
 
@@ -2665,17 +2665,7 @@ pub var g_all_sessions_filter_buf: [64]u16 = std.mem.zeroes([64]u16);
 pub var g_all_sessions_filter_len: u32 = 0;
 pub var g_archive_arm_sid: u32 = 0;
 pub var g_archive_arm_deadline: u64 = 0;
-pub const PendingSessionKill = struct {
-    ai_agent: u8 = 1,
-    host: u8 = 0,
-    session: [64]u8 = std.mem.zeroes([64]u8),
-    session_len: u32 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u32 = 0,
-};
-pub const PENDING_SESSION_KILL_MAX: usize = 8;
-pub var g_pending_session_kills: [PENDING_SESSION_KILL_MAX]PendingSessionKill = [_]PendingSessionKill{.{}} ** PENDING_SESSION_KILL_MAX;
-pub var g_pending_session_kill_count: u32 = 0;
+pub var g_pending_session_kills: @import("session_kills.zig").Queue = .{};
 pub var g_pending_session_kill_mutex: SpinMutex = .{};
 pub var g_all_sessions_sel: u32 = 0;
 pub const AS_TAB_ALL: u32 = 200;
