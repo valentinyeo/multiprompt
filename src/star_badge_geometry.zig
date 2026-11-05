@@ -1,5 +1,14 @@
 const std = @import("std");
 
+pub const Marker = enum { disconnected, unread, favorite };
+
+pub fn marker(disconnected: bool, unread: bool, favorite: bool, starred: bool) ?Marker {
+    if (disconnected) return .disconnected;
+    if (unread) return .unread;
+    if (favorite and !starred) return .favorite;
+    return null;
+}
+
 pub const Geometry = struct {
     center_x: i32,
     center_y: i32,
@@ -7,14 +16,8 @@ pub const Geometry = struct {
     ring: i32,
 };
 
-pub fn diameter(avatar: i32) i32 {
-    return @divTrunc(avatar * 11 + 18, 36);
-}
-
-pub fn geometry(right: i32, bottom: i32, avatar: i32, comptime scale: fn (i32) i32) Geometry {
-    const size = scale(diameter(avatar));
-    const offset = scale(2);
-    return .{ .center_x = right - offset, .center_y = bottom - offset, .diameter = size, .ring = scale(2) };
+pub fn geometry(right: i32, bottom: i32, comptime scale: fn (i32) i32) Geometry {
+    return .{ .center_x = right - scale(2), .center_y = bottom - scale(2), .diameter = scale(8), .ring = scale(2) };
 }
 
 fn identity(px: i32) i32 {
@@ -25,24 +28,22 @@ fn scale150(px: i32) i32 {
     return @divTrunc(px * 150, 100);
 }
 
-test "star badge geometry at 100 and 150 percent" {
-    try std.testing.expectEqual(@as(i32, 7), diameter(24));
-    try std.testing.expectEqual(@as(i32, 11), diameter(36));
-    try std.testing.expectEqual(@as(i32, 12), diameter(40));
-    try std.testing.expectEqual(@as(i32, 17), diameter(56));
-    const cases = [_]struct { avatar: i32, right: i32, bottom: i32, size: i32, ring: i32, x: i32, y: i32, scaled: bool }{
-        .{ .avatar = 40, .right = 50, .bottom = 60, .size = 12, .ring = 2, .x = 48, .y = 58, .scaled = false },
-        .{ .avatar = 40, .right = 75, .bottom = 90, .size = 18, .ring = 3, .x = 72, .y = 87, .scaled = true },
-        .{ .avatar = 56, .right = 66, .bottom = 76, .size = 17, .ring = 2, .x = 64, .y = 74, .scaled = false },
-        .{ .avatar = 56, .right = 99, .bottom = 114, .size = 25, .ring = 3, .x = 96, .y = 111, .scaled = true },
-    };
-    for (cases) |case| {
-        const g = if (case.scaled) geometry(case.right, case.bottom, case.avatar, scale150) else geometry(case.right, case.bottom, case.avatar, identity);
-        try std.testing.expectEqual(case.x, g.center_x);
-        try std.testing.expectEqual(case.y, g.center_y);
-        try std.testing.expectEqual(case.size, g.diameter);
-        try std.testing.expectEqual(case.ring, g.ring);
-        try std.testing.expect(g.center_x < case.right and g.center_y < case.bottom);
-        try std.testing.expect(g.center_x + @divTrunc(g.diameter, 2) + g.ring > case.right);
+test "robot marker precedence and starred visibility" {
+    for ([_]bool{ false, true }) |disconnected| {
+        for ([_]bool{ false, true }) |unread| {
+            for ([_]bool{ false, true }) |favorite| {
+                for ([_]bool{ false, true }) |starred| {
+                    const expected: ?Marker = if (disconnected) .disconnected else if (unread) .unread else if (favorite and !starred) .favorite else null;
+                    try std.testing.expectEqual(expected, marker(disconnected, unread, favorite, starred));
+                }
+            }
+        }
     }
+}
+
+test "robot marker geometry at 100 and 150 percent" {
+    const normal = geometry(50, 60, identity);
+    try std.testing.expectEqual(Geometry{ .center_x = 48, .center_y = 58, .diameter = 8, .ring = 2 }, normal);
+    const scaled = geometry(75, 90, scale150);
+    try std.testing.expectEqual(Geometry{ .center_x = 72, .center_y = 87, .diameter = 12, .ring = 3 }, scaled);
 }
