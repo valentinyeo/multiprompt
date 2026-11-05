@@ -124,7 +124,7 @@ function Look([string]$Menu, [string]$Choice, [int]$Target) {
 function Dialog {
     $dialog = Wait-For 'owned file dialog' {
         $window = [ChatDeliveryDesktop]::GetForegroundWindow()
-        if ($window -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Owner($window) -eq [uint32]$app.Id -and [ChatDeliveryDesktop]::Class($window) -eq '#32770' -and [PhotoDialogOwner]::GetWindow($window, 4) -eq $main) { $window }
+        if ($window -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Owner($window) -eq [uint32]$app.Id -and [ChatDeliveryDesktop]::Class($window) -eq '#32770' -and [PhotoDialogOwner]::GetWindow($window, 4) -eq $main -and [PhotoDialogOwner]::IsWindowVisible($window) -and [PhotoDialogOwner]::IsWindowEnabled($window)) { $window }
     }
     return $dialog
 }

@@ -10,6 +10,13 @@ const source = fs.readFileSync(path.join(root, 'src/fonts.zig'), 'utf8');
 const begin = source.indexOf('fn fileDialogFontHook(');
 const end = source.indexOf('\npub fn openFileName(', begin);
 
+test('file picker input waits for a visible enabled native dialog', () => {
+  const driver = fs.readFileSync(path.join(root, 'tools/verify-bot-photo/drive.ps1'), 'utf8');
+  const dialog = driver.slice(driver.indexOf('function Dialog {'), driver.indexOf('function Picker-State('));
+  assert.match(dialog, /IsWindowVisible\(\$window\)/);
+  assert.match(dialog, /IsWindowEnabled\(\$window\)/);
+});
+
 const fixture = `const std = @import("std");
 var dialog_hook: ?*anyopaque = @ptrFromInt(1);
 var unhooks: usize = 0;
