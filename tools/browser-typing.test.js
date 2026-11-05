@@ -392,7 +392,7 @@ fn SetForegroundWindow(hwnd: HANDLE) i32 {
     return 0;
 }
 fn SwitchToThisWindow(h: HANDLE, activate: i32) void {
-    std.debug.assert(activate == 1);
+    std.debug.assert(activate == 0);
     switch_count += 1;
     foreground = h;
     if (interrupt == 4) app_state.g_account_locked = true;
@@ -585,7 +585,7 @@ fn SetForegroundWindow(hwnd: HANDLE) i32 {
     foreground = hwnd; focus_changes += 1; return 1;
 }
 fn SwitchToThisWindow(hwnd: HANDLE, activate: i32) void {
-    std.debug.assert(activate == 1);
+    std.debug.assert(activate == 0);
     std.debug.assert(attachments == 0);
     switch_count += 1;
     foreground = hwnd;

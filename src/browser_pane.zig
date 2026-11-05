@@ -3978,6 +3978,7 @@ fn hideBrowserWindowHard(hwnd: HANDLE) void {
 
 pub fn hideAllBrowserChrome() void {
     if (app_state.g_chat_browser_swap.shell_id != 0 and !@import("computer_pane.zig").selected()) return;
+    unregisterUrlBarHotkey();
     hideBrowserFloatingChrome();
     for (0..app_state.shell_count) |i| {
         const bh = app_state.shells[i].browser_hwnd;
@@ -4136,8 +4137,8 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
-    defer syncUrlBarHotkey();
     if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
+    defer syncUrlBarHotkey();
     if (!@import("room_frontend.zig").privateActionsAllowed()) {
         hideAllBrowserChrome();
         return;
