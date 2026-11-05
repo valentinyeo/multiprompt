@@ -73,7 +73,8 @@ test('URL focus waits for modifiers and cancels stale handoffs', () => {
   assert.ok(start >= 0 && end > start);
   const production = browser.slice(start, end)
     .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
-    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()');
+    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()')
+    .replaceAll('@import("win32.zig").GetLastError()', 'GetLastError()');
   const fixture = `
 const std = @import("std");
 const HANDLE = ?*anyopaque;
@@ -114,6 +115,7 @@ fn GetForegroundWindow() HANDLE { return foreground; }
 fn GetFocus() HANDLE { return focused; }
 fn GetWindowThreadProcessId(h: HANDLE, _: ?*u32) u32 { return if (h == console) 2 else 1; }
 fn GetCurrentThreadId() u32 { return 1; }
+fn GetLastError() u32 { return 0; }
 fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 {
     if (attach != 0) attach_count += 1 else detach_count += 1;
     return 1;

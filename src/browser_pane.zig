@@ -5897,7 +5897,8 @@ pub fn browserUrlFocusTick() void {
     const fg_thread = GetWindowThreadProcessId(fg, null);
     const our_thread = GetCurrentThreadId();
     const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
-    altqLog("url_timer attach fg={X} current_fg={X} fg_tid={} ui_tid={} attached={} auth={X} until={}", .{ altqPtr(fg), altqPtr(GetForegroundWindow()), fg_thread, our_thread, attached, altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until });
+    const attach_error = @import("win32.zig").GetLastError();
+    altqLog("url_timer attach fg={X} current_fg={X} fg_tid={} ui_tid={} attached={} error={} auth={X} until={}", .{ altqPtr(fg), altqPtr(GetForegroundWindow()), fg_thread, our_thread, attached, attach_error, altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until });
     if (fg_thread != 0 and (fg_thread == our_thread or attached) and GetForegroundWindow() == fg and foregroundIsOurs()) {
         const foreground_result = SetForegroundWindow(url_focus_parent);
         altqLog("url_timer foreground result={} fg={X} parent={X} focus={X}", .{ foreground_result, altqPtr(GetForegroundWindow()), altqPtr(url_focus_parent), altqPtr(GetFocus()) });
