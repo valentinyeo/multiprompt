@@ -33,6 +33,7 @@ const reviewedReleases = {
 };
 
 const reviewedCommits = {
+  '03c8a7198930c20e5c4a57bd9799cd2e73b5312c': 'IGSH-1528',
   'ef5ef94e58b9c7741df9fc72e0c899fb5f42e82a': 'IGSH-1697',
   '8f52c2a6cf81d617d61bf6c439ec29719d850062': 'IGSH-1615',
   '303734dbef8add073075166d2ea8e0d4a091646c': ['IGSH-1544', 'IGSH-1545', 'IGSH-1546'],

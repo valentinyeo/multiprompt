@@ -9,6 +9,10 @@
 - `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
 - `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and every sent text reached Claude's queue exactly once, in send order, within the same 10 seconds.
 
+### Hosted feedback boundary
+
+The GitHub Linux reader suite runs `tools/chat-history-reader-test.py`. Its Claude, Codex and Pi process stand-ins capture the startup guidance and child environment. Its feedback cases run the real command against a fake Hypertask executable, including denial and failed-vote controls. These cases do not prove the Windows build's embedded version, a live provider, real board writes or the existing desktop delivery journey. Those require separate exact-build and authorized-agent evidence.
+
 ## How to get to it (user POV)
 
 Select an existing remote tmux tab with Ctrl+1. Press Alt+C to open Chat View, type a message in its composer and press Enter. To ask Claude to take a queued message immediately, type in the composer and press Ctrl+X then Ctrl+S instead of Enter.

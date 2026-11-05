@@ -272,18 +272,19 @@ starts nothing until the user picks.
 - The declared folder is a `commands.json` default entry for the workspace
   (`default: true`, `workspace`, `cwd`, optional `folder_host`). The last matching
   entry wins, so setting the folder again replaces an earlier choice.
-- Without a declared folder, the picker uses the active tmux tab's server when it
-  belongs to the requested workspace; otherwise it uses the existing workspace fallback.
-- `Ctrl+K` -> **Pick repo...** lists git repo roots on the workspace server: repo
-  roots of open tabs first, then repos one level under `~/projects`. Typing filters
-  the paths, Enter starts the session kind that asked for the pick (Claude, Codex,
-  Pi, terminal, Ctrl+T, Alt+T or the sidebar plus), Esc leaves the tab count
-  unchanged.
-- `Ctrl+K` -> **Set workspace folder...** lists the same repos and saves the pick as
-  the declared folder through the app, so nobody edits the file by hand. The row
-  shows the current folder when one is set.
-- The list paints from cache and refreshes in the background over the same one-shot
-  SSH path the tmux cache uses, so the palette never blocks.
+- Without a declared folder, the picker prioritizes the active tmux tab's server
+  when it belongs to the workspace, otherwise the workspace fallback.
+- `Ctrl+K` -> **Pick repo...** lists folders from all three supported server slots,
+  excluding removed hosts. Each row shows its configured account name or SSH alias.
+  Open-tab folders come first on each host, followed by discovered folders one level
+  under `/home/*/projects`. These folders need not be git roots.
+- Typing filters by folder path and server name. Enter starts the requested session
+  on the row's server and folder; Esc leaves the tab count unchanged.
+- `Ctrl+K` -> **Set workspace folder...** lists the same folders and saves the pick as
+  the declared folder. The row shows the current folder when one is set.
+- Hosts refresh concurrently over one-shot SSH. Results are cached for the app
+  lifetime. A failed host retains its last-known folders, marked offline and not
+  selectable, while other hosts remain available. The palette never waits for SSH.
 - Other programs keep the typed terminal start once the folder is known. Codex and
   Pi start live chats like Claude.
 

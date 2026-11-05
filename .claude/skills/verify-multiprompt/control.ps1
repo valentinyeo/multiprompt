@@ -279,7 +279,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/commands.json'), (ConvertTo-Json -InputObject $commands -Depth 6), (New-Object Text.UTF8Encoding($false)))
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
         Save-Json $seed 'seed-session.json'
-        $result.repoPickerBoundary = 'Two synthetic tmux tabs in Other and one terminal with seeded reported cwd in Example; SSH repository listing and console-backed tmux stand-in; no real SSH, tmux server or agent verified.'
+        $result.repoPickerBoundary = 'Two synthetic tmux tabs in Other, host 0 then active host 2, and an Example terminal with seeded reported cwd; distinct per-host SSH listings, switchable discovery failure and console-backed tmux; no real SSH, tmux server or agent verified.'
     }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'

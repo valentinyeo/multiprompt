@@ -27,6 +27,7 @@ pub const Message = struct {
     text: []const u16,
     author: ?Author,
     time: []const u16,
+    question_id: []const u8 = "",
 };
 pub const ViewModel = struct {
     room_id: []const u8,

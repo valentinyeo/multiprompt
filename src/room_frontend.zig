@@ -1148,6 +1148,8 @@ fn acceptEvents(payload: std.json.Value) bool {
             const content = textField(event, "text") orelse return false;
             if (content.len == 0 or content.len > 65536 or item.messages.items.len >= 100000) return false;
             var author: ?room_view.Author = null;
+            var question_id = id;
+            var insertion_index = item.messages.items.len;
             if (std.mem.eql(u8, kind, "human")) {
                 if (event.object.count() != 7 or item.replay_revision == 0 or (numberField(event, "revision") orelse 0) != item.replay_revision) return false;
                 const recipients = event.object.get("recipients") orelse return false;
@@ -1181,10 +1183,19 @@ fn acceptEvents(payload: std.json.Value) bool {
                     break;
                 };
                 if (!authorized) return false;
+                question_id = parent;
+                var found = false;
+                for (item.messages.items, 0..) |message, index| {
+                    if (std.mem.eql(u8, message.question_id, parent)) {
+                        insertion_index = index + 1;
+                        found = true;
+                    } else if (found) break;
+                }
+                if (!found) return false;
                 author = .{ .name = std.unicode.utf8ToUtf16LeStringLiteral("Unknown agent"), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0x9a9a9a };
                 for (item.history.items) |old| if (std.mem.eql(u8, old.id, member_id)) { author = old.author; break; };
             }
-            item.messages.append(a, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{} }) catch return false;
+            item.messages.insert(a, insertion_index, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{}, .question_id = a.dupe(u8, question_id) catch return false }) catch return false;
         } else return false;
         last = seq;
     }
