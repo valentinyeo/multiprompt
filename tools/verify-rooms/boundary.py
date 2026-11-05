@@ -54,7 +54,8 @@ def synthetic_runtime(store, directory):
                     delivered = runtime['host_handle_request'](query['provider'], query['sid'], query['tmux'], session, delivery)
                     if delivered.get('status') != 'sent' or len(sent) != 1:
                         raise RuntimeError('Synthetic provider admission failed')
-                    text = 'Synthetic ' + member['display_name'].title() + ' reply: Ready.'
+                    answer = 'Second ready.' if query['text'].startswith('Second room question:') else 'Ready.'
+                    text = 'Synthetic ' + member['display_name'].title() + ' reply: ' + answer
                     runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='assistant', message=dict(id='synthetic-' + query['message_id'], content=[dict(type='text', text=text)]))))
                     runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='result', subtype='success')))
                     sent.clear()

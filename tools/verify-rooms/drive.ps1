@@ -139,7 +139,8 @@ function Transcript-Bubbles {
         $right = [int][Math]::Min($width - 20 * $scale, $width / 2 + 380 * $scale)
         $stepX = [int][Math]::Max(1, [Math]::Round(4 * $scale))
         $stepY = [int][Math]::Max(1, [Math]::Round(2 * $scale))
-        $humans = 0; $agents = 0; $wasHuman = $false; $wasAgent = $false
+        $humans = 0; $agents = 0; $lastHumanY = -100000; $lastAgentY = -100000
+        $glyphGap = [int][Math]::Round(14 * $scale)
         for ($y = [int](78 * $scale); $y -lt $height - 130 * $scale; $y += $stepY) {
             $humanPixels = 0; $agentPixels = 0
             for ($x = $left; $x -lt $right; $x += $stepX) {
@@ -149,16 +150,22 @@ function Transcript-Bubbles {
             }
             $isHuman = $humanPixels -ge 20
             $isAgent = $agentPixels -ge 20
-            if ($isHuman -and !$wasHuman) { $humans++ }
-            if ($isAgent -and !$wasAgent) { $agents++ }
-            $wasHuman = $isHuman; $wasAgent = $isAgent
+            if ($isHuman) {
+                if ($y - $lastHumanY -gt $glyphGap) { $humans++ }
+                $lastHumanY = $y
+            }
+            if ($isAgent) {
+                if ($y - $lastAgentY -gt $glyphGap) { $agents++ }
+                $lastAgentY = $y
+            }
         }
-        return @{humans=$humans; agents=$agents; dpi=[int]($scale * 96); width=$width; height=$height}
+        return @{humans=$humans; agents=$agents; dpi=[int]($scale * 96); width=$width; height=$height; left=$rect.Left; top=$rect.Top; glyph_gap=$glyphGap}
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Wait-PaintedMessages([string]$Stage, [int]$Humans, [int]$Agents) {
     $observed = Wait-For ('painted messages: ' + $Stage) {
         $value = Transcript-Bubbles
+        if ($value) { Save $value (Join-Path $Evidence ($Stage + '-last-paint.json')) }
         if ($value -and $value.humans -eq $Humans -and $value.agents -eq $Agents) { return $value }
     }
     Save $observed (Join-Path $Evidence ($Stage + '-paint.json'))
@@ -328,29 +335,48 @@ try {
         $events=@($w.rooms[0].events)
         @($events | Where-Object { $_.type -eq 'human' }).Count -eq 1 -and @($events | Where-Object { $_.type -eq 'agent_reply' }).Count -eq 2 -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
     })
-    function Check-Replies {
+    function Check-Replies([int]$Questions = 1) {
         $w=Witness
         $human=@($w.rooms[0].events | Where-Object { $_.type -eq 'human' })
         $replies=@($w.rooms[0].events | Where-Object { $_.type -eq 'agent_reply' })
-        Check 'exactly-one-human-post' ($human.Count -eq 1 -and $human[0].text -ceq 'Both synthetic agents, reply once.')
-        Check 'exactly-two-member-replies' ($replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2)
-        Check 'reply-parent-binding' (@($replies | Where-Object { $_.parent_event_id -cne $human[0].id }).Count -eq 0)
-        Check 'synthetic-reply-content' ((@($replies.text | Sort-Object) -join '|') -ceq 'Synthetic Alpha reply: Ready.|Synthetic Beta reply: Ready.')
-        Check 'canonical-two-turns-only' (@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2)
+        Check 'exact-human-count' ($human.Count -eq $Questions)
+        Check 'exact-reply-count' ($replies.Count -eq 2 * $Questions)
+        $texts = @('Both synthetic agents, reply once.', 'Second room question: both agents, reply once.')
+        for ($i = 0; $i -lt $Questions; $i++) {
+            $question = $human[$i]
+            $answers = @($replies | Where-Object { $_.parent_event_id -ceq $question.id })
+            Check ('question-text-' + $i) ($question.text -ceq $texts[$i])
+            Check ('question-recipients-' + $i) ($answers.Count -eq 2 -and (@($answers.member_id | Sort-Object) -join '|') -ceq (@($question.recipients | Sort-Object) -join '|'))
+            $answer = if ($i -eq 0) { 'Ready.' } else { 'Second ready.' }
+            Check ('question-reply-content-' + $i) ((@($answers.text | Sort-Object) -join '|') -ceq ('Synthetic Alpha reply: ' + $answer + '|Synthetic Beta reply: ' + $answer))
+        }
+        Check 'canonical-exact-turn-count' (@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 * $Questions -and @($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2 * $Questions)
         Save $w (Join-Path $Evidence 'witness.json')
     }
     Check-Replies
     Wait-PaintedMessages 'after-send' 1 2
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-synthetic-replies'
+    Invoke-NativeInput @{kind='text'; text='Second room question: both agents, reply once.'; keys=$null}
+    Check 'native-second-question-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Second room question: both agents, reply once.')
+    Press @(0x0d)
+    [void](Wait-For 'two questions and four scoped synthetic replies' {
+        $w = Witness
+        if (!$w -or @($w.rooms).Count -ne 1) { return $false }
+        $events = @($w.rooms[0].events)
+        @($events | Where-Object { $_.type -eq 'human' }).Count -eq 2 -and @($events | Where-Object { $_.type -eq 'agent_reply' }).Count -eq 4 -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
+    })
+    Check-Replies 2
+    Wait-PaintedMessages 'after-second-question' 2 4
+    Shot 'two-questions-and-four-replies'
     Stop-App
     Start-App
     [void](Wait-For 'reopened selected room' { Room-Window })
     [void](Wait-For 'post-restart store read' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
-    Check-Replies
-    Wait-PaintedMessages 'after-restart' 1 2
+    Check-Replies 2
+    Wait-PaintedMessages 'after-restart' 2 4
     [void]$app.WaitForInputIdle(5000)
-    Shot 'two-replies-after-restart'
+    Shot 'two-questions-after-restart'
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message

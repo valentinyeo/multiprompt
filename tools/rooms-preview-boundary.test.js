@@ -7,7 +7,7 @@ const { randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 
-test('Rooms preview boundary retains legacy refusal and one broadcast produces two scoped synthetic replies', () => {
+test('Rooms preview boundary retains legacy refusal and binds two broadcasts to their synthetic replies', () => {
   assert.equal(process.env.GITHUB_ACTIONS, 'true', 'GitHub-hosted only');
   assert.ok(fs.existsSync(path.join(root, 'tools/verify-rooms/boundary.py')), 'The executable Rooms preview boundary must exist');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rooms-preview-boundary-'));
@@ -54,11 +54,24 @@ test('Rooms preview boundary retains legacy refusal and one broadcast produces t
     assert.deepEqual(replies.map(reply => reply.text).sort(), ['Synthetic Alpha reply: Ready.', 'Synthetic Beta reply: Ready.']);
     assert.deepEqual(request(post), receipt);
     assert.deepEqual(request(query), page);
+    const second = { ...post, command_id: randomUUID(), text: 'Second room question: both agents, reply once.' };
+    const secondReceipt = request(second);
+    assert.equal(secondReceipt.ok, true, JSON.stringify(secondReceipt));
+    const secondPage = request(query);
+    assert.equal(secondPage.ok, true, JSON.stringify(secondPage));
+    assert.equal(secondPage.result.events.filter(event => event.type === 'human').length, 2);
+    const allReplies = secondPage.result.events.filter(event => event.type === 'agent_reply');
+    assert.equal(allReplies.length, 4);
+    const secondReplies = allReplies.filter(reply => reply.parent_event_id === secondReceipt.result.event.id);
+    assert.equal(new Set(secondReplies.map(reply => reply.member_id)).size, 2);
+    assert.deepEqual(secondReplies.map(reply => reply.text).sort(), ['Synthetic Alpha reply: Second ready.', 'Synthetic Beta reply: Second ready.']);
+    assert.deepEqual(request(second), secondReceipt);
+    assert.deepEqual(request(query), secondPage);
     const witness = JSON.parse(fs.readFileSync(path.join(directory, 'witness.json'), 'utf8'));
     assert.equal(witness.rooms.length, 1);
-    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').length, 2);
-    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.started').length, 2);
-    assert.ok(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').every(row => row.event.room_scope.parent_event_id === receipt.result.event.id));
+    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').length, 4);
+    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.started').length, 4);
+    assert.ok(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').every(row => [receipt.result.event.id, secondReceipt.result.event.id].includes(row.event.room_scope.parent_event_id)));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

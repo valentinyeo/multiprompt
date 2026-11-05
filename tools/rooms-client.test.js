@@ -14,7 +14,8 @@ test('room input waits for the multiline composer instead of retaining the creat
   assert.match(driver, /Wait-For 'composer owns focus'/);
   assert.match(driver, /Wait-For 'created room selected by the app'/);
   assert.match(driver, /Wait-PaintedMessages 'after-send' 1 2/);
-  assert.match(driver, /Wait-PaintedMessages 'after-restart' 1 2/);
+  assert.match(driver, /Wait-PaintedMessages 'after-second-question' 2 4/);
+  assert.match(driver, /Wait-PaintedMessages 'after-restart' 2 4/);
   assert.match(driver, /\$_.event.PSObject.Properties\['kind'\]/);
 });
 
