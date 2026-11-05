@@ -15,12 +15,22 @@ public static class FreezeJourney {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)] struct Keyboard { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
     [StructLayout(LayoutKind.Explicit)] struct Data { [FieldOffset(0)] public Mouse Mouse; [FieldOffset(0)] public Keyboard Keyboard; }
     [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public Data Data; }
     [DllImport("user32.dll")] static extern uint SendInput(uint count, Input[] inputs, int size);
+    public static void Activate(IntPtr window) {
+        Input[] input = new Input[2];
+        for (int i = 0; i < input.Length; i++) {
+            input[i].Type = 1;
+            input[i].Data.Keyboard = new Keyboard { Key = 0x12, Flags = i == 0 ? 0u : 2u };
+        }
+        if (SendInput(2, input, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Activation SendInput failed");
+        SetForegroundWindow(window);
+    }
     public static void FontBigger() {
         Input[] input = new Input[4];
         ushort[] keys = { 0x11, 0xBB, 0xBB, 0x11 };
@@ -173,7 +183,12 @@ try {
     Start-Sleep -Seconds 3
     $restartNoticePixels = Capture-NoticePixels 'next-start.png'
     if ($restartNoticePixels -ne 0) { throw "Unprompted restart notice remains: $restartNoticePixels orange pixels" }
-    if (-not [FreezeJourney]::SetForegroundWindow($window)) { throw 'Cannot focus owned app for action feedback' }
+    [FreezeJourney]::Activate($window)
+    $focusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([FreezeJourney]::GetForegroundWindow() -ne $window) {
+        if ($app.HasExited -or [DateTime]::UtcNow -gt $focusDeadline) { throw 'Cannot focus owned app for action feedback' }
+        Start-Sleep -Milliseconds 50
+    }
     [FreezeJourney]::FontBigger()
     Start-Sleep -Milliseconds 250
     $userActionNoticePixels = Capture-NoticePixels 'user-action.png'
