@@ -827,11 +827,8 @@ pub fn syncShellDisplayNameSurfaces(idx: u32, name: []const u8, send_agent_renam
 
 pub fn applyCanonicalSessionRename(idx: u32, raw_name: []const u16, sync_remote: bool) bool {
     if (idx >= app_state.shell_count) return false;
-    if (raw_name.len == 0) {
-        setDefaultName(&app_state.shells[idx], app_state.shells[idx].kind, idx);
-        app_state.shells[idx].name_source = .default;
-        return true;
-    }
+    const name = std.mem.trim(u16, raw_name, &.{ ' ', '\t', '\r', '\n' });
+    if (name.len == 0) return false;
 
     if (sync_remote) {
         var old_live_buf: [64]u8 = undefined;
@@ -844,20 +841,38 @@ pub fn applyCanonicalSessionRename(idx: u32, raw_name: []const u16, sync_remote:
     }
 
     const local_agent = sync_remote and app_state.shells[idx].tmux_session_len == 0 and shellLooksLikeCodingAgent(idx);
-    const name_len = @min(raw_name.len, app_state.shells[idx].name.len - 1);
-    @memcpy(app_state.shells[idx].name[0..name_len], raw_name[0..name_len]);
+    const name_len = @min(name.len, app_state.shells[idx].name.len - 1);
+    @memcpy(app_state.shells[idx].name[0..name_len], name[0..name_len]);
     app_state.shells[idx].name[name_len] = 0;
     app_state.shells[idx].name_len = @intCast(name_len);
     app_state.shells[idx].name_source = .manual;
     if (sync_remote) {
         var sync_buf: [64]u8 = undefined;
-        const sync_name = shellNameFromU16AsciiTrimmed(raw_name[0..name_len], &sync_buf);
+        const sync_name = shellNameFromU16AsciiTrimmed(name[0..name_len], &sync_buf);
         if (sync_name.len > 0) {
             syncShellDisplayNameSurfaces(idx, sync_name, true);
             if (local_agent and !shellLooksLikeCodingAgent(idx)) sendAgentRenameToLocalShell(idx, sync_name);
         }
     }
     return true;
+}
+
+test "canonical session rename retains blanks and trims names" {
+    const previous_count = app_state.shell_count;
+    const previous_shell = app_state.shells[0];
+    defer {
+        app_state.shell_count = previous_count;
+        app_state.shells[0] = previous_shell;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = app_state.empty_shell;
+    try std.testing.expect(applyCanonicalSessionRename(0, &.{ 'O', 'l', 'd' }, false));
+    try std.testing.expect(!applyCanonicalSessionRename(0, &.{}, false));
+    try std.testing.expect(!applyCanonicalSessionRename(0, &.{ ' ', '\t', '\r', '\n' }, false));
+    try std.testing.expectEqualSlices(u16, &.{ 'O', 'l', 'd' }, app_state.shells[0].name[0..app_state.shells[0].name_len]);
+    try std.testing.expectEqual(app_state.NameSource.manual, app_state.shells[0].name_source);
+    try std.testing.expect(applyCanonicalSessionRename(0, &.{ ' ', '\t', 'N', 'e', 'w', ' ', '\n' }, false));
+    try std.testing.expectEqualSlices(u16, &.{ 'N', 'e', 'w' }, app_state.shells[0].name[0..app_state.shells[0].name_len]);
 }
 
 pub fn shellNameFromU16AsciiTrimmed(src: []const u16, out: *[64]u8) []const u8 {

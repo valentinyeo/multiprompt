@@ -1797,7 +1797,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC => {
             const child: HANDLE = if (lp == 0) null else @ptrFromInt(@as(usize, @bitCast(lp)));
-            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar and !app_state.g_edit_is_inbox) {
+            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
                 const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
                 _ = SetTextColor(dc, @import("rename.zig").inline_text_color);
                 _ = SetBkColor(dc, @import("rename.zig").inline_color);
@@ -2857,8 +2857,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_RENAME_TAB => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            if (app_state.shell_count > 0) {
-                if (app_state.g_chat_active and threadTitleHeight() > 0) startThreadTitleRename() else startRename(app_state.active_shell);
+            if (app_state.g_inbox_active) {
+                @import("inbox.zig").startInboxRename();
+            } else if (app_state.shell_count > 0) {
+                startRename(app_state.active_shell);
             }
             return 0;
         },

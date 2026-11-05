@@ -67,7 +67,6 @@ const L = @import("startup.zig").L;
 const getInstanceName = @import("startup.zig").getInstanceName;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
 const MAX_LWS = @import("app_state.zig").MAX_LWS;
-const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
 const findGroupIdx = @import("sidebar.zig").findGroupIdx;
 const GROUP_COLORS = @import("app_state.zig").GROUP_COLORS;
@@ -194,6 +193,13 @@ pub fn inlineBrush() HANDLE {
     return inline_brush;
 }
 
+pub fn setInlineColors(background: u32, foreground: u32) void {
+    inline_color = background;
+    inline_text_color = foreground;
+    if (inline_brush != null) _ = DeleteObject(inline_brush);
+    inline_brush = @import("win32.zig").CreateSolidBrush(inline_color);
+}
+
 pub fn sidebarNameRect(idx: u32) ?RECT {
     const row = tabRowForShell(idx) orelse return null;
     const y = row.y - app_state.g_sidebar_scroll;
@@ -261,7 +267,7 @@ pub fn startRename(idx: u32) void {
 pub fn beginPaletteRenameInput(idx: u32) bool {
     if (idx >= app_state.shell_count) return false;
     if (app_state.g_search_active) _ = SendMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_SEARCH_CLOSE, 0, 0);
-    if (idx == app_state.active_shell and threadTitleHeight() > 0) startThreadTitleRename() else startRename(idx);
+    startRename(idx);
     return app_state.g_edit_hwnd != null;
 }
 
@@ -285,7 +291,7 @@ fn startRenameInternal(idx: u32, thread_title: bool) void {
     app_state.g_edit_is_inbox = false;
     app_state.g_edit_sync_remote_name = true;
     app_state.g_edit_idx = idx;
-    const in_title = thread_title or app_state.g_hide_sidebar;
+    const in_title = thread_title or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed;
     app_state.g_edit_is_thread_title = in_title;
     var client: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_main_hwnd, &client);

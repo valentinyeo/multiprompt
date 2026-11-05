@@ -181,7 +181,8 @@ test("all session rename entry points synchronize display surfaces without chang
     "the canonical rename path may update display surfaces but not stable bindings");
 
   const paletteRename = functionBody("beginPaletteRenameInput", "startThreadTitleRename");
-  assert.match(paletteRename, /startThreadTitleRename\(\).*startRename\(idx\)/);
+  assert.match(paletteRename, /startRename\(idx\)/);
+  assert.doesNotMatch(paletteRename, /startThreadTitleRename\(/);
   assert.match(rename, /g_edit_sid = shells\[idx\]\.shell_id/);
   assert.match(rename, /SetWindowTextW\(g_edit_hwnd, @ptrCast\(&shells\[idx\]\.name\)\)/);
   assert.match(rename, /SendMessageW\(g_edit_hwnd, 0x00B1, 0, @bitCast\(@as\(isize, -1\)\)\)/);

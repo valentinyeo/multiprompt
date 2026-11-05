@@ -6,6 +6,17 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const rename = read('src/rename.zig');
 const main = read('src/main.zig');
 const send = read('src/chat_send.zig');
+const archive = read('src/archive.zig');
+
+test('canonical rename rejects blank input before mutation and syncs the trimmed name', () => {
+  const start = archive.indexOf('pub fn applyCanonicalSessionRename(');
+  const body = archive.slice(start, archive.indexOf('\ntest ', start));
+  assert.match(body, /const name = std\.mem\.trim\(u16, raw_name, &\.\{ ' ', '\\t', '\\r', '\\n' \}\);\s*if \(name\.len == 0\) return false;/);
+  assert.ok(body.indexOf('if (name.len == 0) return false;') < body.indexOf('if (sync_remote)'));
+  assert.match(body, /@memcpy\(app_state\.shells\[idx\]\.name\[0\.\.name_len\], name\[0\.\.name_len\]\)/);
+  assert.match(body, /shellNameFromU16AsciiTrimmed\(name\[0\.\.name_len\], &sync_buf\)/);
+  assert.doesNotMatch(body, /setDefaultName/);
+});
 
 
 test('inline editor keeps the stable shell identity and commits canonically', () => {
@@ -36,6 +47,7 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', file)), 'hosted rename journey exists');
   const driver = read(file);
   for (const action of ['title-before', 'title-edit', 'title-after', 'sidebar-before', 'sidebar-edit', 'sidebar-after', '/rename Command name', 'Restart-ChatView 1']) assert.ok(driver.includes(action), action);
+  for (const action of ['retain name after empty title', 'retain name after whitespace sidebar name', 'trim surrounding spaces']) assert.ok(driver.includes(action), action);
   assert.match(driver, /@\('light', 'amoled'\)/);
   assert.match(driver, /graphite2 = 'unavailable in shipped themes'/);
   assert.match(driver, /Read-Inbox/);
@@ -45,5 +57,27 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.match(driver, /ZigShellChatTranscript/);
   assert.match(driver, /Click the first sidebar session name/);
   assert.doesNotMatch(driver, /Alt\+C:.*shell view/);
-  assert.doesNotMatch(driver, /^\s+Snapshot ["']rename-/m);
+  assert.doesNotMatch(driver, /^\s+Snapshot ["']rename-(?!inbox-)/m);
+});
+
+test('F2 and palette route by visible context while title clicks stay explicit', () => {
+  const route = main.slice(main.indexOf('WM_APP_RENAME_TAB =>'), main.indexOf('WM_APP_RENAME_WINDOW =>'));
+  assert.match(route, /g_inbox_active[^]*?startInboxRename\(\)[^]*?startRename\(app_state\.active_shell\)/);
+  assert.match(rename, /const in_title = thread_title or app_state\.g_hide_sidebar or app_state\.g_sidebar_collapsed/);
+  assert.match(rename, /pub fn beginPaletteRenameInput[^]*?startRename\(idx\)/);
+  assert.match(main, /startThreadTitleRename\(\)/);
+});
+
+test('Inbox rename uses selected row colors and name geometry', () => {
+  const inbox = read('src/inbox.zig');
+  const editor = inbox.slice(inbox.indexOf('pub fn startInboxRename()'), inbox.indexOf('pub fn inboxRelTime'));
+  assert.match(editor, /row\.att[^]*?600[^]*?uiFontBot\(\.name\)/);
+  assert.match(editor, /setInlineColors\(if \(app_state\.g_light_theme\) RGB\(225, 225, 225\) else RGB\(53, 53, 53\)/);
+  assert.match(editor, /y \+ uiScaled\(8\), edit_w, edit_h/);
+  assert.doesNotMatch(editor, /WS_BORDER|uiFontInboxTitle/);
+  assert.match(main, /child == app_state\.g_edit_hwnd and !app_state\.g_edit_is_group and !app_state\.g_edit_is_window and !app_state\.g_edit_is_browser_urlbar\)/);
+  const driver = read('.claude/skills/verify-multiprompt/control-inline-rename.ps1');
+  assert.match(driver, /Rename-Sidebar \$true[^]*?F2: locate the live title editor/);
+  assert.match(driver, /Rename-Sidebar \$false[^]*?F2: edit sidebar name/);
+  assert.match(driver, /F2: edit selected Inbox row/);
 });
