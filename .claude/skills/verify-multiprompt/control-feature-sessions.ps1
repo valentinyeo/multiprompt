@@ -134,7 +134,7 @@
             } 'Ctrl+T notes-only chat saved'
             Snapshot 'ctrl-t-notes-only-chat'
             $result.checks += @{ name = 'ctrl-t-notes-only-chat'; cwd = '/work/projects/notes-only'; cv = $true; host = 2 }
-            Palette 'close tab' '(7197|6232)'
+            Palette 'hide from sidebar'
             Press @(0x0D) 'Enter: hide notes-only chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'notes-only chat closed'
             Palette 'Second'
@@ -156,7 +156,7 @@
                 Save-Json (Read-Session) ($searchProof + '-session.json')
                 Snapshot ($searchProof + '-chat')
                 $result.checks += @{ name = $searchProof; query = $query; cwd = '/work/projects/software-factory'; cv = $true; host = 2 }
-                Palette 'close tab' '(7197|6232)'
+                Palette 'hide from sidebar'
                 Press @(0x0D) 'Enter: hide software-factory chat'
                 Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'software-factory chat closed'
                 Palette 'Second'
@@ -183,7 +183,7 @@
             } 'Ctrl+T zz-last-folder chat after cancel saved'
             Snapshot 'ctrl-t-zz-last-folder-chat'
             $result.checks += @{ name = 'cancel-then-ctrl-t-zz-last-folder'; cwd = '/work/projects/zz-last-folder'; cv = $true; host = 2 }
-            Palette 'close tab' '(7197|6232)'
+            Palette 'hide from sidebar'
             Press @(0x0D) 'Enter: hide zz-last-folder chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'zz-last-folder chat closed'
             Palette 'Second'
@@ -203,7 +203,7 @@
             } 'beta terminal saved'
             Snapshot 'terminal-beta'
             $result.checks += @{ name = 'terminal-beta'; cwd = '/work/projects/beta'; cv = $false; host = 2 }
-            Palette 'close tab' '(7197|6232)'
+            Palette 'hide from sidebar'
             Press @(0x0D) 'Enter: hide beta terminal'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta terminal closed'
 
