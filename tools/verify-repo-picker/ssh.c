@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     if (!log) return 3;
     fputs(cmd, log);
     fclose(log);
-    if (strstr(cmd, "for d in /home/*/projects/*/")) {
+    if (strstr(cmd, "@@MP_REPOS_OK@@")) {
         int host = strstr(cmd, "remote-3") ? 2 : strstr(cmd, "remote-2") ? 1 : 0;
         snprintf(path, sizeof(path), "%s\\offline-%d", root, host);
         if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;

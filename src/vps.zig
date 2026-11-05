@@ -1130,7 +1130,7 @@ pub const RepoRow = struct {
 };
 
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
-const REPO_LIST_SCRIPT = "for d in /home/*/projects/*/; do [ -d \\\"$d\\\" ] && printf '%s\\n' \\\"${d%/}\\\"; done 2>/dev/null";
+const REPO_LIST_SCRIPT = "[ -r /home ] && [ -x /home ] || exit 1; for p in /home/*/projects; do [ -d \\\"$p\\\" ] || continue; [ -r \\\"$p\\\" ] && [ -x \\\"$p\\\" ] || exit 1; for d in \\\"$p\\\"/*/; do [ -d \\\"$d\\\" ] && printf '%s\\n' \\\"${d%/}\\\"; done; done; true";
 
 const RepoStatus = enum { unknown, online, offline };
 const RepoCache = struct {
@@ -1139,6 +1139,7 @@ const RepoCache = struct {
     status: RepoStatus = .unknown,
     fetching: bool = false,
     enabled: bool = false,
+    allow_shell_roots: bool = true,
     generation: u64 = 0,
     identity: [512]u8 = [_]u8{0} ** 512,
     identity_len: usize = 0,
@@ -1146,7 +1147,7 @@ const RepoCache = struct {
     name_len: usize = 0,
 };
 var g_repo_caches: [3]RepoCache = [_]RepoCache{.{}} ** 3;
-var g_repo_mutex: std.Thread.Mutex = .{};
+var g_repo_mutex: app_state.SpinMutex = .{};
 
 fn repoPathSafe(path: []const u8) bool {
     if (path.len == 0 or path.len > 255 or path[0] != '/') return false;
@@ -1209,18 +1210,20 @@ fn repoSuccessfulListing(success: bool, text: []const u8) ?[]const u8 {
 
 pub fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
     if (host >= g_repo_caches.len) return 0;
-    g_repo_mutex.lock();
+    while (!g_repo_mutex.tryLock()) Sleep(0);
     defer g_repo_mutex.unlock();
     const cache = &g_repo_caches[host];
     if (!cache.enabled) return 0;
     var count: u32 = 0;
-    for (0..app_state.shell_count) |i| {
-        const shell = &app_state.shells[i];
-        if (shell.tmux_session_len == 0) continue;
-        const shell_host = tmuxHostForShell(shell) orelse continue;
-        if (shell_host != host) continue;
-        const raw = shellKnownRemotePath(shell, host) orelse continue;
-        repoListAdd(host, remoteRepoRoot(raw), out, &count);
+    if (cache.allow_shell_roots) {
+        for (0..app_state.shell_count) |i| {
+            const shell = &app_state.shells[i];
+            if (shell.tmux_session_len == 0) continue;
+            const shell_host = tmuxHostForShell(shell) orelse continue;
+            if (shell_host != host) continue;
+            const raw = shellKnownRemotePath(shell, host) orelse continue;
+            repoListAdd(host, remoteRepoRoot(raw), out, &count);
+        }
     }
     for (cache.rows[0..cache.count]) |row| {
         repoListAdd(host, row.path[0..row.path_len], out, &count);
@@ -1236,7 +1239,7 @@ pub fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
 
 pub fn repoRowAvailable(row: *const RepoRow) bool {
     if (row.host >= g_repo_caches.len or !row.available) return false;
-    g_repo_mutex.lock();
+    while (!g_repo_mutex.tryLock()) Sleep(0);
     defer g_repo_mutex.unlock();
     const cache = &g_repo_caches[row.host];
     return cache.enabled and cache.generation == row.generation and cache.status != .offline;
@@ -1247,7 +1250,7 @@ fn repoFetchCommand(host: u8, buf: *[2048]u8) ?[]const u8 {
     if (!appendSshExe(buf, &pos)) return null;
     if (!appendAsciiBuf(buf, &pos, "-T -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=5 ")) return null;
     if (!appendAsciiBuf(buf, &pos, tmuxSshTarget(host))) return null;
-    if (!appendAsciiBuf(buf, &pos, " \"" ++ REPO_LIST_SCRIPT ++ "; printf '\\n@@MP_REPOS_OK@@\\n'\"")) return null;
+    if (!appendAsciiBuf(buf, &pos, " \"" ++ REPO_LIST_SCRIPT ++ " && printf '\\n@@MP_REPOS_OK@@\\n'\"")) return null;
     if (pos == 0 or pos >= buf.len) return null;
     return buf[0..pos];
 }
@@ -1278,18 +1281,23 @@ fn repoFetchThread(host: u8, generation: u64) void {
             success = true;
         }
     }
-    g_repo_mutex.lock();
+    while (!g_repo_mutex.tryLock()) Sleep(0);
     repoPublish(&g_repo_caches[host], generation, success, rows[0..count]);
     g_repo_mutex.unlock();
     if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_TMUX_LIST_READY, 0, 0);
 }
 
 fn repoConfigure(host: u8, enabled: bool, identity: []const u8, name: []const u8) void {
-    g_repo_mutex.lock();
+    while (!g_repo_mutex.tryLock()) Sleep(0);
     defer g_repo_mutex.unlock();
-    const cache = &g_repo_caches[host];
+    repoConfigureCache(&g_repo_caches[host], enabled, identity, name);
+}
+
+fn repoConfigureCache(cache: *RepoCache, enabled: bool, identity: []const u8, name: []const u8) void {
     if (cache.enabled != enabled or !std.mem.eql(u8, cache.identity[0..cache.identity_len], identity)) {
+        if (cache.generation != 0) cache.allow_shell_roots = false;
         cache.generation +%= 1;
+        if (cache.generation == 0) cache.generation = 1;
         cache.count = 0;
         cache.status = .unknown;
         cache.fetching = false;
@@ -1303,7 +1311,7 @@ fn repoConfigure(host: u8, enabled: bool, identity: []const u8, name: []const u8
 
 pub fn requestRepoRefresh(host: u8) void {
     if (host >= g_repo_caches.len) return;
-    g_repo_mutex.lock();
+    while (!g_repo_mutex.tryLock()) Sleep(0);
     const cache = &g_repo_caches[host];
     if (!cache.enabled or cache.fetching) {
         g_repo_mutex.unlock();
@@ -1313,7 +1321,7 @@ pub fn requestRepoRefresh(host: u8) void {
     const generation = cache.generation;
     g_repo_mutex.unlock();
     const thread = std.Thread.spawn(.{ .stack_size = 512 * 1024 }, repoFetchThread, .{ host, generation }) catch {
-        g_repo_mutex.lock();
+        while (!g_repo_mutex.tryLock()) Sleep(0);
         repoPublish(cache, generation, false, &.{});
         g_repo_mutex.unlock();
         return;

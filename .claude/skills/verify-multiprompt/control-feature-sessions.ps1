@@ -63,9 +63,9 @@
                 Press @(0x0D) 'Enter: select the matching server and folder'
                 Wait-Until {
                     $state = Read-Session
-                    $null -ne $state -and @($state.tabs).Count -eq $beforeClaude + 1 -and $state.tabs[$state.active_tab].cwd -eq $case.cwd -and $state.tabs[$state.active_tab].tmux_host -eq $case.host
+                    $null -ne $state -and @($state.tabs).Count -eq $beforeClaude + 1 -and $state.tabs[$state.active_tab].cwd -eq $case.cwd -and $state.tabs[$state.active_tab].tmux_host -eq $case.host -and $state.tabs[$state.active_tab].cv -eq $true
                 } 'selected remote folder and host saved'
-                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('tmux new-session') }).Count -gt 0 } 'SSH command contains selected alias and path'
+                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('tmux new-session') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
                 Save-Json (Read-Session) ('ctrl-t-' + $case.proof + '-session.json')
                 Snapshot ('ctrl-t-' + $case.proof + '-chat')
                 $result.checks += @{ name = ('cross-host-' + $case.proof); host = $case.host; cwd = $case.cwd; alias = $case.alias }

@@ -43,7 +43,8 @@ test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () =
 });
 
 test('cross-host and offline journeys require the selected host and rejection', () => {
-  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*tmux_host -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)/);
+  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*tmux_host -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
+  assert.match(sessions, /tmux_host -eq \$case\.host -and \$state\.tabs\[\$state\.active_tab\]\.cv -eq \$true/);
   assert.match(sessions, /offline-1[\s\S]*\[repo\] offline host=1[\s\S]*\$logBefore = [^\n]+[\s\S]*Enter: reject offline folder[\s\S]*\$log\.Substring\(\$logBefore\)\.Contains\('\[repo\] selection rejected'\)[\s\S]*Offline selection saved a tab[\s\S]*Offline selection launched SSH[\s\S]*other host stays usable[\s\S]*\[repo\] online host=1/);
 });
 
@@ -235,7 +236,7 @@ var g_pick_row_gone = false;
 var g_pick_repo_offline = false;
 var g_start_fail: enum { none } = .none;
 var spawned = false;
-var saved = false;
+var did_save = false;
 var chosen_host: u8 = 255;
 var live_host: u8 = 1;
 fn closePickRepo() void {}
@@ -247,7 +248,7 @@ fn pickRepoFilteredRows(out: []RepoRow) u32 {
     out[0].host = live_host;
     return 1;
 }
-fn saveWorkspaceFolder(_: u8, _: []const u8) bool { saved = true; return true; }
+fn saveWorkspaceFolder(_: u8, _: []const u8) bool { did_save = true; return true; }
 fn activeWorkspaceSlot() u8 { return 0; }
 fn workspaceConfiguredTerminalFolder(_: u8, _: *u8, _: *[256]u8, _: *u32, _: *[128]u8, _: *u32) bool { return false; }
 fn spawnWorkspaceSessionAt(host: u8, _: []const u8, _: []const u8, _: bool, _: bool) bool { spawned = true; chosen_host = host; return true; }
@@ -255,10 +256,10 @@ ${source.slice(start, end).replaceAll('@import("diagnostics.zig").debugLog', 'de
 fn debugLog(_: []const u8) void {}
 test "offline row is not selectable" {
     try std.testing.expect(!pickRepoChoose(100));
-    try std.testing.expect(!spawned and !saved);
+    try std.testing.expect(!spawned and !did_save);
     app_state.g_search_pick_repo_folder_mode = true;
     try std.testing.expect(!pickRepoChoose(100));
-    try std.testing.expect(!spawned and !saved);
+    try std.testing.expect(!spawned and !did_save);
 }
 test "publication cannot retarget the displayed row" {
     presented[0] = .{ .host = 1, .available = true };
