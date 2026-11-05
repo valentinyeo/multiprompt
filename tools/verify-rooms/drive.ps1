@@ -267,6 +267,7 @@ try {
         $h = [ChatDeliveryDesktop]::Composer($room)
         if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Text($h) -ceq 'Keep this draft on old peers') { $h }
     }
+    Focus
     Invoke-NativeInput @{kind='click-composer'; target=$composer.ToInt64(); text=$null; keys=$null}
     [void](Wait-For 'live composer focus' { [ChatDeliveryDesktop]::Focus($main)[1] -eq $composer.ToInt64() })
     [void](Wait-For 'scoped room snapshot loaded' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
