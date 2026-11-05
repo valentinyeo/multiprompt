@@ -48,10 +48,10 @@ $script:inboxSpaceRename = [IntPtr]::Zero
 Wait-Until {
     $handle = [VerifyNative]::GetFocusedWindow($script:window)
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-    if ($element.Current.ProcessId -eq $process.Id -and $element.Current.ClassName -eq 'Edit' -and [VerifyNative]::Title($handle).Length -gt 0) { $script:inboxSpaceRename = $handle; return $true }
+    if ($element.Current.ProcessId -eq $process.Id -and $element.Current.ClassName -eq 'Edit' -and [VerifyNative]::EditText($handle).Length -gt 0) { $script:inboxSpaceRename = $handle; return $true }
     $false
 } 'owned rename edit identifies the sixteenth row'
-$expectedName = [VerifyNative]::Title($script:inboxSpaceRename)
+$expectedName = [VerifyNative]::EditText($script:inboxSpaceRename)
 Snapshot 'inbox-space-rename'
 Press @(0x1B) 'Esc: cancel rename without changing the row'
 Wait-Until { (Read-Inbox).inbox_active -and [VerifyNative]::GetFocusedWindow($script:window) -ne $script:inboxSpaceRename } 'Inbox remains open after cancel'
