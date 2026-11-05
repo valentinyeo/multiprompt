@@ -96,7 +96,7 @@ test('IGSH-1061: dialog measures body against full content width and uses approv
 
 test('IGSH-1061: palette typing waits for owned foreground after asynchronous browser cancellation', () => {
   const control = read('.claude/skills/verify-multiprompt/control.ps1');
-  const body = control.match(/function Palette\(\[string\]\$Query\) \{([^]*?)\n\}/)?.[1];
+  const body = control.match(/function Palette\(\[string\]\$Query(?:,[^\r\n]*)?\) \{([^]*?)\n\}/)?.[1];
   assert.ok(body, 'production palette journey exists');
   assert.match(body, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Wait-Foreground\s+Type-Text \$Query/,
     'the cancelled browser can take foreground after Ctrl+K; settle ownership before typing');

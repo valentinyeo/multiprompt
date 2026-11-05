@@ -29,7 +29,9 @@ test('sessions installs the SSH boundary before launch', () => {
 test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () => {
   const journey = sessions.slice(0, sessions.indexOf("Palette 'new claude in terminal'"));
   assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
-  assert.doesNotMatch(journey.slice(0, journey.indexOf("Palette 'hide from sidebar'")), /\bPalette\s+'|commands\.json|catch|fallback/i);
+  const cleanup = journey.indexOf("Palette 'close tab' '(7197|6232)'");
+  assert.ok(cleanup >= 0, 'notes-only cleanup exists');
+  assert.doesNotMatch(journey.slice(0, cleanup), /\bPalette\s+'|commands\.json|catch|fallback/i);
   assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
 });
 
