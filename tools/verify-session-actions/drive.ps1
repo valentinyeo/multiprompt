@@ -139,8 +139,8 @@ function Read-History([string]$Name, [string]$Sid, [int]$Fixture) {
         $view=[VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'ZigShellChatTranscript', '')
         if ($view -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($view) -and [ChatDeliveryDesktop]::Owner($view) -eq $app.Id) { $view }
     }
-    $shellId=$tab.shell_id
-    [void](Wait-For ('nonempty native history paint '+$Name) { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ('\[switch\] chat content shown shell='+$shellId+' blocks=[1-9]\d* ms=\d+ layout_w=[1-9]\d* client_w=[1-9]\d*') })
+    $historyShellId=$tab.shell_id
+    [void](Wait-For ('nonempty native history paint '+$Name) { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ('\[switch\] chat content shown shell='+$historyShellId+' blocks=[1-9]\d* ms=\d+ layout_w=[1-9]\d* client_w=[1-9]\d*') })
     [Windows.Forms.Clipboard]::Clear()
     Palette 'chat view select all' 6364
     Press @(0x11,0x43)
