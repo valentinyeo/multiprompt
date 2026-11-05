@@ -233,9 +233,7 @@ const CoInitializeEx = @import("win32.zig").CoInitializeEx;
 const CoUninitialize = @import("win32.zig").CoUninitialize;
 const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
-const keybd_event = @import("win32.zig").keybd_event;
 const VK_MENU = @import("app_state.zig").VK_MENU;
-const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
 const cancelShellRefocus = @import("focus.zig").cancelShellRefocus;
@@ -5893,10 +5891,14 @@ pub fn startBrowserUrlBarEdit() void {
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
-        keybd_event(VK_MENU, 0, 0, 0);
+        const fg = GetForegroundWindow();
+        const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
+        const our_thread = GetCurrentThreadId();
+        const attached_fg = fg_thread != 0 and fg_thread != our_thread and
+            AttachThreadInput(our_thread, fg_thread, 1) != 0;
+        defer if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
         _ = SetForegroundWindow(app_state.g_main_hwnd);
         _ = SetFocus(app_state.g_edit_hwnd);
-        keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
     }
 }
@@ -5940,7 +5942,6 @@ pub fn focusActiveWebView2() void {
 
     const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
     if (phys_alt) return;
-    keybd_event(VK_MENU, 0, 0, 0);
 
     const fg = GetForegroundWindow();
     const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
@@ -5953,7 +5954,6 @@ pub fn focusActiveWebView2() void {
         if (app_state.g_webview2_focus) |focus| focus();
     }
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
-    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
