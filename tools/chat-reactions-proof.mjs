@@ -69,7 +69,7 @@ export function assertFollowup(frame, area) {
   const answers = frame.agent.filter(reply => reply.top >= question.bottom);
   assert.equal(answers.length, 1, 'one ordinary answer follows the newest question');
   const [answer] = answers;
-  assert.ok(question.top > area.top && answer.bottom < area.bottom, 'newest question and answer are fully inside the viewport');
+  assert.ok(question.top >= area.top && answer.bottom <= area.bottom, 'newest question and answer are fully inside the viewport');
   assert.equal(frame.dim.length, 0, 'follow-up is not left queued');
   return { x: answer.left + 30, y: Math.floor((answer.top + answer.bottom) / 2) };
 }

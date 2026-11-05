@@ -222,6 +222,7 @@ test('ordinary follow-up requires the full newest pair, not just transcript data
   f.fill(20, 80, 250, 160, 0x444444);
   const frame = inspect(f.image, area);
   assert.deepEqual(proof.assertFollowup(frame, area), { x: 50, y: 120 });
+  assert.deepEqual(proof.assertFollowup(frame, { ...area, top: 10, bottom: 160 }), { x: 50, y: 120 });
   assert.throws(() => proof.assertFollowup({ ...frame, agent: [] }, area), /one ordinary answer/);
   assert.throws(() => proof.assertFollowup({ ...frame, user: [] }, area), /question is visible/);
   assert.throws(() => proof.assertFollowup(frame, { ...area, bottom: 155 }), /fully inside the viewport/);
