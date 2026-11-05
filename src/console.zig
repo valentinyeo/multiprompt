@@ -2008,7 +2008,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         app_state.shells[idx].tmux_identity_len = @intCast(identity.len);
     }
     setDefaultName(&app_state.shells[idx], kind, shell_id);
-    app_state.shells[idx].chat_view_on = pending_chat_view;
+    app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], pending_chat_view);
     if (background_workspace) |workspace| {
         app_state.shells[idx].workspace = workspace;
     } else if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;

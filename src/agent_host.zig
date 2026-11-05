@@ -52,7 +52,9 @@ pub fn formatSessionId(out: *[36]u8, random: *const [16]u8) []const u8 {
 }
 
 pub fn restoreSyncedSession(shell: anytype, session: []const u8) void {
-    if (shell.claude_sid_len != 0 or session.len != 37 or !std.mem.startsWith(u8, session, "live-")) return;
+    if (!@import("chat_view.zig").isLive(session)) return;
+    shell.chat_view_on = true;
+    if (shell.claude_sid_len != 0 or session.len != 37) return;
     for (session[5..]) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return;
     var sid: [36]u8 = undefined;
     var index: usize = 0;
@@ -66,7 +68,6 @@ pub fn restoreSyncedSession(shell: anytype, session: []const u8) void {
     }
     @memcpy(shell.claude_sid[0..sid.len], &sid);
     shell.claude_sid_len = sid.len;
-    shell.chat_view_on = true;
     shell.ai_agent = 1;
 }
 
@@ -149,9 +150,16 @@ test "IGSH-1653 synced named live chats restore their identity and chat view" {
     try std.testing.expectEqual(@as(u8, 1), shell.ai_agent);
     shell.chat_view_on = false;
     restoreSyncedSession(&shell, "live-ffffffffffff8fff8fffffffffffffff");
-    try std.testing.expect(!shell.chat_view_on);
+    try std.testing.expect(shell.chat_view_on);
     try std.testing.expectEqualStrings("01234567-89ab-8def-8123-0123456789ab", shell.claude_sid[0..shell.claude_sid_len]);
-    for ([_][]const u8{ "term-0123456789ab8def81230123456789ab", "live-123", "live-0123456789ab8def81230123456789ag", "live-0123456789AB8def81230123456789ab", "live-0123456789ab8def81230123456789ab0" }) |name| {
+    for ([_][]const u8{ "live-project-abc123", "live-h0123456789ab8def81230123456789ab", "live-123", "live-0123456789ab8def81230123456789ag", "live-0123456789AB8def81230123456789ab", "live-0123456789ab8def81230123456789ab0" }) |name| {
+        var named_shell: Session = .{};
+        restoreSyncedSession(&named_shell, name);
+        try std.testing.expect(named_shell.chat_view_on);
+        try std.testing.expectEqual(@as(u32, 0), named_shell.claude_sid_len);
+        try std.testing.expectEqual(@as(u8, 0), named_shell.ai_agent);
+    }
+    for ([_][]const u8{ "term-0123456789ab8def81230123456789ab", "", "main" }) |name| {
         var untouched: Session = .{};
         restoreSyncedSession(&untouched, name);
         try std.testing.expectEqualDeep(Session{}, untouched);

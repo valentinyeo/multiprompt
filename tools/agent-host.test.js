@@ -123,3 +123,23 @@ test('IGSH-1546 Codex and Pi chats start the same live chat host with their own 
   assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3\);/);
   assert.doesNotMatch(send, /if \(job\.key\.codex\) "codex" else "claude"/);
 });
+
+test('IGSH-1762 every live chat tab is forced into chat view at creation, restore, sync, close and everywhere toggles', () => {
+  const view = read('src/chat_view.zig');
+  assert.match(view, /pub fn isLive\(tmux_session: \[\]const u8\) bool \{\s*return std\.mem\.startsWith\(u8, tmux_session, "live-"\);/);
+  assert.match(view, /pub fn forSession\(tmux_session: \[\]const u8, wanted: bool\) bool \{\s*return wanted or isLive\(tmux_session\);/);
+  assert.match(view, /session\.chat_view_on = forSession\(session\.tmux_session\[0\.\.session\.tmux_session_len\], on\);/);
+
+  const host = read('src/agent_host.zig');
+  const at = host.indexOf('pub fn restoreSyncedSession(');
+  const restore = host.slice(at, at + 400);
+  assert.match(restore, /if \(!@import\("chat_view\.zig"\)\.isLive\(session\)\) return;\s*shell\.chat_view_on = true;/);
+  assert.doesNotMatch(restore, /session\.len != 37 or/);
+
+  assert.match(read('src/console.zig'), /chat_view_on = @import\("chat_view\.zig"\)\.forSession\(app_state\.shells\[idx\]\.tmux_session\[0\.\.app_state\.shells\[idx\]\.tmux_session_len\], pending_chat_view\);/);
+  assert.match(read('src/session.zig'), /chat_view_on = @import\("chat_view\.zig"\)\.forSession\(app_state\.shells\[idx\]\.tmux_session\[0\.\.app_state\.shells\[idx\]\.tmux_session_len\], tab\.cv\);/);
+  assert.match(read('src/chat_composer.zig'), /closing\.chat_view_on = @import\("chat_view\.zig"\)\.forSession\(closing\.tmux_session\[0\.\.closing\.tmux_session_len\], false\);/);
+  const main = read('src/main.zig');
+  assert.equal(main.split('new_shell.chat_view_on = @import("chat_view.zig").forSession(new_shell.tmux_session[0..new_shell.tmux_session_len], new_shell.chat_view_on);').length - 1, 2);
+  assert.match(read('src/account_desktop.zig'), /kept user on active tab"\);\s*@import\("chat_composer\.zig"\)\.applySessionView\(\);/);
+});
