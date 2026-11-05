@@ -1688,6 +1688,25 @@ fn chatEchoDeliveryEvidence(entry: ChatOutboxEntry) chat_echo.DeliveryEvidence {
     return .{};
 }
 
+fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8, busy: bool, now_ms: i64, loaded_ms: i64, remove: bool) bool {
+    var any = false;
+    var i: usize = 0;
+    while (i < list.items.len) {
+        const e = &list.items[i];
+        if (!e.message_v1 or !std.mem.eql(u8, e.key[0..e.key_len], key) or
+            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0), busy, now_ms, loaded_ms))
+        {
+            i += 1;
+            continue;
+        }
+        any = true;
+        if (!remove) return true;
+        if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
+        chatOutboxRemoveAtIn(list, allocator, i);
+    }
+    return any;
+}
+
 pub fn chatEchoMatchActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
@@ -1698,6 +1717,7 @@ pub fn chatEchoMatchActive() void {
     const loaded_ms = chatEchoLoadedMs();
     const now_ms: i64 = @intCast(GetTickCount64());
     const busy = app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working;
+    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, busy, now_ms, loaded_ms, false)) expired = true;
     for (app_state.g_chat_outbox.items) |*e| {
         if (e.message_v1 or e.state != .delivered or !std.mem.eql(u8, e.key[0..e.key_len], key)) continue;
         if (e.channel_sent or e.channel_pending) continue;
@@ -1770,6 +1790,7 @@ pub fn chatEchoMatchActive() void {
         }
         i += 1;
     }
+    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, busy, now_ms, loaded_ms, true)) changed = true;
     if (changed) {
         _ = saveChatOutbox();
         chatOutboxChanged();
@@ -3016,6 +3037,45 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
     try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) == null);
+}
+
+test "IGSH-1766 a message the host accepted stops floating even when its transcript row is out of view" {
+    const allocator = std.testing.allocator;
+    const saved = app_state.g_chat_outbox;
+    app_state.g_chat_outbox = .empty;
+    defer {
+        for (app_state.g_chat_outbox.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        app_state.g_chat_outbox.deinit(allocator);
+        app_state.g_chat_outbox = saved;
+    }
+    const key = "tmux:7:floating-test";
+    const phases = [_][]const u8{ "accepted", "started", "sent", "queued" };
+    for (phases) |phase| {
+        const text = std.unicode.utf8ToUtf16LeStringLiteral("where is the runner list?");
+        const state: ChatEchoState = if (chat_echo.phaseTaken(phase)) .delivered else .queued;
+        try std.testing.expect(chatOutboxEnqueueInState(&app_state.g_chat_outbox, allocator, key, text, state));
+        const entry = &app_state.g_chat_outbox.items[app_state.g_chat_outbox.items.len - 1];
+        entry.message_v1 = true;
+        entry.write_started = true;
+        entry.channel_sent = true;
+        @memcpy(entry.message_phase[0..phase.len], phase);
+    }
+    const other = std.unicode.utf8ToUtf16LeStringLiteral("other chat");
+    try std.testing.expect(chatOutboxEnqueueInState(&app_state.g_chat_outbox, allocator, "tmux:8:other", other, .delivered));
+    app_state.g_chat_outbox.items[4].message_v1 = true;
+    @memcpy(app_state.g_chat_outbox.items[4].message_phase[0..8], "accepted");
+
+    const grace = chat_echo.SETTLE_GRACE_MS;
+    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, false, 1000, 1000, true));
+    try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
+    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, true, 1000 + 3 * grace, 1000 + 3 * grace, true));
+    try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
+    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, false, 1000 + 4 * grace, 1000 + 4 * grace, true));
+    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, false, 1000 + 5 * grace, 1000 + 5 * grace, true));
+    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_outbox.items.len);
+    try std.testing.expectEqualStrings("sent", std.mem.sliceTo(&app_state.g_chat_outbox.items[0].message_phase, 0));
+    try std.testing.expectEqualStrings("queued", std.mem.sliceTo(&app_state.g_chat_outbox.items[1].message_phase, 0));
+    try std.testing.expectEqualStrings("tmux:8:other", app_state.g_chat_outbox.items[2].key[0..app_state.g_chat_outbox.items[2].key_len]);
 }
 
 test "IGSH-1266 the first message of a new chat stops its bubble once the transcript has it" {
