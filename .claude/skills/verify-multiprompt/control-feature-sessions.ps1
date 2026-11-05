@@ -91,6 +91,75 @@
             Press @(0x11, 0x57) 'Ctrl+W: close beta terminal'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta terminal closed'
 
+            Palette 'Second'
+            Press @(0x0D) 'Enter: return to Other on the third server'
+            Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'Other active before saving its folder'
+            $commandsFile = Join-Path $scratch 'roaming/ZigShell/commands.json'
+            Palette 'set workspace folder'
+            Press @(0x0D) 'Enter: set a saved folder for Other'
+            Type-Text 'notes-only'
+            Press @(0x0D) 'Enter: save notes-only as the Other default'
+            Wait-Until {
+                $commands = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
+                @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Other' -and $_.cwd -eq '/work/projects/notes-only' -and $_.default }).Count -gt 0
+            } 'Other saved default persisted through the palette'
+            foreach ($repo in @('beta', 'zz-last-folder')) {
+                Palette 'Second'
+                Press @(0x0D) 'Enter: select Other before its next new session'
+                Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'Other active for repeated picker proof'
+                $beforeOther = @((Read-Session).tabs).Count
+                Press @(0x11, 0x54) 'Ctrl+T: Other must ask despite its saved default'
+                Type-Text $repo
+                Snapshot ('other-saved-default-' + $repo + '-picker')
+                Press @(0x0D) 'Enter: choose a different repo in Other'
+                Wait-Until {
+                    $state = Read-Session
+                    if ($null -eq $state -or @($state.tabs).Count -ne $beforeOther + 1) { return $false }
+                    $tab = @($state.tabs)[$state.active_tab]
+                    $tab.cwd -eq ('/work/projects/' + $repo) -and $tab.cv -eq $true -and $tab.tmux_host -eq 2
+                } 'Other starts in the chosen repo rather than its saved default'
+                Save-Json (Read-Session) ('other-saved-default-' + $repo + '-session.json')
+                Snapshot ('other-saved-default-' + $repo + '-chat')
+                $result.checks += @{ name = 'other-saved-default-picker'; repo = $repo; ignoredDefault = '/work/projects/notes-only'; host = 2 }
+                Press @(0x11, 0x57) 'Ctrl+W: close the Other proof chat'
+                Wait-Until { @((Read-Session).tabs).Count -eq $beforeOther } 'Other proof chat closed'
+            }
+            $workspaceCount = @((Read-Session).workspaces).Count
+            Press @(0x11, 0x4E) 'Ctrl+N: create a named workspace for the default-folder comparison'
+            Wait-Until { $state = Read-Session; @($state.workspaces).Count -eq $workspaceCount + 1 -and $state.active_workspace -ne 0 } 'new comparison workspace saved'
+            $namedState = Read-Session
+            $namedSlot = [int]$namedState.active_workspace
+            $namedWorkspace = [string]$namedState.workspaces[$namedSlot].name
+            if ([string]::IsNullOrWhiteSpace($namedWorkspace)) { $namedWorkspace = 'Workspace ' + ($namedSlot + 1) }
+            if ($namedWorkspace -eq 'Other') { throw 'Comparison workspace must not be Other' }
+            $namedPickerLogStart = (Get-Content -LiteralPath $repoLog -Raw).Length
+            Palette 'set workspace folder'
+            Press @(0x0D) 'Enter: set the named workspace folder'
+            Type-Text 'notes-only'
+            Wait-Until {
+                $text = Get-Content -LiteralPath $repoLog -Raw
+                $text.Length -gt $namedPickerLogStart -and $text.Substring($namedPickerLogStart) -match '\[palette\] rows chars=10 count=2 ids=6702 6710'
+            } 'named workspace folder row is ready on its selected host'
+            Press @(0x0D) 'Enter: save the named workspace default'
+            Wait-Until {
+                $commands = Get-Content -LiteralPath $commandsFile -Raw | ConvertFrom-Json
+                @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq $namedWorkspace -and $_.cwd -eq '/work/projects/notes-only' -and $_.default }).Count -gt 0
+            } 'named workspace default persisted through the palette'
+            Snapshot 'named-workspace-saved-default-before'
+            $beforeNamed = @((Read-Session).tabs).Count
+            Press @(0x11, 0x54) 'Ctrl+T: named workspace starts directly in its saved folder'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $beforeNamed + 1 -or $state.active_workspace -ne $namedSlot) { return $false }
+                $tab = @($state.tabs)[$state.active_tab]
+                $tab.cwd -eq '/work/projects/notes-only' -and $tab.cv -eq $true
+            } 'named workspace starts a chat without selecting a repo'
+            Save-Json (Read-Session) 'named-workspace-saved-default-session.json'
+            Snapshot 'named-workspace-saved-default-chat'
+            $result.checks += @{ name = 'named-workspace-skips-picker'; workspace = $namedWorkspace; cwd = '/work/projects/notes-only'; cv = $true }
+            Press @(0x11, 0x57) 'Ctrl+W: close the named workspace proof chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeNamed } 'named workspace proof chat closed'
+
             $before = @( (Read-Session).tabs ).Count
             Palette 'new cmd'
             Snapshot 'action'
