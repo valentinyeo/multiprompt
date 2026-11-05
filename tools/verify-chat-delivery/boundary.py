@@ -1079,7 +1079,7 @@ def reader_namespace():
     import base64
 
     source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
-    namespace = dict(__name__="verified_remote_reader")
+    namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":
         import hashlib
@@ -1124,6 +1124,30 @@ def reader_namespace():
         sys.modules["fcntl"] = locking
         namespace["events_wake"] = lambda: None
         record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
+        if state().get("name") == "cancel-held":
+            original_subprocess = namespace["subprocess"]
+
+            class WorkerDiagnostics:
+                def __getattr__(self, name):
+                    return getattr(original_subprocess, name)
+
+                def Popen(self, args, *positional, **options):
+                    if "--message-worker" not in args:
+                        return original_subprocess.Popen(args, *positional, **options)
+                    if len(args) != 8 or args[1:3] != ['-u', '-c'] or args[4] != '--message-worker':
+                        raise ValueError('unexpected message worker bootstrap')
+                    adapted = [args[0], '-u', str(Path(__file__).resolve()), 'message-worker', *args[5:]]
+                    with (ROOT / "message-worker.stderr.log").open("ab", buffering=0) as errors:
+                        options["stderr"] = errors
+                        try:
+                            child = original_subprocess.Popen(adapted, *positional, **options)
+                        except Exception as error:
+                            record("message-worker.jsonl", event="spawn-failed", error=repr(error))
+                            raise
+                    record("message-worker.jsonl", event="spawned", child_pid=child.pid)
+                    return child
+
+            namespace["subprocess"] = WorkerDiagnostics()
         if state().get("name") == "reactions":
             install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
@@ -1222,6 +1246,37 @@ def reader_namespace():
 
         namespace["serve_request"] = request
     return namespace
+
+
+def run_message_worker():
+    if os.name != "nt" or state().get("name") != "cancel-held" or len(ARGS) != 3:
+        raise ValueError("message worker adapter requires the owned Windows cancellation fixture")
+    tmux, provider, sid = ARGS
+    if tmux != "verify-agent" or provider != "claude" or sid != state().get("sid"):
+        raise ValueError("message worker adapter requires the fake Claude session")
+    namespace = reader_namespace()
+    original_host_switch = namespace["host_dispatch_switch"]
+
+    def fake_terminal_only(provider, sid):
+        if original_host_switch(provider, sid):
+            raise RuntimeError("real provider dispatch is forbidden in the cancellation fixture")
+        return False
+
+    namespace["host_dispatch_switch"] = fake_terminal_only
+    import selectors
+    original_selector = selectors.DefaultSelector
+
+    class PollingSelector(original_selector):
+        def select(self, timeout=None):
+            if not self.get_map():
+                time.sleep(timeout if timeout is not None else 1)
+                return []
+            return super().select(timeout)
+
+    selectors.DefaultSelector = PollingSelector
+    record("message-worker.jsonl", event="adapter-start", tmux=tmux, provider=provider, sid=sid)
+    namespace["message_worker"](tmux, provider, sid)
+    record("message-worker.jsonl", event="adapter-stop", tmux=tmux, provider=provider, sid=sid)
 
 
 def serve_reader():
@@ -1369,4 +1424,4 @@ def ssh():
 
 
 if __name__ == "__main__":
-    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else ssh())
+    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else run_message_worker() if MODE == "message-worker" else ssh())

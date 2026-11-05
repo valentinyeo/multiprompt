@@ -6401,7 +6401,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_RENAME_SYNC_OFFSET or target == app_state.SEARCH_TABCTX_RENAME) {
-                    const idx = if (target == app_state.SEARCH_TABCTX_RENAME) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    const idx = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
                     if (idx) |shell| _ = beginPaletteRenameInput(shell);
                     return 0;
                 }
@@ -7136,8 +7136,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             closeShell(ti);
                         } else {
                             const shell = &app_state.shells[ti];
-                            var local_id: [16]u8 = undefined;
-                            const id = if (shell.claude_sid_len > 0) shell.claude_sid[0..shell.claude_sid_len] else if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else std.fmt.bufPrint(&local_id, "{d}", .{shell.shell_id}) catch return 0;
+                            var local_id: [40]u8 = undefined;
+                            const id = if (shell.claude_sid_len > 0) shell.claude_sid[0..shell.claude_sid_len] else if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else @import("chat_composer.zig").chatDraftKeyForShell(ti, &local_id);
                             var wide_id: [128]u16 = undefined;
                             const len = std.unicode.utf8ToUtf16Le(&wide_id, id) catch return 0;
                             if (!@import("clipboard.zig").setUnicodeClipboardTextWithRetry(wide_id[0..len])) showHeaderNoticeAscii("Could not copy chat ID", 3000, true);

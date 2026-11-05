@@ -1,10 +1,11 @@
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Remote switch proof runs only on GitHub Windows' }
 Add-Type -Path "$PSScriptRoot/remote-switch.cs"
-function Switch-Palette([string]$Query) {
+function Switch-Palette([string]$Query, [string]$Target = '\d+') {
     $offset = (Read-Shared "$settings/debug.log").Length
+    $count = if ($Target -eq '\d+') { '1' } else { '[1-9]\d*' }
     Press @(0x11, 0x4B) 'Ctrl+K: open switch proof command'
     foreach ($letter in $Query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-    [void](Wait-For 'switch proof command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=1 target=\d+') })
+    [void](Wait-For 'switch proof command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=' + $count + ' target=' + $Target + '(?:\r?\n|$)') })
     Press @(0x0D) 'Enter: run switch proof command'
 }
 Bind-Transcript
@@ -104,7 +105,7 @@ for ($i = 0; $i -lt 20; $i++) {
     $observation.switches.Add($sample)
     Save $observation "$caseDir/observation.json"
 }
-Press @(0x11, 0x57) 'Ctrl+W: close the owned local fixture tab'
+Switch-Palette 'close tab' '(7197|6232)'
 $expectedShells = 1
 [void](Wait-For 'local fixture tab closed' {
     $remaining = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)

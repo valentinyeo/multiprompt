@@ -2317,6 +2317,7 @@ pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
 
 pub const SavedTab = struct {
+    ai_agent: u8 = 0,
     shell_id: u32 = 0,
     chat_id: u64 = 0,
     last_read_message_id: u64 = 0,
@@ -2463,6 +2464,7 @@ pub const TtsChunkRange = struct { start: usize, end: usize };
 pub var g_voice_clean_wide: [24576]u16 = undefined;
 
 pub const ArchivedEntry = struct {
+    ai_agent: u8 = 1,
     name: [64]u8 = std.mem.zeroes([64]u8),
     name_len: u32 = 0,
     tmux_session: [64]u8 = std.mem.zeroes([64]u8),

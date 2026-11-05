@@ -108,7 +108,7 @@ function Press([int[]]$Keys) {
         [void](Wait-For 'palette opened' { $trace = Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=[1-9]\d*' })
     }
 }
-function Query([string]$Text, [int]$Target) {
+function Query([string]$Text, [string]$Target) {
     $before = (Log).Length
     [VerifyNative]::Text($Text)
     [void](Wait-For "palette $Text selects $Target" { $s = Log; $s.Length -ge $before -and $s.Substring($before) -match ("\[palette\] ready chars=" + $Text.Length + " count=[1-9]\d* target=" + $Target + "(?:\r?\n|$)") })
@@ -418,10 +418,10 @@ try {
     }
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
     Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
-    Focus; Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
+    Focus; Press @(0x11, 0x4b); Query 'pin to top' '(7113|6293)'; Press @(0x0d)
     [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.PSObject.Properties['pinned_top'] -and $tab.pinned_top -eq $true })
     Assert-Avatar 'pinned' (Index-For $firstId) 'pinned-wide'
-    Focus; Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Focus; Press @(0x11, 0x4b); Query 'unpin from top' '(7113|6293)'; Press @(0x0d)
     [void](Wait-For 'unpinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; -not $tab.PSObject.Properties['pinned_top'] -or -not $tab.pinned_top })
     Focus; Press @(0x11, 0x10, 0x42)
     $firstIndex = Index-For $firstId
@@ -465,7 +465,7 @@ try {
     Copy-Item $first.FullName (Join-Path $Evidence 'normalized-tall.png')
     Copy-Item $second.FullName (Join-Path $Evidence 'normalized-wide.png')
     Check 'second-bot-does-not-change-first' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $replacementHash)
-    Focus; Press @(0x11, 0x57)
+    Focus; Press @(0x11, 0x4b); Query 'close tab' '(7197|6232)'; Press @(0x0d)
     [void](Wait-For 'second local tab closed' { @((State).tabs | Where-Object { $_.name -eq 'Photo Beta' }).Count -eq 0 })
     $paintStart = (Log).Length
     Focus; Press @(0x11, 0x10, 0x54)
