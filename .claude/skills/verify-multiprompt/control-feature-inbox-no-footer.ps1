@@ -74,10 +74,12 @@ foreach ($theme in $themes) {
     Capture-InboxFooter $token 'search-empty'
     Type-Text 'zzzznomatch1677'
     Capture-InboxFooter $token 'search-no-match'
-    Press @(0x0D) 'Enter: no matching session to open'
-    Capture-InboxFooter $token 'search-no-match-enter'
-    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $true } 'no-match Enter keeps Inbox open'
-    Press @(0x11, 0x46) 'Ctrl+F: restart Inbox search'
+    Press @(0x0D) 'Enter: return from no-match search'
+    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $false -and $s.active_shell_id -eq $sid } 'no-match Enter returns to the active session'
+    Snapshot "inbox-footer-$token-search-no-match-returned"
+    Press @(0x12, 0x49) 'Alt+I: reopen All Inbox'
+    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $true } 'Alt+I reopened Inbox after no-match'
+    Press @(0x11, 0x46) 'Ctrl+F: search Inbox again'
     Type-Text $matchQuery
     Capture-InboxFooter $token 'search-match'
     Press @(0x0D) 'Enter: open matching CMD shell'
