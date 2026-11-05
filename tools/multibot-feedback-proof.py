@@ -4,7 +4,6 @@ import importlib.util
 import hashlib
 import struct
 import urllib.parse
-import urllib.request
 import zlib
 import json
 import os
@@ -151,12 +150,17 @@ def main():
         matches = [item for item in attachments if item.get('fileName') == image_hash + '.png' and item.get('fileSize') == len(image)]
         if len(matches) != 1 or not isinstance(matches[0].get('fileSource'), str):
             raise RuntimeError('attachment missing or duplicated')
-        source = urllib.parse.urljoin('https://app.hypertask.ai/', matches[0]['fileSource'])
-        if urllib.parse.urlparse(source).scheme != 'https':
+        source = matches[0]['fileSource']
+        parsed = urllib.parse.urlsplit(source)
+        if parsed.scheme != 'https' or parsed.netloc != 'files.hypertask.app':
             raise RuntimeError('invalid attachment source')
-        with urllib.request.urlopen(source, timeout=30) as response:
-            downloaded = response.read(len(image) + 1)
-        if hashlib.sha256(downloaded).hexdigest() != image_hash:
+        result = subprocess.run(['curl', '--fail', '--silent', '--show-error', '--location',
+                                 '--proto', '=https', '--proto-redir', '=https', '--max-time', '30',
+                                 '--retry', '3', '--retry-all-errors', '--retry-delay', '2', '--', source],
+                                capture_output=True, timeout=135, check=False)
+        if result.returncode:
+            raise RuntimeError('attachment download failed')
+        if hashlib.sha256(result.stdout).hexdigest() != image_hash:
             raise RuntimeError('attachment bytes differ')
         stage = 'ranking'
         ranking = subprocess.run([sys.executable, str(tool), '--weekly'], capture_output=True, text=True, timeout=180)

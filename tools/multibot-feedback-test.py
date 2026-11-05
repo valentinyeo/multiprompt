@@ -121,11 +121,35 @@ class BoardFeedbackTest(unittest.TestCase):
     def vote(self, agent, date):
         return dict(id='activity-id', runId='run-id', type='thought', text='multibot-feedback-vote:v1', agentId=agent, agentName='Agent', createdAt=date.isoformat())
 
-    def png(self):
+    def png(self, pixel=b'\x12\x34\x56', size=None):
         def chunk(kind, data):
             return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
-        return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)) +
-                chunk(b'IDAT', zlib.compress(b'\x00\x12\x34\x56')) + chunk(b'IEND', b''))
+        image = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)) +
+                 chunk(b'IDAT', zlib.compress(b'\x00' + pixel)))
+        if size is not None:
+            image += chunk(b'tEXt', b'x\x00' + b'a' * (size - len(image) - 26))
+        return image + chunk(b'IEND', b'')
+
+    def test_distinct_attachments_and_maximum_bounds(self):
+        images = []
+        for index in range(4):
+            path = self.work / f'private-{index}.png'
+            data = self.png(bytes([index, 0, 0]), 8 * 1024 * 1024 if index == 3 else None)
+            path.write_bytes(data)
+            images.append((path, data))
+        self.assertEqual(len(images[3][1]), 8 * 1024 * 1024)
+        args = [part for path, _ in images for part in ('--attach', str(path))]
+        self.assertIn('Feedback submitted:', self.run_cli('four screenshots', *args[:4]).stdout)
+        self.assertIn('Feedback voted:', self.run_cli('four screenshots', *args[:4]).stdout)
+        self.assertEqual(len(self.read_board()['tasks'][0]['attachments']), 2)
+        self.assertIn('Feedback voted:', self.run_cli('four screenshots', *args).stdout)
+        self.assertIn('Feedback voted:', self.run_cli('four screenshots', *args).stdout)
+        attachments = self.read_board()['tasks'][0]['attachments']
+        self.assertEqual(len(attachments), 4)
+        self.assertEqual({item['fileName'] for item in attachments},
+                         {hashlib.sha256(data).hexdigest() + '.png' for _, data in images})
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum(call[1:3] == ['task', 'update'] for call in calls), 4)
 
     def test_attachments_retry_dedupe_and_private_filename(self):
         image = self.work / 'private-screenshot.png'
