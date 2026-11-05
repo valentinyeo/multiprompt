@@ -79,6 +79,33 @@ test('waiting and started echoes use their protocol phase for brightness', () =>
   assert.equal(dim({ ...echo, removed_ms: 1 }), false);
 });
 
+test('gradient oracle recognizes dim and normal copies without duplicates', async () => {
+  const { queuedBubble, normalBubble, countMessageBubbles } = await import(pathToFileURL(path.join(root, 'tools/chat-accepted-proof.mjs')));
+  const area = { left: 0, right: 400, top: 0, bottom: 220 };
+  function image(dim, copy = false, text = true) {
+    const result = { width: 400, height: 220, pixels: Buffer.alloc(400 * 220 * 4, 16) };
+    for (const top of copy ? [50, 130] : [50]) for (let y = top; y < top + 40; y++) for (let x = 180; x < 370; x++) {
+      const fill = 66 - Math.floor((y - top) / 5);
+      let color = dim ? Math.floor((fill + 16) / 2) : fill;
+      if (text && y > top + 12 && y < top + 28 && x > 210 && x < 330 && x % 3 === 0) color = dim ? 118 : 220;
+      result.pixels.writeUIntLE(color * 0x010101, (y * 400 + x) * 4, 3);
+    }
+    return result;
+  }
+  const waiting = image(true);
+  const bubble = queuedBubble(waiting, area);
+  assert.equal(normalBubble(waiting, bubble), false);
+  assert.equal(normalBubble(image(false), bubble, waiting), true);
+  assert.equal(normalBubble(image(false, false, false), bubble, waiting), false);
+  const unrelated = image(false, false, false);
+  for (let y = 62; y < 78; y++) for (let x = 212; x < 330; x++) if (x % 3 === 1) unrelated.pixels.writeUIntLE(0xdcdcdc, (y * 400 + x) * 4, 3);
+  assert.equal(normalBubble(unrelated, bubble, waiting), false);
+  assert.equal(countMessageBubbles(image(false), area, bubble), 1);
+  assert.equal(countMessageBubbles(image(false, true), area, bubble), 2);
+  assert.throws(() => queuedBubble(image(false), area), /visibly dimmed/);
+  assert.throws(() => queuedBubble(image(true, false, false), area), /text must remain visible/);
+});
+
 test('pixel oracle rejects a missing or dim taken bubble', async () => {
   const { queuedBubble, normalBubble, countMessageBubbles, evaluateFrames } = await import(pathToFileURL(path.join(root, 'tools/chat-accepted-proof.mjs')));
   assert.equal(typeof countMessageBubbles, 'function');
