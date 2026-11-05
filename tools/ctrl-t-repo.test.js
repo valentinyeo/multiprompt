@@ -55,6 +55,13 @@ test('cross-host and offline journeys require the selected host and rejection', 
   assert.match(sessions, /offline-1[\s\S]*\[repo\] offline host=1[\s\S]*\$logBefore = [^\n]+[\s\S]*Enter: reject offline folder[\s\S]*\$log\.Substring\(\$logBefore\)\.Contains\('\[repo\] selection rejected'\)[\s\S]*Offline selection saved a tab[\s\S]*Offline selection launched SSH[\s\S]*other host stays usable[\s\S]*\[repo\] online host=1/);
 });
 
+test('cross-host and available-host cleanup hides tabs and restores host 2', () => {
+  for (const kind of ['cross-host', 'available host']) {
+    assert.match(sessions, new RegExp(`Palette 'hide from sidebar'\\s+Press @\\(0x0D\\) 'Enter: hide ${kind} chat'\\s+Wait-Until \\{ @\\(\\(Read-Session\\)\\.tabs\\)\\.Count -eq \\$beforeClaude \\} '${kind} chat closed'\\s+Palette 'Second'\\s+Press @\\(0x0D\\) 'Enter: return to host 2'\\s+Wait-Until \\{ \\$state = Read-Session; \\$state\\.tabs\\[\\$state\\.active_tab\\]\\.tmux_host -eq 2 \\}`));
+  }
+  assert.doesNotMatch(sessions, /Press\s+@\(0x11,\s*0x57\)/i);
+});
+
 test('IGSH-1680 native search checks both partial-name queries and the chosen host folder', () => {
   const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
   assert.ok(ssh.indexOf('puts("/work/soft-tools/factory/alpha")') < ssh.indexOf('puts("/work/projects/software-factory")'));

@@ -76,7 +76,8 @@
                 Save-Json (Read-Session) ('ctrl-t-' + $case.proof + '-session.json')
                 Snapshot ('ctrl-t-' + $case.proof + '-chat')
                 $result.checks += @{ name = ('cross-host-' + $case.proof); host = $case.host; cwd = $case.cwd; alias = $case.alias }
-                Press @(0x11, 0x57) 'Ctrl+W: close cross-host chat'
+                Palette 'hide from sidebar'
+                Press @(0x0D) 'Enter: hide cross-host chat'
                 Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'cross-host chat closed'
                 Palette 'Second'
                 Press @(0x0D) 'Enter: return to host 2'
@@ -107,7 +108,8 @@
                 $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
                 $hostId -eq 0 -and $tab.cwd -eq '/work/primary/atlas' -and $tab.cv -eq $true
             } 'other host stays usable'
-            Press @(0x11, 0x57) 'Ctrl+W: close available host chat'
+            Palette 'hide from sidebar'
+            Press @(0x0D) 'Enter: hide available host chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'available host chat closed'
             Palette 'Second'
             Press @(0x0D) 'Enter: return to host 2'
