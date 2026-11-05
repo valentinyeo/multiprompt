@@ -26,7 +26,7 @@ function Save-Process($Process, [string]$ExpectedPath) {
 $cloudflared = Join-Path $work 'cloudflared.exe'
 Invoke-WebRequest 'https://github.com/cloudflare/cloudflared/releases/download/2026.10.7/cloudflared-windows-amd64.exe' -OutFile $cloudflared
 if ((Get-FileHash $cloudflared -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343') { throw 'Cloudflared checksum mismatch' }
-$nodePath = (Get-Command node -CommandType Application).Source
+$nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source
 $serverPath = (Resolve-Path 'service/journey/server.mjs').Path
 $server = Start-Process -FilePath $nodePath -ArgumentList @(('"' + $serverPath + '"'), '--port=18787', '--bind=127.0.0.1', ('--config="' + $configPath + '"')) -PassThru -RedirectStandardOutput (Join-Path $work 'service.out') -RedirectStandardError (Join-Path $work 'service.err')
 Save-Process $server $nodePath
