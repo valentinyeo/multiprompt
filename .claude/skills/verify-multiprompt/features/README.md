@@ -38,6 +38,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
 - [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.
 
+- [Computer menu](computer-menu.md): Computer stays inside the existing chat three-dots menu; real click selects its pane and returning preserves the draft.
+
 - [Settings panel](settings-panel.md): keyboard and palette entry, existing settings persistence, centred native panel and focus-safe dismissal.
 
 - [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
