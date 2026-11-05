@@ -15,16 +15,26 @@ int main(int argc, char **argv) {
     if (!log) return 3;
     fputs(cmd, log);
     fclose(log);
-    if (strstr(cmd, "for d in /home/*/projects/*/")) {
-        puts("/work/projects/alpha");
-        puts("/work/projects/beta");
-        for (int i = 0; i < 94; i++) printf("/work/projects/code-%03d\n", i);
-        puts("/work/soft-tools/factory/alpha");
-        puts("/work/projects/software-factory");
-        puts("/work/projects/notes-only");
-        puts("/work/projects/zz-last-folder");
+    if (strstr(cmd, "@@MP_REPOS_OK@@")) {
+        int host = strstr(cmd, "remote-3") ? 2 : strstr(cmd, "remote-2") ? 1 : 0;
+        snprintf(path, sizeof(path), "%s\\offline-%d", root, host);
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
+        if (host == 0) {
+            puts("/work/primary/atlas");
+        } else if (host == 1) {
+            puts("/work/secondary/cedar");
+        } else {
+            puts("/work/projects/alpha");
+            puts("/work/projects/beta");
+            for (int i = 0; i < 94; i++) printf("/work/projects/code-%03d\n", i);
+            puts("/work/soft-tools/factory/alpha");
+            puts("/work/projects/software-factory");
+            puts("/work/projects/notes-only");
+            puts("/work/projects/zz-last-folder");
+        }
+        puts("\n@@MP_REPOS_OK@@");
         fflush(stdout);
-        snprintf(path, sizeof(path), "%s\\listing-%lu.txt", root, GetCurrentProcessId());
+        snprintf(path, sizeof(path), "%s\\listing-%d-%lu.txt", root, host, GetCurrentProcessId());
         FILE *done = fopen(path, "wb");
         if (!done) return 4;
         fputs("alpha\nbeta\n", done);

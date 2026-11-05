@@ -1065,7 +1065,7 @@ fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(codex64, codex);
     _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
     _ = std.base64.standard.Encoder.encode(feedback64, feedback);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, @embedFile("chat_history_reader.py") }) catch null;
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {

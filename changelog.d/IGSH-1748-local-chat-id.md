@@ -1,1 +1,1 @@
-Copied local chat IDs survive app restarts.
+Copied local chat IDs stay unchanged after restarts.

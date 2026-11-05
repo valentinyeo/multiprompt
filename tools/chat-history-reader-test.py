@@ -19,6 +19,10 @@ import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+FEEDBACK_SPEC = importlib.util.spec_from_file_location('multibot_feedback_test', ROOT / 'tools/multibot-feedback-test.py')
+FEEDBACK_TESTS = importlib.util.module_from_spec(FEEDBACK_SPEC)
+FEEDBACK_SPEC.loader.exec_module(FEEDBACK_TESTS)
+BoardFeedbackTest = FEEDBACK_TESTS.BoardFeedbackTest
 SPEC = importlib.util.spec_from_file_location('reader', ROOT / 'src/chat_history_reader.py')
 reader = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reader)
@@ -4347,7 +4351,9 @@ def record(value):
     with open(log, 'a') as stream:
         stream.write(json.dumps(value) + '\n')
         stream.flush()
-record(dict(kind='start', args=sys.argv[1:], pid=os.getpid(), cwd=os.getcwd()))
+record(dict(kind='start', args=sys.argv[1:], pid=os.getpid(), cwd=os.getcwd(),
+            provider=os.environ.get('MULTIBOT_PROVIDER'), version=os.environ.get('MULTIBOT_APP_VERSION'),
+            path=os.environ.get('PATH')))
 sys.stdout.write(json.dumps(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0')) + '\n')
 sys.stdout.flush()
 for raw in sys.stdin:
@@ -4533,6 +4539,8 @@ class AgentHostFixture:
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'READER_SOURCE', "MULTIBOT_APP_VERSION = '1.2.3'\n" + reader.READER_SOURCE).start()
+        patch.object(reader, 'MULTIBOT_APP_VERSION', '1.2.3', create=True).start()
         patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
         self.sid = str(uuid.uuid4())
         track_fixture_hosts(self)
@@ -4816,12 +4824,17 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         self.seed()
         self.dispatch()
         self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
-        args = self.agent_rows('start')[0]['args']
+        start = self.agent_rows('start')[0]
+        self.assertEqual((start['provider'], start['version']), ('claude', '1.2.3'))
+        self.assertEqual(start['path'].split(':')[0], str(self.home / '.multiprompt-runtime'))
+        args = start['args']
         self.assertIn('--append-system-prompt', args)
         prompt = args[args.index('--append-system-prompt') + 1]
         self.assertIn('multibot-feedback', prompt)
         self.assertIn('Multibot', prompt)
         self.assertIn('zsb', prompt)
+        self.assertIn('Computer view is view-only unless the user grants control', prompt)
+        self.assertIn('The browser does not operate Computer', prompt)
         self.assertLess(len(prompt), 600)
 
     def test_host_turn_runs_with_bypass_permissions_after_enable(self):
@@ -4970,7 +4983,7 @@ class AgentFeedbackCliTest(unittest.TestCase):
     def cli(self, *args, **env):
         base = {key: value for key, value in os.environ.items()
                 if key not in ('XDG_STATE_HOME', 'ZSB_SESSION', 'TMUX', 'MULTIBOT_FEEDBACK_LOG',
-                               'MULTIBOT_PROVIDER', 'MULTIBOT_SESSION')}
+                               'MULTIBOT_PROVIDER', 'MULTIBOT_SESSION', 'HT_TOKEN')}
         base.update(HOME=str(self.home), MULTIBOT_PROVIDER='claude', MULTIBOT_SESSION='fixture-chat')
         base.update(env)
         return subprocess.run([sys.executable, str(self.script), *args], cwd=str(self.work),
@@ -4982,12 +4995,12 @@ class AgentFeedbackCliTest(unittest.TestCase):
         self.assertFalse(self.log.exists(), 'an empty wish must not reach the log')
         saved = self.cli('a shortcut for browser screenshots', '--why', 'a shot takes three commands')
         self.assertEqual(saved.returncode, 0, saved.stderr)
-        self.assertEqual(saved.stdout, 'Feedback saved locally. No board ticket filed.\n')
+        self.assertIn('Feedback saved locally. Board submission not confirmed.', saved.stdout)
         self.assertEqual(self.log.stat().st_mode & 0o077, 0)
         lines = self.log.read_text(encoding='utf-8').splitlines()
         self.assertEqual(len(lines), 1)
         row = json.loads(lines[0])
-        self.assertEqual(set(row), {'id', 'at', 'want', 'why', 'session', 'provider', 'cwd'})
+        self.assertEqual(set(row), {'id', 'at', 'want', 'why', 'session', 'provider', 'app_version', 'cwd'})
         self.assertEqual(row['want'], 'a shortcut for browser screenshots')
         self.assertEqual(row['why'], 'a shot takes three commands')
         self.assertEqual(row['session'], 'fixture-chat')
@@ -5604,7 +5617,8 @@ def ask(request_id, tool, payload, suggestions=None):
     emit(dict(type='control_request', request_id=request_id, request=request))
     return wait_control(request_id)
 
-record(dict(kind='start', args=sys.argv[1:]))
+record(dict(kind='start', args=sys.argv[1:], provider=os.environ.get('MULTIBOT_PROVIDER'),
+            version=os.environ.get('MULTIBOT_APP_VERSION'), path=os.environ.get('PATH')))
 emit(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0'))
 turns = 0
 for raw in sys.stdin:
@@ -6416,7 +6430,8 @@ def play(key, line):
         sys.stdout.write(text + '\n')
         sys.stdout.flush()
 record(dict(kind='start', args=sys.argv[1:], env={name: name in os.environ for name in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL')},
-            host=os.environ.get('MULTIBOT_HOST')))
+            host=os.environ.get('MULTIBOT_HOST'), provider=os.environ.get('MULTIBOT_PROVIDER'),
+            version=os.environ.get('MULTIBOT_APP_VERSION'), path=os.environ.get('PATH')))
 play('$start', {})
 while True:
     line = read()
@@ -6437,6 +6452,8 @@ class HostProviderCase(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'READER_SOURCE', "MULTIBOT_APP_VERSION = '1.2.3'\n" + reader.READER_SOURCE).start()
+        patch.object(reader, 'MULTIBOT_APP_VERSION', '1.2.3', create=True).start()
         patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
         self.sid = str(uuid.uuid4())
         track_fixture_hosts(self)
@@ -6553,13 +6570,19 @@ class IGSH_1544_CodexHostTest(HostProviderCase):
         self.assertEqual(start['args'], ['app-server'])
         self.assertEqual(start['env'], dict(OPENAI_API_KEY=False, CODEX_API_KEY=False, OPENAI_BASE_URL=False))
         self.assertEqual(start['host'], reader.host_key(self.provider, self.sid))
+        self.assertEqual((start['provider'], start['version']), ('codex', '1.2.3'))
+        self.assertEqual(start['path'].split(':')[0], str(self.home / '.multiprompt-runtime'))
         self.assertEqual([line.get('method') for line in self.sent()[:4]], ['initialize', 'initialized', 'thread/start', 'turn/start'])
         for line in self.sent():
             self.assertNotIn('model', line.get('params') or {})
             self.assertNotIn('modelProvider', line.get('params') or {})
         thread = self.params('thread/start')[0]
+        if os.environ.get('MULTIBOT_GUIDANCE_EVIDENCE'):
+            Path(os.environ['MULTIBOT_GUIDANCE_EVIDENCE']).write_text(json.dumps({'provider': 'codex', 'guidance': thread['developerInstructions']}))
         self.assertEqual((thread['approvalPolicy'], thread['sandbox']), ('on-request', 'workspace-write'))
-        self.assertEqual(thread['developerInstructions'], reader.HOST_APPEND_PROMPT)
+        self.assertIn('Computer view is view-only unless the user grants control', thread['developerInstructions'])
+        self.assertIn('multibot-feedback', thread['developerInstructions'])
+        self.assertIn('zsb --help', thread['developerInstructions'])
         self.assertEqual(thread['cwd'], str(self.home))
         self.assertNotIn('ephemeral', thread)
         turn = self.params('turn/start')[0]
@@ -6676,9 +6699,16 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.enable()
         self.send('pi_fixture_message_0001')
         self.wait_for(lambda: self.rows('start'))
-        self.assertEqual(self.rows('start')[0]['args'],
-                         ['--mode', 'rpc', '--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash',
-                          '--session-id', self.sid, '--append-system-prompt', reader.HOST_APPEND_PROMPT])
+        start = self.rows('start')[0]
+        self.assertEqual((start['provider'], start['version']), ('pi', '1.2.3'))
+        self.assertEqual(start['path'].split(':')[0], str(self.home / '.multiprompt-runtime'))
+        args = start['args']
+        self.assertEqual(args[:8], ['--mode', 'rpc', '--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash',
+                                    '--session-id', self.sid])
+        self.assertEqual(args[8], '--append-system-prompt')
+        self.assertIn('Computer view is view-only unless the user grants control', args[9])
+        self.assertIn('multibot-feedback', args[9])
+        self.assertIn('zsb --help', args[9])
 
     def test_pi_streams_a_turn_cancels_dialogs_and_ends_on_agent_settled(self):
         self.enable(permission_mode='plan')
