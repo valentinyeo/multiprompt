@@ -4610,6 +4610,9 @@ def message_store_transaction(q):
             token, text = q.get('message_id'), q.get('text')
             if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or not text.strip() or '\x00' in text:
                 raise ValueError('invalid message')
+            admission_epoch = q.get('admission_epoch')
+            if admission_epoch is not None and (type(admission_epoch) is not int or admission_epoch < 0):
+                raise ValueError('invalid admission epoch')
             legacy_token = q.get('legacy_token')
             if legacy_token is not None:
                 if provider != 'claude' or not isinstance(legacy_token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', legacy_token) or token != legacy_message_id(legacy_token) or not resolved or resolved[0] != sid:
@@ -4636,8 +4639,11 @@ def message_store_transaction(q):
                 if legacy_token is not None:
                     message_event(db, provider, sid, message_row(existing), emit=False)
                 return dict(message=message_row(existing), epoch=epoch, seq=seq)
+            if admission_epoch is not None and admission_epoch > epoch:
+                raise ValueError('future admission epoch')
             position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
-            db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,'queued',NULL,NULL,?,?)", (token, provider, sid, text, position, uuid.uuid4().hex, epoch, time.time()))
+            state = 'cancelled' if admission_epoch is not None and admission_epoch < epoch else 'queued'
+            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,NULL,NULL,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, epoch, time.time()))
             if scope_body is not None:
                 db.execute('INSERT INTO message_room_scopes VALUES (?,?)', (token, scope_body))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
@@ -5968,7 +5974,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 67
+RUNTIME_GENERATION = 68
 
 if __name__ == '__main__':
     import base64 as _base64

@@ -67,10 +67,12 @@ It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message 
 Dispatch `verify.yml` on the branch with `feature=chat-instant`.
 This feature selects the existing chat-delivery driver.
 The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
-It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer before releasing the connection.
+It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer.
+Before releasing SSH or issuing either message to the host, it forcibly terminates the owned job, checks the stopped outbox retains both pending wire IDs, and restarts the app with the same profile while SSH remains held.
+The real native transcript must copy both pending messages after reload; the outbox alone is not proof of rendering.
 The independent oracle requires first paint below 1000 ms, two persisted client IDs in order, no matching messages in the pre-connect store, and exactly those IDs once in order in the production host store after release.
 It also checks the absent startup sync banner and zero owned processes after cleanup.
-Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-delivered.png`, `startup-timing.json`, `offline-outbox.json`, and both store snapshots in `verify-chat-delivery`.
+Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-reloaded.png`, `instant-delivered.png`, `startup-timing.json`, the unchanged `offline-outbox.json`, `crash-outbox.json`, `reloaded-outbox.json`, `reloaded-copied.txt`, crash and reload process receipts, and both store snapshots in `verify-chat-delivery`.
 The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
 Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
 

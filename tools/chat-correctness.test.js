@@ -18,6 +18,7 @@ function body(text, name) {
 }
 const prelude = `
 const std = @import("std");
+const launch_cache = struct { var pending = false; var tabs_restored = true; };
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -45,6 +46,7 @@ fn chatMessageGoesToHost(_: ShellKind, _: u8) bool { return false; }
 fn chatSendRoute(_: ShellKind, _: u8, _: bool) ChatSendRoute { return .terminal_send; }
 fn chatLogSendPath(_: u32, _: ?*const anyopaque, _: ChatSendRoute, _: []const u8) void {}
 fn chatUpgradeToHostMessage(_: u32, _: *ChatOutboxEntry) bool { return true; }
+fn chatMessageCaptureAdmission(_: u32, _: *ChatOutboxEntry) void {}
 var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
@@ -139,6 +141,20 @@ test "correctness identity: first production allocation supports history, browse
     try std.testing.expect(pending.take(id));
     // The screenshot queue rejects zero before accepting any owner.
     try std.testing.expect(id != 0);
+}
+test "correctness newline: IGSH-1640 provisional startup tabs cannot reserve or issue a send" {
+    reset();
+    launch_cache.pending = true;
+    launch_cache.tabs_restored = false;
+    defer { launch_cache.pending = false; launch_cache.tabs_restored = true; }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("hello");
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, text, 1));
+    try std.testing.expect(!storage[0].write_started);
+    try std.testing.expectEqual(ChatEchoState.queued, storage[0].state);
+    try std.testing.expectEqual(@as(usize, 0), writes + enters);
+    launch_cache.tabs_restored = true;
+    try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, text, 1));
+    try std.testing.expectEqual(@as(usize, 1), writes);
 }
 test "correctness newline: leading blank lines arm verification and free the global send slot" {
     reset();
