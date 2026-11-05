@@ -44,4 +44,23 @@ spec = importlib.util.spec_from_file_location('chat_delivery_boundary', Path(__f
 base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
 base.session_names = lambda: list(base.state()['sessions'])
+if base.MODE == 'ssh' and 'tmux new-session -d -s ' in command and 'claude --resume ' in command:
+    target_match = re.search(r'tmux new-session -d -s ([^ ]+)', command)
+    sid_match = re.search(r'claude --resume .*?([0-9a-f]{8}-[0-9a-f-]{27})', command)
+    if target_match is None or sid_match is None:
+        raise RuntimeError('Unexpected archived resume command')
+    target = target_match[1].strip("'\"\\")
+    state = base.state()
+    original = next((name for name, sid in state['session_ids'].items() if sid == sid_match[1]), None)
+    if original is None or re.fullmatch(re.escape(original) + r'-r\d+', target) is None or not (root / ('ended-' + original + '.json')).exists():
+        raise RuntimeError('Archived resume identity does not match an ended fixture')
+    state['sessions'].append(target)
+    state['sids'][target] = sid_match[1]
+    state['panes'][target] = state['panes'][original]
+    temporary = root / 'resume-state.tmp'
+    temporary.write_text(json.dumps(state), encoding='utf-8')
+    os.replace(temporary, root / 'state.json')
+    base.record('resumed.jsonl', session=target, original=original, sid=sid_match[1], boundary='synthetic resume transport; original transcript unchanged')
+    base.attach_fake(target)
+    sys.exit(0)
 sys.exit(base.tmux() if base.MODE == 'tmux' else base.shell() if base.MODE == 'shell' else base.ssh())

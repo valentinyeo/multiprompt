@@ -123,6 +123,37 @@ function Context([int]$Index) {
     [ChatDeliveryDesktop]::RightClickClient($main, [uint32]$app.Id, [int](($pair[0]+$pair[2])/2), [int](($pair[1]+$pair[3])/2))
     [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 6249 7196 7197 7112(?:\s|$)' })
 }
+function Read-History([string]$Name, [string]$Sid, [int]$Fixture) {
+    $saved=@(Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json)
+    $archiveIndex=-1
+    for ($i=0; $i -lt $saved.Count; $i++) { if ($saved[$i].csid -ceq $Sid) { $archiveIndex=$i } }
+    Check ('archived-history-entry-'+$Name) ($archiveIndex -ge 0)
+    Palette $Name (7300+$archiveIndex)
+    [void](Wait-For ('restored saved history identity '+$Name) { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -ceq $Name -and $_.csid -ceq $Sid }).Count -eq 1 })
+    $offset=(Log).Length
+    $current=Session
+    $tab=$current.tabs[$current.active_tab]
+    if (!$tab.PSObject.Properties['cv'] -or !$tab.cv) { Press @(0x12,0x43) }
+    $transcript=Wait-For ('visible owned transcript '+$Name) {
+        $view=[VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'ZigShellChatTranscript', '')
+        if ($view -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($view) -and [ChatDeliveryDesktop]::Owner($view) -eq $app.Id) { $view }
+    }
+    [void](Wait-For ('nonempty native history layout '+$Name) { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[chatfont\] pt=\d+ blocks=[1-9]\d* content_h=[1-9]\d*' })
+    [Windows.Forms.Clipboard]::Clear()
+    Palette 'chat view select all' 6364
+    Press @(0x11,0x43)
+    $copied=Wait-For ('original question and answer copied from native history '+$Name) {
+        $text=[Windows.Forms.Clipboard]::GetText()
+        if ($text.Contains("Session $Fixture question 0:") -and $text.Contains("Session $Fixture answer 0")) { $text }
+    }
+    [IO.File]::WriteAllText((Join-Path $Evidence ('history-'+$Name+'.txt')), $copied)
+    Check ('history-is-not-the-other-chat-'+$Name) (!$copied.Contains('Session '+(1-$Fixture)+' question 0:'))
+    Press @(0x1b)
+    Focus
+    [ChatDeliveryDesktop]::WheelOwnedTranscript($main, [uint32]$app.Id, $transcript, 12000)
+    Shot ('history-'+$Name)
+    Check ('original-stopped-agents-stay-gone-'+$Name) ($servers[0].process.HasExited -and $servers[1].process.HasExited)
+}
 try {
     Check 'binary-sha256' ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -eq $ExpectedHash.ToLowerInvariant())
     Check 'embedded-version' ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;"))
@@ -166,6 +197,19 @@ try {
     Check 'Alt-X-does-not-close-a-chat' (@((Session).tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq 2)
     Palette 'copy chat id' 7196
     Check 'global-copy-chat-id' ([Windows.Forms.Clipboard]::GetText() -ceq $ids[0])
+    foreach ($theme in @(@{name='light'; target=4012}, @{name='amoled'; target=4013}, @{name='mid'; target=4011})) {
+        Palette 'themes' 4000
+        $offset=(Log).Length
+        [VerifyNative]::Text($theme.name)
+        [void](Wait-For ('theme choice '+$theme.name) { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ('\[palette\] ready chars='+$theme.name.Length+' count=[1-9]\d* target='+$theme.target+'(?:\r?\n|$)') })
+        Press @(0x0d)
+        [void](Wait-For ('saved theme '+$theme.name) { $path=Join-Path $settings 'theme-mode.txt'; (Test-Path $path) -and (Get-Content $path -Raw).Trim() -ceq $theme.name })
+        Press @(0x1b)
+        Shot ('theme-'+$theme.name+'-before')
+        Context 1
+        Shot ('theme-'+$theme.name+'-actions')
+        Press @(0x1b)
+    }
     Context 1
     Shot 'right-click-seven-actions'
     $menu=[Drawing.Bitmap]::new((Join-Path $Evidence 'right-click-seven-actions.png'))
@@ -188,7 +232,11 @@ try {
     for ($i=0; $i -lt $transcripts.Count; $i++) { Check 'original-history-bytes-retained' ((Get-FileHash $transcripts[$i].FullName -Algorithm SHA256).Hash -ceq $hashes[$i]) }
     Save @($names | ForEach-Object { Get-Content (Join-Path $env:MP_VERIFY_STATE ('ended-'+$_+'.json')) -Raw | ConvertFrom-Json }) (Join-Path $Evidence 'end-commands.json')
     Shot 'after-delete'
-    $result.history_ui_readability='not exercised; retained original transcripts and saved identities only'
+    Read-History 'Alpha' $ids[0] 0
+    Read-History 'Beta' $ids[1] 1
+    for ($i=0; $i -lt $transcripts.Count; $i++) { Check 'history-read-does-not-rewrite-original-transcript' ((Get-FileHash $transcripts[$i].FullName -Algorithm SHA256).Hash -ceq $hashes[$i]) }
+    $result.history_ui_readability='Both deleted chats reopened through the existing archived resume action; native visible transcript layout and copied original question/answer verified. Resume transport is synthetic; not a read-only viewer or real provider restart.'
+    $result.theme_review='Captured built-in Light, AMOLED and Mid. Mid is not claimed to be the Graphite 2 Figma theme. Independent design QA remains required.'
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message
