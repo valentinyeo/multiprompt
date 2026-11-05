@@ -31,13 +31,16 @@ function Start-HostedRequest([string]$Id, [string]$Tool, $InputValue) {
 function Wait-HostedChoices([int]$Count) {
     Wait-Until { $c = Read-HostedChoices; $null -ne $c -and $c.live -eq 1 -and $c.count -eq $Count } ('hosted cards painted: ' + $Count) 45
 }
+$script:hostedLastClick = [DateTime]::MinValue
 function Click-HostedChoice([int]$Index) {
+    Wait-Until { ([DateTime]::UtcNow - $script:hostedLastClick).TotalMilliseconds -gt [Windows.Forms.SystemInformation]::DoubleClickTime } 'separate single card clicks from native double-clicks'
     $card = (Read-HostedChoices).cards[$Index]
     if ($card.index -ne $Index -or $card.right -le $card.left -or $card.bottom -le $card.top) { throw 'Hosted card rectangle invalid' }
     Doctor
     Assert-Foreground
     Record ('Click hosted choice ' + $Index)
     [VerifyNative]::ClickClient($hostedTranscript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
+    $script:hostedLastClick = [DateTime]::UtcNow
 }
 function Copy-HostedTranscript {
     [Windows.Forms.Clipboard]::Clear()
@@ -94,7 +97,11 @@ Click-HostedChoice 1
 Click-HostedChoice 3
 Wait-HostedChoices 3
 Click-HostedChoice 2
+Wait-Until { $c = Read-HostedChoices; $null -ne $c -and $c.live -eq 0 } 'Other is active before entering an answer'
+Wait-ChatFocus 'Edit' 'hosted-other-composer'
+Snapshot 'hosted-question-other'
 Type-Text 'Blue'
+Wait-Until { [VerifyNative]::EditText($script:slashComposer) -ceq 'Blue' } 'Other answer typed without ordinary submission'
 Press @(0x0D) 'Enter: answer the hosted Other question'
 $answered = Assert-HostedContinued 'hosted-question' 'question_reply' 'allow'
 $answers = $answered.responses[0].response.response.updatedInput.answers
