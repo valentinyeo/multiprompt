@@ -5672,25 +5672,28 @@ class ServeEventPushTest(unittest.TestCase):
         self.server.stdin.write(base64.b64encode((ROOT / 'src/chat_history_reader.py').read_bytes()) + b'\n')
         self.server.stdin.flush()
 
-    def stop(self):
-        self.server.stdin.close()
+    def stop(self, server=None):
+        server = server or self.server
+        server.stdin.close()
         try:
-            self.server.wait(timeout=5)
+            server.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            self.server.kill()
-            self.server.wait(timeout=5)
-        self.server.stdout.close()
-        self.server.stderr.close()
+            server.kill()
+            server.wait(timeout=5)
+        server.stdout.close()
+        server.stderr.close()
 
-    def ask(self, query):
-        self.server.stdin.write(json.dumps(query).encode() + b'\n')
-        self.server.stdin.flush()
+    def ask(self, query, server=None):
+        server = server or self.server
+        server.stdin.write(json.dumps(query).encode() + b'\n')
+        server.stdin.flush()
 
-    def line(self, timeout=10):
+    def line(self, timeout=10, server=None):
+        server = server or self.server
         with selectors.DefaultSelector() as selector:
-            selector.register(self.server.stdout, selectors.EVENT_READ)
+            selector.register(server.stdout, selectors.EVENT_READ)
             self.assertTrue(selector.select(timeout=timeout), 'reader push timed out')
-        return json.loads(self.server.stdout.readline())
+        return json.loads(server.stdout.readline())
 
     def publish(self, text):
         db = reader.message_store_db(self.tmux)
@@ -5734,6 +5737,35 @@ class ServeEventPushTest(unittest.TestCase):
             reply = self.line()
         self.assertEqual(reply['id'], 89)
 
+
+
+    def test_igsh_1633_closing_a_duplicate_chat_reader_does_not_stop_the_open_reply(self):
+        first = self.publish('earlier reply')
+        bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
+        other = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--serve'],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env=dict(os.environ, HOME=str(self.home)))
+        self.addCleanup(self.stop, other)
+        other.stdin.write(base64.b64encode((ROOT / 'src/chat_history_reader.py').read_bytes()) + b'\n')
+        other.stdin.flush()
+        query = dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0)
+        self.ask(query)
+        self.ask(query, server=other)
+        for server in [self.server, other]:
+            backlog = self.line(server=server)
+            self.assertEqual([item['seq'] for item in backlog['result']['events']], [first])
+        self.ask(dict(id=88, op='events_unsubscribe', provider=self.provider, sid=self.sid), server=other)
+        self.assertEqual(self.line(server=other)['result']['events'], [])
+        self.stop(other)
+        self.assertIsNotNone(other.poll())
+        second = self.publish('reply after the other copy closed')
+        pushed = self.line()
+        self.assertEqual(pushed['id'], 88)
+        self.assertEqual([item['seq'] for item in pushed['result']['events']], [second])
+        self.assertEqual(pushed['result']['events'][0]['event']['payload']['text'], 'reply after the other copy closed')
+        self.assertIsNone(self.server.poll())
+        self.ask(dict(id=89, op='engine_info'))
+        self.assertEqual(self.line()['id'], 89)
 
 
 
