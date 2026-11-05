@@ -162,6 +162,7 @@ test('release downloads exclude verification evidence from published update asse
   const artifacts = new Map([
     ['multiprompt-x64', ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe']],
     ['multiprompt-arm64', ['multiprompt-arm64.exe', 'zigshell-bridge-arm64.exe']],
+    ['multiprompt-release-changelog', ['changelog.zig']],
     ['verify-tmux-binding', ['binding-name-reused-stderr.log', 'result.json']],
     ['verify-browser', ['journey.json', 'screenshot.png']],
   ]);
@@ -171,7 +172,7 @@ test('release downloads exclude verification evidence from published update asse
   for (const [, inputs] of downloads) {
     const name = inputs.match(/^          name: (.+)$/m)?.[1];
     const destination = inputs.match(/^          path: (.+)$/m)?.[1];
-    assert.equal(destination, 'dist');
+    assert.equal(destination, name === 'multiprompt-release-changelog' ? 'release-notes-source' : 'dist');
     for (const [artifact, files] of artifacts) {
       if (name && artifact !== name) continue;
       const directory = path.join(f.dir, destination, !name && !inputs.includes('merge-multiple: true') ? artifact : '');
@@ -443,7 +444,7 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
   const build = script('Build');
   assert.match(build, /node tools\/version-stamp\.mjs build "\$TAG"/);
   assert.match(build, /zig build -Dtarget=\$\{\{ matrix.target \}\} -Drelease=\$\{\{ github.event_name != 'pull_request' \}\} -Dversion="\$\{TAG#v\}"/);
-  assert.match(script('Publish plain versioned update notes'), /node tools\/version-stamp\.mjs build "\$TAG"\nnode tools\/release-notes\.mjs/);
+  assert.doesNotMatch(script('Publish plain versioned update notes'), /version-stamp|\bgh\b|\bgit\b/);
   const check = build.match(/<<'NODE'\n([\s\S]*?)\nNODE/)[1];
   const f = fixture(t);
   fs.mkdirSync(path.join(f.dir, 'zig-out/bin'), { recursive: true });
@@ -510,13 +511,44 @@ for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${r
 });
 
 
+test('notes use the stamped artifact without release history', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  f.git('tag', '-d', 'v1.2.2');
+  f.git('--git-dir', f.remote, 'tag', '-d', 'v1.2.2');
+  fs.copyFileSync(path.join(root, 'tools/release-notes.mjs'), path.join(f.dir, 'tools/release-notes.mjs'));
+  fs.mkdirSync(path.join(f.dir, 'dist'));
+  fs.mkdirSync(path.join(f.dir, 'release-notes-source'));
+  const artifact = path.join(f.dir, 'release-notes-source/changelog.zig');
+  const output = path.join(f.dir, 'dist/release-notes.json');
+  assert.notEqual(f.run('Publish plain versioned update notes').status, 0);
+  assert.equal(fs.existsSync(output), false);
+  fs.writeFileSync(artifact, '.{ .ver = "1.2.2", .items = &.{\n        .{ .text = "Updates show what changed.", .ticket = "IGSH-728" },\n    } },\n');
+  assert.notEqual(f.run('Publish plain versioned update notes').status, 0);
+  assert.equal(fs.existsSync(output), false);
+  fs.writeFileSync(artifact, '.{ .ver = "1.2.3", .items = &.{\n        .{ .text = "Updates show what changed.", .ticket = "IGSH-728" },\n    } },\n');
+  const result = f.run('Publish plain versioned update notes');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(output, 'utf8')), {
+    version: '1.2.3', releases: [{ version: '1.2.3', changes: ['Updates show what changed.'], tickets: ['https://app.hypertask.ai/detail/project-2060/728'] }],
+  });
+  assert.deepEqual(f.calls(), []);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'src/changelog.zig'), 'utf8'), changelog);
+});
+
 test('release builds authenticate history reads and publish versioned notes', () => {
   const build = workflow.split('\n  build:\n')[1].split('\n  launch:\n')[0];
   const release = workflow.split('\n  release:\n')[1];
   assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
-  assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(notes, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" dist\/release-notes\.json/);
+  assert.doesNotMatch(notes, /GH_TOKEN/);
+  assert.match(notes, /node tools\/release-notes\.mjs release-notes-source\/changelog\.zig "\$TAG" dist\/release-notes\.json/);
+  assert.match(release, /timeout-minutes: 5/);
+  const uploads = [...build.matchAll(/      - uses: actions\/upload-artifact@[^\n]+\n(?:        [^\n]+\n)+/g)].map(match => match[0]).filter(step => step.includes('multiprompt-release-changelog'));
+  assert.equal(uploads.length, 1);
+  assert.match(uploads[0], /actions\/upload-artifact@[a-f0-9]{40}\n        if: matrix\.arch == 'x64'\n        with:\n          name: multiprompt-release-changelog\n          path: src\/changelog\.zig\n          if-no-files-found: error/);
+  assert.ok(build.indexOf(uploads[0]) > build.indexOf('      - name: Build\n'));
+  assert.match(release, /actions\/download-artifact@[a-f0-9]{40}\n        with:\n          name: multiprompt-release-changelog\n          path: release-notes-source\n/);
+  assert.equal((release.match(/name: multiprompt-release-changelog/g) || []).length, 1);
 });
 
 for (const [published, candidate, latest] of [

@@ -116,6 +116,12 @@ jobs:
           const versions = [...fs.readFileSync('zig-out/bin/multiprompt.exe').toString('latin1').matchAll(/MPVERSION=(\d+\.\d+\.\d+);/g)].map(match => match[1]);
           if (versions.length === 0 || versions.some(version => version !== expected)) throw new Error('Executable embedded version does not match release tag');
           NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: matrix.arch == 'x64'
+        with:
+          name: multiprompt-release-changelog
+          path: src/changelog.zig
+          if-no-files-found: error
       - name: Package
         run: |
           mkdir dist
@@ -183,7 +189,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -197,16 +203,18 @@ jobs:
         with:
           name: multiprompt-arm64
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: multiprompt-release-changelog
+          path: release-notes-source
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Publish plain versioned update notes
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
-          GH_TOKEN: ${{ github.token }}
         run: |
-          node tools/version-stamp.mjs build "$TAG"
-          node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
+          node tools/release-notes.mjs release-notes-source/changelog.zig "$TAG" dist/release-notes.json
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
