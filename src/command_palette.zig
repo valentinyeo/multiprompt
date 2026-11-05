@@ -2219,7 +2219,12 @@ pub fn groupLaunchTarget(sid: u32) ?GroupLaunchTarget {
     if (group == 0 or @import("sidebar.zig").findGroupIdx(group) == null) return null;
     const shell = &app_state.shells[index];
     const host = @import("capacity.zig").remoteHostForShell(shell) orelse return null;
-    const cwd = @import("vps.zig").shellKnownRemotePath(shell, host) orelse return null;
+    const session = shell.tmux_session[0..shell.tmux_session_len];
+    const live = shell.kind == .tmux and (std.mem.eql(u8, session, "live") or std.mem.startsWith(u8, session, "live-"));
+    const cwd = if (live)
+        (if (shell.cached_cwd_len > 0) shell.cached_cwd[0..shell.cached_cwd_len] else if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else return null)
+    else
+        @import("vps.zig").shellKnownRemotePath(shell, host) orelse return null;
     var target = GroupLaunchTarget{ .group = group, .host = host, .cwd = undefined, .cwd_len = cwd.len };
     if (cwd.len == 0 or cwd.len > target.cwd.len or cwd[0] != '/' or !remotePathSafeForShell(cwd)) return null;
     var parts = std.mem.splitScalar(u8, cwd, '/');
@@ -2302,6 +2307,71 @@ test "group launch uses the targeted shell identity" {
         app_state.shells[1].cached_cwd_len = @intCast(path.len);
         try std.testing.expect(groupLaunchTarget(2) == null);
     }
+}
+
+test "group launch ignores hosted carrier cwd but follows terminal cwd" {
+    const saved_shell = app_state.shells[0];
+    const saved_count = app_state.shell_count;
+    const saved_group = app_state.groups[0];
+    const saved_group_count = app_state.group_count;
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_cache = app_state.g_tmux_cache[0];
+    const saved_cache_count = app_state.g_tmux_cache_count;
+    defer {
+        app_state.shells[0] = saved_shell;
+        app_state.shell_count = saved_count;
+        app_state.groups[0] = saved_group;
+        app_state.group_count = saved_group_count;
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_tmux_cache[0] = saved_cache;
+        app_state.g_tmux_cache_count = saved_cache_count;
+    }
+    app_state.shell_count = 1;
+    app_state.group_count = 1;
+    app_state.g_starred_workspace = false;
+    app_state.groups[0] = .{ .id = 17, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 7 };
+    app_state.shells[0] = app_state.empty_shell;
+    const shell = &app_state.shells[0];
+    shell.shell_id = 42;
+    shell.kind = .tmux;
+    shell.tmux_host = 1;
+    shell.group_id = 17;
+    const project = "/home/owner/projects/sample";
+    const carrier = "/home/login";
+    @memcpy(shell.cached_cwd[0..project.len], project);
+    shell.cached_cwd_len = project.len;
+    app_state.g_tmux_cache_count = 1;
+    app_state.g_tmux_cache[0] = .{ .name = @splat(0), .name_len = 0, .activity = 0, .host = 1 };
+    const entry = &app_state.g_tmux_cache[0];
+    @memcpy(entry.path[0..carrier.len], carrier);
+    entry.path_len = carrier.len;
+    for ([_][]const u8{ "live-abc", "live" }) |session| {
+        @memcpy(shell.tmux_session[0..session.len], session);
+        shell.tmux_session_len = @intCast(session.len);
+        @memcpy(entry.name[0..session.len], session);
+        entry.name_len = @intCast(session.len);
+        const target = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(u8, 1), target.host);
+        try std.testing.expectEqualStrings(project, target.cwd[0..target.cwd_len]);
+        shell.cached_cwd_len = 0;
+        try std.testing.expect(groupLaunchTarget(42) == null);
+        @memcpy(shell.claude_cwd[0..project.len], project);
+        shell.claude_cwd_len = project.len;
+        const reported = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqualStrings(project, reported.cwd[0..reported.cwd_len]);
+        shell.claude_cwd_len = 0;
+        shell.cached_cwd_len = project.len;
+    }
+    const terminal = "terminal";
+    @memcpy(shell.tmux_session[0..terminal.len], terminal);
+    shell.tmux_session_len = terminal.len;
+    @memcpy(entry.name[0..terminal.len], terminal);
+    entry.name_len = terminal.len;
+    const target = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(carrier, target.cwd[0..target.cwd_len]);
+    entry.host = 0;
+    const other_host = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(project, other_host.cwd[0..other_host.cwd_len]);
 }
 
 pub fn spawnGroupTmuxSession(target: *const GroupLaunchTarget) bool {
