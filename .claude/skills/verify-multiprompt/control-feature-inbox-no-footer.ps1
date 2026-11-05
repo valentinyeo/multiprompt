@@ -48,8 +48,6 @@ Wait-Until { $s = Read-Session; $null -ne $s -and @($s.tabs).Count -eq 1 -and $s
 Wait-Until { $s = Read-Inbox; $null -ne $s -and @($s.shells).Count -eq 1 } 'one published Inbox session'
 $initialInbox = Read-Inbox
 $sid = $initialInbox.shells[0].sid
-$matchQuery = [string]$initialInbox.shells[0].name
-if ([string]::IsNullOrWhiteSpace($matchQuery) -or $matchQuery -notmatch '^[ -~]+$') { throw 'Published CMD name must be nonempty ASCII for keyboard search' }
 $themes = @(
     @{ query = 'light'; token = 'light' },
     @{ query = 'amoled'; token = 'amoled' },
@@ -78,10 +76,14 @@ foreach ($theme in $themes) {
     Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $false -and $s.active_shell_id -eq $sid } 'no-match Enter returns to the active session'
     Snapshot "inbox-footer-$token-search-no-match-returned"
     Press @(0x12, 0x49) 'Alt+I: reopen All Inbox'
-    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $true } 'Alt+I reopened Inbox after no-match'
+    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $true -and @($s.shells).Count -eq 1 -and $s.shells[0].sid -eq $sid } 'Alt+I reopened Inbox after no-match'
+    $matchQuery = [string](Read-Inbox).shells[0].name
+    if ([string]::IsNullOrWhiteSpace($matchQuery) -or $matchQuery -notmatch '^[ -~]+$') { throw 'Published CMD name must be nonempty ASCII for keyboard search' }
     Press @(0x11, 0x46) 'Ctrl+F: search Inbox again'
     Type-Text $matchQuery
     Capture-InboxFooter $token 'search-match'
+    $matchState = Read-Inbox
+    if ($null -eq $matchState -or @($matchState.shells).Count -ne 1 -or $matchState.shells[0].sid -ne $sid -or $matchState.shells[0].name -cne $matchQuery) { throw 'Published CMD identity or name changed during matching search' }
     Press @(0x0D) 'Enter: open matching CMD shell'
     Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $false -and $s.active_shell_id -eq $sid } 'matching search opened the published session'
     Wait-Until { $s = Read-Session; $null -ne $s -and @($s.tabs).Count -eq 1 -and $s.active_tab -eq 0 -and $s.tabs[0].shell_id -eq $sid } 'matching session selected and saved'

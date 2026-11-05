@@ -43,6 +43,7 @@ test("Inbox search shows query and empty results and lists its shortcut", () => 
   assert.match(paint, /L\("Search Inbox"\)/);
   assert.match(paint, /g_inbox_filter_buf/);
   assert.match(paint, /No Inbox sessions match this search/);
+  assert.doesNotMatch(paint, /Ctrl\+F search/, "Inbox must not draw search shortcut help");
   const shortcuts = fs.readFileSync(path.join(__dirname, "../src/shortcuts.zig"), "utf8");
   assert.match(shortcuts, /\.a = "Ctrl\+F or \/", \.b = "Reduce Inbox to matching sessions"/);
 });
