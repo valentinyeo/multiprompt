@@ -612,6 +612,17 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
   assert.match(deleted.stderr, /App code changed/);
 });
 
+test('IGSH-1732 attributes the reviewed repository picker merge before publishing', () => {
+  const files = { ...base(), 'changelog.d/IGSH-1528-repositories.md': 'Choose project folders across every server.\n' };
+  const commits = [{ sha: '03c8a7198930c20e5c4a57bd9799cd2e73b5312c', subject: "Merge remote-tracking branch 'origin/master' into HEAD" }];
+  let generated;
+  assert.doesNotThrow(() => {
+    generated = buildChangelog(files, 'v0.28.1600', [], commits, { ...titles, 'IGSH-1528': 'Choose repository folders across every server' });
+  });
+  assert.match(generated, /\.ticket = "IGSH-1528"/);
+  assert.match(generated, /IGSH-1528 Choose repository folders across every server/);
+});
+
 test('IGSH-1113 retains historical ticket titles and validates every fragment', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const maintenance = { 'changelog.d/IGSH-127-maintenance.md': 'Fixed a test so releases stop getting stuck.\n' };
