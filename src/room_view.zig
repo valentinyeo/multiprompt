@@ -538,6 +538,7 @@ fn inside(rect: w.RECT, x: i32, y: i32) bool {
 }
 
 fn text(dc: w.HANDLE, value: []const u16, rect: w.RECT, color: u32, flags: u32) void {
+    if (value.len == 0) return;
     var box = rect;
     _ = w.SetTextColor(dc, rgb(color));
     _ = w.DrawTextW(dc, value.ptr, @intCast(value.len), &box, flags | w.DT_NOPREFIX);
