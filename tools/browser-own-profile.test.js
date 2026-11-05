@@ -59,7 +59,7 @@ test('IGSH-672 a workspace that is not opted in launches and routes to the share
   assert.ok(body(own, 'command').includes('if (value.len == 0) "\\\"\\\"" else value'));
   const file = body(pane, 'writeBrowserWindowIdFile');
   assert.match(file, /if \(own_token\.len > 0\) std\.fmt\.bufPrint\(&numbuf, "\{d\}\\n\{s\}\\n", \.\{ wid, own_token \}\) else std\.fmt\.bufPrint\(&numbuf, "\{d\}\\n", \.\{wid\}\)/);
-  assert.match(body(pane, 'assignBrowserProfileForLaunch'), /browser_profile_token = std\.mem\.zeroes\(\[32\]u8\);/);
+  assert.match(body(pane, 'launchBrowserForShellEx'), /browser_profile_token = std\.mem\.zeroes\(\[32\]u8\);/);
   const native = bridge.slice(bridge.indexOf('g_profile_token = if (is_legacy_host)'), bridge.indexOf('var pipe_name_buf: [128]u8 = undefined;'));
   assert.match(native, /if \(own_profile\.nativeParentToken\(allocator, &g_native_own_profile\) catch null\) \|own\| g_profile_token = own;/);
   assert.match(body(own, 'tokenFromPath'), /return null;/);
@@ -67,8 +67,11 @@ test('IGSH-672 a workspace that is not opted in launches and routes to the share
 
 test('IGSH-672 an opted-in pane keeps its own browser for launch, reuse, commands and restore', () => {
   const launch = body(pane, 'launchBrowserForShellEx');
-  assert.ok(launch.indexOf('assignBrowserProfileForLaunch(idx);') >= 0);
-  assert.ok(launch.indexOf('assignBrowserProfileForLaunch(idx);') < launch.indexOf('isolatedBrowserHasLivePane(idx)'));
+  const assignment = '@memcpy(app_state.shells[idx].browser_profile_token[0..launch_profile.len], launch_profile);';
+  assert.ok(launch.indexOf(assignment) >= 0);
+  assert.ok(launch.indexOf('browserSigninProfileBusy(launch_engine, launch_profile)') < launch.indexOf(assignment));
+  assert.ok(launch.indexOf(assignment) < launch.indexOf('isolatedBrowserHasLivePane(idx)'));
+  assert.equal((launch.match(/ownProfileTokenForLaunch\(/g) || []).length, 1, 'reservation and launch must use one config read');
   assert.match(body(pane, 'isolatedBrowserHasLivePane'), /if \(!std\.mem\.eql\(u8, &app_state\.shells\[i\]\.browser_profile_token, &app_state\.shells\[skip_idx\]\.browser_profile_token\)\) continue;/);
   for (const name of ['requestInactivePaneWindow', 'bindBrowserWindowIdForShell', 'navigateBrowserPaneWithIntent']) {
     assert.match(body(pane, name), /spawnBrowserCliForShell\(idx, /, name);
@@ -88,7 +91,7 @@ test('IGSH-672 never clones, migrates, claims or names private data and adds no 
   for (const forbidden of ['workspace-owner', 'browser_profile_clone', 'adoptLegacyProfile', 'ensureWorkspaceProfile', 'requireSourceClosed', 'CopyFile', 'DeleteFile', 'MoveFile', 'RemoveDirectory']) {
     assert.ok(!own.includes(forbidden), forbidden);
   }
-  for (const name of ['ownProfileConfigPath', 'ownProfileTokenForLaunch', 'assignBrowserProfileForLaunch', 'ownBrowserUserDataDir', 'spawnBrowserCliForShell']) {
+  for (const name of ['ownProfileConfigPath', 'ownProfileTokenForLaunch', 'ownBrowserUserDataDir', 'spawnBrowserCliForShell']) {
     assert.doesNotMatch(body(pane, name), /CopyFile|DeleteFile|MoveFile|RemoveDirectory|win32OpenWrite|\.workspace-owner/, name);
   }
   for (const file of ['src/command_palette.zig', 'src/shortcuts.zig', 'src/sidebar.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
