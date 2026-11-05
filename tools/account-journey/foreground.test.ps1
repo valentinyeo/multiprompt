@@ -2,25 +2,36 @@ $ErrorActionPreference = 'Stop'
 Add-Type -Path "$PSScriptRoot/../verify-reconnect/desktop.cs"
 . "$PSScriptRoot/foreground.ps1"
 $source = @'
-Add-Type -AssemblyName System.Windows.Forms
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = 'Account journey foreground probe'
 [System.Windows.Forms.Application]::Run($form)
 '@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))
 $processes = @()
+$logs = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $logs | Out-Null
 try {
-    $processes += Start-Process powershell.exe -ArgumentList '-NoProfile', '-STA', '-EncodedCommand', $encoded -PassThru
-    $processes += Start-Process powershell.exe -ArgumentList '-NoProfile', '-STA', '-EncodedCommand', $encoded -PassThru
+    foreach ($index in 0, 1) {
+        $processes += Start-Process powershell.exe -ArgumentList '-NoProfile', '-STA', '-EncodedCommand', $encoded -PassThru -RedirectStandardError (Join-Path $logs "$index.err")
+    }
     $windows = @()
-    foreach ($process in $processes) {
+    foreach ($index in 0, 1) {
+        $process = $processes[$index]
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        $window = [IntPtr]::Zero
         do {
-            $window = [ReconnectDesktop]::Window($process.Id)
-            if ($window -ne [IntPtr]::Zero) { break }
+            $process.Refresh()
+            if ($process.HasExited) { break }
+            $candidate = $process.MainWindowHandle
+            if ($candidate -ne [IntPtr]::Zero -and [ReconnectDesktop]::IsWindowVisible($candidate) -and [ReconnectDesktop]::Class($candidate) -like 'WindowsForms10.*') { $window = $candidate; break }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
-        if ($window -eq [IntPtr]::Zero) { throw 'Foreground probe window did not appear' }
+        if ($window -eq [IntPtr]::Zero) {
+            $detail = Get-Content -Raw (Join-Path $logs "$index.err")
+            throw "Foreground probe window did not appear (pid=$($process.Id), exited=$($process.HasExited)): $detail"
+        }
         $windows += $window
     }
     foreach ($index in @(0, 1, 0, 1)) {
@@ -34,6 +45,7 @@ try {
     Write-Host 'Account journey foreground assertions passed'
 } finally {
     foreach ($process in $processes) {
-        if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+        if (!$process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
     }
+    Remove-Item -Recurse -Force $logs
 }
