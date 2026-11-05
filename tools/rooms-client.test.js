@@ -56,8 +56,9 @@ const View = struct {
     composer: u32 = 7,
     layout_calls: usize = 0,
     focus_calls: usize = 0,
+    owns_focus: bool = true,
     fn clearHits(_: *View) void {}
-    fn ownsFocus(_: *View) bool { return true; }
+    fn ownsFocus(self: *View) bool { return self.owns_focus; }
     fn layout(self: *View) void { self.layout_calls += 1; }
     fn setFocus(self: *View, target: u32) void { std.debug.assert(target == self.composer); self.focus_calls += 1; }
     fn invalidate(_: *View) void {}
@@ -78,6 +79,15 @@ test "accepted creation retains creation focus and prevents another admission un
     try std.testing.expectEqual(@as(?ActionToken, null), view.pending);
     try std.testing.expectEqualStrings("room", view.model.room_id);
     try std.testing.expectEqual(@as(usize, 1), view.layout_calls);
+    try std.testing.expectEqual(@as(usize, 1), view.focus_calls);
+}
+test "background publication never steals focus from another view" {
+    const empty = ViewModel{ .room_id = "", .name = &.{} };
+    const room = ViewModel{ .room_id = "room", .name = std.unicode.utf8ToUtf16LeStringLiteral("Room") };
+    var view = View{ .model = &empty, .mode = .create, .pending = null, .owns_focus = false };
+    try std.testing.expect(view.setModel(&room));
+    try std.testing.expectEqual(@as(usize, 0), view.focus_calls);
+    try std.testing.expectEqual(Mode.room, view.mode);
 }
 test "rejected creation can retry and accepted edits return to the existing room" {
     const room = ViewModel{ .room_id = "room", .name = std.unicode.utf8ToUtf16LeStringLiteral("Room") };
@@ -101,7 +111,7 @@ test "rejected creation can retry and accepted edits return to the existing room
     fs.writeFileSync(path.join(directory, 'creation.zig'), fixture);
     const result = spawnSync(process.env.ZIG || process.env.ZIG_EXE || 'zig', ['test', path.join(directory, 'creation.zig')], { encoding: 'utf8', timeout: 180000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stderr, /All 2 tests passed/);
+    assert.match(result.stderr, /All 3 tests passed/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
