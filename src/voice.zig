@@ -403,7 +403,8 @@ fn deepgramSpeakChunk(
     req_start_tick: u64,
     stale_out: *bool,
 ) DWORD {
-    var key_buf: [256]u8 = undefined;
+    var key_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key_buf);
     const key = readDeepgramApiKey(&key_buf) orelse return 0;
 
     var body_buf: [DEEPGRAM_TTS_CHAR_LIMIT * 6 + 32]u8 = undefined;
@@ -433,9 +434,11 @@ fn deepgramSpeakChunk(
     if (request == null) return 0;
     defer _ = WinHttpCloseHandle(request);
 
-    var header_ascii: [420]u8 = undefined;
+    var header_ascii: [640]u8 = undefined;
+    defer std.crypto.secureZero(u8, &header_ascii);
     const headers = std.fmt.bufPrint(&header_ascii, "Authorization: Token {s}\r\nContent-Type: application/json\r\n", .{key}) catch return 0;
-    var header_wide: [420]u16 = undefined;
+    var header_wide: [640]u16 = undefined;
+    defer std.crypto.secureZero(u16, &header_wide);
     const header_z = asciiToWideZ(headers, &header_wide) orelse return 0;
     if (WinHttpAddRequestHeaders(request, header_z, 0xFFFFFFFF, WINHTTP_ADDREQ_FLAG_ADD) == 0) return 0;
 
@@ -706,7 +709,8 @@ fn voiceSpeakReply(text: []const u16, shell_id: u32) bool {
         break :blk app_state.g_voice_clean_wide[0..n];
     } else text;
 
-    var key_buf: [256]u8 = undefined;
+    var key_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key_buf);
     if (readDeepgramApiKey(&key_buf) != null and voiceTtsDeviceOpen()) {
         const hw = app_state.g_voice_tts_wave_out.?;
         if (stripped_len > 0) {
@@ -878,7 +882,8 @@ pub fn voiceStartListening() void {
         return;
     }
     if (app_state.g_dictation_recording.load(.acquire) or app_state.g_dictation_running.load(.acquire)) return;
-    var key_buf: [256]u8 = undefined;
+    var key_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key_buf);
     if (readDeepgramApiKey(&key_buf) == null) {
         app_state.g_voice_state = .idle;
         debugLog("Set DEEPGRAM_API_KEY to use dictation");
@@ -1428,7 +1433,8 @@ pub fn voiceMicStart() void {
     voiceDuckingOptOut();
     app_state.g_voice_mic_start_pending = false;
     app_state.g_voice_mic_failed = false;
-    var key: [256]u8 = undefined;
+    var key: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key);
     if (readDeepgramApiKey(&key) == null) {
         app_state.g_voice_mic_failed = true;
         showHeaderNoticeAscii("Set DEEPGRAM_API_KEY to talk back", 5000, true);
@@ -1693,6 +1699,53 @@ pub fn readDeepgramApiKey(out: []u8) ?[]const u8 {
     return if (len == 0) null else out[0..len];
 }
 
+extern "winhttp" fn WinHttpSetOption(@import("win32.zig").HANDLE, DWORD, ?*anyopaque, DWORD) callconv(@import("win32.zig").WINAPI) i32;
+
+pub fn checkDeepgramKey(key: []const u16) @import("deepgram_key.zig").Check {
+    var port_buf: [16]u8 = undefined;
+    const port_len = GetEnvironmentVariableA("MP_VERIFY_DEEPGRAM_PORT", &port_buf, port_buf.len);
+    var fixture_port: ?u16 = null;
+    if (port_len != 0) {
+        if (port_len >= port_buf.len) return .unknown;
+        var github: [32]u8 = undefined;
+        var runner: [32]u8 = undefined;
+        var offline: [32]u8 = undefined;
+        const github_len = GetEnvironmentVariableA("GITHUB_ACTIONS", &github, github.len);
+        const runner_len = GetEnvironmentVariableA("RUNNER_OS", &runner, runner.len);
+        const offline_len = GetEnvironmentVariableA("MULTIPROMPT_NO_LOGIN", &offline, offline.len);
+        if (github_len >= github.len or runner_len >= runner.len or offline_len >= offline.len) return .unknown;
+        fixture_port = @import("deepgram_key.zig").fixturePort(github[0..github_len], runner[0..runner_len], offline[0..offline_len], port_buf[0..port_len]) orelse return .unknown;
+    }
+    const session = WinHttpOpen(L("multiprompt Dictation key"), if (fixture_port != null) 1 else WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0);
+    if (session == null) return .unknown;
+    defer _ = WinHttpCloseHandle(session);
+    if (WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000) == 0) return .unknown;
+    const connection = WinHttpConnect(session, if (fixture_port != null) L("127.0.0.1") else DEEPGRAM_HOST, fixture_port orelse INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (connection == null) return .unknown;
+    defer _ = WinHttpCloseHandle(connection);
+    const request = WinHttpOpenRequest(connection, L("POST"), L("/v1/listen?model=nova-3"), null, null, null, if (fixture_port != null) 0 else WINHTTP_FLAG_SECURE);
+    if (request == null) return .unknown;
+    defer _ = WinHttpCloseHandle(request);
+    var no_redirect: DWORD = 0;
+    if (WinHttpSetOption(request, 88, &no_redirect, @sizeOf(DWORD)) == 0) return .unknown;
+    var headers: [640:0]u16 = @splat(0);
+    defer std.crypto.secureZero(u16, &headers);
+    const prefix = L("Authorization: Token ");
+    const suffix = L("\r\nContent-Type: audio/wav\r\n");
+    const prefix_len = std.mem.len(prefix);
+    const suffix_len = std.mem.len(suffix);
+    if (prefix_len + key.len + suffix_len > 640) return .unknown;
+    @memcpy(headers[0..prefix_len], prefix[0..prefix_len]);
+    @memcpy(headers[prefix_len..][0..key.len], key);
+    @memcpy(headers[prefix_len + key.len ..][0..suffix_len], suffix[0..suffix_len]);
+    if (WinHttpAddRequestHeaders(request, &headers, 0xFFFFFFFF, WINHTTP_ADDREQ_FLAG_ADD) == 0) return .unknown;
+    if (WinHttpSendRequest(request, null, 0, null, 0, 0, 0) == 0 or WinHttpReceiveResponse(request, null) == 0) return .unknown;
+    var status: DWORD = 0;
+    var size: DWORD = @sizeOf(DWORD);
+    if (WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, null, &status, &size, null) == 0) return .unknown;
+    return @import("deepgram_key.zig").classify(status);
+}
+
 pub fn saveDeepgramApiKey(value: [:0]const u16) bool {
     const w = @import("win32.zig");
     var current: w.HANDLE = null;
@@ -1705,12 +1758,14 @@ pub fn saveDeepgramApiKey(value: [:0]const u16) bool {
 }
 
 pub fn logDeepgramKeySource() void {
-    var key_buf: [256]u8 = undefined;
+    var key_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key_buf);
     debugLog(if (readDeepgramApiKey(&key_buf) != null) "[voice] deepgram key source=registry" else "[voice] deepgram key source=none");
 }
 
 fn readUserEnvRegistryAscii(comptime name: []const u8, out: []u8) usize {
-    var wide: [512]u16 = undefined;
+    var wide: [513]u16 = undefined;
+    defer std.crypto.secureZero(u16, &wide);
     var size: DWORD = @intCast(wide.len * 2);
     const RRF_RT_REG_SZ: DWORD = 0x00000002;
     if (RegGetValueW(HKEY_CURRENT_USER, L("Environment"), L(name), RRF_RT_REG_SZ, null, &wide, &size) != 0) return 0;
@@ -1931,7 +1986,8 @@ fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpR
         return .{ .transcript_len = parseDeepgramTranscript(response[0..n], transcript_out), .status = 200 };
     }
 
-    var key_buf: [256]u8 = undefined;
+    var key_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key_buf);
     const key = readDeepgramApiKey(&key_buf) orelse return .{};
 
     const session = WinHttpOpen(L("multiprompt Dictation"), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0);
@@ -1955,9 +2011,11 @@ fn deepgramTranscribePcm(audio: []const u8, transcript_out: []u8) DictationHttpR
     if (request == null) return .{};
     defer _ = WinHttpCloseHandle(request);
 
-    var header_ascii: [420]u8 = undefined;
+    var header_ascii: [640]u8 = undefined;
+    defer std.crypto.secureZero(u8, &header_ascii);
     const headers = std.fmt.bufPrint(&header_ascii, "Authorization: Token {s}\r\nContent-Type: audio/raw\r\n", .{key}) catch return .{};
-    var header_wide: [420]u16 = undefined;
+    var header_wide: [640]u16 = undefined;
+    defer std.crypto.secureZero(u16, &header_wide);
     const header_z = asciiToWideZ(headers, &header_wide) orelse return .{};
     if (WinHttpAddRequestHeaders(request, header_z, 0xFFFFFFFF, WINHTTP_ADDREQ_FLAG_ADD) == 0) return .{};
 
@@ -2354,7 +2412,8 @@ pub fn toggleDictation() void {
         showDictationStatus("Dictation already transcribing...", 3000);
         return;
     }
-    var key_buf: [256]u8 = undefined;
+    var key_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &key_buf);
     if (!dictationFixtureEnabled() and readDeepgramApiKey(&key_buf) == null) {
         showHeaderNoticeAscii("Set DEEPGRAM_API_KEY to use dictation", 5000, true);
         return;
