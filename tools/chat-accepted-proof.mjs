@@ -23,7 +23,7 @@ function bubbleColors(bg) {
 export function queuedBubble(image, area) {
   const pixel = (x, y) => image.pixels.readUIntLE((y * image.width + x) * 4, 3);
   const bg = pixel(area.left, area.top);
-  const fills = bubbleColors(bg).dim;
+  const fills = bubbleColors(bg).normal;
   const groups = [];
   for (let y = area.top; y < area.bottom; y++) {
     let start = -1;
@@ -40,35 +40,24 @@ export function queuedBubble(image, area) {
     }
   }
   const bubble = groups.filter(g => g.bottom - g.top > 20).sort((a, b) => b.bottom - a.bottom)[0];
-  assert.ok(bubble, 'waiting message must be visibly dimmed');
+  assert.ok(bubble, 'queued message must have a normal bubble');
   const { left, right, top, bottom } = bubble;
-  let ink = 0;
-  const maxFill = Math.max(...fills);
-  for (let y = top + 4; y < bottom - 4; y++) for (let x = left + 8; x < right - 8; x++) {
-    const color = pixel(x, y);
-    if ([0, 8, 16].every(s => ((color >> s) & 255) > ((maxFill >> s) & 255) + 20)) ink++;
-  }
-  assert.ok(ink > 20, 'waiting message text must remain visible');
   return { left, right, top, bottom, bg };
 }
 
-export function normalBubble(image, bubble, waiting = null) {
+export function normalBubble(image, bubble) {
   const { left, right, top, bottom, bg } = bubble;
   const palette = bubbleColors(bg);
   const colors = palette.normal;
   const brightest = Math.max(...colors);
-  const dimmestInk = Math.max(...palette.dim);
-  let fill = 0, ink = 0, matchingInk = 0;
+  let fill = 0, ink = 0;
   for (let y = top + 4; y < bottom - 4; y++) for (let x = left + 8; x < right - 8; x++) {
     const color = image.pixels.readUIntLE((y * image.width + x) * 4, 3);
     if (colors.has(color)) fill++;
     else if ([0, 8, 16].every(s => ((color >> s) & 255) > ((brightest >> s) & 255) + 20)) ink++;
-    if (waiting) {
-      const dim = waiting.pixels.readUIntLE((y * waiting.width + x) * 4, 3);
-      if ([0, 8, 16].every(s => ((dim >> s) & 255) > ((dimmestInk >> s) & 255) + 20 && Math.abs(2 * ((dim >> s) & 255) - ((bg >> s) & 255) - ((color >> s) & 255)) <= 4)) matchingInk++;
-    }
+
   }
-  return fill > (right - left - 16) * (bottom - top - 8) * 0.5 && ink > 20 && (!waiting || matchingInk > 20);
+  return fill > (right - left - 16) * (bottom - top - 8) * 0.5 && ink > 20;
 }
 
 export function countMessageBubbles(image, area, bubble) {
@@ -93,11 +82,11 @@ export function countMessageBubbles(image, area, bubble) {
 }
 
 export function evaluateFrames(frames, acceptedMs) {
-  const first = frames.find(frame => frame.normal);
-  assert.ok(first, 'IGSH-969 accepted message remains dimmed');
-  assert.ok(first.ms >= acceptedMs && first.ms - acceptedMs <= 1000, 'IGSH-969 acceptance took over one second');
-  for (const frame of frames.filter(frame => frame.ms >= first.ms)) {
-    assert.ok(frame.normal, 'accepted message became dimmed again');
+  assert.ok(Number.isFinite(acceptedMs), 'IGSH-969 acceptance timestamp is invalid');
+  const first = frames.find(frame => frame.ms >= acceptedMs);
+  assert.ok(first && first.ms - acceptedMs <= 1000, 'IGSH-969 no frame within one second of acceptance');
+  for (const frame of frames) {
+    assert.ok(frame.normal, 'queued message must remain normal in every frame');
     assert.ok(frame.dots, 'working dots must remain visible for accepted message');
   }
   return first.ms - acceptedMs;
@@ -141,14 +130,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     assert.equal(cleanup.scratch_removed, true);
     const queued = readBmp(path.join(root, 'accepted-queued.bmp'));
     const bubble = queuedBubble(queued, observation.area);
-    assert.equal(normalBubble(queued, bubble), false);
+    assert.ok(normalBubble(queued, bubble), 'queued message must already have normal fill and text');
     const frames = observation.frames.map(frame => {
       const image = readBmp(path.join(root, frame.name + '.bmp'));
+      assert.equal(image.width, queued.width);
+      assert.equal(image.height, queued.height);
+      for (let y = bubble.top; y < bubble.bottom; y++) for (let x = bubble.left; x < bubble.right; x++) {
+        const offset = (y * image.width + x) * 4;
+        if (image.pixels.readUIntLE(offset, 3) !== queued.pixels.readUIntLE(offset, 3)) {
+          assert.fail(`bubble RGB changed at ${x},${y} in ${frame.name}`);
+        }
+      }
       let working = null;
       for (let left = observation.area.left; left < observation.area.right - 40 && !working; left += 140) {
         working = dots(image, { ...observation.area, left, top: bubble.bottom + 2 });
       }
-      return { ...frame, normal: normalBubble(image, bubble, queued), dots: !!working, count: countMessageBubbles(image, observation.area, bubble) };
+      return { ...frame, normal: normalBubble(image, bubble), dots: !!working, count: countMessageBubbles(image, observation.area, bubble) };
     });
     const receipt = json('accepted-message/stand-in/accepted.json');
     assert.equal(receipt.text, observation.text);
@@ -157,11 +154,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     assert.ok(observation.transition.length >= 20);
     for (const frame of observation.transition) {
       const image = readBmp(path.join(root, frame.name + '.bmp'));
-      assert.ok(normalBubble(image, bubble, queued), 'message vanished or dimmed during transcript handoff');
+      assert.ok(normalBubble(image, bubble), 'message vanished or dimmed during transcript handoff');
       assert.equal(countMessageBubbles(image, observation.area, bubble), 1, 'message duplicated during transcript handoff');
     }
     const taken = readBmp(path.join(root, 'accepted-taken.bmp'));
-    assert.ok(normalBubble(taken, bubble, queued), 'taken message must stay normal at its original position');
+    assert.ok(normalBubble(taken, bubble), 'taken message must stay normal at its original position');
     writeCrop(queued, { ...observation.area, top: Math.max(observation.area.top, bubble.top - 8) }, 1, path.join(root, 'accepted-before.png'));
     writeCrop(taken, { ...observation.area, top: Math.max(observation.area.top, bubble.top - 8) }, 1, path.join(root, 'accepted-after.png'));
     fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-accepted-message', status: 'passed', latencyMs, frames, transition: observation.transition }, null, 2));

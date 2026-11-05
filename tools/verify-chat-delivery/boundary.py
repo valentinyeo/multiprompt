@@ -1124,6 +1124,27 @@ def reader_namespace():
         sys.modules["fcntl"] = locking
         namespace["events_wake"] = lambda: None
         record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
+        if state().get("name") == "cancel-held":
+            original_subprocess = namespace["subprocess"]
+
+            class WorkerDiagnostics:
+                def __getattr__(self, name):
+                    return getattr(original_subprocess, name)
+
+                def Popen(self, args, *positional, **options):
+                    if "--message-worker" not in args:
+                        return original_subprocess.Popen(args, *positional, **options)
+                    with (ROOT / "message-worker.stderr.log").open("ab", buffering=0) as errors:
+                        options["stderr"] = errors
+                        try:
+                            child = original_subprocess.Popen(args, *positional, **options)
+                        except Exception as error:
+                            record("message-worker.jsonl", event="spawn-failed", error=repr(error))
+                            raise
+                    record("message-worker.jsonl", event="spawned", child_pid=child.pid)
+                    return child
+
+            namespace["subprocess"] = WorkerDiagnostics()
         if state().get("name") == "reactions":
             install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
