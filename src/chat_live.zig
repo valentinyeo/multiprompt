@@ -542,6 +542,19 @@ pub fn running(shell_id: u32) bool {
     return false;
 }
 
+pub fn replyPresent(shell_id: u32) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        if (live.reply_in_history) return true;
+        for (live.items.items) |item| {
+            if (item.kind == .text and item.text.items.len > 0) return true;
+        }
+    }
+    return false;
+}
+
 pub fn revision(shell_id: u32) u64 {
     mutex.lock();
     defer mutex.unlock();
@@ -829,6 +842,38 @@ pub fn planOpen(shell_id: u32) bool {
         if (live.used and live.shell_id == shell_id) return live.request.open and live.request.kind == .plan;
     }
     return false;
+}
+
+test "IGSH-1668 reply visibility follows the current live turn" {
+    const shell_id = 1668;
+    const sid = "11111111-2222-3333-4444-166800000001";
+    _ = begin(shell_id, 0, sid);
+    defer release(shell_id);
+    const events = [_][]const u8{
+        "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\"}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"text.delta\",\"item\":\"empty\",\"payload\":{\"text\":\"\"}}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"thinking.delta\",\"item\":\"thinking\",\"payload\":{\"text\":\"Thinking\"}}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"item.started\",\"item\":\"tool\",\"payload\":{\"tool\":\"Search\"}}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"text.delta\",\"item\":\"reply\",\"payload\":{\"text\":\"Answer\"}}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":6,\"event\":{\"kind\":\"text.done\",\"item\":\"reply\",\"payload\":{\"text\":\"Answer\"}}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":7,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\"}}]}}",
+        "{\"result\":{\"events\":[{\"seq\":8,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t2\"}}]}}",
+    };
+    for (events[0..5], 0..) |event, i| {
+        try std.testing.expect(applyPage(shell_id, sid, event));
+        try std.testing.expectEqual(i == 4, replyPresent(shell_id));
+        try std.testing.expect(running(shell_id));
+    }
+    try std.testing.expect(applyPage(shell_id, sid, events[5]));
+    historyCaughtUp(shell_id);
+    try std.testing.expect(replyPresent(shell_id));
+    try std.testing.expect(running(shell_id));
+    try std.testing.expect(applyPage(shell_id, sid, events[6]));
+    try std.testing.expect(replyPresent(shell_id));
+    try std.testing.expect(!running(shell_id));
+    try std.testing.expect(applyPage(shell_id, sid, events[7]));
+    try std.testing.expect(!replyPresent(shell_id));
+    try std.testing.expect(running(shell_id));
 }
 
 test "D3 answers are stored per question and only a full set builds the reply" {

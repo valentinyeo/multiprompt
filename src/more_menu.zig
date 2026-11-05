@@ -14,8 +14,9 @@ const RGB = startup.RGB;
 const L = startup.L;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { approve, stop, terminal, rename, history, resync, waiting, remind, archive, model, end_session, remove, bot_face, bot_color };
+pub const Item = enum(usize) { approve, stop, terminal, rename, computer, history, resync, waiting, remind, archive, model, end_session, remove, bot_face, bot_color };
 const ITEM_COUNT = std.meta.tags(Item).len;
+const ROW_COUNT: i32 = ITEM_COUNT - 3;
 const CARD_COUNT = 5;
 
 pub const State = struct {
@@ -63,6 +64,7 @@ fn label(item: Item) []const u8 {
         .stop => "Stop",
         .terminal => "Terminal",
         .rename => "Rename",
+        .computer => @import("ui_words.zon").computer_title,
         .history => "History",
         .resync => "Resync chat",
         .waiting => "Waiting",
@@ -100,10 +102,10 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     const fixed_height = 2 * pad + top_h + 4 * gap;
     const minimum_top = bounds.top + uiScaled(8);
     const preferred_top = anchor.bottom + uiScaled(8);
-    const compact_top = bounds.bottom - uiScaled(8) - fixed_height - 11 * uiScaled(20);
+    const compact_top = bounds.bottom - uiScaled(8) - fixed_height - ROW_COUNT * uiScaled(20);
     const panel_top = @max(minimum_top, @min(preferred_top, compact_top));
     const spare = bounds.bottom - uiScaled(8) - panel_top - fixed_height;
-    const row_h = @min(uiScaled(38), @max(1, @divTrunc(spare, 11)));
+    const row_h = @min(uiScaled(38), @max(1, @divTrunc(spare, ROW_COUNT)));
     const inner_l = left + pad;
     const inner_r = right - pad;
     var g: Geometry = std.mem.zeroes(Geometry);
@@ -116,7 +118,7 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     }
     y += top_h + gap;
     const groups = [_][]const Item{
-        &.{ .rename, .history, .resync, .bot_face, .bot_color },
+        &.{ .rename, .computer, .history, .resync, .bot_face, .bot_color },
         &.{ .waiting, .remind, .archive },
         &.{.model},
         &.{ .end_session, .remove },
@@ -136,6 +138,26 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
 
 fn inside(rc: RECT, x: i32, y: i32) bool {
     return x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom;
+}
+
+test "IGSH-1630 Computer and every existing menu action fit and hit independently" {
+    for ([_]i32{ 320, 480, 640, 900 }) |height| {
+        const bounds = RECT{ .left = 0, .top = 0, .right = 700, .bottom = height };
+        const anchor = RECT{ .left = 640, .top = 12, .right = 672, .bottom = 44 };
+        const g = geometry(bounds, anchor);
+        try std.testing.expect(g.panel.top >= bounds.top);
+        try std.testing.expect(g.panel.bottom <= bounds.bottom);
+        for (std.meta.tags(Item)) |item| {
+            const cell = g.cells[@intFromEnum(item)];
+            try std.testing.expect(cell.bottom > cell.top and cell.right > cell.left);
+            try std.testing.expect(cell.left >= g.panel.left and cell.right <= g.panel.right);
+            try std.testing.expect(cell.top >= g.panel.top and cell.bottom <= g.panel.bottom);
+            try std.testing.expectEqual(@as(?Item, item), hitItem(&g, @divTrunc(cell.left + cell.right, 2), @divTrunc(cell.top + cell.bottom, 2)));
+        }
+        try std.testing.expect(g.cells[@intFromEnum(Item.rename)].bottom == g.cells[@intFromEnum(Item.computer)].top);
+        try std.testing.expect(g.cells[@intFromEnum(Item.computer)].bottom == g.cells[@intFromEnum(Item.history)].top);
+    }
+    std.debug.print("IGSH-1630 menu geometry verified at four heights\n", .{});
 }
 
 fn shrink(rc: RECT, by: i32) RECT {
@@ -250,6 +272,7 @@ pub fn snapshot(state: *State) void {
     state.enabled[@intFromEnum(Item.bot_color)] = look_allowed;
     state.enabled[@intFromEnum(Item.approve)] = window_layout.chatPermissionVisible();
     state.enabled[@intFromEnum(Item.stop)] = window_layout.chatStopVisible();
+    state.enabled[@intFromEnum(Item.computer)] = tmux;
     state.enabled[@intFromEnum(Item.remind)] = tmux;
     state.enabled[@intFromEnum(Item.end_session)] = tmux;
     state.enabled[@intFromEnum(Item.model)] = false;
@@ -309,6 +332,8 @@ pub fn open() void {
     const resync = geometry(g_bounds, g_anchor).cells[@intFromEnum(Item.resync)];
     var log_buf: [128]u8 = undefined;
     @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log_buf, "[chat] menu resync rect={d},{d},{d},{d}", .{ resync.left, resync.top, resync.right, resync.bottom }) catch "[chat] menu resync");
+    const computer = geometry(g_bounds, g_anchor).cells[@intFromEnum(Item.computer)];
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log_buf, "[chat] menu computer rect={d},{d},{d},{d}", .{ computer.left, computer.top, computer.right, computer.bottom }) catch "[chat] menu computer");
     _ = w.MoveWindow(g_hwnd, pane.left, pane.top, width, height, 0);
     _ = focus.SetWindowPos(g_hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(g_hwnd);
@@ -330,7 +355,7 @@ fn activate(item: Item) void {
     if (!g_state.enabled[@intFromEnum(item)]) return;
     const target_sid = g_state.target_sid;
     close();
-    _ = focus.PostMessageW(app_state.g_main_hwnd, w.WM_APP_MORE_MENU_ACTION, @intFromEnum(item), if (item == .bot_face or item == .bot_color) @intCast(target_sid) else 0);
+    _ = focus.PostMessageW(app_state.g_main_hwnd, w.WM_APP_MORE_MENU_ACTION, @intFromEnum(item), if (item == .computer or item == .bot_face or item == .bot_color) @intCast(target_sid) else 0);
 }
 
 fn step(direction: i32) void {
