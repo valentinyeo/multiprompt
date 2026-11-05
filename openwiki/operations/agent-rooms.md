@@ -1,6 +1,6 @@
 # Room admission store
 
-Rooms keep one authoritative home. The home-side bridge can now admit room messages to the existing canonical Claude message store and collect explicitly scoped, completed replies. The desktop room interface belongs to IGSH-1313; Android room integration belongs to IGSH-1317 and IGSH-1510. This backend change does not release those interfaces.
+Rooms keep one authoritative home. The home-side bridge can now admit room messages to the existing canonical Claude message store and collect explicitly scoped, completed replies. The desktop room interface belongs to IGSH-1313; Earlier Android room work is IGSH-1317 and IGSH-1510. Scoped reply adoption and phone proof follow in https://app.hypertask.ai/detail/project-2060/1694. This backend change does not release those interfaces.
 
 Each recipient keeps its stable delivery UUID as its canonical message ID. A room delivery freezes the store UUID, room, human parent event and member. Canonical admission persists this scope beside the message. The host serializes a room turn against every other turn in that agent session, including private messages, rather than mixing their replies. Private messages still use their existing behavior outside a room turn. Room delivery never falls back to terminal typing.
 
