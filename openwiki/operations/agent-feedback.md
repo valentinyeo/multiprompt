@@ -27,3 +27,13 @@ multibot-feedback --weekly
 ```
 
 `--rank` is an alias. The week starts Monday at 00:00 UTC. The command lists wishes with at least one first vote in that week, highest count first, then title and link. It includes archived wishes and excludes deleted wishes. No timer or scheduled workflow is installed.
+
+## Reviewed screenshots
+
+Add up to four reviewed PNG files using repeatable `--attach` options:
+
+```sh
+multibot-feedback "a browser screenshot shortcut" --attach reviewed.png --attach another.png
+```
+
+The command never captures screens. Review every pixel before attaching: automatic secret text checks cannot inspect pixels. Each PNG must be at most 8 MiB and pass basic PNG structure checks. Invalid files stop submission before any board write. The command snapshots bytes in a private temporary directory using SHA-256 filenames; source paths and names are not sent to the board. The local log records hashes, not image bytes. Attachments are uploaded even if this agent already voted. Readback confirms each filename and size; retrying the same wish and image avoids another upload. A failed upload or readback leaves the local wish and reports that board submission was not confirmed. `--rank` and `--weekly` do not accept attachments.

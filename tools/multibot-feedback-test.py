@@ -2,6 +2,9 @@ import base64
 import datetime
 import concurrent.futures
 import json
+import hashlib
+import struct
+import zlib
 import os
 from pathlib import Path
 import subprocess
@@ -50,6 +53,19 @@ elif args[:2] == ['task', 'create']:
     state['tasks'].append(task)
     state_path.write_text(json.dumps(state))
     print(json.dumps(dict(success=True, task=task)))
+elif args[:2] == ['task', 'get']:
+    if os.environ.get('FAKE_FAIL_READBACK'): sys.exit(1)
+    task = next(task for task in state['tasks'] if task['ticketNumber'] == args[2])
+    if os.environ.get('FAKE_FAIL_AFTER_UPLOAD') and task.get('attachments'): sys.exit(1)
+    print(json.dumps(dict(success=True, tasks=[dict(ticketNumber=args[2], attachments=task.get('attachments', []))])))
+elif args[:2] == ['task', 'update']:
+    if os.environ.get('FAKE_FAIL_UPLOAD'): sys.exit(1)
+    task = next(task for task in state['tasks'] if task['ticketNumber'] == args[2])
+    path = Path(option('--attach'))
+    task.setdefault('attachments', []).append(dict(fileName=path.name, fileType='image/png', fileSize=path.stat().st_size, fileSource='synthetic'))
+    state_path.write_text(json.dumps(state))
+    if os.environ.get('FAKE_LOST_UPLOAD_RESPONSE'): sys.exit(1)
+    print(json.dumps(dict(success=True)))
 elif args[:2] == ['comment', 'list']:
     if '--include-activity' not in args: sys.exit(2)
     activity = state['comments'].get(args[2], [])
@@ -104,6 +120,90 @@ class BoardFeedbackTest(unittest.TestCase):
 
     def vote(self, agent, date):
         return dict(id='activity-id', runId='run-id', type='thought', text='multibot-feedback-vote:v1', agentId=agent, agentName='Agent', createdAt=date.isoformat())
+
+    def png(self, pixel=b'\x12\x34\x56', size=None):
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+        image = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)) +
+                 chunk(b'IDAT', zlib.compress(b'\x00' + pixel)))
+        if size is not None:
+            image += chunk(b'tEXt', b'x\x00' + b'a' * (size - len(image) - 26))
+        return image + chunk(b'IEND', b'')
+
+    def test_distinct_attachments_and_maximum_bounds(self):
+        images = []
+        for index in range(4):
+            path = self.work / f'private-{index}.png'
+            data = self.png(bytes([index, 0, 0]), 8 * 1024 * 1024 if index == 3 else None)
+            path.write_bytes(data)
+            images.append((path, data))
+        self.assertEqual(len(images[3][1]), 8 * 1024 * 1024)
+        args = [part for path, _ in images for part in ('--attach', str(path))]
+        self.assertIn('Feedback submitted:', self.run_cli('four screenshots', *args[:4]).stdout)
+        self.assertIn('Feedback voted:', self.run_cli('four screenshots', *args[:4]).stdout)
+        self.assertEqual(len(self.read_board()['tasks'][0]['attachments']), 2)
+        self.assertIn('Feedback voted:', self.run_cli('four screenshots', *args).stdout)
+        self.assertIn('Feedback voted:', self.run_cli('four screenshots', *args).stdout)
+        attachments = self.read_board()['tasks'][0]['attachments']
+        self.assertEqual(len(attachments), 4)
+        self.assertEqual({item['fileName'] for item in attachments},
+                         {hashlib.sha256(data).hexdigest() + '.png' for _, data in images})
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum(call[1:3] == ['task', 'update'] for call in calls), 4)
+
+    def test_attachments_retry_dedupe_and_private_filename(self):
+        image = self.work / 'private-screenshot.png'
+        data = self.png()
+        image.write_bytes(data)
+        digest = hashlib.sha256(data).hexdigest()
+        first = self.run_cli('screenshots', '--attach', str(image), FAKE_LOST_UPLOAD_RESPONSE='1')
+        self.assertIn('Board submission not confirmed', first.stdout)
+        self.assertNotIn('Feedback submitted:', first.stdout)
+        for _ in range(2):
+            result = self.run_cli('screenshots', '--attach', str(image), '--attach', str(image))
+            self.assertIn('Feedback voted:', result.stdout)
+        board = self.read_board()
+        self.assertEqual(len(board['tasks']), 1)
+        self.assertEqual(len(board['tasks'][0]['attachments']), 1)
+        self.assertEqual(board['tasks'][0]['attachments'][0]['fileName'], digest + '.png')
+        self.assertNotIn(str(image), json.dumps(board))
+        self.assertNotIn(image.name, json.dumps(board))
+        self.assertIn(digest, self.log.read_text())
+        self.assertNotIn(image.name, self.log.read_text())
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum(call[1:3] == ['task', 'update'] for call in calls), 1)
+        self.assertTrue(all(str(image) not in json.dumps(call) for call in calls))
+
+    def test_attachment_new_existing_and_failures(self):
+        image = self.work / 'image.png'
+        image.write_bytes(self.png())
+        result = self.run_cli('new attachment', '--attach', str(image))
+        self.assertIn('Feedback submitted:', result.stdout)
+        self.assertIn('Feedback submitted:', self.run_cli('existing attachment').stdout)
+        failed = self.run_cli('existing attachment', '--attach', str(image), FAKE_FAIL_UPLOAD='1')
+        self.assertIn('Board submission not confirmed', failed.stdout)
+        self.assertNotIn('Feedback voted:', failed.stdout)
+        failed = self.run_cli('existing attachment', '--attach', str(image), FAKE_FAIL_READBACK='1')
+        self.assertIn('Board submission not confirmed', failed.stdout)
+        failed = self.run_cli('existing attachment', '--attach', str(image), FAKE_FAIL_AFTER_UPLOAD='1')
+        self.assertIn('Board submission not confirmed', failed.stdout)
+        self.assertNotIn('Feedback voted:', failed.stdout)
+        self.assertIn('Feedback voted:', self.run_cli('existing attachment', '--attach', str(image)).stdout)
+        self.assertEqual(len(self.read_board()['tasks'][1]['attachments']), 1)
+
+    def test_invalid_attachments_rejected_before_board(self):
+        image = self.work / 'invalid.png'
+        for data in (b'bad', self.png()[:-1], b'\x89PNG\r\n\x1a\n' + b'x' * (8 * 1024 * 1024)):
+            image.write_bytes(data)
+            result = self.run_cli('invalid attachment', '--attach', str(image))
+            self.assertEqual(result.returncode, 2)
+        result = self.run_cli('missing attachment', '--attach', str(self.work / 'missing.png'))
+        self.assertEqual(result.returncode, 2)
+        result = self.run_cli('too many', *sum((['--attach', str(image)] for _ in range(5)), []))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.run_cli('--rank', '--attach', str(image)).returncode, 2)
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.log.exists())
 
     def test_reader_bundle_installs_the_real_tool_and_missing_source_is_a_negative_control(self):
         source = (ROOT / 'src/chat_history_reader.py').read_text()

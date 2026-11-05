@@ -3,6 +3,8 @@ const app_state = @import("app_state.zig");
 const IS_DEV = @import("main.zig").IS_DEV;
 const w = @import("win32.zig");
 const drawing = @import("drawing.zig");
+const themes = @import("themes.zig");
+const fonts = @import("fonts.zig");
 const startup = @import("startup.zig");
 const focus = @import("focus.zig");
 const workspaces = @import("workspaces.zig");
@@ -24,6 +26,9 @@ var width: i32 = 0;
 var height: i32 = 0;
 var header_font: w.HANDLE = null;
 var header_font_height: i32 = 0;
+var row_font: w.HANDLE = null;
+var current_font: w.HANDLE = null;
+var row_font_height: i32 = 0;
 
 pub fn headerHeight() i32 {
     return if (app_state.g_hide_sidebar or app_state.g_sidebar_collapsed) 0 else scale(52);
@@ -104,15 +109,22 @@ fn rowCount() usize {
 }
 
 fn rowRect(index: usize) w.RECT {
-    const top = scale(36) + @as(i32, @intCast(index - first)) * scale(36);
-    return .{ .left = scale(8), .top = top, .right = width - scale(8), .bottom = top + scale(36) };
+    const gap: i32 = if (index == entry_count + 1) scale(7) else 0;
+    const top = scale(6) + @as(i32, @intCast(index - first)) * scale(28) + gap;
+    return .{ .left = scale(6), .top = top, .right = width - scale(6), .bottom = top + scale(28) };
 }
 
 fn hit(x: i32, y: i32) ?usize {
-    if (x < scale(8) or x >= width - scale(8) or y < scale(36)) return null;
-    const offset: usize = @intCast(@divTrunc(y - scale(36), scale(36)));
-    if (offset >= visible or first + offset >= rowCount()) return null;
-    return first + offset;
+    for (first..@min(first + visible, rowCount())) |index| {
+        if (inside(rowRect(index), x, y)) return index;
+    }
+    return null;
+}
+
+fn countLabel(count: ?u32, buf: []u8) []const u8 {
+    const value = count orelse return "";
+    if (value == 0) return "";
+    return std.fmt.bufPrint(buf, "{d}", .{value}) catch "";
 }
 
 fn current(index: usize) bool {
@@ -147,39 +159,53 @@ fn paint(dc: w.HANDLE) void {
     const bg = w.CreateSolidBrush(@import("themes.zig").themeSidebarBg());
     _ = w.FillRect(dc, &bounds, bg);
     _ = w.DeleteObject(bg);
-    fillRoundRect(dc, bounds, scale(16), outlineColor());
-    fillRoundRect(dc, inset(bounds, scale(1)), scale(15), if (app_state.g_light_theme) RGB(250, 250, 251) else RGB(24, 24, 24));
-    const font = w.SelectObject(dc, drawing.uiFontSubtitle());
+    const panel = themes.customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(249, 249, 249) else RGB(38, 38, 38));
+    const border = themes.customColorOr("overlay_border", outlineColor());
+    const divider = themes.customColorOr("overlay_divider", if (app_state.g_light_theme) RGB(230, 230, 234) else RGB(60, 60, 60));
+    const muted = themes.customColorOr("muted", hintColor());
+    fillRoundRect(dc, bounds, scale(16), border);
+    fillRoundRect(dc, inset(bounds, scale(1)), scale(15), panel);
+    const font_height = -scale(13);
+    if (row_font == null or current_font == null or row_font_height != font_height) {
+        if (row_font != null) _ = w.DeleteObject(row_font);
+        if (current_font != null) _ = w.DeleteObject(current_font);
+        row_font = fonts.create(font_height, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(fonts.UI_FACE));
+        current_font = fonts.create(font_height, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 5, 0, L(fonts.UI_SEMIBOLD_FACE));
+        row_font_height = font_height;
+    }
+    const font = w.SelectObject(dc, row_font orelse drawing.uiFontSubtitle());
     defer _ = w.SelectObject(dc, font);
     _ = w.SetBkMode(dc, w.TRANSPARENT);
-    _ = w.SetTextColor(dc, hintColor());
-    var title = w.RECT{ .left = scale(16), .top = scale(4), .right = width - scale(16), .bottom = scale(36) };
     const flags = w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS;
-    drawing.drawAscii(dc, "WORKSPACES", &title, flags);
     for (first..@min(first + visible, rowCount())) |index| {
         const rc = rowRect(index);
-        if (current(index) or selected == index) fillRoundRect(dc, rc, scale(10), if (app_state.g_light_theme) RGB(230, 230, 234) else RGB(53, 53, 53));
+        const is_current = current(index);
+        const is_action = index == entry_count + 1;
+        if (is_action) {
+            var line = rc;
+            line.top -= scale(4);
+            line.bottom = line.top + scale(1);
+            const brush = w.CreateSolidBrush(divider);
+            _ = w.FillRect(dc, &line, brush);
+            _ = w.DeleteObject(brush);
+        }
+        if (is_current or selected == index) fillRoundRect(dc, rc, scale(10), if (is_current) divider else @import("chat_scrollbar.zig").blend(panel, divider, 153));
+        var buf: [12]u8 = undefined;
+        const count = countLabel(if (is_action) null else sessionCount(index), &buf);
         var label = rc;
         label.left += scale(10);
-        label.right -= scale(if (index <= entry_count) @as(i32, 58) else 10);
-        _ = w.SetTextColor(dc, textColor());
-        const name = if (index == 0) "Starred" else if (index == entry_count + 1) "+ New workspace" else entries[index - 1].name[0..entries[index - 1].name_len];
+        label.right -= scale(if (count.len > 0) @as(i32, 44) else 10);
+        _ = w.SelectObject(dc, (if (is_current) current_font else row_font) orelse drawing.uiFontSubtitle());
+        _ = w.SetTextColor(dc, if (is_action) muted else themes.customColorOr("text", textColor()));
+        const name = if (index == 0) "Starred" else if (is_action) "New workspace" else entries[index - 1].name[0..entries[index - 1].name_len];
         drawName(dc, name, &label, flags);
-        if (index <= entry_count) {
+        if (count.len > 0) {
             var count_rc = rc;
-            count_rc.left = count_rc.right - scale(54);
-            count_rc.right -= scale(24);
-            _ = w.SetTextColor(dc, hintColor());
-            if (sessionCount(index)) |count| {
-                var buf: [12]u8 = undefined;
-                drawing.drawAscii(dc, std.fmt.bufPrint(&buf, "{d}", .{count}) catch "", &count_rc, flags | w.DT_RIGHT);
-            }
-            if (current(index)) {
-                var check = rc;
-                check.left = check.right - scale(24);
-                _ = w.SetTextColor(dc, textColor());
-                _ = w.DrawTextW(dc, L("\u{2713}"), -1, &check, flags | w.DT_CENTER);
-            }
+            count_rc.left = count_rc.right - scale(40);
+            count_rc.right -= scale(10);
+            _ = w.SelectObject(dc, row_font orelse drawing.uiFontSubtitle());
+            _ = w.SetTextColor(dc, muted);
+            drawing.drawAscii(dc, count, &count_rc, flags | w.DT_RIGHT);
         }
     }
 }
@@ -233,8 +259,8 @@ pub fn headerClick(x: i32, y: i32) bool {
     const anchor = headerRect();
     const top = anchor.bottom + scale(8);
     width = anchor.right - anchor.left;
-    visible = @min(rowCount(), @as(usize, @intCast(@max(1, @divTrunc(client.bottom - top - scale(44), scale(36))))));
-    height = scale(44) + @as(i32, @intCast(visible)) * scale(36);
+    visible = @min(rowCount(), @as(usize, @intCast(@max(1, @divTrunc(client.bottom - top - scale(19), scale(28))))));
+    height = scale(19) + @as(i32, @intCast(visible)) * scale(28);
     first = @min(selected, rowCount() - visible);
     if (!registered) {
         const wc = w.WNDCLASSEXW{ .cbSize = @sizeOf(w.WNDCLASSEXW), .style = 0, .lpfnWndProc = wndProc, .cbClsExtra = 0, .cbWndExtra = 0, .hInstance = w.GetModuleHandleW(null), .hIcon = null, .hCursor = w.LoadCursorW(null, @ptrFromInt(32512)), .hbrBackground = null, .lpszMenuName = null, .lpszClassName = L("MultiPromptWorkspaceSwitcher"), .hIconSm = null };
@@ -379,4 +405,42 @@ test "IGSH-1082 workspace menu scroll keeps every row and new workspace reachabl
     step(1);
     try std.testing.expectEqual(@as(usize, 0), selected);
     try std.testing.expectEqual(@as(usize, 0), first);
+}
+
+test "IGSH-1687 counts omit empty workspaces" {
+    var buf: [12]u8 = undefined;
+    try std.testing.expectEqualStrings("", countLabel(null, &buf));
+    try std.testing.expectEqualStrings("", countLabel(0, &buf));
+    try std.testing.expectEqualStrings("17", countLabel(17, &buf));
+    try std.testing.expectEqualStrings("4294967295", countLabel(std.math.maxInt(u32), &buf));
+}
+
+test "IGSH-1687 compact rows share exact paint and hit bounds" {
+    const old_count = entry_count;
+    const old_first = first;
+    const old_visible = visible;
+    const old_width = width;
+    defer {
+        entry_count = old_count;
+        first = old_first;
+        visible = old_visible;
+        width = old_width;
+    }
+    entry_count = 2;
+    first = 0;
+    visible = rowCount();
+    width = scale(203);
+    for (0..rowCount()) |index| {
+        const rc = rowRect(index);
+        try std.testing.expectEqual(scale(28), rc.bottom - rc.top);
+        try std.testing.expectEqual(index, hit(rc.left, rc.top).?);
+        try std.testing.expectEqual(index, hit(rc.right - 1, rc.bottom - 1).?);
+        try std.testing.expect(hit(rc.right, rc.top) == null);
+    }
+    try std.testing.expectEqual(scale(6), rowRect(0).top);
+    const action = rowRect(entry_count + 1);
+    try std.testing.expectEqual(scale(7), action.top - rowRect(entry_count).bottom);
+    try std.testing.expect(hit(action.left, action.top - 1) == null);
+    try std.testing.expect(hit(action.left, action.bottom) == null);
+    try std.testing.expect(hit(scale(6), scale(5)) == null);
 }

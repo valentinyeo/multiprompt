@@ -22,8 +22,9 @@ test('settings clicks bring the target into view through bounded native Tab focu
 test('key verification saves an unset key and replaces it before opening Chat View', () => {
   const outside = source.slice(source.indexOf('    Remove-ItemProperty'), source.indexOf("    Snapshot 'settings-backdrop'"));
   assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-cancelled' -Cancel/);
-  assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-dictation-first'/);
-  assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-dictation-before'/);
+  assert.match(outside, /Paste wrapped synthetic key/);
+  assert.match(outside, /Wrapped key was not normalized before persistence/);
+  assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-dictation-before-zzzzzzzzzz'/);
   assert.match(outside, /savedAndReplaced = \$true; chatOpened = \$false/);
   assert.ok(outside.indexOf('settings-key-outside-chat') < outside.indexOf("'Alt+C: show the chat behind Settings'"));
 });

@@ -36,9 +36,9 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     if ($target -lt 1) { throw 'Target workspace missing from the card registry' }
     $rect = New-Object VerifyNative+Rect
     if (-not [VerifyNative]::GetClientRect($card, [ref]$rect)) { throw 'Card rectangle unavailable' }
-    if ($rect.Bottom -lt (44 + ($windows.Count + 2) * 36)) { throw 'Fixture requires all workspace rows visible' }
+    if ($rect.Bottom -lt (19 + ($windows.Count + 2) * 28)) { throw 'Fixture requires all workspace rows visible' }
     Record ('Click named workspace row ' + $state.workspaces[$Workspace].name)
-    [VerifyNative]::ClickClient($card, 50, (36 + $target * 36 + 18))
+    [VerifyNative]::ClickClient($card, 50, (6 + $target * 28 + 14))
     Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq $Workspace -and -not (Read-Session).starred_view } 'card closed and chosen workspace saved'
     Snapshot $Shot
     Save-Json (Read-Session) ($Shot + '.session.json')
@@ -60,8 +60,11 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     Snapshot ("workspace-$theme-header")
     $card = Open-WorkspaceCard ("workspace-$theme-card")
     $look = [VerifyNative]::MenuLook($card)
-    $expected = if ($theme -eq 'light') { 'FAFAFB' } elseif ($theme -eq 'system') { $null } else { '181818' }
+    $expected = if ($theme -eq 'light') { 'F9F9F9' } elseif ($theme -eq 'system') { $null } elseif ($theme -eq 'multiprompt') { '0F1011' } else { '262626' }
     if ($null -ne $expected -and $look.fill -cne $expected) { throw "Workspace card unreadable fill in ${theme}: $($look.fill)" }
+    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+    $expectedHeight = 19 + (@($registry.windows).Count + 2) * 28
+    if ($look.height -ne $expectedHeight) { throw "Workspace card must hug compact rows: $($look.height), expected $expectedHeight" }
     Save-Json $look ("workspace-$theme-card-look.json")
     Record 'Escape closes workspace card without switching'
     [VerifyNative]::Chord(@(0x1B))
@@ -70,12 +73,35 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     $result.checks += @{ name = 'workspace-card-theme'; theme = $theme; fill = $look.fill; screenshot = "workspace-$theme-card.png" }
 }
 
+$card = Open-WorkspaceCard 'workspace-keyboard-open'
+$state = Read-Session
+$registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+$windows = @($registry.windows)
+$currentRow = -1
+$targetRow = -1
+for ($index = 0; $index -lt $windows.Count; $index++) {
+    if ($windows[$index].id -ceq $state.workspaces[$created].wid) { $currentRow = $index + 1 }
+    if ($windows[$index].id -ceq $state.workspaces[0].wid) { $targetRow = $index + 1 }
+}
+if ($currentRow -lt 1 -or $targetRow -lt 1) { throw 'Keyboard fixture workspaces missing' }
+Record 'Arrow Up and Down preserve selection, then arrows select first workspace'
+[VerifyNative]::Chord(@(0x26))
+[VerifyNative]::Chord(@(0x28))
+$arrow = if ($targetRow -lt $currentRow) { 0x26 } else { 0x28 }
+for ($index = 0; $index -lt [Math]::Abs($targetRow - $currentRow); $index++) { [VerifyNative]::Chord(@($arrow)) }
+Snapshot 'workspace-keyboard-selected'
+[VerifyNative]::Chord(@(0x0D))
+Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq 0 -and -not (Read-Session).starred_view } 'Enter activates arrow-selected workspace'
+$result.checks += @{ name = 'workspace-card-arrow-enter'; workspace = 0 }
+Select-WorkspaceCard $created 'workspace-keyboard-return'
+$result.checks += @{ name = 'workspace-card-theme-unavailable'; theme = 'Graphite 2'; reason = 'Not a shipped theme; Edge Grey is separate' }
+
 $card = Open-WorkspaceCard 'workspace-new-open'
 $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
 $newRow = @($registry.windows).Count + 1
 $count = (Read-Session).workspace_count
 Record 'Click New workspace in workspace card'
-[VerifyNative]::ClickClient($card, 50, (36 + $newRow * 36 + 18))
+[VerifyNative]::ClickClient($card, 50, (6 + $newRow * 28 + 7 + 14))
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).workspace_count -eq $count + 1 } 'card created one workspace and closed'
 $result.checks += @{ name = 'workspace-card-create'; workspacesBefore = $count; workspacesAfter = (Read-Session).workspace_count }
 Snapshot 'after'

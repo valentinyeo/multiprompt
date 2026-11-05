@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('rooms', 'whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('rooms', 'whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -103,6 +103,7 @@ $warmup = $null
 $switchNativeRegistry = $null
 $switchExtensionRoot = $null
 $script:pinnedNotifyListeners = @()
+$script:keyProvider = $null
 $script:uploadReceiver = $null
 $script:uploadReceiverDir = $null
 $script:window = [IntPtr]::Zero
@@ -127,7 +128,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE', 'MP_VERIFY_DEEPGRAM_PORT')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
@@ -262,6 +263,16 @@ try {
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
+    $env:MP_VERIFY_DEEPGRAM_PORT = $null
+    if ($Feature -eq 'settings-panel') {
+        $script:keyProviderDir = Join-Path $scratch 'key-provider'
+        New-Item -ItemType Directory -Force $script:keyProviderDir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $script:keyProviderDir 'mode.txt'), '400')
+        $script:keyProvider = Start-Process -FilePath node -ArgumentList @(('"' + (Join-Path $PSScriptRoot 'settings-key-provider.cjs') + '"'), ('"' + $script:keyProviderDir + '"')) -PassThru -WindowStyle Hidden
+        Wait-Until { Test-Path -LiteralPath (Join-Path $script:keyProviderDir 'port.txt') } 'offline key provider listening' 30
+        $env:MP_VERIFY_DEEPGRAM_PORT = (Get-Content -LiteralPath (Join-Path $script:keyProviderDir 'port.txt') -Raw).Trim()
+        if ($env:MP_VERIFY_DEEPGRAM_PORT -notmatch '^[0-9]{1,5}$') { throw 'Invalid offline provider port' }
+    }
     $env:ZIGSHELL_DEBUG = '1'
     if ($Feature -eq 'sessions') {
         $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
@@ -420,7 +431,7 @@ try {
         Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
         $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
     }
-    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
+    if ($Feature -in @('browser-pane-stuck', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
         if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed', 'live-chat-pane')) {
             $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
             $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
@@ -595,6 +606,9 @@ try {
         'browser-pane-stuck' {
             . (Join-Path $PSScriptRoot 'control-feature-browser-pane-stuck.ps1')
         }
+        'browser-typing' {
+            . (Join-Path $PSScriptRoot 'control-feature-browser-typing.ps1')
+        }
         'live-chat-pane' {
             . (Join-Path $PSScriptRoot 'control-feature-live-chat-pane.ps1')
         }
@@ -660,6 +674,7 @@ try {
                 }
                 foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
                 $script:pinnedNotifyListeners = @()
+                if ($null -ne $script:keyProvider -and -not $script:keyProvider.HasExited) { $script:keyProvider.Kill(); $script:keyProvider.WaitForExit() }
                 if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     if ($UpdateFixtureRoot) { Remove-Item -LiteralPath (Join-Path $scratch 'footer-test') -Recurse -Force -ErrorAction Stop }

@@ -94,8 +94,9 @@ test("workspace identity remains visible when numbered pills are hidden", () => 
   assert.match(switcher, /workspaceDisplayName\(app_state.g_active_workspace/);
   assert.match(switcher, /openWorkspaceByIndex/);
   assert.match(switcher, /var band = .*\.right = browser\.SIDEBAR_W\(\) - 1/, "header background must preserve the native pane separator");
-  assert.match(switcher, /WORKSPACES/);
-  assert.match(switcher, /New workspace/);
+  assert.doesNotMatch(switcher, /"WORKSPACES"/);
+  assert.match(switcher, /"New workspace"/);
+  assert.doesNotMatch(switcher, /"\+ New workspace"|\\u\{2713\}/);
 });
 
 

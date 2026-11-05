@@ -40,6 +40,104 @@ var key_window: w.HANDLE = null;
 var key_edit: w.HANDLE = null;
 var key_edit_proc: isize = 0;
 var key_control: Control = .dictation;
+var key_save: w.HANDLE = null;
+var key_cancel: w.HANDLE = null;
+var key_status: w.HANDLE = null;
+const KeyRequest = struct {
+    refs: std.atomic.Value(u32) = .init(2),
+    status: std.atomic.Value(u32) = .init(0),
+    key: [512:0]u16 = @splat(0),
+    len: usize = 0,
+};
+var key_request: ?*KeyRequest = null;
+
+fn setKeyStatus(message: w.LPCWSTR) void {
+    _ = w.SetWindowTextW(key_status, message);
+    _ = @import("focus.zig").ShowWindow(key_status, 4);
+}
+
+fn releaseKeyRequest(request: *KeyRequest) void {
+    if (request.refs.fetchSub(1, .acq_rel) == 1) {
+        std.crypto.secureZero(u16, &request.key);
+        a.destroy(request);
+    }
+}
+
+fn checkKeyWorker(request: *KeyRequest) void {
+    const result = @import("voice.zig").checkDeepgramKey(request.key[0..request.len]);
+    request.status.store(if (result == .rejected) 1 else 2, .release);
+    releaseKeyRequest(request);
+}
+
+fn beginKeyCheck() void {
+    if (key_request != null) return;
+    const len = w.GetWindowTextLengthW(key_edit);
+    if (len < 0 or len > 65536) {
+        setKeyStatus(L("Enter a valid dictation key."));
+        return;
+    }
+    const text = a.allocSentinel(u16, @intCast(len), 0) catch {
+        setKeyStatus(L("Could not check the key."));
+        return;
+    };
+    defer {
+        std.crypto.secureZero(u16, text);
+        a.free(text);
+    }
+    _ = w.GetWindowTextW(key_edit, text.ptr, @intCast(text.len + 1));
+    const request = a.create(KeyRequest) catch {
+        setKeyStatus(L("Could not check the key."));
+        return;
+    };
+    request.* = .{};
+    const normalized = @import("deepgram_key.zig").normalize(text, &request.key) orelse {
+        std.crypto.secureZero(u16, &request.key);
+        a.destroy(request);
+        setKeyStatus(L("Enter a valid dictation key."));
+        return;
+    };
+    request.len = normalized.len;
+    if (w.SetTimer(key_window, 1, 100, null) == 0) {
+        std.crypto.secureZero(u16, &request.key);
+        a.destroy(request);
+        setKeyStatus(L("Could not check the key."));
+        return;
+    }
+    key_request = request;
+    _ = @import("focus.zig").SetFocus(key_cancel);
+    _ = EnableWindow(key_save, 0);
+    _ = EnableWindow(key_edit, 0);
+    setKeyStatus(L("Checking key..."));
+    const thread = std.Thread.spawn(.{}, checkKeyWorker, .{request}) catch {
+        _ = w.KillTimer(key_window, 1);
+        key_request = null;
+        _ = EnableWindow(key_save, 1);
+        _ = EnableWindow(key_edit, 1);
+        std.crypto.secureZero(u16, &request.key);
+        a.destroy(request);
+        setKeyStatus(L("Could not check the key."));
+        return;
+    };
+    thread.detach();
+}
+
+fn finishKeyCheck() void {
+    const request = key_request orelse return;
+    const result = request.status.load(.acquire);
+    if (result == 0) return;
+    _ = w.KillTimer(key_window, 1);
+    key_request = null;
+    _ = EnableWindow(key_save, 1);
+    _ = EnableWindow(key_edit, 1);
+    if (result == 1) {
+        setKeyStatus(L("Deepgram rejected this key."));
+        releaseKeyRequest(request);
+        return;
+    }
+    const saved = @import("voice.zig").saveDeepgramApiKey(request.key[0..request.len :0]);
+    releaseKeyRequest(request);
+    if (saved) closeKey() else setKeyStatus(L(words.settings_key_save_error));
+}
 var fonts: [3]w.HANDLE = @splat(null);
 var scroll: i32 = 0;
 var scale: i32 = 100;
@@ -209,13 +307,13 @@ pub fn replaceUploadKey(allocator: std.mem.Allocator, contents: []const u8, valu
 
 fn loadKey(control: Control) void {
     var key: [512:0]u16 = @splat(0);
-    defer @memset(&key, 0);
+    defer std.crypto.secureZero(u16, &key);
     if (control == .dictation) {
         var bytes: [512]u8 = undefined;
-        defer @memset(&bytes, 0);
+        defer std.crypto.secureZero(u8, &bytes);
         if (@import("voice.zig").readDeepgramApiKey(&bytes)) |value| {
             const len = std.unicode.utf8ToUtf16Le(&key, value) catch return;
-            key[len] = 0;
+            if (len < key.len) key[len] = 0;
             _ = w.SetWindowTextW(key_edit, &key);
         }
         return;
@@ -236,7 +334,7 @@ fn loadKey(control: Control) void {
     }
 }
 
-fn saveKey(control: Control) bool {
+fn saveUploadKey() bool {
     const edit = key_edit;
     const len = w.GetWindowTextLengthW(edit);
     const text = a.allocSentinel(u16, @intCast(@max(0, len)), 0) catch return false;
@@ -245,9 +343,7 @@ fn saveKey(control: Control) bool {
         a.free(text);
     }
     _ = w.GetWindowTextW(edit, text.ptr, @intCast(text.len + 1));
-    if (control == .dictation) {
-        if (!@import("voice.zig").saveDeepgramApiKey(text)) return false;
-    } else {
+    {
         const utf8 = std.unicode.utf16LeToUtf8Alloc(a, text) catch return false;
         defer {
             @memset(utf8, 0);
@@ -287,6 +383,15 @@ fn saveKey(control: Control) bool {
 fn closeKey() void {
     if (key_window == null) return;
     const current = key_window;
+    _ = w.KillTimer(current, 1);
+    if (key_request) |request| {
+        key_request = null;
+        releaseKeyRequest(request);
+    }
+    _ = w.SetWindowTextW(key_edit, L(""));
+    key_save = null;
+    key_cancel = null;
+    key_status = null;
     _ = EnableWindow(window, 1);
     key_window = null;
     key_edit = null;
@@ -313,8 +418,12 @@ fn keyProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv
             const id: u16 = @truncate(wp);
             if (id == 2) closeKey();
             if (id == 1) {
-                if (saveKey(key_control)) closeKey() else _ = w.MessageBoxW(hwnd, L(words.settings_key_save_error), L(words.settings_title), 0x10);
+                if (key_control == .dictation) beginKeyCheck() else if (saveUploadKey()) closeKey() else _ = w.MessageBoxW(hwnd, L(words.settings_key_save_error), L(words.settings_title), 0x10);
             }
+            return 0;
+        },
+        0x0113 => {
+            if (wp == 1) finishKeyCheck();
             return 0;
         },
         state.WM_CLOSE => {
@@ -363,8 +472,11 @@ fn openKey(control: Control) void {
     key_edit = w.CreateWindowExW(0, L("EDIT"), L(""), 0x40000000 | 0x10000000 | 0x00010000 | 0x20 | 0x80, s(24), s(76), width - s(48), s(32), key_window, @ptrFromInt(10), instance, null);
     key_edit_proc = w.SetWindowLongPtrW(key_edit, -4, @bitCast(@intFromPtr(&keyEditProc)));
     const cancel = w.CreateWindowExW(0, L("BUTTON"), L(words.action_cancel), 0x40000000 | 0x10000000 | 0x00010000, width - s(208), s(140), s(84), s(36), key_window, @ptrFromInt(2), instance, null);
+    key_status = w.CreateWindowExW(0, L("STATIC"), L(""), 0x40000000, s(24), s(112), width - s(48), s(24), key_window, null, instance, null);
     const save = w.CreateWindowExW(0, L("BUTTON"), L(words.action_save), 0x40000000 | 0x10000000 | 0x00010000 | 1, width - s(108), s(140), s(84), s(36), key_window, @ptrFromInt(1), instance, null);
-    for ([_]w.HANDLE{ key_edit, cancel, save }) |child| _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
+    key_save = save;
+    key_cancel = cancel;
+    for ([_]w.HANDLE{ key_edit, key_status, cancel, save }) |child| _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
     loadKey(control);
     _ = EnableWindow(window, 0);
     _ = @import("focus.zig").ShowWindow(key_window, 5);
