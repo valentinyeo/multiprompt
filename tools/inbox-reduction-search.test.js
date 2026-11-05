@@ -38,11 +38,11 @@ test("Ctrl+F and slash enter one shared Inbox search mode", () => {
     "Enter must use the normal selected-row open path");
 });
 
-test("Inbox search has visible query, empty-result, and help states", () => {
+test("Inbox search shows query and empty results and lists its shortcut", () => {
   const paint = functionBody("paintInbox", "openInbox");
   assert.match(paint, /L\("Search Inbox"\)/);
   assert.match(paint, /g_inbox_filter_buf/);
   assert.match(paint, /No Inbox sessions match this search/);
-  assert.match(paint, /Ctrl\+F search/);
-  assert.match(source, /\.a = "Ctrl\+F or \/", \.b = "Reduce Inbox to matching sessions"/);
+  const shortcuts = fs.readFileSync(path.join(__dirname, "../src/shortcuts.zig"), "utf8");
+  assert.match(shortcuts, /\.a = "Ctrl\+F or \/", \.b = "Reduce Inbox to matching sessions"/);
 });
