@@ -26,7 +26,7 @@ test('Rooms preview boundary retains legacy refusal and one broadcast produces t
     const host = capabilities.host_uuid;
     const members = ['alpha', 'beta'].map(alias => {
       const sid = randomUUID();
-      return { alias, display_name: alias, host_uuid: host, provider: 'claude', provider_sid: sid, session_identity: `claude:${sid}` };
+      return { alias: `agent_${alias}`, display_name: alias, host_uuid: host, provider: 'claude', provider_sid: sid, session_identity: `claude:${sid}` };
     });
     const created = request({ op: 'create', host_uuid: host, command_id: randomUUID(), name: 'Synthetic proof', members });
     assert.equal(created.ok, true, JSON.stringify(created));

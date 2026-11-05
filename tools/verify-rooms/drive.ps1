@@ -67,17 +67,38 @@ function Log {
     $reader = [IO.StreamReader]::new($stream)
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
+function Invoke-NativeInput($Value) {
+    if ($app.HasExited -or [ChatDeliveryDesktop]::Window([uint32]$app.Id) -ne $main -or [ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App does not own keyboard' }
+    $Value.pid=$app.Id
+    $Value.hwnd=$main.ToInt64()
+    $Value.focus=[ChatDeliveryDesktop]::Focus($main)[1]
+    $result.phase='native input: ' + $Value.kind
+    Save $result (Join-Path $Evidence 'result.json')
+    $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind=$Value['kind']; keys=$Value['keys']; text=$Value['text']; focus=$Value['focus']})
+    Save @($actions) (Join-Path $Evidence 'actions.json')
+    $requestPath=Join-Path $profile 'input.json'
+    Save $Value $requestPath
+    $inputJob=[VerifyJob]::new()
+    try {
+        $sender=$inputJob.Start((Get-Command powershell.exe).Source, $profile, (Join-Path $profile 'input.stdout'), (Join-Path $profile 'input.stderr'), ('-NoProfile -NonInteractive -File "' + "$PSScriptRoot/input.ps1" + '" -Request "' + $requestPath + '"'), $true)
+        if (!$sender.WaitForExit(20000)) { throw 'Native keyboard input stalled for twenty seconds' }
+        if ($sender.ExitCode -ne 0) { throw 'Native keyboard input failed ownership or delivery' }
+    } finally {
+        $remaining=$inputJob.Stop()
+        $inputJob.Dispose()
+        if ($remaining.ActiveProcesses -ne 0) { throw 'Native keyboard sender cleanup failed' }
+    }
+}
 function Press([int[]]$Keys) {
     if ($app.HasExited -or [ChatDeliveryDesktop]::Window([uint32]$app.Id) -ne $main -or [ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App does not own keyboard' }
-    $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='keys'; keys=$Keys})
     $opensPalette = $Keys.Count -eq 2 -and $Keys[0] -eq 0x11 -and $Keys[1] -eq 0x4b
     $offset = if ($opensPalette) { (Log).Length } else { 0 }
-    [VerifyNative]::Chord($Keys)
+    Invoke-NativeInput @{kind='keys'; keys=$Keys; text=$null}
     if ($opensPalette) { [void](Wait-For 'palette opened' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=[1-9]\d*' }) }
 }
 function Query([string]$Text, [int]$Target) {
     $offset = (Log).Length
-    [VerifyNative]::Text($Text)
+    Invoke-NativeInput @{kind='text'; text=$Text; keys=$null}
     [void](Wait-For 'palette selection' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ("\[palette\] ready chars="+$Text.Length+" count=[1-9]\d* target="+$Target+"(?:\r?\n|$)") })
 }
 function Focus {
@@ -181,7 +202,7 @@ try {
         $h = [ChatDeliveryDesktop]::Composer((Room-Window))
         if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Focus($main)[1] -eq $h.ToInt64()) { $h }
     }
-    [VerifyNative]::Text('Product sync')
+    Invoke-NativeInput @{kind='text'; text='Product sync'; keys=$null}
     Check 'native-room-name' ([ChatDeliveryDesktop]::Text($nameEdit) -ceq 'Product sync')
     Press @(0x09)
     Press @(0x0d); Press @(0x28); Press @(0x0d)
@@ -191,8 +212,18 @@ try {
     $room = Wait-For 'room composer' { $h=Room-Window; if ($h -and [ChatDeliveryDesktop]::Composer($h) -ne [IntPtr]::Zero) { $h } }
     $composer = [ChatDeliveryDesktop]::Composer($room)
     [void](Wait-For 'composer owns focus' { [ChatDeliveryDesktop]::Focus($main)[1] -eq $composer.ToInt64() })
+    [void](Wait-For 'created room selected by the app' {
+        try {
+            $files=@(Get-ChildItem $settings -Filter 'room-ui-*.json')
+            if ($files.Count -ne 1) { return $false }
+            $record=(Get-Content $files[0].FullName -Raw | ConvertFrom-Json).record
+            $w=Witness
+            $record.selected_front -and $record.selected -and $w -and $record.selected.room_id -ceq $w.rooms[0].id
+        } catch { $false }
+    })
+    [void]$app.WaitForInputIdle(5000)
     Shot 'created'
-    [VerifyNative]::Text('Keep this draft on old peers')
+    Invoke-NativeInput @{kind='text'; text='Keep this draft on old peers'; keys=$null}
     Press @(0x0d)
     Check 'legacy-peer-keeps-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Keep this draft on old peers')
     $witness = Witness
@@ -229,7 +260,7 @@ try {
     [void]$app.WaitForInputIdle(5000)
     Press @(0x24); Press @(0x10,0x23); Press @(0x08)
     Check 'legacy-draft-cleared-by-keyboard' ([ChatDeliveryDesktop]::Text($composer) -ceq '')
-    [VerifyNative]::Text('Both synthetic agents, reply once.')
+    Invoke-NativeInput @{kind='text'; text='Both synthetic agents, reply once.'; keys=$null}
     Check 'native-broadcast-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Both synthetic agents, reply once.')
     Shot 'before-send'
     Press @(0x0d)

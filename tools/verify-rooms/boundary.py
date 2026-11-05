@@ -44,7 +44,7 @@ def synthetic_runtime(store, directory):
             previous = runtime['message_events_page'](query['provider'], query['sid'], 0)
             finished = any(row['event'].get('kind') == 'turn.ended' and row['event'].get('message_id') == query['message_id'] for row in previous['events'])
             if not finished:
-                member = store.db.execute('SELECT alias FROM members WHERE id=? AND provider_sid=?', (query['room_scope']['member_id'], query['sid'])).fetchone()
+                member = store.db.execute('SELECT display_name FROM members WHERE id=? AND provider_sid=?', (query['room_scope']['member_id'], query['sid'])).fetchone()
                 if member is None:
                     raise RuntimeError('Synthetic provider identity mismatch')
                 session = dict(state={})
@@ -54,7 +54,7 @@ def synthetic_runtime(store, directory):
                     delivered = runtime['host_handle_request'](query['provider'], query['sid'], query['tmux'], session, delivery)
                     if delivered.get('status') != 'sent' or len(sent) != 1:
                         raise RuntimeError('Synthetic provider admission failed')
-                    text = 'Synthetic ' + member['alias'].title() + ' reply: Ready.'
+                    text = 'Synthetic ' + member['display_name'].title() + ' reply: Ready.'
                     runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='assistant', message=dict(id='synthetic-' + query['message_id'], content=[dict(type='text', text=text)]))))
                     runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='result', subtype='success')))
                     sent.clear()
