@@ -115,6 +115,7 @@ const keybd_event = @import("win32.zig").keybd_event;
 const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
+const focusActiveShellFromBrowserInput = @import("focus.zig").focusActiveShellFromBrowserInput;
 const activeShellHasForegroundFocus = @import("focus.zig").activeShellHasForegroundFocus;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
 const navigateBrowserPane = @import("browser_pane.zig").navigateBrowserPane;
@@ -171,8 +172,7 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
             if (was_browser_urlbar) {
                 _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 0);
                 app_state.g_shell_focused = true;
-                focusActiveShell();
-                if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
+                focusActiveShellFromBrowserInput();
             } else if (was_inbox) {
                 _ = SetFocus(app_state.g_main_hwnd);
             } else {
@@ -417,8 +417,7 @@ pub fn commitRename() void {
             }
         }
         app_state.g_shell_focused = true;
-        focusActiveShell();
-        if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
+        focusActiveShellFromBrowserInput();
         return;
     }
     if (app_state.g_edit_is_window) {

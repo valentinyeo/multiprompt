@@ -1467,7 +1467,7 @@ fn browserFocusHotkey() void {
         app_state.g_chat_browser_handoff_until = 0;
         app_state.g_browser_focus_mode = false;
         app_state.g_shell_focused = true;
-        @import("focus.zig").focusActiveShellFromHotkey();
+        @import("focus.zig").focusActiveShellFromBrowserInput();
     } else {
         _ = SetForegroundWindow(app_state.g_main_hwnd);
         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FOCUS_TOGGLE, 0, 0);

@@ -797,7 +797,7 @@ pub fn focusActiveShell() void {
     focusActiveShellInner(true);
 }
 
-pub fn focusActiveShellFromHotkey() void {
+pub fn focusActiveShellFromBrowserInput() void {
     if (app_state.g_account_locked or @import("computer_pane.zig").selected() or !@import("room_frontend.zig").privateActionsAllowed() or
         app_state.g_inbox_active or app_state.g_all_sessions_active or !foregroundIsOurs()) return;
     if (app_state.g_chat_active and !chatViewOwnsInput()) return;

@@ -66,10 +66,20 @@ test "held Alt and AltGr are not injected or released" {
   }
 });
 
-test('hotkey shell return activates directly without key injection or queue attachment', () => {
-  const production = productionFunction('focusActiveShellFromHotkey')
+test('browser input returns to the shell without key injection or queue attachment', () => {
+  const production = productionFunction('focusActiveShellFromBrowserInput')
     .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
     .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
+  const rename = fs.readFileSync(path.join(__dirname, '../src/rename.zig'), 'utf8');
+  const cancelMarker = '            if (was_browser_urlbar) {';
+  const cancelStart = rename.indexOf(cancelMarker);
+  const cancelEnd = rename.indexOf('\n            } else if (was_inbox)', cancelStart);
+  const commitStart = rename.indexOf('    if (app_state.g_edit_is_browser_urlbar) {', rename.indexOf('pub fn commitRename('));
+  const commitTail = rename.indexOf('        app_state.g_shell_focused = true;', commitStart);
+  const commitEnd = rename.indexOf('\n        return;', commitTail);
+  assert.ok(cancelStart >= 0 && cancelEnd > cancelStart && commitStart >= 0 && commitTail > commitStart && commitEnd > commitTail);
+  const cancel = rename.slice(cancelStart + cancelMarker.length, cancelEnd);
+  const commit = rename.slice(commitTail, commitEnd);
   const fixture = `
 const std = @import("std");
 const HANDLE = ?*anyopaque;
@@ -95,6 +105,8 @@ const app_state = struct {
     var g_all_sessions_active = false;
     var g_chat_active = false;
     var g_main_hwnd: HANDLE = frame;
+    var g_urlbar_hwnd: HANDLE = frame;
+    var g_shell_focused = false;
     var g_chat_composer_hwnd: HANDLE = composer;
 };
 fn computerSelected() bool { return false; }
@@ -113,17 +125,34 @@ fn SetForegroundWindow(h: HANDLE) i32 {
 fn SetFocus(h: HANDLE) HANDLE { focus_calls += 1; focused = h; return null; }
 fn AttachThreadInput(_: u32, _: u32, _: i32) i32 { attachments += 1; return 1; }
 fn keybd_event(_: u8, _: u8, _: u32, _: usize) void { injections += 1; }
+fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
+fn focusActiveShell() void { injections += 2; foreground = console_window; focused = console_window; }
+fn activeShellHasForegroundFocus() bool { return foreground == console_window; }
+fn requestShellRefocus(_: u32, _: u32) void { injections += 2; }
 ${production}
+fn cancelBrowserEdit() void { ${cancel} }
+fn commitBrowserEdit() void { ${commit} }
 fn reset() void {
     foreground = pane; focused = null; owned = true; accepted = true; guard_allowed = true;
-    app_state.g_chat_active = false; app_state.g_account_locked = false;
+    app_state.g_chat_active = false; app_state.g_account_locked = false; app_state.g_shell_focused = false;
     attachments = 0; injections = 0; activation_calls = 0; focus_calls = 0;
     alt_held = true; ctrl_held = true; chat_owns = true;
+}
+test "address Escape and Enter return through the non-injecting input path" {
+    for ([_]*const fn () void{ &cancelBrowserEdit, &commitBrowserEdit }) |finish| {
+        reset(); foreground = frame;
+        finish();
+        try std.testing.expectEqual(console_window, foreground);
+        try std.testing.expectEqual(console_window, focused);
+        try std.testing.expect(app_state.g_shell_focused);
+        try std.testing.expectEqual(@as(usize, 0), attachments);
+        try std.testing.expectEqual(@as(usize, 0), injections);
+    }
 }
 test "held modifiers survive direct console and composer activation" {
     for ([_]bool{ false, true }) |chat| {
         reset(); app_state.g_chat_active = chat;
-        focusActiveShellFromHotkey();
+        focusActiveShellFromBrowserInput();
         try std.testing.expectEqual(if (chat) frame else console_window, foreground);
         try std.testing.expectEqual(if (chat) composer else console_window, focused);
         try std.testing.expectEqual(@as(usize, 0), attachments);
@@ -142,7 +171,7 @@ test "foreign foreground, refused activation and guards do not focus" {
             4 => { app_state.g_chat_active = true; chat_owns = false; },
             else => unreachable,
         }
-        focusActiveShellFromHotkey();
+        focusActiveShellFromBrowserInput();
         try std.testing.expectEqual(@as(usize, 0), focus_calls);
         try std.testing.expectEqual(@as(usize, 0), attachments);
         try std.testing.expectEqual(@as(usize, 0), injections);
@@ -248,7 +277,7 @@ test('address hotkey registers only for the owned visible custom bar', () => {
   assert.ok(start >= 0 && end > start && handlerStart >= 0 && handlerEnd > handlerStart && helperStart >= 0 && helperEnd > helperStart);
   const focusHelper = main.slice(helperStart, helperEnd)
     .replaceAll('@import("chat_find_ui.zig").close(false)', 'closeFind()')
-    .replaceAll('@import("focus.zig").focusActiveShellFromHotkey()', 'focusActiveShell()');
+    .replaceAll('@import("focus.zig").focusActiveShellFromBrowserInput()', 'focusActiveShell()');
   const lifecycle = pane.slice(start, end)
     .replaceAll('@import("win32.zig")', 'win32')
     .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
