@@ -958,7 +958,7 @@ fn finishRefresh(c: *rooms.Controller, success: bool) void {
 fn scheduleMetadata(c: *rooms.Controller) bool {
     if (c.job == null and (front == .create or front == .selected) and c.has_host_uuid and candidate_scan < discovered_count and nextStatus(c)) return true;
     if (pumpRefresh(c)) return true;
-    if (c.job != null or !catalog_complete or !c.has_host_uuid or request_generation != account_generation) return false;
+    if (c.job != null or !c.has_host_uuid or request_generation != account_generation) return false;
     const route = configuredRoute(route_slot) orelse return false;
     const key = routeKey(route);
     if (!std.mem.eql(u8, &key, &route_key)) return false;
@@ -967,7 +967,7 @@ fn scheduleMetadata(c: *rooms.Controller) bool {
         selection_waiting = false;
     }
     const count = catalog_rows.items.len;
-    if (count == 0) return false;
+    if (!catalog_complete or count == 0) return false;
     var scanned: usize = 0;
     while (scanned < count) : (scanned += 1) {
         const index = metadata_cursor % count;

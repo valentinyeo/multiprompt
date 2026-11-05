@@ -89,6 +89,27 @@ test('queued commands retain scope and identity across background read completio
   }
 });
 
+test('selected history refresh does not depend on catalog completion', () => {
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/selected-refresh.zig'), 'utf8');
+  const source = `${fixture}\n${declaration(read('room_frontend.zig'), 'fn scheduleMetadata(')}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-selected-refresh-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'selected.zig'), source);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'selected.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined, run.error?.message);
+    assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
+    assert.match(run.stderr, /All 2 tests passed/);
+    const negative = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/selected-refresh-negative.zig'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'negative.zig'), `${fixture}\n${negative}`);
+    const red = spawnSync(process.env.ZIG || 'zig', ['test', 'negative.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(red.error, undefined, red.error?.message);
+    assert.equal(red.status, 1, `${red.stdout || ''}${red.stderr || ''}`);
+    assert.match(red.stderr, /selected history refresh survives an interrupted incomplete catalog\.\.\.FAIL \(TestUnexpectedResult\)/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('accepted room posts read selected history in the durable evidence recovery path', () => {
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/post-refresh.zig'), 'utf8');
   const source = `${fixture}\n${declaration(read('room_frontend.zig'), 'pub fn retryCommandEvidence(')}`;
