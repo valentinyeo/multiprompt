@@ -4289,7 +4289,155 @@ LOCK_PROBE = ("import importlib.util,sys;"
               "print(module.host_lock('claude',sys.argv[2]) is None)")
 
 
-class AgentHostTest(unittest.TestCase):
+def stop_fixture_process(child):
+    if child.poll() is None:
+        try:
+            child.kill()
+        except ProcessLookupError:
+            pass
+    child.wait(timeout=10)
+
+
+def track_fixture_hosts(test):
+    test.host_children = []
+    spawn = reader.host_spawn
+
+    def tracked(provider, sid, *args, **kwargs):
+        child = spawn(provider, sid, *args, **kwargs)
+        if child is not None and provider == test.provider and sid == test.sid:
+            test.host_children.append(child)
+        return child
+
+    patch.object(reader, 'host_spawn', side_effect=tracked).start()
+
+
+def join_fixture_worker(test, worker):
+    with patch.object(reader, 'host_dispatch_switch', return_value=False), \
+            patch.object(reader, 'resolve_tmux_agent', return_value=None):
+        worker.join(timeout=20)
+    test.assertFalse(worker.is_alive(), 'fixture worker outlived its HOME patch')
+
+
+class FixtureHostSession(dict):
+    def __init__(self):
+        super().__init__(state={})
+        self.started = threading.Event()
+
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        self.started.set()
+
+
+def stop_fixture_host_loop(test, thread, session):
+    started = session.started.wait(timeout=10)
+    session['stop'] = True
+    thread.join(timeout=10)
+    test.assertTrue(started, 'fixture host loop did not initialize')
+    test.assertFalse(thread.is_alive(), 'fixture host loop outlived its HOME patch')
+
+
+class FixtureLifecycleTest(unittest.TestCase):
+    def test_discovery_does_not_repeat_methods_with_the_same_fixture(self):
+        loader = unittest.TestLoader()
+        seen = {}
+        for case in globals().values():
+            if not isinstance(case, type) or not issubclass(case, unittest.TestCase):
+                continue
+            for name in loader.getTestCaseNames(case):
+                key = (getattr(case, name), case.setUp, getattr(case, 'enable', None))
+                self.assertNotIn(key, seen, '%s.%s duplicates %s' % (case.__name__, name, seen.get(key)))
+                seen[key] = '%s.%s' % (case.__name__, name)
+
+        base = set(loader.getTestCaseNames(AgentHostTest))
+        self.assertEqual(len(base), 23)
+        self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
+        self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
+        self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
+
+    def test_failed_host_fixture_reaps_agent_after_host_crash(self):
+        owned = {}
+        decoy = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
+        self.addCleanup(stop_fixture_process, decoy)
+
+        class FailingFixture(AgentHostFixture, unittest.TestCase):
+            def stop_hosts(self):
+                super().stop_hosts()
+                self.assertEqual(reader.HOME, self.home)
+                self.wait_for(lambda: not reader.host_agent_orphan(self.provider, self.sid, owned['agent_pid']))
+                owned['checked'] = True
+
+            def runTest(self):
+                with self.agent.open('a') as agent:
+                    agent.write('\nimport time; time.sleep(120)\n')
+                self.enable()
+                self.seed()
+                self.dispatch()
+                self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+                self.assertEqual(len(self.host_children), 1)
+                host = self.host_children[0]
+                owned['agent_pid'] = reader.host_agent_recorded_pid(self.provider, self.sid)
+                self.assertTrue(reader.host_agent_orphan(self.provider, self.sid, owned['agent_pid']))
+                stop_fixture_process(host)
+                self.assertTrue(reader.host_agent_orphan(self.provider, self.sid, owned['agent_pid']))
+                self.fail('intentional hosted fixture failure')
+
+        result = unittest.TestResult()
+        FailingFixture().run(result)
+        self.assertEqual(len(result.failures), 1)
+        self.assertIn('intentional hosted fixture failure', result.failures[0][1])
+        self.assertEqual(result.errors, [])
+        self.assertTrue(owned.get('checked'))
+        self.assertIsNone(decoy.poll())
+
+    def test_failed_host_fixture_stops_its_thread_and_process_before_restoring_home(self):
+        import socket as module
+        owned = {}
+
+        class FailingFixture(unittest.TestCase):
+            def runTest(self):
+                temp = tempfile.TemporaryDirectory()
+                self.addCleanup(temp.cleanup)
+                home = Path(temp.name)
+                home_patch = patch.object(reader, 'HOME', home)
+                home_patch.start()
+                self.addCleanup(home_patch.stop)
+                server, peer = module.socketpair()
+                self.addCleanup(server.close)
+                self.addCleanup(peer.close)
+                read_end, write_end = os.pipe()
+                self.addCleanup(os.close, write_end)
+                agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
+                self.addCleanup(agent.stdout.close)
+
+                def check_cleanup():
+                    self.assertEqual(reader.HOME, home)
+                    self.assertFalse(owned['thread'].is_alive())
+                    self.assertIsNotNone(owned['process'].poll())
+                    owned['checked'] = True
+
+                self.addCleanup(check_cleanup)
+                owned['process'] = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
+                self.addCleanup(stop_fixture_process, owned['process'])
+                session = FixtureHostSession()
+                owned['thread'] = threading.Thread(target=reader.host_loop,
+                    args=('claude', 'fixture', None, session, server, agent), daemon=True)
+                owned['thread'].start()
+                self.addCleanup(stop_fixture_host_loop, self, owned['thread'], session)
+                self.assertTrue(session.started.wait(timeout=10))
+                self.assertTrue(owned['thread'].is_alive())
+                self.fail('intentional fixture failure')
+
+        result = unittest.TestResult()
+        FailingFixture().run(result)
+        self.assertEqual(len(result.failures), 1)
+        self.assertIn('intentional fixture failure', result.failures[0][1])
+        self.assertEqual(result.errors, [])
+        self.assertTrue(owned.get('checked'))
+        self.assertFalse(owned['thread'].is_alive())
+        self.assertIsNotNone(owned['process'].poll())
+
+
+class AgentHostFixture:
     provider = 'claude'
     sid = 'host-fixture-session'
     tmux = 'fixture-chat'
@@ -4302,6 +4450,9 @@ class AgentHostTest(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        self.sid = str(uuid.uuid4())
+        track_fixture_hosts(self)
         self.transcript = self.home / '.claude/projects/-work-demo' / (self.sid + '.jsonl')
         self.transcript.parent.mkdir(parents=True)
         self.transcript.write_text('')
@@ -4314,12 +4465,12 @@ class AgentHostTest(unittest.TestCase):
         self.addCleanup(self.stop_hosts)
 
     def stop_hosts(self):
-        reader.host_stop(self.provider, self.sid, force=True)
-        for path in reader.host_paths(self.provider, self.sid)['root'].glob('*.owner.json'):
-            try:
-                os.kill(json.loads(path.read_text())['pid'], 9)
-            except (OSError, ValueError, KeyError):
-                pass
+        try:
+            reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
 
     def enable(self, mode='ok', **extra):
         config = dict(enabled=True, tmux=self.tmux, command=[sys.executable, str(self.agent)], cwd=str(self.home))
@@ -4384,6 +4535,8 @@ class AgentHostTest(unittest.TestCase):
             db.execute("UPDATE shared_messages SET state='queued',deadline=NULL WHERE id=?", (token,))
         db.close()
 
+
+class AgentHostTest(AgentHostFixture, unittest.TestCase):
     def test_host_delivers_once_with_receipt(self):
         self.enable()
         token = self.seed()
@@ -4410,8 +4563,10 @@ class AgentHostTest(unittest.TestCase):
         db.close()
         worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
         worker.start()
+        self.addCleanup(join_fixture_worker, self, worker)
         self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
         worker.join(timeout=20)
+        self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
         self.assertEqual(self.user_lines(), [self.text])
 
     def test_host_retry_is_idempotent_by_message_id(self):
@@ -4647,6 +4802,7 @@ class AgentHostTest(unittest.TestCase):
                     patch.object(reader, "resolve_tmux_agent", return_value=None):
                 worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
                 worker.start()
+                self.addCleanup(join_fixture_worker, self, worker)
                 worker.join(timeout=15)
         finally:
             threading.excepthook = previous_hook
@@ -4659,9 +4815,9 @@ class AgentHostTest(unittest.TestCase):
         self.enable()
         orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
                                    "--print", "--session-id", self.sid])
-        self.addCleanup(lambda: orphan.poll() is None and orphan.kill())
+        self.addCleanup(stop_fixture_process, orphan)
         decoy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "--print"])
-        self.addCleanup(lambda: decoy.poll() is None and decoy.kill())
+        self.addCleanup(stop_fixture_process, decoy)
         state = reader.host_session_state(self.provider, self.sid)
         state["agent_pid"] = orphan.pid
         reader.host_write(reader.host_paths(self.provider, self.sid)["state"], state)
@@ -5085,7 +5241,7 @@ class HandsOverChatTest(unittest.TestCase):
         self.assertEqual(reader.host_resume('claude', self.sid, self.tmux), dict(status='error', reason='host_timeout'))
 
 
-class HostWorkerDeliveryTest(AgentHostTest):
+class HostWorkerDeliveryTest(AgentHostFixture, unittest.TestCase):
     def test_a_hosted_chat_delivers_without_a_pane_agent_or_locator(self):
         self.enable()
         db = reader.message_store_db(self.tmux)
@@ -5099,9 +5255,11 @@ class HostWorkerDeliveryTest(AgentHostTest):
 
         worker = threading.Thread(target=reader.message_worker, args=(self.tmux, 'claude', self.sid), daemon=True)
         worker.start()
+        self.addCleanup(join_fixture_worker, self, worker)
         self.wait_for(lambda: (self.message() or {}).get('state') in ('accepted', 'started'))
         self.assertEqual(self.user_lines(), [self.text])
         worker.join(timeout=20)
+        self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
 
 
 class EmptyHostedChatTest(unittest.TestCase):
@@ -5146,7 +5304,7 @@ class EmptyHostedChatTest(unittest.TestCase):
         self.assertEqual(wire.splitlines()[0].split('\t')[3], 'missing')
 
 
-class AgentHostReviewTest(AgentHostTest):
+class AgentHostReviewTest(AgentHostFixture, unittest.TestCase):
     second = 'host_fixture_message_02'
 
     def test_a_locked_store_does_not_kill_the_shared_channel(self):
@@ -5377,7 +5535,7 @@ for raw in sys.stdin:
         finish(subtype='error_during_execution', stop_reason=None, cost=0)
 '''
 
-class HostEventStreamTest(unittest.TestCase):
+class HostEventStreamFixture:
     provider = 'claude'
     sid = 'host-stream-session'
     tmux = 'stream-chat'
@@ -5411,6 +5569,8 @@ class HostEventStreamTest(unittest.TestCase):
         db.close()
         return [row for row in rows if kind is None or row.get('kind') == kind]
 
+
+class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
     def test_text_and_thinking_deltas_coalesce_into_one_full_text_row_then_complete(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='thinking', thinking=''))),
@@ -5577,7 +5737,7 @@ class ServeEventPushTest(unittest.TestCase):
 
 
 
-class AgentHostStreamTest(AgentHostTest):
+class AgentHostStreamFixture(AgentHostFixture):
     def setUp(self):
         super().setUp()
         self.agent.write_text(FAKE_CLAUDE)
@@ -5599,6 +5759,8 @@ class AgentHostStreamTest(AgentHostTest):
         db.close()
         return [row for row in rows if kind is None or row.get('kind') == kind]
 
+
+class AgentHostStreamTest(AgentHostStreamFixture, unittest.TestCase):
     def test_a_hosted_turn_streams_thinking_text_and_its_end_into_the_event_log(self):
         self.fake('stream')
         os.environ['FAKE_AGENT_PACE'] = '0.5'
@@ -5651,7 +5813,11 @@ class AgentHostStreamTest(AgentHostTest):
 
 
 
-class HostControlTest(HostEventStreamTest):
+class AgentHostStreamContractTest(AgentHostStreamFixture, AgentHostTest):
+    pass
+
+
+class HostControlFixture(HostEventStreamFixture):
     def writes(self):
         return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
 
@@ -5668,6 +5834,8 @@ class HostControlTest(HostEventStreamTest):
     def reply(self, **request):
         return reader.host_handle_request(self.provider, self.sid, self.tmux, self.session, request)
 
+
+class HostControlTest(HostControlFixture, unittest.TestCase):
     def test_a_control_request_is_parked_and_turned_into_an_approval_request(self):
         request_id = self.approval(suggestions=[dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
                                                      behavior='allow', destination='localSettings')])
@@ -5857,10 +6025,12 @@ class HostControlTest(HostEventStreamTest):
 
 
 
-class AgentHostControlTest(AgentHostStreamTest):
+class AgentHostControlFixture(AgentHostStreamFixture):
     def answer(self, **request):
         return reader.host_reply(dict(provider=self.provider, sid=self.sid, **request))
 
+
+class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
     def test_an_approval_request_reaches_the_event_log_and_the_answer_runs_the_tool(self):
         self.fake('approval')
         self.seed()
@@ -5938,12 +6108,13 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.addCleanup(os.close, write_end)
         agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
         self.addCleanup(agent.stdout.close)
-        session = dict(state={})
-        reader.host_session_reset(session, agent)
+        session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
                                    daemon=True)
         with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
             running.start()
+            self.addCleanup(stop_fixture_host_loop, self, running, session)
+            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
             time.sleep(0.2)
             session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
             time.sleep(0.8)
@@ -5964,13 +6135,13 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.addCleanup(os.close, write_end)
         agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb'))
         self.addCleanup(agent.stdout.close)
-        session = dict(state={})
-        reader.host_session_reset(session, agent)
+        session = FixtureHostSession()
         running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
                                    daemon=True)
-        self.addCleanup(running.join, 10)
         with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
             running.start()
+            self.addCleanup(stop_fixture_host_loop, self, running, session)
+            self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
             session['turn'], session['inflight'] = 't-1', dict(id='desktop-long-turn', at=time.time() - 3600)
             session['state']['inflight'] = session['inflight']
             time.sleep(0.5)
@@ -5989,7 +6160,7 @@ class AgentHostControlTest(AgentHostStreamTest):
 
 
 
-class HostInterruptTest(HostControlTest):
+class HostInterruptTest(HostControlFixture, unittest.TestCase):
     def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),
@@ -6014,7 +6185,7 @@ class HostInterruptTest(HostControlTest):
         self.assertTrue(self.session['stop'])
 
 
-class AgentHostInterruptTest(AgentHostControlTest):
+class AgentHostInterruptTest(AgentHostControlFixture, unittest.TestCase):
     def test_stop_interrupts_the_turn_and_the_host_takes_the_next_message(self):
         self.fake('slow')
         self.seed(text='first prompt')
@@ -6035,7 +6206,7 @@ class AgentHostInterruptTest(AgentHostControlTest):
         self.assertEqual([row['payload']['status'] for row in self.events('turn.ended')], ['interrupted', 'interrupted'])
 
 
-class AgentHostMidTurnSendTest(AgentHostControlTest):
+class AgentHostMidTurnSendTest(AgentHostControlFixture, unittest.TestCase):
     def test_a_second_message_starts_its_own_turn_in_the_event_log(self):
         self.fake('silent')
         self.seed(text='first prompt')
@@ -6118,6 +6289,9 @@ class HostProviderCase(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
         patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        self.sid = str(uuid.uuid4())
+        track_fixture_hosts(self)
         self.agent = self.home / 'fake-rpc.py'
         self.agent.write_text(FAKE_RPC)
         self.log = self.home / 'fake-rpc.log'
@@ -6127,8 +6301,13 @@ class HostProviderCase(unittest.TestCase):
         self.addCleanup(self.stop_hosts)
 
     def stop_hosts(self):
-        if self.provider in reader.HOST_PROVIDERS:
-            reader.host_stop(self.provider, self.sid, force=True)
+        try:
+            if self.provider in reader.HOST_PROVIDERS:
+                reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
 
     def enable(self, **extra):
         self.assertIn(self.provider, reader.HOST_PROVIDERS)
@@ -6182,7 +6361,10 @@ class HostProviderCase(unittest.TestCase):
         self.request('submit', message_id=token, text=self.text)
         worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
         worker.start()
+        self.addCleanup(join_fixture_worker, self, worker)
         self.assertEqual(self.wait_for(lambda: (self.message(token) or {}).get('state') == 'accepted' and 'ok'), 'ok')
+        worker.join(timeout=20)
+        self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
         return worker
 
 
@@ -6416,6 +6598,41 @@ class IGSH_1545_PiHostTest(HostProviderCase):
         self.assertEqual(self.message('pi_fixture_message_0001')['state'], 'accepted')
         self.assertEqual(self.message('pi_fixture_message_0002')['state'], 'accepted')
         self.assertEqual(len(self.events('turn.ended')), 1)
+
+
+class ShardDiscoveryTest(unittest.TestCase):
+    def test_shards_cover_full_suite_without_splitting_classes(self):
+        loader = unittest.TestLoader()
+        module = sys.modules[__name__]
+
+        def ids(suite):
+            return {test.id() for group in suite for test in group}
+
+        with patch.dict(os.environ):
+            os.environ.pop('HISTORY_READER_SHARD', None)
+            full = ids(loader.loadTestsFromModule(module))
+            shards = []
+            for index in range(2):
+                os.environ['HISTORY_READER_SHARD'] = f'{index}/2'
+                shards.append(ids(loader.loadTestsFromModule(module)))
+            self.assertFalse(shards[0] & shards[1])
+            self.assertEqual(shards[0] | shards[1], full)
+            classes = [{test_id.rsplit('.', 1)[0] for test_id in shard} for shard in shards]
+            self.assertFalse(classes[0] & classes[1])
+            for invalid in ('', '2/2', '-1/2', '0/1', '0/3', '01/2', 'bad'):
+                os.environ['HISTORY_READER_SHARD'] = invalid
+                with self.subTest(shard=invalid), self.assertRaises(ValueError):
+                    load_tests(loader, unittest.TestSuite(), None)
+
+
+def load_tests(loader, tests, pattern):
+    shard = os.environ.get('HISTORY_READER_SHARD')
+    if shard is None:
+        return tests
+    if shard not in ('0/2', '1/2'):
+        raise ValueError('HISTORY_READER_SHARD must be 0/2 or 1/2')
+    index = int(shard[0])
+    return unittest.TestSuite(group for i, group in enumerate(tests) if i % 2 == index)
 
 
 if __name__ == '__main__':
