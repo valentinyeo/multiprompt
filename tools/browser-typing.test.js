@@ -15,6 +15,57 @@ function productionFunction(name) {
   return source.slice(start, end + 2);
 }
 
+test('shell handoff while Alt is held preserves the real modifier', () => {
+  const start = source.indexOf('        if (phys_alt) {', source.indexOf('fn focusActiveShellInner('));
+  const end = source.indexOf('        if (isCtrlDown())', start);
+  assert.ok(start >= 0 && end > start);
+  const branch = source.slice(start, end);
+  const fixture = `
+const std = @import("std");
+const VK_MENU: u8 = 0x12;
+var alt_down = true;
+var ctrl_down = false;
+var injections: usize = 0;
+var requested = false;
+const app_state = struct {
+    var g_main_hwnd: usize = 1;
+    var g_ws_switch_focus_grace: u64 = 0;
+    var g_refocus_waiting_for_alt_release = false;
+};
+fn keybd_event(_: u8, _: u8, _: u32, _: usize) void { injections += 1; }
+fn SetForegroundWindow(_: usize) i32 { return 1; }
+fn SetFocus(_: usize) usize { return 1; }
+fn GetTickCount64() u64 { return 100; }
+fn requestShellRefocus(delay: u32, retries: u32) void { requested = delay == 80 and retries == 40; }
+fn handoff(phys_alt: bool) void {
+${branch}
+}
+test "held Alt and AltGr are not injected or released" {
+    for ([_]bool{ false, true }) |ctrl| {
+        alt_down = true;
+        ctrl_down = ctrl;
+        injections = 0;
+        requested = false;
+        handoff(alt_down);
+        try std.testing.expectEqual(@as(usize, 0), injections);
+        try std.testing.expect(alt_down);
+        try std.testing.expectEqual(ctrl, ctrl_down);
+        try std.testing.expect(requested);
+        try std.testing.expect(app_state.g_refocus_waiting_for_alt_release);
+    }
+}
+`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shell-modifiers-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, fixture);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, `${result.error || ''}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('browser focus preserves physical modifiers and never injects keyboard input', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-typing-'));
   try {

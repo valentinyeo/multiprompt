@@ -836,7 +836,6 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
     if (use_alt_trick) {
         const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
         if (phys_alt) {
-            keybd_event(VK_MENU, 0, 0, 0);
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             _ = SetFocus(app_state.g_main_hwnd);
             app_state.g_ws_switch_focus_grace = GetTickCount64() + 2000;
