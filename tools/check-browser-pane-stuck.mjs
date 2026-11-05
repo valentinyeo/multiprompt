@@ -41,7 +41,8 @@ function matrixContract(source) {
   assert.ok(features.full.includes('browser-pane-stuck'), 'master matrix includes browser recovery');
   assert.ok(source.includes('FEATURE: ${{ matrix.feature }}'));
   assert.match(source, /^  workflow_call:/m);
-  assert.match(read('.github/workflows/test.yml'), /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(source, /^  workflow_dispatch:/m);
+  assert.match(source, /^  schedule:/m);
   assert.doesNotMatch(source, /^\s+paths(?:-ignore)?:/m);
 }
 matrixContract(workflow);
