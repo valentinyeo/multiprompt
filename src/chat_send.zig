@@ -1,4 +1,5 @@
 const app_state = @import("app_state.zig");
+const launch_cache = @import("launch_cache.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const skill_model = @import("skills.zig");
@@ -2135,6 +2136,7 @@ fn chatUpgradeToHostMessage(shell_index: u32, entry: *app_state.ChatOutboxEntry)
 
 fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: u64) ShellSendResult {
     if (shell_index >= app_state.shell_count) return .write_failed;
+    if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
     const route = chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);

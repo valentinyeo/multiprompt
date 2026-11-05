@@ -12,6 +12,7 @@ function body(name) {
 }
 const prelude = String.raw`
 const std = @import("std");
+const launch_cache = struct { var pending = false; var tabs_restored = true; };
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -78,7 +79,9 @@ fn chatResetSameChat(_: Key, _: Key) bool { return true; }
 var g_chat_pending_reset: ?ChatPendingReset = null;
 const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 fn chatLogSendPath(_: u32, _: ?*const Entry, _: ChatSendRoute, _: []const u8) void {}
-fn chatMessageCaptureAdmission(_: u32, _: *Entry) void {}
+var admission_captures: usize = 0;
+var saved_admission_captures: usize = 0;
+fn chatMessageCaptureAdmission(_: u32, _: *Entry) void { admission_captures += 1; }
 const ChatSubmitPatch = struct { write_started: bool, state: @TypeOf(storage[0].state), retryable: bool };
 fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
     if (entry.message_v1) return true;
@@ -114,7 +117,7 @@ var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
 fn chatFileIdentityForShell(_: u32) Key { return test_key; }
 fn chatOutboxIndexById(id: u64) ?usize { return if (id == 1) 0 else null; }
 fn chatEchoAnchorNow(_: u32) @TypeOf(storage[0].anchor) { return .{ .sent_ms = 44 }; }
-fn saveChatOutbox() bool { saves += 1; return save_ok; }
+fn saveChatOutbox() bool { saves += 1; saved_admission_captures = admission_captures; return save_ok; }
 fn chatShouldUseDirectInput(_: u32) bool { return direct; }
 fn pasteTextToShellDirectEx(_: u32, _: []const u16, _: bool) bool { pastes += 1; return paste_ok; }
 fn chatSendForceBracketed(_: u32) bool { return true; }
@@ -136,6 +139,7 @@ fn reset() void {
     storage[0] = .{}; shells[0].kind = .tmux; shells[0].ai_agent = 1; test_key = .{}; test_key.tmux[0] = 't'; test_key.sid[0] = 's'; g_history_stub = .{};
     starts = 0; pastes = 0; local_pastes = 0; enters = 0; verifies = 0;
     saves = 0; save_ok = true; spawn_ok = true; direct = true; paste_ok = true; enter_ok = true;
+    admission_captures = 0; saved_admission_captures = 0;
     g_chat_tmux_send_job = null;
 }
 fn finishBoxNotClear() void {
@@ -152,6 +156,15 @@ fn finishJob(written: bool, retry: bool, echo_id: u64) void {
     g_chat_tmux_send_job = job;
     storage[0].channel_pending = true;
     chatTmuxSendFinish();
+}
+test "IGSH-1640 host upgrade captures admission before persistence and never refreshes it on retry" {
+    reset();
+    try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 1), saved_admission_captures);
+    storage[0].write_started = false;
+    storage[0].channel_pending = false;
+    try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 1), admission_captures);
 }
 test "VPS tmux routing ignores console visibility lock and busy status" {
     reset();
