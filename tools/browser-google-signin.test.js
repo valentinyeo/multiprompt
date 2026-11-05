@@ -50,6 +50,17 @@ test('IGSH-1507 a rejected Google sign-in page turns the controlled pane into a 
   assert.match(pane, /if \(offerPlainSigninForRejectedPage\(idx, url\)\) \{/, 'the URL poll must offer the plain sign-in');
 });
 
+test('IGSH-1507 global Ctrl+K exposes sign-in for the active own-profile tab', () => {
+  const palette = read('src/command_palette.zig');
+  const generalBrowserActions = palette.slice(palette.indexOf('var show_browser_toggle'));
+  assert.match(generalBrowserActions, /browserProfileToken\(app_state\.active_shell\)/);
+  assert.match(generalBrowserActions, /g_search_results\[app_state\.g_search_result_count\] = SEARCH_TABCTX_GOOGLE_SIGNIN/);
+  const main = read('src/main.zig');
+  const branch = main.slice(main.indexOf('if (target == SEARCH_TABCTX_GOOGLE_SIGNIN) {'), main.indexOf('if (target == SEARCH_TABCTX_ADOPT_HOST) {'));
+  assert.match(branch, /g_tabctx_sid == 0 and app_state\.active_shell < app_state\.shell_count/);
+  assert.match(branch, /app_state\.shells\[app_state\.active_shell\]\.shell_id/);
+});
+
 test('IGSH-1507 hosted sign-in proof checks the actual Chrome owner with two same-profile panes', () => {
   const control = read('.claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1');
   assert.match(control, /Two distinct managed panes must share the same controlled Chrome process and profile/);
