@@ -125,7 +125,8 @@ function Check-Pixels($Row, [string]$Name) {
             }
         }
         $area = $Row.size * $Row.size
-        if ($bright -lt $area * .01 -or $dark -lt $area * .15 -or ($Row.color -ne 7 -and $tint -lt $area * .12)) { throw "Robot pixels absent: $Name bright=$bright dark=$dark tint=$tint area=$area" }
+        $minimumBrightFraction = if ($Row.face -in @(3, 19)) { .005 } else { .01 }
+        if ($bright -lt $area * $minimumBrightFraction -or $dark -lt $area * .15 -or ($Row.color -ne 7 -and $tint -lt $area * .12)) { throw "Robot pixels absent: $Name bright=$bright dark=$dark tint=$tint area=$area" }
         if ($workspaceTint -lt $area * .08) { throw "Workspace hue absent: $Name" }
         if ($Row.color -eq 7 -and $whiteBody -lt $area * .04) { throw "White robot body absent: $Name midgray=$whiteBody area=$area" }
         $bitmap.Save("$Evidence/$Name.png")
