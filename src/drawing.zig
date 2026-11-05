@@ -620,7 +620,7 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
     if (app_state.shells[shell_idx].ai_agent != 0) text_left += 30;
 
     const now = GetTickCount64();
-    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+    const cap_msg = app_state.g_cap_msg_until > now;
     const voice_status = !cap_msg and app_state.g_chat_active and app_state.g_voice_mode_active;
     const right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (browserSlotReserved()) 16 else 120;
     const title_right = band_right - right_margin - 8;
@@ -654,11 +654,8 @@ fn measureTitleText(font: HANDLE, text: []const u16) i32 {
 }
 
 fn chatTitleMetaText(now: u64) []const u16 {
-    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+    const cap_msg = app_state.g_cap_msg_until > now;
     if (cap_msg) {
-        if (app_state.g_account_reauth) {
-            return std.mem.span(L("Sign in again: Ctrl+K > Sign in to Multi Bot"));
-        }
         if (app_state.g_cap_msg_len > 0) return app_state.g_cap_msg_text[0..app_state.g_cap_msg_len];
         return std.mem.span(L("Tab limit reached (256) - close a tab"));
     }
@@ -692,7 +689,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
         layout.meta_pill = .{ .left = layout.more.left - margin - width, .top = top, .right = layout.more.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
-        layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+        layout.meta_warn = app_state.g_cap_msg_until > now;
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
@@ -801,7 +798,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     }
 
     const now = GetTickCount64();
-    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+    const cap_msg = app_state.g_cap_msg_until > now;
     const voice_status = !cap_msg and app_state.g_chat_active and app_state.g_voice_mode_active;
     const show_meta = !browserSlotReserved();
     const right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (show_meta) 120 else 16;
@@ -812,9 +809,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
         const warn_col: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
         _ = SetTextColor(hdc, warn_col);
         var cap_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
-        if (app_state.g_account_reauth) {
-            _ = DrawTextW(hdc, L("Sign in again: Ctrl+K > Sign in to Multi Bot"), -1, &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        } else if (app_state.g_cap_msg_len > 0) {
+        if (app_state.g_cap_msg_len > 0) {
             _ = DrawTextW(hdc, @ptrCast(&app_state.g_cap_msg_text), @intCast(app_state.g_cap_msg_len), &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         } else {
             _ = DrawTextW(hdc, L("Tab limit reached (256) - close a tab"), -1, &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);

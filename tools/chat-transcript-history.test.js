@@ -1023,7 +1023,7 @@ test "cache-first switch-back Resync success notice requires live source" {
     one.ready.store(true, .release);
     chatFileOnReady();
     try std.testing.expect(!one.resync);
-    try std.testing.expectEqual(@as(usize, 1), resync_notices);
+    try std.testing.expectEqual(@as(usize, 0), resync_notices);
 }
 `;
   const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);

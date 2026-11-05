@@ -880,7 +880,6 @@ pub const HostCapacity = struct {
 
 pub var g_capacity_policy = CapacityPolicy{};
 pub var g_host_capacity: [2]HostCapacity = .{ .{}, .{} };
-pub var g_capacity_announced: [2]CapacityState = .{ .unknown, .unknown };
 pub var g_capacity_block_notice_until: u64 = 0;
 
 pub var g_tmux_cache: [MAX_TMUX_SESSIONS]TmuxSessionEntry = undefined;

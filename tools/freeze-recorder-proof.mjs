@@ -48,10 +48,12 @@ export function validateEvidence(directory) {
   assert.equal(result.healthyReports, 0);
   assert.equal(result.firstStallReports, 1);
   assert.equal(result.secondStallReports, 2);
-  assert.equal(result.restartNotice, true);
+  assert.equal(result.restartNoticePixels, 0);
+  assert.ok(result.userActionNoticePixels >= 10, 'Explicit user action must still paint its reply');
   assert.equal(result.privateTextAbsent, true);
   assert.match(result.exeHash, /^[0-9A-F]{64}$/);
   assert.ok(fs.statSync(path.join(directory, 'next-start.png')).size > 1000);
+  assert.ok(fs.statSync(path.join(directory, 'user-action.png')).size > 1000);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

@@ -200,9 +200,9 @@ class AccountDesktop(unittest.TestCase):
         background = invalid.split('} else {', 1)[1]
         self.assertNotIn('accountLock()', background)
         self.assertIn('g_account_reauth = true;', invalid)
-        self.assertIn('Sign in again:', invalid)
+        self.assertNotIn('showHeaderNoticeAscii(', invalid)
         self.assertIn('g_account_locked or g_account_reauth', MAIN)
-        self.assertIn('g_account_reauth or g_cap_msg_until > now', MAIN)
+        self.assertNotIn('g_account_reauth or g_cap_msg_until > now', MAIN)
 
     def test_cache_failure_never_blocks_unlock(self):
         prepare = function(MAIN, 'accountPrepareRestore')

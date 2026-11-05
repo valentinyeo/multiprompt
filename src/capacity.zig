@@ -325,6 +325,7 @@ pub fn capacityAdmitNewAgent(host: u8, workspace: u8, origin: AdmissionOrigin, l
     const host_limit = if (host < app_state.g_capacity_policy.host_busy_limit.len) app_state.g_capacity_policy.host_busy_limit[host] else 0;
     const decision = capacityAdmissionFor(origin, state, host_busy, host_limit);
     auditCapacityAdmission(host, workspace, origin, decision, label);
+    if (origin == .automatic) return decision == .allow or decision == .warn;
 
     var msg_buf: [128]u8 = undefined;
     switch (decision) {
@@ -358,36 +359,6 @@ pub fn capacityAdmitNewAgent(host: u8, workspace: u8, origin: AdmissionOrigin, l
 
 pub fn capacityBlockNoticeActive() bool {
     return GetTickCount64() < app_state.g_capacity_block_notice_until;
-}
-
-pub fn announceCapacityTransitions() void {
-    for (0..app_state.g_host_capacity.len) |host_usize| {
-        const host: u8 = @intCast(host_usize);
-        const current = effectiveCapacityState(host);
-        const previous = app_state.g_capacity_announced[host_usize];
-        if (current == previous) continue;
-        app_state.g_capacity_announced[host_usize] = current;
-        if (current == .unknown or current == .green and previous == .unknown) continue;
-
-        var msg_buf: [128]u8 = undefined;
-        if (current == .green) {
-            const msg = std.fmt.bufPrint(&msg_buf, "{s} capacity recovered - new workloads enabled", .{capacityHostLabel(host)}) catch "VPS capacity recovered";
-            showHeaderNoticeAscii(msg, 6000, false);
-        } else if (current == .amber or current == .red or current == .critical) {
-            const metrics = app_state.g_host_capacity[host_usize];
-            const load_whole = metrics.load_milli / 1000;
-            const load_frac = metrics.load_milli % 1000 / 100;
-            const msg = std.fmt.bufPrint(&msg_buf, "{s} {s}: load {d}.{d}/{d}, {d} busy agents", .{
-                capacityHostLabel(host),
-                capacityStateLabel(current),
-                load_whole,
-                load_frac,
-                metrics.cores,
-                hostBusyAgentCount(host),
-            }) catch "VPS capacity warning";
-            showHeaderNoticeAscii(msg, if (current == .amber) 6000 else 10000, true);
-        }
-    }
 }
 
 pub fn activeCapacityStatus(out: *[48]u16, out_state: *CapacityState) usize {

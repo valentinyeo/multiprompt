@@ -881,7 +881,7 @@ pub fn voiceStartListening() void {
     var key_buf: [256]u8 = undefined;
     if (readDeepgramApiKey(&key_buf) == null) {
         app_state.g_voice_state = .idle;
-        showHeaderNoticeAscii("Set DEEPGRAM_API_KEY to use dictation", 5000, true);
+        debugLog("Set DEEPGRAM_API_KEY to use dictation");
         invalidateChatHeader();
         return;
     }
@@ -970,7 +970,7 @@ pub fn voiceOnTurnEnd(shell_id: u32) void {
     dictationAudit("voice-speak-start", n);
     if (!voiceSpeakReply(out[0..n], shell_id)) {
         app_state.g_voice_state = .idle;
-        showHeaderNoticeAscii("Voice Mode: text-to-speech unavailable", 4000, true);
+        debugLog("Voice Mode: text-to-speech unavailable");
         invalidateChatHeader();
         return;
     }
@@ -1659,13 +1659,11 @@ pub fn voiceHandleUtterance(result: *VoiceResult) void {
         pending.shell_id = target_shell_id;
         pending.len = n;
         @memcpy(pending.text[0..n], wide[0..n]);
-        showHeaderNoticeAscii("Voice text saved for the previous tab", 3500, false);
         invalidateChatHeader();
         return;
     }
     if (app_state.g_chat_active) insertTextIntoChatComposer(wide[0..n]);
     if (decision == .send) {
-        const skipped = app_state.g_voice_deferred_turn_shell_id != 0;
         app_state.g_voice_deferred_turn_shell_id = 0;
         voiceRefreshTranscriptCache(true);
         var reply: [8192]u16 = undefined;
@@ -1677,18 +1675,14 @@ pub fn voiceHandleUtterance(result: *VoiceResult) void {
         if (app_state.g_chat_active) sendChatPrompt() else _ = voiceSendTranscriptToShell(wide[0..n]);
         app_state.g_voice_auto_sending = false;
         app_state.g_voice_state = if (another_open) .listening else .waiting;
-        if (skipped) showHeaderNoticeAscii("Skipped reading the last reply (you were talking)", 3500, false);
     } else if (!app_state.g_chat_active) {
-        if (voicePasteTranscriptToShellNoEnter(wide[0..n])) {
-            showHeaderNoticeAscii("Voice text added, press Enter to send", 4000, false);
-        } else {
+        if (!voicePasteTranscriptToShellNoEnter(wide[0..n])) {
             const pending = &app_state.g_voice_deferred_text[result.id % app_state.g_voice_deferred_text.len];
             pending.shell_id = target_shell_id;
             pending.len = n;
             @memcpy(pending.text[0..n], wide[0..n]);
-            showHeaderNoticeAscii("Voice text not added, switch back to this tab to retry", 4000, true);
         }
-    } else showHeaderNoticeAscii("Voice text added, press Enter to send", 4000, false);
+    }
     invalidateChatHeader();
 }
 
@@ -2243,6 +2237,7 @@ pub fn handleDictationReady() void {
             invalidateChatHeader();
         }
         dictationAudit("empty-transcript", err_len);
+        if (was_voice_listening) return;
         if (err_len > 0) {
             app_state.g_cap_msg_len = @min(err_len, app_state.g_cap_msg_text.len - 1);
             @memcpy(app_state.g_cap_msg_text[0..app_state.g_cap_msg_len], err_copy[0..app_state.g_cap_msg_len]);
@@ -2337,7 +2332,7 @@ pub fn handleDictationReady() void {
 }
 
 fn showDictationStatus(msg: []const u8, ms: u64) void {
-    if (app_state.g_chat_active) return;
+    if (app_state.g_chat_active or app_state.g_voice_listening_active.load(.acquire)) return;
     showHeaderNoticeAscii(msg, ms, false);
 }
 
@@ -2393,7 +2388,7 @@ pub fn toggleDictation() void {
     const t = std.Thread.spawn(.{}, dictationWorkerThread, .{}) catch {
         app_state.g_dictation_recording.store(false, .release);
         app_state.g_dictation_running.store(false, .release);
-        showHeaderNoticeAscii("Dictation failed: could not start worker", 5000, true);
+        if (!app_state.g_voice_listening_active.load(.acquire)) showHeaderNoticeAscii("Dictation failed: could not start worker", 5000, true);
         return;
     };
     t.detach();

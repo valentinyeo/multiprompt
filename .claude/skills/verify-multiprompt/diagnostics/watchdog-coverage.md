@@ -3,6 +3,7 @@
 ## Sub-features
 
 - The existing watchdog records sampled awake and responsive time, unknown observation time and cumulative freeze counts.
+- Recovery reports are consumed quietly on restart. The header stays free of automatic orange notices; Ctrl+= still shows the font-change reply. The hosted journey retains separate screenshots and measured orange-pixel counts for both states.
 - Its first minute and then hourly receipts use the existing private authenticated report upload, not a new endpoint.
 - Only numeric diagnostic counters, version and process/session identity are sent. No chat contents, paths or host names.
 - The day verifier requires eight responsive hours in one explicitly selected desktop session, no observation gaps or freezes, fresh evidence and no subsequent crash/freeze report.
