@@ -68,7 +68,6 @@ const WM_APP_BROWSER_FORWARD = @import("win32.zig").WM_APP_BROWSER_FORWARD;
 const WM_APP_BROWSER_RESOLVED = @import("win32.zig").WM_APP_BROWSER_RESOLVED;
 const WM_APP_BROWSER_DOCKED = @import("win32.zig").WM_APP_BROWSER_DOCKED;
 const WM_ERASEBKGND = @import("win32.zig").WM_ERASEBKGND;
-const TIMER_REFOCUS = @import("win32.zig").TIMER_REFOCUS;
 const TIMER_BROWSER_ADOPT = @import("win32.zig").TIMER_BROWSER_ADOPT;
 const TIMER_BROWSER_SETTLE = @import("win32.zig").TIMER_BROWSER_SETTLE;
 const TIMER_BROWSER_URL_POLL = @import("win32.zig").TIMER_BROWSER_URL_POLL;
@@ -5867,7 +5866,7 @@ pub fn startBrowserUrlBarEdit() void {
         updateBrowserVisibility();
     }
     const layout = calcBrowserLayout() orelse return;
-    _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
+    cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_edit_is_browser_urlbar = true;
     app_state.g_edit_is_window = false;
     app_state.g_edit_is_group = false;
@@ -5891,7 +5890,7 @@ pub fn startBrowserUrlBarEdit() void {
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
-        _ = SetForegroundWindow(app_state.g_main_hwnd);
+        _ = SetForegroundWindow(edit_parent);
         _ = SetFocus(app_state.g_edit_hwnd);
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
     }
