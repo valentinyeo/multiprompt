@@ -55,6 +55,7 @@ test('Rooms preview boundary retains legacy refusal and binds two broadcasts to 
     assert.deepEqual(request(post), receipt);
     assert.deepEqual(request(query), offline);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'witness.json'), 'utf8')).room_messages, queued.room_messages);
+    fs.writeFileSync(path.join(directory, 'private-replies'), 'synthetic private provider turns only');
     fs.unlinkSync(path.join(directory, 'agents-offline'));
     const page = request(query);
     assert.equal(page.ok, true, JSON.stringify(page));
@@ -82,9 +83,17 @@ test('Rooms preview boundary retains legacy refusal and binds two broadcasts to 
     assert.deepEqual(request(query), secondPage);
     const witness = JSON.parse(fs.readFileSync(path.join(directory, 'witness.json'), 'utf8'));
     assert.equal(witness.rooms.length, 1);
-    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').length, 4);
-    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.started').length, 4);
-    assert.ok(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').every(row => [receipt.result.event.id, secondReceipt.result.event.id].includes(row.event.room_scope.parent_event_id)));
+    const scoped = witness.canonical_events.filter(row => row.event.room_scope);
+    const privateEvents = witness.canonical_events.filter(row => !row.event.room_scope);
+    assert.equal(scoped.filter(row => row.event.kind === 'turn.ended').length, 4);
+    assert.equal(scoped.filter(row => row.event.kind === 'turn.started').length, 4);
+    assert.ok(scoped.filter(row => row.event.kind === 'turn.ended').every(row => [receipt.result.event.id, secondReceipt.result.event.id].includes(row.event.room_scope.parent_event_id)));
+    assert.equal(privateEvents.filter(row => row.event.kind === 'turn.started').length, 2);
+    assert.equal(privateEvents.filter(row => row.event.kind === 'turn.ended').length, 2);
+    assert.equal(privateEvents.filter(row => row.event.kind === 'text.done' && row.event.payload.text === 'Synthetic private answer: keep outside rooms.').length, 2);
+    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.started').length, 6);
+    assert.equal(witness.canonical_events.filter(row => row.event.kind === 'turn.ended').length, 6);
+    assert.ok(!JSON.stringify(witness.rooms).includes('Synthetic private'));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

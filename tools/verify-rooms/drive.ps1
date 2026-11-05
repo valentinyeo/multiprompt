@@ -316,6 +316,7 @@ try {
     Stop-App
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'live-replies'), 'Synthetic providers only')
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'agents-offline'), 'Synthetic provider availability only')
+    [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'private-replies'), 'Synthetic private provider turns only')
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'hold-next-background-read'), 'Synthetic transport latency only')
     Start-App
     $room = Wait-For 'live room restored' { Room-Window }
@@ -387,7 +388,13 @@ try {
             $answer = if ($i -eq 0) { 'Ready.' } else { 'Second ready.' }
             Check ('question-reply-content-' + $i) ((@($answers.text | Sort-Object) -join '|') -ceq ('Synthetic Alpha reply: ' + $answer + '|Synthetic Beta reply: ' + $answer))
         }
-        Check 'canonical-exact-turn-count' (@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 * $Questions -and @($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2 * $Questions)
+        $scoped = @($w.canonical_events | Where-Object { $_.event.PSObject.Properties['room_scope'] -and $null -ne $_.event.room_scope })
+        $private = @($w.canonical_events | Where-Object { !$_.event.PSObject.Properties['room_scope'] -or $null -eq $_.event.room_scope })
+        Check 'canonical-exact-turn-count' (@($scoped | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 * $Questions -and @($scoped | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2 * $Questions)
+        Check 'canonical-exact-private-turn-count' (@($private | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($private | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2)
+        Check 'canonical-exact-total-turn-count' (@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 * $Questions + 2 -and @($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2 * $Questions + 2)
+        Check 'private-canonical-answer-present' (@($private | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'text.done' -and $_.event.payload.text -ceq 'Synthetic private answer: keep outside rooms.' }).Count -eq 2)
+        Check 'private-answer-never-enters-room' (@($w.rooms[0].events | Where-Object { $_.PSObject.Properties['text'] -and $_.text -cmatch 'Synthetic private' }).Count -eq 0)
         Save $w (Join-Path $Evidence 'witness.json')
     }
     Check-Replies

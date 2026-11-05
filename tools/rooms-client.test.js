@@ -27,6 +27,10 @@ test('room input waits for the multiline composer instead of retaining the creat
   assert.match(driver, /Wait-PaintedMessages 'offline-send' 1 0/);
   assert.match(driver, /Wait-PaintedMessages 'offline-restart' 1 0/);
   assert.match(driver, /Check 'reconnected-original-message-ids'/);
+  assert.match(driver, /Check 'canonical-exact-private-turn-count'/);
+  assert.match(driver, /Check 'canonical-exact-total-turn-count'/);
+  assert.match(driver, /Check 'private-canonical-answer-present'/);
+  assert.match(driver, /Check 'private-answer-never-enters-room'/);
 });
 
 for (const source of ['src/room_message.zig', 'src/room_journal.zig', 'src/rooms.zig']) {

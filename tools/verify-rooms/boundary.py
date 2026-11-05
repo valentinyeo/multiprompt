@@ -60,6 +60,18 @@ def synthetic_runtime(store, directory):
                     runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='assistant', message=dict(id='synthetic-' + query['message_id'], content=[dict(type='text', text=text)]))))
                     runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='result', subtype='success')))
                     sent.clear()
+                    if (ROOT / 'private-replies').is_file():
+                        private_id = 'synthetic-private-' + query['sid']
+                        previous = runtime['message_events_page'](query['provider'], query['sid'], 0)
+                        private_finished = any(row['event'].get('kind') == 'turn.ended' and row['event'].get('message_id') == private_id for row in previous['events'])
+                        if not private_finished:
+                            private = runtime['message_store_transaction'](dict(op='message_submit', provider=query['provider'], sid=query['sid'], tmux=query['tmux'], message_id=private_id, text='Synthetic private question.'))
+                            admitted = runtime['host_handle_request'](query['provider'], query['sid'], query['tmux'], session, dict(op='deliver', id=private_id, attempt=private['message']['attempt'], epoch=private['epoch'], text='Synthetic private question.'))
+                            if admitted.get('status') != 'sent' or len(sent) != 1:
+                                raise RuntimeError('Synthetic private provider admission failed')
+                            runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='assistant', message=dict(id=private_id, content=[dict(type='text', text='Synthetic private answer: keep outside rooms.')]))))
+                            runtime['host_agent_event'](query['provider'], query['sid'], query['tmux'], session, json.dumps(dict(type='result', subtype='success')))
+                            sent.clear()
                 finally:
                     if session.get('db') is not None:
                         session['db'].close()
