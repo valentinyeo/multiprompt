@@ -92,6 +92,9 @@ fn fontSyncActiveNow() void {}
 var keyboard_hook_installed = false;
 fn installHook() void { keyboard_hook_installed = true; }
 fn sessionFrontChanged() void {}
+var hotkey_syncs: usize = 0;
+var hotkey_scope_owned = false;
+fn syncBrowserHotkeys() void { hotkey_syncs += 1; hotkey_scope_owned = foregroundIsOurs(); }
 var paint_demand_active = false;
 fn freezeActivation(active: bool) void { paint_demand_active = active; }
 fn focusGuardReturnFromPane(_: HANDLE) bool { return false; }
@@ -132,11 +135,23 @@ fn foregroundMovesTo(h: HANDLE) void {
 }
 ${body('armConsoleGeometrySettle')}
 ${body('settleConsoleGeometry')}
-${body('foregroundWinEventProc').replaceAll('@import("main.zig").', '').replaceAll('@import("freeze_recorder.zig").activation', 'freezeActivation')}
+${body('foregroundWinEventProc').replaceAll('@import("main.zig").', '').replaceAll('@import("freeze_recorder.zig").activation', 'freezeActivation').replaceAll('@import("browser_pane.zig").syncBrowserHotkeys', 'syncBrowserHotkeys')}
 ${optional('windowPosChangeMovesGeometry')}
 ${optional('paneRingState')}
 ${optional('paneRingRepaintNeeded')}
 `;
+
+test('IGSH-1592 foreground callbacks synchronize owned and foreign hotkey scope', () => {
+  zig(prelude + `
+test "IGSH-1592 hotkey foreground scope" {
+    foregroundMovesTo(pane_hwnd);
+    try std.testing.expect(hotkey_scope_owned);
+    foregroundMovesTo(@ptrFromInt(0x900));
+    try std.testing.expect(!hotkey_scope_owned);
+    try std.testing.expectEqual(@as(usize, 2), hotkey_syncs);
+}
+`, 'IGSH-1592');
+});
 
 test('ISSUE-521 a burst of agent browser windows does not repaint or re-lay out the main window per window', () => {
   zig(prelude + `

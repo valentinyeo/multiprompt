@@ -429,6 +429,7 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     _ = eventTime;
     if (event != EVENT_SYSTEM_FOREGROUND) return;
     if (idObject != OBJID_WINDOW or idChild != 0) return;
+    @import("browser_pane.zig").syncBrowserHotkeys();
     @import("main.zig").sessionFrontChanged();
     if (focusGuardReturnFromPane(hwnd)) return;
     syncPaneFocusModeFromForeground(hwnd, leftMouseButtonDown());
@@ -796,6 +797,18 @@ pub fn focusActiveShell() void {
     focusActiveShellInner(true);
 }
 
+pub fn focusActiveShellFromBrowserInput() void {
+    if (app_state.g_account_locked or @import("computer_pane.zig").selected() or !@import("room_frontend.zig").privateActionsAllowed() or
+        app_state.g_inbox_active or app_state.g_all_sessions_active or !foregroundIsOurs()) return;
+    if (app_state.g_chat_active and !chatViewOwnsInput()) return;
+    const target = if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard();
+    if (target == null or IsWindow(target) == 0 or !focusGuard(target)) return;
+    const foreground_target = if (app_state.g_chat_active) app_state.g_main_hwnd else target;
+    if (foreground_target == null) return;
+    _ = SetForegroundWindow(foreground_target);
+    if (GetForegroundWindow() == foreground_target) _ = SetFocus(target);
+}
+
 fn focusActiveShellSoft() void {
     focusActiveShellInner(false);
 }
@@ -836,7 +849,6 @@ fn focusActiveShellInner(use_alt_trick: bool) void {
     if (use_alt_trick) {
         const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
         if (phys_alt) {
-            keybd_event(VK_MENU, 0, 0, 0);
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             _ = SetFocus(app_state.g_main_hwnd);
             app_state.g_ws_switch_focus_grace = GetTickCount64() + 2000;
@@ -932,6 +944,16 @@ pub fn activeShellHasForegroundFocus() bool {
     return if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == target;
 }
 
+pub fn heldModifierMask() u32 {
+    const w = @import("win32.zig");
+    var mods: u32 = 0;
+    if (GetAsyncKeyState(0x12) < 0) mods |= w.MOD_ALT;
+    if (GetAsyncKeyState(0x11) < 0) mods |= w.MOD_CONTROL;
+    if (GetAsyncKeyState(0x10) < 0) mods |= w.MOD_SHIFT;
+    if (GetAsyncKeyState(0x5B) < 0 or GetAsyncKeyState(0x5C) < 0) mods |= w.MOD_WIN;
+    return mods;
+}
+
 pub fn browserPageFocusCommand(pane_foreground: bool, alt_down: bool) ?WPARAM {
     const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;
     return if (pane_foreground and !alt_down) IDC_FOCUS_WEB_CONTENTS_PANE else null;
@@ -955,7 +977,6 @@ pub fn unlockBrowserForeground() void {
 }
 
 pub fn focusActiveBrowserPane() void {
-    if (!activeBrowserHasForegroundFocus()) unlockBrowserForeground();
     focusActiveBrowserPaneUnlocked();
 }
 
@@ -963,9 +984,11 @@ pub fn focusActiveBrowserPaneUnlocked() void {
     app_state.g_native_browser_alt_unlocked_at = 0;
     const bh = activeBrowserHwndLive() orelse return;
     if (!focusGuard(bh)) return;
-    const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+    const held_modifiers = heldModifierMask();
+    const phys_alt = held_modifiers & @import("win32.zig").MOD_ALT != 0;
     altqLog("pane_hop enter pane={X} phys_alt={} pane_fg={} fg={X} chat={} mode={}", .{ altqPtr(bh), phys_alt, activeBrowserHasForegroundFocus(), altqPtr(GetForegroundWindow()), app_state.g_chat_active, app_state.g_browser_focus_mode });
     if (phys_alt) return;
+    if (held_modifiers != 0) return;
     cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
 
@@ -980,6 +1003,15 @@ pub fn focusActiveBrowserPaneUnlocked() void {
     _ = SetFocus(bh);
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
     if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);
+    if (fg != null and fg != bh and GetForegroundWindow() == fg and foregroundIsOurs() and activeBrowserHwndLive() == bh) {
+        var modifier_held = false;
+        for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
+            if (GetAsyncKeyState(key) < 0) modifier_held = true;
+        }
+        if (!modifier_held and GetForegroundWindow() == fg and foregroundIsOurs() and activeBrowserHwndLive() == bh and focusGuard(bh)) {
+            SwitchToThisWindow(bh, 0);
+        }
+    }
     if (browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)) |command| {
         _ = PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0);
     }
@@ -1071,7 +1103,6 @@ pub fn requestNativeBrowserFocus() void {
     app_state.g_native_browser_focus_retries = 500;
     app_state.g_native_browser_focus_attempts = 12;
     app_state.g_native_browser_alt_unlocked_at = 0;
-    if (activeBrowserHwndLive() != null and foregroundIsOurs() and !activeBrowserHasForegroundFocus()) unlockBrowserForeground();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS);
     _ = SetTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
     altqLog("request_native armed sid={} retries={} attempts={} chat={}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_native_browser_focus_retries, app_state.g_native_browser_focus_attempts, app_state.g_chat_active });
