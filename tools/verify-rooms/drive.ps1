@@ -76,7 +76,7 @@ function Focus {
 }
 function Room-Window {
     if ($app.HasExited) { throw ('App exited: '+$app.ExitCode) }
-    $room = [VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'MultiPromptRoomView', $null)
+    $room = [VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'MultiPromptRoomView', 'Room')
     if ($room -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($room)) { return $room }
 }
 function Witness {
