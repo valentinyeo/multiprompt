@@ -35,8 +35,8 @@ const pane: HANDLE = @ptrFromInt(1);
 const main_window: HANDLE = @ptrFromInt(2);
 var foreground: HANDLE = main_window;
 var focused: HANDLE = main_window;
-var alt_down = false;
-var ctrl_down = false;
+var simulated_alt_down = false;
+var simulated_ctrl_down = false;
 var injections: usize = 0;
 var focus_changes: usize = 0;
 var posted: usize = 0;
@@ -50,7 +50,7 @@ const app_state = struct {
     var g_chat_browser_handoff_until: u64 = 0;
 };
 fn GetAsyncKeyState(key: i32) i16 {
-    const down = if (key == VK_MENU) alt_down else if (key == 0x11) ctrl_down else false;
+    const down = if (key == VK_MENU) simulated_alt_down else if (key == 0x11) simulated_ctrl_down else false;
     return if (down) @bitCast(@as(u16, 0x8000)) else 0;
 }
 fn keybd_event(_: u8, _: u8, _: u32, _: usize) void { injections += 1; }
@@ -77,8 +77,8 @@ ${production}
 fn reset(alt: bool, ctrl: bool) void {
     foreground = main_window;
     focused = main_window;
-    alt_down = alt;
-    ctrl_down = ctrl;
+    simulated_alt_down = alt;
+    simulated_ctrl_down = ctrl;
     injections = 0;
     focus_changes = 0;
     posted = 0;
@@ -93,8 +93,8 @@ test "held Alt and AltGr keep focus and keys unchanged" {
         try std.testing.expectEqual(@as(usize, 0), focus_changes);
         try std.testing.expectEqual(@as(usize, 0), posted);
         try std.testing.expectEqual(@as(usize, 0), injections);
-        try std.testing.expect(alt_down);
-        try std.testing.expectEqual(ctrl, ctrl_down);
+        try std.testing.expect(simulated_alt_down);
+        try std.testing.expectEqual(ctrl, simulated_ctrl_down);
     }
 }
 test "plain and held Ctrl focus the browser without keyboard injection" {
@@ -106,8 +106,8 @@ test "plain and held Ctrl focus the browser without keyboard injection" {
         try std.testing.expectEqual(@as(usize, 1), posted);
         try std.testing.expectEqual(@as(WPARAM, 39009), posted_command);
         try std.testing.expectEqual(@as(usize, 0), injections);
-        try std.testing.expect(!alt_down);
-        try std.testing.expectEqual(ctrl, ctrl_down);
+        try std.testing.expect(!simulated_alt_down);
+        try std.testing.expectEqual(ctrl, simulated_ctrl_down);
     }
 }
 `;

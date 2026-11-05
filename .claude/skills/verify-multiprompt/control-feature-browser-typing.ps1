@@ -68,6 +68,27 @@ Wait-Until {
 } 'local page URL typed into owned browser omnibox' 5
 [VerifyNative]::Chord(@(0x0D))
 Wait-Until { [VerifyNative]::Title($browser).StartsWith('typing-ready', [StringComparison]::Ordinal) } 'local data page loaded in owned browser' 20
+$expectedPage = ''
+for ($round = 1; $round -le 20; $round++) {
+    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw "Native round $round browser page lost foreground" }
+    [VerifyNative]::Text('abc')
+    $expectedPage += 'abc'
+    Wait-Until { [VerifyNative]::Title($browser).StartsWith($expectedPage + ' ', [StringComparison]::Ordinal) } "native round $round page receives exact typed prefix" 5 -PollMilliseconds 20
+    [VerifyNative]::Chord(@(0x11, 0x4C))
+    Wait-Until {
+        $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+        $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus
+    } "native round $round Ctrl+L focuses the omnibox" 5 -PollMilliseconds 20
+    [VerifyNative]::Text('abc')
+    $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+    $actual = $omnibox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $result.checks += @{ name = 'native-page-and-omnibox-typing'; round = $round; text = $actual; pageText = $expectedPage }
+    if ($actual -cne 'abc') { throw "Native round $round expected omnibox text abc, got '$actual'" }
+    [VerifyNative]::Chord(@(0x1B))
+    [VerifyNative]::Chord(@(0x12, 0x51))
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -ne $browser } "native round $round Alt+Q leaves browser" 10 -PollMilliseconds 20
+    Page-TypingFocus
+}
 Focus-Palette 'browser url' 6236
 Press @(0x0D) 'Enter: choose browser URL'
 Type-Text $url
@@ -77,25 +98,20 @@ Focus-Palette 'browser mode' 6244
 Press @(0x0D) 'Enter: use the app address bar'
 Wait-Until {
     $candidate = [VerifyNative]::DockedPaneWindow($script:window)
-    $candidate -ne [IntPtr]::Zero -and
+    $candidate -ne [IntPtr]::Zero -and $candidate -ne $browser -and
         [VerifyNative]::GetProp($candidate, 'ZigShellPaneOwner') -eq $script:window -and
-        [VerifyNative]::Title($candidate).StartsWith('typing-ready', [StringComparison]::Ordinal) -and
         (Get-TypingUrlBar) -ne [IntPtr]::Zero
-} 'owned browser retains local page and shows the app address bar' 30
+} 'owned browser shows the app address bar' 30
 $browser = [VerifyNative]::DockedPaneWindow($script:window)
 if ([VerifyNative]::GetForegroundWindow() -ne $browser) { Page-TypingFocus }
 
-$expectedPage = ''
 for ($round = 1; $round -le 20; $round++) {
-    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw "Round $round browser page lost foreground" }
-    [VerifyNative]::Text('abc')
-    $expectedPage += 'abc'
-    Wait-Until { [VerifyNative]::Title($browser).StartsWith($expectedPage + ' ', [StringComparison]::Ordinal) } "round $round page receives exact typed prefix" 5 -PollMilliseconds 20
+    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw "Round $round browser pane lost foreground" }
     $bar = Click-TypingUrlBar
     $edit = Wait-TypingEdit $bar
     [VerifyNative]::Text('abc')
     $actual = [VerifyNative]::EditText($edit)
-    $result.checks += @{ name = 'ordinary-address-typing'; round = $round; text = $actual; pageText = $expectedPage }
+    $result.checks += @{ name = 'ordinary-address-typing'; round = $round; text = $actual }
     if ($actual -cne 'abc') { throw "Round $round expected address text abc, got '$actual'" }
     [VerifyNative]::Chord(@(0x1B))
     Page-TypingFocus
