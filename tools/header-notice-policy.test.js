@@ -80,7 +80,7 @@ test "automatic admission remains quiet, while explicit actions retain feedback"
     }
 }
 `);
-    const result = spawnSync('zig', ['test', 'proof.zig'], { cwd: directory, encoding: 'utf8', timeout: 120000 });
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', 'proof.zig'], { cwd: directory, encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.error?.message || result.stdout + result.stderr);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
