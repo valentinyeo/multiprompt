@@ -50,6 +50,18 @@ test('IGSH-1507 a rejected Google sign-in page turns the controlled pane into a 
   assert.match(pane, /if \(offerPlainSigninForRejectedPage\(idx, url\)\) \{/, 'the URL poll must offer the plain sign-in');
 });
 
+test('IGSH-1507 hosted sign-in proof checks the actual Chrome owner with two same-profile panes', () => {
+  const control = read('.claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1');
+  assert.match(control, /Two distinct managed panes must share the same controlled Chrome process and profile/);
+  assert.match(control, /Focus-Palette 'sign in to google' 7191/);
+  assert.match(control, /Get-PaneUserDataDir \$handle/);
+  assert.match(control, /\$script:signinWindow\.browser\.commandLine -match/);
+  assert.match(control, /Sign-in window is owned by a controlled Chrome process/);
+  assert.match(control, /original controlled Chrome process exited/);
+  assert.match(control, /Unrelated profile process exited during sign-in/);
+  assert.match(control, /Reopened browser lost the sign-in profile/);
+});
+
 test('IGSH-1507 Sign in to Google is reachable from Ctrl+K, the tab actions and the shortcut list', () => {
   const state = read('src/app_state.zig');
   assert.match(state, /pub const SEARCH_TABCTX_GOOGLE_SIGNIN: usize = \d+;/);
