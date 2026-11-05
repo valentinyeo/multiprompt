@@ -669,6 +669,8 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
     if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Action failed"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    var trace: [128]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[rooms] painted messages={d} members={d} revision={d}", .{ view.model.messages.len, view.model.members.len, view.model.revision }) catch "[rooms] paint trace overflow");
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {

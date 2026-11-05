@@ -276,6 +276,7 @@ try {
     Invoke-NativeInput @{kind='text'; text='Both synthetic agents, reply once.'; keys=$null}
     Check 'native-broadcast-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Both synthetic agents, reply once.')
     Shot 'before-send'
+    $paintOffset=(Log).Length
     Press @(0x0d)
     [void](Wait-For 'one broadcast and two scoped synthetic replies' {
         $w=Witness
@@ -296,13 +297,18 @@ try {
         Save $w (Join-Path $Evidence 'witness.json')
     }
     Check-Replies
+    [void](Wait-For 'three native messages painted' { $trace=Log; $trace.Length -gt $paintOffset -and $trace.Substring($paintOffset) -match '\[rooms\] painted messages=3 members=2 revision=1(?:\r?\n|$)' })
+    Check 'three-messages-painted-before-restart' $true
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-synthetic-replies'
     Stop-App
+    $paintOffset=(Log).Length
     Start-App
     [void](Wait-For 'reopened selected room' { Room-Window })
     [void](Wait-For 'post-restart store read' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
     Check-Replies
+    [void](Wait-For 'three native messages painted after restart' { $trace=Log; $trace.Length -gt $paintOffset -and $trace.Substring($paintOffset) -match '\[rooms\] painted messages=3 members=2 revision=1(?:\r?\n|$)' })
+    Check 'three-messages-painted-after-restart' $true
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-replies-after-restart'
     $result.status='passed'
