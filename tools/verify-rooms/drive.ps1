@@ -76,14 +76,8 @@ function Focus {
 }
 function Room-Window {
     if ($app.HasExited) { throw ('App exited: '+$app.ExitCode) }
-    try {
-        $root = [Windows.Automation.AutomationElement]::FromHandle($main)
-        $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptRoomView')
-        $node = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
-        if ($node -and !$node.Current.IsOffscreen) { return [IntPtr]$node.Current.NativeWindowHandle }
-    } catch [System.Management.Automation.MethodInvocationException] {
-        if ($_.Exception.InnerException -isnot [Windows.Automation.ElementNotAvailableException]) { throw }
-    } catch [Windows.Automation.ElementNotAvailableException] {}
+    $room = [VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'MultiPromptRoomView', $null)
+    if ($room -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($room)) { return $room }
 }
 function Witness {
     $path = Join-Path $env:MP_VERIFY_STATE 'witness.json'
@@ -133,7 +127,12 @@ try {
     Focus; Press @(0x11,0x4b); Query 'new room' 5105; Press @(0x0d)
     [void](Wait-For 'native room window' { Room-Window })
     [void](Wait-For 'both candidates checked' { @(Get-ChildItem $env:MP_VERIFY_STATE -Filter 'status-*.json').Count -ge 2 })
+    $nameEdit = Wait-For 'room name owns focus' {
+        $h = [ChatDeliveryDesktop]::Composer((Room-Window))
+        if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Focus($main)[1] -eq $h.ToInt64()) { $h }
+    }
     [VerifyNative]::Text('Product sync')
+    Check 'native-room-name' ([ChatDeliveryDesktop]::Text($nameEdit) -ceq 'Product sync')
     Press @(0x09)
     Press @(0x0d); Press @(0x28); Press @(0x0d)
     Shot 'create-members'
