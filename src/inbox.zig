@@ -1534,21 +1534,31 @@ pub fn paintInbox(hdc: HANDLE) void {
         if (index == app_state.g_inbox_sel) @import("smooth.zig").fillRoundRect(hdc, .{ .left = layout.left, .top = y, .right = layout.right, .bottom = y + layout.row_height }, uiScaled(12), selected_bg);
         if (width < uiScaled(80)) continue;
         const avatar_rc = RECT{ .left = layout.left + uiScaled(10), .top = y + uiScaled(8), .right = layout.left + uiScaled(50), .bottom = y + uiScaled(48) };
-        if (row.ag != 0) {
-            const avatar = @import("bot_avatar.zig");
-            var appearance = avatar.Appearance.forSession(row.name[0..row.name_len]);
-            if (row.avatar_face != null and row.avatar_color != null) appearance = .{ .face = row.avatar_face.?, .color = row.avatar_color.? };
-            if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
-                if (findShellById(row.sid)) |idx| appearance = avatar.forShell(&app_state.shells[idx]);
+        if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+            var log: [120]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] inbox target={d} rect={d},{d},{d},{d}", .{ row.sid, avatar_rc.left, avatar_rc.top, avatar_rc.right, avatar_rc.bottom }) catch "[photo-proof] unavailable");
+        }
+        const local_shell: ?*const Shell = if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd))
+            if (findShellById(row.sid)) |idx| &app_state.shells[idx] else null
+        else
+            null;
+        const photo_drawn = if (local_shell) |shell| @import("bot_photo.zig").draw(shell, hdc, avatar_rc) else false;
+        if (!photo_drawn) {
+            const custom_face = if (local_shell) |shell| shell.face != null or shell.color != null else false;
+            if (row.ag != 0 or custom_face) {
+                const avatar = @import("bot_avatar.zig");
+                var appearance = avatar.Appearance.forSession(row.name[0..row.name_len]);
+                if (row.avatar_face != null and row.avatar_color != null) appearance = .{ .face = row.avatar_face.?, .color = row.avatar_color.? };
+                if (local_shell) |shell| appearance = avatar.forShell(shell);
+                avatar.draw(hdc, avatar_rc, appearance);
+            } else {
+                @import("smooth.zig").fillEllipse(hdc, avatar_rc, if (app_state.g_light_theme) RGB(180, 180, 180) else RGB(46, 46, 46));
+                @import("smooth.zig").fillEllipse(hdc, .{ .left = avatar_rc.left + uiScaled(1), .top = avatar_rc.top + uiScaled(1), .right = avatar_rc.right - uiScaled(1), .bottom = avatar_rc.bottom - uiScaled(1) }, if (app_state.g_light_theme) RGB(235, 235, 235) else RGB(31, 31, 31));
+                _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+                _ = SetTextColor(hdc, muted);
+                var terminal = avatar_rc;
+                _ = DrawTextW(hdc, L(">_"), -1, &terminal, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | @import("win32.zig").DT_CENTER);
             }
-            avatar.draw(hdc, avatar_rc, appearance);
-        } else {
-            @import("smooth.zig").fillEllipse(hdc, avatar_rc, if (app_state.g_light_theme) RGB(180, 180, 180) else RGB(46, 46, 46));
-            @import("smooth.zig").fillEllipse(hdc, .{ .left = avatar_rc.left + uiScaled(1), .top = avatar_rc.top + uiScaled(1), .right = avatar_rc.right - uiScaled(1), .bottom = avatar_rc.bottom - uiScaled(1) }, if (app_state.g_light_theme) RGB(235, 235, 235) else RGB(31, 31, 31));
-            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-            _ = SetTextColor(hdc, muted);
-            var terminal = avatar_rc;
-            _ = DrawTextW(hdc, L(">_"), -1, &terminal, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | @import("win32.zig").DT_CENTER);
         }
         const name = inboxNameBounds(layout, row);
         const text_left = name.left;
