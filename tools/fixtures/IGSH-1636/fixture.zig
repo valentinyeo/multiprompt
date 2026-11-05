@@ -14,7 +14,7 @@ var g_account_hosts_cache = .{ .hosts = &[_]account_hosts.Host{
     .{ .slot = 1, .name = "Friendly server", .hostname = "beta.example", .port = 22, .user = "user" },
     .{ .slot = 2, .name = "Third server", .hostname = "gamma.example", .port = 22, .user = "user" },
 } };
-var g_account_keys_cache = .{ .last_check_ms = @as(?u64, null) };
+var g_account_keys_cache: struct { last_check_ms: ?u64 = null } = .{};
 var down: u8 = 0;
 var attempts: u8 = 0;
 var posts: u8 = 0;
