@@ -145,6 +145,26 @@ for ($round = 1; $round -le 20; $round++) {
 Snapshot 'action'
 Leave-TypingBrowser
 $bar = Get-TypingUrlBar
+if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing before timeout case' }
+if ([VerifyNative]::IsDown(0x11) -or [VerifyNative]::IsDown(0x10)) { throw 'Unexpected held modifier before timeout case' }
+try {
+    [VerifyNative]::KeyDown(0x11)
+    [VerifyNative]::KeyDown(0x10)
+    [VerifyNative]::KeyDown(0x4C)
+    [VerifyNative]::KeyUp(0x4C)
+    [VerifyNative]::KeyUp(0x10)
+    Wait-Until { (Get-TypingEditChild $bar) -ne [IntPtr]::Zero } 'held-Ctrl address request creates the owned Edit' 5 -PollMilliseconds 20
+    Wait-Until { (Get-TypingEditChild $bar) -eq [IntPtr]::Zero } 'expired held-Ctrl request discards its unfocused Edit' 5 -PollMilliseconds 20
+    if (-not [VerifyNative]::IsDown(0x11)) { throw 'Address handoff released the fixture-held Ctrl key' }
+    $result.checks += @{ name = 'held-ctrl-address-timeout'; discarded = $true; ctrlPreserved = $true }
+} finally {
+    [VerifyNative]::KeyUp(0x4C)
+    [VerifyNative]::KeyUp(0x10)
+    [VerifyNative]::KeyUp(0x11)
+}
+Page-TypingFocus
+Leave-TypingBrowser
+$bar = Get-TypingUrlBar
 if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing before fault' }
 
 $fault = New-Object BrowserTypingFault

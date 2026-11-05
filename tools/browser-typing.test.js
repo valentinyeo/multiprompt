@@ -71,9 +71,14 @@ test('URL focus waits for modifiers and cancels stale handoffs', () => {
   const start = browser.indexOf('var url_focus_edit:');
   const end = browser.indexOf('\npub fn startBrowserUrlBarEdit()', start);
   assert.ok(start >= 0 && end > start);
-  const production = browser.slice(start, end)
+  const discardStart = browser.indexOf('pub fn discardBrowserUrlBarEdit()');
+  const discardEnd = browser.indexOf('\nfn suspendBrowserForShell(', discardStart);
+  assert.ok(discardStart >= 0 && discardEnd > discardStart);
+  const production = (browser.slice(discardStart, discardEnd) + '\n' + browser.slice(start, end))
     .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
-    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()');
+    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()')
+    .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
+    .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
   const fixture = `
 const std = @import("std");
 const HANDLE = ?*anyopaque;
@@ -88,6 +93,10 @@ var focused: HANDLE = null;
 var held: i32 = 0;
 var now: u64 = 100;
 var owned = true;
+var computer_selected = false;
+var private_allowed = true;
+var guard_allowed = true;
+var destroyed: HANDLE = null;
 var foreground_attempts: usize = 0;
 var switch_count: usize = 0;
 var interrupt: u8 = 0;
@@ -96,6 +105,8 @@ const app_state = struct {
     var g_main_hwnd: HANDLE = main;
     var g_edit_hwnd: HANDLE = edit;
     var g_edit_is_browser_urlbar = true;
+    var g_edit_sync_remote_name = false;
+    var g_urlbar_hwnd: HANDLE = parent;
     var g_focus_authorized_hwnd: HANDLE = parent;
     var g_focus_authorized_until: u64 = 1000;
     var g_focus_input_tick: u64 = 10;
@@ -104,12 +115,16 @@ const app_state = struct {
     var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 };
 fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
+fn DestroyWindow(hwnd: HANDLE) i32 { destroyed = hwnd; return 1; }
+fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
+fn computerSelected() bool { return computer_selected; }
+fn privateActionsAllowed() bool { return private_allowed; }
 fn focusGuardReadMouse() void {}
 fn IsWindow(h: HANDLE) i32 { return if (h != null) 1 else 0; }
 fn GetTickCount64() u64 { return now; }
 fn foregroundIsOurs() bool { return owned; }
 fn GetAsyncKeyState(key: i32) i16 { return if (key == held) -32768 else 0; }
-fn focusGuard(_: HANDLE) bool { return true; }
+fn focusGuard(_: HANDLE) bool { return guard_allowed; }
 fn GetForegroundWindow() HANDLE { return foreground; }
 fn GetFocus() HANDLE { return focused; }
 fn SetForegroundWindow(_: HANDLE) i32 {
@@ -138,6 +153,10 @@ fn reset() void {
     held = 0;
     now = 100;
     owned = true;
+    computer_selected = false;
+    private_allowed = true;
+    guard_allowed = true;
+    destroyed = null;
     foreground_attempts = 0;
     switch_count = 0;
     interrupt = 0;
@@ -156,6 +175,8 @@ test "held modifiers defer; release focuses after foreground refusal" {
         try std.testing.expectEqual(@as(usize, 1), switch_count);
         try std.testing.expectEqual(parent, foreground);
         try std.testing.expectEqual(edit, focused);
+        try std.testing.expectEqual(edit, app_state.g_edit_hwnd);
+        try std.testing.expectEqual(@as(HANDLE, null), destroyed);
         try std.testing.expectEqual(@as(usize, 1), killed);
     }
 }
@@ -171,14 +192,19 @@ test "intervening foreign focus or input blocks the fallback" {
         try std.testing.expectEqual(@as(usize, 1), killed);
     }
 }
-test "foreign foreground, newer input, expired request and destroyed edit cancel" {
-    for (0..4) |case| {
+test "invalid requests discard only their own pending editor" {
+    for (0..9) |case| {
         reset();
         switch (case) {
             0 => owned = false,
             1 => app_state.g_focus_input_tick = 11,
             2 => now = 1000,
             3 => app_state.g_edit_hwnd = null,
+            4 => computer_selected = true,
+            5 => private_allowed = false,
+            6 => guard_allowed = false,
+            7 => app_state.g_edit_hwnd = foreign,
+            8 => { now = 1001; held = 0x10; },
             else => unreachable,
         }
         browserUrlFocusTick();
@@ -186,6 +212,14 @@ test "foreign foreground, newer input, expired request and destroyed edit cancel
         try std.testing.expectEqual(@as(usize, 0), switch_count);
         try std.testing.expectEqual(@as(usize, 1), killed);
         try std.testing.expectEqual(console, foreground);
+        if (case == 3 or case == 7) {
+            try std.testing.expectEqual(@as(HANDLE, null), destroyed);
+            try std.testing.expectEqual(if (case == 7) foreign else null, app_state.g_edit_hwnd);
+        } else {
+            try std.testing.expectEqual(edit, destroyed);
+            try std.testing.expectEqual(@as(HANDLE, null), app_state.g_edit_hwnd);
+            try std.testing.expect(!app_state.g_edit_is_browser_urlbar);
+        }
     }
 }
 `;
