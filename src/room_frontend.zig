@@ -148,6 +148,7 @@ const PendingCommand = struct {
     bindings: []const PendingBinding,
     evidence: ?[]const u8 = null,
     evidence_state: journal.State = .uncertain,
+    awaiting_launch: bool = false,
 };
 var pending_command: ?*PendingCommand = null;
 const CreatedSelection = struct { location: RoomLocation, generation: u64, token_generation: u64 };
@@ -1470,6 +1471,50 @@ fn driveRestore(c: *rooms.Controller) bool {
     return false;
 }
 
+fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool) bool {
+    const item = pending_command orelse return false;
+    if (!item.awaiting_launch or completion == .pending) return false;
+    if (!fresh or commandScope(item.location) == null) {
+        if (commandVisible(item)) view.completeAction(item.token, .failed);
+        freePending(item);
+        return false;
+    }
+    const kind = switch (completion) {
+        .finished => |finished| blk: {
+            var result = finished;
+            const result_kind = result.kind;
+            result.deinit();
+            break :blk result_kind;
+        },
+        .failed => |failure| failure.kind,
+        .pending => unreachable,
+    };
+    discardBuilding();
+    if (kind == .catalog) finishRefresh(c, false);
+    if (kind == .catalog_metadata) {
+        if (metadata_read) |read| {
+            if (read.catalog_generation == catalog_generation) for (catalog_rows.items) |*row| {
+                if (std.mem.eql(u8, row.id, &read.room_id) and row.metadata_state == .loading and row.read_generation == read.read_generation) row.metadata_state = .queued;
+            };
+        }
+        metadata_read = null;
+    }
+    if (kind == .status and status_generation == candidate_generation and candidate_scan > 0) candidate_scan -= 1;
+    if (front == .selected) selection_waiting = true;
+    item.awaiting_launch = false;
+    c.launchPrepared(item.kind, &item.id, if (item.kind == .create) "" else &item.room_id, item.revision) catch {
+        if (commandVisible(item)) view.completeAction(item.token, .failed);
+        freePending(item);
+        journal_checked_generation = null;
+        scheduleDiscovery(c);
+        controller = null;
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        return true;
+    };
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+    return true;
+}
+
 pub fn pollTimer(id: usize) bool {
     if (!enabled) return false;
     if (id == TIMER_ROOM_EVIDENCE) {
@@ -1514,6 +1559,7 @@ pub fn pollTimer(id: usize) bool {
     const current_route = configuredRoute(route_slot);
     const current_key = if (current_route) |route| routeKey(route) else @as([64]u8, @splat(0));
     const fresh = request_generation == account_generation and current_route != null and std.mem.eql(u8, &current_key, &route_key);
+    if (launchQueuedCommand(c, completion, fresh)) return true;
     const mutation = switch (completion) { .failed => |failure| failure.kind == .create or failure.kind == .edit or failure.kind == .post, .finished => |result| result.kind == .create or result.kind == .edit or result.kind == .post, .pending => false,
     };
     if (mutation and pending_command != null) {
@@ -1850,7 +1896,7 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
         @import("diagnostics.zig").debugLog("[rooms] rejected controller=Absent");
         return .failed;
     };
-    if (c.job != null) {
+    if (c.journal_lock != null) {
         @import("diagnostics.zig").debugLog2("[rooms] rejected busy=", @tagName(c.kind));
         return .failed;
     }
@@ -1916,7 +1962,8 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
         @import("diagnostics.zig").debugLog2("[rooms] rejected journal=", @errorName(err));
         return .failed;
     };
-    c.launchPrepared(kind, &item.id, room_id, revision) catch |err| {
+    item.awaiting_launch = c.job != null;
+    if (!item.awaiting_launch) c.launchPrepared(kind, &item.id, room_id, revision) catch |err| {
         @import("diagnostics.zig").debugLog2("[rooms] rejected launch=", @errorName(err));
         if (kind == .post) {
             journal_checked_generation = null;

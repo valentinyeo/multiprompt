@@ -69,6 +69,26 @@ ${fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/room-replay.zig'), 'u
   }
 });
 
+test('queued commands retain scope and identity across background read completion', () => {
+  const frontend = read('room_frontend.zig');
+  assert.match(frontend, /if \(c\.journal_lock != null\)/);
+  assert.match(frontend, /item\.awaiting_launch = c\.job != null/);
+  assert.match(frontend, /if \(!item\.awaiting_launch\) c\.launchPrepared/);
+  assert.ok(frontend.indexOf('if (launchQueuedCommand(c, completion, fresh))') < frontend.indexOf('if (mutation and pending_command != null)'));
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/queued-command.zig'), 'utf8');
+  const source = `${fixture}\n${declaration(frontend, 'fn launchQueuedCommand(')}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-queued-command-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'queued.zig'), source);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'queued.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined, run.error?.message);
+    assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
+    assert.match(run.stderr, /All 6 tests passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('accepted room posts read selected history in the durable evidence recovery path', () => {
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/post-refresh.zig'), 'utf8');
   const source = `${fixture}\n${declaration(read('room_frontend.zig'), 'pub fn retryCommandEvidence(')}`;
