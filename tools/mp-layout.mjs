@@ -272,7 +272,7 @@ async function spawnSession(ctx, flags) {
     }
     if (mode === 'visible') {
       if (!parked) {
-        const created = ctx.tmux(['new-session', '-d', '-s', session, '-c', folder, 'sleep', 'infinity', ';', 'set-option', '-t', '=' + session, '@mp_spawn_sid', sid, ';', 'set-option', '-t', '=' + session + ':', '@mp_host_sid', sid]);
+        const created = ctx.tmux(['new-session', '-d', '-s', session, '-c', folder, 'sleep', 'infinity', ';', 'set-option', '-t', '=' + session + ':', '@mp_spawn_sid', sid, ';', 'set-option', '-t', '=' + session + ':', '@mp_host_sid', sid]);
         if (created.status !== 0 && ctx.tmux(['has-session', '-t', '=' + session]).status !== 0) throw new Failure('could not start parking session');
       }
       const pane = ctx.tmux(['display-message', '-p', '-t', '=' + session + ':', '#{pane_current_command}\t#{pane_current_path}\t#{@mp_spawn_sid}']);

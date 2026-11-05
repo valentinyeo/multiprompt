@@ -63,3 +63,37 @@ test('real flock and reader config/message storage converge without forwarding t
   assert.equal(await run([...args.slice(0, -1), 'changed task'], opts), 1);
   assert.equal(await run(args, opts), 0, errors.join('\n'));
 });
+
+test('real tmux parking markers survive repeated visible spawn', { skip: !unix }, async t => {
+  const { spawnSync } = require('node:child_process');
+  const { run } = await import('./mp-layout.mjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-spawn-tmux-'));
+  const socket = 'mp-spawn-' + crypto.randomBytes(12).toString('hex');
+  const tmux = args => spawnSync('tmux', ['-L', socket, ...args], { encoding: 'utf8', timeout: 10000, env: { HOME: home, PATH: process.env.PATH } });
+  t.after(() => { tmux(['kill-server']); fs.rmSync(home, { recursive: true, force: true }); });
+  assert.equal(spawnSync('tmux', ['-V']).status, 0, 'hosted Unix proof requires tmux');
+  let layout = { workspaces: [{ name: 'Work' }], tabs: [] }, revision = 0;
+  const output = [], errors = [];
+  const opts = {
+    env: { HOME: home, PATH: process.env.PATH, MULTIPROMPT_KEY: 'fixture-only' },
+    out: line => output.push(JSON.parse(line)), err: line => errors.push(line),
+    fetch: async (_, request) => {
+      if (request.method === 'GET') return { status: 200, json: async () => ({ revision, layout: structuredClone(layout) }) };
+      const body = JSON.parse(request.body);
+      assert.equal(body.base_revision, revision);
+      layout = body.layout; revision++;
+      return { status: 200, json: async () => ({ revision }) };
+    },
+    tmux,
+    runtime: args => ({ status: 0, stdout: JSON.stringify({ status: args[1] === 'enable' ? 'enabled' : 'started' }) })
+  };
+  const args = ['spawn', '--name', 'Real parking', '--folder', home, '--workspace', 'Work'];
+  assert.equal(await run(args, opts), 0, errors.join('\n'));
+  assert.equal(await run(args, opts), 0, errors.join('\n'));
+  assert.equal(output[0].sid, output[1].sid);
+  assert.equal(layout.tabs.length, 1);
+  assert.equal(revision, 1);
+  const markers = tmux(['display-message', '-p', '-t', '=' + output[0].session + ':', '#{@mp_spawn_sid}|#{@mp_host_sid}']);
+  assert.equal(markers.status, 0, markers.stderr);
+  assert.equal(markers.stdout.trim(), output[0].sid + '|' + output[0].sid);
+});
