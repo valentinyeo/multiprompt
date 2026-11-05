@@ -178,8 +178,13 @@ try {
     Click-Setting 'Save' -RootWindow $keyWindow
     Wait-Until { -not (Settings-Control 'Save' -RootWindow $keyWindow).Current.IsEnabled } 'Save disabled while checking'
     Wait-Until { [int](Get-Content (Join-Path $script:keyProviderDir 'requests.txt') -Raw) -gt $requestsBeforeDelay } 'delayed provider request received'
-    $saveHandle = [IntPtr](Settings-Control 'Save' -RootWindow $keyWindow).Current.NativeWindowHandle
-    [VerifyNative]::ClickClient($saveHandle, 8, 8)
+    $saveControl = Settings-Control 'Save' -RootWindow $keyWindow
+    $saveHandle = [IntPtr]$saveControl.Current.NativeWindowHandle
+    $saveRect = New-Object VerifyNative+Rect
+    $keyOrigin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect($saveHandle, [ref]$saveRect) -or -not [VerifyNative]::ClientToScreen($keyWindow, [ref]$keyOrigin)) { throw 'Missing disabled Save geometry' }
+    if ($saveControl.Current.IsEnabled) { throw 'Save became enabled before duplicate click' }
+    [VerifyNative]::ClickClient($keyWindow, [int](($saveRect.Left + $saveRect.Right) / 2 - $keyOrigin.X), [int](($saveRect.Top + $saveRect.Bottom) / 2 - $keyOrigin.Y))
     Start-Sleep -Milliseconds 200
     if ([int](Get-Content (Join-Path $script:keyProviderDir 'requests.txt') -Raw) -ne ($requestsBeforeDelay + 1)) { throw 'Duplicate save sent another request' }
     Press @(0x1B) 'Cancel delayed request'
