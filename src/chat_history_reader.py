@@ -5432,6 +5432,8 @@ def send_response_preserve_draft(q):
         typed, sent = record.get('typed'), record.get('sent')
         typed = typed if isinstance(typed, str) else ''
         sent = sent if isinstance(sent, str) else ''
+        if re.fullmatch(r'(?:👍|👎|❤️) to: [^\r\n]+ \[mp:[0-9a-f]{16}\]', text):
+            typed = ''
         displaced = draft if draft and not own_draft(draft, text, typed, sent) else ''
         if displaced:
             draft_note(name, displaced=displaced, displaced_at=time.time())
@@ -5974,7 +5976,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 68
+RUNTIME_GENERATION = 69
 
 if __name__ == '__main__':
     import base64 as _base64
