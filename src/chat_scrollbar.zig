@@ -86,6 +86,33 @@ pub fn contains(box: Box, x: i32, y: i32) bool {
     return x >= box.left and x < box.right and y >= box.top and y < box.bottom;
 }
 
+pub fn lastFirstLine(total_lines: i32, visible_lines: i32) i32 {
+    return @max(0, total_lines - visible_lines);
+}
+
+pub fn caretScrollLines(first_line: i32, visible_lines: i32, total_lines: i32, caret_line: i32) i32 {
+    if (visible_lines <= 0 or total_lines <= 0) return 0;
+    var target = first_line;
+    if (caret_line < target) {
+        target = caret_line;
+    } else if (caret_line >= target + visible_lines) {
+        target = caret_line - visible_lines + 1;
+    }
+    target = std.math.clamp(target, 0, lastFirstLine(total_lines, visible_lines));
+    return target - first_line;
+}
+
+pub fn clampedLineScroll(first_line: i32, delta_lines: i32, visible_lines: i32, total_lines: i32) i32 {
+    const target = std.math.clamp(first_line + delta_lines, 0, lastFirstLine(total_lines, visible_lines));
+    return target - first_line;
+}
+
+pub fn wheelLines(wheel_delta: i16, lines_per_notch: i32) i32 {
+    const lines = -@divTrunc(@as(i32, wheel_delta) * lines_per_notch, WHEEL_NOTCH);
+    if (lines != 0 or wheel_delta == 0) return lines;
+    return if (wheel_delta > 0) -1 else 1;
+}
+
 pub fn atBottom(scroll_y: i32, content_h: i32, viewport_h: i32, slack: i32) bool {
     return scroll_y >= content_h - viewport_h - slack;
 }
@@ -194,4 +221,46 @@ test "IGSH-897 blend runs from the background colour to the thumb colour" {
     try std.testing.expectEqual(@as(u32, 0x505050), blend(0x181818, 0x505050, 255));
     try std.testing.expectEqual(@as(u32, 0x343434), blend(0x181818, 0x505050, 128));
     try std.testing.expectEqual(@as(u32, 0x30FF10), blend(0x30FF10, 0x30FF10, 77));
+}
+
+test "IGSH-1761 a pasted long text scrolls the composer so the last line is in view" {
+    try std.testing.expectEqual(@as(i32, 38), caretScrollLines(0, 12, 50, 49));
+    try std.testing.expectEqual(@as(i32, 0), caretScrollLines(38, 12, 50, 49));
+}
+
+test "IGSH-1761 typing keeps the caret line inside the composer" {
+    try std.testing.expectEqual(@as(i32, 0), caretScrollLines(5, 12, 50, 10));
+    try std.testing.expectEqual(@as(i32, 1), caretScrollLines(5, 12, 50, 17));
+    try std.testing.expectEqual(@as(i32, -3), caretScrollLines(5, 12, 50, 2));
+    try std.testing.expectEqual(@as(i32, 0), caretScrollLines(0, 12, 6, 5));
+}
+
+test "IGSH-1761 the composer never scrolls past its last line or with nothing to scroll" {
+    try std.testing.expectEqual(@as(i32, -4), caretScrollLines(10, 12, 18, 17));
+    try std.testing.expectEqual(@as(i32, 0), caretScrollLines(0, 0, 50, 49));
+    try std.testing.expectEqual(@as(i32, 0), caretScrollLines(0, 12, 0, 0));
+    try std.testing.expectEqual(@as(i32, 7), clampedLineScroll(0, 99, 12, 19));
+    try std.testing.expectEqual(@as(i32, -7), clampedLineScroll(7, -99, 12, 19));
+    try std.testing.expectEqual(@as(i32, 0), clampedLineScroll(0, 3, 12, 8));
+}
+
+test "IGSH-1761 composer wheel moves whole lines, at least one per touchpad tick" {
+    try std.testing.expectEqual(@as(i32, -3), wheelLines(120, 3));
+    try std.testing.expectEqual(@as(i32, 3), wheelLines(-120, 3));
+    try std.testing.expectEqual(@as(i32, -1), wheelLines(10, 3));
+    try std.testing.expectEqual(@as(i32, 1), wheelLines(-10, 3));
+    try std.testing.expectEqual(@as(i32, 0), wheelLines(0, 3));
+}
+
+test "IGSH-1761 composer thumb is the transcript thumb: fixed size, tracks the first visible line" {
+    const total: i32 = 50;
+    const visible: i32 = 12;
+    const track: i32 = 240;
+    const top = fixedThumb(total, visible, 0, track, 75).?;
+    try std.testing.expectEqual(@as(i32, 0), top.top);
+    try std.testing.expectEqual(@as(i32, 75), top.height);
+    const bottom = fixedThumb(total, visible, lastFirstLine(total, visible), track, 75).?;
+    try std.testing.expectEqual(track, bottom.top + bottom.height);
+    try std.testing.expect(fixedThumb(12, 12, 0, track, 75) == null);
+    try std.testing.expectEqual(@as(i32, 38), scrollForThumbTop(total, visible, track, 75, 9999));
 }

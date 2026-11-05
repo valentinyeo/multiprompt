@@ -101,5 +101,5 @@ test('IGSH-820 executes production toggles and legacy shell migration', () => {
 test('IGSH-820 view restoration and respawn retain independent view preferences without locks', () => {
   for (const name of ['openChatView', 'closeChatView', 'respawnShellInPlace', 'restoreBrowserStateFromSavedTab']) assert.doesNotMatch(body(name), /chat_view_lock/);
   assert.match(body('respawnShellInPlace'), /\.chat_view_on = saved_chat_view_on,/);
-  assert.match(body('restoreBrowserStateFromSavedTab'), /shells\[idx\]\.chat_view_on = tab\.cv;/);
+  assert.match(body('restoreBrowserStateFromSavedTab'), /shells\[idx\]\.chat_view_on = @import\(\"chat_view\.zig\"\)\.forSession\(shells\[idx\]\.tmux_session\[0\.\.shells\[idx\]\.tmux_session_len\], tab\.cv\);/);
 });

@@ -20,7 +20,7 @@ const restart = driver.slice(driver.indexOf('function Restart-ChatView('), drive
 const journey = driver.slice(driver.indexOf("        'chat-view-everywhere' {"), driver.indexOf("        'chat-focus' {"));
 
 function bulkContract(source) {
-  assert.match(source, /pub fn setEverywhere\(sessions: anytype, on: bool\) void \{\s*for \(sessions\) \|\*session\| \{\s*session.chat_view_on = on;/);
+  assert.match(source, /pub fn setEverywhere\(sessions: anytype, on: bool\) void \{\s*for \(sessions\) \|\*session\| \{\s*if \(comptime @hasField\(@TypeOf\(session.\*\), \"tmux_session_len\"\)\) \{\s*session.chat_view_on = forSession\(session.tmux_session\[0..session.tmux_session_len\], on\);\s*\} else \{\s*session.chat_view_on = on;/);
   assert.match(source, /pub fn toggle\(session: anytype\) void \{\s*session.chat_view_on = !session.chat_view_on;/);
   assert.match(source, /pub fn shouldShow\(on: bool\) bool \{\s*return on;/);
   assert.doesNotMatch(source, /chat_view_lock|pub const Lock|pub fn setLock|pub fn savedLock/);

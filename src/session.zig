@@ -1121,7 +1121,7 @@ pub fn restoreBrowserStateFromSavedTab(idx: u32, tab: *const SavedTab) void {
     restoreArchiveMarkers(&app_state.shells[idx], tab);
     app_state.shells[idx].keep_awake = tab.kaw;
     app_state.shells[idx].last_read_message_id = tab.last_read_message_id;
-    app_state.shells[idx].chat_view_on = tab.cv;
+    app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], tab.cv);
     @import("browser_pane.zig").cancelPinnedBrowserEntry(app_state.shells[idx].shell_id);
     app_state.shells[idx].browser_pin_revision = 0;
     app_state.shells[idx].browser_pinned_url = tab.bpin;

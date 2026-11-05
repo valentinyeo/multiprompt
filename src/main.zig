@@ -8725,6 +8725,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             const tlen = @min(transfer.tmux_len, 63);
                             if (tlen > 0) @memcpy(new_shell.tmux_session[0..tlen], transfer.tmux[0..tlen]);
                             new_shell.tmux_session_len = tlen;
+                            new_shell.chat_view_on = @import("chat_view.zig").forSession(new_shell.tmux_session[0..new_shell.tmux_session_len], new_shell.chat_view_on);
                             new_shell.tmux_identity = transfer.tmux_identity;
                             new_shell.tmux_identity_len = transfer.tmux_identity_len;
 
@@ -9390,6 +9391,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                     @memcpy(new_shell.tmux_session[0..app_state.g_adopt_tmux_len], app_state.g_adopt_tmux[0..app_state.g_adopt_tmux_len]);
                     new_shell.tmux_session_len = app_state.g_adopt_tmux_len;
                 }
+                new_shell.chat_view_on = @import("chat_view.zig").forSession(new_shell.tmux_session[0..new_shell.tmux_session_len], new_shell.chat_view_on);
 
                 new_shell.tmux_identity = app_state.g_adopt_tmux_identity;
                 new_shell.tmux_identity_len = app_state.g_adopt_tmux_identity_len;
