@@ -1,8 +1,9 @@
-function Hax-Palette([string]$Query) {
+function Hax-Palette([string]$Query, [string]$Target = '\d+') {
     $offset = (Read-Shared "$settings/debug.log").Length
+    $count = if ($Target -eq '\d+') { '1' } else { '[1-9]\d*' }
     Press @(0x11, 0x4B) 'Ctrl+K: open runner proof command'
     foreach ($letter in $Query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
-    [void](Wait-For 'runner proof command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=1 target=\d+') })
+    [void](Wait-For 'runner proof command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=' + $count + ' target=' + $Target + '(?:\r?\n|$)') })
     Press @(0x0D) 'Enter: run runner proof command'
 }
 $before = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
@@ -36,7 +37,7 @@ if ($plan.name -eq 'hax-reader') {
     $emptyId = $before[3].sid
     $observation.closedId = $emptyId
     $observation.savedBefore = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs).Count
-    Press @(0x11, 0x57) 'Ctrl+W: close the empty runner session'
+    Hax-Palette 'close tab' '(7197|6232)'
     $expectedShells = 3
     [void](Wait-For 'closed tab removed from saved and published state' {
         $rows = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
@@ -79,7 +80,7 @@ if ($plan.name -eq 'hax-reader') {
         $rows.Count -eq 4 -and @($rows | Where-Object { $_.name -eq 'runner-empty' }).Count -eq 1
     })
     $observation.explicitReopen = $true
-    Press @(0x11, 0x57) 'Ctrl+W: close the explicitly reopened runner again'
+    Hax-Palette 'close tab' '(7197|6232)'
     $expectedShells = 3
     [void](Wait-For 'reopened runner closes without a duplicate tab' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 3 })
 }

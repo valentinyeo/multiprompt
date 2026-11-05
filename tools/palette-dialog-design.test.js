@@ -96,8 +96,12 @@ test('IGSH-1061: dialog measures body against full content width and uses approv
 
 test('IGSH-1061: palette typing waits for owned foreground after asynchronous browser cancellation', () => {
   const control = read('.claude/skills/verify-multiprompt/control.ps1');
-  const body = control.match(/function Palette\(\[string\]\$Query\) \{([^]*?)\n\}/)?.[1];
-  assert.ok(body, 'production palette journey exists');
+  const body = control.match(/function Palette\(\[string\]\$Query, \[string\]\$Target = ''\) \{([^]*?)\n\}/)?.[1];
+  assert.ok(body, 'production palette journey accepts an optional target');
+  assert.match(body, /\$offset = if \(\$Target\) \{ \(Read-SharedText \$log\)\.Length \} else \{ 0 \}[\s\S]*Type-Text \$Query\s+if \(\$Target\) \{\s+Wait-Until \{ \$trace = Read-SharedText \$log; \$trace\.Length -ge \$offset -and \$trace\.Substring\(\$offset\) -match/,
+    'targeted queries wait for a fresh palette result');
+  assert.ok(body.includes(String.raw`'\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)'`),
+    'the selected target must match the complete result line');
   assert.match(body, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Wait-Foreground\s+Type-Text \$Query/,
     'the cancelled browser can take foreground after Ctrl+K; settle ownership before typing');
   const workflow = read('.github/workflows/palette-dialog-design.yml');
