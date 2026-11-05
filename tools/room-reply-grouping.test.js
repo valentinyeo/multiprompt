@@ -68,3 +68,44 @@ ${fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/room-replay.zig'), 'u
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('queued commands retain scope and identity across background read completion', () => {
+  const frontend = read('room_frontend.zig');
+  assert.match(frontend, /if \(c\.journal_lock != null/);
+  assert.match(frontend, /item\.awaiting_launch = c\.job != null/);
+  assert.match(frontend, /if \(!item\.awaiting_launch\) c\.launchPrepared/);
+  assert.ok(frontend.indexOf('if (launchQueuedCommand(c, completion, fresh))') < frontend.indexOf('if (mutation and pending_command != null)'));
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/queued-command.zig'), 'utf8');
+  const source = `${fixture}\n${declaration(frontend, 'fn launchQueuedCommand(')}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-queued-command-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'queued.zig'), source);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'queued.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined, run.error?.message);
+    assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
+    assert.match(run.stderr, /All 6 tests passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('selected history refresh does not depend on catalog completion', () => {
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/selected-refresh.zig'), 'utf8');
+  const source = `${fixture}\n${declaration(read('room_frontend.zig'), 'fn scheduleMetadata(')}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-selected-refresh-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'selected.zig'), source);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'selected.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined, run.error?.message);
+    assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
+    assert.match(run.stderr, /All 2 tests passed/);
+    const negative = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/selected-refresh-negative.zig'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'negative.zig'), `${fixture}\n${negative}`);
+    const red = spawnSync(process.env.ZIG || 'zig', ['test', 'negative.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(red.error, undefined, red.error?.message);
+    assert.equal(red.status, 1, `${red.stdout || ''}${red.stderr || ''}`);
+    assert.match(red.stderr, /selected history refresh survives an interrupted incomplete catalog\.\.\.FAIL \(TestUnexpectedResult\)/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
