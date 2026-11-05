@@ -253,14 +253,12 @@ fn chatMeasureBlockRect(_: HANDLE, _: []const u16, _: ChatBlock, _: chat_style.B
 fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
 fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
 fn chatEchoRowLanded(_: anytype) bool { return false; }
-fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }
+fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32${source.includes('y: i32, status: bool, projection:') ? ', _: bool' : ''}) RECT { unreachable; }
 fn chatMeasureProjectedBlockRect(hdc: HANDLE, text: []const u16, block: ChatBlock, pos: chat_style.BubblePos, w: i32, y: i32, imgs: ?*ChatImgLayout, _: ?*const chat_reaction.Projection) RECT {
     return chatMeasureBlockRect(hdc, text, block, pos, w, y, imgs);
 }
-fn chatMeasureProjectedEchoRect(hdc: HANDLE, text: []const u16, w: i32, y: i32, status: bool, _: ?*const chat_reaction.Projection) RECT {
-    var rect = chatMeasureEchoRect(hdc, text, w, y, status);
-    if (!clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
-    return rect;
+fn chatMeasureProjectedEchoRect(hdc: HANDLE, text: []const u16, w: i32, y: i32${source.includes('y: i32, status: bool, projection:') ? ', status: bool' : ''}, _: ?*const chat_reaction.Projection) RECT {
+    ${source.includes('y: i32, status: bool, projection:') ? 'var rect = chatMeasureEchoRect(hdc, text, w, y, status);\n    if (!clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);\n    return rect;' : 'return chatMeasureEchoRect(hdc, text, w, y);'}
 }
 fn chatShellRowsLayout(_: HANDLE, _: i32, y: i32) i32 { return y; }
 const ChoiceStub = struct { present: bool = false, prompt: bool = false, anchor: usize = 0 };
@@ -353,7 +351,9 @@ test('ISSUE-268 oldest match has room below the find bar and closing removes tha
 test('layout oracle rejects actual 706 full-history remeasurement', () => {
   const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
   assert.equal(old.status, 0);
-  const result = run(layout + body(old.stdout, 'chatRelayout') + layoutChecks);
+  const oldLayout = body(old.stdout, 'chatRelayout');
+  const compatibleLayout = source.includes('y: i32, status: bool, projection:') ? oldLayout : oldLayout.replace('chatMeasureEchoRect(hdc, e.text, width, y, true)', 'chatMeasureEchoRect(hdc, e.text, width, y)');
+  const result = run(layout + compatibleLayout + layoutChecks);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 1000, found 2000/);
 });
@@ -782,20 +782,24 @@ test "hidden reaction and its lone reply leave no New divider" {
 });
 
 
-test('IGSH-1010 cancelled bubbles retain label space without retry controls', () => {
+test('IGSH-1624 all pending states have the same plain bubble geometry', () => {
+  const statusArg = source.includes('y: i32, status: bool, projection:') ? ', _: bool' : '';
   const prelude = layout
     .replace('return "";', 'return "k";')
-    .replace('fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }', 'fn chatMeasureEchoRect(_: HANDLE, _: []const u16, w: i32, y: i32, _: bool) RECT { return .{ .left = 0, .top = y, .right = w, .bottom = y + 20 }; }');
+    .replace(`fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32${statusArg}) RECT { unreachable; }`, `fn chatMeasureEchoRect(_: HANDLE, _: []const u16, w: i32, y: i32${statusArg}) RECT { return .{ .left = 0, .top = y, .right = w, .bottom = y + 20 }; }`);
   const checks = `
-test "cancelled label remains visible in clean chat" {
-    clean_chat = true;
+test "pending geometry is independent of state and clean mode" {
     g_chat_block_count = 0;
-    const entries = [_]@TypeOf(g_chat_outbox.items[0]){.{ .key = .{ 'k', 0, 0, 0, 0, 0, 0, 0 }, .key_len = 1, .text = &.{'x'}, .id = 1, .state = chat_echo.stateOnLoad(4, true) }};
-    g_chat_outbox.items = &entries;
-    chatRelayout(400);
-    try std.testing.expectEqual(@as(usize, 1), g_chat_echo_layout_count);
-    try std.testing.expectEqual(@as(i32, 40), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
-    try std.testing.expect(!chat_echo.pendingActions(entries[0].state).send_again);
+    for ([_]bool{ false, true }) |clean| {
+        clean_chat = clean;
+        for ([_]chat_echo.OutboxState{ .queued, .sending, .not_sent, .delivered, .cancelled }) |state| {
+            const entries = [_]@TypeOf(g_chat_outbox.items[0]){.{ .key = .{ 'k', 0, 0, 0, 0, 0, 0, 0 }, .key_len = 1, .text = &.{'x'}, .id = 1, .state = state }};
+            g_chat_outbox.items = &entries;
+            chatRelayout(400);
+            try std.testing.expectEqual(@as(usize, 1), g_chat_echo_layout_count);
+            try std.testing.expectEqual(@as(i32, 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
+        }
+    }
 }
 `;
   const result = run(prelude + body(source, 'chatRelayout') + checks);

@@ -76,6 +76,19 @@ Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-reloaded.png
 The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
 Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
 
+### Three sent messages and cancellation (IGSH-1624)
+
+Run the same harness revision against the released executable and the branch build:
+
+```sh
+gh workflow run verify.yml --ref <branch> -f feature=chat-delivery -f chat_cancel_proof=true -f tag=v0.28.1490
+gh workflow run verify.yml --ref <branch> -f feature=chat-delivery -f chat_cancel_proof=true
+```
+
+The branch must first contain these capture changes. The tag selects the published executable, not its old harness. The driver types three messages, opens the actual middle-message context menu, cancels it, and verifies the other two arrive in order. It selects Light, AMOLED and Edge Grey through Themes before and after cancellation, waits for each app-written theme token and a sampled stable transcript, then restores the initial theme. Edge Grey is not Graphite 2.
+
+The artifact contains `cancel-held-{held,cancelled}-{light,amoled,edgegray}.png`, matching `-transcript.bmp` crops, and `cancel-held/cancel-held-<stage>-<theme>-frame.json` viewport and stability observations. Compare the two runs and retain the existing outbox, transcript, input, Doctor and cleanup evidence. An independent reviewer must inspect the images. The current oracle checks cancellation behavior and the original screenshots; it does not measure these themed pixels or assert the absence of status labels. A green run is not visual proof. The intended old-release visual control is the visible Cancelled label or resulting spacing, but this must be established from the artifact, not inferred from a setup failure. The SSH/tmux and agent are synthetic; no real network or agent is tested.
+
 ## Gotchas
 
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
