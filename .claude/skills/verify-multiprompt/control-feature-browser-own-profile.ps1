@@ -194,5 +194,68 @@
             $null = Assert-WorkspaceBrowser 'stable-restored-own' $stableRoot $stableWorkspace
             $result.checks += @{ name = 'browser-own-profile branded Chrome stable cold and restored'; executable = $stableChrome; token = $stableToken; windowId = $stablePane.browser_window_id }
 
+            Press @(0x12, (0x32 + $ownWorkspace)) 'Switch to the unrelated own-profile workspace'
+            $decoy = Assert-WorkspaceBrowser 'signin-decoy' $ownRoot $ownWorkspace
+            Press @(0x12, (0x32 + $stableWorkspace)) 'Return to the sign-in workspace'
+            $first = Assert-WorkspaceBrowser 'signin-first' $stableRoot $stableWorkspace
+            $firstShell = (Read-Inbox).active_shell_id
+            Focus-Palette 'new cmd' 2000
+            Snapshot 'signin-new-shell-action'
+            Press @(0x0D) 'Enter: New CMD Shell in the sign-in workspace'
+            Wait-Until {
+                $state = Read-Inbox
+                $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+                $selected.Count -eq 1 -and $state.active_shell_id -ne $firstShell -and $selected[0].ws -eq $stableWorkspace
+            } 'second CMD shell selected in the same workspace'
+            $script:browserShellId = (Read-Inbox).active_shell_id
+            $second = Open-WorkspaceBrowser 'signin-second'
+            if ($second.userDataDir -ine $stableRoot -or $second.pid -ne $first.pid -or $second.hwnd -eq $first.hwnd) { throw 'Two distinct managed panes must share the same controlled Chrome process and profile' }
+            [uint32]$firstOwner = 0
+            [void][VerifyNative]::GetWindowThreadProcessId([IntPtr]::new([long]$first.hwnd), [ref]$firstOwner)
+            if ($firstOwner -ne $first.pid -or [VerifyNative]::GetProp([IntPtr]::new([long]$first.hwnd), 'ZigShellPaneOwner') -ne $script:window) { throw 'The first managed pane did not remain open' }
+            if ($decoy.pid -eq $first.pid -or $decoy.userDataDir -ieq $stableRoot) { throw 'Sign-in decoy must use an unrelated process and profile' }
+            $controlled = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $first.pid)
+            $decoyProcess = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $decoy.pid)
+            if ($controlled.ExecutablePath -ine $stableChrome -or $controlled.CommandLine -notmatch '--remote-debugging-pipe') { throw 'The original owner is not controlled branded Chrome' }
+            $beforeWindows = @([VerifyNative]::DesktopWindows() | ForEach-Object { $_.handle })
+            Save-Json @{ first = $first; second = $second; controlledExecutable = $controlled.ExecutablePath; decoy = $decoy; decoyExecutable = $decoyProcess.ExecutablePath; desktopHandles = $beforeWindows } 'signin-before.json'
+            Focus-Palette 'sign in to google' 7191
+            Snapshot 'signin-action'
+            Press @(0x0D) 'Enter: Sign in to Google in this profile'
+            $script:signinWindow = $null
+            try {
+            Wait-Until {
+                foreach ($candidate in [VerifyNative]::DesktopWindows()) {
+                    if (-not $candidate.visible -or $candidate.class -cne 'Chrome_WidgetWin_1' -or $candidate.handle -in $beforeWindows) { continue }
+                    $handle = [IntPtr]::new([long]$candidate.handle)
+                    if ([VerifyNative]::GetProp($handle, 'ZigShellPaneOwner') -ne [IntPtr]::Zero) { continue }
+                    try { $proof = Get-PaneUserDataDir $handle } catch { continue }
+                    if ($proof.userDataDir -ine $stableRoot) { continue }
+                    $owner = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $proof.pid)
+                    if ($null -eq $owner -or $owner.ExecutablePath -ine $stableChrome) { continue }
+                    $script:signinWindow = @{ browser = $proof; executable = $owner.ExecutablePath; identity = $candidate }
+                    return $true
+                }
+                return $false
+            } 'new visible standalone Chrome window for the sign-in profile' 90
+            } finally {
+                Save-Json @{ plain = $script:signinWindow; windows = @([VerifyNative]::DesktopWindows()); originalAlive = ($null -ne (Get-Process -Id $first.pid -ErrorAction SilentlyContinue)); decoyAlive = ($null -ne (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) } 'signin-after.json'
+            }
+            Snapshot 'signin-window'
+            if ($script:signinWindow.browser.commandLine -match '(?i)--(remote-debugging-pipe|enable-unsafe-extension-debugging|load-extension|disable-sync)(?:[=\s"]|$)') { throw 'Sign-in window is owned by a controlled Chrome process' }
+            Wait-Until { $null -eq (Get-Process -Id $first.pid -ErrorAction SilentlyContinue) } 'original controlled Chrome process exited' 30
+            if ($null -eq (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) { throw 'Unrelated profile process exited during sign-in' }
+            $plainHandle = [IntPtr]::new([long]$script:signinWindow.browser.hwnd)
+            [uint32]$plainOwner = 0
+            [void][VerifyNative]::GetWindowThreadProcessId($plainHandle, [ref]$plainOwner)
+            if ($plainOwner -ne $script:signinWindow.browser.pid -or [VerifyNative]::GetProp($plainHandle, 'ZigShellPaneOwner') -ne [IntPtr]::Zero) { throw 'Sign-in window ownership changed before close' }
+            if (-not [VerifyNative]::PostMessage($plainHandle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close the owned sign-in window' }
+            Wait-Until { [VerifyNative]::GetWindowThreadProcessId($plainHandle, [ref]$plainOwner) -eq 0 } 'standalone sign-in window closed' 30
+            $reopened = Open-WorkspaceBrowser 'signin-reopened'
+            if ($reopened.userDataDir -ine $stableRoot) { throw 'Reopened browser lost the sign-in profile' }
+            Save-Json @{ reopened = $reopened; executable = (Get-CimInstance Win32_Process -Filter ("ProcessId = " + $reopened.pid)).ExecutablePath; decoyAlive = ($null -ne (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) } 'signin-reopened.json'
+            $result.checks += @{ name = 'browser-own-profile Google sign-in handoff'; profile = $stableRoot; reopened = $reopened }
+            Snapshot 'signin-reopened'
+
             }
             Snapshot 'after'
