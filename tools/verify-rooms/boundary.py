@@ -63,7 +63,8 @@ def synthetic_runtime(store, directory):
                     if (ROOT / 'private-replies').is_file():
                         private_id = 'synthetic-private-' + query['sid']
                         previous = runtime['message_events_page'](query['provider'], query['sid'], 0)
-                        private_finished = any(row['event'].get('kind') == 'turn.ended' and row['event'].get('message_id') == private_id for row in previous['events'])
+                        private_turns = {row['event']['turn'] for row in previous['events'] if row['event'].get('kind') == 'turn.started' and row['event'].get('payload', {}).get('message_id') == private_id}
+                        private_finished = any(row['event'].get('kind') == 'turn.ended' and row['event'].get('turn') in private_turns for row in previous['events'])
                         if not private_finished:
                             private = runtime['message_store_transaction'](dict(op='message_submit', provider=query['provider'], sid=query['sid'], tmux=query['tmux'], message_id=private_id, text='Synthetic private question.'))
                             admitted = runtime['host_handle_request'](query['provider'], query['sid'], query['tmux'], session, dict(op='deliver', id=private_id, attempt=private['message']['attempt'], epoch=private['epoch'], text='Synthetic private question.'))
