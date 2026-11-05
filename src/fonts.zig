@@ -119,7 +119,25 @@ pub fn promptForCredentials(info: ?*const w.CREDUI_INFOW, target: w.LPCWSTR, res
     return w.CredUIPromptForCredentialsW(info, target, reserved, error_code, username, username_len, password, password_len, save, flags);
 }
 
+fn fileDialogFontHook(code: i32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+    const hook = dialog_hook;
+    if (code == 5 and hook != null) {
+        dialog_hook = null;
+        _ = w.UnhookWindowsHookEx(hook);
+        const hwnd: w.HANDLE = @ptrFromInt(wp);
+        setControlFont(hwnd);
+        _ = w.EnumChildWindows(hwnd, &setDialogChildFont, 0);
+    }
+    return w.CallNextHookEx(hook, code, wp, lp);
+}
+
 pub fn openFileName(ofn: *w.OPENFILENAMEW) w.BOOL {
+    const previous = dialog_hook;
+    dialog_hook = w.SetWindowsHookExW(5, &fileDialogFontHook, null, w.GetCurrentThreadId());
+    defer {
+        if (dialog_hook != null) _ = w.UnhookWindowsHookEx(dialog_hook);
+        dialog_hook = previous;
+    }
     return w.GetOpenFileNameW(ofn);
 }
 
