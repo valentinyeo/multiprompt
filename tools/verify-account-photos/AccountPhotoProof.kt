@@ -63,6 +63,10 @@ class AccountPhotoProof {
         dismissDeviceApproval()
         compose.onNodeWithContentDescription("Session list actions").performClick()
         compose.onNodeWithText("Settings").performClick()
+        compose.waitUntil(180_000) {
+            dismissDeviceApproval()
+            compose.onAllNodesWithText("Auto").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onAllNodesWithText("Auto").onFirst().performScrollTo()
         dismissDeviceApproval()
     }
