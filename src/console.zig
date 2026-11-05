@@ -2015,7 +2015,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
     if (!app_state.g_restoring) {
-        if (tmux_session) |session| app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+        if (tmux_session) |session| {
+            @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+        }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
     registerShellExitWait(idx);

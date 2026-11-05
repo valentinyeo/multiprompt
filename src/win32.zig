@@ -691,6 +691,7 @@ pub extern "kernel32" fn GetLastError() callconv(WINAPI) DWORD;
 pub extern "kernel32" fn ExitProcess(UINT) callconv(WINAPI) noreturn;
 pub extern "kernel32" fn QueryFullProcessImageNameW(HANDLE, DWORD, [*]u16, *DWORD) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn TerminateProcess(HANDLE, UINT) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn ResumeThread(HANDLE) callconv(WINAPI) DWORD;
 pub extern "dwmapi" fn DwmSetWindowAttribute(HANDLE, DWORD, *const anyopaque, DWORD) callconv(WINAPI) i32;
 pub extern "dwmapi" fn DwmGetWindowAttribute(HANDLE, DWORD, *anyopaque, DWORD) callconv(WINAPI) i32;
 pub extern "advapi32" fn RegOpenCurrentUser(DWORD, *HANDLE) callconv(WINAPI) LONG;
