@@ -12,8 +12,8 @@ const palette = read('src/command_palette.zig');
 const verify = read('.github/workflows/verify.yml');
 
 test('IGSH-1020 menu lists the Android items in the Android order with no submenus', () => {
-  assert.match(menu, /enum\(usize\) \{ approve, stop, terminal, rename, history, resync, waiting, remind, archive, model, end_session, remove, bot_face, bot_color \}/);
-  assert.match(menu, /&\.\{ \.rename, \.history, \.resync, \.bot_face, \.bot_color \}[\s\S]*&\.\{ \.waiting, \.remind, \.archive \}[\s\S]*&\.\{\.model\}[\s\S]*&\.\{ \.end_session, \.remove \}/);
+  assert.match(menu, /enum\(usize\) \{ approve, stop, terminal, rename, computer, history, resync, waiting, remind, archive, model, end_session, remove, bot_face, bot_color \}/);
+  assert.match(menu, /&\.\{ \.rename, \.computer, \.history, \.resync, \.bot_face, \.bot_color \}[\s\S]*&\.\{ \.waiting, \.remind, \.archive \}[\s\S]*&\.\{\.model\}[\s\S]*&\.\{ \.end_session, \.remove \}/);
   assert.match(menu, /RGB\(0x18, 0x18, 0x18\)[\s\S]*RGB\(0x2E, 0x2E, 0x2E\)[\s\S]*RGB\(0xF2, 0x8B, 0x82\)/);
   assert.match(menu, /uiScaled\(20\)/);
 });
@@ -31,6 +31,16 @@ test('IGSH-1020 keyboard, palette and screenshot proof are wired', () => {
   assert.match(palette, /SEARCH_CHAT_MORE_MENU_OFFSET/);
   assert.match(render, /more_menu\.paint\(menu_dc/);
   assert.match(verify, /evidence\/chat-more-menu\.png/);
+});
+
+test('IGSH-1630 Computer reuses the captured chat identity without adding a header button', () => {
+  assert.match(menu, /\.computer => @import\("ui_words\.zon"\)\.computer_title/);
+  assert.match(menu, /state\.enabled\[@intFromEnum\(Item\.computer\)\] = tmux;/);
+  assert.match(menu, /item == \.computer or item == \.bot_face or item == \.bot_color\) @intCast\(target_sid\)/);
+  const action = main.slice(main.indexOf('if (wp == @intFromEnum(more_menu.Item.computer))'), main.indexOf('if (wp == @intFromEnum(more_menu.Item.bot_face)'));
+  assert.match(action, /findShellById\(@intCast\(lp\)\) orelse return 0;[\s\S]*@import\("computer_pane\.zig"\)\.toggle\(target_idx\)/);
+  const header = drawing.slice(drawing.indexOf('pub const ChatTitleLayout = struct'), drawing.indexOf('pub fn paintThreadTitle'));
+  assert.doesNotMatch(header, /computer/i);
 });
 
 test('IGSH-1020 menu shows the model only inside the menu, never around messages', () => {

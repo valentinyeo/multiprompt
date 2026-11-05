@@ -219,6 +219,14 @@ pub fn build(b: *std.Build) void {
     run_smooth_shape_tests.has_side_effects = true;
     b.step("test-smooth-shapes", "Run native fractional avatar pixel proof").dependOn(&run_smooth_shape_tests.step);
 
+    const live_working_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"IGSH-1668 hosted live events"},
+    });
+    const run_live_working_tests = b.addRunArtifact(live_working_tests);
+    run_live_working_tests.has_side_effects = true;
+    b.step("test-live-working", "Investigate live working events with the native painter").dependOn(&run_live_working_tests.step);
+
     const clean_chat_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-816 CLEAN"},
@@ -628,7 +636,7 @@ pub fn build(b: *std.Build) void {
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
-    const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js", "tools/font-probe.test.js", "tools/chat-font-weight.test.js" });
+    const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js", "tools/font-probe.test.js", "tools/chat-font-weight.test.js", "tools/file-picker-font-hook.test.js" });
     test_step.dependOn(&one_font_tests.step);
     vps_test_step.dependOn(&one_font_tests.step);
     const terminal_glyph_tests = b.addSystemCommand(&.{ "node", "--test", "tools/terminal-glyphs.test.js" });

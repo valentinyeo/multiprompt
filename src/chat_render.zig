@@ -1947,9 +1947,15 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
 var g_working_rect: ?RECT = null;
 var g_note_logged = false;
 
+fn chatWorkingDotsVisible() bool {
+    if (!@import("window_layout.zig").chatStopVisible()) return false;
+    if (@import("chat_send.zig").chatOutboxWorkingForShell(app_state.active_shell)) return true;
+    return !@import("chat_live.zig").replyPresent(app_state.shells[app_state.active_shell].shell_id);
+}
+
 pub fn chatWorkingSync() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
-    if ((g_working_rect != null) != @import("window_layout.zig").chatStopVisible()) {
+    if ((g_working_rect != null) != chatWorkingDotsVisible()) {
         var rc: RECT = std.mem.zeroes(RECT);
         chatViewClientRect(&rc);
         chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
@@ -1964,7 +1970,7 @@ pub fn chatWorkingSync() void {
 
 fn chatPaintWorking(hdc: HANDLE, now: u64) void {
     const source = g_working_rect orelse return;
-    if (!@import("window_layout.zig").chatStopVisible()) return;
+    if (!chatWorkingDotsVisible()) return;
     var rc = source;
     rc.top -= app_state.g_chat_scroll_y;
     rc.bottom -= app_state.g_chat_scroll_y;
@@ -2509,7 +2515,7 @@ pub fn chatRelayout(client_width: i32) void {
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
-    if (@import("window_layout.zig").chatStopVisible()) {
+    if (chatWorkingDotsVisible()) {
         y += chatBlockGapBefore(has_previous or app_state.g_chat_echo_layout_count > 0 or g_shell_rect_count > 0, .prose, true, .single);
         const sample = std.unicode.utf8ToUtf16LeStringLiteral("Ready.");
         var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
@@ -7474,6 +7480,165 @@ fn channelDistance(a: u32, b: u32) u32 {
         out = @max(out, @as(u32, @intCast(@abs(x - y))));
     }
     return out;
+}
+
+fn liveWorkingProofFrame(dc: HANDLE, name: LPCWSTR, bytes: []const u8, header: anytype, started: u64, case: []const u8, stage: []const u8) !void {
+    const w = @import("win32.zig");
+    const bounds = RECT{ .left = 0, .top = 0, .right = 800, .bottom = 600 };
+    chatPaintTranscriptContent(dc, 800, 600, bounds);
+    _ = struct { extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL; }.GdiFlush();
+    try scrollProofSave(name, bytes, header);
+    std.debug.print("IGSH1668 case={s} stage={s} elapsed_ms={d} live={any} screen={any} visible={any} slot={any} timer={any} blocks={d}\n", .{
+        case, stage, GetTickCount64() -| started, @import("chat_live.zig").running(app_state.shells[0].shell_id),
+        app_state.g_chat_screen_working, @import("window_layout.zig").chatStopVisible(), g_working_rect != null,
+        app_state.g_chat_working_timer_running, app_state.g_chat_block_count,
+    });
+}
+
+test "IGSH-1668 hosted live events reach the native working painter" {
+    const w = @import("win32.zig");
+    var enabled: [8]u8 = undefined;
+    if (w.GetEnvironmentVariableA("MULTIPROMPT_LIVE_WORKING_PROOF", &enabled, enabled.len) == 0) return;
+    const live = @import("chat_live.zig");
+    const session = @import("chat_session.zig");
+    const layout = @import("window_layout.zig");
+    const shell_id = 1668001;
+    const sid = "11111111-2222-3333-4444-166800000001";
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("live working proof"), 0, 0, 0, 800, 600, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const info: w.BITMAPINFO = .{ .header = .{ .width = 800, .height = -600 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const bytes = @as([*]const u8, @ptrCast(bits.?))[0 .. 800 * 600 * 4];
+    const saved = .{
+        .shell = app_state.shells[0], .count = app_state.shell_count, .active = app_state.active_shell,
+        .chat = app_state.g_chat_active, .main = app_state.g_main_hwnd, .transcript = app_state.g_chat_transcript_hwnd,
+        .outbox = app_state.g_chat_outbox, .working = app_state.g_chat_screen_working,
+        .status = app_state.g_chat_screen_status_len, .permission = app_state.g_chat_permission,
+        .permission_sid = app_state.g_chat_permission_sid, .timer = app_state.g_chat_working_timer_running,
+    };
+    app_state.g_chat_outbox = .empty;
+    defer {
+        _ = w.KillTimer(hwnd, w.TIMER_CHAT_WORKING);
+        _ = w.KillTimer(hwnd, w.TIMER_CHAT_REFRESH);
+        live.release(shell_id);
+        session.chatHistoryForget(shell_id);
+        for (app_state.g_chat_outbox.items) |item| std.heap.page_allocator.free(item.text);
+        app_state.g_chat_outbox.deinit(std.heap.page_allocator);
+        app_state.g_chat_outbox = saved.outbox;
+        app_state.shells[0] = saved.shell;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_transcript_hwnd = saved.transcript;
+        app_state.g_chat_screen_working = saved.working;
+        app_state.g_chat_screen_status_len = saved.status;
+        app_state.g_chat_permission = saved.permission;
+        app_state.g_chat_permission_sid = saved.permission_sid;
+        app_state.g_chat_working_timer_running = saved.timer;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+        g_working_rect = null;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].shell_id = shell_id;
+    app_state.shells[0].chat_id = shell_id;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_main_hwnd = hwnd;
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.g_chat_screen_working = false;
+    app_state.g_chat_screen_status_len = 0;
+    app_state.g_chat_permission.count = 0;
+    app_state.g_chat_working_timer_running = false;
+    app_state.g_chat_scroll_y = 0;
+    app_state.g_chat_block_count = 0;
+    app_state.g_chat_last_len = 0;
+    app_state.g_chat_layout_reuse = 0;
+    app_state.shells[0].kind = .tmux;
+    @memcpy(app_state.shells[0].tmux_session[0..6], "term-1");
+    app_state.shells[0].tmux_session_len = 6;
+    const cases = [_]struct { name: []const u8, history: bool, files: [6]LPCWSTR }{
+        .{ .name = "empty", .history = false, .files = .{ L("live-working-empty-queued.bmp"), L("live-working-empty-accepted.bmp"), L("live-working-empty-busy-0.bmp"), L("live-working-empty-busy-1.bmp"), L("live-working-empty-reply-delta.bmp"), L("live-working-empty-answered.bmp") } },
+        .{ .name = "history", .history = true, .files = .{ L("live-working-history-queued.bmp"), L("live-working-history-accepted.bmp"), L("live-working-history-busy-0.bmp"), L("live-working-history-busy-1.bmp"), L("live-working-history-reply-delta.bmp"), L("live-working-history-answered.bmp") } },
+    };
+    for (cases) |case| {
+        session.chatHistoryForget(shell_id);
+        live.release(shell_id);
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+        const identity = session.chatFileIdentity();
+        const history = session.chatHistoryEntry(identity) orelse return error.TestUnexpectedResult;
+        if (case.history) {
+            const wire = "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\n" ++
+                "{\"role\":\"user\",\"text\":\"Earlier question\",\"timestamp\":\"2026-10-03T12:34:00Z\",\"id\":\"one\"}\n" ++
+                "{\"role\":\"assistant\",\"text\":\"Earlier answer\",\"timestamp\":\"2026-10-03T12:34:01Z\",\"id\":\"two\"}\n@@MP_END@@\n";
+            try history.history.apply(std.heap.page_allocator, wire, 1, identity);
+            try std.testing.expect(history.history.blocks.items.len > 0);
+        } else {
+            try std.testing.expectEqual(@as(usize, 0), history.history.blocks.items.len);
+        }
+        session.chatDeferTranscriptLoad();
+        chatRelayout(800);
+        try std.testing.expectEqual(history.history.blocks.items.len, app_state.g_chat_block_count);
+        _ = live.begin(shell_id, 0, sid);
+        var entry = app_state.ChatOutboxEntry{ .id = 1668, .state = .queued };
+        entry.text = try std.heap.page_allocator.dupe(u16, std.unicode.utf8ToUtf16LeStringLiteral("Please reply."));
+        const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &entry.key);
+        entry.key_len = @intCast(key.len);
+        app_state.g_chat_outbox.append(std.heap.page_allocator, entry) catch |err| {
+            std.heap.page_allocator.free(entry.text);
+            return err;
+        };
+        const started = GetTickCount64();
+        layout.chatWorkingIndicatorSync();
+        try liveWorkingProofFrame(dc, case.files[0], bytes, info.header, started, case.name, "queued");
+        app_state.g_chat_outbox.items[0].state = .delivered;
+        app_state.g_chat_outbox.items[0].channel_sent = true;
+        layout.chatWorkingIndicatorSync();
+        try liveWorkingProofFrame(dc, case.files[1], bytes, info.header, started, case.name, "accepted-before-event");
+        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{}}}]}}";
+        try std.testing.expect(live.applyPage(shell_id, sid, begin));
+        session.chatFileOnReady();
+        try liveWorkingProofFrame(dc, case.files[2], bytes, info.header, started, case.name, "turn-started");
+        try std.testing.expect(live.running(shell_id));
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect != null);
+        try std.testing.expect(app_state.g_chat_working_timer_running);
+        w.Sleep(300);
+        layout.chatWorkingBarTick();
+        try liveWorkingProofFrame(dc, case.files[3], bytes, info.header, started, case.name, "tick");
+        const reply = "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t1\",\"item\":\"reply\",\"payload\":{\"text\":\"Ready.\"}}}]}}";
+        try std.testing.expect(live.applyPage(shell_id, sid, reply));
+        session.chatFileOnReady();
+        try liveWorkingProofFrame(dc, case.files[4], bytes, info.header, started, case.name, "reply-delta");
+        try std.testing.expect(live.running(shell_id));
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect == null);
+        const end = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"completed\"}}}]}}";
+        try std.testing.expect(live.applyPage(shell_id, sid, end));
+        app_state.shells[0].activity = .active;
+        session.chatFileOnReady();
+        layout.chatWorkingIndicatorSync();
+        try liveWorkingProofFrame(dc, case.files[5], bytes, info.header, started, case.name, "turn-ended");
+        try std.testing.expect(g_working_rect == null);
+        try std.testing.expect(layout.chatStopVisible());
+        app_state.g_chat_outbox.items[0].state = .queued;
+        layout.chatWorkingIndicatorSync();
+        try std.testing.expect(g_working_rect != null);
+        app_state.shells[0].activity = .idle;
+        std.heap.page_allocator.free(app_state.g_chat_outbox.items[0].text);
+        app_state.g_chat_outbox.clearRetainingCapacity();
+    }
 }
 
 test "IGSH-924 working dots reserve the next reply rectangle and disappear for idle or input" {

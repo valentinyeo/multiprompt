@@ -1,4 +1,5 @@
 const app_state = @import("app_state.zig");
+const launch_cache = @import("launch_cache.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const skill_model = @import("skills.zig");
@@ -942,6 +943,10 @@ fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: s
             appendJsonEscaped(out, &pos, std.mem.sliceTo(&m.message_wire_id, 0));
             const retry_text = std.fmt.bufPrint(out[pos..], "\",\"retry_nonce\":{d},\"reset_pending\":{d}", .{m.retry_nonce, @intFromBool(m.reset_pending)}) catch "";
             pos += retry_text.len;
+            if (m.message_admission_epoch) |epoch| {
+                const epoch_text = std.fmt.bufPrint(out[pos..], ",\"admission_epoch\":{d}", .{epoch}) catch "";
+                pos += epoch_text.len;
+            }
             out[pos] = '}';
             pos += 1;
         }
@@ -993,6 +998,12 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                             .counted = json_reader.uintDefault(mobj, "n", 0) != 0,
                         };
                         const entry = &list.items[list.items.len - 1];
+                        entry.from_disk = true;
+                        entry.message_admission_epoch = switch (json_reader.field(mobj, "admission_epoch")) {
+                            .integer => |n| if (n >= 0) @intCast(n) else null,
+                            .number_string => |n| std.fmt.parseInt(u64, n, 10) catch null,
+                            else => null,
+                        };
                         entry.channel_sent = entry.write_started and std.mem.startsWith(u8, key, "tmux:");
                         entry.host_held = json_reader.uintDefault(mobj, "held", 0) != 0;
                         entry.queue_id = json_reader.uintDefault(mobj, "qid", entry.queue_id);
@@ -1554,6 +1565,18 @@ test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab 
     try std.testing.expect(!chatMessageGoesToHost(.vps2, 2));
 }
 
+fn chatMessageCaptureAdmission(idx: u32, entry: *ChatOutboxEntry) void {
+    if (idx >= app_state.shell_count or entry.message_admission_epoch != null or entry.from_disk or !entry.message_v1 or entry.message_phase[0] != 0) return;
+    const identity = chatFileIdentityForShell(idx);
+    if (identity.sid[0] == 0 or !std.mem.eql(u8, &identity.sid, &entry.message_sid)) return;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0 or !std.mem.eql(u8, key, entry.key[0..entry.key_len])) return;
+    if (chatHistoryEntry(identity)) |history| {
+        if (history.message_synced) entry.message_admission_epoch = history.message_epoch;
+    }
+}
+
 fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?usize {
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
@@ -1566,6 +1589,7 @@ fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?u
         app_state.g_chat_outbox.items[added].message_v1 = true;
         app_state.g_chat_outbox.items[added].message_sid = chatFileIdentityForShell(idx).sid;
     }
+    chatMessageCaptureAdmission(idx, &app_state.g_chat_outbox.items[added]);
     app_state.g_chat_outbox.items[added].sent_tick_ms = @intCast(GetTickCount64());
     app_state.g_chat_outbox.items[added].expires_ms = anchor.sent_ms +| 600_000;
     if (!saveChatOutbox()) {
@@ -2101,6 +2125,7 @@ fn chatUpgradeToHostMessage(shell_index: u32, entry: *app_state.ChatOutboxEntry)
     while (entry.queue_id == 0) random_io.io().random(std.mem.asBytes(&entry.queue_id));
     _ = std.fmt.bufPrint(&entry.message_wire_id, "desktop-{x:0>16}{x:0>16}", .{ entry.message_nonce, entry.queue_id }) catch return false;
     entry.message_v1 = true;
+    entry.message_admission_epoch = null;
     entry.message_sid = identity.sid;
     entry.channel_pending = false;
     entry.write_started = false;
@@ -2111,6 +2136,7 @@ fn chatUpgradeToHostMessage(shell_index: u32, entry: *app_state.ChatOutboxEntry)
 
 fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: u64) ShellSendResult {
     if (shell_index >= app_state.shell_count) return .write_failed;
+    if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
     const route = chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
@@ -2129,6 +2155,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
                 entry.write_started = false;
                 return .write_failed;
             }
+            chatMessageCaptureAdmission(shell_index, entry);
             chatLogSendPath(shell_index, entry, route, "upgraded");
         }
         if (route == .terminal_send and entry.message_v1) {
@@ -2200,12 +2227,41 @@ test "Chat View send: a host message is not held while the tab console reconnect
     try std.testing.expect(!chatOutboxHeldByLink(false, false, false));
 }
 
+fn chatOutboxRecoverOlderAdmission(idx: u32, e: usize) bool {
+    if (idx >= app_state.shell_count or e >= app_state.g_chat_outbox.items.len) return true;
+    const entry = &app_state.g_chat_outbox.items[e];
+    const epoch = entry.message_admission_epoch orelse return true;
+    if (!entry.message_v1 or entry.message_phase[0] != 0 or entry.channel_pending or entry.reset_pending or entry.state == .cancelled) return true;
+    const identity = chatFileIdentityForShell(idx);
+    if (identity.sid[0] == 0 or !std.mem.eql(u8, &identity.sid, &entry.message_sid)) return true;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0 or !std.mem.eql(u8, key, entry.key[0..entry.key_len])) return true;
+    const history = chatHistoryEntry(identity) orelse return true;
+    if (!history.message_synced or epoch >= history.message_epoch) return true;
+    if (entry.state == .queued and !entry.write_started and !entry.retryable) return true;
+    const state = entry.state;
+    const write_started = entry.write_started;
+    const retryable = entry.retryable;
+    entry.state = .queued;
+    entry.write_started = false;
+    entry.retryable = false;
+    if (!saveChatOutbox()) {
+        entry.state = state;
+        entry.write_started = write_started;
+        entry.retryable = retryable;
+        return false;
+    }
+    return true;
+}
+
 fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (e >= app_state.g_chat_outbox.items.len) return false;
     if (app_state.g_chat_pending_reset) |pending| {
         const identity = chatFileIdentityForShell(shell_index);
         if (identity.host == pending.key.host and identity.codex == pending.key.codex and identity.pi == pending.key.pi and std.mem.eql(u8, &identity.sid, &pending.key.sid)) return false;
     }
+    if (!chatOutboxRecoverOlderAdmission(shell_index, e)) return false;
     if (app_state.g_chat_outbox.items[e].message_v1) {
         if (chatHistoryEntry(chatFileIdentityForShell(shell_index))) |history| {
             if (GetTickCount64() < history.send_next_tick) return false;
@@ -2310,7 +2366,7 @@ pub fn chatOutboxTick() void {
         chatOutboxChanged();
     }
     if (app_state.g_chat_active) chatEchoMatchActive();
-    if (chatOutboxFindSending(&app_state.g_chat_outbox) == null) {
+    {
         for (0..app_state.g_chat_outbox.items.len) |e| {
             const key = app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)];
             const idx = chatOutboxShellForKey(key) orelse continue;
@@ -3088,6 +3144,7 @@ fn chatTmuxSendStart(idx: u32, text: []const u16, echo_id: u64, retry: bool, sta
         const entry = app_state.g_chat_outbox.items[ei];
         if (!entry.message_v1 and app_state.shells[idx].ai_agent >= 2) { a.free(job.text); a.destroy(job); return false; }
         job.message_v1 = entry.message_v1;
+        job.message_admission_epoch = entry.message_admission_epoch;
         job.message_nonce = entry.message_nonce;
         job.message_wire_id = entry.message_wire_id;
         job.request_nonce = entry.retry_nonce;
@@ -3135,7 +3192,7 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
         }
         var request_buf: [48]u8 = undefined;
         const request_id = std.fmt.bufPrint(&request_buf, "{x:0>16}{x:0>16}", .{ job.message_nonce, job.request_nonce }) catch return;
-        const query = std.json.Stringify.valueAlloc(a, .{ .op = if (job.message_reset) "message_reset" else if (job.message_dismiss) "message_dismiss" else if (job.message_status) "message_status" else if (job.retry) "message_retry" else "message_submit", .message_protocol = 1, .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .provider = job.key.provider(), .sid = std.mem.sliceTo(&job.key.sid, 0), .message_id = token, .text = text, .retry_id = request_id, .reset_id = request_id }, .{}) catch return;
+        const query = std.json.Stringify.valueAlloc(a, .{ .op = if (job.message_reset) "message_reset" else if (job.message_dismiss) "message_dismiss" else if (job.message_status) "message_status" else if (job.retry) "message_retry" else "message_submit", .message_protocol = 1, .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .provider = job.key.provider(), .sid = std.mem.sliceTo(&job.key.sid, 0), .message_id = token, .text = text, .retry_id = request_id, .reset_id = request_id, .admission_epoch = job.message_admission_epoch }, .{}) catch return;
         defer a.free(query);
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);

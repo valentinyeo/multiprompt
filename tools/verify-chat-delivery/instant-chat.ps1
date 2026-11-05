@@ -76,6 +76,43 @@ foreach ($message in $messages) {
 Copy-Item "$settings/chat-outbox.json" "$caseDir/offline-outbox.json"
 [void](Wait-For 'real transport attempted while connection held' { Test-Path "$state/connection-waits.jsonl" } 5)
 Shot 'instant-buffered'
+$offline = Read-Shared "$caseDir/offline-outbox.json" | ConvertFrom-Json
+$offlinePending = @($offline.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -in $messages })
+if ($offlinePending.Count -ne 2 -or -not $offlinePending[0].wire_id -or -not $offlinePending[1].wire_id) { throw 'Offline pending wire IDs missing' }
+if (-not (Test-Path "$state/connection-held")) { throw 'Connection was released before crash' }
+$crashedPid = $app.Id
+$stopped = $job.Stop()
+Save $stopped "$caseDir/crash-process-tree.json"
+if ($stopped.ActiveProcesses -ne 0 -or -not $app.WaitForExit(10000)) { throw 'Crash left owned processes running' }
+Save @{pid=$crashedPid; stoppedMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); connectionHeld=(Test-Path "$state/connection-held")} "$caseDir/crash-receipt.json"
+$job.Dispose()
+if (-not (Test-Path "$state/connection-held")) { throw 'Connection was released during crash' }
+Copy-Item "$settings/chat-outbox.json" "$caseDir/crash-outbox.json"
+$crashed = Read-Shared "$caseDir/crash-outbox.json" | ConvertFrom-Json
+$crashPending = @($crashed.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -in $messages })
+if ($crashPending.Count -ne 2 -or $crashPending[0].t -cne $offlinePending[0].t -or $crashPending[1].t -cne $offlinePending[1].t -or $crashPending[0].wire_id -cne $offlinePending[0].wire_id -or $crashPending[1].wire_id -cne $offlinePending[1].wire_id) { throw 'Pending messages or wire IDs changed after crash' }
+$job = [VerifyJob]::new()
+$app = $job.Start($Exe, $profile, "$caseDir/reloaded-stdout.log", "$caseDir/reloaded-stderr.log", '--no-window-restore')
+$main = Wait-For 'reloaded owned window while connection held' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+$composer = Wait-For 'reloaded native composer while connection held' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h } }
+Bind-Transcript
+Save @{pid=$app.Id; hwnd=$main.ToInt64(); startedMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); connectionHeld=(Test-Path "$state/connection-held")} "$caseDir/reloaded-receipt.json"
+[void](Wait-For 'both pending messages rendered after crash while connection held' {
+    if (-not (Test-Path "$state/connection-held")) { throw 'Connection was released before reload proof' }
+    [Windows.Forms.Clipboard]::Clear()
+    Press @(0x11, 0x4B) 'Ctrl+K: select reloaded conversation while offline'
+    foreach ($letter in 'chat view select all'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+    Press @(0x0D) 'Enter: select reloaded conversation'
+    Press @(0x11, 0x43) 'Ctrl+C: copy reloaded conversation'
+    $reloaded = [Windows.Forms.Clipboard]::GetText()
+    [IO.File]::WriteAllText("$caseDir/reloaded-copied.txt", $reloaded)
+    Press @(0x1B) 'Esc: clear reloaded conversation selection'
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    $reloaded.Contains($messages[0]) -and $reloaded.Contains($messages[1])
+} 10)
+Copy-Item "$settings/chat-outbox.json" "$caseDir/reloaded-outbox.json"
+Shot 'instant-reloaded'
+if (-not (Test-Path "$state/connection-held")) { throw 'Connection was released before store check' }
 $store = "$profile/home/.local/state/multiprompt/shared-messages/store.sqlite3"
 $before = & $env:MP_VERIFY_PYTHON "$PSScriptRoot/instant-store.py" $store
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect pre-connect store' }
