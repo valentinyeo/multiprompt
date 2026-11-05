@@ -95,6 +95,10 @@ foreach ($theme in $themes) {
     Press @(0x55) 'U: toggle selected session read state after search clear'
     Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.shells[0].att -ne $beforeAttention } 'U toggled published attention after Escape'
     $changedAttention = (Read-Inbox).shells[0].att
+    Press @(0x1B) 'Esc: close Inbox after published attention change'
+    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $false -and $s.shells[0].att -eq $changedAttention } 'changed attention retained after Inbox closes'
+    Press @(0x12, 0x49) 'Alt+I: reopen All with published attention'
+    Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.inbox_active -eq $true -and $s.shells[0].att -eq $changedAttention } 'Inbox reopened with changed attention published'
     Press @(0x55) 'U: restore session read state'
     Wait-Until { $s = Read-Inbox; $null -ne $s -and $s.shells[0].att -eq $beforeAttention } 'U restored published attention'
     Press @(0x11, 0x10, 0x55) 'Ctrl+Shift+U: enable unread only'
