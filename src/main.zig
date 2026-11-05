@@ -4981,8 +4981,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             return 0;
                         };
                         const title_id = app_state.shells[idx].title_id;
-                        _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
-                        cancelShellRefocus(hwnd);
                         var file: [32768]u16 = @splat(0);
                         var picker = std.mem.zeroes(app_state.OPENFILENAMEW);
                         picker.lStructSize = @sizeOf(app_state.OPENFILENAMEW);

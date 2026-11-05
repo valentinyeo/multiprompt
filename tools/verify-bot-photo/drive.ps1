@@ -59,6 +59,7 @@ $job = $null
 $app = $null
 $main = [IntPtr]::Zero
 $switchJob = $null
+$nativeJob = $null
 $switchApp = $null
 $switchWindow = [IntPtr]::Zero
 $lastDialog = [IntPtr]::Zero
@@ -152,6 +153,15 @@ function Switch-Picker([IntPtr]$Dialog) {
         Check 'picker-foreground-after-alt-tab' ($state.foreground -eq $Dialog.ToInt64())
     }
 }
+function Submit-File([IntPtr]$Dialog, [string]$Path) {
+    [Windows.Forms.Clipboard]::SetText($Path)
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $Dialog) { throw 'File dialog lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x4e))
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x41))
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x56))
+    [ChatDeliveryDesktop]::Chord(@(0x0d))
+    [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $Dialog })
+}
 function Pick([string]$Path, [bool]$SwitchAway = $false) {
     $start = (Log).Length
     Look 'bot face' 'upload image' 7193
@@ -183,13 +193,7 @@ function Pick([string]$Path, [bool]$SwitchAway = $false) {
         }
         return
     }
-    [Windows.Forms.Clipboard]::SetText($Path)
-    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog) { throw 'File dialog lost foreground' }
-    [ChatDeliveryDesktop]::Chord(@(0x12, 0x4e))
-    [ChatDeliveryDesktop]::Chord(@(0x11, 0x41))
-    [ChatDeliveryDesktop]::Chord(@(0x11, 0x56))
-    [ChatDeliveryDesktop]::Chord(@(0x0d))
-    [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog })
+    Submit-File $dialog $Path
     [void](Wait-For 'import completed' { $trace = Log; $trace.Length -ge $start -and $trace.Substring($start) -match '\[bot-photo\] import=(ok|failed)' })
 }
 function Shot([string]$Name) {
@@ -307,6 +311,25 @@ try {
         $window = [PhotoDialogOwner]::SwitchTarget([uint32]$switchApp.Id)
         if ($window -ne [IntPtr]::Zero) { $window }
     }
+    $nativeReceipt = Join-Path $Evidence 'native-control.json'
+    $nativeJob = [VerifyJob]::new()
+    $app = $nativeJob.Start((Get-Process -Id $PID).Path, $Evidence, (Join-Path $Evidence 'native-control.stdout.log'), (Join-Path $Evidence 'native-control.stderr.log'), ('-NoProfile -STA -File "' + "$PSScriptRoot/switch-target.ps1" + '" -NativePicker -Receipt "' + $nativeReceipt + '"'), $true)
+    $main = Wait-For 'standalone native owner' {
+        if ($app.HasExited) { throw 'Standalone native control exited before its window' }
+        $window = [PhotoDialogOwner]::SwitchTarget([uint32]$app.Id)
+        if ($window -ne [IntPtr]::Zero) { $window }
+    }
+    $lastDialog = Dialog
+    try {
+        Switch-Picker $lastDialog
+        Submit-File $lastDialog $wide
+        [void](Wait-For 'standalone native selection receipt' { Test-Path $nativeReceipt })
+        $nativeResult = Get-Content $nativeReceipt -Raw | ConvertFrom-Json
+        Check 'standalone-native-picker-after-alt-tab' ($nativeResult.answer -eq 'OK' -and $nativeResult.selected -ceq $wide)
+    } catch { throw ('Standalone Windows picker control: ' + $_.Exception.Message) }
+    $nativeStopped = $nativeJob.Stop()
+    Check 'standalone-native-control-cleaned' ($nativeStopped.ActiveProcesses -eq 0)
+    $nativeJob.Dispose(); $nativeJob = $null
     Start-App
     Shot 'before'
     Look 'bot face' 'tall one eye' 7145
@@ -425,6 +448,11 @@ try {
     try { Save (Picker-State $lastDialog) (Join-Path $Evidence 'failure-state.json'); Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup = 0 }
+    if ($null -ne $nativeJob) {
+        $nativeStopped = $nativeJob.Stop()
+        $result.cleanup += $nativeStopped.ActiveProcesses
+        $nativeJob.Dispose()
+    }
     if ($null -ne $switchJob) {
         $switchStopped = $switchJob.Stop()
         $result.cleanup += $switchStopped.ActiveProcesses
