@@ -13,7 +13,7 @@ Type /plan or /permissions in live chat. Press Enter, then choose a mode. Ctrl+K
 Dispatch the GitHub Windows journey:
 
 ```sh
-gh workflow run verify.yml --ref igsh-1522-live-chat-slash -f feature=chat-slash
+gh workflow run verify.yml --ref igsh-1644-hosted-questions -f feature=chat-slash
 ```
 
 The journey selects an isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
