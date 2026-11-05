@@ -69,7 +69,11 @@ test('real tmux parking markers survive repeated visible spawn', { skip: !unix }
   const { run } = await import('./mp-layout.mjs');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-spawn-tmux-'));
   const socket = 'mp-spawn-' + crypto.randomBytes(12).toString('hex');
-  const tmux = args => spawnSync('tmux', ['-L', socket, ...args], { encoding: 'utf8', timeout: 10000, env: { HOME: home, PATH: process.env.PATH } });
+  const tmux = args => {
+    const result = spawnSync('tmux', ['-L', socket, ...args], { encoding: 'utf8', timeout: 10000, env: { HOME: home, PATH: process.env.PATH } });
+    t.diagnostic(JSON.stringify({ args, status: result.status, stdout: result.stdout, stderr: result.stderr }));
+    return result;
+  };
   t.after(() => { tmux(['kill-server']); fs.rmSync(home, { recursive: true, force: true }); });
   assert.equal(spawnSync('tmux', ['-V']).status, 0, 'hosted Unix proof requires tmux');
   let layout = { workspaces: [{ name: 'Work' }], tabs: [] }, revision = 0;
