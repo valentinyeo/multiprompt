@@ -1427,8 +1427,8 @@ fn startDeferredBrowserUrlQuery() void {
     browser_url_query_deferred = null;
     if (!startBrowserUrlQuery(job)) {
         if (job.purpose == .navigate_pin) finishPinnedNavigation(job.shell_id, job.entry_token);
+        if (job.purpose != .poll) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
         std.heap.page_allocator.destroy(job);
-        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
     }
 }
 

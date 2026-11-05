@@ -495,7 +495,6 @@ const updateCardPoll = @import("update_card.zig").updateCardPoll;
 const updateCardDismiss = @import("update_card.zig").updateCardDismiss;
 const updateCardRelaunch = @import("update_card.zig").updateCardRelaunch;
 const capacityBlockNoticeActive = @import("capacity.zig").capacityBlockNoticeActive;
-const announceCapacityTransitions = @import("capacity.zig").announceCapacityTransitions;
 const focusGuardComposerRepairAllowed = @import("focus.zig").focusGuardComposerRepairAllowed;
 const focusGuardNoteActivation = @import("focus.zig").focusGuardNoteActivation;
 const PostMessageW = @import("focus.zig").PostMessageW;
@@ -1470,7 +1469,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     }
     if (msg == @import("win32.zig").WM_APP_APP_SAVE_FAILED) {
         if (@import("file_io.zig").g_save_failure_pending.swap(false, .acq_rel) and hwnd == app_state.g_main_hwnd and hwnd != null and !app_state.g_app_closing and @import("win32.zig").IsWindow(hwnd) != 0) {
-            @import("console.zig").showHeaderNoticeAscii(@import("ui_words.zon").app_changes_save_error, 4000, false);
+            debugLog(@import("ui_words.zon").app_changes_save_error);
         }
         return 0;
     }
@@ -3894,11 +3893,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_voice_mode_active and app_state.g_voice_always_listen) {
                 if (wp == 2 and !app_state.g_voice_echo_notice_shown) {
                     app_state.g_voice_echo_notice_shown = true;
-                    showHeaderNoticeAscii("No echo cancelling on this mic: talk over it clearly or use headphones", 5000, true);
+                    debugLog("No echo cancelling on this mic: talk over it clearly or use headphones");
                 } else if (wp == 3) {
                     app_state.g_voice_mic_failed = true;
                     dictationAudit("voice-duplex-mic-failed", @intCast(lp));
-                    showHeaderNoticeAscii("Always listening unavailable, taking turns", 5000, true);
+                    debugLog("Always listening unavailable, taking turns");
                     if (app_state.g_voice_state == .idle) voiceStartListening();
                     invalidateChatHeader();
                 }
@@ -3969,11 +3968,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (!@import("room_frontend.zig").privateActionsAllowed() or !valid or (app_state.g_voice_manual_playing and !@import("voice.zig").voiceManualValid()) or
                 (!app_state.g_voice_replay_only and !app_state.g_voice_mode_active) or app_state.g_voice_state != .speaking or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != fallback_shell) return 0;
             if (!app_state.g_voice_tts_fallback_shown.swap(true, .acq_rel)) {
-                showHeaderNoticeAscii("Deepgram voice unavailable, using Windows voice", 4000, true);
+                debugLog("Deepgram voice unavailable, using Windows voice");
             }
             if (!voiceSapiStart()) {
                 app_state.g_voice_state = .idle;
-                showHeaderNoticeAscii("Voice Mode: text-to-speech unavailable", 4000, true);
+                debugLog("Voice Mode: text-to-speech unavailable");
                 invalidateChatHeader();
                 return 0;
             }
@@ -7589,7 +7588,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("usage_card.zig").refresh();
             if (app_state.g_vps_poll_is_leader) writeVpsPollCache();
             _ = syncLiveTmuxMetadataFromCache();
-            announceCapacityTransitions();
             if (app_state.g_search_active) updateSearchResults();
             invalidateSidebar();
             _ = InvalidateRect(hwnd, null, 0);
@@ -7948,7 +7946,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (duplex.voiceShouldAutoOff(true, working, speaking, now -| app_state.g_voice_last_activity_tick)) {
                             dictationAudit("voice-duplex-autooff", 600000);
                             setVoiceModeActive(false);
-                            showHeaderNoticeAscii("Voice Mode off after 10 quiet minutes", 4000, false);
+                            debugLog("Voice Mode off after 10 quiet minutes");
                         }
                     }
                     _ = SetTimer(hwnd, TIMER_CHAT_REFRESH, @as(UINT, 750), null);
@@ -8121,7 +8119,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         cancelPendingNativeBrowserFocus();
                         app_state.g_browser_focus_mode = false;
                         app_state.g_shell_focused = true;
-                        showHeaderNoticeAscii("Browser focus failed", 2500, false);
+                        debugLog("Browser focus failed");
                     }
                     return 0;
                 }
@@ -8144,7 +8142,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         cancelPendingNativeBrowserFocus();
                         app_state.g_browser_focus_mode = false;
                         app_state.g_shell_focused = true;
-                        showHeaderNoticeAscii("Browser focus failed", 2500, false);
+                        debugLog("Browser focus failed");
                     }
                 }
                 return 0;
@@ -9220,20 +9218,20 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             }
             startTunnelInboundListener();
             if (!@import("session.zig").prepareStartupRestore()) {
-                showHeaderNoticeAscii("Could not start session restore", 5000, true);
+                debugLog("Could not start session restore");
                 return true;
             }
         },
         .tabs => {
             if (app_state.g_adopt_browser_invalid) {
-                showHeaderNoticeAscii("Cannot move this pinned page", 4000, true);
+                debugLog("Cannot move this pinned page");
                 return true;
             }
             if (app_state.g_account_locked or !@import("session.zig").startupRestoreReady()) return false;
             switch (@import("notifications.zig").listener_status.load(.acquire)) {
                 .pending => return false,
                 .failed => {
-                    showHeaderNoticeAscii("Notifications unavailable. Sessions are still restoring.", 30000, true);
+                    debugLog("Notifications unavailable. Sessions are still restoring.");
                 },
                 .ready => {},
             }
@@ -9338,7 +9336,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .chat => {
             launch_cache.tabs_restored = true;
-            if (app_state.g_adopt_browser != null and !@import("session.zig").saveSessionQueued()) showHeaderNoticeAscii("Could not save this pinned page", 4000, true);
+            if (app_state.g_adopt_browser != null and !@import("session.zig").saveSessionQueued()) debugLog("Could not save this pinned page");
             for (0..app_state.shell_count) |idx| {
                 @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
             }
@@ -9417,10 +9415,8 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 } else |_| {}
             }
 
-            if (crash_recorder.takeFreezeNotice()) {
-                showHeaderNoticeAscii(freeze_recorder.NOTICE_TEXT, 8000, false);
-                debugLog(freeze_recorder.NOTICE_TEXT);
-            } else if (crash_recorder.takeRestartNotice()) showHeaderNoticeAscii(crash_recorder.NOTICE_TEXT, 8000, false);
+            if (crash_recorder.takeFreezeNotice()) debugLog(freeze_recorder.NOTICE_TEXT);
+            if (crash_recorder.takeRestartNotice()) debugLog(crash_recorder.NOTICE_TEXT);
         },
         .done => {
             @import("room_frontend.zig").startupSettled();

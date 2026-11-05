@@ -373,11 +373,11 @@ pub fn voiceSendTranscriptToShell(transcript: []const u16) bool {
             return true;
         },
         .write_failed => {
-            showHeaderNoticeAscii("Voice Mode could not write to this terminal", 3500, true);
+            debugLog("Voice Mode could not write to this terminal");
             return false;
         },
         .enter_failed => {
-            showHeaderNoticeAscii("Voice Mode sent the reply but could not press Enter", 3500, true);
+            debugLog("Voice Mode sent the reply but could not press Enter");
             return false;
         },
     }

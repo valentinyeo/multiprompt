@@ -1531,7 +1531,6 @@ pub fn chatFileOnReady() void {
             entry.missing_message = @splat(0);
             if (entry.resync and !disk and !history.more) {
                 entry.resync = false;
-                if (belongs_to_active) showHeaderNoticeAscii("Chat resynced", 3000, false);
                 debugLog("[chat] resync completed");
             }
             entry.next = GetTickCount64() + (if (disk or entry.prepended or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else if (entry.stream != null) @as(u64, 0) else chatFilePollInterval());

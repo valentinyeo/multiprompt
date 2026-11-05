@@ -491,7 +491,6 @@ fn finishMonitorTransition(hwnd: HANDLE, ok: bool, stage: []const u8) void {
     armConsoleGeometrySettle(hwnd);
     const final_ok = ok and monitorTransitionMasksReady();
     auditMonitorTransition(if (ok and !final_ok) "mask_readback" else stage, final_ok, actual);
-    if (!final_ok) showHeaderNoticeAscii("Monitor move incomplete - audit saved", 5000, true);
 }
 
 pub fn monitorTransitionTick(hwnd: HANDLE) void {

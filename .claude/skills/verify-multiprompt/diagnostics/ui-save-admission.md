@@ -4,12 +4,12 @@
 
 - Every UI-thread save uses the existing background write queue, including empty payloads.
 - Rejected admission returns failure without entering the synchronous disk writer.
-- Rejected saves share the existing coalesced saving-failed notice; failed notice posting permits retry.
+- Rejected saves share the existing coalesced saving-failed diagnostic; failed message posting permits retry. Background failures do not paint an orange notice.
 - Successful admission and non-UI synchronous success/failure retain their existing results.
 
 ## How to get to it (user POV)
 
-Change a workspace or another saved preference. Saving must not stop window input. If a background save cannot be accepted, the existing saving-failed notice appears instead of silently blocking the window.
+Change a workspace or another saved preference. Saving must not stop window input. If a background save cannot be accepted, the failure remains recorded in diagnostics without an unsolicited orange notice or blocked window input.
 
 ## Driving it with hosted CI
 

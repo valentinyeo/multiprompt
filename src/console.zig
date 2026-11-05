@@ -2359,7 +2359,6 @@ pub fn markPinnedLocalTabDisconnected(idx: u32) void {
     app_state.shells[idx].activity = .idle;
     app_state.shells[idx].needs_attention = false;
     app_state.shells[idx].disconnected = true;
-    showHeaderNoticeAscii("Pinned session disconnected", 8000, true);
     logSessionAuditAlways("pinned-local-session-exited-preserved");
     invalidateSidebar();
     saveSession();
@@ -2840,12 +2839,8 @@ pub fn switchToShell(idx: u32) void {
                 if (app_state.g_chat_active) {
                     insertTextIntoChatComposer(pending.text[0..pending.len]);
                     pending.* = .{};
-                    showHeaderNoticeAscii("Voice text added, press Enter to send", 3500, false);
                 } else if (voicePasteTranscriptToShellNoEnter(pending.text[0..pending.len])) {
                     pending.* = .{};
-                    showHeaderNoticeAscii("Voice text added, press Enter to send", 3500, false);
-                } else {
-                    showHeaderNoticeAscii("Voice text not added, switch back to this tab to retry", 3500, true);
                 }
             }
         }
@@ -3027,7 +3022,7 @@ pub fn finishStartupShell(job: *StartupShell) void {
         } else {
             app_state.shells[idx].launch_failed = true;
             app_state.shells[idx].needs_attention = true;
-            showHeaderNoticeAscii("Could not start terminal. Close the tab and try again.", 10000, true);
+            debugLog("Could not start terminal. Close the tab and try again.");
         }
         if (!job.reconnect) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;

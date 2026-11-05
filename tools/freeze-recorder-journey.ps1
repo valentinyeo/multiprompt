@@ -14,6 +14,21 @@ public static class FreezeJourney {
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
+    [StructLayout(LayoutKind.Sequential)] struct Keyboard { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
+    [StructLayout(LayoutKind.Explicit)] struct Data { [FieldOffset(0)] public Mouse Mouse; [FieldOffset(0)] public Keyboard Keyboard; }
+    [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public Data Data; }
+    [DllImport("user32.dll")] static extern uint SendInput(uint count, Input[] inputs, int size);
+    public static void FontBigger() {
+        Input[] input = new Input[4];
+        ushort[] keys = { 0x11, 0xBB, 0xBB, 0x11 };
+        for (int i = 0; i < input.Length; i++) {
+            input[i].Type = 1;
+            input[i].Data.Keyboard = new Keyboard { Key = keys[i], Flags = i < 2 ? 0u : 2u };
+        }
+        if (SendInput(4, input, Marshal.SizeOf(typeof(Input))) != 4) throw new InvalidOperationException("Font command SendInput failed");
+    }
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -68,6 +83,26 @@ function Wait-Window {
         Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $until)
     throw 'Window never responded'
+}
+function Capture-NoticePixels([string]$Name) {
+    $rect = New-Object FreezeJourney+Rect
+    if (-not [FreezeJourney]::GetWindowRect($script:window, [ref]$rect)) { throw 'Missing owned window bounds' }
+    $bitmap = New-Object Drawing.Bitmap ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $dc = $graphics.GetHdc()
+        try { if (-not [FreezeJourney]::PrintWindow($script:window, $dc, 2)) { throw 'Cannot capture owned window' } }
+        finally { $graphics.ReleaseHdc($dc) }
+        $bitmap.Save((Join-Path $Evidence $Name))
+        $orange = 0
+        for ($y = 0; $y -lt [Math]::Min(120, $bitmap.Height); $y++) {
+            for ($x = [int]($bitmap.Width / 2); $x -lt $bitmap.Width - 8; $x++) {
+                $color = $bitmap.GetPixel($x, $y)
+                if ($color.R -ge 120 -and $color.G -ge 60 -and $color.G -le 220 -and $color.B -le 130 -and $color.R -ge $color.G + 20 -and $color.G -ge $color.B + 15) { $orange++ }
+            }
+        }
+        return $orange
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Reports { return @(Get-ChildItem $crashes -Filter 'freeze-*.txt' -ErrorAction SilentlyContinue) }
 function Stall([bool]$VerifyLive = $false) {
@@ -134,18 +169,16 @@ try {
     $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
     $window = Wait-Window $app
     Start-Sleep -Seconds 3
-    $rect = New-Object FreezeJourney+Rect
-    if (-not [FreezeJourney]::GetWindowRect($window, [ref]$rect)) { throw 'Missing notice window bounds' }
-    $bitmap = New-Object Drawing.Bitmap ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    $dc = $graphics.GetHdc()
-    try { if (-not [FreezeJourney]::PrintWindow($window, $dc, 2)) { throw 'Cannot capture next-start notice' } } finally { $graphics.ReleaseHdc($dc) }
-    $bitmap.Save((Join-Path $Evidence 'next-start.png'))
-    $graphics.Dispose()
-    $bitmap.Dispose()
+    $restartNoticePixels = Capture-NoticePixels 'next-start.png'
+    if ($restartNoticePixels -ne 0) { throw "Unprompted restart notice remains: $restartNoticePixels orange pixels" }
+    if (-not [FreezeJourney]::SetForegroundWindow($window)) { throw 'Cannot focus owned app for action feedback' }
+    [FreezeJourney]::FontBigger()
+    Start-Sleep -Milliseconds 250
+    $userActionNoticePixels = Capture-NoticePixels 'user-action.png'
+    if ($userActionNoticePixels -lt 10) { throw 'User font command lost its visible feedback' }
     $log = -join (Get-Content -LiteralPath (Join-Path $env:APPDATA 'ZigShell/debug.log') -Raw)
-    if (-not $log.Contains('Multi Bot froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
-    if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Next-start notice was not consumed' }
+    if (-not $log.Contains('Multi Bot froze last time, a report was saved')) { throw 'Quiet restart lost the saved freeze diagnostic' }
+    if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Quiet restart did not consume the freeze marker' }
     if (@(Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
     if ($Service) {
         if (@(Get-ChildItem $crashes -Filter 'upload-*.json').Count -ne 1) { throw 'Restart lost pending report' }
@@ -172,7 +205,7 @@ try {
         @{ device = $state.device_id; version = ([regex]::Match($text, '(?m)^version: (.+)$')).Groups[1].Value; captured = ([regex]::Match($text, '(?m)^time_unix: (.+)$')).Groups[1].Value } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'live-result.json')
         Write-Host 'FREEZE_LIVE_UPLOAD_OK'
     }
-    @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; watchdogHealth = [bool]$healthReceipt; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
+    @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; watchdogHealth = [bool]$healthReceipt; restartNoticePixels = $restartNoticePixels; userActionNoticePixels = $userActionNoticePixels; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
     Stop-Process -Id $app.Id -Force
     if (-not $app.WaitForExit(5000)) { throw 'Original freeze journey process did not exit' }
     $app.Dispose()
