@@ -1127,7 +1127,6 @@ const invalidateSpinnerRects = @import("window_layout.zig").invalidateSpinnerRec
 const startWindowRename = @import("rename.zig").startWindowRename;
 const startRename = @import("rename.zig").startRename;
 const beginPaletteRenameInput = @import("rename.zig").beginPaletteRenameInput;
-const startThreadTitleRename = @import("rename.zig").startThreadTitleRename;
 const startGroupRename = @import("rename.zig").startGroupRename;
 const commitRename = @import("rename.zig").commitRename;
 const openTabContextPalette = @import("rename.zig").openTabContextPalette;
@@ -1864,11 +1863,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (@import("chat_composer.zig").chatDictationClick(mx, my)) return 0;
                 if (chatTitleLayout()) |title| {
-                    const name = title.text;
-                    if (@import("room_frontend.zig").privateActionsAllowed() and mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
-                        startThreadTitleRename();
-                        return 0;
-                    }
                     const more = title.more;
                     if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
                         more_menu.open();
@@ -2080,14 +2074,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (@import("room_frontend.zig").privateActionsAllowed() and tth_click > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth_click and
                     (!app_state.g_chat_active or (mx >= chatViewLayout().transcript.left and mx < chatViewLayout().transcript.right)))
                 {
-                    var client: RECT = std.mem.zeroes(RECT);
-                    _ = GetClientRect(hwnd, &client);
-                    if (@import("drawing.zig").threadTitleNameRectFor(client.right, app_state.active_shell)) |name| {
-                        if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
-                            startThreadTitleRename();
-                            return 0;
-                        }
-                    }
                     app_state.g_shell_focused = true;
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -2152,15 +2138,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
-                            if (!isCtrlDown() and (wp & 0x0004) == 0 and @import("room_frontend.zig").privateActionsAllowed()) {
-                                if (@import("rename.zig").sidebarNameRect(tab_idx)) |name| {
-                                    if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
-                                        if (tab_idx != app_state.active_shell or @import("room_frontend.zig").isActive()) @import("console.zig").switchToShellByUser(tab_idx);
-                                        startRename(tab_idx);
-                                        return 0;
-                                    }
-                                }
-                            }
                             commitRename();
                             const ctrl = isCtrlDown();
                             const shift = (wp & 0x0004) != 0;
@@ -2838,14 +2815,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
                 !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
                 !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
-            const tth = threadTitleHeight();
-            const tth_top = threadTitleTop();
-            if (@import("room_frontend.zig").privateActionsAllowed() and tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
-                (!app_state.g_chat_active or (mx >= chatViewLayout().transcript.left and mx < chatViewLayout().transcript.right)))
-            {
-                startThreadTitleRename();
-                return 0;
-            }
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
                 if (updateCardHit(mx, my) != 0) return 0;
@@ -2858,11 +2827,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
-                    .tab => |tab_idx| {
-                        if (mx <= SIDEBAR_W() - 30 and tab_idx < app_state.shell_count and tab_idx == app_state.active_shell) {
-                            startRename(tab_idx);
-                        }
-                    },
                     .header => |gidx| {
                         if (gidx < app_state.group_count) startGroupRename(gidx);
                     },

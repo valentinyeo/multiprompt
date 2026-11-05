@@ -268,7 +268,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Create Snippet", .b = "Save a named paste block", .header = false },
     .{ .a = "Ctrl+K -> Manage Snippets", .b = "Delete saved snippets; Esc cancels", .header = false },
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
-    .{ .a = "F2 / click or double-click name", .b = "Rename chat title, tab or selected Inbox session", .header = false },
+    .{ .a = "F2", .b = "Rename chat title, tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },
     .{ .a = "Alt+1", .b = "Go to Starred workspace", .header = false },
     .{ .a = "Alt+1 ... 9", .b = "Switch workspace: 1 is Starred, 2-9 are stored workspaces", .header = false },
