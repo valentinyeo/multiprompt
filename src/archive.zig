@@ -1014,10 +1014,7 @@ pub fn rejectPinnedGroupClose(gid: u32) bool {
     return false;
 }
 
-pub fn archiveTabAt(i: usize) void {
-    if (i >= app_state.shell_count) return;
-    if (rejectPinnedSessionClose(i)) return;
-    if (app_state.shells[i].tmux_session_len == 0) return;
+fn rememberArchivedTab(i: usize) ?ArchivedEntry {
     loadArchiveFromDisk(true);
     var entry = ArchivedEntry{};
     entry.name_len = @intCast(@min(app_state.shells[i].name_len, @as(u32, 63)));
@@ -1042,19 +1039,28 @@ pub fn archiveTabAt(i: usize) void {
         !remoteResumeFieldsAreSafe(entry.claude_sid[0..entry.claude_sid_len], entry.claude_cwd[0..entry.claude_cwd_len]))
     {
         showHeaderNoticeAscii("Unsafe tmux session name", 4000, true);
-        return;
+        return null;
     }
     if (!upsertArchivedEntry(entry)) {
         debugLog("archiveTabAt: could not grow archive");
         showHeaderNoticeAscii("Archive memory allocation failed", 4000, true);
-        return;
+        return null;
     }
     if (!saveArchive()) {
         debugLog("archiveTabAt: saveArchive failed; leaving tab/session untouched");
         loadArchiveFromDisk(true);
         showHeaderNoticeAscii("Archive save failed - tab left open", 4000, true);
-        return;
+        return null;
     }
+    return entry;
+}
+
+pub fn archiveTabAt(i: usize) void {
+    if (i >= app_state.shell_count) return;
+    if (rejectPinnedSessionClose(i)) return;
+    if (app_state.shells[i].tmux_session_len == 0) return;
+    const entry = rememberArchivedTab(i) orelse return;
+    const ts_len = entry.tmux_session_len;
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
     if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "") != .gone) {
         if (parked_focus) focusActiveShell();
@@ -1114,6 +1120,7 @@ pub fn endTmuxSessionAt(i: usize) void {
     if (i >= app_state.shell_count) return;
     if (rejectPinnedSessionClose(i)) return;
     if (app_state.shells[i].tmux_session_len == 0) return;
+    _ = rememberArchivedTab(i) orelse return;
 
     var session_buf: [64]u8 = std.mem.zeroes([64]u8);
     const ts_len: usize = @intCast(@min(app_state.shells[i].tmux_session_len, @as(u32, 63)));
