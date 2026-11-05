@@ -53,8 +53,8 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90)
     throw "Timed out: $Description"
 }
 function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id) {
-    Set-JourneyForeground $Window $ProcessId
     Start-Sleep -Milliseconds 2000
+    Set-JourneyForeground $Window $ProcessId
     Assert-Window $Window $ProcessId
     $bitmap = [Drawing.Bitmap]::new([ReconnectDesktop]::GetSystemMetrics(0), [ReconnectDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -292,6 +292,7 @@ try {
     $offsetB = (Read-Log $logB).Length
     $nativeStart = [DateTime]::UtcNow
     $stage = 'native rename'
+    Set-JourneyForeground $main $app.Id
     Assert-Focus $main $app.Id $editA
     if ([ReconnectDesktop]::Text($editA) -cne 'Runners') { throw 'Rename edit changed unexpectedly' }
     [ReconnectDesktop]::Key(0x11, $false)

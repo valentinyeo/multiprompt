@@ -42,6 +42,32 @@ try {
     $rejected = $false
     try { Set-JourneyForeground $windows[0] $processes[1].Id } catch { $rejected = $_.Exception.Message -match 'expected hwnd=.*owner=.*foreground=' }
     if (!$rejected) { throw 'Foreground probe accepted a window owned by another process' }
+
+    Add-Type -AssemblyName System.Drawing
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot/drive.ps1", [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count) { throw 'Could not parse account journey driver' }
+    $shot = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Shot' }, $false)
+    if (!$shot) { throw 'Screenshot function not found' }
+    . ([scriptblock]::Create($shot.Extent.Text))
+    $Output = $logs
+    $script:settled = $false
+    function Start-Sleep([int]$Milliseconds) {
+        if ($Milliseconds -eq 2000) {
+            $script:settled = $true
+            Set-JourneyForeground $windows[1] $processes[1].Id
+            Assert-Window $windows[1] $processes[1].Id
+        } else {
+            Microsoft.PowerShell.Utility\Start-Sleep -Milliseconds $Milliseconds
+        }
+    }
+    Set-JourneyForeground $windows[0] $processes[0].Id
+    Shot 'settle-race' $windows[0] $processes[0].Id
+    if (!$script:settled -or !(Test-Path "$logs/settle-race.png")) { throw 'Screenshot settle race was not exercised' }
+    Assert-Window $windows[0] $processes[0].Id
+    $capture = Get-Content "$logs/settle-race.json" -Raw | ConvertFrom-Json
+    if ($capture.pid -ne $processes[0].Id -or $capture.hwnd -ne $windows[0].ToInt64()) { throw 'Screenshot identity mismatch' }
     Write-Host 'Account journey foreground assertions passed'
 } finally {
     foreach ($process in $processes) {
