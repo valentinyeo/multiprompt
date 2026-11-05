@@ -219,6 +219,32 @@
             if ($controlled.ExecutablePath -ine $stableChrome -or $controlled.CommandLine -notmatch '--remote-debugging-pipe') { throw 'The original owner is not controlled branded Chrome' }
             $beforeWindows = @([VerifyNative]::DesktopWindows() | ForEach-Object { $_.handle })
             Save-Json @{ first = $first; second = $second; controlledExecutable = $controlled.ExecutablePath; decoy = $decoy; decoyExecutable = $decoyProcess.ExecutablePath; desktopHandles = $beforeWindows } 'signin-before.json'
+            $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+            $storageUrl = 'http://127.0.0.1:' + (Get-Content -LiteralPath (Join-Path $script:uploadReceiverDir 'port.txt') -Raw).Trim() + '/signin-storage'
+            $marker = 'synthetic-' + [guid]::NewGuid().ToString('N')
+            Save-Json @{ url = $storageUrl; marker = $marker; cookieName = 'mp_signin_proof'; boundary = 'Synthetic browser storage, not Google authentication' } 'signin-storage-expected.json'
+            $storageBridge = {
+                param([long]$WindowId, [string]$Step, [string]$Command, [string]$Argument)
+                $reply = & $bridge --profile $stableToken --window $WindowId $Command $Argument 2> (Join-Path $Evidence "signin-storage-$Step.stderr.txt")
+                $exitCode = $LASTEXITCODE
+                [IO.File]::WriteAllText((Join-Path $Evidence "signin-storage-$Step.reply.json"), ($reply -join "`n"))
+                if ($exitCode -ne 0) { throw "Storage bridge $Step exited $exitCode" }
+                $parsed = ($reply -join "`n") | ConvertFrom-Json
+                if (-not $parsed.ok) { throw "Storage bridge $Step failed: $($parsed.error)" }
+                return $parsed.result
+            }
+            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'second sign-in pane has a browser window id' 60
+            $secondWindowId = [long](Read-BrowserPane).browser_window_id
+            $null = & $storageBridge $secondWindowId 'before-navigate' 'navigate' $storageUrl
+            $readStorage = '({url:location.href,ready:document.readyState,value:localStorage.getItem(''mp_signin_proof''),cookie:document.cookie})'
+            Wait-Until {
+                $script:signinStoragePage = & $storageBridge $secondWindowId 'before-load' 'eval' $readStorage
+                $script:signinStoragePage.url -ceq $storageUrl -and $script:signinStoragePage.ready -eq 'complete'
+            } 'synthetic sign-in storage origin loaded in second pane' 60
+            $writeStorage = "(localStorage.setItem('mp_signin_proof','$marker'),document.cookie='mp_signin_proof=$marker; Max-Age=3600; Path=/'," + $readStorage + ')'
+            $storageBefore = & $storageBridge $secondWindowId 'before-write' 'eval' $writeStorage
+            Save-Json $storageBefore 'signin-storage-before.json'
+            if ($storageBefore.url -cne $storageUrl -or $storageBefore.value -cne $marker -or $storageBefore.cookie -notmatch ('(?:^|;\s*)mp_signin_proof=' + [regex]::Escape($marker) + '(?:;|$)')) { throw 'Synthetic storage marker or cookie was not set before sign-in' }
             Focus-Palette 'sign in to google' 7191
             Snapshot 'signin-action'
             Press @(0x0D) 'Enter: Sign in to Google in this profile'
@@ -249,10 +275,25 @@
             [uint32]$plainOwner = 0
             [void][VerifyNative]::GetWindowThreadProcessId($plainHandle, [ref]$plainOwner)
             if ($plainOwner -ne $script:signinWindow.browser.pid -or [VerifyNative]::GetProp($plainHandle, 'ZigShellPaneOwner') -ne [IntPtr]::Zero) { throw 'Sign-in window ownership changed before close' }
+            $plainProcess = Get-Process -Id $script:signinWindow.browser.pid
+            [void]$plainProcess.Handle
             if (-not [VerifyNative]::PostMessage($plainHandle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close the owned sign-in window' }
             Wait-Until { [VerifyNative]::GetWindowThreadProcessId($plainHandle, [ref]$plainOwner) -eq 0 } 'standalone sign-in window closed' 30
+            if (-not $plainProcess.WaitForExit(30000)) { throw 'Standalone sign-in Chrome process did not exit before reopening' }
+            Save-Json @{ pid = $plainProcess.Id; exited = $plainProcess.HasExited } 'signin-plain-exit.json'
+            $plainProcess.Dispose()
             $reopened = Open-WorkspaceBrowser 'signin-reopened'
             if ($reopened.userDataDir -ine $stableRoot) { throw 'Reopened browser lost the sign-in profile' }
+            $reopenedWindowId = [long](Read-BrowserPane).browser_window_id
+            $null = & $storageBridge $reopenedWindowId 'after-navigate' 'navigate' $storageUrl
+            Wait-Until {
+                $script:signinStorageAfter = & $storageBridge $reopenedWindowId 'after-read' 'eval' $readStorage
+                $script:signinStorageAfter.url -ceq $storageUrl -and $script:signinStorageAfter.ready -eq 'complete'
+            } 'synthetic sign-in storage origin loaded after reopening' 60
+            Save-Json $script:signinStorageAfter 'signin-storage-after.json'
+            if ($script:signinStorageAfter.value -cne $marker -or $script:signinStorageAfter.cookie -notmatch ('(?:^|;\s*)mp_signin_proof=' + [regex]::Escape($marker) + '(?:;|$)')) { throw 'Synthetic storage marker or cookie changed across sign-in handoff' }
+            if ($null -eq (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) { throw 'Unrelated profile process exited during sign-in reopen' }
+            $result.checks += @{ name = 'browser-own-profile synthetic storage survives handoff'; marker = $marker; url = $storageUrl; boundary = 'Not Google authentication' }
             Save-Json @{ reopened = $reopened; executable = (Get-CimInstance Win32_Process -Filter ("ProcessId = " + $reopened.pid)).ExecutablePath; decoyAlive = ($null -ne (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) } 'signin-reopened.json'
             $result.checks += @{ name = 'browser-own-profile Google sign-in handoff'; profile = $stableRoot; reopened = $reopened }
             Snapshot 'signin-reopened'
