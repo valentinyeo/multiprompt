@@ -12,6 +12,10 @@ The regression calls production `acceptEvents` with two human questions, reverse
 
 Shared private isolation, offline retention and old-client capability contracts remain in `tools/room-agent-replies.test.js` and the Python room suites. This change does not alter those protocols.
 
+## Accepted-send refresh
+
+Both normal command completion and durable evidence recovery must schedule a selected-room snapshot for accepted posts, not only member edits. The bridge collects canonical replies during event reads; refreshing the catalog alone never invokes that collection. The compiled recovery-path fixture exercises accepted posts and edits, room-creation exclusion, another selected room and rejected sends. Its persistence and transport functions are explicit recording boundaries, not real journal or network proof. The existing `rooms` preview journey exercises normal keyboard send with synthetic providers.
+
 ## Remaining user proof
 
 This is a model regression, not a desktop walkthrough. Production Rooms remain disabled: `rooms-preview` defaults off and release builds reject it. IGSH-1313 owns desktop Rooms delivery. Once that prerequisite lands, drive two questions through real room input, receive answers in reverse order, switch away and reopen, then restart in the same isolated profile. Inspect native screenshots and independently read persisted events; each answer must occur once beneath its own question. Check private conversation isolation, offline pending delivery and paired Android IGSH-1694 before marking parity complete.

@@ -68,3 +68,18 @@ ${fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/room-replay.zig'), 'u
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('accepted room posts read selected history in the durable evidence recovery path', () => {
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/post-refresh.zig'), 'utf8');
+  const source = `${fixture}\n${declaration(read('room_frontend.zig'), 'pub fn retryCommandEvidence(')}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-post-refresh-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'refresh.zig'), source);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'refresh.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined, run.error?.message);
+    assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
+    assert.match(run.stderr, /All 3 tests passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
