@@ -12,8 +12,8 @@ const layoutFeature = (request, token) => (request.headers.get('X-Layout-Feature
 function layoutResponse(request, value, status = 200) {
   if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
-    if (!layoutFeature(request, 'bot_photo')) delete visible.photo;
     if (!layoutFeature(request, 'groups')) delete visible.group;
+    if (!layoutFeature(request, 'bot_photo')) delete visible.photo;
     if (!layoutFeature(request, 'favorite')) delete visible.favorite;
     if (!layoutFeature(request, 'muted')) delete visible.muted;
     if (!layoutFeature(request, 'used')) delete visible.used;
@@ -411,13 +411,13 @@ export default {
         const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
-          const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
-          if (photo !== undefined) tab.photo = photo;
-          else delete tab.photo;
           if (!layoutFeature(req, 'groups')) {
             if (previous?.group !== undefined) tab.group = previous.group;
             else delete tab.group;
           }
+          const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
+          if (photo !== undefined) tab.photo = photo;
+          else delete tab.photo;
           if (!layoutFeature(req, 'bot_appearance')) {
             for (const field of ['face', 'color']) {
               if (previous?.[field] !== undefined) tab[field] = previous[field];

@@ -101,9 +101,9 @@ function nativeZigTestsOnly() {
 
 function prepareService(dir) {
   if (!tests.some(file => file.startsWith('service/test/'))) return;
-  for (const args of [['ci', '--no-audit', '--no-fund'], ['run', 'pretest']]) {
+  for (const args of [['ci', '--no-audit', '--no-fund', '--prefer-offline'], ['run', 'pretest']]) {
     const result = spawnSync('npm', args, {
-      cwd: path.join(dir, 'service'), encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024,
+      cwd: path.join(dir, 'service'), encoding: 'utf8', timeout: 300000, maxBuffer: 16 * 1024 * 1024,
     });
     if (result.error || result.status !== 0) throw new Error(`Cannot prepare service snapshot: npm ${args.join(' ')}\n${result.stdout || ''}${result.stderr || ''}`);
   }

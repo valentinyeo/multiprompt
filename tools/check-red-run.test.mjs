@@ -66,6 +66,9 @@ function fixture(t) {
 if (fs.existsSync(checker)) {
   test('service admission installs and builds each source snapshot before proving assertions', t => {
     const f = fixture(t);
+    const bin = path.join(f.repo, 'fixture-bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nexit 14\n', { mode: 0o755 });
     f.write('service/package.json', JSON.stringify({ name: 'fixture-service', version: '1.0.0', private: true, type: 'module', scripts: { pretest: 'node build.mjs' }, dependencies: { 'fixture-value': 'file:dep' } }));
     f.write('service/package-lock.json', JSON.stringify({ name: 'fixture-service', version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'fixture-service', version: '1.0.0', dependencies: { 'fixture-value': 'file:dep' } }, dep: { name: 'fixture-value', version: '1.0.0' }, 'node_modules/fixture-value': { resolved: 'dep', link: true } } }));
     f.write('service/dep/package.json', JSON.stringify({ name: 'fixture-value', version: '1.0.0', type: 'module', exports: './index.js' }));
@@ -75,7 +78,7 @@ if (fs.existsSync(checker)) {
     f.write('service/dep/index.js', "export const value = 'fixed';\n");
     f.write('service/test/value.test.mjs', "import {test} from 'node:test'; import assert from 'node:assert/strict'; import {value} from '../.build/worker.mjs'; test('built service behavior',()=>assert.equal(value,'fixed'));\n");
     f.commit();
-    const result = f.run(base);
+    const result = f.run(base, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
     assert.equal(result.status, 0, 'service snapshots need their own dependencies and builds');
     assert.match(result.stdout, /RED PROVEN service\/test\/value.test.mjs/);
     assert.ok(!fs.existsSync(path.join(f.repo, 'service/node_modules')));
@@ -231,7 +234,7 @@ const after = 1;
     const f = fixture(t);
     const bin = path.join(f.repo, 'bin');
     fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\nmkdir -p node_modules\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\nif [ "$1" = "ci" ]; then mkdir -p node_modules; else exec npx wrangler deploy --dry-run --outdir .build; fi\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nmkdir -p .build\ncp worker.txt .build/worker.txt\n', { mode: 0o755 });
     f.write('service/worker.txt', 'broken');
     f.write('service/test/fixtures/input.txt', 'old');

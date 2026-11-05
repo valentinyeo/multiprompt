@@ -41,8 +41,8 @@ pub const Response = struct {
     removal_supported: bool = false,
     colors_supported: bool = false,
     appearance_supported: bool = false,
-    photos_supported: bool = false,
     groups_supported: bool = false,
+    photos_supported: bool = false,
     pub fn deinit(self: Response) void {
         std.crypto.secureZero(u8, self.bytes);
         a.free(self.bytes);
@@ -101,8 +101,8 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     var removal_supported = false;
     var colors_supported = false;
     var appearance_supported = false;
-    var photos_supported = false;
     var groups_supported = false;
+    var photos_supported = false;
     var header_buf: [8192]u16 = @splat(0);
     size = @sizeOf(@TypeOf(header_buf));
     if (WinHttpQueryHeaders(req, 22, null, &header_buf, &size, null) != 0) {
@@ -112,8 +112,8 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
         removal_supported = layoutSupportsRemoval(raw);
         colors_supported = layoutSupportsColors(raw);
         appearance_supported = layoutSupportsAppearance(raw);
-        photos_supported = layoutSupports(raw, "bot_photo");
         groups_supported = layoutSupports(raw, "groups");
+        photos_supported = layoutSupports(raw, "bot_photo");
     }
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
