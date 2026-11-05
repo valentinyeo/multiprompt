@@ -1621,20 +1621,27 @@ fn workspaceConfiguredTerminalFolder(ws: u8, out_host: *u8, out_path: *[256]u8, 
 }
 
 fn repoPathMatchesQuery(path: []const u8, query: []const u16) bool {
-    if (query.len == 0) return true;
-    if (query.len > path.len) return false;
-    var start: usize = 0;
-    while (start + query.len <= path.len) : (start += 1) {
-        var matched = true;
-        for (query, 0..) |q, k| {
-            if (u16ToLower(q) != u16ToLower(@as(u16, path[start + k]))) {
-                matched = false;
+    var words = std.mem.tokenizeAny(u16, query, &.{ ' ', '\t', '\n', '\r', 0x0b, 0x0c });
+    while (words.next()) |word| {
+        if (word.len > path.len) return false;
+        var start: usize = 0;
+        var found = false;
+        while (start + word.len <= path.len) : (start += 1) {
+            var matched = true;
+            for (word, 0..) |q, k| {
+                if (u16ToLower(q) != u16ToLower(@as(u16, path[start + k]))) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                found = true;
                 break;
             }
         }
-        if (matched) return true;
+        if (!found) return false;
     }
-    return false;
+    return true;
 }
 
 pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
@@ -1642,11 +1649,16 @@ pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
     const total = repoRowsForHost(app_state.g_search_pick_repo_host, all[0..]);
     const query = app_state.g_search_buf[0..app_state.g_search_len];
     var count: u32 = 0;
-    var i: u32 = 0;
-    while (i < total and count < out.len) : (i += 1) {
-        if (!repoPathMatchesQuery(all[i].path[0..all[i].path_len], query)) continue;
-        out[count] = all[i];
-        count += 1;
+    for ([_]bool{ true, false }) |name_match| {
+        var i: u32 = 0;
+        while (i < total and count < out.len) : (i += 1) {
+            const path = all[i].path[0..all[i].path_len];
+            const name_start = if (std.mem.lastIndexOfAny(u8, path, "/\\")) |index| index + 1 else 0;
+            if (repoPathMatchesQuery(path[name_start..], query) != name_match) continue;
+            if (!name_match and !repoPathMatchesQuery(path, query)) continue;
+            out[count] = all[i];
+            count += 1;
+        }
     }
     return count;
 }

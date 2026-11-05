@@ -1,8 +1,114 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { inspect, assertBadge } from './chat-reactions-proof.mjs';
 import * as proof from './chat-reactions-proof.mjs';
+
+test('IGSH-1590 Windows reaction scheduling uses production polling and dispatch without duplicate workers', () => {
+  const boundary = new URL('./verify-chat-delivery/boundary.py', import.meta.url);
+  assert.match(fs.readFileSync(boundary, 'utf8'), /def install_reaction_worker\(namespace\):/);
+  const script = String.raw`
+import ast, pathlib, sqlite3, sys, tempfile, threading
+from contextlib import closing
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+worker = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'install_reaction_worker')
+with tempfile.TemporaryDirectory() as directory:
+    database = pathlib.Path(directory) / 'store.sqlite3'
+    def connect(tmux):
+        assert tmux == 'verify-agent'
+        return sqlite3.connect(database)
+    with closing(connect('verify-agent')) as db:
+        db.execute('CREATE TABLE shared_messages (id INTEGER, provider TEXT, sid TEXT, state TEXT)')
+        db.execute("INSERT INTO shared_messages VALUES (1,'claude','sid','queued')")
+        db.commit()
+    entered, release, first, second = (threading.Event() for _ in range(4))
+    records, delivered, polls = [], [], []
+    def poll(tmux, provider, sid):
+        assert (tmux, provider, sid) == ('verify-agent', 'claude', 'sid')
+        polls.append(sid)
+    def dispatch(query):
+        assert query['op'] == 'message_dispatch'
+        entered.set()
+        assert release.wait(5)
+        with closing(connect(query['tmux'])) as db:
+            row = db.execute("SELECT id FROM shared_messages WHERE state='queued' ORDER BY id LIMIT 1").fetchone()
+            if row:
+                delivered.append(row[0])
+                db.execute("UPDATE shared_messages SET state='accepted' WHERE id=?", row)
+                db.commit()
+        if row:
+            (first if row[0] == 1 else second).set()
+    scope = dict(record=lambda name, **row: records.append(row))
+    exec(compile(ast.Module(body=[worker], type_ignores=[]), '<reaction-worker>', 'exec'), scope)
+    namespace = dict(message_poll=poll, message_store_request=dispatch, message_store_db=connect)
+    scope['install_reaction_worker'](namespace)
+    query = dict(op='message_submit', tmux='verify-agent', provider='claude', sid='sid')
+    start = namespace['start_message_worker']
+    start(query, '')
+    assert entered.wait(5)
+    for i in range(10): start(query, '')
+    assert len([row for row in records if row['stage'] == 'started']) == 1
+    release.set()
+    assert first.wait(5)
+    with closing(connect('verify-agent')) as db:
+        db.execute("INSERT INTO shared_messages VALUES (2,'claude','sid','queued')")
+        db.commit()
+    start(query, '')
+    assert second.wait(5)
+    for thread in threading.enumerate():
+        if thread is not threading.current_thread():
+            thread.join(5)
+            assert not thread.is_alive()
+    assert delivered == [1, 2], delivered
+    assert len(polls) >= 2
+    assert not [row for row in records if row['stage'] == 'error'], records
+print('REACTION_WINDOWS_DISPATCH_PROVEN')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(boundary)], { encoding: 'utf8', timeout: 20000 }), /REACTION_WINDOWS_DISPATCH_PROVEN/);
+});
+
+test('IGSH-1590 tmux buffers preserve Unicode and paste once without submitting', () => {
+  const script = String.raw`
+import ast, io, pathlib, re, subprocess, sys, tempfile, types
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+nodes = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in ('tmux_buffer', 'tmux', 'install_reaction_tmux')]
+assert len(nodes) == 3
+with tempfile.TemporaryDirectory() as directory:
+    sent, records = [], []
+    text = '👍 to: Same first words [mp:6d8e353d25c5fe23]\nsecond line'
+    name = 'mp-send-' + 'a' * 32
+    scope = dict(ROOT=pathlib.Path(directory), re=re, subprocess=subprocess, state=lambda: dict(fake=True), capture_screen=lambda escapes: '❯ draft stays here\n', fake_send=lambda argv: sent.append(argv) or True, record=lambda name, **row: records.append(row))
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), '<tmux-buffer>', 'exec'), scope)
+    external = []
+    namespace = dict(subprocess=types.SimpleNamespace(run=lambda *args, **kwargs: external.append(args) or 'external'))
+    scope['install_reaction_tmux'](namespace)
+    command = namespace['subprocess'].run
+    assert command(['external']) == 'external' and external == [(['external'],)]
+    assert command(['tmux', 'capture-pane', '-p', '-e'], text=True).stdout == '❯ draft stays here\n'
+    assert command(['tmux', 'capture-pane', '-p']).stdout == '❯ draft stays here\n'.encode()
+    def run(*args):
+        return command(['tmux', *args], input=text.encode('utf-8')).returncode
+    assert run('load-buffer', '-b', name, '-') == 0
+    assert not sent
+    assert run('paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:') == 0
+    assert sent == [['send-keys', '-t', '=verify-agent:', '-l', '--', text]], sent
+    assert run('paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:') == 1
+    assert len(sent) == 1
+    assert run('delete-buffer', '-b', name) == 1
+    try:
+        command(['tmux', 'paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:'], check=True)
+        raise AssertionError('missing buffer must raise with check=True')
+    except subprocess.CalledProcessError as error:
+        assert error.returncode == 1
+    assert run('load-buffer', '-b', name, '-') == 0
+    assert run('delete-buffer', '-b', name) == 0
+    assert run('load-buffer', '-b', '../outside', '-') == 95
+print('REACTION_TMUX_BUFFERS_PROVEN')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url))], { encoding: 'utf8', timeout: 20000 }), /REACTION_TMUX_BUFFERS_PROVEN/);
+});
 
 const area = { left: 0, top: 0, right: 300, bottom: 300 };
 function fixture() {
@@ -106,6 +212,46 @@ test('floating title is not the first reply after the setup prompt', () => {
   assert.equal(frame.agent.length, 2);
   assert.equal(frame.agent[0].top, 60);
   assertBadge(frame);
+});
+
+test('ordinary follow-up requires the full newest pair, not just transcript data', () => {
+  assert.equal(typeof proof.assertFollowup, 'function', 'ordinary newest-answer verification must be available');
+  const f = fixture();
+  f.fill(0, 0, 300, 300, 0x202020);
+  f.fill(20, 10, 250, 60, 0x555555);
+  f.fill(20, 80, 250, 160, 0x444444);
+  const frame = inspect(f.image, area);
+  assert.deepEqual(proof.assertFollowup(frame, area), { x: 50, y: 120 });
+  assert.deepEqual(proof.assertFollowup(frame, { ...area, top: 10, bottom: 160 }), { x: 50, y: 120 });
+  assert.throws(() => proof.assertFollowup({ ...frame, agent: [] }, area), /one ordinary answer/);
+  assert.throws(() => proof.assertFollowup({ ...frame, user: [] }, area), /question is visible/);
+  assert.throws(() => proof.assertFollowup(frame, { ...area, bottom: 155 }), /fully inside the viewport/);
+  assert.throws(() => proof.assertFollowup({ ...frame, agent: [...frame.agent, { ...frame.agent[0], top: 180, bottom: 230 }] }, area), /one ordinary answer/);
+  assert.throws(() => proof.assertFollowup({ ...frame, dim: [frame.user[0]] }, area), /not left queued/);
+});
+
+test('reaction fixture answers only an actual idle follow-up submission', () => {
+  const script = String.raw`
+import ast, pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+node = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'fake_submit')
+events, queued = [], []
+scope = dict(state=lambda: dict(name='reactions'), fake_event=lambda kind, **row: events.append((kind, row)), fake_queue_event=lambda *args: queued.append(args))
+exec(compile(ast.Module(body=[node], type_ignores=[]), '<reaction-followup>', 'exec'), scope)
+submit = scope['fake_submit']
+claude = dict(mode='busy', queue=[])
+submit(claude, 'What should I do next?')
+assert not events and len(queued) == 1
+claude['mode'] = 'idle'
+submit(claude, 'Something else')
+assert [kind for kind, row in events] == ['user']
+events.clear()
+submit(claude, 'What should I do next?')
+assert [kind for kind, row in events] == ['user', 'assistant']
+assert events[1][1]['message']['content'][0]['text'] == 'The next answer stays visible after reacting.'
+print('REACTION_ORDINARY_FOLLOWUP_PROVEN')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url))], { encoding: 'utf8', timeout: 20000 }), /REACTION_ORDINARY_FOLLOWUP_PROVEN/);
 });
 
 test('native three-dot more glyph is visible; a missing glyph still fails', () => {
