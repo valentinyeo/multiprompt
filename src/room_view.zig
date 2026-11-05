@@ -1177,3 +1177,97 @@ test "candidate paging reaches past membership limit" {
     try std.testing.expectEqual(@as(?usize, 73), filteredIndex(&candidates, L(""), boundedScroll(73, 80, 6)));
     try std.testing.expectEqual(@as(usize, 0), boundedScroll(73, 1, 6));
 }
+
+test "IGSH-1697 synthetic native create and room paint" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    var env: [32]u16 = undefined;
+    const ci_len = w.GetEnvironmentVariableW(L("GITHUB_ACTIONS"), &env, env.len);
+    if (ci_len != 4 or !std.mem.eql(u16, env[0..4], L("true"))) return error.SkipZigTest;
+    const os_len = w.GetEnvironmentVariableW(L("RUNNER_OS"), &env, env.len);
+    if (os_len != 7 or !std.mem.eql(u16, env[0..7], L("Windows"))) return error.SkipZigTest;
+
+    const Fixture = struct {
+        response: ActionResult,
+        calls: usize = 0,
+        valid: bool = false,
+        action: ?ActionToken = null,
+
+        fn create(ctx: *anyopaque, action: ActionToken, name: []const u16, ids: []const []const u8) ActionResult {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.calls += 1;
+            self.action = action;
+            self.valid = action.kind == .create and std.mem.eql(u16, name, L("Product sync")) and ids.len == 2 and std.mem.eql(u8, ids[0], "alpha") and std.mem.eql(u8, ids[1], "beta");
+            return self.response;
+        }
+        fn edit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
+        fn submit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { return .failed; }
+        fn restart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
+    };
+
+    const parent = w.CreateWindowExW(0, L("STATIC"), L("Rooms synthetic test"), w.WS_POPUP | w.WS_VISIBLE, 0, 0, 1200, 900, null, null, w.GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const empty = ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{} };
+    for ([_]ActionResult{ .accepted, .pending }) |response| {
+        for (0..4) |iteration| {
+            std.debug.print("IGSH-1697 {s} iteration {d}: create\n", .{ @tagName(response), iteration });
+            var create_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer create_arena.deinit();
+            var room_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer room_arena.deinit();
+            const a = create_arena.allocator();
+            const members = try a.alloc(Member, 2);
+            members[0] = .{ .id = try a.dupe(u8, "alpha"), .alias = try a.dupe(u16, L("alpha")), .name = try a.dupe(u16, L("Alpha")), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0, .presence = .online };
+            members[1] = .{ .id = try a.dupe(u8, "beta"), .alias = try a.dupe(u16, L("beta")), .name = try a.dupe(u16, L("Beta")), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0, .presence = .online };
+            const create_model = ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = members, .messages = &.{} };
+            var fixture = Fixture{ .response = response };
+            var view: View = undefined;
+            try std.testing.expect(view.create(parent, &create_model, .{ .context = &fixture, .create = Fixture.create, .edit = Fixture.edit, .submit = Fixture.submit, .restart = Fixture.restart }));
+            defer view.destroy();
+            try std.testing.expect(view.setDpi(96));
+            view.setBounds(.{ .left = 0, .top = 0, .right = 1000, .bottom = 800 });
+            view.show(true);
+            try std.testing.expect(w.IsWindowVisible(view.hwnd) != 0);
+            view.openCreate();
+            try std.testing.expect(w.SetWindowTextW(view.name_edit, L("Product sync")) != 0);
+            try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
+            try std.testing.expectEqual(@as(usize, 2), view.dialog_count);
+            view.toggle(members[0].id);
+            view.toggle(members[1].id);
+            view.confirm();
+            try std.testing.expectEqual(@as(usize, 1), fixture.calls);
+            try std.testing.expect(fixture.valid);
+            const action = fixture.action orelse return error.TestUnexpectedResult;
+            if (response == .pending) {
+                try std.testing.expectEqual(Mode.create, view.mode);
+                view.completeAction(action, .accepted);
+            } else view.completeAction(action, .accepted);
+            try std.testing.expectEqual(Mode.room, view.mode);
+            try std.testing.expect(view.pending == null);
+            std.debug.print("IGSH-1697 {s} iteration {d}: pre-publication paint\n", .{ @tagName(response), iteration });
+            view.presented_revision = 99;
+            try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
+            try std.testing.expectEqual(@as(u64, 0), view.presented_revision);
+            try std.testing.expect(w.InvalidateRect(view.composer, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.composer) != 0);
+
+            view.resetScope(&empty);
+            create_arena.deinit();
+            create_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            const r = room_arena.allocator();
+            const room_members = try r.alloc(Member, 2);
+            room_members[0] = .{ .id = try r.dupe(u8, "alpha"), .alias = try r.dupe(u16, L("alpha")), .name = try r.dupe(u16, L("Alpha")), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0, .presence = .unknown };
+            room_members[1] = .{ .id = try r.dupe(u8, "beta"), .alias = try r.dupe(u16, L("beta")), .name = try r.dupe(u16, L("Beta")), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0, .presence = .unknown };
+            const room = ViewModel{ .room_id = try r.dupe(u8, "room"), .name = try r.dupe(u16, L("Product sync")), .revision = 1, .members = room_members, .candidates = room_members, .messages = &.{} };
+            std.debug.print("IGSH-1697 {s} iteration {d}: authoritative paint\n", .{ @tagName(response), iteration });
+            try std.testing.expect(view.setModel(&room));
+            try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
+            try std.testing.expectEqual(@as(u64, 1), view.presented_revision);
+            try std.testing.expect(w.InvalidateRect(view.composer, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.composer) != 0);
+            view.resetScope(&empty);
+        }
+    }
+}
