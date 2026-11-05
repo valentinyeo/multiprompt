@@ -85,9 +85,15 @@ function Click-CardMore($View) {
     $dpiContext = [UpdateProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
     Assert ($dpiContext -ne [IntPtr]::Zero) 'Cannot set per-monitor DPI awareness for card input'
     try {
-        $cardProcess.Refresh()
-        $hwnd = $cardProcess.MainWindowHandle
-        Assert ($hwnd -ne [IntPtr]::Zero -and [UpdateProof]::SetForegroundWindow($hwnd)) 'Could not focus update card window'
+        $deadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            $cardProcess.Refresh()
+            Assert (-not $cardProcess.HasExited) 'Update card process exited before focus'
+            $hwnd = [ChatDeliveryDesktop]::Window([uint32]$cardProcess.Id)
+            if ($hwnd -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($hwnd, [uint32]$cardProcess.Id, $hwnd)) { break }
+            if ([DateTime]::UtcNow -gt $deadline) { throw 'Could not focus owned update card window' }
+            Start-Sleep -Milliseconds 100
+        } while ($true)
         $point = New-Object UpdateProof+Point
         $point.X = $View.moreX; $point.Y = $View.moreY
         $client = New-Object UpdateProof+Rect
@@ -164,6 +170,12 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
+                Add-Type -Path "$PSScriptRoot/verify-chat-delivery/desktop.cs"
+                foreach ($candidate in @([IntPtr]::Zero, $signedOut.MainWindowHandle)) {
+                    $rejected = $false
+                    try { [void][ChatDeliveryDesktop]::FocusOwnedWindow($candidate, [uint32]$PID, $candidate) } catch { $rejected = $_.Exception.GetBaseException() -is [InvalidOperationException] }
+                    Assert $rejected 'Focus accepted a stale or foreign window'
+                }
                 Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p); [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern uint GetDoubleClickTime(); [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int x, y; public uint data, flags, time; public UIntPtr extra; } [StructLayout(LayoutKind.Explicit)] public struct InputUnion { [FieldOffset(0)] public Mouse mouse; } [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public InputUnion data; } [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, Input[] inputs, int size); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context); public static void Click() { foreach (uint flags in new uint[] { 2, 4 }) { Input input = new Input(); input.data.mouse.flags = flags; if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed"); System.Threading.Thread.Sleep(35); } } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
