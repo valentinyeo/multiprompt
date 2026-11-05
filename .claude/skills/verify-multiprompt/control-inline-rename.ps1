@@ -125,7 +125,8 @@
             [void](Rename-EditPoint $current)
             Type-Text 'Palette name'
             Doctor
-            [VerifyNative]::ClickClient($script:window, $sidePoint[0] - 50, $sidePoint[1])
+            Record 'Click the session avatar outside the sidebar editor to save'
+            [VerifyNative]::ClickClient($script:window, [int](30 * $scale), $sidePoint[1])
             $current = 'Palette name'
             Rename-WaitSaved $current
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'

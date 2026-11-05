@@ -80,4 +80,6 @@ test('Inbox rename uses selected row colors and name geometry', () => {
   assert.match(driver, /Rename-Sidebar \$true[^]*?F2: locate the live title editor/);
   assert.match(driver, /Rename-Sidebar \$false[^]*?F2: edit sidebar name/);
   assert.match(driver, /F2: edit selected Inbox row/);
+  assert.match(driver, /Click the session avatar outside the sidebar editor to save/);
+  assert.doesNotMatch(driver, /\$sidePoint\[0\] - 50/);
 });
