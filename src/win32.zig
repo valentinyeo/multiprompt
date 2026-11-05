@@ -545,7 +545,6 @@ pub const SW_MAXIMIZE: i32 = 3;
 pub const SW_MINIMIZE: i32 = 6;
 pub extern "user32" fn IsWindow(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn IsWindowVisible(HANDLE) callconv(WINAPI) BOOL;
-pub extern "user32" fn IsWindowEnabled(HANDLE) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetWindow(HANDLE, UINT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetLastActivePopup(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetMessageW(*MSG, HANDLE, UINT, UINT) callconv(WINAPI) BOOL;

@@ -1167,7 +1167,6 @@ fn systemAltTabForeignTarget(reverse: bool) ?HANDLE {
 }
 
 pub fn switchSystemAltTabToForeign(reverse: bool) bool {
-    if (app_state.g_main_hwnd == null or @import("win32.zig").IsWindowEnabled(app_state.g_main_hwnd) == 0) return false;
     const target = systemAltTabForeignTarget(reverse) orelse return false;
     if (!focusGuard(target)) return false;
     keybd_event(0xFF, 0, 0, 0);

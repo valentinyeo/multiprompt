@@ -128,7 +128,7 @@ function Dialog {
     return $dialog
 }
 function Picker-State([IntPtr]$Dialog) {
-    $focus = [ChatDeliveryDesktop]::Focus($main)
+    $focus = [ChatDeliveryDesktop]::Focus($Dialog)
     return @{ foreground=$focus[0]; focus=$focus[1]; focusClass=[ChatDeliveryDesktop]::Class([IntPtr]$focus[1]); altDown=([PhotoDialogOwner]::GetAsyncKeyState(0x12) -lt 0); dialogClass=[ChatDeliveryDesktop]::Class($Dialog); main=$main.ToInt64(); dialog=$Dialog.ToInt64(); owner=[PhotoDialogOwner]::GetWindow($Dialog, 4).ToInt64(); visible=[PhotoDialogOwner]::IsWindowVisible($Dialog); enabled=[PhotoDialogOwner]::IsWindowEnabled($Dialog); mainEnabled=[PhotoDialogOwner]::IsWindowEnabled($main) }
 }
 function Switch-Picker([IntPtr]$Dialog) {
@@ -301,7 +301,7 @@ try {
     $largeFile = [IO.File]::Create($oversized)
     try { $largeFile.SetLength(16MB + 1) } finally { $largeFile.Dispose() }
     $switchJob = [VerifyJob]::new()
-    $switchApp = $switchJob.Start((Get-Process -Id $PID).Path, $profile, (Join-Path $Evidence 'switch-target.stdout.log'), (Join-Path $Evidence 'switch-target.stderr.log'), ('-NoProfile -STA -File "' + "$PSScriptRoot/switch-target.ps1" + '"'))
+    $switchApp = $switchJob.Start((Get-Process -Id $PID).Path, $Evidence, (Join-Path $Evidence 'switch-target.stdout.log'), (Join-Path $Evidence 'switch-target.stderr.log'), ('-NoProfile -STA -File "' + "$PSScriptRoot/switch-target.ps1" + '"'), $true)
     $switchWindow = Wait-For 'separate Alt+Tab switch target' {
         if ($switchApp.HasExited) { throw 'Switch target exited before its window' }
         $window = [PhotoDialogOwner]::SwitchTarget([uint32]$switchApp.Id)
