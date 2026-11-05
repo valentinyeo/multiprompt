@@ -24,6 +24,21 @@ with patch('os.path.isdir', return_value=False), patch('os.listdir', return_valu
   assert.deepEqual(result.stdout.trim().split('\n'), ['/home/reader/projects/sample', '/home/owner/projects/sample']);
 });
 
+test('host agent environment carries app version and provider', () => {
+  const script = `import json
+source = open('src/chat_history_reader.py').read()
+outer = {}
+exec(compile(source, '<reader>', 'exec'), outer)
+ns = {}
+exec(compile("MULTIBOT_APP_VERSION = '1.2.3'\\n" + outer['READER_SOURCE'], '<runtime>', 'exec'), ns)
+ns.update(host_config=lambda *_: {}, host_chat_name=lambda *_: '')
+env = ns['host_agent_env']('codex', 'test')
+print(json.dumps({key: env.get(key) for key in ('MULTIBOT_APP_VERSION', 'MULTIBOT_PROVIDER')}))`;
+  const result = spawnSync('python3', ['-c', script], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { MULTIBOT_APP_VERSION: '1.2.3', MULTIBOT_PROVIDER: 'codex' });
+});
+
 test('resolved cwd starts the agent as its owner', () => {
   const script = `import json
 from pathlib import Path
