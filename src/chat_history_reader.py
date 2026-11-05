@@ -2377,10 +2377,11 @@ HOST_EVENTS_BYTES = 512 * 1024
 HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and wait for the user's feedback "
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
-                      "Your browser pane works through zsb; run `zsb --help` to see its commands.\n"
-                      "When Multibot lacks something that would make your work easier, run\n"
+                      "Browser pane: use `zsb --help`.\n"
+                      "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
+                      "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
-                      "Feedback is saved locally. No board ticket is filed.")
+                      "Saved locally; an authorized agent token also submits or votes on the board.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
 HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
 HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
@@ -3055,6 +3056,7 @@ def host_agent_env(provider, sid):
     path = env.get('PATH', '')
     env['PATH'] = tools + (':' + path if path else '')
     env['MULTIBOT_PROVIDER'] = provider
+    env['MULTIBOT_APP_VERSION'] = globals().get('MULTIBOT_APP_VERSION', '')
     if provider != 'claude':
         env['MULTIBOT_HOST'] = host_key(provider, sid)
     if provider == 'codex':
@@ -3108,7 +3110,8 @@ def host_agent_start(provider, sid):
         user, home = owner
         env = {"PATH": "/usr/bin:/bin"}
         prefix = ["sudo", "-n", "-H", "-u", user, "--", "/usr/bin/env", "-i", "HOME=" + str(home),
-                  "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider]
+                  "USER=" + user, "LOGNAME=" + user, "MULTIBOT_PROVIDER=" + provider,
+                  "MULTIBOT_APP_VERSION=" + globals().get('MULTIBOT_APP_VERSION', '')]
         tmux = host_chat_name(provider, sid)
         if tmux:
             prefix += ["MULTIBOT_SESSION=" + tmux, "ZSB_SESSION=" + tmux, "MULTIPROMPT_TAB=" + tmux]
@@ -6018,7 +6021,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 70
+RUNTIME_GENERATION = 72
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -6141,7 +6144,8 @@ if __name__ == '__main__':
 
     try:
         _selected, _info = _select_runtime(READER_SOURCE.encode('utf-8'))
-        _worker_source = 'ENGINE_INFO = ' + repr(_info) + '\n' + _selected.decode('utf-8')
+        _worker_source = ('ENGINE_INFO = ' + repr(_info) + '\nMULTIBOT_APP_VERSION = ' +
+                          repr(globals().get('MULTIBOT_APP_VERSION', '')) + '\n' + _selected.decode('utf-8'))
         READER_SOURCE = 'READER_SOURCE = ' + repr(_worker_source) + '\n' + _worker_source
     except (OSError, ValueError, UnicodeError):
         def _error(line):
