@@ -12,6 +12,7 @@ const layoutFeature = (request, token) => (request.headers.get('X-Layout-Feature
 function layoutResponse(request, value, status = 200) {
   if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
+    if (!layoutFeature(request, 'groups')) delete visible.group;
     if (!layoutFeature(request, 'bot_photo')) delete visible.photo;
     if (!layoutFeature(request, 'favorite')) delete visible.favorite;
     if (!layoutFeature(request, 'muted')) delete visible.muted;
@@ -35,7 +36,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups');
   return response;
 }
 export function validateLayout(x) {
@@ -65,8 +66,8 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' ? t.group !== '' && !text(t.group, 64) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
@@ -422,6 +423,10 @@ export default {
         const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
+          if (!layoutFeature(req, 'groups')) {
+            if (previous?.group !== undefined) tab.group = previous.group;
+            else delete tab.group;
+          }
           const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
           if (photo !== undefined) tab.photo = photo;
           else delete tab.photo;

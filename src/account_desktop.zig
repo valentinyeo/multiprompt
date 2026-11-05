@@ -196,6 +196,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
+            .group = if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
             .favorite = shell.favorite,
             .muted = shell.muted,
             .face = shell.face,
@@ -355,6 +356,11 @@ pub fn publishSessionLayout() void {
     var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
     var plain_base = account_layout.withoutAppearance(arena.allocator(), base.value) catch return;
     var plain_synced = account_layout.withoutAppearance(arena.allocator(), synced.value) catch return;
+    if (!app_state.g_account_groups_supported) {
+        plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutGroups(arena.allocator(), plain_synced) catch return;
+    }
     if (!app_state.g_account_colors_supported) {
         plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutColors(arena.allocator(), plain_base) catch return;
@@ -778,6 +784,7 @@ pub fn accountSignOut() void {
     g_palette8_supported = false;
     app_state.g_account_colors_supported = false;
     app_state.g_account_appearance_supported = false;
+    app_state.g_account_groups_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -1309,6 +1316,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
     reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1379,6 +1387,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
         }
         synced_hosts = merged_hosts;
+        if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
         if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
         if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
@@ -1409,6 +1418,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     if (remote.status != 200) return error.Conflict;
     reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
@@ -1666,6 +1676,28 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
+            if (tab.group) |name| {
+                var wide: [64]u16 = undefined;
+                const len = try std.unicode.utf8ToUtf16Le(&wide, name);
+                var group_id: u32 = 0;
+                if (len > 0) {
+                    if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| {
+                        const current = app_state.groups[gi];
+                        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) group_id = current.id;
+                    }
+                    for (app_state.groups[0..app_state.group_count]) |group| {
+                        if (group_id != 0) break;
+                        if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) {
+                            group_id = group.id;
+                            break;
+                        }
+                    }
+                    if (group_id == 0) group_id = @import("sidebar.zig").createGroup(wide[0..len]);
+                    if (group_id == 0) return error.LayoutCapacity;
+                }
+                shell.group_id = group_id;
+            }
             shell.face = tab.face;
             shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
@@ -1905,6 +1937,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     defer server.deinit();
     g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
+    app_state.g_account_groups_supported = reply.groups_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {
