@@ -17,7 +17,7 @@ IGSH-1541 adds the real Alt+S / Alt+1 Starred path, pins the selected bot there,
 Before launching Multiprompt, an independent legacy Windows file picker must pass the identical Alt+Tab and file-entry sequence against a separate blank window. It records the actual selected path. This distinguishes driver/native-dialog failures from app behavior.
 
 The upload and Cancel paths each Alt+Tab away to a separate, job-owned blank window and back three times with the native picker open. Real keyboard input must return to the same visible, enabled picker owned by the main app window, without focus repair. Each cycle records before/away/return screenshots and independently read native ownership, foreground and enabled state. Upload then proves persisted image pixels; Cancel proves the dialog is destroyed, the main window is enabled and Ctrl+K accepts another query. Both owned jobs must clean up to zero processes.
-## Recorded desktop proof
+### Recorded desktop proof
 
 - Positive: [41933658328](https://github.com/valentinyeo/multiprompt/actions/runs/41933658328), app/harness/embedded revision `a1f75a771853c63495f95410314e0d190b276da8`. All 67 checks passed; cleanup reported zero owned processes.
 - Negative: [41935826746](https://github.com/valentinyeo/multiprompt/actions/runs/41935826746), revision `c1d1e5842f836e5c3a851e8c0e9cde9fb5fa6071`. Identical driver, original generated-only title/Inbox rendering. Upload and Starred pixels passed; both header and Inbox image-center assertions failed, with zero owned processes after cleanup.
