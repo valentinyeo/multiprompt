@@ -45,10 +45,26 @@ class AccountPhotoProof {
     private val colorsRequired = BuildConfig.ACCOUNT_ORIGIN.matches(Regex("https://[a-z0-9-]+\\.trycloudflare\\.com"))
     private var workspaceColors: JSONObject? = null
 
+    private fun dismissDeviceApproval() {
+        if (compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty()) {
+            try {
+                compose.onNodeWithText("No").performClick()
+            } catch (failure: AssertionError) {
+                if (!failure.message.orEmpty().contains("Expected exactly '1' node but could not find any node") ||
+                    compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty() ||
+                    compose.onAllNodesWithText("No").fetchSemanticsNodes().isNotEmpty()) {
+                    throw failure
+                }
+            }
+        }
+    }
+
     private fun openWorkspaceColors() {
+        dismissDeviceApproval()
         compose.onNodeWithContentDescription("Session list actions").performClick()
         compose.onNodeWithText("Settings").performClick()
         compose.onAllNodesWithText("Auto").onFirst().performScrollTo()
+        dismissDeviceApproval()
     }
 
     private fun colorCenter(index: Int): Offset {
@@ -58,6 +74,7 @@ class AccountPhotoProof {
     }
 
     private fun colorSelected(index: Int): Boolean {
+        dismissDeviceApproval()
         val center = colorCenter(index)
         val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
         val image = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
@@ -158,17 +175,7 @@ class AccountPhotoProof {
             val deadline = SystemClock.elapsedRealtime() + 60_000
             var image: Bitmap? = null
             while (SystemClock.elapsedRealtime() < deadline) {
-                if (compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty()) {
-                    try {
-                        compose.onNodeWithText("No").performClick()
-                    } catch (failure: AssertionError) {
-                        if (!failure.message.orEmpty().contains("Expected exactly '1' node but could not find any node") ||
-                            compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty() ||
-                            compose.onAllNodesWithText("No").fetchSemanticsNodes().isNotEmpty()) {
-                            throw failure
-                        }
-                    }
-                }
+                dismissDeviceApproval()
                 val bounds = avatar.fetchSemanticsNode().boundsInWindow
                 val screen = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
                 val candidate = Bitmap.createBitmap(screen, bounds.left.toInt(), bounds.top.toInt(), bounds.width.toInt(), bounds.height.toInt())
