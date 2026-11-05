@@ -1205,6 +1205,11 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         reply.unauthorized = account_state.invalidCredential(response.status, response.bytes);
         return error.Authentication;
     }
+    if (job.kind == .login) {
+        if (g_account_keys_cache.published_key) |old| std.heap.page_allocator.free(old);
+        g_account_keys_cache.published_key = null;
+        g_account_keys_cache.last_check_ms = null;
+    }
     if (@import("room_frontend.zig").enabled and job.kind != .signout) {
         reply.account_id = account_client.field(response.bytes, "account_id") catch null;
     }
