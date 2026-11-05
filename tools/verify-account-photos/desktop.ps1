@@ -10,6 +10,11 @@ Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $config = $env:PHOTO_PROOF_CREDENTIAL | ConvertFrom-Json
+foreach ($name in @('account_id', 'desktop_device_id', 'android_device_id', 'desktop_refresh_token', 'android_refresh_token')) {
+    $value = [string]$config.$name
+    if (!$value -or $value -match '[\r\n]') { throw 'Invalid proof credential' }
+    Write-Output ('::add-mask::' + $value.Replace('%', '%25'))
+}
 Remove-Item Env:PHOTO_PROOF_CREDENTIAL
 $client = Get-Content "$PSScriptRoot/../../src/account_client.zig" -Raw
 $origin = [regex]::Match($client, 'pub const origin = "([^"]+)"').Groups[1].Value
