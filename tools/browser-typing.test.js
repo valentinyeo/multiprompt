@@ -78,6 +78,7 @@ test('URL focus waits for modifiers and cancels stale handoffs', () => {
     .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
     .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()')
     .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
+    .replaceAll('@import("computer_pane.zig").sync()', 'computerSync()')
     .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
   const fixture = `
 const std = @import("std");
@@ -97,12 +98,14 @@ var computer_selected = false;
 var private_allowed = true;
 var guard_allowed = true;
 var destroyed: HANDLE = null;
+var sync_count: usize = 0;
 var foreground_attempts: usize = 0;
 var switch_count: usize = 0;
 var interrupt: u8 = 0;
 var killed: usize = 0;
 const app_state = struct {
     var g_main_hwnd: HANDLE = main;
+    var g_account_locked = false;
     var g_edit_hwnd: HANDLE = edit;
     var g_edit_is_browser_urlbar = true;
     var g_edit_sync_remote_name = false;
@@ -118,6 +121,7 @@ fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
 fn DestroyWindow(hwnd: HANDLE) i32 { destroyed = hwnd; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
 fn computerSelected() bool { return computer_selected; }
+fn computerSync() void { sync_count += 1; }
 fn privateActionsAllowed() bool { return private_allowed; }
 fn focusGuardReadMouse() void {}
 fn IsWindow(h: HANDLE) i32 { return if (h != null) 1 else 0; }
@@ -131,9 +135,14 @@ fn SetForegroundWindow(_: HANDLE) i32 {
     foreground_attempts += 1;
     if (interrupt == 1) { foreground = foreign; owned = false; }
     if (interrupt == 2) app_state.g_focus_input_tick = 11;
+    if (interrupt == 3) app_state.g_account_locked = true;
     return 0;
 }
-fn SwitchToThisWindow(h: HANDLE, _: i32) void { switch_count += 1; foreground = h; }
+fn SwitchToThisWindow(h: HANDLE, _: i32) void {
+    switch_count += 1;
+    foreground = h;
+    if (interrupt == 4) app_state.g_account_locked = true;
+}
 fn SetFocus(h: HANDLE) HANDLE { const previous = focused; focused = h; return previous; }
 
 ${production}
@@ -145,6 +154,7 @@ fn reset() void {
     url_focus_shell_id = 7;
     app_state.g_edit_hwnd = edit;
     app_state.g_edit_is_browser_urlbar = true;
+    app_state.g_account_locked = false;
     app_state.g_focus_authorized_hwnd = parent;
     app_state.g_focus_authorized_until = 1000;
     app_state.g_focus_input_tick = 10;
@@ -157,6 +167,7 @@ fn reset() void {
     private_allowed = true;
     guard_allowed = true;
     destroyed = null;
+    sync_count = 0;
     foreground_attempts = 0;
     switch_count = 0;
     interrupt = 0;
@@ -180,20 +191,20 @@ test "held modifiers defer; release focuses after foreground refusal" {
         try std.testing.expectEqual(@as(usize, 1), killed);
     }
 }
-test "intervening foreign focus or input blocks the fallback" {
-    for ([_]u8{ 1, 2 }) |cause| {
+test "intervening foreign focus, input or account lock blocks the handoff" {
+    for ([_]u8{ 1, 2, 3, 4 }) |cause| {
         reset();
         interrupt = cause;
         browserUrlFocusTick();
         try std.testing.expectEqual(@as(usize, 1), foreground_attempts);
-        try std.testing.expectEqual(@as(usize, 0), switch_count);
+        try std.testing.expectEqual(@as(usize, if (cause == 4) 1 else 0), switch_count);
         try std.testing.expectEqual(@as(HANDLE, null), focused);
         browserUrlFocusTick();
         try std.testing.expectEqual(@as(usize, 1), killed);
     }
 }
 test "invalid requests discard only their own pending editor" {
-    for (0..9) |case| {
+    for (0..11) |case| {
         reset();
         switch (case) {
             0 => owned = false,
@@ -205,6 +216,8 @@ test "invalid requests discard only their own pending editor" {
             6 => guard_allowed = false,
             7 => app_state.g_edit_hwnd = foreign,
             8 => { now = 1001; held = 0x10; },
+            9 => app_state.g_account_locked = true,
+            10 => { computer_selected = true; app_state.g_edit_hwnd = foreign; },
             else => unreachable,
         }
         browserUrlFocusTick();
@@ -212,9 +225,10 @@ test "invalid requests discard only their own pending editor" {
         try std.testing.expectEqual(@as(usize, 0), switch_count);
         try std.testing.expectEqual(@as(usize, 1), killed);
         try std.testing.expectEqual(console, foreground);
-        if (case == 3 or case == 7) {
+        try std.testing.expectEqual(@as(usize, if (case == 4) 1 else 0), sync_count);
+        if (case == 3 or case == 7 or case == 10) {
             try std.testing.expectEqual(@as(HANDLE, null), destroyed);
-            try std.testing.expectEqual(if (case == 7) foreign else null, app_state.g_edit_hwnd);
+            try std.testing.expectEqual(if (case == 7 or case == 10) foreign else null, app_state.g_edit_hwnd);
         } else {
             try std.testing.expectEqual(edit, destroyed);
             try std.testing.expectEqual(@as(HANDLE, null), app_state.g_edit_hwnd);
