@@ -3916,7 +3916,42 @@ def host_claude_open(provider, sid, tmux, session):
     pass
 
 
+HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
+
+
+def host_skill_file(name, cwd=None):
+    home = Path.home() / ".claude"
+    if ":" in name:
+        plugin, skill = name.split(":", 1)
+        files = [f for r in (home / "plugins" / "cache").glob("*/" + plugin + "/*") for f in (r / "skills" / skill / "SKILL.md", r / "commands" / (skill + ".md"))]
+    else:
+        bases = [home] + ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else [])
+        files = [f for b in bases for f in (b / "skills" / name / "SKILL.md", b / "commands" / (name + ".md"))]
+    return next((f for f in files if f.is_file()), None)
+
+
+def host_skill_user_only(path):
+    try:
+        head = path.read_text(errors="replace")[:4000]
+    except OSError:
+        return False
+    return bool(re.search(r"^disable-model-invocation:\s*true\s*$", head, re.M))
+
+
+def host_claude_lead_skill(text, cwd=None):
+    if not isinstance(text, str) or text.lstrip().startswith("/"):
+        return text
+    found = [(m, f) for m in HOST_SKILL_TOKEN.finditer(text) for f in [host_skill_file(m.group(1), cwd)] if f is not None]
+    if not found:
+        return text
+    match = next((m for m, f in found if host_skill_user_only(f)), found[0][0])
+    rest = (text[:match.start()].rstrip() + " " + text[match.end():].lstrip()).strip()
+    return "/" + match.group(1) + (" " + rest if rest else "")
+
+
 def host_claude_write(provider, sid, session, token, text):
+    config = host_config(provider, sid)
+    text = host_claude_lead_skill(text, config.get("cwd") if isinstance(config, dict) else None)
     return host_control_send(session, dict(type="user", message=dict(role="user", content=[dict(type="text", text=text)])))
 
 
