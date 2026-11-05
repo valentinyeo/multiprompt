@@ -1023,7 +1023,7 @@ fn inboxLayout(w: i32, h: i32) InboxLayout {
     const top = uiScaled(if (app_state.g_inbox_filter_active) 112 else 72);
     const stride = @max(1, uiScaled(58));
     const row_height = @max(1, uiScaled(56));
-    const available = @max(0, h - top - uiScaled(40));
+    const available = @max(0, h - top - uiScaled(30));
     const max_rows: u32 = if (available >= row_height) @intCast(1 + @divFloor(available - row_height, stride)) else 0;
     const scroll = if (max_rows > 0 and app_state.g_inbox_sel >= max_rows) app_state.g_inbox_sel - max_rows + 1 else 0;
     return .{ .left = @divTrunc(w - width, 2), .right = @divTrunc(w - width, 2) + width, .top = top, .stride = stride, .row_height = row_height, .max_rows = max_rows, .scroll = scroll };
