@@ -172,6 +172,13 @@ try {
 } catch {
     $result.error=$_.Exception.Message
     try { $w=Witness; if ($w) { Save $w (Join-Path $Evidence 'witness.json') } } catch {}
+    try {
+        $reports = @(Get-ChildItem (Join-Path $settings 'crashes') -Filter 'crash-*.txt' -ErrorAction SilentlyContinue)
+        $frames = @($reports | ForEach-Object {
+            Get-Content $_.FullName | Where-Object { $_ -match '^(exception_code: 0x[0-9A-F]+ \([A-Z_]+\)|exception_address: 0x[0-9A-F]+|module_base: 0x[0-9A-F]+|module_offset: 0x[0-9A-F]+|exe_base: 0x[0-9A-F]+|  0x[0-9A-F]+)$' }
+        })
+        Save $frames (Join-Path $Evidence 'crash-addresses.json')
+    } catch {}
     try { Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped=$job.Stop(); $result.cleanup=$stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup=0 }
