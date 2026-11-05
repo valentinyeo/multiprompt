@@ -7,6 +7,7 @@ pub const Provider = enum {
     claude,
     codex,
     pi,
+    hax,
 
     pub fn wire(self: Provider) []const u8 {
         return @tagName(self);
@@ -17,6 +18,7 @@ pub const Provider = enum {
             .claude => "Claude",
             .codex => "Codex",
             .pi => "Pi",
+            .hax => "Hax",
         };
     }
 
@@ -25,9 +27,36 @@ pub const Provider = enum {
             .claude => 1,
             .codex => 2,
             .pi => 3,
+            .hax => 5,
         };
     }
 };
+
+pub fn fromAiAgent(agent: u8) ?Provider {
+    return switch (agent) {
+        1 => .claude,
+        2 => .codex,
+        3 => .pi,
+        5 => .hax,
+        else => null,
+    };
+}
+
+pub const CLAUDE_SESSION_LEN: usize = 37;
+pub const HAX_SESSION_LEN: usize = 38;
+
+pub fn syncedSessionName(out: *[HAX_SESSION_LEN]u8, provider: Provider, sid: []const u8) ?[]const u8 {
+    if (!safeSessionId(sid)) return null;
+    const prefix = if (provider == .hax) "live-h" else "live-";
+    @memcpy(out[0..prefix.len], prefix);
+    var len: usize = prefix.len;
+    for (sid) |c| {
+        if (c == '-') continue;
+        out[len] = c;
+        len += 1;
+    }
+    return out[0..len];
+}
 
 pub fn eligible(program: []const u8) bool {
     return ENABLED and std.mem.startsWith(u8, program, "claude");
@@ -52,11 +81,14 @@ pub fn formatSessionId(out: *[36]u8, random: *const [16]u8) []const u8 {
 }
 
 pub fn restoreSyncedSession(shell: anytype, session: []const u8) void {
-    if (shell.claude_sid_len != 0 or session.len != 37 or !std.mem.startsWith(u8, session, "live-")) return;
-    for (session[5..]) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return;
+    if (shell.claude_sid_len != 0 or !std.mem.startsWith(u8, session, "live-")) return;
+    const hax = session.len == HAX_SESSION_LEN and session[5] == 'h';
+    if (session.len != CLAUDE_SESSION_LEN and !hax) return;
+    const hex = session[if (hax) 6 else 5..];
+    for (hex) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return;
     var sid: [36]u8 = undefined;
     var index: usize = 0;
-    for (session[5..], 0..) |c, i| {
+    for (hex, 0..) |c, i| {
         if (i == 8 or i == 12 or i == 16 or i == 20) {
             sid[index] = '-';
             index += 1;
@@ -67,7 +99,7 @@ pub fn restoreSyncedSession(shell: anytype, session: []const u8) void {
     @memcpy(shell.claude_sid[0..sid.len], &sid);
     shell.claude_sid_len = sid.len;
     shell.chat_view_on = true;
-    shell.ai_agent = 1;
+    shell.ai_agent = if (hax) Provider.hax.aiAgent() else Provider.claude.aiAgent();
 }
 
 pub fn mintSessionId(out: *[36]u8) ?[]const u8 {
@@ -156,6 +188,69 @@ test "IGSH-1653 synced named live chats restore their identity and chat view" {
         restoreSyncedSession(&untouched, name);
         try std.testing.expectEqualDeep(Session{}, untouched);
     }
+}
+
+test "IGSH-1758 synced hax live chats restore as hax and claude names stay claude" {
+    const Session = struct {
+        claude_sid: [40]u8 = @splat(0),
+        claude_sid_len: u32 = 0,
+        chat_view_on: bool = false,
+        ai_agent: u8 = 0,
+    };
+    var hax: Session = .{};
+    restoreSyncedSession(&hax, "live-h0123456789ab8def81230123456789ab");
+    try std.testing.expectEqualStrings("01234567-89ab-8def-8123-0123456789ab", hax.claude_sid[0..hax.claude_sid_len]);
+    try std.testing.expect(hax.chat_view_on);
+    try std.testing.expectEqual(@as(u8, 5), hax.ai_agent);
+    var claude: Session = .{};
+    restoreSyncedSession(&claude, "live-0123456789ab8def81230123456789ab");
+    try std.testing.expectEqual(@as(u8, 1), claude.ai_agent);
+    for ([_][]const u8{ "live-h0123456789ab8def81230123456789a", "live-h0123456789ab8def81230123456789abc", "live-h0123456789ab8def81230123456789ag", "live-h0123456789AB8def81230123456789ab", "live-x0123456789ab8def81230123456789ab", "live-h" }) |name| {
+        var untouched: Session = .{};
+        restoreSyncedSession(&untouched, name);
+        try std.testing.expectEqualDeep(Session{}, untouched);
+    }
+}
+
+test "IGSH-1758 a minted session name round-trips through restore for every provider" {
+    const sid = "01234567-89ab-8def-8123-0123456789ab";
+    var name: [HAX_SESSION_LEN]u8 = undefined;
+    const Session = struct {
+        claude_sid: [40]u8 = @splat(0),
+        claude_sid_len: u32 = 0,
+        chat_view_on: bool = false,
+        ai_agent: u8 = 0,
+    };
+    const hax_name = syncedSessionName(&name, .hax, sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("live-h0123456789ab8def81230123456789ab", hax_name);
+    try std.testing.expectEqual(HAX_SESSION_LEN, hax_name.len);
+    var hax: Session = .{};
+    restoreSyncedSession(&hax, hax_name);
+    try std.testing.expectEqualStrings(sid, hax.claude_sid[0..hax.claude_sid_len]);
+    try std.testing.expectEqual(@as(u8, 5), hax.ai_agent);
+    const claude_name = syncedSessionName(&name, .claude, sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("live-0123456789ab8def81230123456789ab", claude_name);
+    try std.testing.expectEqual(CLAUDE_SESSION_LEN, claude_name.len);
+    try std.testing.expect(syncedSessionName(&name, .hax, "bad") == null);
+}
+
+test "IGSH-1758 hax is its own provider on the wire, label and tab kind" {
+    try std.testing.expectEqual(@as(u8, 5), Provider.hax.aiAgent());
+    try std.testing.expectEqualStrings("Hax", Provider.hax.label());
+    try std.testing.expectEqualStrings("hax", Provider.hax.wire());
+    try std.testing.expectEqual(Provider.hax, fromAiAgent(5).?);
+    try std.testing.expectEqual(Provider.codex, fromAiAgent(2).?);
+    try std.testing.expect(fromAiAgent(0) == null);
+    try std.testing.expect(fromAiAgent(4) == null);
+    var out: [1024]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const launch = launchCommandFor(&out, .hax, "live-habc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, launch, "host enable hax ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-habc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, launch, "host start hax ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, launch, "permission-mode") == null);
+    const resume_command = resumeCommandFor(&out, .hax, "live-habc", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, resume_command, "host start hax ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-habc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resume_command, "host enable") == null);
 }
 
 test "IGSH-1266 moving a chat asks the reader for the side it should run on" {

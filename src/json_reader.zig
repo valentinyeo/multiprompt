@@ -214,7 +214,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.shell_id = @intCast(@min(uint(obj, "shell_id"), std.math.maxInt(u32)));
         tab.chat_id = uint(obj, "chat_id");
         const agent = uint(obj, "ai_agent");
-        tab.ai_agent = if (agent >= 1 and agent <= 3) @intCast(agent) else 0;
+        tab.ai_agent = if ((agent >= 1 and agent <= 3) or agent == 5) @intCast(agent) else 0;
         tab.last_read_message_id = uint(obj, "last_read_message_id");
         tab.wake_id = @intCast(@min(uint(obj, "wake_id"), std.math.maxInt(u32)));
         tab.pid = @truncate(uint(obj, "pid"));

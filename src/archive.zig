@@ -220,7 +220,7 @@ fn parseArchiveJson(allocator: std.mem.Allocator, json: []const u8, parsed: *std
         e.tmux_session_len = json_reader.copyString(obj, "tmux_session", &e.tmux_session);
         e.tmux_identity_len = json_reader.copyString(obj, "tmux_identity", &e.tmux_identity);
         const agent = json_reader.uint(obj, "ai_agent");
-        e.ai_agent = if (agent >= 1 and agent <= 3) @intCast(agent) else 1;
+        e.ai_agent = if ((agent >= 1 and agent <= 3) or agent == 5) @intCast(agent) else 1;
         e.claude_sid_len = json_reader.copyString(obj, "csid", &e.claude_sid);
         e.claude_cwd_len = json_reader.copyString(obj, "ccwd", &e.claude_cwd);
         if (json_reader.uint(obj, "host") == 1) e.tmux_host = 1;
@@ -512,8 +512,8 @@ pub fn resurrectArchivedByKey(hwnd: HANDLE, host: u8, session: []const u8) bool 
         }
     }
     var rcmd: [1024]u8 = std.mem.zeroes([1024]u8);
-    if (ar_run.ai_agent == 2 or ar_run.ai_agent == 3) {
-        const provider: agent_host.Provider = if (ar_run.ai_agent == 2) .codex else .pi;
+    if (ar_run.ai_agent == 2 or ar_run.ai_agent == 3 or ar_run.ai_agent == 5) {
+        const provider: agent_host.Provider = agent_host.fromAiAgent(ar_run.ai_agent) orelse return false;
         const command = agent_host.resumeCommandFor(&rcmd, provider, ar_run.tmux_session[0..ar_run.tmux_session_len], ar_run.claude_sid[0..ar_run.claude_sid_len]) orelse return false;
         @memcpy(app_state.g_pending_tmux_cmd[0..command.len], command);
         app_state.g_pending_tmux_cmd_len = @intCast(command.len);
@@ -1056,7 +1056,7 @@ fn rememberArchivedTab(i: usize) ?ArchivedEntry {
     entry.tmux_identity = app_state.shells[i].tmux_identity;
     entry.tmux_identity_len = app_state.shells[i].tmux_identity_len;
     entry.tmux_host = app_state.shells[i].tmux_host;
-    entry.ai_agent = if (app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) app_state.shells[i].ai_agent else 1;
+    entry.ai_agent = if ((app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) or app_state.shells[i].ai_agent == 5) app_state.shells[i].ai_agent else 1;
     const cs_len: u32 = @intCast(@min(app_state.shells[i].claude_sid_len, @as(u32, 39)));
     if (cs_len > 0) {
         @memcpy(entry.claude_sid[0..cs_len], app_state.shells[i].claude_sid[0..cs_len]);
@@ -2670,6 +2670,27 @@ pub fn activateSessionOverviewRow(row_idx: u32, hwnd: HANDLE) bool {
     }
 }
 
+test "IGSH-1758 an archived hax chat keeps its provider and resumes with host start hax" {
+    const allocator = std.testing.allocator;
+    var entries: std.ArrayList(ArchivedEntry) = .empty;
+    defer entries.deinit(allocator);
+    const json = "[{\"name\":\"Hax\",\"tmux_session\":\"live-h0123456789ab8def81230123456789ab\",\"csid\":\"01234567-89ab-8def-8123-0123456789ab\",\"ai_agent\":5}]";
+    try std.testing.expect(parseArchiveJson(allocator, json, &entries));
+    try std.testing.expectEqual(@as(u8, 5), entries.items[0].ai_agent);
+    var out: [3074]u8 = undefined;
+    const len = serializeArchiveJson(entries.items, &out) orelse return error.TestUnexpectedResult;
+    var restored: std.ArrayList(ArchivedEntry) = .empty;
+    defer restored.deinit(allocator);
+    try std.testing.expect(parseArchiveJson(allocator, out[0..len], &restored));
+    try std.testing.expectEqual(@as(u8, 5), restored.items[0].ai_agent);
+    const entry = restored.items[0];
+    const provider: agent_host.Provider = agent_host.fromAiAgent(entry.ai_agent) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(agent_host.Provider.hax, provider);
+    var command: [1024]u8 = undefined;
+    const result = agent_host.resumeCommandFor(&command, provider, entry.tmux_session[0..entry.tmux_session_len], entry.claude_sid[0..entry.claude_sid_len]) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, result, "host start hax") != null);
+}
+
 test "IGSH-1666 archived provider survives JSON and legacy defaults" {
     const allocator = std.testing.allocator;
     var entries: std.ArrayList(ArchivedEntry) = .empty;
@@ -2690,7 +2711,7 @@ test "IGSH-1666 archived provider survives JSON and legacy defaults" {
     }
     var command: [1024]u8 = undefined;
     for (restored.items[0..2]) |entry| {
-        const provider: agent_host.Provider = if (entry.ai_agent == 2) .codex else .pi;
+        const provider: agent_host.Provider = agent_host.fromAiAgent(entry.ai_agent) orelse return error.TestUnexpectedResult;
         const result = agent_host.resumeCommandFor(&command, provider, entry.tmux_session[0..entry.tmux_session_len], entry.claude_sid[0..entry.claude_sid_len]) orelse return error.TestUnexpectedResult;
         try std.testing.expect(std.mem.indexOf(u8, result, provider.wire()) != null);
         try std.testing.expect(std.mem.indexOf(u8, result, entry.claude_sid[0..entry.claude_sid_len]) != null);

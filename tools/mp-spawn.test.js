@@ -36,7 +36,7 @@ async function fixture() {
     runtime: (args, input) => {
       calls.push(['runtime', ...args]);
       if (args[0] === 'host' && args[1] === 'enable') {
-        const key = crypto.createHash('sha256').update('claude:' + args[3]).digest('hex').slice(0, 32);
+        const key = crypto.createHash('sha256').update(args[2] + ':' + args[3]).digest('hex').slice(0, 32);
         const file = path.join(home, '.local/state/multiprompt/agent-host', key + '.config.json');
         fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file)), enabled: true }));
         return { status: 0, stdout: '{"status":"enabled"}' };
@@ -161,7 +161,7 @@ test('headless repeats stay undiscoverable; visible mode promotes the same chat 
 });
 
 test('invalid modes and groups refuse before any host setup', async () => {
-  for (const options of [['--mode', 'background'], ['--group', ' '], ['--group', 'x'.repeat(65)], ['--group', 'bad\nname'], ['--mode', 'headless', '--mode', 'visible']]) {
+  for (const options of [['--mode', 'background'], ['--group', ' '], ['--group', 'x'.repeat(65)], ['--group', 'bad\nname'], ['--mode', 'headless', '--mode', 'visible'], ['--provider', 'codex'], ['--provider', 'hax', '--provider', 'claude'], ['--provider']]) {
     const f = await fixture();
     assert.equal((await f.invoke(options)).code, 1);
     assert.deepEqual(f.calls, []);
@@ -239,4 +239,41 @@ test('normalized names converge and terminal ownership is preserved', async () =
   const key = crypto.createHash('sha256').update('claude:' + JSON.parse(first.out).sid).digest('hex').slice(0, 32);
   fs.writeFileSync(path.join(f.opts.env.HOME, '.local/state/multiprompt/agent-host', key + '.owner.json'), JSON.stringify({ owner: 'terminal' }), { mode: 0o600 });
   assert.match((await f.invoke([], { name: 'Caf\u00e9' })).err, /owned by terminal/);
+});
+
+test('IGSH-1758 provider hax spawns a live-h chat with its own host state and no permission mode', async () => {
+  const f = await fixture();
+  const first = await f.invoke(['--provider', 'hax', '--task', 'hello']);
+  assert.equal(first.code, 0, first.err);
+  const result = JSON.parse(first.out);
+  assert.match(result.session, /^live-h[0-9a-f]{32}$/);
+  assert.equal(result.session.length, 38);
+  assert.equal(f.layout.tabs.length, 1);
+  assert.equal(f.layout.tabs[0].tmux_session, result.session);
+  const enable = f.calls.find(x => x[0] === 'runtime' && x[1] === 'host' && x[2] === 'enable');
+  assert.deepEqual(enable.slice(1, 5), ['host', 'enable', 'hax', result.sid]);
+  assert.ok(!enable.includes('--permission-mode'));
+  assert.deepEqual(enable.slice(5, 9), ['--tmux', result.session, '--cwd', '/work']);
+  const start = f.calls.find(x => x[0] === 'runtime' && x[1] === 'host' && x[2] === 'start');
+  assert.deepEqual(start.slice(1), ['host', 'start', 'hax', result.sid]);
+  const serve = f.calls.find(x => x[0] === 'runtime' && x[1] === '--serve');
+  assert.ok(serve);
+  const repeat = await f.invoke(['--provider', 'hax', '--task', 'hello']);
+  assert.equal(repeat.code, 0, repeat.err);
+  assert.equal(JSON.parse(repeat.out).session, result.session);
+  assert.equal(f.layout.tabs.length, 1);
+  const home = f.opts.env.HOME;
+  const key = crypto.createHash('sha256').update('hax:' + result.sid).digest('hex').slice(0, 32);
+  assert.ok(fs.existsSync(path.join(home, '.local/state/multiprompt/agent-host', key + '.config.json')));
+});
+
+test('IGSH-1758 the default provider stays claude and its session name is unchanged', async () => {
+  const f = await fixture();
+  const result = JSON.parse((await f.invoke()).out);
+  assert.match(result.session, /^live-[0-9a-f]{32}$/);
+  const explicit = await fixture();
+  const same = JSON.parse((await explicit.invoke(['--provider', 'claude'])).out);
+  assert.equal(same.session, result.session);
+  const enable = explicit.calls.find(x => x[0] === 'runtime' && x[1] === 'host' && x[2] === 'enable');
+  assert.deepEqual(enable.slice(-2), ['--permission-mode', 'bypassPermissions']);
 });

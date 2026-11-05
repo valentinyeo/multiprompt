@@ -11,7 +11,7 @@ pub fn build(out: []u8, reader: []const u8, session: []const u8, sid: []const u8
     if (sid.len != 0) {
         if (!append(out, &pos, "python3 ")) return null;
         if (!append(out, &pos, reader)) return null;
-        const command = switch (agent) { 2 => " host stop codex '", 3 => " host stop pi '", else => " host stop claude '" };
+        const command = switch (agent) { 2 => " host stop codex '", 3 => " host stop pi '", 5 => " host stop hax '", else => " host stop claude '" };
         if (!append(out, &pos, command)) return null;
         if (!append(out, &pos, sid)) return null;
         if (!append(out, &pos, "' >/dev/null 2>&1; ")) return null;
@@ -78,4 +78,6 @@ test "IGSH-1666 stopping a hosted chat selects its provider" {
     try std.testing.expect(std.mem.indexOf(u8, codex, "host stop codex 'ffffffff") != null);
     const pi = build(&out, "~/.multiprompt-runtime/reader.py", "live-pi", sid, 3) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, pi, "host stop pi 'ffffffff") != null);
+    const hax = build(&out, "~/.multiprompt-runtime/reader.py", "live-h0123", sid, 5) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, hax, "host stop hax 'ffffffff") != null);
 }

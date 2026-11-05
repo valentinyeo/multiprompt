@@ -167,5 +167,5 @@ test('reset has all command surfaces and rejects obsolete cache writes/results',
 
 test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
   const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
-  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
+  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.hax\) "hax" else if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
 });
