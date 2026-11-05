@@ -95,8 +95,14 @@ test('pending settings block sends before draft or outbox changes', () => {
       const at = body.indexOf(mutation);
       if (at >= 0) assert.ok(guard < at, `${name}: ${mutation}`);
     }
-    assert.match(body, /Wait for chat settings to update/);
+    if (name === 'sendChatPrompt') {
+      assert.match(body, /chatSettingsPending\([^\n]*\)\) \{\s*showHeaderNoticeAscii\("Wait for chat settings to update", 3500, false\);\s*return;\s*\}/);
+    } else {
+      assert.match(body, /chatSettingsPending\([^\n]*\)\) \{\s*return false;\s*\}/);
+    }
   }
+  const reaction = read('src/chat_render.zig').split('pub fn chatReactToMessage(')[1].split('\n}')[0];
+  assert.match(reaction, /if \(!@import\("chat_send\.zig"\)\.sendChatMessage\(line\)\) showHeaderNoticeAscii\("Could not send the reaction; try again", 3500, true\);/);
   const session = read('src/chat_session.zig');
   const write = session.split('pub fn chatLiveWrite(')[1].split('\n}')[0];
   assert.ok(write.indexOf('pending_settings.start()') < write.indexOf('WriteFile('));
@@ -107,6 +113,21 @@ test('pending settings block sends before draft or outbox changes', () => {
   const apply = live.split('pub fn applyValue')[1].split('\nfn eventLabel')[0];
   const snapshot = live.split('pub fn applySettingsSnapshot')[1].split('\npub fn ')[0];
   assert.doesNotMatch(apply + snapshot, /pending_settings/);
+});
+
+test('settings notice literals occur only at the named call sites', () => {
+  const calls = [];
+  for (const file of fs.readdirSync(path.join(root, 'src')).filter(name => name.endsWith('.zig'))) {
+    const source = read(`src/${file}`);
+    for (const match of source.matchAll(/showHeaderNoticeAscii\("(Wait for chat settings to update|Could not change chat settings)",\s*\d+,\s*(?:true|false)\)/g)) {
+      const declarations = [...source.slice(0, match.index).matchAll(/^(?:pub )?(?:inline )?fn (\w+)\(/gm)];
+      calls.push(`${file}:${declarations.at(-1)?.[1]}:${match[1]}`);
+    }
+  }
+  assert.deepEqual(calls.sort(), [
+    'chat_send.zig:sendChatPrompt:Wait for chat settings to update',
+    'main.zig:wndProc:Could not change chat settings',
+  ]);
 });
 
 test('new routing IDs avoid all registered bands', async () => {
