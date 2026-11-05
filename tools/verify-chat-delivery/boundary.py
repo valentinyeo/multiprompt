@@ -869,8 +869,36 @@ def capture_screen(escapes):
     return shown
 
 
+def tmux_buffer():
+    name = ARGS[ARGS.index("-b") + 1]
+    if not re.fullmatch(r"mp-send-[0-9a-f]{32}", name):
+        return 95
+    directory = ROOT / "tmux-buffers"
+    directory.mkdir(exist_ok=True)
+    path = directory / name
+    operation = ARGS[0]
+    if operation == "load-buffer":
+        path.write_bytes(sys.stdin.buffer.read())
+    elif operation == "paste-buffer":
+        if not path.exists():
+            return 1
+        text = path.read_text(encoding="utf-8")
+        if not fake_send(["send-keys", "-t", ARGS[ARGS.index("-t") + 1], "-l", "--", text]):
+            return 95
+        if "-d" in ARGS:
+            path.unlink()
+    elif path.exists():
+        path.unlink()
+    else:
+        return 1
+    record("tmux-buffers.jsonl", argv=ARGS)
+    return 0
+
+
 def tmux():
     fake = state().get("fake")
+    if fake and ARGS[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
+        return tmux_buffer()
     if ARGS[:1] == ["capture-pane"]:
         shown = capture_screen("-e" in ARGS)
         record("capture.jsonl", argv=ARGS, screen=shown)

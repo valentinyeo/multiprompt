@@ -69,6 +69,36 @@ print('REACTION_WINDOWS_DISPATCH_PROVEN')
   assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(boundary)], { encoding: 'utf8', timeout: 20000 }), /REACTION_WINDOWS_DISPATCH_PROVEN/);
 });
 
+test('IGSH-1590 tmux buffers preserve Unicode and paste once without submitting', () => {
+  const script = String.raw`
+import ast, io, pathlib, re, sys, tempfile, types
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+node = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'tmux_buffer')
+with tempfile.TemporaryDirectory() as directory:
+    sent, records = [], []
+    text = '👍 to: Same first words [mp:6d8e353d25c5fe23]\nsecond line'
+    name = 'mp-send-' + 'a' * 32
+    scope = dict(ROOT=pathlib.Path(directory), re=re, sys=types.SimpleNamespace(stdin=types.SimpleNamespace(buffer=io.BytesIO(text.encode('utf-8')))), fake_send=lambda argv: sent.append(argv) or True, record=lambda name, **row: records.append(row))
+    exec(compile(ast.Module(body=[node], type_ignores=[]), '<tmux-buffer>', 'exec'), scope)
+    def run(*args):
+        scope['ARGS'] = list(args)
+        return scope['tmux_buffer']()
+    assert run('load-buffer', '-b', name, '-') == 0
+    assert not sent
+    assert run('paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:') == 0
+    assert sent == [['send-keys', '-t', '=verify-agent:', '-l', '--', text]], sent
+    assert run('paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:') == 1
+    assert len(sent) == 1
+    assert run('delete-buffer', '-b', name) == 1
+    scope['sys'].stdin.buffer = io.BytesIO(b'other')
+    assert run('load-buffer', '-b', name, '-') == 0
+    assert run('delete-buffer', '-b', name) == 0
+    assert run('load-buffer', '-b', '../outside', '-') == 95
+print('REACTION_TMUX_BUFFERS_PROVEN')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url))], { encoding: 'utf8', timeout: 20000 }), /REACTION_TMUX_BUFFERS_PROVEN/);
+});
+
 const area = { left: 0, top: 0, right: 300, bottom: 300 };
 function fixture() {
   const image = { width: 300, height: 300, pixels: Buffer.alloc(300 * 300 * 4) };
