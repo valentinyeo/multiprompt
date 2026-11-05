@@ -7,6 +7,10 @@ CREATE TABLE IF NOT EXISTS codes (
  hash TEXT PRIMARY KEY, account TEXT NOT NULL, challenge TEXT NOT NULL,
  redirect TEXT NOT NULL, name TEXT NOT NULL, expires INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS passkey_device_grants (
+ code_hash TEXT PRIMARY KEY, account TEXT NOT NULL,
+ device_id TEXT UNIQUE, public_key TEXT, expires INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS access_tokens (
  hash TEXT PRIMARY KEY, device TEXT NOT NULL REFERENCES devices(id), expires INTEGER NOT NULL
 );

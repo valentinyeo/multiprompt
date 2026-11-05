@@ -1186,6 +1186,15 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     }
     reply.device_keys = try std.heap.page_allocator.dupe(u8, result.bytes);
     const aliases = try accountKnownKeyHosts(a, ssh, reply);
+    for (listing.value.keys) |key| {
+        if (key.status != .pending or !key.passkey or std.mem.eql(u8, key.device_id, listing.value.device_id) or aliases.len == 0) continue;
+        const outcome = accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, key.public_key), reply) catch continue;
+        if (!outcome.complete) continue;
+        const path = try std.fmt.allocPrint(a, "/v1/device-keys/{s}/approve", .{key.device_id});
+        const decided = account_client.request("POST", path, access, "") catch continue;
+        defer decided.deinit();
+        if (decided.status != 200) continue;
+    }
     const cleaned = readDpapiFile("account-keys-cleaned.dat", 64 * 1024);
     defer if (cleaned) |bytes| std.heap.page_allocator.free(bytes);
     var state: std.ArrayList(u8) = .empty;
@@ -1809,6 +1818,7 @@ fn accountPromptDeviceKeys(bytes: []const u8, user_initiated: bool) void {
     var decisions: std.ArrayList(account_keys.Decision) = .empty;
     for (listing.value.keys) |key| {
         if (key.status != .pending or std.mem.eql(u8, key.device_id, listing.value.device_id)) continue;
+        if (key.passkey) continue;
         if (!user_initiated) {
             var seen = false;
             if (previous) |old| {

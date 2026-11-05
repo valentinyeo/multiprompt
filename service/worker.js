@@ -162,15 +162,17 @@ function authorization(url) {
       !/^[A-Za-z0-9_-]{43}$/.test(state || '') || !/^[A-Za-z0-9_-]{43}$/.test(challenge || '') || url.searchParams.get('code_challenge_method') !== 'S256' || name.length > 80 || /[\x00-\x1f]/.test(name)) fail(400, 'invalid_authorization');
   return { redirect, state, challenge, name };
 }
-async function issue(db, email, { redirect, state, challenge, name }, status = 302) {
-  const code = random();
+async function issue(db, email, { redirect, state, challenge, name }, status = 302, passkey = false) {
+  const code = random(), codeHash = await hash(code);
   await db.batch([
     db.prepare('DELETE FROM codes WHERE expires<=?').bind(now()),
     db.prepare('DELETE FROM access_tokens WHERE expires<=?').bind(now()),
-    db.prepare('INSERT INTO codes VALUES (?,?,?,?,?,?)').bind(await hash(code), email, challenge, redirect, name, now() + 120)
+    db.prepare('INSERT INTO codes VALUES (?,?,?,?,?,?)').bind(codeHash, email, challenge, redirect, name, now() + 120),
+    db.prepare('DELETE FROM passkey_device_grants WHERE public_key IS NULL AND expires<=?').bind(now()),
+    ...(passkey ? [db.prepare('INSERT INTO passkey_device_grants (code_hash,account,expires) VALUES (?,?,?)').bind(codeHash, email, now() + 300)] : [])
   ]);
   const target = new URL(redirect); target.searchParams.set('code', code); target.searchParams.set('state', state);
-  return redirectTo(target.href, status);
+  return status === 200 ? json({ redirect: target.href }) : redirectTo(target.href, status);
 }
 const redirectTo = (location, status = 302) => new Response(null, { status, headers: { Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 const html = (text, status = 200) => new Response(text, { status, headers: {
@@ -207,6 +209,17 @@ export default {
         if (request.method === 'POST') {
           sameOrigin(request, env);
           if (!email) fail(401, 'session_required');
+          if (request.headers.get('Content-Type')?.startsWith('application/json')) {
+            const b = await body(request, 32 * 1024, 'invalid_passkey');
+            let authenticator;
+            try { authenticator = atob(b.response.response.authenticatorData.replaceAll('-', '+').replaceAll('_', '/')); } catch { fail(400, 'invalid_passkey'); }
+            if (authenticator.length < 37 || !(authenticator.charCodeAt(32) & 4)) fail(403, 'user_verification_required');
+            const verified = await auth().handler(new Request(url.origin + '/api/auth/passkey/verify-authentication', { method: 'POST', headers: request.headers, body: JSON.stringify({ response: b.response }) }));
+            if (!verified.ok) fail(403, 'passkey_required');
+            const identity = await verified.json();
+            if (identity.user?.email?.toLowerCase() !== email) fail(403, 'passkey_account_mismatch');
+            return issue(db, email, params, 200, true);
+          }
           return issue(db, email, params, 303);
         }
         fail(405, 'method_not_allowed');
@@ -236,7 +249,10 @@ export default {
           const row = await db.prepare('DELETE FROM codes WHERE hash=? AND challenge=? AND redirect=? AND expires>? RETURNING *').bind(await hash(b.code), await hash(b.code_verifier), b.redirect_uri || '', now()).first();
           if (!row) fail(400, 'invalid_grant');
           const refresh = random(), device = { id: crypto.randomUUID(), account: row.account };
-          await db.prepare('INSERT INTO devices (id,account,name,refresh_hash,created,last_seen) VALUES (?,?,?,?,?,?)').bind(device.id, device.account, row.name, await hash(refresh), now(), now()).run();
+          await db.batch([
+            db.prepare('INSERT INTO devices (id,account,name,refresh_hash,created,last_seen) VALUES (?,?,?,?,?,?)').bind(device.id, device.account, row.name, await hash(refresh), now(), now()),
+            db.prepare('UPDATE passkey_device_grants SET device_id=? WHERE code_hash=? AND account=? AND device_id IS NULL AND expires>?').bind(device.id, await hash(b.code), device.account, now())
+          ]);
           return tokens(db, device, refresh);
         }
         if (b.grant_type === 'refresh_token') {
@@ -284,11 +300,12 @@ export default {
         if (!result[1].results.length) fail(401, 'device_required');
         const key = result[1].results[0];
         if (key.status !== 'revoked' && key.public_key !== b.public_key) fail(409, 'key_locked');
+        await db.prepare("UPDATE passkey_device_grants SET public_key=? WHERE device_id=? AND account=? AND public_key IS NULL AND expires>? AND EXISTS (SELECT 1 FROM device_keys WHERE device_id=? AND account=? AND public_key=? AND status='pending')").bind(b.public_key, device.id, device.account, now(), device.id, device.account, b.public_key).run();
         return json({ status: key.status });
       }
       if (url.pathname === '/v1/device-keys' && request.method === 'GET') {
-        const result = await db.prepare('SELECT k.device_id,d.name,k.public_key,k.status,k.requested,k.decided FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.account=? ORDER BY k.requested,k.device_id').bind(device.account).all();
-        return json({ device_id: device.id, keys: result.results });
+        const result = await db.prepare("SELECT k.device_id,d.name,k.public_key,k.status,k.requested,k.decided,EXISTS (SELECT 1 FROM passkey_device_grants g WHERE g.account=k.account AND g.device_id=k.device_id AND g.public_key=k.public_key AND k.status='pending' AND d.revoked=0) AS passkey FROM device_keys k JOIN devices d ON d.id=k.device_id WHERE k.account=? ORDER BY k.requested,k.device_id").bind(device.account).all();
+        return json({ device_id: device.id, keys: result.results.map(key => ({ ...key, passkey: Boolean(key.passkey) })) });
       }
       const decision = url.pathname.match(/^\/v1\/device-keys\/([^/]+)\/(approve|deny)$/);
       if (decision && request.method === 'POST') {
