@@ -26,12 +26,12 @@ pub const Queue = struct {
                 if (same(entry.host, entry.session[0..entry.session_len], host, session)) return entry.token;
             } else if (free == null) free = i;
         }
-        const index = free orelse return null;
+        const slot = free orelse return null;
         var entry = Entry{ .token = @enumFromInt(self.next_token), .host = host, .session_len = session.len, .sid_len = sid.len };
         self.next_token +%= 1;
         @memcpy(entry.session[0..session.len], session);
         @memcpy(entry.sid[0..sid.len], sid);
-        self.slots[index] = entry;
+        self.slots[slot] = entry;
         return entry.token;
     }
 

@@ -15,7 +15,10 @@ function between(source, start, end) {
 function native(source, files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-close-'));
   try {
-    for (const file of files) fs.copyFileSync(`src/${file}`, path.join(dir, file));
+    for (const file of files) {
+      const source = read(`src/${file}`);
+      fs.writeFileSync(path.join(dir, file), file === 'json_reader.zig' ? source.replace(/^test "[^\n]+" \{[\s\S]*?^\}\n/gm, '') : source);
+    }
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -40,7 +43,7 @@ const app_state = struct {
     const g_main_hwnd: ?*anyopaque = null;
 };
 const session_layout = struct { const Tab = struct { tmux_host: u8, tmux_session: []const u8 }; };
-var outcome: Outcome = .retry;
+var kill_outcome: Outcome = .retry;
 var admitted = true;
 var notices: usize = 0;
 var saved: usize = 0;
@@ -48,7 +51,7 @@ var queued: usize = 0;
 fn rejectPinnedSessionClose(_: usize) bool { return false; }
 fn parkMainWindowBeforeActiveShellRemoval(_: usize) bool { return true; }
 fn focusActiveShell() void {}
-fn killRemoteTmuxSession(_: []const u8, _: u8, _: []const u8${tokenized ? ', _: ?u64' : ''}) Outcome { return outcome; }
+fn killRemoteTmuxSession(_: []const u8, _: u8, _: []const u8${tokenized ? ', _: ?u64' : ''}) Outcome { return kill_outcome; }
 fn queuePendingSessionKill(_: []const u8, _: u8, _: []const u8) ${admits ? 'bool' : 'void'} { queued += 1; ${admits ? 'return admitted;' : ''} }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
 fn removePaneSessionFilesForShell(_: u32) void {}
@@ -88,22 +91,22 @@ test "offline end prevents stale sync resurrection but not another host" {
     app_state.g_tmux_closed.reopen(0, "session-one");
 }
 test "full queue and unsafe target preserve tab, successful end needs no retry" {
-    reset(); admitted = false; outcome = .retry;
+    reset(); admitted = false; kill_outcome = .retry;
     endTmuxSessionAt(0);
     try std.testing.expectEqual(@as(usize, 1), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 1), notices);
     try std.testing.expectEqual(@as(usize, 0), saved);
-    reset(); outcome = .unsafe;
+    reset(); kill_outcome = .unsafe;
     endTmuxSessionAt(0);
     try std.testing.expectEqual(@as(usize, 1), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 0), queued);
-    reset(); outcome = .gone;
+    reset(); kill_outcome = .gone;
     endTmuxSessionAt(0);
     try std.testing.expectEqual(@as(usize, 0), app_state.shell_count);
     try std.testing.expectEqual(@as(usize, 0), queued);
     try std.testing.expect(!app_state.g_tmux_closed.contains(0, "session-one"));
 }
-`, ['tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig']);
+`, ['tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
 });
 
 test('IGSH-1516 cancelled retry cannot kill or resurrect a replacement intent', () => {
@@ -175,5 +178,5 @@ test "only explicit accepted reopen cancels end and clears tombstone" {
     try std.testing.expect(app_state.g_pending_session_kills.begin(0) == null);
 }
 test "production queue controls" { std.testing.refAllDecls(session_kills); }
-`, ['session_kills.zig', 'tmux_identity.zig', 'tmux_closed.zig', 'json_reader.zig']);
+`, ['session_kills.zig', 'tmux_identity.zig', 'tmux_closed.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
 });

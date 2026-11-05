@@ -3,7 +3,7 @@ const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const session_end = @import("session_end.zig");
 const session_kills = @import("session_kills.zig");
-extern "kernel32" fn ResumeThread(HANDLE) callconv(.winapi) DWORD;
+const ResumeThread = @import("win32.zig").ResumeThread;
 const agent_host = @import("agent_host.zig");
 const Sleep = @import("win32.zig").Sleep;
 const DWORD = @import("win32.zig").DWORD;

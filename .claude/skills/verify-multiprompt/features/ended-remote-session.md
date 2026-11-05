@@ -12,7 +12,7 @@ Keep a remote tab open while its tmux session is removed on the server. Select t
 
 Case B empties sessions.txt and kills verify-two's transport, exercising the no-server response rather than a list of remaining sessions. Require one reason=session-gone and no attempt for the ended ID in the following 60 seconds. After the observation, Ctrl+2 exposes the ended tab in case-B-session-ended.png. The log plus screenshot is the proof, without OCR. Explicit restart is a mapped manual extension, not claimed by case B; the stand-in supports new-session -A -s for that extension.
 
-## Offline close and explicit reopen
+### Offline close and explicit reopen
 
 `verify-close-unattached.yml` also runs `tools/verify-reconnect/pending-close.ps1` sequentially on its owned hosted Windows desktop. It seeds two saved remote tabs once, then uses real Ctrl+Shift+W, Ctrl+Shift+T and Ctrl+K → Show all sessions. The SSH boundary rejects kills while `kill-offline` exists and holds a connecting retry while `kill-hold` exists. It never modifies app state after launch.
 
