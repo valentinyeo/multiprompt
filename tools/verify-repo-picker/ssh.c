@@ -36,6 +36,7 @@ int main(int argc, char **argv) {
         puts("@@MP_LIVE@@");
         return 0;
     }
+    if (strstr(cmd, "tmux list-sessions")) return 0;
     if (strstr(cmd, "tmux attach") || strstr(cmd, "tmux new-session")) {
         puts("Verification terminal");
         fflush(stdout);
