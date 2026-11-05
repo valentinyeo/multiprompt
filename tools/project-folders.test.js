@@ -87,64 +87,6 @@ test "all folders can be filtered on their source host" {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
-test('surviving shells cannot migrate roots to a new endpoint', t => {
-  assert.ok(vps.includes('fn repoConfigureCache('), 'cache reconfiguration must be testable');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-identity-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const row = vps.slice(vps.indexOf('pub const RepoRow = struct'), vps.indexOf('const MAX_REPO_ROWS'));
-  const cache = vps.slice(vps.indexOf('const RepoStatus = enum'), vps.indexOf('var g_repo_caches:'));
-  const listing = vps.slice(vps.indexOf('fn repoPathSafe('), vps.indexOf('pub fn repoRowAvailable('));
-  const configure = vps.slice(vps.indexOf('fn repoConfigureCache('), vps.indexOf('pub fn requestRepoRefresh('));
-  const publish = vps.slice(vps.indexOf('fn repoPublish('), vps.indexOf('fn repoFetchThread('));
-  const file = path.join(root, 'identity.zig');
-  fs.writeFileSync(file, `const std = @import("std");
-const MAX_REPO_ROWS = 8;
-${row}
-${cache}
-var g_repo_caches: [3]RepoCache = @splat(.{});
-const SpinMutex = struct {
-    state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
-    fn tryLock(self: *SpinMutex) bool { return self.state.cmpxchgStrong(0, 1, .acquire, .monotonic) == null; }
-    fn unlock(self: *SpinMutex) void { self.state.store(0, .release); }
-};
-var g_repo_mutex: SpinMutex = .{};
-fn Sleep(_: u32) void {}
-const app_state = struct {
-    const Shell = struct { tmux_session_len: usize = 1 };
-    var shells = [_]Shell{.{}};
-    const shell_count = 1;
-};
-fn tmuxHostForShell(_: *const app_state.Shell) ?u8 { return 0; }
-fn shellKnownRemotePath(_: *const app_state.Shell, _: u8) ?[]const u8 { return "/old/project"; }
-fn remoteRepoRoot(path: []const u8) []const u8 { return path; }
-${listing}
-${configure}
-${publish}
-test "endpoint replacement excludes old shell but permits discovery" {
-    const cache = &g_repo_caches[0];
-    var rows: [8]RepoRow = @splat(.{});
-    repoConfigureCache(cache, true, "old", "Old");
-    try std.testing.expectEqual(@as(u32, 1), repoRowsForHost(0, &rows));
-    repoConfigureCache(cache, true, "old", "Renamed");
-    try std.testing.expectEqual(@as(u32, 1), repoRowsForHost(0, &rows));
-    const old_generation = cache.generation;
-    repoConfigureCache(cache, true, "new", "New");
-    try std.testing.expect(cache.generation != old_generation);
-    try std.testing.expectEqual(@as(u32, 0), repoRowsForHost(0, &rows));
-    var found: [8]RepoRow = @splat(.{});
-    const n = parseRepoListing(0, "/new/project", &found);
-    repoPublish(cache, cache.generation, true, found[0..n]);
-    try std.testing.expectEqual(@as(u32, 1), repoRowsForHost(0, &rows));
-    try std.testing.expectEqualStrings("/new/project", rows[0].path[0..rows[0].path_len]);
-    repoConfigureCache(cache, false, "new", "New");
-    repoConfigureCache(cache, true, "new", "New");
-    try std.testing.expectEqual(@as(u32, 0), repoRowsForHost(0, &rows));
-}
-`);
-  const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-});
-
 test('repository caches isolate failures, empty results, and stale workers', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-cache-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

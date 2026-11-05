@@ -211,6 +211,20 @@ test "all hosts are filtered before the result limit" {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('offline selection reports the user failure while background fetching stays quiet', () => {
+  const main = readFileSync('src/main.zig', 'utf8');
+  const palette = readFileSync('src/command_palette.zig', 'utf8');
+  const vps = readFileSync('src/vps.zig', 'utf8');
+  const choose = palette.match(/pub fn pickRepoChoose\([^]*?\n\}/);
+  const failure = main.match(/fn showPickRepoFailure\([^]*?\n\}/);
+  const fetch = vps.match(/fn repoFetchThread\([^]*?\n\}/);
+  assert.ok(choose && failure && fetch);
+  assert.match(choose[0], /if \(!@import\("vps\.zig"\)\.repoRowAvailable\(&rows\[idx\]\)\) \{[^]*?g_pick_repo_offline = true;\s*return false;/);
+  assert.match(main, /if \(target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET \+ MAX_REPO_ROWS\) \{[^]*?const picked = pickRepoChoose\(target\);[^]*?if \(!picked\) showPickRepoFailure\(saving_folder\);/);
+  assert.match(failure[0], /if \(palette\.g_pick_repo_offline\) \{\s*showHeaderNoticeAscii\("Pick repo: server is offline", 4000, true\);\s*return;/);
+  assert.doesNotMatch(fetch[0], /showHeaderNoticeAscii/);
+});
+
 test('offline repository selection does not start or save anything', () => {
   const fs = require('node:fs');
   const os = require('node:os');
