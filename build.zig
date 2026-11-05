@@ -323,7 +323,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&agent_host_tests.step);
     const startup_retry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-host-startup-retry.test.js", "tools/chat-host-owner.test.js" });
     vps_test_step.dependOn(&startup_retry_tests.step);
-    const end_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/end-session.test.js" });
+    const end_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/end-session.test.js", "tools/session-actions.test.js" });
     test_step.dependOn(&end_session_tests.step);
     vps_test_step.dependOn(&end_session_tests.step);
     const session_end_tests = b.addTest(.{ .root_module = b.createModule(.{

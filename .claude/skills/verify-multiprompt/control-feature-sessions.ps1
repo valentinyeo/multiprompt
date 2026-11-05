@@ -22,7 +22,8 @@
             } 'Ctrl+T notes-only chat saved'
             Snapshot 'ctrl-t-notes-only-chat'
             $result.checks += @{ name = 'ctrl-t-notes-only-chat'; cwd = '/work/projects/notes-only'; cv = $true; host = 2 }
-            Press @(0x11, 0x57) 'Ctrl+W: close notes-only chat'
+            Palette 'hide from sidebar'
+            Press @(0x0D) 'Enter: hide notes-only chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'notes-only chat closed'
             Palette 'Second'
             Press @(0x0D) 'Enter: return to the seeded third-server session'
@@ -69,7 +70,8 @@
             } 'Ctrl+T zz-last-folder chat after cancel saved'
             Snapshot 'ctrl-t-zz-last-folder-chat'
             $result.checks += @{ name = 'cancel-then-ctrl-t-zz-last-folder'; cwd = '/work/projects/zz-last-folder'; cv = $true; host = 2 }
-            Press @(0x11, 0x57) 'Ctrl+W: close zz-last-folder chat'
+            Palette 'hide from sidebar'
+            Press @(0x0D) 'Enter: hide zz-last-folder chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'zz-last-folder chat closed'
             Palette 'Second'
             Press @(0x0D) 'Enter: return to the seeded third-server session'
@@ -88,7 +90,8 @@
             } 'beta terminal saved'
             Snapshot 'terminal-beta'
             $result.checks += @{ name = 'terminal-beta'; cwd = '/work/projects/beta'; cv = $false; host = 2 }
-            Press @(0x11, 0x57) 'Ctrl+W: close beta terminal'
+            Palette 'hide from sidebar'
+            Press @(0x0D) 'Enter: hide beta terminal'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta terminal closed'
 
             $before = @( (Read-Session).tabs ).Count
