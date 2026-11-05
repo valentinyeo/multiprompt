@@ -110,7 +110,10 @@ function Query([string]$Text, [int]$Target) {
     [void](Wait-For 'palette selection' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ("\[palette\] ready chars="+$Text.Length+" count=[1-9]\d* target="+$Target+"(?:\r?\n|$)") })
 }
 function Focus {
-    [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
+    $focused = [IntPtr][long]([ChatDeliveryDesktop]::Focus($main)[1])
+    $target = if ($focused -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Owner($focused) -eq [uint32]$app.Id -and [VerifyNative]::GetAncestor($focused, 2) -eq $main) { $focused } else { $main }
+    $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='foreground'; previous_focus=$focused.ToInt64(); retained_focus=$target.ToInt64()})
+    [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $target) })
 }
 function Room-Window {
     if ($app.HasExited) { throw ('App exited: '+$app.ExitCode) }

@@ -31,6 +31,9 @@ test('room input waits for the multiline composer instead of retaining the creat
   assert.match(driver, /Check 'canonical-exact-total-turn-count'/);
   assert.match(driver, /Check 'private-canonical-answer-present'/);
   assert.match(driver, /Check 'private-answer-never-enters-room'/);
+  assert.match(driver, /GetAncestor\(\$focused, 2\) -eq \$main/);
+  assert.match(driver, /FocusOwnedWindow\(\$main, \[uint32\]\$app.Id, \$target\)/);
+  assert.match(driver, /retained_focus=\$target.ToInt64\(\)/);
 });
 
 for (const source of ['src/room_message.zig', 'src/room_journal.zig', 'src/rooms.zig']) {
