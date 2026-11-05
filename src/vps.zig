@@ -1130,11 +1130,12 @@ pub const RepoRow = struct {
 };
 
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
+const REPO_CACHE_ROWS = @import("app_state.zig").REPO_CACHE_ROWS;
 const REPO_LIST_SCRIPT = "[ -r /home ] && [ -x /home ] || exit 1; for p in /home/*/projects; do [ -d \\\"$p\\\" ] || continue; [ -r \\\"$p\\\" ] && [ -x \\\"$p\\\" ] || exit 1; for d in \\\"$p\\\"/*/; do [ -d \\\"$d\\\" ] && printf '%s\\n' \\\"${d%/}\\\"; done; done; true";
 
 const RepoStatus = enum { unknown, online, offline };
 const RepoCache = struct {
-    rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS,
+    rows: [REPO_CACHE_ROWS]RepoRow = undefined,
     count: u32 = 0,
     status: RepoStatus = .unknown,
     fetching: bool = false,
@@ -1271,19 +1272,23 @@ fn repoFetchThread(host: u8, generation: u64) void {
     crash_recorder.guardThread();
     var command_buf: [2048]u8 = undefined;
     var text_buf: [65536]u8 = undefined;
-    var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    var rows: []RepoRow = &.{};
     var count: u32 = 0;
     var success = false;
-    if (repoFetchCommand(host, &command_buf)) |command| {
-        const result = sshOneShotCaptureInput(command, &text_buf, null, 10_000);
-        if (repoSuccessfulListing(result.success, text_buf[0..result.len])) |listing| {
-            count = parseRepoListing(host, listing, rows[0..]);
-            success = true;
+    if (std.heap.page_allocator.alloc(RepoRow, REPO_CACHE_ROWS)) |buffer| {
+        rows = buffer;
+        if (repoFetchCommand(host, &command_buf)) |command| {
+            const result = sshOneShotCaptureInput(command, &text_buf, null, 10_000);
+            if (repoSuccessfulListing(result.success, text_buf[0..result.len])) |listing| {
+                count = parseRepoListing(host, listing, rows);
+                success = true;
+            }
         }
-    }
+    } else |_| {}
     while (!g_repo_mutex.tryLock()) Sleep(0);
     repoPublish(&g_repo_caches[host], generation, success, rows[0..count]);
     g_repo_mutex.unlock();
+    if (rows.len > 0) std.heap.page_allocator.free(rows);
     if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_TMUX_LIST_READY, 0, 0);
 }
 

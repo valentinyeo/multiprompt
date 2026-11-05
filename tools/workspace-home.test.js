@@ -98,6 +98,7 @@ test('surviving shells cannot migrate roots to a new endpoint', t => {
   const file = path.join(root, 'identity.zig');
   fs.writeFileSync(file, `const std = @import("std");
 const MAX_REPO_ROWS = 8;
+const REPO_CACHE_ROWS = 8;
 ${row}
 ${cache}
 var g_repo_caches: [3]RepoCache = @splat(.{});
