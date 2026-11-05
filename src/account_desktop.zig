@@ -2178,6 +2178,10 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
+    if (app_state.g_search_pick_repo_mode) {
+        @import("vps.zig").requestAllRepoRefresh();
+        @import("command_palette.zig").updateSearchResults();
+    }
     if (room_prepare_ok and @import("room_frontend.zig").enabled) {
         room_layout_applied = @import("room_frontend.zig").applyAccountLayout(reply.account_id, to_apply);
     }
