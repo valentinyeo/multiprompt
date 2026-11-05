@@ -7,6 +7,7 @@ import re
 import runpy
 import sqlite3
 import sys
+import time
 import types
 import uuid
 
@@ -126,6 +127,16 @@ def room_request():
         temporary = ROOT / ('witness-' + uuid.uuid4().hex + '.json')
         temporary.write_text(json.dumps(witness), encoding='utf-8')
         os.replace(temporary, ROOT / 'witness.json')
+        background = request.get('op') == 'list' or (request.get('op') == 'snapshot' and request.get('metadata') is True)
+        first_complete = len(rows) == 1 and sum(event['type'] == 'human' for event in rows[0]['events']) == 1 and sum(event['type'] == 'agent_reply' for event in rows[0]['events']) == 2
+        if live and background and first_complete and (ROOT / 'hold-next-background-read').is_file() and not (ROOT / 'background-read-held.json').exists():
+            (ROOT / 'background-read-held.json').write_text(json.dumps(dict(kind='catalog' if request['op'] == 'list' else 'catalog_metadata')), encoding='utf-8')
+            deadline = time.monotonic() + 12
+            while not (ROOT / 'release-background-read').is_file():
+                if time.monotonic() >= deadline:
+                    (ROOT / 'background-read-timeout').write_text('expired', encoding='ascii')
+                    raise RuntimeError('Synthetic background-read hold expired')
+                time.sleep(0.025)
         print(service.encoded(response), flush=True)
     finally:
         store.close()

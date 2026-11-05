@@ -315,6 +315,7 @@ try {
     Shot 'after-restart'
     Stop-App
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'live-replies'), 'Synthetic providers only')
+    [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'hold-next-background-read'), 'Synthetic transport latency only')
     Start-App
     $room = Wait-For 'live room restored' { Room-Window }
     $composer = Wait-For 'live composer focus' {
@@ -357,9 +358,18 @@ try {
     Wait-PaintedMessages 'after-send' 1 2
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-synthetic-replies'
+    [void](Wait-For 'background read held by synthetic transport' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'background-read-held.json') })
+    $held = Get-Content (Join-Path $env:MP_VERIFY_STATE 'background-read-held.json') -Raw | ConvertFrom-Json
+    Check 'background-read-kind' ($held.kind -in @('catalog', 'catalog_metadata'))
+    $result.delayed_read_kind = $held.kind
     Invoke-NativeInput @{kind='text'; text='Second room question: both agents, reply once.'; keys=$null}
     Check 'native-second-question-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Second room question: both agents, reply once.')
+    $secondLogOffset = (Log).Length
     Press @(0x0d)
+    [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'release-background-read'), 'Second keyboard send has been attempted')
+    Check 'background-read-hold-not-expired' (!(Test-Path (Join-Path $env:MP_VERIFY_STATE 'background-read-timeout')))
+    $sendLog = Log
+    Check 'second-send-not-rejected' ($sendLog.Length -ge $secondLogOffset -and $sendLog.Substring($secondLogOffset) -notmatch '\[rooms\] rejected ')
     [void](Wait-For 'two questions and four scoped synthetic replies' {
         $w = Witness
         if (!$w -or @($w.rooms).Count -ne 1) { return $false }

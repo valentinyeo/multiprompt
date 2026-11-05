@@ -19,6 +19,9 @@ test('room input waits for the multiline composer instead of retaining the creat
   assert.match(driver, /\$_.event.PSObject.Properties\['kind'\]/);
   assert.match(driver, /\$result.rejections = @\(\[regex\]::Matches/);
   assert.match(driver, /Select-Object -Last 32/);
+  assert.match(driver, /Wait-For 'background read held by synthetic transport'/);
+  assert.match(driver, /release-background-read/);
+  assert.match(driver, /Check 'background-read-hold-not-expired'/);
 });
 
 for (const source of ['src/room_message.zig', 'src/room_journal.zig', 'src/rooms.zig']) {
