@@ -19,10 +19,7 @@
     "allSessionsToggleMark: showHeaderNoticeAscii(\"Only unattached sessions can be marked\",2500,true)",
     "archiveArmOrCommit: showHeaderNoticeAscii(\"Press Alt+X again to archive\",2500,false)",
     "archiveArmOrCommit: showHeaderNoticeAscii(\"Press Alt+X again to close\",2500,false)",
-    "archiveTabAt: showHeaderNoticeAscii(\"Archive memory allocation failed\",4000,true)",
-    "archiveTabAt: showHeaderNoticeAscii(\"Archive save failed - tab left open\",4000,true)",
     "archiveTabAt: showHeaderNoticeAscii(\"Could not kill remote tmux session\",4000,true)",
-    "archiveTabAt: showHeaderNoticeAscii(\"Unsafe tmux session name\",4000,true)",
     "endTmuxSessionAt: showHeaderNoticeAscii(\"Could not kill remote tmux session\",4000,true)",
     "finishUnarchiveUnattachedQueue: showHeaderNoticeAscii(notice,3500,failed>0orworkspace_changed)",
     "handleAllSessionsKey: showHeaderNoticeAscii(\"Archived session deleted\",2500,false)",
@@ -31,6 +28,9 @@
     "handleAllSessionsKey: showHeaderNoticeAscii(\"Not a tmux session\",2500,true)",
     "handleAllSessionsKey: showHeaderNoticeAscii(\"Session killed\",2500,false)",
     "rejectPinnedSessionClose: showHeaderNoticeAscii(\"Pinned session. Unpin before this action.\",4500,true)",
+    "rememberArchivedTab: showHeaderNoticeAscii(\"Archive memory allocation failed\",4000,true)",
+    "rememberArchivedTab: showHeaderNoticeAscii(\"Archive save failed - tab left open\",4000,true)",
+    "rememberArchivedTab: showHeaderNoticeAscii(\"Unsafe tmux session name\",4000,true)",
     "resurrectArchivedByKey: showHeaderNoticeAscii(\"Archive cleanup failed\",4000,true)"
   ],
   "browser_pane.zig": [
@@ -167,6 +167,7 @@
     "showPickRepoFailure: showHeaderNoticeAscii(\"Set workspace folder: could not save\",4000,true)",
     "wndProc: if(!@import(\"browser_pane.zig\").signInGoogleForShell(ti))showHeaderNoticeAscii(\"Sign in to Google needs a Chrome profile tab\",5000,true)",
     "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
+    "wndProc: if(!@import(\"clipboard.zig\").setUnicodeClipboardTextWithRetry(wide_id[0..len]))showHeaderNoticeAscii(\"Could not copy chat ID\",3000,true)",
     "wndProc: if(!@import(\"command_palette.zig\").startAdoptHost(ti))showHeaderNoticeAscii(\"Move chat: this session cannot move yet\",4000,true)",
     "wndProc: if(!capacityBlockNoticeActive())showHeaderNoticeAscii(\"Archived session restore failed\",4000,true)",
     "wndProc: if(!photo.reset(digest))showHeaderNoticeAscii(\"Could not reset image\",4000,true)",

@@ -436,7 +436,7 @@ fn paintContent(hdc: w.HANDLE) void {
 }
 
 fn colorDotRect(workspace: usize, color: usize) w.RECT {
-    const cell = @min(s(40), @divTrunc(client(viewport).right - s(32), 8));
+    const cell = @min(s(40), @divTrunc(client(viewport).right - s(32), @import("session_layout.zig").color_count + 1));
     const left = s(16) + cell * @as(i32, @intCast(color));
     const top = contentGeometry().colors.top + s(@as(i32, @intCast(workspace)) * 80 + 36);
     return .{ .left = left, .right = left + cell, .top = top - scroll, .bottom = top + s(36) - scroll };
@@ -459,13 +459,13 @@ fn paintWorkspaceColors(hdc: w.HANDLE) void {
             rc.bottom -= s(4);
             smooth.fillEllipse(hdc, rc, ((hex >> 16) & 255) | (hex & 0xFF00) | ((hex & 255) << 16));
         }
-        paintText(hdc, words.settings_color_auto, colorDotRect(workspace, 7), 2, if (state.g_ws_colors[workspace] == null) tokens.ReaderForeground else tokens.ReaderHint, w.DT_CENTER);
+        paintText(hdc, words.settings_color_auto, colorDotRect(workspace, @import("session_layout.zig").color_count), 2, if (state.g_ws_colors[workspace] == null) tokens.ReaderForeground else tokens.ReaderHint, w.DT_CENTER);
     }
 }
 
 pub fn chooseWorkspaceColor(workspace: usize, color: ?u8) bool {
     if (workspace >= state.g_lws_count or workspace >= state.MAX_LWS) return false;
-    if (color) |value| if (value >= 7) return false;
+    if (color) |value| if (value >= @import("session_layout.zig").color_count) return false;
     if (state.g_account_locked or state.g_restoring or state.g_account_applying) return false;
     if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) return false;
     state.g_ws_colors[workspace] = color;
@@ -622,12 +622,12 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
         w.WM_LBUTTONDOWN => {
             const x: i16 = @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)))));
             const y: i16 = @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)) >> 16)));
-            for (0..state.g_lws_count) |workspace| for (0..8) |color| {
+            for (0..state.g_lws_count) |workspace| for (0..@import("session_layout.zig").color_count + 1) |color| {
                 const rc = colorDotRect(workspace, color);
                 if (x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom) {
                     color_focus = workspace;
                     _ = @import("focus.zig").SetFocus(hwnd);
-                    _ = chooseWorkspaceColor(workspace, if (color < 7) @intCast(color) else null);
+                    _ = chooseWorkspaceColor(workspace, if (color < @import("session_layout.zig").color_count) @intCast(color) else null);
                     return 0;
                 }
             };
@@ -642,7 +642,7 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
                 setScroll(scroll + rc.top - s(40));
             } else if (wp == 0x25 or wp == 0x27) {
                 const current = @import("session_layout.zig").workspaceColor(color_focus, state.g_ws_colors[color_focus]);
-                _ = chooseWorkspaceColor(color_focus, (current + @as(u8, if (wp == 0x25) 6 else 1)) % 7);
+                _ = chooseWorkspaceColor(color_focus, (current + @as(u8, if (wp == 0x25) @import("session_layout.zig").color_count - 1 else 1)) % @import("session_layout.zig").color_count);
             } else if (wp == 0x24 or wp == 0x2e) _ = chooseWorkspaceColor(color_focus, null);
             return 0;
         },

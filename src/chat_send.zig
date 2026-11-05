@@ -1737,6 +1737,11 @@ pub fn chatEchoMatchActive() void {
             changed = true;
             continue;
         }
+        if (e.message_v1 and e.state == .delivered and app_state.shells[app_state.active_shell].ai_agent == 1) {
+            const facts = chatEchoDeliveryEvidence(app_state.g_chat_outbox.items[i]);
+            if (app_state.g_chat_outbox.items[i].delivery_watch.removed_ms != facts.removed_ms) changed = true;
+            app_state.g_chat_outbox.items[i].delivery_watch.evidence(facts, now_ms);
+        }
         if (e.host_held or e.channel_sent or e.channel_pending) {
             i += 1;
             continue;
@@ -3280,10 +3285,13 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
         if (entry.message_v1 and std.mem.eql(u8, entry.key[0..entry.key_len], key) and std.mem.eql(u8, &entry.message_sid, &identity.sid) and std.mem.eql(u8, std.mem.sliceTo(&entry.message_wire_id, 0), token)) { found = i; break; }
     }
     if (std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started") or std.mem.eql(u8, phase, "cancelled")) {
-        if (found) |i| chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
-        return true;
+        if (found == null) return true;
+        if (std.mem.eql(u8, phase, "cancelled") or app_state.shells[idx].ai_agent != 1) {
+            if (found) |i| chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+            return true;
+        }
     }
-    if (!std.mem.eql(u8, phase, "queued") and !std.mem.eql(u8, phase, "sent") and !std.mem.eql(u8, phase, "failed")) return false;
+    if (!std.mem.eql(u8, phase, "queued") and !std.mem.eql(u8, phase, "sent") and !std.mem.eql(u8, phase, "accepted") and !std.mem.eql(u8, phase, "started") and !std.mem.eql(u8, phase, "failed")) return false;
     if (found == null) {
         for (app_state.g_chat_confirmed.items) |c| {
             if (token.len != 0 and std.mem.eql(u8, c.key[0..c.key_len], key) and std.mem.eql(u8, &c.message_sid, &identity.sid) and std.mem.eql(u8, std.mem.sliceTo(&c.message_wire_id, 0), token)) return true;
@@ -3299,8 +3307,9 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
         _ = json_reader.copyString(message, "id", &entry.message_wire_id);
     }
     const entry = &app_state.g_chat_outbox.items[found.?];
+    if (std.mem.eql(u8, phase, "accepted") and std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")) return true;
     _ = json_reader.copyString(message, "state", &entry.message_phase);
-    entry.state = if (std.mem.eql(u8, phase, "failed")) .not_sent else .queued;
+    entry.state = if (std.mem.eql(u8, phase, "failed")) .not_sent else if (std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started")) .delivered else .queued;
     entry.write_started = true;
     entry.channel_sent = true;
     return true;

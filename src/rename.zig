@@ -525,7 +525,7 @@ pub fn openTabContextPalette(hwnd: HANDLE, tab_idx: u32) void {
     app_state.g_search_tabctx_mode = true;
     app_state.g_tabctx_sid = sid;
     app_state.g_search_len = 0;
-    app_state.g_search_sel = 1;
+    app_state.g_search_sel = 0;
     app_state.g_search_scroll = 0;
     updateSearchResults();
     _ = InvalidateRect(hwnd, null, 0);

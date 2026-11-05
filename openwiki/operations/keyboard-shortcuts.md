@@ -12,6 +12,7 @@ updated: 2026-10-03
 
 Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. The Full list below is generated from it by `node tools/shortcuts-doc.mjs`. Every new user-facing function ships with a shortcut (when sensible), a Ctrl+K entry, and an F1 row; regenerate the Full list after changing those rows.
 
+- Ctrl+T / Ctrl+K → New Claude session: Create a live chat manually. Agents can use the [server command](spawn-multibot-session.md) to create a named chat through account sync instead; no additional Windows binding is needed.
 - Ctrl+Shift+Space: Inside multiprompt, start/stop dictation. Escape while recording discards it without changing your draft. Ctrl+K has `Chat View: Toggle Dictation`. From another app, bring multiprompt to the front (global hotkey).
 - Ctrl+Shift+S: Screenshot the active browser-pane tab, upload it, and insert its link followed by exactly one space. Works from multiprompt, Chat View, and the focused docked Chrome/Edge pane through the native hook and bridge, independently of Chrome's shortcut binding. Ctrl+K has `Browser: Screenshot → Chat View / Shell`; F1 lists the chord. In Chat View the composer receives focus with the caret after the space, including extension-menu screenshots and Ctrl+V image attachments. An inactive target receives the link without changing tabs or stealing focus; another foreground application and modal editors keep their focus.
 - Chrome extension screenshot shortcuts: extension 1.0.62 suggests Ctrl+Shift+S and retains Alt+Shift+S. Both commands and the extension context menu use the same capture/upload/paste transaction. Chrome can leave a conflicting suggested key unbound, and unpacked reloads preserve old bindings: assign it manually at `chrome://extensions/shortcuts` if needed. The app-owned Ctrl+Shift+S path still works while a bound multiprompt pane or the app is foreground; this is not a global shortcut for unrelated Chrome windows.
@@ -119,8 +120,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Close active tab / session |
-| Ctrl+Shift+W | Close active session completely (tmux kill + tab close) |
+| Ctrl+W | Quit the app; keep server agents and saved chats |
+| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
 | Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
@@ -159,6 +162,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -186,7 +191,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
-| Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
 | Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer; Escape discards the recording |
 | Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording; Escape discards the recording |
 

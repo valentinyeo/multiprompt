@@ -2016,7 +2016,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     pos += 1;
     cmd_buf[pos] = 'c';
     pos += 1;
-    writeNum(&cmd_buf, &pos, shell.color orelse 7);
+    writeNum(&cmd_buf, &pos, @import("session_layout.zig").encodeTransferColor(shell.color));
     cmd_buf[pos] = ' ';
     pos += 1;
     cmd_buf[pos] = '"';
@@ -2286,7 +2286,7 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     var appearance_transfer: app_state.AppearanceTabTransfer = std.mem.zeroes(app_state.AppearanceTabTransfer);
     appearance_transfer.legacy = transfer;
     appearance_transfer.face = shell.face orelse 20;
-    appearance_transfer.color = shell.color orelse 7;
+    appearance_transfer.color = @import("session_layout.zig").encodeTransferColor(shell.color);
     const extended = shell.face != null or shell.color != null;
     browser_transfer.appearance = appearance_transfer;
     browser_transfer.has_appearance = @intFromBool(extended);
@@ -4340,8 +4340,8 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         const ncap = @min(nn, @as(u32, 31));
         if (ncap > 0) @memcpy(src_names[swi][0..ncap], nb[0..ncap]);
         src_name_len[swi] = ncap;
-        const color = json_reader.uintDefault(obj, "color", 7);
-        src_colors[swi] = if (color < 7) @intCast(color) else null;
+        const color = json_reader.uintDefault(obj, "color", @import("session_layout.zig").color_count);
+        src_colors[swi] = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
         var wb: [64]u8 = std.mem.zeroes([64]u8);
         const wn2 = json_reader.copyString(obj, "wid", &wb);
         const wcap = @min(wn2, @as(u32, @intCast(src_wids[swi].len)));

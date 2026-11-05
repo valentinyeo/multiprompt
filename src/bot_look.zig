@@ -11,7 +11,7 @@ pub const faces = [_][]const u8{
 };
 pub const colors = [_][]const u8{
     words.settings_color_auto, words.bot_color_sage, words.bot_color_clay, words.bot_color_sand,
-    words.bot_color_mist, words.bot_color_lilac, words.bot_color_rose, words.bot_color_mint,
+    words.bot_color_mist, words.bot_color_lilac, words.bot_color_rose, words.bot_color_mint, words.bot_color_white,
 };
 
 pub fn eligible(idx: u32) bool {

@@ -38,7 +38,6 @@ test("filtered Back-row menus select their first actionable result", () => {
     ["g_search_theme_mode", "g_search_ws_sort_mode"],
     ["g_search_ws_move_mode", "g_search_group_move_mode"],
     ["g_search_group_move_mode", "g_search_tabctx_mode"],
-    ["g_search_tabctx_mode", "g_search_workspace_mode"],
   ];
   for (const [mode, nextMode] of searchableBackRowModes) {
     const body = searchModeBody(mode, nextMode);
@@ -137,4 +136,12 @@ test("Ctrl+K selection follows the mouse pointer over visible result rows", () =
     "ordinary pointer movement must hit-test Ctrl+K results");
   assert.match(body, /hovered_row != g_search_sel[\s\S]*?g_search_sel = hovered_row;[\s\S]*?InvalidateRect/,
     "moving to a new result must update and repaint the selected row");
+});
+
+test("IGSH-1666 chat context has no Back row and keeps the first action selected", () => {
+  const context = searchModeBody("g_search_tabctx_mode", "g_search_workspace_mode");
+  assert.match(context, /appendChatActions\(index\)/);
+  assert.doesNotMatch(context, /SEARCH_TABCTX_BACK|preferFirstFilteredResultAfterBack/);
+  const open = functionBody("openTabContextPalette", "paletteGroupId");
+  assert.match(open, /g_search_sel = 0/);
 });

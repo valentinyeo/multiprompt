@@ -1253,6 +1253,7 @@ comptime {
         _ = @import("sidebar.zig");
         _ = @import("themes.zig");
         _ = @import("browser_pane.zig");
+        _ = @import("computer_pane.zig");
         _ = @import("capacity.zig");
         _ = @import("status_line.zig");
         _ = @import("update_card.zig");
@@ -1286,6 +1287,7 @@ comptime {
         _ = @import("changelog.zig");
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
+        _ = @import("bot_avatar.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
@@ -3203,6 +3205,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_QUIT_ALL => {
             app_state.g_quit_all_in_progress = true;
+            if (wp == 1) {
+                quitAllZigShellWindows(hwnd);
+                return 0;
+            }
             rememberOpenWorkspaceForQuit();
             app_state.requestAppClose(hwnd, .quit_all);
             return 0;
@@ -4943,6 +4949,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
+                var confirm_trace: [64]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&confirm_trace, "[palette] confirm target={d}", .{target}) catch "[palette] confirm unavailable");
                 if ((app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) and target == SEARCH_TABCTX_BACK) {
                     app_state.g_workspace_color_target = null;
                     app_state.g_bot_look_mode = .none;
@@ -7027,7 +7035,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_workspace_delete_confirm = null;
                     app_state.g_search_ws_sort_mode = false;
                     app_state.g_search_theme_mode = false;
-                    app_state.g_wsmove_tab_sid = app_state.g_tabctx_sid;
+                    app_state.g_wsmove_tab_sid = if (app_state.g_tabctx_sid != 0) app_state.g_tabctx_sid else if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
@@ -7114,10 +7122,34 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
+                if (target == app_state.SEARCH_TABCTX_UNREAD or target == app_state.SEARCH_TABCTX_COPY_ID or target == app_state.SEARCH_TABCTX_HIDE) {
+                    const index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (index) |ti| {
+                        if (target == app_state.SEARCH_TABCTX_UNREAD) {
+                            @import("sidebar.zig").markShellUnread(ti);
+                        } else if (target == app_state.SEARCH_TABCTX_HIDE) {
+                            closeShell(ti);
+                        } else {
+                            const shell = &app_state.shells[ti];
+                            var local_id: [16]u8 = undefined;
+                            const id = if (shell.claude_sid_len > 0) shell.claude_sid[0..shell.claude_sid_len] else if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else std.fmt.bufPrint(&local_id, "{d}", .{shell.shell_id}) catch return 0;
+                            var wide_id: [128]u16 = undefined;
+                            const len = std.unicode.utf8ToUtf16Le(&wide_id, id) catch return 0;
+                            if (!@import("clipboard.zig").setUnicodeClipboardTextWithRetry(wide_id[0..len])) showHeaderNoticeAscii("Could not copy chat ID", 3000, true);
+                        }
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
-                    const tc_sid = if (target == SEARCH_TABCTX_START_SESSION and app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
+                    const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
                     const tc_sel_mode = selectedTabCount() > 0;
                     var rename_group_idx: ?u32 = null;
                     if (findShellById(tc_sid)) |ti| {
@@ -7166,7 +7198,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         } else if (target == SEARCH_TABCTX_ARCHIVE) {
                             if (app_state.shells[ti].tmux_session_len > 0) archiveTabAt(ti) else closeNonTmuxTabAt(ti);
                         } else if (target == SEARCH_TABCTX_END_TMUX) {
-                            if (app_state.shells[ti].tmux_session_len > 0) endTmuxSessionAt(ti);
+                            if (app_state.shells[ti].tmux_session_len > 0) endTmuxSessionAt(ti) else closeNonTmuxTabAt(ti);
                         } else if (target == SEARCH_TABCTX_BROWSER) {
                             const from_computer = computer.chosenFor(ti);
                             computer.chooseBrowser(ti);
@@ -8603,14 +8635,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (browser) |metadata| {
                             if (app_state.g_account_locked or app_state.g_restoring or (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored)) return 0;
                             if (!app_state.validBrowserTabTransfer(metadata)) return 0;
-                            if (metadata.appearance.face > 20 or metadata.appearance.color > 7 or metadata.appearance.pending_mask != 0) return 0;
+                            if (metadata.appearance.face > 20 or metadata.appearance.color > @import("session_layout.zig").color_count or metadata.appearance.pending_mask != 0) return 0;
                         }
                         const transfer: *const TabTransfer = @ptrCast(@alignCast(data_ptr));
                         const appearance: ?*const app_state.AppearanceTabTransfer = if (browser) |metadata|
                             (if (metadata.has_appearance != 0) &metadata.appearance else null)
                         else if (cds.cbData == @sizeOf(app_state.AppearanceTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
                         if (appearance) |extended| {
-                            if (extended.face > 20 or extended.color > 7 or extended.pending_mask != 0) return 0;
+                            if (extended.face > 20 or extended.color > @import("session_layout.zig").color_count or extended.pending_mask != 0) return 0;
                         }
                         if (transfer.tmux_identity_len > 63) return 0;
                         if (browser != null and (transfer.console_hwnd == 0 or transfer.kind > 6 or transfer.name_source > 4 or
@@ -8651,7 +8683,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.favorite = transfer.favorite != 0;
                             if (appearance) |extended| {
                                 new_shell.face = if (extended.face < 20) extended.face else null;
-                                new_shell.color = if (extended.color < 7) extended.color else null;
+                                new_shell.color = @import("session_layout.zig").decodeTransferColor(extended.color);
                             }
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;
