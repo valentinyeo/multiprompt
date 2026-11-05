@@ -507,7 +507,6 @@ pub fn chatSteerPrompt() void {
 pub fn sendChatMessage(text: []const u16) bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
     if (@import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
-        showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
         return false;
     }
     _ = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse return false;
@@ -680,7 +679,6 @@ pub fn sendChatPrompt() void {
 pub fn chatSendChoice(text: []const u16) bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
     if (@import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
-        showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
         return false;
     }
     send_latency.markPressed();
