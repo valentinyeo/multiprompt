@@ -8,14 +8,15 @@ const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || process.cwd();
 const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
 
 test('reader expands relative home under its own login', () => {
-  const script = `import ast, os, re
+  const script = `from unittest.mock import patch
 source = open('src/chat_history_reader.py').read()
-fragment = source[source.index('def host_folder(value):'):source.index('def host_cwd(provider, sid):')]
-fn = ast.parse(fragment).body[0]
-ns = {'os': os, 'HOST_FOLDER': re.compile(r'[A-Za-z0-9_./~\\-]+')}
-exec(compile(ast.Module(body=[fn], type_ignores=[]), '<reader>', 'exec'), ns)
-print(ns['host_folder']('~/projects/sample'))
-print(ns['host_folder']('/home/owner/projects/sample'))`;
+outer = {'__name__': 'fixture'}
+exec(compile(source, '<reader>', 'exec'), outer)
+ns = {'__name__': 'fixture'}
+exec(compile(outer['READER_SOURCE'], '<runtime>', 'exec'), ns)
+with patch('os.path.isdir', return_value=False), patch('os.listdir', return_value=[]):
+    print(ns['host_folder']('~/projects/sample'))
+    print(ns['host_folder']('/home/owner/projects/sample'))`;
   const result = spawnSync('python3', ['-c', script], { cwd: root, env: { ...process.env, HOME: '/home/reader' }, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.stdout.trim().split('\n'), ['/home/reader/projects/sample', '/home/owner/projects/sample']);
