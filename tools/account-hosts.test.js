@@ -33,6 +33,9 @@ function audit(desktop, client) {
   assert.match(client, /WinHttpQueryHeaders\(req, 22, null, &header_buf, &size, null\)/);
   assert.match(client, /hosts_supported = layoutSupportsHosts\(raw\);/);
   assert.match(client, /\.hosts_supported = hosts_supported/);
+  assert.match(client, /palette8_supported = layoutSupportsPalette8\(raw\);/);
+  assert.match(client, /\.palette8_supported = palette8_supported/);
+  assert.match(request, /if \(!remote\.palette8_supported\) rebased = try account_layout\.projectPalette7\(alloc, rebased, server\.value\);/);
   const layoutHeaders = client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field('));
   assert.match(layoutHeaders, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal/);
   assert.match(layoutHeaders, /and colors\) ",workspace_color"/);

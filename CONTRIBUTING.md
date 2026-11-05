@@ -21,6 +21,10 @@ trufflehog filesystem . --no-update --fail
 
 Keep personal runtime data, credentials, screenshots of real sessions, and build artifacts out of commits. Changes to shortcuts should update the F1 table and [shortcut reference](openwiki/operations/keyboard-shortcuts.md). Browser extension and native bridge versions must match.
 
+## Chat and sidebar changes
+
+Build chat and sidebar changes only from a ticket that asks for them. Tickets filed by Valentin or the design lead need no further approval. A wrong change is rolled back.
+
 ## Remote shells
 
 The three built-in host slots use SSH config aliases `remote-1`, `remote-2`, and `remote-3`. Configure them in your own SSH config, for example:

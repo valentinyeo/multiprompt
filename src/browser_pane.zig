@@ -68,7 +68,6 @@ const WM_APP_BROWSER_FORWARD = @import("win32.zig").WM_APP_BROWSER_FORWARD;
 const WM_APP_BROWSER_RESOLVED = @import("win32.zig").WM_APP_BROWSER_RESOLVED;
 const WM_APP_BROWSER_DOCKED = @import("win32.zig").WM_APP_BROWSER_DOCKED;
 const WM_ERASEBKGND = @import("win32.zig").WM_ERASEBKGND;
-const TIMER_REFOCUS = @import("win32.zig").TIMER_REFOCUS;
 const TIMER_BROWSER_ADOPT = @import("win32.zig").TIMER_BROWSER_ADOPT;
 const TIMER_BROWSER_SETTLE = @import("win32.zig").TIMER_BROWSER_SETTLE;
 const TIMER_BROWSER_URL_POLL = @import("win32.zig").TIMER_BROWSER_URL_POLL;
@@ -117,6 +116,7 @@ const DestroyWindow = @import("win32.zig").DestroyWindow;
 const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
+const GetFocus = @import("win32.zig").GetFocus;
 const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
 const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
@@ -197,6 +197,7 @@ const focusGuard = @import("focus.zig").focusGuard;
 const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;
 const SetFocus = @import("focus.zig").SetFocus;
 const AttachThreadInput = @import("focus.zig").AttachThreadInput;
+const SwitchToThisWindow = @import("focus.zig").SwitchToThisWindow;
 const ShowWindow = @import("focus.zig").ShowWindow;
 const ShowWindowAsync = @import("focus.zig").ShowWindowAsync;
 const SetWindowPos = @import("focus.zig").SetWindowPos;
@@ -233,9 +234,7 @@ const CoInitializeEx = @import("win32.zig").CoInitializeEx;
 const CoUninitialize = @import("win32.zig").CoUninitialize;
 const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
-const keybd_event = @import("win32.zig").keybd_event;
 const VK_MENU = @import("app_state.zig").VK_MENU;
-const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
 const cancelShellRefocus = @import("focus.zig").cancelShellRefocus;
@@ -347,13 +346,6 @@ fn ownProfileTokenForLaunch(idx: u32, buf: *[browser_own_profile.TOKEN_LEN]u8) ?
     _ = CloseHandle(h);
     const profile_seed = browser_own_profile.seed(listing[0..listing_len], workspace_id, workspace_name) orelse return null;
     return browser_own_profile.token(buf, profile_seed) catch null;
-}
-
-fn assignBrowserProfileForLaunch(idx: u32) void {
-    app_state.shells[idx].browser_profile_token = std.mem.zeroes([32]u8);
-    var token_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;
-    const own_token = ownProfileTokenForLaunch(idx, &token_buf) orelse return;
-    @memcpy(app_state.shells[idx].browser_profile_token[0..own_token.len], own_token);
 }
 
 pub fn browserProfileToken(idx: u32) []const u8 {
@@ -1010,7 +1002,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     const own_token = if (launch_idx) |li| browserProfileToken(li) else "";
     const launch_dir = if (own_token.len > 0) ownBrowserUserDataDir(&own_dir_buf, own_token) else user_data_dir;
     if (launch_dir.len == 0) {
-        showHeaderNoticeAscii("Isolated browser profile path is unavailable", 5000, true);
+        debugLog("Isolated browser profile path is unavailable");
         return;
     }
     const chrome_bridge = native_chrome and app_state.g_browser_engine == .chrome and browser_own_profile.isToken(own_token);
@@ -1427,8 +1419,8 @@ fn startDeferredBrowserUrlQuery() void {
     browser_url_query_deferred = null;
     if (!startBrowserUrlQuery(job)) {
         if (job.purpose == .navigate_pin) finishPinnedNavigation(job.shell_id, job.entry_token);
+        if (job.purpose == .pin_page) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
         std.heap.page_allocator.destroy(job);
-        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
     }
 }
 
@@ -1440,7 +1432,7 @@ fn recoverBrowserUrlQuery() void {
                 browser_pin_send_allowed.store(0, .release);
                 finishPinnedNavigation(job.shell_id, job.entry_token);
             }
-            if (job.purpose != .poll and browserUrlQueryOwner(job) != null) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+            if (job.purpose == .pin_page and browserUrlQueryOwner(job) != null) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
         }
         browser_url_query_inflight = 0;
         browser_url_query_inflight_owner = null;
@@ -1538,11 +1530,11 @@ pub fn consumePinnedBrowserEntry(shell_id: u32) void {
         sh.browser_pin_entry_pending = false;
         var buf: [512]u8 = undefined;
         const current: ?[]const u8 = currentWebView2Url(idx, &buf) catch |err| if (err == error.TooLong) null else {
-            @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+            debugLog("Could not read this page");
             return;
         };
         const pin = sh.browser_pinned_url[0..sh.browser_pinned_url_len];
-        if ((if (current) |url| !std.mem.eql(u8, url, pin) else true) and !navigateWebView2(pin)) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        if ((if (current) |url| !std.mem.eql(u8, url, pin) else true) and !navigateWebView2(pin)) debugLog("Could not open this page");
         return;
     }
     if (sh.browser_pin_navigation_token == sh.browser_pin_entry_token) return;
@@ -1557,7 +1549,7 @@ pub fn consumePinnedBrowserEntry(shell_id: u32) void {
         navigateBrowserPaneWithIntent(idx, pin[0..len], .select_preserve_focus);
         if (sh.browser_hwnd == null and sh.browser_launch_tick == 0) {
             finishPinnedNavigation(shell_id, token);
-            @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            debugLog("Could not open this page");
         }
         return;
     }
@@ -1568,7 +1560,7 @@ pub fn consumePinnedBrowserEntry(shell_id: u32) void {
     if (requestBrowserUrl(shell_id, .ensure_pin)) {
         sh.browser_pin_entry_pending = false;
     } else {
-        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+        debugLog("Could not read this page");
     }
 }
 
@@ -1691,7 +1683,7 @@ pub fn handleBrowserUrlQueryDone(raw: usize) void {
         browser_pin_send_allowed.store(0, .release);
         const valid = browserUrlQueryOwner(job) != null;
         finishPinnedNavigation(job.shell_id, job.entry_token);
-        if (valid and job.result != .success) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        if (valid and job.result != .success) debugLog("Could not open this page");
         std.heap.page_allocator.destroy(job);
         if (browser_url_query_deferred != null) startDeferredBrowserUrlQuery();
         return;
@@ -1712,14 +1704,14 @@ pub fn handleBrowserUrlQueryDone(raw: usize) void {
             }
         } else if (job.purpose == .ensure_pin) {
             if (job.result == .failed) {
-                @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+                debugLog("Could not read this page");
             } else if (job.result == .too_long or !std.mem.eql(u8, url, job.pin[0..job.pin_len])) {
                 app_state.shells[idx].browser_pin_navigation_token = job.entry_token;
                 job.purpose = .navigate_pin;
                 job.result = .failed;
                 if (startBrowserUrlQuery(job)) return;
                 finishPinnedNavigation(job.shell_id, job.entry_token);
-                @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+                debugLog("Could not open this page");
             }
         } else if (job.result == .success and !(std.mem.startsWith(u8, url, "data:text/html") and std.mem.indexOf(u8, url, "ZSPANE") != null)) {
             if (offerPlainSigninForRejectedPage(idx, url)) {
@@ -1882,7 +1874,7 @@ fn navigateBrowserPaneWithIntent(idx: u32, raw_url: []const u8, intent: app_stat
             if (idx != app_state.active_shell or token == 0 or sh.browser_pin_navigation_token != token or
                 !std.mem.eql(u8, url, sh.browser_pinned_url[0..sh.browser_pinned_url_len]) or !requestBrowserUrl(sh.shell_id, .navigate_pin)) {
                 finishPinnedNavigation(sh.shell_id, token);
-                @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+                debugLog("Could not open this page");
             }
             return;
         }
@@ -1961,6 +1953,77 @@ fn activeBrowserShowsUrlBar() bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     const sh = &app_state.shells[app_state.active_shell];
     return sh.browser_pinned_url_len != 0 or (!sh.browser_native and !webView2OwnsActiveShell());
+}
+
+const Scope = enum { focus_escape, focus, address, pane_address };
+const Binding = struct { id: i32, modifiers: u32, key: u32, scope: Scope };
+const Registration = enum { inactive, registered, refused };
+const bindings = [_]Binding{
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_URL, .modifiers = @import("win32.zig").MOD_CONTROL | @import("win32.zig").MOD_SHIFT, .key = 0x4C, .scope = .address },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS, .modifiers = @import("win32.zig").MOD_ALT, .key = 0x51, .scope = .focus_escape },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS_ALT_M, .modifiers = @import("win32.zig").MOD_ALT, .key = 0x4D, .scope = .focus_escape },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS_GRAVE, .modifiers = @import("win32.zig").MOD_CONTROL, .key = 0xC0, .scope = .focus },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_PANE_URL, .modifiers = @import("win32.zig").MOD_CONTROL, .key = 0x4C, .scope = .pane_address },
+};
+var registrations: [bindings.len]Registration = @splat(.inactive);
+
+fn browserFocusHotkeyAllowed() bool {
+    return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
+        !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+        !browserChromeHiddenForOverlay() and !app_state.g_search_active and app_state.active_shell < app_state.shell_count and
+        (app_state.shells[app_state.active_shell].browser_enabled or webView2OwnsActiveShell()) and foregroundIsOurs();
+}
+
+fn urlBarHotkeyAllowed() bool {
+    return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
+        !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+        !browserChromeHiddenForOverlay() and !app_state.g_search_active and !app_state.g_chat_find_open and app_state.g_edit_hwnd == null and
+        app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled and
+        activeBrowserShowsUrlBar() and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0 and
+        IsWindowVisible(app_state.g_urlbar_hwnd) != 0 and foregroundIsOurs();
+}
+
+fn browserHotkeyScopeAllowed(scope: Scope) bool {
+    return switch (scope) {
+        .focus_escape => browserFocusHotkeyAllowed(),
+        .focus => browserFocusHotkeyAllowed() and !app_state.g_chat_find_open and app_state.g_edit_hwnd == null and (activeBrowserHwndLive() != null or webView2OwnsActiveShell()),
+        .address => urlBarHotkeyAllowed(),
+        .pane_address => urlBarHotkeyAllowed() and activeBrowserHasForegroundFocus(),
+    };
+}
+
+pub fn unregisterBrowserHotkeys() void {
+    for (bindings, 0..) |binding, i| {
+        if (registrations[i] == .registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, binding.id);
+        registrations[i] = .inactive;
+    }
+}
+
+pub fn syncBrowserHotkeys() void {
+    for (bindings, 0..) |binding, i| {
+        if (!browserHotkeyScopeAllowed(binding.scope)) {
+            if (registrations[i] == .registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, binding.id);
+            registrations[i] = .inactive;
+        } else if (registrations[i] == .inactive) {
+            registrations[i] = if (@import("win32.zig").RegisterHotKey(app_state.g_main_hwnd, binding.id, binding.modifiers | @import("win32.zig").MOD_NOREPEAT, binding.key) != 0) .registered else .refused;
+        }
+    }
+}
+
+pub fn browserHotkeyAction(id: usize, lp: isize) ?enum { focus, address } {
+    for (bindings, 0..) |binding, i| {
+        if (id == @as(usize, @intCast(binding.id)) and registrations[i] == .registered and browserHotkeyScopeAllowed(binding.scope) and
+            @as(usize, @bitCast(lp)) == (@as(usize, binding.key) << 16 | binding.modifiers) and @import("focus.zig").heldModifierMask() & ~binding.modifiers == 0)
+            return switch (binding.scope) { .focus_escape, .focus => .focus, .address, .pane_address => .address };
+    }
+    return null;
+}
+
+pub fn browserHotkeyPasses(key: u32) bool {
+    for (bindings, 0..) |binding, i| {
+        if (binding.key == key and registrations[i] == .registered and browserHotkeyScopeAllowed(binding.scope) and @import("focus.zig").heldModifierMask() == binding.modifiers) return true;
+    }
+    return false;
 }
 
 pub fn calcBrowserLayout() ?BrowserLayout {
@@ -2926,7 +2989,7 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
         if (job.pin_entry_token != 0 and sh.browser_pin_entry_token == job.pin_entry_token and (sh.browser_pin_entry_pending or token == job.pin_entry_token)) {
             sh.browser_pin_entry_pending = false;
             finishPinnedNavigation(shell_id, job.pin_entry_token);
-            if (idx == app_state.active_shell) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            if (idx == app_state.active_shell) debugLog("Could not open this page");
         }
         if (verboseLoggingEnabled()) debugLog2("[browser-resolve] pending profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
         return;
@@ -3342,6 +3405,16 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_launch, timing_started);
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx) or @import("computer_pane.zig").chosenFor(idx)) return;
+    const launch_engine = app_state.g_browser_engine;
+    var launch_profile_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;
+    const launch_profile = ownProfileTokenForLaunch(idx, &launch_profile_buf) orelse "";
+    if (browserSigninProfileBusy(launch_engine, launch_profile)) {
+        app_state.shells[idx].browser_enabled = false;
+        if (user_initiated) showHeaderNoticeAscii("Close the Google sign-in window before reopening this profile", 5000, true);
+        saveSession();
+        publishInboxState();
+        return;
+    }
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     if (app_state.g_browser_adopt_target_idx != 0xFFFFFFFF) return;
     const launch_now = GetTickCount64();
@@ -3352,7 +3425,8 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
         return;
     }
     ensureBrowserDefaultUrl(idx);
-    assignBrowserProfileForLaunch(idx);
+    app_state.shells[idx].browser_profile_token = std.mem.zeroes([32]u8);
+    @memcpy(app_state.shells[idx].browser_profile_token[0..launch_profile.len], launch_profile);
     app_state.shells[idx].browser_suspended = false;
     app_state.shells[idx].browser_native = app_state.g_browser_native_default;
     const now = launch_now;
@@ -3523,7 +3597,7 @@ pub fn adoptBrowserTick() void {
         if (sh.browser_pin_entry_pending or token != 0) {
             sh.browser_pin_entry_pending = false;
             finishPinnedNavigation(sh.shell_id, token);
-            if (target == app_state.active_shell) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            if (target == app_state.active_shell) debugLog("Could not open this page");
         }
         debugLog("browser adopt timed out");
         if (target == app_state.active_shell and app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -3948,6 +4022,7 @@ fn hideBrowserWindowHard(hwnd: HANDLE) void {
 
 pub fn hideAllBrowserChrome() void {
     if (app_state.g_chat_browser_swap.shell_id != 0 and !@import("computer_pane.zig").selected()) return;
+    unregisterBrowserHotkeys();
     hideBrowserFloatingChrome();
     for (0..app_state.shell_count) |i| {
         const bh = app_state.shells[i].browser_hwnd;
@@ -4107,6 +4182,7 @@ fn sweepBrowserOrphans(now: u64) void {
 
 pub fn updateBrowserVisibility() void {
     if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
+    defer syncBrowserHotkeys();
     if (!@import("room_frontend.zig").privateActionsAllowed()) {
         hideAllBrowserChrome();
         return;
@@ -4264,20 +4340,190 @@ test "IGSH-523 cancelled launches reuse expired slots and evict oldest when full
     try std.testing.expectEqual(@as(usize, 0), cancelledBrowserLaunchSlot(&launches, 1000));
 }
 
+const BrowserSigninReservation = struct {
+    profile: [32]u8,
+    engine: BrowserEngine,
+    operation_id: usize,
+    finished: HANDLE,
+};
+
+const BrowserSigninJob = struct {
+    command: [2048:0]u16,
+    owner: HANDLE,
+    process: HANDLE,
+    start: HANDLE,
+    finished: HANDLE,
+    operation_id: usize,
+};
+
+var browser_signin_reservation: ?BrowserSigninReservation = null;
+var browser_signin_operation_id: usize = 0;
+var browser_signin_cancelled = std.atomic.Value(bool).init(false);
+
+pub fn cancelBrowserSigninForShutdown() void {
+    browser_signin_cancelled.store(true, .release);
+}
+
+fn clearFinishedBrowserSignin() void {
+    const reservation = browser_signin_reservation orelse return;
+    if (WaitForSingleObject(reservation.finished, 0) != 0) return;
+    _ = CloseHandle(reservation.finished);
+    browser_signin_reservation = null;
+}
+
+fn browserSigninProfileBusy(engine: BrowserEngine, profile: []const u8) bool {
+    clearFinishedBrowserSignin();
+    const reservation = browser_signin_reservation orelse return false;
+    return reservation.engine == engine and std.mem.eql(u8, std.mem.sliceTo(&reservation.profile, 0), profile);
+}
+
+pub fn handleBrowserSigninDone(operation_id: usize, status: usize) void {
+    const reservation = browser_signin_reservation orelse return;
+    if (reservation.operation_id != operation_id) return;
+    clearFinishedBrowserSignin();
+    if (browser_signin_reservation != null or app_state.g_app_closing) return;
+    if (status == 0) showHeaderNoticeAscii("Could not open Google sign-in; close remaining profile windows and retry", 8000, true);
+}
+
+fn browserSigninWorker(job: *BrowserSigninJob) void {
+    crash_recorder.guardThread();
+    defer std.heap.page_allocator.destroy(job);
+    defer _ = CloseHandle(job.process);
+    defer _ = CloseHandle(job.start);
+    defer _ = CloseHandle(job.finished);
+    var status: usize = 0;
+    defer {
+        _ = @import("win32.zig").SetEvent(job.finished);
+        _ = PostMessageW(job.owner, @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE, status, @bitCast(job.operation_id));
+    }
+    if (WaitForSingleObject(job.start, 15_000) != 0) return;
+    if (WaitForSingleObject(job.process, 15_000) != 0) return;
+    if (IsWindow(job.owner) == 0) return;
+    var si = std.mem.zeroes(STARTUPINFOW);
+    si.cb = @sizeOf(STARTUPINFOW);
+    var pi: PROCESS_INFORMATION = undefined;
+    if (browser_signin_cancelled.load(.acquire)) return;
+    if (CreateProcessW(null, &job.command, null, null, 0, 0, null, null, &si, &pi) == 0) return;
+    _ = CloseHandle(pi.hThread);
+    defer _ = CloseHandle(pi.hProcess);
+    while (!browser_signin_cancelled.load(.acquire) and IsWindow(job.owner) != 0) {
+        const result = WaitForSingleObject(pi.hProcess, 250);
+        if (result == 0) {
+            status = 1;
+            return;
+        }
+        if (result != 258) return;
+    }
+    status = 1;
+}
+
 pub fn signInGoogleForShell(idx: u32) bool {
-    if (idx >= app_state.shell_count) return false;
+    if (app_state.g_app_closing or idx >= app_state.shell_count) return false;
+    const engine = app_state.g_browser_engine;
     const own_token = browserProfileToken(idx);
-    if (own_token.len == 0) return false;
+    if (engine != .chrome or !browser_own_profile.isToken(own_token)) return false;
+    clearFinishedBrowserSignin();
+    if (browser_signin_reservation != null) {
+        showHeaderNoticeAscii("Close the Google sign-in window before starting another sign-in", 5000, true);
+        return true;
+    }
+    var started = false;
+    defer if (!started) showHeaderNoticeAscii("Could not open Google sign-in; wait for profile panes and retry", 8000, true);
+    const owner = app_state.g_main_hwnd orelse return true;
+    if (IsWindow(owner) == 0) return true;
+    const profile = app_state.shells[idx].browser_profile_token;
+    const win = @import("win32.zig");
+    var process: HANDLE = null;
+    defer {
+        if (!started and process != null) _ = CloseHandle(process);
+    }
+    var canonical_pid: DWORD = 0;
+    for (0..app_state.shell_count) |i| {
+        if (!std.mem.eql(u8, &app_state.shells[i].browser_profile_token, &profile)) continue;
+        const sh = &app_state.shells[i];
+        if (sh.browser_launch_tick != 0 or sh.browser_docking or app_state.g_browser_adopt_target_idx == i) return true;
+        const hwnd = sh.browser_hwnd orelse continue;
+        if (IsWindow(hwnd) == 0 or GetPropW(hwnd, L("ZigShellPaneOwner")) != owner or
+            !edgeWindowClassMatches(hwnd) or !browserWindowProfileMatches(hwnd, @intCast(i))) return true;
+        var pid: DWORD = 0;
+        _ = GetWindowThreadProcessId(hwnd, &pid);
+        if (pid == 0 or (canonical_pid != 0 and canonical_pid != pid)) return true;
+        if (process == null) {
+            process = win.OpenProcess(win.PROCESS_QUERY_LIMITED_INFORMATION | win.PROCESS_SYNCHRONIZE, 0, pid) orelse return true;
+            canonical_pid = pid;
+        }
+    }
+    const controlled_process = process orelse return true;
+    if (WaitForSingleObject(controlled_process, 0) != 258) return true;
+    var image: [1024]u16 = undefined;
+    var image_len: DWORD = image.len;
+    if (win.QueryFullProcessImageNameW(process, 0, &image, &image_len) == 0) return true;
+    const image_path = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, image[0..image_len]) catch return true;
+    defer std.heap.page_allocator.free(image_path);
+    const exe = browserExePath();
+    if (!std.ascii.eqlIgnoreCase(image_path, exe)) return true;
     var dir_buf: [1024]u8 = undefined;
     const dir = ownBrowserUserDataDir(&dir_buf, own_token);
-    if (dir.len == 0) return false;
+    if (dir.len == 0) return true;
+    const controlled_line = browser_own_profile.processCommandLine(std.heap.page_allocator, controlled_process) catch return true;
+    defer std.heap.page_allocator.free(controlled_line);
+    const controlled_dir = (browser_own_profile.userDataArgument(std.heap.page_allocator, controlled_line) catch return true) orelse return true;
+    defer std.heap.page_allocator.free(controlled_dir);
+    if (!std.ascii.eqlIgnoreCase(dir, controlled_dir)) return true;
     var cmd_buf: [2048]u8 = undefined;
-    const cmd = browser_signin.plainProfileLaunch(&cmd_buf, browserExePath(), dir, browserProfile()) orelse return false;
-    app_state.shells[idx].browser_enabled = false;
-    closeBrowserForShell(idx);
-    spawnBrowserCliHidden(cmd);
+    const cmd = browser_signin.plainProfileLaunch(&cmd_buf, exe, dir, browserProfile()) orelse return true;
+    const start = win.CreateEventW(null, 1, 0, null) orelse return true;
+    defer {
+        if (!started) _ = CloseHandle(start);
+    }
+    const finished = win.CreateEventW(null, 1, 0, null) orelse return true;
+    defer {
+        if (!started) _ = CloseHandle(finished);
+    }
+    var worker_start: HANDLE = null;
+    if (win.DuplicateHandle(win.GetCurrentProcess(), start, win.GetCurrentProcess(), &worker_start, 0, 0, win.DUPLICATE_SAME_ACCESS) == 0) return true;
+    defer {
+        if (!started) _ = CloseHandle(worker_start);
+    }
+    var worker_finished: HANDLE = null;
+    if (win.DuplicateHandle(win.GetCurrentProcess(), finished, win.GetCurrentProcess(), &worker_finished, 0, 0, win.DUPLICATE_SAME_ACCESS) == 0) return true;
+    defer {
+        if (!started) _ = CloseHandle(worker_finished);
+    }
+    const job = std.heap.page_allocator.create(BrowserSigninJob) catch return true;
+    defer if (!started) std.heap.page_allocator.destroy(job);
+    job.* = .{
+        .command = std.mem.zeroes([2048:0]u16),
+        .owner = owner,
+        .process = process,
+        .start = worker_start,
+        .finished = worker_finished,
+        .operation_id = 0,
+    };
+    const command_len = std.unicode.utf8ToUtf16Le(job.command[0..job.command.len], cmd) catch return true;
+    job.command[command_len] = 0;
+    browser_signin_operation_id +%= 1;
+    if (browser_signin_operation_id == 0) browser_signin_operation_id = 1;
+    const operation_id = browser_signin_operation_id;
+    job.operation_id = operation_id;
+    browser_signin_reservation = .{ .profile = profile, .engine = engine, .operation_id = operation_id, .finished = finished };
+    const thread = std.Thread.spawn(.{}, browserSigninWorker, .{job}) catch {
+        browser_signin_reservation = null;
+        return true;
+    };
+    started = true;
+    thread.detach();
+    for (0..app_state.shell_count) |i| {
+        if (!std.mem.eql(u8, &app_state.shells[i].browser_profile_token, &profile)) continue;
+        app_state.shells[i].browser_enabled = false;
+        closeBrowserForShell(@intCast(i));
+    }
+    _ = win.SetEvent(start);
+    _ = CloseHandle(start);
     showHeaderNoticeAscii("Sign in to Google in the plain window, then close it", 8000, false);
     saveSession();
+    repositionActive();
+    updateBrowserVisibility();
     return true;
 }
 
@@ -4382,6 +4628,7 @@ pub fn switchBrowserEngine(hwnd: HANDLE) void {
 }
 
 pub fn discardBrowserUrlBarEdit() void {
+    cancelUrlBarFocus();
     if (!app_state.g_edit_is_browser_urlbar or app_state.g_edit_hwnd == null) return;
     _ = DestroyWindow(app_state.g_edit_hwnd);
     app_state.g_edit_hwnd = null;
@@ -5679,10 +5926,89 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
     }
 }
 
+var url_focus_edit: HANDLE = null;
+var url_focus_parent: HANDLE = null;
+var url_focus_deadline: u64 = 0;
+var url_focus_input_tick: u64 = 0;
+var url_focus_shell_id: u32 = 0;
+
+fn cancelUrlBarFocus() void {
+    _ = KillTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS);
+    if (app_state.g_focus_authorized_until == url_focus_deadline and
+        (app_state.g_focus_authorized_hwnd == url_focus_parent or app_state.g_focus_authorized_hwnd == url_focus_edit))
+    {
+        app_state.g_focus_authorized_hwnd = null;
+        app_state.g_focus_authorized_until = 0;
+    }
+    url_focus_edit = null;
+    url_focus_parent = null;
+    url_focus_deadline = 0;
+}
+
+fn abandonUrlBarFocus() void {
+    altqLog("url_focus abandon edit={X} current={X} fg={X} focus={X} now={} deadline={} input={} requested={} auth={X} until={} alt={} ctrl={} shift={}", .{ altqPtr(url_focus_edit), altqPtr(app_state.g_edit_hwnd), altqPtr(GetForegroundWindow()), altqPtr(GetFocus()), GetTickCount64(), url_focus_deadline, app_state.g_focus_input_tick, url_focus_input_tick, altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until, GetAsyncKeyState(0x12), GetAsyncKeyState(0x11), GetAsyncKeyState(0x10) });
+    if (url_focus_edit != null and app_state.g_edit_hwnd == url_focus_edit and app_state.g_edit_is_browser_urlbar) {
+        discardBrowserUrlBarEdit();
+        if (@import("computer_pane.zig").selected()) @import("computer_pane.zig").sync();
+    } else {
+        cancelUrlBarFocus();
+    }
+}
+
+pub fn browserUrlFocusTick() void {
+    @import("focus.zig").focusGuardReadMouse();
+    if (app_state.g_account_locked or @import("computer_pane.zig").selected() or !@import("room_frontend.zig").privateActionsAllowed() or
+        url_focus_edit == null or app_state.g_edit_hwnd != url_focus_edit or !app_state.g_edit_is_browser_urlbar or
+        IsWindow(url_focus_edit) == 0 or IsWindow(url_focus_parent) == 0 or
+        app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != url_focus_shell_id or
+        GetTickCount64() >= url_focus_deadline or app_state.g_focus_input_tick != url_focus_input_tick or !foregroundIsOurs())
+    {
+        abandonUrlBarFocus();
+        return;
+    }
+    for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
+        if (GetAsyncKeyState(key) < 0) return;
+    }
+    if (!focusGuard(url_focus_parent)) {
+        abandonUrlBarFocus();
+        return;
+    }
+    const fg = GetForegroundWindow();
+    if (!foregroundIsOurs() or GetForegroundWindow() != fg) {
+        abandonUrlBarFocus();
+        return;
+    }
+    if (fg != url_focus_parent) {
+        _ = SetForegroundWindow(url_focus_parent);
+        @import("focus.zig").focusGuardReadMouse();
+        if (GetForegroundWindow() == fg and foregroundIsOurs() and GetTickCount64() < url_focus_deadline and
+            !app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+            app_state.g_focus_input_tick == url_focus_input_tick and app_state.g_edit_hwnd == url_focus_edit and
+            IsWindow(url_focus_edit) != 0 and IsWindow(url_focus_parent) != 0 and
+            app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
+        {
+            SwitchToThisWindow(url_focus_parent, 0);
+        }
+    }
+    @import("focus.zig").focusGuardReadMouse();
+    if (GetForegroundWindow() == url_focus_parent and app_state.g_focus_input_tick == url_focus_input_tick and
+        !app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+        GetTickCount64() < url_focus_deadline and app_state.g_edit_hwnd == url_focus_edit and IsWindow(url_focus_edit) != 0 and
+        app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
+    {
+        app_state.g_focus_authorized_hwnd = url_focus_edit;
+        app_state.g_focus_authorized_until = url_focus_deadline;
+        _ = SetFocus(url_focus_edit);
+    }
+    if (!app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
+        GetForegroundWindow() == url_focus_parent and GetFocus() == url_focus_edit) cancelUrlBarFocus();
+}
+
 pub fn startBrowserUrlBarEdit() void {
     if (@import("computer_pane.zig").selected()) return;
     if (!focusGuard(app_state.g_main_hwnd)) return;
     if (!activeBrowserShowsUrlBar()) return;
+    cancelUrlBarFocus();
     commitRename();
     if (app_state.active_shell >= app_state.shell_count) return;
     if (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell()) return;
@@ -5695,7 +6021,7 @@ pub fn startBrowserUrlBarEdit() void {
         updateBrowserVisibility();
     }
     const layout = calcBrowserLayout() orelse return;
-    _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
+    cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_edit_is_browser_urlbar = true;
     app_state.g_edit_is_window = false;
     app_state.g_edit_is_group = false;
@@ -5719,11 +6045,33 @@ pub fn startBrowserUrlBarEdit() void {
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
-        keybd_event(VK_MENU, 0, 0, 0);
-        _ = SetForegroundWindow(app_state.g_main_hwnd);
-        _ = SetFocus(app_state.g_edit_hwnd);
-        keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
+        url_focus_edit = app_state.g_edit_hwnd;
+        url_focus_parent = edit_parent;
+        url_focus_deadline = GetTickCount64() + 1400;
+        url_focus_input_tick = app_state.g_focus_input_tick;
+        url_focus_shell_id = app_state.shells[app_state.active_shell].shell_id;
+        app_state.g_focus_authorized_hwnd = edit_parent;
+        app_state.g_focus_authorized_until = url_focus_deadline;
+        if (foregroundIsOurs()) {
+            _ = SetForegroundWindow(edit_parent);
+            @import("focus.zig").focusGuardReadMouse();
+            if (GetForegroundWindow() == edit_parent and app_state.g_edit_hwnd == url_focus_edit and
+                app_state.g_focus_input_tick == url_focus_input_tick and app_state.active_shell < app_state.shell_count and
+                app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id and
+                !app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed())
+            {
+                app_state.g_focus_authorized_hwnd = url_focus_edit;
+                app_state.g_focus_authorized_until = url_focus_deadline;
+                _ = SetFocus(url_focus_edit);
+            }
+        }
+        if (GetForegroundWindow() == edit_parent and GetFocus() == url_focus_edit) {
+            cancelUrlBarFocus();
+        } else {
+            _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
+            browserUrlFocusTick();
+        }
     }
 }
 
@@ -5766,7 +6114,6 @@ pub fn focusActiveWebView2() void {
 
     const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
     if (phys_alt) return;
-    keybd_event(VK_MENU, 0, 0, 0);
 
     const fg = GetForegroundWindow();
     const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
@@ -5779,7 +6126,6 @@ pub fn focusActiveWebView2() void {
         if (app_state.g_webview2_focus) |focus| focus();
     }
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
-    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 

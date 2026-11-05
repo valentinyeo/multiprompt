@@ -479,6 +479,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + chat_id_pre.len], chat_id_pre);
         pos += chat_id_pre.len;
         pos += writeUintTo(json_buf[pos..], app_state.shells[i].chat_id);
+        if (app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) {
+            const agent_field = std.fmt.bufPrint(json_buf[pos..], ",\"ai_agent\":{d}", .{app_state.shells[i].ai_agent}) catch return false;
+            pos += agent_field.len;
+        }
         const read_marker = std.fmt.bufPrint(json_buf[pos..], ",\"last_read_message_id\":\"{d}\"", .{app_state.shells[i].last_read_message_id}) catch return false;
         pos += read_marker.len;
         if (app_state.shells[i].claude_sid_len > 0 and pos < json_buf.len - 60) {
@@ -1034,7 +1038,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     if (tab.claude_sid_len > 0) {
         @memcpy(shell.claude_sid[0..tab.claude_sid_len], tab.claude_sid[0..tab.claude_sid_len]);
         shell.claude_sid_len = tab.claude_sid_len;
-        shell.ai_agent = 1;
+        shell.ai_agent = if (tab.ai_agent != 0) tab.ai_agent else 1;
     }
     if (tab.claude_sid_len > 0) shell.hook_capable = true;
     if (shell.needs_attention) {
@@ -1519,7 +1523,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     if (tabs[t].claude_sid_len > 0) {
         @memcpy(app_state.shells[idx].claude_sid[0..tabs[t].claude_sid_len], tabs[t].claude_sid[0..tabs[t].claude_sid_len]);
         app_state.shells[idx].claude_sid_len = tabs[t].claude_sid_len;
-        app_state.shells[idx].ai_agent = 1;
+        app_state.shells[idx].ai_agent = if (tabs[t].ai_agent != 0) tabs[t].ai_agent else 1;
         app_state.shells[idx].hook_capable = true;
     }
     noteRestoredBlueDot(idx);
@@ -1810,8 +1814,8 @@ pub fn restoreSession() u32 {
     app_state.g_hide_pills = json_reader.boolean(json_reader.field(json, "hide_pills"), app_state.g_hide_pills);
 
     app_state.g_ws_colors = @splat(null);
-    const workspace_color = json_reader.uintDefault(json, "workspace_color", 7);
-    app_state.g_ws_colors[0] = if (workspace_color < 7) @intCast(workspace_color) else null;
+    const workspace_color = json_reader.uintDefault(json, "workspace_color", @import("session_layout.zig").color_count);
+    app_state.g_ws_colors[0] = if (workspace_color < @import("session_layout.zig").color_count) @intCast(workspace_color) else null;
     var saved_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
@@ -1825,8 +1829,8 @@ pub fn restoreSession() u32 {
         for (json_reader.array(json_reader.field(json, "workspaces")), 0..) |obj, wi| {
             if (wi >= MAX_LWS) break;
             app_state.g_ws_name_len[wi] = json_reader.copyString(obj, "name", &app_state.g_ws_names[wi]);
-            const color = json_reader.uintDefault(obj, "color", 7);
-            app_state.g_ws_colors[wi] = if (color < 7) @intCast(color) else null;
+            const color = json_reader.uintDefault(obj, "color", @import("session_layout.zig").color_count);
+            app_state.g_ws_colors[wi] = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
             var wid_tmp: [64]u8 = std.mem.zeroes([64]u8);
             const wid_n = json_reader.copyString(obj, "wid", &wid_tmp);
             const wid_cap = @min(wid_n, @as(u32, @intCast(app_state.g_ws_ids[wi].len)));
@@ -2464,6 +2468,7 @@ test "IGSH-1447 a remote tab saves the folder it was opened in" {
     app_state.shells[0].kind = .tmux;
     app_state.shells[0].tmux_host = 0;
     app_state.shells[0].shell_id = 9;
+    app_state.shells[0].ai_agent = 2;
     const session = "term-picked";
     @memcpy(app_state.shells[0].tmux_session[0..session.len], session);
     app_state.shells[0].tmux_session_len = session.len;
@@ -2494,6 +2499,15 @@ test "IGSH-1447 a remote tab saves the folder it was opened in" {
     try std.testing.expectEqual(@as(u32, 1), count);
     try std.testing.expectEqualStrings(session, tabs[0].tmux_session[0..tabs[0].tmux_session_len]);
     try std.testing.expectEqualStrings(folder, tabs[0].cwd[0..tabs[0].cwd_len]);
+    try std.testing.expectEqual(@as(u8, 2), tabs[0].ai_agent);
+    app_state.shells[0].ai_agent = 3;
+    try std.testing.expect(saveSessionTo(path, null));
+    const pi_bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(pi_bytes);
+    var pi_parsed = try json_reader.parse(std.testing.allocator, pi_bytes);
+    defer pi_parsed.deinit();
+    try std.testing.expectEqual(@as(u32, 1), json_reader.sessionTabs(pi_parsed.value, &tabs, MAX_LWS));
+    try std.testing.expectEqual(@as(u8, 3), tabs[0].ai_agent);
 }
 
 test "IGSH-820 pre-change session ignores locks and preserves pinned tabs" {

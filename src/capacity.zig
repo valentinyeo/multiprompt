@@ -273,12 +273,12 @@ pub fn sidebarStickyCardHitTest(my: i32) bool {
 pub const AdmissionOrigin = enum { user, automatic };
 
 fn capacityAdmissionFor(origin: AdmissionOrigin, state: CapacityState, host_busy: u16, host_limit: u16) CapacityAdmission {
+    if (origin == .user) return .allow;
     const saturated = host_limit > 0 and host_busy >= host_limit;
     return switch (state) {
-        .critical => .block_host_pressure,
-        .red => if (origin == .automatic) .block_host_pressure else .warn,
+        .critical, .red => .block_host_pressure,
         .amber => .warn,
-        .green, .unknown => if (saturated) (if (origin == .automatic) .block_host_busy else .warn) else .allow,
+        .green, .unknown => if (saturated) .block_host_busy else .allow,
     };
 }
 
@@ -325,6 +325,7 @@ pub fn capacityAdmitNewAgent(host: u8, workspace: u8, origin: AdmissionOrigin, l
     const host_limit = if (host < app_state.g_capacity_policy.host_busy_limit.len) app_state.g_capacity_policy.host_busy_limit[host] else 0;
     const decision = capacityAdmissionFor(origin, state, host_busy, host_limit);
     auditCapacityAdmission(host, workspace, origin, decision, label);
+    if (origin == .automatic) return decision == .allow or decision == .warn;
 
     var msg_buf: [128]u8 = undefined;
     switch (decision) {
@@ -358,36 +359,6 @@ pub fn capacityAdmitNewAgent(host: u8, workspace: u8, origin: AdmissionOrigin, l
 
 pub fn capacityBlockNoticeActive() bool {
     return GetTickCount64() < app_state.g_capacity_block_notice_until;
-}
-
-pub fn announceCapacityTransitions() void {
-    for (0..app_state.g_host_capacity.len) |host_usize| {
-        const host: u8 = @intCast(host_usize);
-        const current = effectiveCapacityState(host);
-        const previous = app_state.g_capacity_announced[host_usize];
-        if (current == previous) continue;
-        app_state.g_capacity_announced[host_usize] = current;
-        if (current == .unknown or current == .green and previous == .unknown) continue;
-
-        var msg_buf: [128]u8 = undefined;
-        if (current == .green) {
-            const msg = std.fmt.bufPrint(&msg_buf, "{s} capacity recovered - new workloads enabled", .{capacityHostLabel(host)}) catch "VPS capacity recovered";
-            showHeaderNoticeAscii(msg, 6000, false);
-        } else if (current == .amber or current == .red or current == .critical) {
-            const metrics = app_state.g_host_capacity[host_usize];
-            const load_whole = metrics.load_milli / 1000;
-            const load_frac = metrics.load_milli % 1000 / 100;
-            const msg = std.fmt.bufPrint(&msg_buf, "{s} {s}: load {d}.{d}/{d}, {d} busy agents", .{
-                capacityHostLabel(host),
-                capacityStateLabel(current),
-                load_whole,
-                load_frac,
-                metrics.cores,
-                hostBusyAgentCount(host),
-            }) catch "VPS capacity warning";
-            showHeaderNoticeAscii(msg, if (current == .amber) 6000 else 10000, true);
-        }
-    }
 }
 
 pub fn activeCapacityStatus(out: *[48]u16, out_state: *CapacityState) usize {
@@ -458,9 +429,10 @@ test "capacity admission blocks host pressure and host saturation only" {
     try std.testing.expectEqual(CapacityAdmission.block_host_busy, capacityAdmissionFor(.automatic, .green, 8, 8));
 }
 
-test "IGSH-1447 a hand-started session opens on a busy host and only critical blocks it" {
-    try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.user, .red, 0, 8));
-    try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.user, .critical, 0, 8));
+test "IGSH-1648 hand-started sessions always proceed without pressure warnings" {
+    for ([_]CapacityState{ .unknown, .green, .amber, .red, .critical }) |state| {
+        try std.testing.expectEqual(CapacityAdmission.allow, capacityAdmissionFor(.user, state, 20, 8));
+    }
     try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.automatic, .red, 0, 8));
     try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.automatic, .amber, 2, 8));
 }
@@ -547,7 +519,7 @@ pub fn ensureCapacityPolicyStarter() void {
     }
     const starter =
         "{\n" ++
-        "  \"_doc\": \"VPS Capacity Guardian. Load thresholds are per-core percentages; PSI values are Linux avg10 percentages. Red/critical pressure blocks new AI workloads but never blocks attaching, inspecting, or ending an existing tmux session.\",\n" ++
+        "  \"_doc\": \"VPS Capacity Guardian. Load thresholds are per-core percentages; PSI values are Linux avg60 percentages. Red/critical pressure blocks automatic AI workloads but never blocks user-started sessions or attaching, inspecting, or ending an existing tmux session.\",\n" ++
         "  \"host1_busy_agents\": 8,\n" ++
         "  \"host2_busy_agents\": 8,\n" ++
         "  \"amber_load_percent\": 75,\n" ++

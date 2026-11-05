@@ -93,5 +93,5 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+X", \.b = "Insert current browser tab URL/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /\| Ctrl\+Shift\+X \| Insert current browser tab URL/);
   assert.match(read('build.zig'), /"node", "--test"[^\n]*"tools\/issue-493-tab-url-shortcut\.test\.js"/);
-  assert.match(readChangelogEntry('IGSH-493'), /^Ctrl\+Shift\+X inserts[^\n]+without sending\.\n$/);
+  assert.equal(readChangelogEntry('IGSH-493').trim(), 'IGSH-493 Chat View: a keyboard shortcut that inserts the URL of the browser tab I am looking at into the message box');
 });

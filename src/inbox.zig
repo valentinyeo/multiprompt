@@ -9,7 +9,6 @@ const WPARAM = @import("win32.zig").WPARAM;
 const HANDLE = @import("win32.zig").HANDLE;
 const WS_VISIBLE = @import("win32.zig").WS_VISIBLE;
 const WS_CHILD = @import("win32.zig").WS_CHILD;
-const WS_BORDER = @import("win32.zig").WS_BORDER;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
 const SW_HIDE = @import("win32.zig").SW_HIDE;
 const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
@@ -108,17 +107,11 @@ const editSubclassProc = @import("rename.zig").editSubclassProc;
 const commitRename = @import("rename.zig").commitRename;
 const clearSearchBackdrop = @import("rename.zig").clearSearchBackdrop;
 const uiScaled = @import("drawing.zig").uiScaled;
-const uiFontInboxTitle = @import("drawing.zig").uiFontInboxTitle;
 const browserInboxState = @import("drawing.zig").browserInboxState;
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const asciiContainsQueryInsensitive = @import("command_palette.zig").asciiContainsQueryInsensitive;
 const SetTimer = @import("win32.zig").SetTimer;
 const KillTimer = @import("win32.zig").KillTimer;
-const etaRemainingMs = @import("notifications.zig").etaRemainingMs;
-const etaElapsedMs = @import("notifications.zig").etaElapsedMs;
-const etaOverdueColor = @import("notifications.zig").etaOverdueColor;
-const formatEtaRemaining = @import("notifications.zig").formatEtaRemaining;
-const etaFillFraction = @import("notifications.zig").etaFillFraction;
 const INBOX_MAX_WS = @import("app_state.zig").INBOX_MAX_WS;
 const INBOX_MAX_ROWS = @import("app_state.zig").INBOX_MAX_ROWS;
 const InboxRow = @import("app_state.zig").InboxRow;
@@ -470,9 +463,13 @@ pub fn publishInboxStateNow() void {
         const o9 = ",\"pv\":\"";
         @memcpy(json[pos .. pos + o9.len], o9);
         pos += o9.len;
-        appendJsonEscaped(&json, &pos, inboxUtf8Prefix(app_state.shells[i].preview[0..app_state.shells[i].preview_len], 90));
+        const second_line = @import("agent_second_line.zig").forShell(@intCast(i));
+        appendJsonEscaped(&json, &pos, inboxUtf8Prefix(second_line.text[0..second_line.len], 90));
         json[pos] = '"';
         pos += 1;
+        const question_field = if (second_line.question) ",\"pv_semantic\":true,\"pv_question\":true" else ",\"pv_semantic\":true,\"pv_question\":false";
+        @memcpy(json[pos .. pos + question_field.len], question_field);
+        pos += question_field.len;
         if (app_state.shells[i].ai_agent != 0) {
             const oag = ",\"ag\":";
             @memcpy(json[pos .. pos + oag.len], oag);
@@ -625,7 +622,7 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         var spv: [96]u8 = std.mem.zeroes([96]u8);
         const snl = json_reader.copyString(o, "name", &sname);
         const ssl = json_reader.copyString(o, "sub", &ssub);
-        const spvl = json_reader.copyString(o, "pv", &spv);
+        const spvl = if (json_reader.boolTrue(o, "pv_semantic")) json_reader.copyString(o, "pv", &spv) else 0;
         const sid = json_reader.uint(o, "sid");
         const kind = json_reader.uint(o, "kind");
         const act = json_reader.uint(o, "act");
@@ -682,6 +679,7 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         const pvl2 = @min(spvl, @as(u32, 95));
         @memcpy(app_state.g_inbox_rows[ri].pv[0..pvl2], spv[0..pvl2]);
         app_state.g_inbox_rows[ri].pv_len = pvl2;
+        app_state.g_inbox_rows[ri].pv_question = json_reader.boolTrue(o, "pv_question");
         app_state.g_inbox_row_count += 1;
 
         app_state.g_inbox_ws[ws_idx].total += 1;
@@ -1005,7 +1003,6 @@ const InboxLayout = struct {
 const InboxNameBounds = struct {
     left: i32,
     right: i32,
-    workspace_right: i32,
     show_age: bool,
 };
 
@@ -1015,10 +1012,8 @@ fn inboxNameBounds(layout: InboxLayout, row: *const InboxRow) InboxNameBounds {
     const has_time = row.la != 0 or row.lv != 0;
     const age_right_padding: i32 = if (has_time) 100 else 30;
     const show_age = (row.att or has_time) and content_right - left >= uiScaled(age_right_padding - 14 + 80);
-    const workspace_right = if (show_age) @max(left, layout.right - uiScaled(age_right_padding)) else content_right;
-    const has_workspace = row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].name_len > 0;
-    const workspace_space = if (has_workspace and workspace_right - left >= uiScaled(156)) uiScaled(76) else 0;
-    return .{ .left = left, .right = workspace_right - workspace_space, .workspace_right = workspace_right, .show_age = show_age };
+    const right = if (show_age) @max(left, layout.right - uiScaled(age_right_padding)) else content_right;
+    return .{ .left = left, .right = right, .show_age = show_age };
 }
 
 fn inboxLayout(w: i32, h: i32) InboxLayout {
@@ -1026,7 +1021,7 @@ fn inboxLayout(w: i32, h: i32) InboxLayout {
     const top = uiScaled(if (app_state.g_inbox_filter_active) 112 else 72);
     const stride = @max(1, uiScaled(58));
     const row_height = @max(1, uiScaled(56));
-    const available = @max(0, h - top - uiScaled(40));
+    const available = @max(0, h - top - uiScaled(30));
     const max_rows: u32 = if (available >= row_height) @intCast(1 + @divFloor(available - row_height, stride)) else 0;
     const scroll = if (max_rows > 0 and app_state.g_inbox_sel >= max_rows) app_state.g_inbox_sel - max_rows + 1 else 0;
     return .{ .left = @divTrunc(w - width, 2), .right = @divTrunc(w - width, 2) + width, .top = top, .stride = stride, .row_height = row_height, .max_rows = max_rows, .scroll = scroll };
@@ -1211,7 +1206,9 @@ pub fn findShellById(sid: u32) ?u32 {
     return null;
 }
 
-fn startInboxRename() void {
+var inbox_rename_font: HANDLE = null;
+
+pub fn startInboxRename() void {
     const ri = inboxNthVisible(app_state.g_inbox_sel) orelse {
         showHeaderNoticeAscii("No session selected", 2500, true);
         return;
@@ -1239,6 +1236,7 @@ fn startInboxRename() void {
     commitRename();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
     app_state.g_edit_tab = idx;
+    app_state.g_edit_sid = app_state.shells[idx].shell_id;
     app_state.g_edit_idx = idx;
     app_state.g_edit_is_group = false;
     app_state.g_edit_is_window = false;
@@ -1248,14 +1246,20 @@ fn startInboxRename() void {
     app_state.g_edit_sync_remote_name = true;
 
     const y = layout.top + @as(i32, @intCast(app_state.g_inbox_sel - layout.scroll)) * layout.stride;
-    const edit_h = uiScaled(22);
+    const edit_h = uiScaled(19);
+    const rename = @import("rename.zig");
+    rename.setInlineColors(if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(53, 53, 53), if (app_state.g_light_theme) RGB(30, 30, 30) else RGB(242, 242, 242));
+    if (inbox_rename_font != null) _ = DeleteObject(inbox_rename_font);
+    inbox_rename_font = if (row.att) @import("fonts.zig").create(uiScaled(-14), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 4, 0, L(@import("fonts.zig").UI_MEDIUM_FACE)) else null;
+    const font = inbox_rename_font orelse @import("drawing.zig").uiFontBot(.name);
 
-    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, name.left, y + uiScaled(6), edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
+    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, name.left, y + uiScaled(8), edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
     if (app_state.g_edit_hwnd != null) {
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
-        _ = SendMessageW(app_state.g_edit_hwnd, 0x0030, @intFromPtr(uiFontInboxTitle()), 1);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x0030, @intFromPtr(font), 1);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x00D3, 3, 0);
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&app_state.shells[idx].name));
         _ = SetFocus(app_state.g_edit_hwnd);
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
@@ -1530,21 +1534,31 @@ pub fn paintInbox(hdc: HANDLE) void {
         if (index == app_state.g_inbox_sel) @import("smooth.zig").fillRoundRect(hdc, .{ .left = layout.left, .top = y, .right = layout.right, .bottom = y + layout.row_height }, uiScaled(12), selected_bg);
         if (width < uiScaled(80)) continue;
         const avatar_rc = RECT{ .left = layout.left + uiScaled(10), .top = y + uiScaled(8), .right = layout.left + uiScaled(50), .bottom = y + uiScaled(48) };
-        if (row.ag != 0) {
-            const avatar = @import("bot_avatar.zig");
-            var appearance = avatar.Appearance.forSession(row.name[0..row.name_len]);
-            if (row.avatar_face != null and row.avatar_color != null) appearance = .{ .face = row.avatar_face.?, .color = row.avatar_color.? };
-            if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
-                if (findShellById(row.sid)) |idx| appearance = avatar.forShell(&app_state.shells[idx]);
+        if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+            var log: [120]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] inbox target={d} rect={d},{d},{d},{d}", .{ row.sid, avatar_rc.left, avatar_rc.top, avatar_rc.right, avatar_rc.bottom }) catch "[photo-proof] unavailable");
+        }
+        const local_shell: ?*const Shell = if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd))
+            if (findShellById(row.sid)) |idx| &app_state.shells[idx] else null
+        else
+            null;
+        const photo_drawn = if (local_shell) |shell| @import("bot_photo.zig").draw(shell, hdc, avatar_rc) else false;
+        if (!photo_drawn) {
+            const custom_face = if (local_shell) |shell| shell.face != null or shell.color != null else false;
+            if (row.ag != 0 or custom_face) {
+                const avatar = @import("bot_avatar.zig");
+                var appearance = avatar.Appearance.forSession(row.name[0..row.name_len]);
+                if (row.avatar_face != null and row.avatar_color != null) appearance = .{ .face = row.avatar_face.?, .color = row.avatar_color.? };
+                if (local_shell) |shell| appearance = avatar.forShell(shell);
+                avatar.draw(hdc, avatar_rc, appearance);
+            } else {
+                @import("smooth.zig").fillEllipse(hdc, avatar_rc, if (app_state.g_light_theme) RGB(180, 180, 180) else RGB(46, 46, 46));
+                @import("smooth.zig").fillEllipse(hdc, .{ .left = avatar_rc.left + uiScaled(1), .top = avatar_rc.top + uiScaled(1), .right = avatar_rc.right - uiScaled(1), .bottom = avatar_rc.bottom - uiScaled(1) }, if (app_state.g_light_theme) RGB(235, 235, 235) else RGB(31, 31, 31));
+                _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+                _ = SetTextColor(hdc, muted);
+                var terminal = avatar_rc;
+                _ = DrawTextW(hdc, L(">_"), -1, &terminal, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | @import("win32.zig").DT_CENTER);
             }
-            avatar.draw(hdc, avatar_rc, appearance);
-        } else {
-            @import("smooth.zig").fillEllipse(hdc, avatar_rc, if (app_state.g_light_theme) RGB(180, 180, 180) else RGB(46, 46, 46));
-            @import("smooth.zig").fillEllipse(hdc, .{ .left = avatar_rc.left + uiScaled(1), .top = avatar_rc.top + uiScaled(1), .right = avatar_rc.right - uiScaled(1), .bottom = avatar_rc.bottom - uiScaled(1) }, if (app_state.g_light_theme) RGB(235, 235, 235) else RGB(31, 31, 31));
-            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-            _ = SetTextColor(hdc, muted);
-            var terminal = avatar_rc;
-            _ = DrawTextW(hdc, L(">_"), -1, &terminal, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | @import("win32.zig").DT_CENTER);
         }
         const name = inboxNameBounds(layout, row);
         const text_left = name.left;
@@ -1552,19 +1566,8 @@ pub fn paintInbox(hdc: HANDLE) void {
         const name_len = json_reader.wide(row.name[0..row.name_len], &name_buf);
         _ = SelectObject(hdc, if (row.att) semibold else @import("drawing.zig").uiFontBot(.name));
         _ = SetTextColor(hdc, bright);
-        const name_width = inboxTextWidth(hdc, name_buf[0..name_len]);
-        const name_right = @min(name.right, text_left + name_width);
-        var name_rc = RECT{ .left = text_left, .top = y + uiScaled(8), .right = name_right, .bottom = y + uiScaled(27) };
+        var name_rc = RECT{ .left = text_left, .top = y + uiScaled(8), .right = name.right, .bottom = y + uiScaled(27) };
         _ = @import("dwrite_text.zig").draw(hdc, &name_buf, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        if (name.workspace_right > name.right and name_right + uiScaled(8) < name.workspace_right) {
-            const ws = &app_state.g_inbox_ws[row.ws];
-            var ws_buf: [64]u16 = undefined;
-            const ws_len = json_reader.wide(ws.name[0..ws.name_len], &ws_buf);
-            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
-            _ = SetTextColor(hdc, faint);
-            var ws_rc = RECT{ .left = name_right + uiScaled(8), .top = y + uiScaled(8), .right = name.workspace_right, .bottom = y + uiScaled(27) };
-            _ = @import("dwrite_text.zig").draw(hdc, &ws_buf, @intCast(ws_len), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
         if (name.show_age) {
             var time_buf: [24]u16 = undefined;
             const time_len = inboxRelTime(@max(row.la, row.lv), &time_buf);
@@ -1574,59 +1577,16 @@ pub fn paintInbox(hdc: HANDLE) void {
             _ = @import("dwrite_text.zig").draw(hdc, &time_buf, @intCast(time_len), &time_rc, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT);
             if (row.att) drawAttentionDot(hdc, layout.right - uiScaled(18), y + uiScaled(17), @max(1, uiScaled(4)), blue);
         }
-        const eta_valid = row.act == 1 and row.eta_total_ms > 0 and row.eta_deadline_tick != 0;
-        const show_eta = eta_valid and (app_state.g_eta_numbers_on or app_state.g_eta_progress_on) and width >= uiScaled(320);
-        const preview_right = if (show_eta) layout.right - uiScaled(146) else layout.right - uiScaled(14);
+        const preview_right = layout.right - uiScaled(14);
         const pv = row.pv[0..row.pv_len];
-        var clean = true;
-        var escape_debris = pv.len > 0;
-        var has_separator = false;
-        for (pv) |c| {
-            if (c < 32 or c == 127) clean = false;
-            if (c == ';') has_separator = true;
-            if (!std.ascii.isDigit(c) and c != ';' and c != ':' and c != '[' and c != '?' and c != 'c' and c != 'm') escape_debris = false;
-        }
-        if (escape_debris and has_separator) clean = false;
-        const sub = row.sub[0..row.sub_len];
-        var cwd: [64]u8 = undefined;
-        var fallback: []const u8 = if (row.cwd_len > 0) row.cwd[0..row.cwd_len] else if (std.mem.startsWith(u8, sub, "tmux: ")) "" else sub;
-        if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
-            if (findShellById(row.sid)) |idx| {
-                const cwd_len = inboxCwd(&app_state.shells[idx], &cwd);
-                fallback = cwd[0..cwd_len];
-            }
-        }
-        const preview = if (pv.len > 0 and clean) pv else fallback;
+        const preview = pv;
         var preview_buf: [96]u16 = undefined;
         const preview_len = json_reader.wide(preview, &preview_buf);
         _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-        _ = SetTextColor(hdc, muted);
+        _ = SetTextColor(hdc, if (row.pv_question) blue else muted);
         var preview_rc = RECT{ .left = text_left, .top = y + uiScaled(29), .right = @max(text_left, preview_right), .bottom = y + uiScaled(48) };
         _ = @import("dwrite_text.zig").draw(hdc, &preview_buf, @intCast(preview_len), &preview_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        if (show_eta) {
-            const remaining = etaRemainingMs(row.eta_deadline_tick, GetTickCount64());
-            const bar_right = layout.right - uiScaled(14);
-            const bar_left = bar_right - uiScaled(60);
-            if (app_state.g_eta_progress_on) {
-                const track = RECT{ .left = bar_left, .top = y + uiScaled(36), .right = bar_right, .bottom = y + uiScaled(40) };
-                @import("smooth.zig").fillRoundRect(hdc, track, uiScaled(2), selected_bg);
-                const frac = if (remaining < 0) @as(f32, 1) else etaFillFraction(etaElapsedMs(row.eta_total_ms, remaining), row.eta_total_ms);
-                const fill: i32 = @intFromFloat(@as(f32, @floatFromInt(bar_right - bar_left)) * frac);
-                @import("smooth.zig").fillRoundRect(hdc, .{ .left = bar_left, .top = track.top, .right = bar_left + fill, .bottom = track.bottom }, uiScaled(2), if (remaining < 0) etaOverdueColor() else blue);
-            }
-            if (app_state.g_eta_numbers_on) {
-                var eta_buf: [16]u8 = undefined;
-                const eta = formatEtaRemaining(remaining, &eta_buf);
-                var text_buf: [32]u8 = undefined;
-                const text = if (remaining < 0) eta else std.fmt.bufPrint(&text_buf, "{s} left", .{eta}) catch eta;
-                var eta_wide: [32]u16 = undefined;
-                const eta_len = asciiToU16(text, &eta_wide);
-                _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
-                _ = SetTextColor(hdc, if (remaining < 0) etaOverdueColor() else muted);
-                var eta_rc = RECT{ .left = layout.right - uiScaled(146), .top = y + uiScaled(29), .right = if (app_state.g_eta_progress_on) bar_left - uiScaled(8) else bar_right, .bottom = y + uiScaled(48) };
-                _ = @import("dwrite_text.zig").draw(hdc, &eta_wide, @intCast(eta_len), &eta_rc, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
-            }
-        }
+
     }
     if (width > 0 and h > uiScaled(40)) {
         const selected_top = if (vis > 0 and layout.max_rows > 0) layout.top + @as(i32, @intCast(app_state.g_inbox_sel - layout.scroll)) * layout.stride else -1;
@@ -1635,16 +1595,8 @@ pub fn paintInbox(hdc: HANDLE) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, faint);
     var footer = RECT{ .left = layout.left, .top = @max(0, h - uiScaled(30)), .right = layout.right, .bottom = h };
-    const hint = if (app_state.g_inbox_filter_active)
-        (if (app_state.g_unread_only) L("Unread only · Esc clear") else L("Esc clear search · Enter open · Up/Down move"))
-    else if (app_state.g_unread_only)
-        L("Unread only · Enter open · Ctrl+F search · E wait · U mark read · F2 rename · Esc close")
-    else
-        L("Enter open · Ctrl+F search · E wait · U mark read · F2 rename · Esc close");
     if (app_state.g_cap_msg_len > 0 and app_state.g_cap_msg_until > GetTickCount64()) {
         _ = DrawTextW(hdc, &app_state.g_cap_msg_text, @intCast(app_state.g_cap_msg_len), &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
-    } else {
-        _ = DrawTextW(hdc, hint, -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
     }
 }
 

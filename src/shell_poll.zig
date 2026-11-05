@@ -1601,6 +1601,31 @@ test "inbox preview preserves unicode within byte budget" {
     try std.testing.expectEqualSlices(u8, &([_]u8{'a'} ** 89), output[0..boundary_length]);
 }
 
+fn updateConsoleStep(shell: *app_state.Shell, step: []const u16, saw_ai_working: bool, now: u64) bool {
+    const different = !std.mem.eql(u16, shell.console_step[0..shell.console_step_len], step);
+    const new_turn = step.len > 0 and saw_ai_working and shell.working_since_ms > shell.console_step_changed_ms;
+    if (!different and !new_turn) return false;
+    @memcpy(shell.console_step[0..step.len], step);
+    shell.console_step_len = step.len;
+    shell.console_step_changed_ms = now;
+    return true;
+}
+
+test "console step is recertified once after each working start" {
+    var shell = app_state.empty_shell;
+    const step = std.unicode.utf8ToUtf16LeStringLiteral("Thinking");
+    try std.testing.expect(updateConsoleStep(&shell, step, true, 100));
+    shell.working_since_ms = 101;
+    try std.testing.expect(updateConsoleStep(&shell, step, true, 102));
+    try std.testing.expectEqual(@as(u64, 102), shell.console_step_changed_ms);
+    try std.testing.expect(!updateConsoleStep(&shell, step, true, 150));
+    shell.working_since_ms = 200;
+    try std.testing.expect(!updateConsoleStep(&shell, step, false, 201));
+    try std.testing.expect(updateConsoleStep(&shell, step, true, 202));
+    try std.testing.expect(!updateConsoleStep(&shell, step, true, 250));
+    try std.testing.expectEqual(@as(u64, 202), shell.console_step_changed_ms);
+}
+
 fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool {
     if (pid == 0 or i >= app_state.shell_count) return false;
     _ = FreeConsole();
@@ -1625,6 +1650,10 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
     var saw_grok_agent = false;
     var saw_idle_prompt = false;
     var saw_ai_working = false;
+    var step: [128]u16 = undefined;
+    var step_len: usize = 0;
+    var reply: [128]u16 = undefined;
+    var reply_len: usize = 0;
     var changed = false;
     var content = archive_rules.Content{};
 
@@ -1641,6 +1670,8 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
         if (is_idle_prompt) saw_idle_prompt = true;
         const working = lineLooksLikeAiWorking(line);
         if (working) saw_ai_working = true;
+        if (step_len == 0 and !(ry == win.bottom and app_state.shells[i].kind == .tmux)) step_len = @import("agent_second_line.zig").consoleStep(line, &step);
+        if (reply_len == 0 and !is_idle_prompt and !working and !(ry == win.bottom and app_state.shells[i].kind == .tmux) and !lineLooksLikeGenericTmuxStatusPreview(&app_state.shells[i], line)) reply_len = @import("agent_second_line.zig").consoleReply(line, &reply);
         content.add(line, (ry == win.bottom and app_state.shells[i].kind == .tmux) or lineLooksLikeGenericTmuxStatusPreview(&app_state.shells[i], line), is_idle_prompt, working);
 
         if (u16ContainsAsciiCI(line, "shift+tab to cycle") or
@@ -1709,6 +1740,13 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
     }
 
     app_state.shells[i].console_working = saw_ai_working;
+    if (updateConsoleStep(&app_state.shells[i], step[0..step_len], saw_ai_working, GetTickCount64())) changed = true;
+    if (!std.mem.eql(u16, app_state.shells[i].console_reply[0..app_state.shells[i].console_reply_len], reply[0..reply_len])) {
+        @memcpy(app_state.shells[i].console_reply[0..reply_len], reply[0..reply_len]);
+        app_state.shells[i].console_reply_len = reply_len;
+        app_state.shells[i].console_reply_changed_ms = GetTickCount64();
+        changed = true;
+    }
     if (saw_ai_working and app_state.shells[i].needs_attention and app_state.shells[i].last_blue_dot_source != .notification) {
         app_state.shells[i].needs_attention = false;
         changed = true;
@@ -1781,6 +1819,8 @@ pub fn shellProcessAliveForRead(i: usize) bool {
     if (GetExitCodeProcess(h, &code) == 0) return true;
     return code == STILL_ACTIVE;
 }
+
+var g_second_line_refresh_ms: u64 = 0;
 
 pub fn pollShellNames() void {
     defer @import("window_layout.zig").chatWorkingTimesPoll();
@@ -2180,6 +2220,16 @@ pub fn pollShellNames() void {
             refreshFavicon(&app_state.shells[i]);
             if (app_state.shells[i].favicon_hicon != prev_hicon or app_state.shells[i].favicon_path_len != prev_len) {
                 changed = true;
+            }
+        }
+    }
+    const now = GetTickCount64();
+    if (now >= g_second_line_refresh_ms) {
+        g_second_line_refresh_ms = now + 60_000;
+        for (app_state.shells[0..app_state.shell_count]) |*shell| {
+            if (shell.activity == .active or shell.console_working or @import("chat_live.zig").running(shell.shell_id)) {
+                changed = true;
+                break;
             }
         }
     }

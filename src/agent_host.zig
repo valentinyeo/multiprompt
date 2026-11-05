@@ -51,6 +51,25 @@ pub fn formatSessionId(out: *[36]u8, random: *const [16]u8) []const u8 {
     return out[0..index];
 }
 
+pub fn restoreSyncedSession(shell: anytype, session: []const u8) void {
+    if (shell.claude_sid_len != 0 or session.len != 37 or !std.mem.startsWith(u8, session, "live-")) return;
+    for (session[5..]) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return;
+    var sid: [36]u8 = undefined;
+    var index: usize = 0;
+    for (session[5..], 0..) |c, i| {
+        if (i == 8 or i == 12 or i == 16 or i == 20) {
+            sid[index] = '-';
+            index += 1;
+        }
+        sid[index] = c;
+        index += 1;
+    }
+    @memcpy(shell.claude_sid[0..sid.len], &sid);
+    shell.claude_sid_len = sid.len;
+    shell.chat_view_on = true;
+    shell.ai_agent = 1;
+}
+
 pub fn mintSessionId(out: *[36]u8) ?[]const u8 {
     var random: [16]u8 = undefined;
     if (@import("win32.zig").BCryptGenRandom(null, &random, random.len, 0x00000002) < 0) return null;
@@ -96,6 +115,11 @@ pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd:
     return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start {s} {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, name, sid, session, cwd, mode, READER, name, sid, session }) catch null;
 }
 
+pub fn resumeCommandFor(out: []u8, provider: Provider, session: []const u8, sid: []const u8) ?[]const u8 {
+    if (!safeName(session) or !safeSessionId(sid)) return null;
+    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host start {s} {s} --tmux {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, provider.wire(), sid, session, session }) catch null;
+}
+
 pub const MoveTarget = enum { terminal, chat };
 
 pub fn moveRequest(out: []u8, target: MoveTarget, id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8) ?[]const u8 {
@@ -109,6 +133,29 @@ pub fn moveRequest(out: []u8, target: MoveTarget, id: u32, host: u8, sid: []cons
 
 pub fn movedReply(body: []const u8) bool {
     return std.mem.indexOf(u8, body, "\"status\":\"moved\"") != null or std.mem.indexOf(u8, body, "\"status\":\"already\"") != null;
+}
+
+test "IGSH-1653 synced named live chats restore their identity and chat view" {
+    const Session = struct {
+        claude_sid: [40]u8 = @splat(0),
+        claude_sid_len: u32 = 0,
+        chat_view_on: bool = false,
+        ai_agent: u8 = 0,
+    };
+    var shell: Session = .{};
+    restoreSyncedSession(&shell, "live-0123456789ab8def81230123456789ab");
+    try std.testing.expectEqualStrings("01234567-89ab-8def-8123-0123456789ab", shell.claude_sid[0..shell.claude_sid_len]);
+    try std.testing.expect(shell.chat_view_on);
+    try std.testing.expectEqual(@as(u8, 1), shell.ai_agent);
+    shell.chat_view_on = false;
+    restoreSyncedSession(&shell, "live-ffffffffffff8fff8fffffffffffffff");
+    try std.testing.expect(!shell.chat_view_on);
+    try std.testing.expectEqualStrings("01234567-89ab-8def-8123-0123456789ab", shell.claude_sid[0..shell.claude_sid_len]);
+    for ([_][]const u8{ "term-0123456789ab8def81230123456789ab", "live-123", "live-0123456789ab8def81230123456789ag", "live-0123456789AB8def81230123456789ab", "live-0123456789ab8def81230123456789ab0" }) |name| {
+        var untouched: Session = .{};
+        restoreSyncedSession(&untouched, name);
+        try std.testing.expectEqualDeep(Session{}, untouched);
+    }
 }
 
 test "IGSH-1266 moving a chat asks the reader for the side it should run on" {
@@ -186,4 +233,15 @@ test "IGSH-1546 each provider maps to the agent kind its tab shows" {
     try std.testing.expectEqual(@as(u8, 3), Provider.pi.aiAgent());
     try std.testing.expectEqualStrings("Codex", Provider.codex.label());
     try std.testing.expectEqualStrings("pi", Provider.pi.wire());
+}
+
+test "IGSH-1666 hosted resumes retain provider and host identity" {
+    var out: [1024]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const codex = resumeCommandFor(&out, .codex, "live-codex", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, codex, "host start codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-codex") != null);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "host enable") == null);
+    const pi = resumeCommandFor(&out, .pi, "live-pi", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-pi") != null);
+    try std.testing.expect(resumeCommandFor(&out, .codex, "live-codex", "bad") == null);
 }

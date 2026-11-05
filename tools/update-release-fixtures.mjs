@@ -26,12 +26,12 @@ for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0'
   const names = ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe', 'multiprompt-extension.zip'];
   for (const [i, bytes] of [app, bridge, fs.readFileSync(path.join(root, 'extension.zip'))].entries()) fs.writeFileSync(path.join(dir, names[i]), bytes);
   const releases = version === '9.10.0' ? [
-    { version: '9.8.0', changes: ['Older change.'] },
-    { version: '9.9.0', changes: ['Middle change.'] },
-    { version: '10.0.0', changes: ['Not offered yet.'] },
-    { version: '0.0.0', changes: ['Already installed.'] },
-    { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Fix IGSH-123.', 'Fix src/main.zig.', 'Behind the scenes fixes.', 'Chat speed checks now ignore shared-machine pauses.'] },
-  ] : [{ version, changes: version === '9.11.0' ? ['Checks and fixes, no visible change'] : ['Typing feels faster.'], ...(version === '9.11.0' ? { tickets: ['https://app.hypertask.ai/detail/project-2060/1243'] } : {}) }];
+    { version: '9.8.0', changes: ['IGSH-1 Older change'] },
+    { version: '9.9.0', changes: ['IGSH-2 Middle change'] },
+    { version: '10.0.0', changes: ['IGSH-3 Not offered yet'] },
+    { version: '0.0.0', changes: ['IGSH-4 Already installed'] },
+    { version, changes: ['IGSH-5 Typing feels faster', 'IGSH-6 Chats keep your place', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
+  ] : [{ version, changes: version === '9.11.0' ? ['IGSH-1243 Changelog ticket links'] : ['IGSH-5 Typing feels faster'], ...(version === '9.11.0' ? { tickets: ['https://app.hypertask.ai/detail/project-2060/1243'] } : {}) }];
   fs.writeFileSync(path.join(dir, 'release-notes.json'), JSON.stringify({ version, releases }));
   names.push('release-notes.json');
   const sums = Buffer.from(names.map(name => `${createHash('sha256').update(fs.readFileSync(path.join(dir, name))).digest('hex')}  ${name}\n`).join(''));

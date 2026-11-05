@@ -67,7 +67,6 @@ const L = @import("startup.zig").L;
 const getInstanceName = @import("startup.zig").getInstanceName;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
 const MAX_LWS = @import("app_state.zig").MAX_LWS;
-const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
 const findGroupIdx = @import("sidebar.zig").findGroupIdx;
 const GROUP_COLORS = @import("app_state.zig").GROUP_COLORS;
@@ -116,6 +115,7 @@ const keybd_event = @import("win32.zig").keybd_event;
 const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
+const focusActiveShellFromBrowserInput = @import("focus.zig").focusActiveShellFromBrowserInput;
 const activeShellHasForegroundFocus = @import("focus.zig").activeShellHasForegroundFocus;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
 const navigateBrowserPane = @import("browser_pane.zig").navigateBrowserPane;
@@ -139,7 +139,11 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (msg == WM_KILLFOCUS and app_state.g_edit_is_browser_urlbar and app_state.g_main_hwnd != null) {
-        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_URLBAR_DISMISS, 0, 0);
+        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_URLBAR_DISMISS, @intFromPtr(hwnd), 0);
+    }
+    if (msg == @import("win32.zig").WM_LBUTTONDBLCLK and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar and !app_state.g_edit_is_inbox) {
+        _ = SendMessageW(hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
+        return 0;
     }
     if (msg == WM_KEYDOWN) {
         if (wp == 0x41 and isCtrlDown()) {
@@ -152,6 +156,7 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
             return 0;
         }
         if (wp == 0x1B) {
+            app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());
             const h = app_state.g_edit_hwnd;
             const was_browser_urlbar = app_state.g_edit_is_browser_urlbar;
             const was_inbox = app_state.g_edit_is_inbox;
@@ -167,15 +172,43 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
             if (was_browser_urlbar) {
                 _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 0);
                 app_state.g_shell_focused = true;
-                focusActiveShell();
-                if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
+                focusActiveShellFromBrowserInput();
             } else if (was_inbox) {
                 _ = SetFocus(app_state.g_main_hwnd);
+            } else {
+                app_state.g_shell_focused = true;
+                focusActiveShell();
             }
             return 0;
         }
     }
     return CallWindowProcW(app_state.g_edit_orig_proc, hwnd, msg, wp, lp);
+}
+
+var inline_brush: HANDLE = null;
+pub var inline_color: u32 = 0;
+pub var inline_text_color: u32 = 0;
+
+pub fn inlineBrush() HANDLE {
+    return inline_brush;
+}
+
+pub fn setInlineColors(background: u32, foreground: u32) void {
+    inline_color = background;
+    inline_text_color = foreground;
+    if (inline_brush != null) _ = DeleteObject(inline_brush);
+    inline_brush = @import("win32.zig").CreateSolidBrush(inline_color);
+}
+
+pub fn sidebarNameRect(idx: u32) ?RECT {
+    const row = tabRowForShell(idx) orelse return null;
+    const y = row.y - app_state.g_sidebar_scroll;
+    if (row.tile) return .{ .left = row.x + uiScaled(4), .top = y + uiScaled(68), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
+    if (app_state.g_sidebar_collapsed) return null;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    const column = @import("window_layout.zig").activePaneRects(client).sidebar;
+    return .{ .left = column.left + uiScaled(58), .top = y + uiScaled(10), .right = column.right - uiScaled(12), .bottom = y + uiScaled(29) };
 }
 
 pub fn startWindowRename() void {
@@ -231,22 +264,11 @@ pub fn startRename(idx: u32) void {
     startRenameInternal(idx, false);
 }
 
-fn startRenameSync(idx: u32) void {
-    startRename(idx);
-}
-
 pub fn beginPaletteRenameInput(idx: u32) bool {
-    if (idx >= app_state.shell_count or !app_state.g_search_active) return false;
-    app_state.g_search_rename_input_mode = true;
-    app_state.g_search_rename_sid = app_state.shells[idx].shell_id;
-    app_state.g_search_rename_select_all = true;
-    app_state.g_search_len = @min(app_state.shells[idx].name_len, @as(u32, @intCast(app_state.g_search_buf.len - 1)));
-    @memcpy(app_state.g_search_buf[0..app_state.g_search_len], app_state.shells[idx].name[0..app_state.g_search_len]);
-    app_state.g_search_sel = 0;
-    app_state.g_search_scroll = 0;
-    updateSearchResults();
-    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-    return true;
+    if (idx >= app_state.shell_count) return false;
+    if (app_state.g_search_active) _ = SendMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_SEARCH_CLOSE, 0, 0);
+    startRename(idx);
+    return app_state.g_edit_hwnd != null;
 }
 
 pub fn startThreadTitleRename() void {
@@ -255,11 +277,13 @@ pub fn startThreadTitleRename() void {
 }
 
 fn startRenameInternal(idx: u32, thread_title: bool) void {
+    app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());
     if (!focusGuard(app_state.g_main_hwnd)) return;
     commitRename();
     if (idx >= app_state.shell_count) return;
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
     app_state.g_edit_tab = idx;
+    app_state.g_edit_sid = app_state.shells[idx].shell_id;
     app_state.g_edit_is_group = false;
     app_state.g_edit_is_window = false;
     app_state.g_edit_is_browser_urlbar = false;
@@ -267,43 +291,31 @@ fn startRenameInternal(idx: u32, thread_title: bool) void {
     app_state.g_edit_is_inbox = false;
     app_state.g_edit_sync_remote_name = true;
     app_state.g_edit_idx = idx;
-    const tth_edit = threadTitleHeight();
-    if ((thread_title or app_state.g_hide_sidebar) and tth_edit > 0 and app_state.g_main_hwnd != null) {
-        var crc: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_main_hwnd, &crc);
-        const edit_h: i32 = 24;
-        const edit_y = threadTitleTop() + @divTrunc(tth_edit - edit_h, 2);
-        const name_rc = threadTitleNameRectFor(crc.right, idx) orelse RECT{
-            .left = SIDEBAR_W() + 16,
-            .top = threadTitleTop(),
-            .right = crc.right - 120,
-            .bottom = threadTitleTop() + tth_edit,
-        };
-        const edit_x = name_rc.left;
-        const edit_w = @max(name_rc.right - name_rc.left, 100);
-        app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, edit_x, edit_y, edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
-    } else {
-        const row = tabRowForShell(idx) orelse return;
-        const y = row.y - app_state.g_sidebar_scroll;
-        const name_left = if (row.tile) row.x + uiScaled(4) else uiScaled(12);
-        const name_width = if (row.tile) row.width - uiScaled(8) else SIDEBAR_W() - uiScaled(54);
-        app_state.g_edit_hwnd = CreateWindowExW(
-            0,
-            L("EDIT"),
-            null,
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            name_left,
-            y + (if (row.tile) uiScaled(68) else uiScaled(3)),
-            name_width,
-            22,
-            app_state.g_main_hwnd,
-            null,
-            null,
-            null,
-        );
-    }
+    const in_title = thread_title or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed;
+    app_state.g_edit_is_thread_title = in_title;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    const row = tabRowForShell(idx);
+    const tile = !in_title and row != null and row.?.tile;
+    const name_rc = if (in_title)
+        (if (app_state.g_chat_active) if (@import("drawing.zig").chatTitleLayout()) |layout| layout.text else null else threadTitleNameRectFor(client.right, idx)) orelse return
+    else
+        sidebarNameRect(idx) orelse return;
+    const font = if (in_title) (if (app_state.g_chat_active) @import("drawing.zig").uiFontTitle() else @import("drawing.zig").uiFontThreadTitle()) else if (tile) @import("drawing.zig").uiFontBot(.pinned) else @import("drawing.zig").uiFontBot(.name);
+    const rgb = @import("startup.zig").RGB;
+    inline_color = if (in_title) (if (app_state.g_chat_active) blk: {
+        @import("chat_composer.zig").refreshChatBrushes();
+        break :blk app_state.g_chat_input_color;
+    } else @import("themes.zig").themeConsoleBg()) else if (idx == app_state.active_shell) (if (app_state.g_light_theme) rgb(214, 214, 214) else rgb(58, 58, 58)) else @import("themes.zig").themeSidebarBg();
+    inline_text_color = if (in_title) (if (app_state.g_light_theme) rgb(20, 20, 20) else if (app_state.g_chat_active and @import("themes.zig").themeReaderDark()) @import("design_tokens.zig").ReaderForeground else rgb(255, 255, 255)) else if (app_state.g_light_theme) rgb(28, 28, 28) else rgb(242, 242, 242);
+    if (inline_brush != null) _ = DeleteObject(inline_brush);
+    inline_brush = @import("win32.zig").CreateSolidBrush(inline_color);
+    const edit_h = if (in_title and !app_state.g_chat_active) name_rc.bottom - name_rc.top else if (in_title) uiScaled(24) else uiScaled(19);
+    const edit_y = name_rc.top + @divTrunc(name_rc.bottom - name_rc.top - edit_h, 2);
+    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | (if (tile) @as(u32, 1) else 0), name_rc.left, edit_y, @max(name_rc.right - name_rc.left, 1), edit_h, app_state.g_main_hwnd, null, null, null);
     if (app_state.g_edit_hwnd != null) {
-        @import("fonts.zig").setControlFont(app_state.g_edit_hwnd);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x0030, @intFromPtr(font), 1);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x00D3, 3, 0);
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
@@ -373,6 +385,7 @@ pub fn startGroupRename(gidx: u32) void {
 
 pub fn commitRename() void {
     if (app_state.g_edit_hwnd == null) return;
+    const had_focus = @import("win32.zig").GetFocus() == app_state.g_edit_hwnd;
     if (!@import("room_frontend.zig").privateActionsAllowed() and !app_state.g_edit_is_window) {
         const edit = app_state.g_edit_hwnd;
         app_state.g_edit_hwnd = null;
@@ -404,8 +417,7 @@ pub fn commitRename() void {
             }
         }
         app_state.g_shell_focused = true;
-        focusActiveShell();
-        if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
+        focusActiveShellFromBrowserInput();
         return;
     }
     if (app_state.g_edit_is_window) {
@@ -462,7 +474,8 @@ pub fn commitRename() void {
         return;
     }
     const was_inbox_rename = app_state.g_edit_is_inbox;
-    const renamed_sid: u32 = if (app_state.g_edit_tab < app_state.shell_count) app_state.shells[app_state.g_edit_tab].shell_id else 0;
+    const renamed_sid = app_state.g_edit_sid;
+    app_state.g_edit_tab = @import("inbox.zig").findShellById(renamed_sid) orelse app_state.shell_count;
     if (app_state.g_edit_tab < app_state.shell_count) {
         var buf: [64]u16 = std.mem.zeroes([64]u16);
         const len = GetWindowTextW(app_state.g_edit_hwnd, &buf, 64);
@@ -491,13 +504,17 @@ pub fn commitRename() void {
             }
         }
         publishInboxState();
-        _ = SetFocus(app_state.g_main_hwnd);
+        if (had_focus) _ = SetFocus(app_state.g_main_hwnd);
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;
     }
-    app_state.g_shell_focused = true;
-    focusActiveShell();
-    if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
+    publishInboxState();
+    updateMainWindowTitle();
+    if (had_focus) {
+        app_state.g_shell_focused = true;
+        focusActiveShell();
+        if (!activeShellHasForegroundFocus()) requestShellRefocus(60, 8);
+    }
 }
 
 pub fn openTabContextPalette(hwnd: HANDLE, tab_idx: u32) void {
@@ -507,7 +524,7 @@ pub fn openTabContextPalette(hwnd: HANDLE, tab_idx: u32) void {
     app_state.g_search_tabctx_mode = true;
     app_state.g_tabctx_sid = sid;
     app_state.g_search_len = 0;
-    app_state.g_search_sel = 1;
+    app_state.g_search_sel = 0;
     app_state.g_search_scroll = 0;
     updateSearchResults();
     _ = InvalidateRect(hwnd, null, 0);

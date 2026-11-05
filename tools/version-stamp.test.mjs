@@ -9,8 +9,11 @@ import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint }
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
+const titles = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
+const line = id => `${id} ${titles[id]}`;
+const release = (version, ...ids) => ({ version, changes: ids.map(line), tickets: ids.map(id => `https://app.hypertask.ai/detail/project-${id.startsWith('HYCI-') ? '11514' : '2060'}/${id.split('-')[1]}`) });
 const main = 'pub const APP_VERSION = "0.28.735";\nconst untouched = 1;\n';
-const changelog = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.735", .items = &.{\n        .{ .text = "Existing.", .ticket = "DEMO-360" },\n    } },\n};\n';
+const changelog = `pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.735", .items = &.{\n        .{ .text = ${JSON.stringify(line('IGSH-240'))}, .ticket = "IGSH-240" },\n    } },\n};\n`;
 const base = () => ({ 'src/main.zig': main, 'src/changelog.zig': changelog, 'changelog.d/README.md': 'Documentation.\n' });
 
 function repo(t, files = base()) {
@@ -45,36 +48,38 @@ function expectKind(result, kind, status) {
 }
 
 test('folds fragments in filename then line order into one new entry', () => {
-  const files = { ...base(), 'changelog.d/DEMO-9-second.md': ' Last. \n', 'changelog.d/DEMO-1-first.md': '\n First. \r\n\r\nSecond.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-232-second.md': ' Last. \n', 'changelog.d/IGSH-127-first.md': '\n First. \r\n\r\nSecond.\n' };
   const saved = { ...files };
   const stamp = stampTree(files);
   assert.equal(stamp.version, '0.28.736');
-  assert.deepEqual(stamp.tickets, ['DEMO-1', 'DEMO-9']);
-  assert.deepEqual(stamp.removed, ['changelog.d/DEMO-1-first.md', 'changelog.d/DEMO-9-second.md']);
+  assert.deepEqual(stamp.tickets, ['IGSH-127', 'IGSH-232']);
+  assert.deepEqual(stamp.removed, ['changelog.d/IGSH-127-first.md', 'changelog.d/IGSH-232-second.md']);
   assert.equal(stamp.files['src/main.zig'], main.replace('735', '736'));
-  assert.equal(stamp.files['src/changelog.zig'], changelog.replace('pub const CHANGELOG = [_]ChangelogEntry{\n', 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.736", .items = &.{\n        .{ .text = "First.", .ticket = "DEMO-1" },\n        .{ .text = "Second.", .ticket = "DEMO-1" },\n        .{ .text = "Last.", .ticket = "DEMO-9" },\n    } },\n'));
+  for (const id of ['IGSH-127', 'IGSH-232']) assert.ok(stamp.files['src/changelog.zig'].includes(`.text = ${JSON.stringify(line(id))}, .ticket = "${id}"`));
+  assert.equal((stamp.files['src/changelog.zig'].match(/\.ticket = "IGSH-127"/g) || []).length, 1);
   assert.equal(stamp.files['changelog.d/README.md'], files['changelog.d/README.md']);
   for (const file of stamp.removed) assert.equal(file in stamp.files, false);
   assert.deepEqual(files, saved);
 });
 
-test('escapes plain quoted text without interpreting replacement dollar sequences', () => {
-  const stamp = stampTree({ ...base(), 'changelog.d/DEMO-2-escape.md': 'Open "saved chats" with $&.\n' });
-  assert.ok(stamp.files['src/changelog.zig'].includes('        .{ .text = "Open \\"saved chats\\" with $&.", .ticket = "DEMO-2" },\n'));
+test('escapes authoritative quoted Unicode titles and dollar sequences', () => {
+  const title = 'Open "saved chats" at the café with $&';
+  const stamp = stampTree({ ...base(), 'changelog.d/IGSH-154-escape.md': 'Open chats.\n' }, undefined, { 'IGSH-154': title });
+  assert.ok(stamp.files['src/changelog.zig'].includes(`.text = ${JSON.stringify('IGSH-154 ' + title)}, .ticket = "IGSH-154"`));
 });
 
 test('README alone is not a fragment', () => assert.equal(stampTree(base()), null));
 test('no changelog directory gives null', () => assert.equal(stampTree({ 'src/main.zig': main, 'src/changelog.zig': changelog }), null));
 test('rejects bad names and empty fragments', () => {
-  for (const name of ['notes.md', 'demo-2-name.md', 'DEMO-2.md', 'DEMO-2-.md', 'DEMO-2-name.txt', 'nested/DEMO-2-name.md']) {
+  for (const name of ['notes.md', 'demo-2-name.md', 'IGSH-154.md', 'IGSH-154-.md', 'IGSH-154-name.txt', 'nested/IGSH-154-name.md']) {
     assert.throws(() => stampTree({ ...base(), [`changelog.d/${name}`]: 'Text.' }), /Bad fragment filename/);
   }
-  assert.throws(() => stampTree({ ...base(), 'changelog.d/DEMO-2-empty.md': ' \r\n\t\n' }), /no text/);
+  assert.throws(() => stampTree({ ...base(), 'changelog.d/IGSH-154-empty.md': ' \r\n\t\n' }), /no text/);
 });
 test('deduplicates ticket names and increments only the patch', () => {
-  const stamp = stampTree({ ...base(), 'src/main.zig': main.replace('0.28.735', '1.9.999'), 'changelog.d/DEMO-2-a.md': 'One.', 'changelog.d/DEMO-2-b.md': 'Two.' });
+  const stamp = stampTree({ ...base(), 'src/main.zig': main.replace('0.28.735', '1.9.999'), 'changelog.d/IGSH-154-a.md': 'One.', 'changelog.d/IGSH-154-b.md': 'Two.' });
   assert.equal(stamp.version, '1.9.1000');
-  assert.deepEqual(stamp.tickets, ['DEMO-2']);
+  assert.deepEqual(stamp.tickets, ['IGSH-154']);
 });
 
 test('check rejects a hand bump and reports offending lines and the fix', t => {
@@ -89,7 +94,7 @@ test('check rejects a hand bump and reports offending lines and the fix', t => {
 });
 
 test('check accepts an exact stamp with fragment deletion', t => {
-  const files = { ...base(), 'changelog.d/DEMO-2-first.md': 'One.\n', 'changelog.d/DEMO-3-second.md': 'Two.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-first.md': 'One.\n', 'changelog.d/IGSH-212-second.md': 'Two.\n' };
   const r = repo(t, files);
   const stamp = stampTree(files);
   r.write(stamp.files);
@@ -99,9 +104,9 @@ test('check accepts an exact stamp with fragment deletion', t => {
 });
 
 test('check accepts a squashed stamp on a master that gained a newer fragment', t => {
-  const first = { ...base(), 'changelog.d/DEMO-2-first.md': 'One.\n' };
+  const first = { ...base(), 'changelog.d/IGSH-154-first.md': 'One.\n' };
   const stamp = stampTree(first);
-  const r = repo(t, { ...first, 'changelog.d/DEMO-3-later.md': 'Later.\n' });
+  const r = repo(t, { ...first, 'changelog.d/IGSH-212-later.md': 'Later.\n' });
   r.write(stamp.files);
   for (const file of stamp.removed) fs.unlinkSync(path.join(r.dir, file));
   expectKind(r.check(r.initial, r.commit()), 'STAMP', 0);
@@ -109,16 +114,16 @@ test('check accepts a squashed stamp on a master that gained a newer fragment', 
 
 test('check accepts code edits alongside a new fragment', t => {
   const r = repo(t);
-  r.write({ 'other.txt': 'Code change.\n', 'changelog.d/DEMO-2-code.md': 'A useful feature.\n' });
+  r.write({ 'other.txt': 'Code change.\n', 'changelog.d/IGSH-154-code.md': 'A useful feature.\n' });
   expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
   assert.equal(fs.readFileSync(path.join(r.dir, '.git', 'github-output'), 'utf8'), 'kind=CODE\n');
 });
 
 test('app code needs a changelog note except on auto-revert branches', t => {
-  const r = repo(t, { ...base(), 'changelog.d/DEMO-2-code.md': 'A useful feature.\n', 'src/feature.zig': 'const on = true;\n' });
-  r.git('rm', '-q', 'changelog.d/DEMO-2-code.md', 'src/feature.zig');
+  const r = repo(t, { ...base(), 'changelog.d/IGSH-154-code.md': 'A useful feature.\n', 'src/feature.zig': 'const on = true;\n' });
+  r.git('rm', '-q', 'changelog.d/IGSH-154-code.md', 'src/feature.zig');
   const head = r.commit();
-  const normal = r.check(r.initial, head, { GITHUB_HEAD_REF: 'ceo/DEMO-2' });
+  const normal = r.check(r.initial, head, { GITHUB_HEAD_REF: 'ceo/IGSH-154' });
   assert.equal(normal.status, 1);
   assert.match(normal.stderr, /App code changed: add changelog\.d/);
   const revert = r.check(r.initial, head, { GITHUB_HEAD_REF: 'auto-revert/40533455263' });
@@ -128,17 +133,17 @@ test('app code needs a changelog note except on auto-revert branches', t => {
 });
 
 test('check rejects a stamp with an extra byte in the entry', t => {
-  const files = { ...base(), 'changelog.d/DEMO-2-code.md': 'Feature.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-code.md': 'Feature.\n' };
   const r = repo(t, files);
   const stamp = stampTree(files);
-  stamp.files['src/changelog.zig'] = stamp.files['src/changelog.zig'].replace('Feature.', 'Feature!');
+  stamp.files['src/changelog.zig'] = stamp.files['src/changelog.zig'].replace(line('IGSH-154'), line('IGSH-154') + '!');
   r.write(stamp.files);
   for (const file of stamp.removed) fs.unlinkSync(path.join(r.dir, file));
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
 });
 
 test('check rejects stamp lookalikes with unrelated edits, retained fragments or edited history', t => {
-  const files = { ...base(), 'changelog.d/DEMO-2-code.md': 'Feature.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-code.md': 'Feature.\n' };
   const r = repo(t, files);
   const stamp = stampTree(files);
   r.write(stamp.files);
@@ -147,7 +152,7 @@ test('check rejects stamp lookalikes with unrelated edits, retained fragments or
   r.write({ 'other.txt': 'Extra.\n' });
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
   fs.unlinkSync(path.join(r.dir, 'other.txt'));
-  r.write({ 'src/changelog.zig': stamp.files['src/changelog.zig'].replace('Existing.', 'Edited history.') });
+  r.write({ 'src/changelog.zig': stamp.files['src/changelog.zig'].replace(line('IGSH-240'), 'Edited history.') });
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
 });
 
@@ -284,12 +289,12 @@ test('build, CI, installer and documentation use the stamp contract', () => {
   const readme = fs.readFileSync(path.join(root, 'changelog.d/README.md'), 'utf8');
   assert.match(readme, /Never edit APP_VERSION or \.ver lines by hand/);
   assert.match(readme, /Automatic releases replace manual `node tools\/version-stamp\.mjs release`/);
-  assert.match(readme, /Releases without product notes show linked check notes/);
+  assert.match(readme, /Release notes use the ticket number and its authoritative board title/);
   assert.match(readme, /Releases without ticketed lines cannot publish/);
 });
 
 for (const race of [false, true]) test(race ? 'release retries a competing branch and waits for its PR' : 'release stamps, opens and waits for the PR, then reports nothing pending', { skip: process.platform === 'win32' }, t => {
-  const files = { ...base(), 'changelog.d/DEMO-2-release.md': 'Feature.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-release.md': 'Feature.\n' };
   const r = repo(t, files);
   const remote = path.join(r.dir, 'origin.git');
   r.git('init', '--bare', remote);
@@ -310,7 +315,7 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /https:\/\/example\.invalid\/pr\/1[\s\S]*NOTHING_TO_STAMP 0\.28\.736/);
   const requests = fs.readFileSync(path.join(r.dir, 'gh-log'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  if (!race) assert.deepEqual(requests.find(args => args[1] === 'create'), ['pr', 'create', '--base', 'master', '--head', 'release/0.28.736', '--title', 'v0.28.736: release DEMO-2', '--body', 'Stamped by tools/version-stamp.mjs from changelog.d.']);
+  if (!race) assert.deepEqual(requests.find(args => args[1] === 'create'), ['pr', 'create', '--base', 'master', '--head', 'release/0.28.736', '--title', 'v0.28.736: release IGSH-154', '--body', 'Stamped by tools/version-stamp.mjs from changelog.d.']);
   if (!race) assert.deepEqual(requests.find(args => args[1] === 'merge'), ['pr', 'merge', 'https://example.invalid/pr/1', '--squash', '--auto', '--delete-branch']);
   assert.deepEqual(requests.find(args => args[1] === 'view'), ['pr', 'view', '1', '--json', 'state,statusCheckRollup']);
   assert.equal(requests.some(args => args[1] === 'checks'), false);
@@ -321,7 +326,7 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
 });
 
 for (const outcome of ['green', 'red', 'pending']) test({ green: 'release merges its own PR after green checks when auto-merge is refused', red: 'release does not merge on a red check when auto-merge is refused', pending: 'release does not merge while checks are pending when auto-merge is refused' }[outcome], { skip: process.platform === 'win32' }, t => {
-  const r = repo(t, { ...base(), 'changelog.d/DEMO-2-release.md': 'Feature.\n' });
+  const r = repo(t, { ...base(), 'changelog.d/IGSH-154-release.md': 'Feature.\n' });
   const remote = path.join(r.dir, 'origin.git');
   r.git('init', '--bare', remote);
   r.git('remote', 'add', 'origin', remote);
@@ -416,7 +421,7 @@ test('build options preserve the source default and feed both app channels and t
 });
 
 test('stamp and admission preserve the build fallback without allowing a version hand bump', () => {
-  const files = { ...base(), 'changelog.d/DEMO-2-new.md': 'A useful improvement.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-new.md': 'A useful improvement.\n' };
   const configured = { ...files, 'src/main.zig': main.replace('= "', '= build_config.app_version orelse "') };
   assert.equal(classifyTrees(files, configured, ['src/main.zig']), 'CODE');
   assert.equal(classifyTrees(configured, { ...configured, 'src/main.zig': configured['src/main.zig'].replace('735', '736') }, ['src/main.zig']), 'HAND_EDIT');
@@ -426,11 +431,11 @@ test('stamp and admission preserve the build fallback without allowing a version
 });
 
 test('build changelog uses the tag and fragments without changing source defaults or consuming fragments', t => {
-  const files = { ...base(), 'changelog.d/DEMO-2-new.md': 'A useful improvement.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-new.md': 'A useful improvement.\n' };
   const saved = structuredClone(files);
   const generated = buildChangelog(files, 'v0.28.900');
   assert.match(generated, /\.ver = "0\.28\.900"/);
-  assert.match(generated, /A useful improvement/);
+  assert.ok(generated.includes(line('IGSH-154')));
   assert.deepEqual(files, saved);
   assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
   assert.throws(() => buildChangelog(base(), 'v0.28.900'), /No unpublished product changes/);
@@ -441,7 +446,7 @@ test('build changelog uses the tag and fragments without changing source default
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/main.zig'), 'utf8'), main);
-  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-2-new.md'), 'utf8'), files['changelog.d/DEMO-2-new.md']);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/IGSH-154-new.md'), 'utf8'), files['changelog.d/IGSH-154-new.md']);
   assert.equal(r.git('diff', '--name-only'), 'src/changelog.zig');
   const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900', '[]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(again.status, 0, again.stderr);
@@ -457,33 +462,33 @@ test('IGSH-889 picks the newest older release tag by number', () => {
 });
 
 test('IGSH-889 a release lists only fragments added since the previous release', t => {
-  const old = { 'changelog.d/DEMO-1-old.md': 'An old improvement.\n' };
-  const fresh = { ...base(), ...old, 'changelog.d/DEMO-2-new.md': 'A new improvement.\n' };
+  const old = { 'changelog.d/IGSH-127-old.md': 'An old improvement.\n' };
+  const fresh = { ...base(), ...old, 'changelog.d/IGSH-154-new.md': 'A new improvement.\n' };
   const generated = buildChangelog(fresh, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
-  assert.match(generated, /A new improvement/);
-  assert.doesNotMatch(generated, /An old improvement/);
+  assert.ok(generated.includes(line('IGSH-154')));
+  assert.ok(!generated.includes(line('IGSH-127')));
   assert.throws(() => buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]), /No unpublished product changes/);
 
   const r = repo(t, { ...base(), ...old });
   r.git('tag', 'v0.28.735');
-  r.write({ 'changelog.d/DEMO-2-new.md': 'Second release change.\n' });
+  r.write({ 'changelog.d/IGSH-154-new.md': 'Second release change.\n' });
   r.commit();
   r.git('tag', 'v0.28.736');
-  r.write({ 'changelog.d/DEMO-3-skipped.md': 'Third release change.\n' });
+  r.write({ 'changelog.d/IGSH-212-skipped.md': 'Third release change.\n' });
   r.commit();
   r.git('tag', 'v0.28.737');
-  r.write({ 'changelog.d/DEMO-4-latest.md': 'Latest release change.\n' });
+  r.write({ 'changelog.d/IGSH-221-latest.md': 'Latest release change.\n' });
   r.commit();
   r.git('tag', 'v0.28.738');
   const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738', JSON.stringify(['v0.28.735', 'v0.28.736', 'v0.28.737'])], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
   const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
-  assert.doesNotMatch(written, /An old improvement/);
+  assert.ok(!written.includes(line('IGSH-127')));
   const order = ['0.28.738', '0.28.737', '0.28.736', '0.28.735'].map(v => written.indexOf(`.ver = "${v}"`));
   assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), 'one entry per release, newest first');
-  assert.match(written.slice(order[0], order[1]), /Latest release change/);
-  assert.match(written.slice(order[1], order[2]), /Third release change/);
-  assert.match(written.slice(order[2], order[3]), /Second release change/);
+  assert.ok(written.slice(order[0], order[1]).includes(line('IGSH-221')));
+  assert.ok(written.slice(order[1], order[2]).includes(line('IGSH-212')));
+  assert.ok(written.slice(order[2], order[3]).includes(line('IGSH-154')));
 });
 
 const attemptTitles = {
@@ -492,7 +497,7 @@ const attemptTitles = {
   moved: 'IGSH-891 release keeps a branch that moved after its PR was closed'
 };
 for (const outcome of Object.keys(attemptTitles)) test(attemptTitles[outcome], { skip: process.platform === 'win32' }, t => {
-  const files = { ...base(), 'changelog.d/DEMO-2-release.md': 'Feature.\n' };
+  const files = { ...base(), 'changelog.d/IGSH-154-release.md': 'Feature.\n' };
   const r = repo(t, files);
   const remote = path.join(r.dir, 'origin.git');
   r.git('init', '--bare', remote);
@@ -559,7 +564,7 @@ test('IGSH-1090 maintenance releases wait instead of inventing a note', () => {
 
 test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific product changes', async () => {
   const { checkFragments } = await import('./version-stamp.mjs');
-  const name = 'changelog.d/DEMO-1-update.md';
+  const name = 'changelog.d/IGSH-127-update.md';
   for (const line of [
     'Behind the scenes fixes.', 'Plus 2 behind the scenes fixes.',
     'Updates include the latest improvements.', 'Various improvements.', 'Bug fixes.',
@@ -607,33 +612,44 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
   assert.match(deleted.stderr, /App code changed/);
 });
 
-test('IGSH-1113 omits filtered historical releases while preserving current notes and validation', async () => {
+test('IGSH-1732 attributes the reviewed repository picker merge before publishing', () => {
+  const files = { ...base(), 'changelog.d/IGSH-1528-repositories.md': 'Choose project folders across every server.\n' };
+  const commits = [{ sha: '03c8a7198930c20e5c4a57bd9799cd2e73b5312c', subject: "Merge remote-tracking branch 'origin/master' into HEAD" }];
+  let generated;
+  assert.doesNotThrow(() => {
+    generated = buildChangelog(files, 'v0.28.1600', [], commits, { ...titles, 'IGSH-1528': 'Choose repository folders across every server' });
+  });
+  assert.match(generated, /\.ticket = "IGSH-1528"/);
+  assert.match(generated, /IGSH-1528 Choose repository folders across every server/);
+});
+
+test('IGSH-1113 retains historical ticket titles and validates every fragment', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
-  const maintenance = { 'changelog.d/DEMO-1-maintenance.md': 'Fixed a test so releases stop getting stuck.\n' };
-  const product = { 'changelog.d/DEMO-2-chat.md': 'Switching chats is faster.\nAdded proof for chat replies.\n' };
-  const latest = { 'changelog.d/DEMO-3-update.md': 'The update card explains each change.\n' };
+  const maintenance = { 'changelog.d/IGSH-127-maintenance.md': 'Fixed a test so releases stop getting stuck.\n' };
+  const product = { 'changelog.d/IGSH-154-chat.md': 'Switching chats is faster.\nAdded proof for chat replies.\n' };
+  const latest = { 'changelog.d/IGSH-212-update.md': 'The update card explains each change.\n' };
   const history = [
     { tag: 'v0.28.896', files: base() },
     { tag: 'v0.28.897', files: { ...base(), ...maintenance } },
     { tag: 'v0.28.898', files: { ...base(), ...maintenance, ...product } },
-    { tag: 'v0.28.899', files: { ...base(), ...maintenance, ...product, 'changelog.d/DEMO-4-maintenance.md': 'Pipeline changes.\n' } },
+    { tag: 'v0.28.899', files: { ...base(), ...maintenance, ...product, 'changelog.d/IGSH-221-maintenance.md': 'Pipeline changes.\n' } },
   ];
   const files = { ...history.at(-1).files, ...latest };
   const saved = structuredClone({ files, history });
   const generated = buildChangelog(files, 'v0.28.900', history);
   assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
     version: '0.28.900', releases: [
-      { version: '0.28.900', changes: ['The update card explains each change.'] },
-      { version: '0.28.899', changes: [] },
-      { version: '0.28.898', changes: ['Switching chats is faster.'] },
-      { version: '0.28.897', changes: [] },
-      { version: '0.28.735', changes: ['Existing.'] },
+      release('0.28.900', 'IGSH-212'),
+      release('0.28.899', 'IGSH-221'),
+      release('0.28.898', 'IGSH-154'),
+      release('0.28.897', 'IGSH-127'),
+      release('0.28.735', 'IGSH-240'),
     ],
   });
   assert.deepEqual({ files, history }, saved);
   assert.throws(() => buildChangelog(history.at(-1).files, 'v0.28.900', history), /No unpublished product changes/);
-  assert.throws(() => buildChangelog({ ...files, 'changelog.d/DEMO-5-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
-  const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/DEMO-6-empty.md': ' \n' } }];
+  assert.throws(() => buildChangelog({ ...files, 'changelog.d/IGSH-224-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
+  const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/IGSH-228-empty.md': ' \n' } }];
   assert.throws(() => buildChangelog(files, 'v0.28.900', invalid), /Fragment has no text/);
 });
 
@@ -641,7 +657,7 @@ test('IGSH-1115 failed tags cannot consume unpublished product notes', async t =
   const { releaseNotes } = await import('./release-notes.mjs');
   const r = repo(t);
   r.git('tag', 'v0.28.735');
-  r.write({ 'changelog.d/DEMO-1115-recovered.md': 'Your chats keep their saved order.\n' });
+  r.write({ 'changelog.d/IGSH-246-recovered.md': 'Your chats keep their saved order.\n' });
   r.commit();
   r.git('tag', 'v0.28.736');
   r.git('tag', 'v0.28.737');
@@ -650,21 +666,21 @@ test('IGSH-1115 failed tags cannot consume unpublished product notes', async t =
   const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
   assert.deepEqual(releaseNotes(written, 'v0.28.738'), {
     version: '0.28.738', releases: [
-      { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
-      { version: '0.28.735', changes: ['Existing.'] },
+      release('0.28.738', 'IGSH-246'),
+      release('0.28.735', 'IGSH-240'),
     ],
   });
   assert.doesNotMatch(written, /\.ver = "0\.28\.73[67]"/);
-  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-1115-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
+  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/IGSH-246-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
 });
 
 test('build fetches a newly published tag without changing HEAD or consuming failed tags', { skip: process.platform === 'win32' }, async t => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const r = repo(t);
   r.git('tag', 'v0.28.735');
-  r.write({ 'changelog.d/DEMO-1-published.md': 'Previously published change.\n' });
+  r.write({ 'changelog.d/IGSH-127-published.md': 'Previously published change.\n' });
   const published = r.commit();
-  r.write({ 'changelog.d/DEMO-2-new.md': 'New release change.\n' });
+  r.write({ 'changelog.d/IGSH-154-new.md': 'New release change.\n' });
   const head = r.commit();
   const clone = path.join(r.dir, '.git', 'fixture-clone');
   r.git('clone', '--no-hardlinks', r.dir, clone);
@@ -681,9 +697,9 @@ test('build fetches a newly published tag without changing HEAD or consuming fai
   assert.equal(git('rev-parse', 'refs/tags/v0.28.736^{commit}'), published);
   assert.deepEqual(releaseNotes(fs.readFileSync(path.join(clone, 'src/changelog.zig'), 'utf8'), 'v0.28.738'), {
     version: '0.28.738', releases: [
-      { version: '0.28.738', changes: ['New release change.'] },
-      { version: '0.28.736', changes: ['Previously published change.'] },
-      { version: '0.28.735', changes: ['Existing.'] },
+      release('0.28.738', 'IGSH-154'),
+      release('0.28.736', 'IGSH-127'),
+      release('0.28.735', 'IGSH-240'),
     ],
   });
   git('remote', 'remove', 'origin');
@@ -696,7 +712,7 @@ test('IGSH-1115 production history ignores failed tags without moving their prod
   const { releaseNotes } = await import('./release-notes.mjs');
   const r = repo(t);
   r.git('tag', 'v0.28.735');
-  r.write({ 'changelog.d/DEMO-1115-recovered.md': 'Your chats keep their saved order.\n' });
+  r.write({ 'changelog.d/IGSH-246-recovered.md': 'Your chats keep their saved order.\n' });
   r.commit();
   r.git('tag', 'v0.28.736');
   r.git('tag', 'v0.28.737');
@@ -709,30 +725,30 @@ test('IGSH-1115 production history ignores failed tags without moving their prod
   assert.equal(built.status, 0, built.stderr);
   assert.deepEqual(releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.28.738'), {
     version: '0.28.738', releases: [
-      { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
-      { version: '0.28.735', changes: ['Existing.'] },
+      release('0.28.738', 'IGSH-246'),
+      release('0.28.735', 'IGSH-240'),
     ],
   });
 });
 
 
-test('IGSH-1131 refuses an empty release before writing invalid Zig', () => {
-  for (const extra of [{}, { 'changelog.d/DEMO-1131-check.md': 'Fixed a test so releases stop getting stuck.\n' }]) {
-    assert.throws(() => stampTree({ ...base(), ...extra }, '0.28.986'), /No unpublished product changes/);
-  }
+test('IGSH-1131 refuses an empty release and names ticketed maintenance', () => {
+  assert.throws(() => stampTree(base(), '0.28.986'), /No unpublished product changes/);
+  const stamp = stampTree({ ...base(), 'changelog.d/IGSH-252-check.md': 'Fixed a test so releases stop getting stuck.\n' }, '0.28.986');
+  assert.ok(stamp.files['src/changelog.zig'].includes(line('IGSH-252')));
 });
 
 test('IGSH-1131 pending notes include only changed unpublished product fragments', t => {
   const r = repo(t);
   r.git('tag', 'v0.28.735');
-  r.write({ 'changelog.d/DEMO-1131-chat.md': 'Your chats keep their saved order.\n' });
+  r.write({ 'changelog.d/IGSH-252-chat.md': 'Your chats keep their saved order.\n' });
   const product = r.commit();
   const pending = rev => spawnSync(process.execPath, [tool, 'pending', 'v0.28.735', rev], { cwd: r.dir, encoding: 'utf8' });
   const result = pending(product);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'Your chats keep their saved order.');
   r.git('tag', 'v0.28.736');
-  r.write({ 'changelog.d/DEMO-1132-check.md': 'Fixed a test so releases stop getting stuck.\n' });
+  r.write({ 'changelog.d/IGSH-278-check.md': 'Fixed a test so releases stop getting stuck.\n' });
   const maintenance = r.commit();
   const quiet = spawnSync(process.execPath, [tool, 'pending', 'v0.28.736', maintenance], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(quiet.status, 0, quiet.stderr);
@@ -753,8 +769,8 @@ test('IGSH-1243 build reads ticketed commits between published tags', async t =>
     if (subject.startsWith('IGSH-')) {
       assert.equal(result.status, 0, result.stderr);
       const notes = releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.29.2');
-      assert.deepEqual(notes.releases[0].changes, []);
-      assert.deepEqual(notes.releases[0].tickets, []);
+      const ids = subject.split(':')[0].split(', ');
+      assert.deepEqual(notes.releases[0], release('0.29.2', ...ids));
     } else {
       assert.equal(result.status, 1);
       assert.ok(result.stderr.includes(sha));
@@ -774,9 +790,8 @@ test('tests after: a CI-board ticket releases without product notes', async t =>
   const result = spawnSync(process.execPath, [tool, 'build', 'v0.29.2', '["v0.29.1"]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
-  assert.match(source, /\.\{ \.ver = "0\.29\.2", \.items = &\.\{\n        \.\{ \.text = "Checks and fixes, no visible change", \.ticket = "HYCI-101" \},\n    \} \},/);
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0].changes, []);
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0].tickets, []);
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
+  assert.doesNotMatch(source, /Checks and fixes, no visible change/);
 });
 
 test('tests after: a CI-board ticket cannot carry a product line', async t => {
@@ -790,7 +805,7 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.equal(result.status, 0, result.stderr);
   const source = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
   assert.equal(source.includes('Typing feels faster.'), false);
-  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0].changes, []);
+  assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
   const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
-  assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /needs plain ticketed lines/);
+  assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
 });

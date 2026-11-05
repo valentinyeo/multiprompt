@@ -64,6 +64,27 @@ function fixture(t) {
 }
 
 if (fs.existsSync(checker)) {
+  test('service admission installs and builds each source snapshot before proving assertions', t => {
+    const f = fixture(t);
+    const bin = path.join(f.repo, 'fixture-bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nexit 14\n', { mode: 0o755 });
+    f.write('service/package.json', JSON.stringify({ name: 'fixture-service', version: '1.0.0', private: true, type: 'module', scripts: { pretest: 'node build.mjs' }, dependencies: { 'fixture-value': 'file:dep' } }));
+    f.write('service/package-lock.json', JSON.stringify({ name: 'fixture-service', version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'fixture-service', version: '1.0.0', dependencies: { 'fixture-value': 'file:dep' } }, dep: { name: 'fixture-value', version: '1.0.0' }, 'node_modules/fixture-value': { resolved: 'dep', link: true } } }));
+    f.write('service/dep/package.json', JSON.stringify({ name: 'fixture-value', version: '1.0.0', type: 'module', exports: './index.js' }));
+    f.write('service/dep/index.js', "export const value = 'broken';\n");
+    f.write('service/build.mjs', "import fs from 'node:fs'; fs.mkdirSync('.build', {recursive:true}); fs.writeFileSync('.build/worker.mjs', \"export {value} from 'fixture-value';\\n\");\n");
+    const base = f.commit();
+    f.write('service/dep/index.js', "export const value = 'fixed';\n");
+    f.write('service/test/value.test.mjs', "import {test} from 'node:test'; import assert from 'node:assert/strict'; import {value} from '../.build/worker.mjs'; test('built service behavior',()=>assert.equal(value,'fixed'));\n");
+    f.commit();
+    const result = f.run(base, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+    assert.equal(result.status, 0, 'service snapshots need their own dependencies and builds');
+    assert.match(result.stdout, /RED PROVEN service\/test\/value.test.mjs/);
+    assert.ok(!fs.existsSync(path.join(f.repo, 'service/node_modules')));
+    assert.ok(!fs.existsSync(path.join(f.repo, 'service/.build')));
+  });
+
   test('manual master checks compare the preceding commit without weakening PR or branch proof', t => {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
     const f = fixture(t);
@@ -207,6 +228,24 @@ const after = 1;
     assert.match(result.stdout, /RED PROVEN tools\/value.test.cjs/);
     assert.equal(f.git('status', '--porcelain'), '');
     assert.equal(f.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
+  });
+
+  test('service suites prepare each snapshot and copy changed fixtures', t => {
+    const f = fixture(t);
+    const bin = path.join(f.repo, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\nif [ "$1" = "ci" ]; then mkdir -p node_modules; else exec npx wrangler deploy --dry-run --outdir .build; fi\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nmkdir -p .build\ncp worker.txt .build/worker.txt\n', { mode: 0o755 });
+    f.write('service/worker.txt', 'broken');
+    f.write('service/test/fixtures/input.txt', 'old');
+    const base = f.commit();
+    f.write('service/worker.txt', 'fixed');
+    f.write('service/test/fixtures/input.txt', 'fixed');
+    f.write('service/test/worker.test.cjs', "const assert=require('node:assert/strict'); const fs=require('node:fs'); require('node:test')('bundle',()=>{assert.ok(fs.existsSync('service/node_modules')); assert.equal(fs.readFileSync('service/.build/worker.txt','utf8'),fs.readFileSync('service/test/fixtures/input.txt','utf8'));});\n");
+    f.commit();
+    const result = f.run(base, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /RED PROVEN service\/test\/worker.test.cjs/);
   });
 
   test('an ineffective test is rejected, even when another suite catches the bug', t => {
@@ -397,11 +436,13 @@ const after = 1;
     const files = {
       'src/main.zig': 'pub const APP_VERSION = "1.2.3";\n',
       'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
-      'changelog.d/DEMO-1-change.md': 'Opening tabs works.\n',
+      'changelog.d/IGSH-154-change.md': 'Opening tabs works.\n',
     };
     for (const [file, text] of Object.entries(files)) f.write(file, text);
     const base = f.commit();
     const stamped = stampTree(files);
+    const titles = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
+    assert.ok(stamped.files['src/changelog.zig'].includes(`IGSH-154 ${titles['IGSH-154']}`));
     for (const [file, text] of Object.entries(stamped.files)) f.write(file, text);
     for (const file of stamped.removed) fs.unlinkSync(path.join(f.repo, file));
     f.commit();

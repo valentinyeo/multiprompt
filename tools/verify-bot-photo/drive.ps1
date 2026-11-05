@@ -12,12 +12,33 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
-Add-Type -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class PhotoDialogOwner {
     [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr dialog, int id);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int length);
+    delegate bool EnumProc(IntPtr window, IntPtr parameter);
+    public static IntPtr SwitchTarget(uint pid) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((window, parameter) => {
+            var title = new System.Text.StringBuilder(256);
+            GetWindowText(window, title, title.Capacity);
+            uint owner;
+            GetWindowThreadProcessId(window, out owner);
+            if (owner == pid && IsWindowVisible(window) && title.ToString() == "Picture picker switch target") { found = window; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
 }
 '@
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -26,16 +47,22 @@ $settings = Join-Path $profile 'roaming/ZigShell'
 $env:APPDATA = Join-Path $profile 'roaming'
 $env:LOCALAPPDATA = Join-Path $profile 'local'
 $env:USERPROFILE = Join-Path $profile 'home'
+$env:HOME = $env:USERPROFILE
 $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '0'
 $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
-New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE | Out-Null
+New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE, (Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:USERPROFILE 'Documents') | Out-Null
 $checks = [Collections.Generic.List[object]]::new()
 $result = @{ feature='bot-photo'; version=$ExpectedVersion; sha256=$ExpectedHash; status='failed'; checks=$checks; cleanup='pending'; error=$null }
 $job = $null
 $app = $null
 $main = [IntPtr]::Zero
+$switchJob = $null
+$nativeJob = $null
+$switchApp = $null
+$switchWindow = [IntPtr]::Zero
+$lastDialog = [IntPtr]::Zero
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false)) }
 function Wait-For([string]$Name, [scriptblock]$Test) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -72,10 +99,16 @@ function Focus {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
 }
 function Press([int[]]$Keys) {
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App does not own keyboard' }
-    [ChatDeliveryDesktop]::Chord($Keys)
+    $opensPalette = $Keys.Count -eq 2 -and $Keys[0] -eq 0x11 -and $Keys[1] -eq 0x4b
+    $offset = if ($opensPalette) { (Log).Length } else { 0 }
+    [VerifyNative]::Chord($Keys)
+    if ($opensPalette) {
+        [void](Wait-For 'palette opened' { $trace = Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=[1-9]\d*' })
+    }
 }
-function Query([string]$Text, [int]$Target) {
+function Query([string]$Text, [string]$Target) {
     $before = (Log).Length
     [VerifyNative]::Text($Text)
     [void](Wait-For "palette $Text selects $Target" { $s = Log; $s.Length -ge $before -and $s.Substring($before) -match ("\[palette\] ready chars=" + $Text.Length + " count=[1-9]\d* target=" + $Target + "(?:\r?\n|$)") })
@@ -91,24 +124,86 @@ function Look([string]$Menu, [string]$Choice, [int]$Target) {
 function Dialog {
     $dialog = Wait-For 'owned file dialog' {
         $window = [ChatDeliveryDesktop]::GetForegroundWindow()
-        if ($window -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Owner($window) -eq [uint32]$app.Id -and [ChatDeliveryDesktop]::Class($window) -eq '#32770' -and [PhotoDialogOwner]::GetWindow($window, 4) -eq $main) { $window }
+        if ($window -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Owner($window) -eq [uint32]$app.Id -and [ChatDeliveryDesktop]::Class($window) -eq '#32770' -and [PhotoDialogOwner]::GetWindow($window, 4) -eq $main -and [PhotoDialogOwner]::IsWindowVisible($window) -and [PhotoDialogOwner]::IsWindowEnabled($window)) { $window }
     }
     return $dialog
 }
-function Pick([string]$Path) {
+function Picker-State([IntPtr]$Dialog) {
+    $focus = [ChatDeliveryDesktop]::Focus($Dialog)
+    return @{ foreground=$focus[0]; focus=$focus[1]; focusClass=[ChatDeliveryDesktop]::Class([IntPtr]$focus[1]); altDown=([PhotoDialogOwner]::GetAsyncKeyState(0x12) -lt 0); dialogClass=[ChatDeliveryDesktop]::Class($Dialog); main=$main.ToInt64(); dialog=$Dialog.ToInt64(); owner=[PhotoDialogOwner]::GetWindow($Dialog, 4).ToInt64(); visible=[PhotoDialogOwner]::IsWindowVisible($Dialog); enabled=[PhotoDialogOwner]::IsWindowEnabled($Dialog); mainEnabled=[PhotoDialogOwner]::IsWindowEnabled($main) }
+}
+function Switch-Picker([IntPtr]$Dialog) {
+    for ($cycle = 1; $cycle -le 3; $cycle++) {
+        $name = "picker-$($checks.Count)-alt-tab-$cycle"
+        Save (Picker-State $Dialog) (Join-Path $Evidence "$name-before.json")
+        Shot "$name-before"
+        [ChatDeliveryDesktop]::Chord(@(0x12, 0x09))
+        [void](Wait-For 'Alt+Tab reaches the separate switch target' { [ChatDeliveryDesktop]::GetForegroundWindow() -eq $switchWindow })
+        Start-Sleep -Milliseconds 700
+        Save (Picker-State $Dialog) (Join-Path $Evidence "$name-away.json")
+        Shot "$name-away"
+        [ChatDeliveryDesktop]::Chord(@(0x12, 0x09))
+        [void](Wait-For 'Alt+Tab returns to the owned app' { [ChatDeliveryDesktop]::Owner([ChatDeliveryDesktop]::GetForegroundWindow()) -eq [uint32]$app.Id })
+        Start-Sleep -Milliseconds 700
+        $state = Picker-State $Dialog
+        Save $state (Join-Path $Evidence "$name-return.json")
+        Shot "$name-return"
+        Check 'picker-retains-main-owner-after-alt-tab' ($state.owner -eq $main.ToInt64())
+        Check 'picker-visible-enabled-after-alt-tab' ($state.visible -and $state.enabled)
+        Check 'picker-foreground-after-alt-tab' ($state.foreground -eq $Dialog.ToInt64())
+    }
+}
+function Submit-File([IntPtr]$Dialog, [string]$Path) {
+    [Windows.Forms.Clipboard]::SetText($Path)
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $Dialog) { throw 'File dialog lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x4e))
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x41))
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x56))
+    [ChatDeliveryDesktop]::Chord(@(0x0d))
+    [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $Dialog })
+}
+function Pick([string]$Path, [bool]$SwitchAway = $false) {
     $start = (Log).Length
     Look 'bot face' 'upload image' 7193
     $dialog = Dialog
+    $script:lastDialog = $dialog
+    Save (Picker-State $dialog) (Join-Path $Evidence "picker-$($checks.Count)-opened.json")
+    if ($SwitchAway) { Switch-Picker $dialog }
     if ($Path -eq '') {
         [ChatDeliveryDesktop]::Chord(@(0x1b))
-        [void](Wait-For 'cancelled dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog })
+        try {
+            [void](Wait-For 'cancelled dialog closed' { -not [PhotoDialogOwner]::IsWindow($dialog) })
+        } catch {
+            Save (Picker-State $dialog) (Join-Path $Evidence 'cancel-key-failure.json')
+            $button = [PhotoDialogOwner]::GetDlgItem($dialog, 2)
+            if ($button -ne [IntPtr]::Zero) {
+                $rect = [ChatDeliveryDesktop+Rect]::new()
+                if ([ChatDeliveryDesktop]::GetClientRect($button, [ref]$rect)) {
+                    [ChatDeliveryDesktop]::PressClient($button, [uint32]$app.Id, [int]($rect.Right / 2), [int]($rect.Bottom / 2))
+                    Start-Sleep -Milliseconds 700
+                    Save @{ dialogClosed=(-not [PhotoDialogOwner]::IsWindow($dialog)); state=(Picker-State $dialog) } (Join-Path $Evidence 'cancel-click-diagnostic.json')
+                }
+            }
+            throw
+        }
+        Check 'cancel-reenables-main-window' ([PhotoDialogOwner]::IsWindowEnabled($main))
+        if ($SwitchAway) {
+            Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x1b)
+            Shot 'cancel-after-alt-tab'
+        }
         return
     }
-    [Windows.Forms.Clipboard]::SetText($Path)
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog) { throw 'File dialog lost foreground' }
-    [ChatDeliveryDesktop]::Chord(@(0x11, 0x56))
-    [ChatDeliveryDesktop]::Chord(@(0x0d))
-    [void](Wait-For 'file dialog closed' { [ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog })
+    [VerifyNative]::Chord(@(0x12, 0x4e))
+    $filename = Wait-For 'owned filename input' {
+        $edit = [VerifyNative]::GetFocusedWindow($dialog)
+        if ([ChatDeliveryDesktop]::GetForegroundWindow() -eq $dialog -and [ChatDeliveryDesktop]::Owner($edit) -eq [uint32]$app.Id -and [VerifyNative]::Class($edit) -eq 'Edit') { $edit }
+    }
+    [VerifyNative]::Chord(@(0x11, 0x41))
+    [VerifyNative]::Text($Path)
+    [void](Wait-For 'filename typed exactly' { [VerifyNative]::EditText($filename) -ceq $Path })
+    [VerifyNative]::Chord(@(0x0d))
+    [void](Wait-For 'file dialog closed' { -not [PhotoDialogOwner]::IsWindow($dialog) })
     [void](Wait-For 'import completed' { $trace = Log; $trace.Length -ge $start -and $trace.Substring($start) -match '\[bot-photo\] import=(ok|failed)' })
 }
 function Shot([string]$Name) {
@@ -134,10 +229,50 @@ function Assert-Avatar([string]$Surface, [int]$Index, [string]$Name, [bool]$Tall
         $corner = $bitmap.GetPixel(0, 0)
         $centerOk = if ($Tall) { $green.R -gt 150 -and $green.G -gt 150 -and $green.B -lt 100 -and $blue.R -gt 120 -and $blue.B -gt 120 -and $blue.G -lt 100 } else { $green.G -gt 140 -and $green.R -lt 100 -and $blue.B -gt 120 -and $blue.R -lt 100 }
         $cornerIsPhoto = if ($Tall) { $corner.R -gt 150 -and $corner.G -gt 150 -and $corner.B -lt 100 } else { $corner.G -gt 140 -and $corner.R -lt 100 }
+        $bitmap.Save((Join-Path $Evidence "$Name.png"))
         Check "$Name-circle-center" $centerOk
         Check "$Name-circle-corner" (-not $cornerIsPhoto)
-        $bitmap.Save((Join-Path $Evidence "$Name.png"))
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool]$Generated = $false) {
+    $index = Index-For $Id
+    $tab = @((State).tabs)[$index]
+    $wasChat = $tab.PSObject.Properties['cv'] -and $tab.cv
+    Focus
+    if (-not $tab.PSObject.Properties['favorite'] -or -not $tab.favorite) {
+        Press @(0x12, 0x53)
+        [void](Wait-For 'favorite saved' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['favorite'] -and $saved.favorite })
+    }
+    Press @(0x12, 0x31)
+    [void](Wait-For 'Starred workspace' { $saved = State; $saved.PSObject.Properties['starred_view'] -and $saved.starred_view })
+    if (-not $wasChat) {
+        Press @(0x12, 0x43)
+        [void](Wait-For 'chat title visible' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['cv'] -and $saved.cv })
+    }
+    Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
+    [void](Wait-For 'Starred tile pinned' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['starred_pinned_top'] -and $saved.starred_pinned_top })
+    Shot "$Name-starred-header"
+    if ($Generated) { Assert-Generated $index "$Name-starred" 'pinned' } else { Assert-Avatar 'pinned' $index "$Name-starred" $Tall }
+    $failures = @()
+    try {
+        if ($Generated) { Assert-Generated $index "$Name-header" 'header' } else { Assert-Avatar 'header' $index "$Name-header" $Tall }
+    } catch { $failures += $_.Exception.Message }
+    Press @(0x11, 0x10, 0x49)
+    [void](Wait-For 'Inbox opened' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; $s.inbox_active })
+    Shot "$Name-inbox-window"
+    try {
+        if ($Generated) { Assert-Generated ([int]$tab.shell_id) "$Name-inbox" 'inbox' } else { Assert-Avatar 'inbox' ([int]$tab.shell_id) "$Name-inbox" $Tall }
+    } catch { $failures += $_.Exception.Message }
+    Press @(0x1b)
+    [void](Wait-For 'Inbox closed' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; -not $s.inbox_active })
+    Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Press @(0x12, 0x32)
+    [void](Wait-For 'home workspace' { -not (State).starred_view })
+    if (-not $wasChat) {
+        Press @(0x12, 0x43)
+        [void](Wait-For 'shell view restored' { $saved = @((State).tabs)[(Index-For $Id)]; -not $saved.PSObject.Properties['cv'] -or -not $saved.cv })
+    }
+    if ($failures.Count -gt 0) { throw ($failures -join '; ') }
 }
 function Capture-Avatar([int]$Index, [string]$Name) {
     $pattern = "\[photo-proof\] expanded target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
@@ -150,11 +285,13 @@ function Capture-Avatar([int]$Index, [string]$Name) {
     try { $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size); $bitmap.Save((Join-Path $Evidence "$Name.png")) } finally { $graphics.Dispose(); $bitmap.Dispose() }
     return (Get-FileHash (Join-Path $Evidence "$Name.png") -Algorithm SHA256).Hash
 }
-function Assert-Generated([int]$Index, [string]$Name) {
-    $pattern = "\[photo-proof\] expanded target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
+function Assert-Generated([int]$Index, [string]$Name, [string]$Surface = 'expanded') {
+    $pattern = "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
     $match = Wait-For 'generated avatar coordinates' { $found = [regex]::Matches((Log), $pattern); if ($found.Count -gt 0) { $found[$found.Count-1] } }
     $x = [int]$match.Groups[1].Value; $y = [int]$match.Groups[2].Value
     $size = [int]$match.Groups[3].Value - $x
+    $rect = "$x,$y,$($match.Groups[3].Value),$($match.Groups[4].Value)"
+    Check "$Name-chosen-face-color" ((Log).Contains("[bots] face=6 color=0 rect=$rect"))
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, $x, $y)
     $bitmap = [Drawing.Bitmap]::new($size, $size)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -192,8 +329,12 @@ function Assert-Normalized([string]$Path, [bool]$Tall = $false) {
 }
 function Start-App {
     $script:job = [VerifyJob]::new()
-    $script:app = $job.Start($Exe, $profile, (Join-Path $Evidence "stdout-$($checks.Count).log"), (Join-Path $Evidence "stderr-$($checks.Count).log"), '--no-window-restore')
-    $script:main = Wait-For 'owned main' { $h = [ChatDeliveryDesktop]::Window([uint32]$app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    $script:app = $job.Start($Exe, $profile, (Join-Path $Evidence "stdout-$($checks.Count).log"), (Join-Path $Evidence "stderr-$($checks.Count).log"), '--single-window --no-window-restore')
+    $script:main = Wait-For 'owned main' {
+        if ($app.HasExited) { throw ('App exited before its main window: ' + $app.ExitCode) }
+        $h = [ChatDeliveryDesktop]::Window([uint32]$app.Id)
+        if ($h -ne [IntPtr]::Zero) { $h }
+    }
     Focus
     [void](Wait-For 'local tabs restored' { try { @((State).tabs).Count -ge 2 -and (Log) -match 'launch step=browser' } catch { $false } })
 }
@@ -215,12 +356,40 @@ try {
     [IO.File]::WriteAllBytes($truncated, $jpg[0..([int]($jpg.Length / 2))])
     $largeFile = [IO.File]::Create($oversized)
     try { $largeFile.SetLength(16MB + 1) } finally { $largeFile.Dispose() }
+    $switchJob = [VerifyJob]::new()
+    $switchApp = $switchJob.Start((Get-Process -Id $PID).Path, $Evidence, (Join-Path $Evidence 'switch-target.stdout.log'), (Join-Path $Evidence 'switch-target.stderr.log'), ('-NoProfile -STA -File "' + "$PSScriptRoot/switch-target.ps1" + '"'), $true)
+    $switchWindow = Wait-For 'separate Alt+Tab switch target' {
+        if ($switchApp.HasExited) { throw 'Switch target exited before its window' }
+        $window = [PhotoDialogOwner]::SwitchTarget([uint32]$switchApp.Id)
+        if ($window -ne [IntPtr]::Zero) { $window }
+    }
+    $nativeReceipt = Join-Path $Evidence 'native-control.json'
+    $nativeJob = [VerifyJob]::new()
+    $app = $nativeJob.Start((Get-Process -Id $PID).Path, $Evidence, (Join-Path $Evidence 'native-control.stdout.log'), (Join-Path $Evidence 'native-control.stderr.log'), ('-NoProfile -STA -File "' + "$PSScriptRoot/switch-target.ps1" + '" -NativePicker -Receipt "' + $nativeReceipt + '"'), $true)
+    $main = Wait-For 'standalone native owner' {
+        if ($app.HasExited) { throw 'Standalone native control exited before its window' }
+        $window = [PhotoDialogOwner]::SwitchTarget([uint32]$app.Id)
+        if ($window -ne [IntPtr]::Zero) { $window }
+    }
+    $lastDialog = Dialog
+    try {
+        Switch-Picker $lastDialog
+        Submit-File $lastDialog $wide
+        [void](Wait-For 'standalone native selection receipt' { Test-Path $nativeReceipt })
+        $nativeResult = Get-Content $nativeReceipt -Raw | ConvertFrom-Json
+        Check 'standalone-native-picker-after-alt-tab' ($nativeResult.answer -eq 'OK' -and $nativeResult.selected -ceq $wide)
+    } catch { throw ('Standalone Windows picker control: ' + $_.Exception.Message) }
+    $nativeStopped = $nativeJob.Stop()
+    Check 'standalone-native-control-cleaned' ($nativeStopped.ActiveProcesses -eq 0)
+    $nativeJob.Dispose(); $nativeJob = $null
     Start-App
     Shot 'before'
     Look 'bot face' 'tall one eye' 7145
     Look 'bot color' 'sage' 7162
     $otherBefore = Capture-Avatar (Index-Name 'Photo Beta') 'other-before'
-    Pick $wide
+    Pick ''
+    Check 'cancel-without-alt-tab' ([PhotoDialogOwner]::IsWindowEnabled($main))
+    Pick $wide $true
     $first = Wait-For 'first stored image' { $a = @(Assets); if ($a.Count -eq 1) { $a[0] } }
     $firstId = Wait-For 'first local identity' { $tab = @((State).tabs | Where-Object { $_.name -ceq 'Photo Alpha' -and $_.PSObject.Properties['avatar_local_id'] }); if ($tab.Count -eq 1 -and $tab[0].avatar_local_id -match '^[0-9a-f]{32}$') { $tab[0].avatar_local_id } }
     Assert-Normalized $first.FullName
@@ -231,13 +400,28 @@ try {
     Check 'other-local-bot-unchanged' (@((State).tabs | Where-Object { $_.name -eq 'Photo Beta' -and $_.PSObject.Properties['avatar_local_id'] }).Count -eq 0)
     Shot 'uploaded-wide'
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-wide'
+    Assert-AllFaces $firstId 'matching-wide'
     Check 'other-bot-pixels-unchanged' ((Capture-Avatar (Index-Name 'Photo Beta') 'other-after') -eq $otherBefore)
+    foreach ($theme in @(
+        @{ name='light'; query='light'; target=4012; saved='light' },
+        @{ name='amoled'; query='amoled'; target=4013; saved='amoled' },
+        @{ name='edge-grey'; query='edge'; target=4014; saved='edgegray' }
+    )) {
+        Focus; Press @(0x11, 0x4b); Query 'themes' 4000; Press @(0x0d)
+        Query $theme.query $theme.target; Press @(0x0d)
+        [void](Wait-For "$($theme.name) theme saved" {
+            $path = Join-Path $settings 'theme-mode.txt'
+            (Test-Path $path) -and (Get-Content $path -Raw).Trim() -ceq $theme.saved
+        })
+        Press @(0x1b)
+        Assert-AllFaces $firstId ("matching-" + $theme.name)
+    }
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
-    Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b); Press @(0x1b)
-    Focus; Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
-    [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.pinned_top -eq $true })
+    Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
+    Focus; Press @(0x11, 0x4b); Query 'pin to top' '(7113|6293)'; Press @(0x0d)
+    [void](Wait-For 'pinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; $tab.PSObject.Properties['pinned_top'] -and $tab.pinned_top -eq $true })
     Assert-Avatar 'pinned' (Index-For $firstId) 'pinned-wide'
-    Focus; Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Focus; Press @(0x11, 0x4b); Query 'unpin from top' '(7113|6293)'; Press @(0x0d)
     [void](Wait-For 'unpinned local tab' { $tab = @((State).tabs | Where-Object { $_.name -eq 'Photo Alpha' })[0]; -not $tab.PSObject.Properties['pinned_top'] -or -not $tab.pinned_top })
     Focus; Press @(0x11, 0x10, 0x42)
     $firstIndex = Index-For $firstId
@@ -247,7 +431,7 @@ try {
     [void](Wait-For 'sidebar hidden' { $s = State; $s.PSObject.Properties['hide_sidebar'] -and $s.hide_sidebar })
     Focus; Press @(0x11, 0x10, 0x42)
     [void](Wait-For 'sidebar expanded' { $s = State; (-not $s.PSObject.Properties['hide_sidebar'] -or -not $s.hide_sidebar) -and (-not $s.PSObject.Properties['sidebar_collapsed'] -or -not $s.sidebar_collapsed) })
-    Pick ''
+    Pick '' $true
     Check 'cancel-preserves-image' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $firstHash)
     Pick $bad
     Check 'bad-image-preserves-image' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $firstHash)
@@ -269,6 +453,7 @@ try {
     $replacementHash = (Get-FileHash $first.FullName -Algorithm SHA256).Hash
     Shot 'uploaded-tall'
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-tall' $true
+    Assert-AllFaces $firstId 'matching-replacement' $true
     $secondIndex = Index-Name 'Photo Beta'
     Focus; Press @(0x11, 0x4b); Query 'photo beta' $secondIndex; Press @(0x0d)
     Pick $wide
@@ -280,7 +465,7 @@ try {
     Copy-Item $first.FullName (Join-Path $Evidence 'normalized-tall.png')
     Copy-Item $second.FullName (Join-Path $Evidence 'normalized-wide.png')
     Check 'second-bot-does-not-change-first' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $replacementHash)
-    Focus; Press @(0x11, 0x57)
+    Focus; Press @(0x11, 0x4b); Query 'close tab' '(7197|6232)'; Press @(0x0d)
     [void](Wait-For 'second local tab closed' { @((State).tabs | Where-Object { $_.name -eq 'Photo Beta' }).Count -eq 0 })
     $paintStart = (Log).Length
     Focus; Press @(0x11, 0x10, 0x54)
@@ -318,6 +503,7 @@ try {
     $saved = @((State).tabs | Where-Object { $_.name -eq 'Renamed Alpha' })[0]
     Check 'reset-retains-face-and-color' ($saved.face -eq 6 -and $saved.color -eq 0)
     Assert-Generated (Index-For $firstId) 'generated-after-reset'
+    Assert-AllFaces $firstId 'matching-reset' $false $true
     Shot 'reset'
     Stop-App
     Start-App
@@ -328,9 +514,19 @@ try {
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
-    if ($main -ne [IntPtr]::Zero) { try { Shot 'failure' } catch {} }
+    try { Save (Picker-State $lastDialog) (Join-Path $Evidence 'failure-state.json'); Shot 'failure' } catch {}
 } finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup = 0 }
+    if ($null -ne $nativeJob) {
+        $nativeStopped = $nativeJob.Stop()
+        $result.cleanup += $nativeStopped.ActiveProcesses
+        $nativeJob.Dispose()
+    }
+    if ($null -ne $switchJob) {
+        $switchStopped = $switchJob.Stop()
+        $result.cleanup += $switchStopped.ActiveProcesses
+        $switchJob.Dispose()
+    }
     if (Test-Path (Join-Path $settings 'session.json')) { Copy-Item (Join-Path $settings 'session.json') (Join-Path $Evidence 'session.json') }
     if (Test-Path (Join-Path $settings 'debug.log')) { Copy-Item (Join-Path $settings 'debug.log') (Join-Path $Evidence 'debug.log') }
     Save $result (Join-Path $Evidence 'result.json')

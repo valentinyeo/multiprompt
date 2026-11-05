@@ -9,7 +9,7 @@ const SSH_TARGET_DE = "remote-1";
 const SSH_TARGET_UK = "remote-2";
 const SSH_TARGET_INNE = "remote-3";
 const AccountJob = struct { kind: enum { startup, login, pull, push, remove_host }, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, appearance: ?[]const appearance_intent.Intent = null };
-const LayoutReply = struct { bytes: ?[]u8 = null, unauthorized: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false };
+const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, bytes: ?[]u8 = null, unauthorized: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false };
 const initial_host = account_hosts.Host{ .slot = 0, .name = "Host 1", .hostname = "old.example", .port = 22, .user = "owner" };
 const initial_config = "Host remote-1\r\n  HostName old.example\r\n  Port 22\r\n  User owner\r\n  IdentityFile ~/.ssh/local_key\r\n  ProxyCommand custom-proxy %h\r\n  ForwardAgent no\r\nHost other\r\n  HostName untouched.example\r\n";
 var g_account_hosts_cache: struct {
@@ -121,6 +121,7 @@ fn accountReadLayout(alloc: std.mem.Allocator, bytes: []const u8) ![]u8 {
     return session_layout.encode(alloc, parsed.value.layout);
 }
 fn accountSyncDeviceKeys(_: []const u8, _: AccountJob, _: *LayoutReply) !void {}
+fn accountSyncPhotos(_: []const u8, _: []const u8, _: []const session_layout.Tab) !void {}
 fn accountDeviceKeyError(_: *LayoutReply, _: []const u8) void {
     @panic("unexpected device key error");
 }

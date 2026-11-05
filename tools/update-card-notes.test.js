@@ -19,80 +19,46 @@ function assertCardNotes(source) {
 
 test('release asset includes every historical version, plain lines only, and the offered version rather than embedded-only notes', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
-  const { plainChange } = await import('./version-stamp.mjs');
   const source = read('src/changelog.zig');
   const versions = [...source.matchAll(/\.ver = "(\d+\.\d+\.\d+)"/g)].map(match => match[1]);
   const notes = releaseNotes(source, `v${versions[0]}`);
   assert.deepEqual(notes.releases.map(release => release.version), versions);
   assert.ok(Buffer.byteLength(JSON.stringify(notes)) < 1024 * 1024);
-  assert.ok(notes.releases.every(release => release.changes.every(plainChange)));
+  assert.ok(notes.releases.every(release => release.changes.every(line => /^(?:IGSH|HYCI)-[1-9]\d* \S/.test(line))));
   assert.ok(notes.releases[0].changes.length > 0);
   assert.equal(notes.version, versions[0]);
   assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes, no visible change/);
   assert.throws(() => releaseNotes(source, 'v99.0.0'), /offered version/);
 });
 
-test('IGSH-1266 the update card never shows the empty release filler', async () => {
+test('filler cannot be published as a ticket title', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const source = `pub const CHANGELOG = [_]ChangelogEntry{
     .{ .ver = "0.28.1400", .items = &.{
-        .{ .text = "Checks and fixes, no visible change", .ticket = "IGSH-1300" },
-    } },
-    .{ .ver = "0.28.1399", .items = &.{
-        .{ .text = "A failed move to the terminal keeps your chat open.", .ticket = "IGSH-1266" },
+        .{ .text = "IGSH-1300 Checks and fixes, no visible change", .ticket = "IGSH-1300" },
     } },
 };`;
-  assert.deepEqual(releaseNotes(source, 'v0.28.1400'), {
-    version: '0.28.1400', releases: [
-      { version: '0.28.1400', changes: [], tickets: [] },
-      { version: '0.28.1399', changes: ['A failed move to the terminal keeps your chat open.'], tickets: ['https://app.hypertask.ai/detail/project-2060/1266'] },
-    ],
-  });
-  assert.doesNotMatch(JSON.stringify(releaseNotes(source, 'v0.28.1400')), /Checks and fixes/);
+  assert.throws(() => releaseNotes(source, 'v0.28.1400'), /title/);
 });
 
-test('IGSH-1266 release 1339 states its real change instead of the filler', async () => {
-  const { execFileSync } = require('node:child_process');
+test('historical and current lines use the same authoritative title', async () => {
   const { buildChangelog } = await import('./version-stamp.mjs');
   const { releaseNotes } = await import('./release-notes.mjs');
-  const sha = execFileSync('git', ['rev-parse', 'v0.28.1339^{commit}'], { cwd: root, encoding: 'utf8' }).trim();
   const files = {
-    'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
-    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1266" },\n    } },\n};\n',
   };
-  const history = [{ tag: 'v0.28.1338', files }, { tag: 'v0.28.1339', files, sha }];
-  const generated = buildChangelog(files, 'v0.28.1341', history, [{ sha: 'new', subject: 'IGSH-1266: Keep the real line' }]);
-  const notes = releaseNotes(generated, 'v0.28.1341');
-  const release = notes.releases.find(item => item.version === '0.28.1339');
-  assert.deepEqual(release.changes, ['A failed move to the terminal keeps your chat open.']);
-  assert.deepEqual(release.tickets, ['https://app.hypertask.ai/detail/project-2060/1266']);
-  assert.deepEqual(notes.releases.find(item => item.version === '0.28.1341').changes, []);
-  assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes/);
-});
-
-test('publication exports pending fragments after the release fold and handles older Zig string escapes', async () => {
-  const { releaseNotes } = await import('./release-notes.mjs');
-  const { stampTree } = await import('./version-stamp.mjs');
-  const changelog = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.900", .summary = "Old", .ticket = "", .items = &.{\n        .{ .text = "Opening browser\\u{2026}", .ticket = "" },\n        .{ .text = "Fix IGSH-123.", .ticket = "" },\n        .{ .text = "Fix src/main.zig.", .ticket = "" },\n        .{ .text = "Fix #12.", .ticket = "" },\n    } },\n};\n';
-  const stamp = stampTree({
-    'src/main.zig': 'pub const APP_VERSION = "0.28.900";\n',
-    'src/changelog.zig': changelog,
-    'changelog.d/DEMO-1-notes.md': 'Tabs open sooner.\n',
-  });
-  assert.deepEqual(releaseNotes(stamp.files['src/changelog.zig'], 'v0.28.901'), {
-    version: '0.28.901', releases: [
-      { version: '0.28.901', changes: ['Tabs open sooner.'] },
-      { version: '0.28.900', changes: ['Opening browser…'] },
-    ],
-  });
+  const titles = { 'IGSH-1266': 'A title with café and "quotes"' };
+  const source = buildChangelog(files, 'v0.28.1341', [], [{ sha: 'new', subject: 'IGSH-1266: Keep the real line' }], titles);
+  const notes = releaseNotes(source, 'v0.28.1341');
+  assert.deepEqual(notes.releases.map(release => release.changes), [['IGSH-1266 A title with café and "quotes"'], ['IGSH-1266 A title with café and "quotes"']]);
 });
 
 test('existing release workflow signs the versioned history alongside the update bundle', () => {
   const workflow = read('.github/workflows/release.yml');
-  assert.match(workflow, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" dist\/release-notes\.json/);
+  assert.match(workflow, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" release-notes\.json/);
   const release = workflow.slice(workflow.indexOf('\n  release:\n'));
   const signedNotesInOrder = text => {
-    const notes = text.indexOf('node tools/release-notes.mjs');
+    const notes = text.indexOf('cp release-notes.json dist/release-notes.json');
     const manifest = text.indexOf('sha256sum *.exe *.zip release-notes.json > SHA256SUMS.txt');
     const signature = text.indexOf('node tools/sign-release.mjs');
     const publication = text.indexOf('gh release create "$TAG" dist/*');
@@ -143,11 +109,9 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   assert.match(read('src/main.zig'), /if \(pt\.x >= 0 and pt\.x < SIDEBAR_W\(\) and pt\.y >= 0\) \{\s+const delta: i16 = @bitCast\(@as\(u16, @truncate\(wp >> 16\)\)\);\s+if \(@import\("update_card\.zig"\)\.updateCardScroll\(pt\.x, pt\.y, delta\)\) return 0/);
   const notes = read('src/update_notes.zig');
   for (const name of [
-    'IGSH-728 picks only versions between installed and offered, newest first',
-    'IGSH-948 shows three lines then and N more, and the full list when expanded',
-    'IGSH-948 keeps sixteen lines and counts the rest as more even when expanded',
-    'IGSH-1090 keeps real notes individual and maintenance releases quiet',
-    'IGSH-728 skips ticket ids, file paths, file names and PR numbers',
+    'ticket titles and skipped releases retain newest-first order',
+    'invalid notes and filler are not displayed',
+    'collapsed and expanded counts retain omitted items',
   ]) assert.ok(notes.includes(`test "${name}"`));
   assert.match(notes, /lines: \[16\]\[512\]u8/);
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
@@ -175,18 +139,21 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /\$observedNotes\[\$i\] -ceq \$expectedNotes\[\$i\]/);
   assert.match(suite, /GetClientRect\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /GetDpiForWindow\(\$cardProcess.MainWindowHandle/);
-  assert.match(suite, /\$observedNotes \| ConvertTo-Json/);
+  assert.match(suite, /\$collapsed \| ConvertTo-Json/);
+  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'and 1 more'/);
+  assert.match(suite, /Click-CardMore \$collapsed/);
+  assert.match(suite, /'update-card-expanded\.png'/);
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
   assert.match(suite, /Tampered notes accepted/);
-  assert.match(suite, /checks-only staged notes retain fallback and ticket link/);
-  assert.match(suite, /Checks-only fallback is missing or changed/);
-  assert.match(suite, /Checks-only ticket link is missing or changed/);
-  assert.match(suite, /Checks-only update marker missing/);
-  assert.match(suite, /update-card-quiet\.png/);
+  assert.match(suite, /ticket-title staged notes retain title and ticket link/);
+  assert.match(suite, /Ticket title is missing or changed/);
+  assert.match(suite, /Ticket link is missing or changed/);
+  assert.match(suite, /Ticket-title update marker missing/);
+  assert.match(suite, /update-card-ticket-title\.png/);
   assert.match(suite, /Restored update marker missing/);
   assert.match(suite, /\$installedNotes\.version = \$newVersion/);
-  assert.match(suite, /Restart keeps your chats open/);
+  assert.match(suite, /restart card reopens newer native app with session restored/);
   const journey = read('tools/update-release-journey.ps1');
   assert.match(journey, /signed staged notes retain expected data/);
   assert.match(journey, /zig test src\/update_notes\.zig/);
@@ -194,21 +161,18 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(read('.claude/skills/verify-multiprompt/features/safe-updates.md'), /update-card-notes.png/);
   const fixture = read('tools/update-release-fixtures.mjs');
   for (const version of ['9.8.0', '9.9.0', '9.10.0', '10.0.0']) assert.ok(fixture.includes(version));
-  assert.match(fixture, /version: '9.9.0', changes: \['Middle change.'\]/);
+  assert.match(fixture, /version: '9.9.0', changes: \['IGSH-2 Middle change'\]/);
   assert.match(fixture, /names.push\('release-notes.json'\)/);
 });
 
-test('IGSH-1090 publication removes engineering notes and filler, not real product lines', async () => {
+test('unidentified legacy lines cannot be published', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const source = `pub const CHANGELOG = [_]ChangelogEntry{
     .{ .ver = "0.28.901", .items = &.{
-        .{ .text = "Behind the scenes fixes.", .ticket = "" },
-        .{ .text = "Chat speed checks now ignore shared-machine pauses.", .ticket = "" },
-        .{ .text = "Dictation shortcuts keep working when keys queue up.", .ticket = "" },
+        .{ .text = "Unidentified legacy note", .ticket = "" },
     } },
 };`;
-  assert.deepEqual(releaseNotes(source, 'v0.28.901').releases[0].changes, ['Dictation shortcuts keep working when keys queue up.']);
-  assert.doesNotMatch(read('tools/version-stamp.mjs'), /IGSH-834-maintenance|export const behindTheScenes/);
+  assert.throws(() => releaseNotes(source, 'v0.28.901'), /unidentified/);
 });
 
 test('changed implementation is comment-free and leaves no error log', async () => {
@@ -245,7 +209,7 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   const historyResponse = await fetch(historyAsset.browser_download_url);
   assert.equal(historyResponse.status, 200);
   const history = await historyResponse.json();
-  const feature = history.releases.find(item => item.changes.includes('Update cards explain each change, without generic messages.'));
+  const feature = history.releases.find(item => item.changes.some(change => change.startsWith('IGSH-1090 ') || change === 'Update cards explain each change, without generic messages.'));
   assert.ok(feature, 'Feature must be published before its release-card proof');
   assert.match(release.tag_name, /^v\d+\.\d+\.\d+$/);
   const assets = {};
@@ -262,7 +226,7 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   }
   const notes = JSON.parse(fs.readFileSync(assets['release-notes.json'], 'utf8'));
   assert.equal(notes.version, release.tag_name.slice(1));
-  assert.ok(notes.releases.some(item => item.changes.includes('Update cards explain each change, without generic messages.')));
+  assert.ok(notes.releases.some(item => item.changes.some(change => change.startsWith('IGSH-1090 ') || change === 'Update cards explain each change, without generic messages.')));
   const proof = spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
     '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
@@ -301,7 +265,7 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   const notes = path.join(directory, 'notes.json');
   await download(latest, 'release-notes.json', notes);
   const history = JSON.parse(fs.readFileSync(notes, 'utf8'));
-  const shipped = history.releases.find(release => release.changes.includes(fragment));
+  const shipped = history.releases.find(release => release.changes.some(change => change.startsWith('IGSH-1118 ') || change === fragment));
   let exe = path.join(root, 'zig-out/bin/multiprompt.exe');
   if (shipped) {
     const release = shipped.version === latest.tag_name.slice(1) ? latest : await api(`releases/tags/v${shipped.version}`);
@@ -331,32 +295,22 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   console.log(green.stdout);
 });
 
-test('IGSH-1243 builds one linked line for each commit ticket', async () => {
+test('release contains one linked authoritative line for each commit ticket', async () => {
   const { buildChangelog } = await import('./version-stamp.mjs');
   const { releaseNotes } = await import('./release-notes.mjs');
   const files = {
-    'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
     'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
     [path.posix.join('changelog.d', 'IGSH-2-chat.md')]: 'Chats open sooner.\nDrafts stay visible.\n',
   };
+  const titles = { 'IGSH-1': 'Earlier title', 'IGSH-2': 'Chat title', 'IGSH-3': 'Checks title' };
   const commits = [{ sha: 'aaa', subject: 'IGSH-2: Improve chats' }, { sha: 'bbb', subject: 'IGSH-3: Repair checks' }, { sha: 'ccc', subject: 'IGSH-2: Follow up' }];
-  const generated = buildChangelog(files, 'v0.28.1100', [], commits);
+  const generated = buildChangelog(files, 'v0.28.1100', [], commits, titles);
   const latest = releaseNotes(generated, 'v0.28.1100').releases[0];
-  assert.deepEqual(latest.changes, ['Chats open sooner. Drafts stay visible.']);
-  assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2']);
-  assert.match(generated, /\.text = "Chats open sooner\. Drafts stay visible\.", \.ticket = "IGSH-2"/);
-  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }]), /bad123.*leading ticket ID/);
-  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], []), /fragment has no matching commit ticket/);
-  let shared = '';
-  assert.doesNotThrow(() => { shared = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'ddd', subject: 'IGSH-3, IGSH-2: Ship both' }]); });
-  assert.match(shared, /\.text = "Chats open sooner\. Drafts stay visible\.", \.ticket = "IGSH-2"/);
-  const noFragments = { ...files };
-  delete noFragments[path.posix.join('changelog.d', 'IGSH-2-chat.md')];
-  assert.throws(() => buildChangelog(noFragments, 'v0.28.1100'), /no ticketed release lines/);
-  const tooling = releaseNotes(buildChangelog(noFragments, 'v0.28.1100', [], [commits[1]]), 'v0.28.1100').releases[0];
-  assert.deepEqual(tooling.changes, []);
-  assert.deepEqual(tooling.tickets, []);
-  assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /needs plain ticketed lines/);
+  assert.deepEqual(latest.changes, ['IGSH-2 Chat title', 'IGSH-3 Checks title']);
+  assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2', 'https://app.hypertask.ai/detail/project-2060/3']);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }], titles), /bad123.*leading ticket ID/);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [], titles), /fragment has no matching commit ticket/);
+  assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /unidentified/);
 });
 
 test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () => {
@@ -372,9 +326,10 @@ test('IGSH-1615 releases a reviewed commit that has no ticket prefix', async () 
     { sha: '246972c5', subject: 'IGSH-1610: Approve a device even when one SSH host is unreachable (#738)' },
   ];
   let generated;
-  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits); });
+  assert.doesNotThrow(() => { generated = buildChangelog(files, 'v0.28.1448', [], commits, { ...JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json')), 'IGSH-1': 'Earlier title' }); });
   const latest = releaseNotes(generated, 'v0.28.1448').releases[0];
-  assert.deepEqual(latest.changes, ['Devices can be approved when one host is offline.']);
+  assert.ok(latest.changes.some(line => line.startsWith('IGSH-1610 ')));
+  assert.ok(latest.changes.some(line => line.startsWith('IGSH-1615 ')));
   assert.match(generated, /\.ticket = "IGSH-1615"/);
   assert.throws(() => buildChangelog(files, 'v0.28.1448', [], [{ sha: '8f52c2a6', subject: commits[0].subject }, commits[1]]), /8f52c2a6.*leading ticket ID/);
 });
@@ -396,7 +351,7 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
     history.push({ tag, files: { ...source, ...fragments }, sha: git('rev-parse', `${tag}^{commit}`) });
   }
   const files = { ...history.at(-1).files, [path.posix.join('changelog.d', 'IGSH-1243-notes.md')]: 'Changelog ticket links now open their tickets.\n' };
-  const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]);
+  const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }], { ...JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json')), 'IGSH-1': 'Earlier title' });
   const notes = releaseNotes(generated, 'v0.28.1100');
   for (const tag of tags) {
     const release = notes.releases.find(item => item.version === tag.slice(1));
@@ -408,7 +363,7 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
   assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes/);
   assert.equal(notes.releases.some(item => item.version === '0.28.1041'), false);
   const release1038 = notes.releases.find(item => item.version === '0.28.1038');
-  const actualFragment = git('show', `v0.28.1038:${path.posix.join('changelog.d', 'IGSH-1238-busy-queue.md')}`).split('\n').join(' ');
+  const actualFragment = 'IGSH-1238 ' + JSON.parse(read('tools/fixtures/IGSH-1681/ticket-titles.json'))['IGSH-1238'];
   const fragmentIndex = release1038.tickets.indexOf('https://app.hypertask.ai/detail/project-2060/1238');
   assert.equal(release1038.changes[fragmentIndex], actualFragment);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', history.map(item => item.tag === 'v0.28.1048' ? { ...item, sha: 'wrong' } : item), [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]), /reviewed release commit does not match/);

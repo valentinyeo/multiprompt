@@ -256,5 +256,6 @@
     .bot_color_lilac = "Lilac",
     .bot_color_rose = "Rose",
     .bot_color_mint = "Mint",
+    .bot_color_white = "White",
     .bot_look_save_error = "Could not save bot look",
 }

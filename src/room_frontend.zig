@@ -148,6 +148,7 @@ const PendingCommand = struct {
     bindings: []const PendingBinding,
     evidence: ?[]const u8 = null,
     evidence_state: journal.State = .uncertain,
+    awaiting_launch: bool = false,
 };
 var pending_command: ?*PendingCommand = null;
 const CreatedSelection = struct { location: RoomLocation, generation: u64, token_generation: u64 };
@@ -931,7 +932,7 @@ fn finishRefresh(c: *rooms.Controller, success: bool) void {
 fn scheduleMetadata(c: *rooms.Controller) bool {
     if (c.job == null and (front == .create or front == .selected) and c.has_host_uuid and candidate_scan < discovered_count and nextStatus(c)) return true;
     if (pumpRefresh(c)) return true;
-    if (c.job != null or !catalog_complete or !c.has_host_uuid or request_generation != account_generation) return false;
+    if (c.job != null or !c.has_host_uuid or request_generation != account_generation) return false;
     const route = configuredRoute(route_slot) orelse return false;
     const key = routeKey(route);
     if (!std.mem.eql(u8, &key, &route_key)) return false;
@@ -940,7 +941,7 @@ fn scheduleMetadata(c: *rooms.Controller) bool {
         selection_waiting = false;
     }
     const count = catalog_rows.items.len;
-    if (count == 0) return false;
+    if (!catalog_complete or count == 0) return false;
     var scanned: usize = 0;
     while (scanned < count) : (scanned += 1) {
         const index = metadata_cursor % count;
@@ -1122,6 +1123,8 @@ fn acceptEvents(payload: std.json.Value) bool {
             const content = textField(event, "text") orelse return false;
             if (content.len == 0 or content.len > 65536 or item.messages.items.len >= 100000) return false;
             var author: ?room_view.Author = null;
+            var question_id = id;
+            var insertion_index = item.messages.items.len;
             if (std.mem.eql(u8, kind, "human")) {
                 if (event.object.count() != 7 or item.replay_revision == 0 or (numberField(event, "revision") orelse 0) != item.replay_revision) return false;
                 const recipients = event.object.get("recipients") orelse return false;
@@ -1155,10 +1158,19 @@ fn acceptEvents(payload: std.json.Value) bool {
                     break;
                 };
                 if (!authorized) return false;
+                question_id = parent;
+                var found = false;
+                for (item.messages.items, 0..) |message, index| {
+                    if (std.mem.eql(u8, message.question_id, parent)) {
+                        insertion_index = index + 1;
+                        found = true;
+                    } else if (found) break;
+                }
+                if (!found) return false;
                 author = .{ .name = std.unicode.utf8ToUtf16LeStringLiteral("Unknown agent"), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0x9a9a9a };
                 for (item.history.items) |old| if (std.mem.eql(u8, old.id, member_id)) { author = old.author; break; };
             }
-            item.messages.append(a, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{} }) catch return false;
+            item.messages.insert(a, insertion_index, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{}, .question_id = a.dupe(u8, question_id) catch return false }) catch return false;
         } else return false;
         last = seq;
     }
@@ -1415,6 +1427,53 @@ fn driveRestore(c: *rooms.Controller) bool {
     return false;
 }
 
+fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool) bool {
+    const item = pending_command orelse return false;
+    if (!item.awaiting_launch or completion == .pending) return false;
+    if (!fresh or commandScope(item.location) == null) {
+        if (commandVisible(item)) view.completeAction(item.token, .failed);
+        freePending(item);
+        return false;
+    }
+    const kind = switch (completion) {
+        .finished => |finished| blk: {
+            var result = finished;
+            const result_kind = result.kind;
+            result.deinit();
+            break :blk result_kind;
+        },
+        .failed => |failure| failure.kind,
+        .pending => unreachable,
+    };
+    discardBuilding();
+    if (kind == .catalog) {
+        finishRefresh(c, false);
+        _ = enqueueRefresh(item.location);
+    }
+    if (kind == .catalog_metadata) {
+        if (metadata_read) |read| {
+            if (read.catalog_generation == catalog_generation) for (catalog_rows.items) |*row| {
+                if (std.mem.eql(u8, row.id, &read.room_id) and row.metadata_state == .loading and row.read_generation == read.read_generation) row.metadata_state = .queued;
+            };
+        }
+        metadata_read = null;
+    }
+    if (kind == .status and status_generation == candidate_generation and candidate_scan > 0) candidate_scan -= 1;
+    if (front == .selected) selection_waiting = true;
+    item.awaiting_launch = false;
+    c.launchPrepared(item.kind, &item.id, if (item.kind == .create) "" else &item.room_id, item.revision) catch {
+        if (commandVisible(item)) view.completeAction(item.token, .failed);
+        freePending(item);
+        journal_checked_generation = null;
+        scheduleDiscovery(c);
+        controller = null;
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        return true;
+    };
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+    return true;
+}
+
 pub fn pollTimer(id: usize) bool {
     if (!enabled) return false;
     if (id == TIMER_ROOM_EVIDENCE) {
@@ -1459,6 +1518,7 @@ pub fn pollTimer(id: usize) bool {
     const current_route = configuredRoute(route_slot);
     const current_key = if (current_route) |route| routeKey(route) else @as([64]u8, @splat(0));
     const fresh = request_generation == account_generation and current_route != null and std.mem.eql(u8, &current_key, &route_key);
+    if (launchQueuedCommand(c, completion, fresh)) return true;
     const mutation = switch (completion) { .failed => |failure| failure.kind == .create or failure.kind == .edit, .finished => |result| result.kind == .create or result.kind == .edit, .pending => false };
     if (mutation and pending_command != null) {
         finishCommand(c, completion, fresh);
@@ -1535,7 +1595,8 @@ pub fn pollTimer(id: usize) bool {
                 if (!acceptEvents(payload)) { discardBuilding(); last_failure = .{ .kind = .events, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
                 const item = building_model.?;
                 if (item.after == item.highwater) {
-                    if (!publishModel()) { discardBuilding(); view.showUnavailable(); }
+                    const advanced = numberField(payload, "next_after").? > item.highwater;
+                    if (!publishModel()) { discardBuilding(); view.showUnavailable(); } else if (advanced) selection_waiting = true;
                     if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
                 } else if (!c.events(item.value.room_id, item.after)) {
                     discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
@@ -1775,7 +1836,7 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
         return if (accepted) .accepted else .failed;
     }
     const c = if (controller) |*value| value else return .failed;
-    if (c.job != null or !c.has_host_uuid) return .failed;
+    if (c.journal_lock != null or !c.has_host_uuid) return .failed;
     var location = StoreLocation{ .account = @splat(0), .account_len = account_len, .store_uuid = c.host_uuid };
     @memcpy(location.account[0..account_len], account[0..account_len]);
     const scope = commandScope(location) orelse return .failed;
@@ -1824,7 +1885,8 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
     else
         std.json.Stringify.valueAlloc(a, .{ .op = "edit", .host_uuid = location.store_uuid[0..], .command_id = item.id[0..], .room_id = room_id, .expected_revision = revision, .name = name_buf[0..name_len], .members = members.items }, .{}) catch return .failed;
     journal.prepare(scope, kind, &item.id, room_id, revision, item.request, item.bindings) catch return .failed;
-    c.launchPrepared(kind, &item.id, room_id, revision) catch return .failed;
+    item.awaiting_launch = c.job != null;
+    if (!item.awaiting_launch) c.launchPrepared(kind, &item.id, room_id, revision) catch return .failed;
     pending_command = item;
     retained = true;
     _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);

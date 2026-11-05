@@ -195,6 +195,8 @@ def fake_submit(claude, text):
         if state().get("name") == "cancel-held":
             fake_event("assistant", message=dict(role="assistant", id="reply_" + uuid.uuid4().hex, content=[dict(type="text", text="Received " + text)]))
             claude.setdefault("turns", []).append([text, "Received " + text])
+        elif state().get("name") == "reactions" and text == "What should I do next?":
+            fake_event("assistant", message=dict(role="assistant", id="msg_followup", content=[dict(type="text", text="The next answer stays visible after reacting.")]))
 
 
 def fake_take(claude):
@@ -659,14 +661,6 @@ def shell():
                 fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
                 fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
         return 0
-    if op == "hidden-steps":
-        for group, size in ((1, 2), (2, 1)):
-            for index in range(size):
-                identity = f"hidden-step-{group}-{index}"
-                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command=f"echo step {group}-{index}"))]))
-                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content=f"Output for step {group}-{index}", is_error=False)]))
-            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="text", text=f"Finished group {group}. The next reply stays visible.")]))
-        return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
         fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id="activity-todo", content="verified", is_error=False)]))
@@ -693,6 +687,11 @@ def shell():
             text = claude["queue"].pop(0)
             fake_queue_event("remove", text, reason="absorbed_mid_turn")
             (ROOT / "accepted.json").write_text(json.dumps(dict(text=text, ms=time.time_ns() // 1_000_000)), encoding="utf-8")
+            return True
+    elif op == "finish-accepted":
+        def change(claude):
+            accepted = json.loads((ROOT / "accepted.json").read_text(encoding="utf-8"))
+            fake_event("attachment", attachment=dict(type="queued_command", prompt=accepted["text"], commandMode="prompt"))
             return True
     elif op == "idle":
         change = lambda claude: fake_take(claude) is None
@@ -877,40 +876,69 @@ def capture_screen(escapes):
     return shown
 
 
-def tmux():
+def tmux_buffer(argv, input):
+    name = argv[argv.index("-b") + 1]
+    if not re.fullmatch(r"mp-send-[0-9a-f]{32}", name):
+        return 95
+    directory = ROOT / "tmux-buffers"
+    directory.mkdir(exist_ok=True)
+    path = directory / name
+    operation = argv[0]
+    if operation == "load-buffer":
+        path.write_bytes(input.read())
+    elif operation == "paste-buffer":
+        if not path.exists():
+            return 1
+        text = path.read_bytes().decode("utf-8")
+        if not fake_send(["send-keys", "-t", argv[argv.index("-t") + 1], "-l", "--", text]):
+            return 95
+        if "-d" in argv:
+            path.unlink()
+    elif path.exists():
+        path.unlink()
+    else:
+        return 1
+    record("tmux-buffers.jsonl", argv=argv)
+    return 0
+
+
+def tmux(argv, input, output):
     fake = state().get("fake")
-    if ARGS[:1] == ["capture-pane"]:
-        shown = capture_screen("-e" in ARGS)
-        record("capture.jsonl", argv=ARGS, screen=shown)
-        sys.stdout.reconfigure(newline="\n")
-        sys.stdout.write(shown)
+    if fake and argv[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
+        return tmux_buffer(argv, input)
+    if argv[:1] == ["capture-pane"]:
+        shown = capture_screen("-e" in argv)
+        record("capture.jsonl", argv=argv, screen=shown)
+        if hasattr(output, "reconfigure"):
+            output.reconfigure(newline="\n")
+        output.write(shown)
         return 0
-    if ARGS[:1] == ["send-keys"] and state().get("sendingProof") and "-l" in ARGS:
+    if argv[:1] == ["send-keys"] and state().get("sendingProof") and "-l" in argv:
         (ROOT / "send-blocked").touch()
         deadline = time.monotonic() + 30
         while not (ROOT / "release-send").exists():
             if time.monotonic() > deadline:
                 return 96
             time.sleep(0.05)
-    if ARGS[:1] == ["send-keys"]:
+    if argv[:1] == ["send-keys"]:
         if stateful(state()):
             return box_send()
-        record("agent-buffer.jsonl", argv=ARGS)
-        if fake and not fake_send(ARGS):
-            record("unsupported.jsonl", argv=ARGS)
+        record("agent-buffer.jsonl", argv=argv)
+        if fake and not fake_send(argv):
+            record("unsupported.jsonl", argv=argv)
             return 95
         return 0
-    if ARGS[:1] == ["list-panes"]:
+    if argv[:1] == ["list-panes"]:
         if fake:
             panes = state().get("panes")
             if panes:
-                target = ARGS[ARGS.index("-t") + 1].lstrip("=") if "-t" in ARGS else ""
+                target = argv[argv.index("-t") + 1].lstrip("=") if "-t" in argv else ""
                 if target in panes:
-                    sys.stdout.write(str(panes[target]) + "\n")
+                    output.write(str(panes[target]) + "\n")
             else:
-                sys.stdout.write(str(state()["panePid"]) + "\n")
+                output.write(str(state()["panePid"]) + "\n")
         return 0
-    record("unsupported.jsonl", argv=ARGS)
+    record("unsupported.jsonl", argv=argv)
     return 95
 
 
@@ -985,11 +1013,73 @@ def completion(remote):
     return 95
 
 
+def install_reaction_tmux(namespace):
+    import io
+    import types
+
+    original = namespace['subprocess'].run
+
+    def run(command, **kwargs):
+        if command[:1] != ['tmux']:
+            return original(command, **kwargs)
+        output = io.StringIO()
+        code = tmux(command[1:], io.BytesIO(kwargs.get('input', b'')), output)
+        text = kwargs.get('text') or kwargs.get('encoding') or kwargs.get('universal_newlines')
+        stdout = output.getvalue() if text else output.getvalue().encode('utf-8')
+        stderr = '' if text else b''
+        if code and kwargs.get('check'):
+            raise subprocess.CalledProcessError(code, command, stdout, stderr)
+        return subprocess.CompletedProcess(command, code, stdout, stderr)
+
+    namespace['subprocess'] = types.SimpleNamespace(**dict(vars(subprocess), run=run))
+    record('reader-boundary.jsonl', tmux='in-process fake command boundary; production connector unchanged')
+
+
+def install_reaction_worker(namespace):
+    import threading
+    from contextlib import closing
+
+    workers = {}
+    lock = threading.Lock()
+
+    def start(query, source, only_if_work=False):
+        key = (query['provider'], query['sid'])
+        with lock:
+            if key in workers:
+                workers[key].set()
+                return
+            wake = threading.Event()
+            workers[key] = wake
+
+        def run():
+            try:
+                while True:
+                    wake.clear()
+                    namespace['message_poll'](query['tmux'], *key)
+                    namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    with closing(namespace['message_store_db'](query['tmux'])) as db:
+                        pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
+                    with lock:
+                        if not pending and not wake.is_set():
+                            del workers[key]
+                            return
+                    wake.wait(0.1)
+            except Exception as error:
+                record('reaction-worker.jsonl', stage='error', error=repr(error))
+                with lock:
+                    workers.pop(key, None)
+
+        record('reaction-worker.jsonl', stage='started', provider=key[0], sid=key[1], boundary='Windows thread; production poll and dispatch unchanged')
+        threading.Thread(target=run, daemon=True).start()
+
+    namespace['start_message_worker'] = start
+
+
 def reader_namespace():
     import base64
 
     source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
-    namespace = dict(__name__="verified_remote_reader")
+    namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
     if state().get("name") == "resync-recovery":
         import hashlib
@@ -1014,9 +1104,7 @@ def reader_namespace():
         slash_host = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(slash_host)
         slash_host.install(namespace, ROOT, record)
-        if os.name == "nt":
-            namespace["events_wake"] = lambda: None
-    if os.name == "nt" and state().get("name") in ("instant-chat", "startup-failure"):
+    if os.name == "nt":
         import msvcrt
         import types
 
@@ -1037,8 +1125,94 @@ def reader_namespace():
         locking.flock = flock
         sys.modules["fcntl"] = locking
         namespace["events_wake"] = lambda: None
-        namespace["start_message_worker"] = lambda *args, **kwargs: None
-        record("instant-boundary.jsonl", notification="poll fallback", dispatch="store arrival only")
+        record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
+        if state().get("name") == "cancel-held":
+            original_subprocess = namespace["subprocess"]
+
+            class WorkerDiagnostics:
+                def __getattr__(self, name):
+                    return getattr(original_subprocess, name)
+
+                def Popen(self, args, *positional, **options):
+                    if "--message-worker" not in args:
+                        return original_subprocess.Popen(args, *positional, **options)
+                    if len(args) != 8 or args[1:3] != ['-u', '-c'] or args[4] != '--message-worker':
+                        raise ValueError('unexpected message worker bootstrap')
+                    adapted = [args[0], '-u', str(Path(__file__).resolve()), 'message-worker', *args[5:]]
+                    with (ROOT / "message-worker.stderr.log").open("ab", buffering=0) as errors:
+                        options["stderr"] = errors
+                        try:
+                            child = original_subprocess.Popen(adapted, *positional, **options)
+                        except Exception as error:
+                            record("message-worker.jsonl", event="spawn-failed", error=repr(error))
+                            raise
+                    record("message-worker.jsonl", event="spawned", child_pid=child.pid)
+                    return child
+
+            namespace["subprocess"] = WorkerDiagnostics()
+        if state().get("name") == "reactions":
+            install_reaction_tmux(namespace)
+            install_reaction_worker(namespace)
+        if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
+            namespace["start_message_worker"] = lambda *args, **kwargs: None
+            record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
+        if state().get("name") == "accepted-message":
+            import threading
+
+            def start_worker(query, source, only_if_work=False):
+                if source is None:
+                    return
+                request = dict(message_protocol=1, tmux=query['tmux'], provider=query['provider'], sid=query['sid'])
+
+                def work():
+                    lock_path = ROOT / 'accepted-message-worker.lock'
+                    with lock_path.open('a') as lock:
+                        try:
+                            locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
+                        except BlockingIOError:
+                            return
+                        record('accepted-worker.jsonl', stage='started', request=request)
+                        while True:
+                            try:
+                                namespace['message_poll'](request['tmux'], request['provider'], request['sid'])
+                                result = namespace['message_store_request'](dict(request, op='message_dispatch'))
+                                if result.get('message') is not None:
+                                    record('accepted-worker.jsonl', stage='dispatch', result=result)
+                            except Exception as error:
+                                record('accepted-worker-errors.jsonl', error=repr(error))
+                            time.sleep(0.25)
+
+                threading.Thread(target=work, daemon=True).start()
+
+            namespace['start_message_worker'] = start_worker
+            record('accepted-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
+    if state().get("name") == "working-live":
+        fixture_path = Path(__file__).with_name("working-host.py")
+        assert fixture_path.is_file(), "Hosted working provider fixture is missing"
+        spec = importlib.util.spec_from_file_location("working_host", fixture_path)
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
+        original_push = namespace["events_push"]
+
+        def working_push(subscriptions):
+            pages = [(sub, namespace["message_events_page"](sub["provider"], sub["sid"], sub["after"]))
+                     for sub in subscriptions.values() if sub["sid"] == fixture.SID]
+            original_push(subscriptions)
+            for sub, page in pages:
+                if page["events"]:
+                    record("working-host.jsonl", stage="pushed", sid=sub["sid"], events=page["events"])
+
+        namespace["events_push"] = working_push
+        original_request = namespace["serve_request"]
+
+        def working_request(line, source, subscriptions, lock):
+            query = json.loads(line)
+            original_request(line, source, subscriptions, lock)
+            if query.get("op") == "events_subscribe" and query.get("sid") == fixture.SID:
+                record("working-host.jsonl", stage="subscribed", sid=fixture.SID, provider=query.get("provider"))
+
+        namespace["serve_request"] = working_request
     if state().get("name") == "startup-failure":
         original = namespace["serve_request"]
         sid = "a1b2c3d4-1593-4000-8000-000000001593"
@@ -1074,6 +1248,37 @@ def reader_namespace():
 
         namespace["serve_request"] = request
     return namespace
+
+
+def run_message_worker():
+    if os.name != "nt" or state().get("name") != "cancel-held" or len(ARGS) != 3:
+        raise ValueError("message worker adapter requires the owned Windows cancellation fixture")
+    tmux, provider, sid = ARGS
+    if tmux != "verify-agent" or provider != "claude" or sid != state().get("sid"):
+        raise ValueError("message worker adapter requires the fake Claude session")
+    namespace = reader_namespace()
+    original_host_switch = namespace["host_dispatch_switch"]
+
+    def fake_terminal_only(provider, sid):
+        if original_host_switch(provider, sid):
+            raise RuntimeError("real provider dispatch is forbidden in the cancellation fixture")
+        return False
+
+    namespace["host_dispatch_switch"] = fake_terminal_only
+    import selectors
+    original_selector = selectors.DefaultSelector
+
+    class PollingSelector(original_selector):
+        def select(self, timeout=None):
+            if not self.get_map():
+                time.sleep(timeout if timeout is not None else 1)
+                return []
+            return super().select(timeout)
+
+    selectors.DefaultSelector = PollingSelector
+    record("message-worker.jsonl", event="adapter-start", tmux=tmux, provider=provider, sid=sid)
+    namespace["message_worker"](tmux, provider, sid)
+    record("message-worker.jsonl", event="adapter-stop", tmux=tmux, provider=provider, sid=sid)
 
 
 def serve_reader():
@@ -1232,4 +1437,4 @@ def ssh():
 
 
 if __name__ == "__main__":
-    sys.exit(tmux() if MODE == "tmux" else shell() if MODE == "shell" else ssh())
+    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else run_message_worker() if MODE == "message-worker" else ssh())

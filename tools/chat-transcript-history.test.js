@@ -442,6 +442,8 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     const status_text_ptr = one.history.text.items.ptr;
     const status_blocks = g_chat_block_count;
     const prior_layouts = status_layout_calls;
+    const content_before_percent = one.preview_loaded_ms;
+    const status_before_percent = one.preview_status_ms;
     g_chat_layout_reuse = status_blocks;
     remote_pages = &.{ "@mp\\t11\\thistory\\tok\\tsid\\t150\\t150\\t10\\t0\\tclaude\\tterm-1\\t0\\t" ++ ("a" ** 64) ++ "\\tdelta\\t25\\n{\\\"role\\\":\\\"status\\\",\\\"model\\\":\\\"Opus 5.5\\\",\\\"percent_left\\\":62}\\n@@MP_END@@\\n" };
     remote_calls = 0;
@@ -453,6 +455,8 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(status_blocks, g_chat_block_count);
     try std.testing.expectEqual(status_blocks, g_chat_layout_reuse);
     try std.testing.expectEqual(@as(?u8, 62), one.history.status.percent_left);
+    try std.testing.expectEqual(content_before_percent, one.preview_loaded_ms);
+    try std.testing.expectEqual(status_before_percent, one.preview_status_ms);
     try std.testing.expectEqual(prior_layouts + 1, status_layout_calls);
     const known_layouts = status_layout_calls;
     remote_calls = 0;
@@ -460,11 +464,41 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     chatFileFetchThread(&one, one.key, 11, false, null);
     chatFileOnReady();
     try std.testing.expectEqual(known_layouts, status_layout_calls);
+    one.preview_status_ms = 0;
+    ticks += 100;
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 11, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(ticks, one.preview_status_ms);
+    const preview_before_status = one.preview_status_ms;
+    const preview_before_content = one.preview_loaded_ms;
+    ticks += 100;
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 11, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(preview_before_status, one.preview_status_ms);
+    try std.testing.expectEqual(preview_before_content, one.preview_loaded_ms);
+    var task_status = one.history.cursor();
+    const step = std.unicode.utf8ToUtf16LeStringLiteral("Checking the current task");
+    @memcpy(task_status.status.todos[0].text[0..step.len], step);
+    task_status.status.todos[0].len = step.len;
+    task_status.status.todos[0].status = .in_progress;
+    task_status.status.total = 1;
+    one.result = task_status;
+    one.unchanged = true;
+    one.ready.store(true, .release);
+    ticks += 100;
+    chatFileOnReady();
+    try std.testing.expectEqual(ticks, one.preview_status_ms);
+    try std.testing.expectEqual(preview_before_content, one.preview_loaded_ms);
     fake_viewport_h = 800;
     shells[0].kind = .cmd;
     capture_result = 0;
     refreshChatTranscript(false);
     try std.testing.expectEqual(@as(usize, 3), g_chat_block_count);
+    try std.testing.expect(@import("agent_second_line.zig").calls > 0);
 }
 `;
 function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chatScrollBy'), boundary = 'fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }') {
@@ -472,6 +506,9 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
   require('./fixtures/inline-stubs').writeAll(dir);
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_live.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'agent_second_line.zig'), 'pub var calls: usize = 0;\npub fn forShell(_: usize) u8 { calls += 1; return 0; }\n');
+    fs.writeFileSync(path.join(dir, 'window_layout.zig'), 'pub fn invalidateSidebar() void {}\n');
+    fs.writeFileSync(path.join(dir, 'inbox.zig'), 'pub fn publishInboxState() void {}\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
@@ -986,7 +1023,7 @@ test "cache-first switch-back Resync success notice requires live source" {
     one.ready.store(true, .release);
     chatFileOnReady();
     try std.testing.expect(!one.resync);
-    try std.testing.expectEqual(@as(usize, 1), resync_notices);
+    try std.testing.expectEqual(@as(usize, 0), resync_notices);
 }
 `;
   const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);

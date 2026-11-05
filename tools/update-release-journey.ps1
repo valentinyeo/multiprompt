@@ -7,7 +7,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not build newer native update fixture' }
 & "$PSScriptRoot/update-release.test.ps1" -Verifier $Exe -Evidence $Evidence -NativeUpdate "$env:RUNNER_TEMP/native-update/bin/multiprompt.exe"
 if (-not $?) { throw 'Signed local release journey failed' }
 $proof = Get-Content (Join-Path $Evidence 'safe-updates.json') -Raw | ConvertFrom-Json
-foreach ($required in @('checks-only staged notes retain fallback and ticket link', 'restart card reopens newer native app with session restored', 'signed staged notes retain expected data', 'release notes checksum verified', 'first signed local release swap', 'second consecutive update', 'immediate-exit rollback', 'locked backup update succeeds')) {
+foreach ($required in @('ticket-title staged notes retain title and ticket link', 'restart card reopens newer native app with session restored', 'signed staged notes retain expected data', 'release notes checksum verified', 'first signed local release swap', 'second consecutive update', 'immediate-exit rollback', 'locked backup update succeeds')) {
     if ($required -notin $proof.checks) { throw "Missing signed local release proof: $required" }
 }
 if (-not (Test-Path (Join-Path $Evidence 'update-card-notes.png'))) { throw 'Missing update card screenshot' }

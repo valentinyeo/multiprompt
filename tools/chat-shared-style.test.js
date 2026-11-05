@@ -14,13 +14,15 @@ function body(source, signature) {
 test('chat sidebar shows approved robots and previews, retaining unread and hover details', () => {
   const row = body(sidebar, 'fn paintChatSidebarRow(');
   assert.doesNotMatch(row, /drawAgentIcon|DrawIconEx|browser_frozen|browser_suspended|drawFavoriteDot/);
-  assert.match(row, /needs_attention[^]*?RGB\(137, 180, 248\)/);
+  assert.match(row, /\.marker\(shell\.disconnected, shell\.needs_attention, shell\.favorite, app_state\.g_starred_workspace\)/);
+  assert.match(row, /drawRobotMarker\(hdc, avatar_rect, marker, background\)/);
+  assert.match(body(sidebar, 'fn drawRobotMarker('), /\.unread => RGB\(137, 180, 248\)/);
   assert.match(row, /g_sidebar_hover == index/);
   assert.match(row, /if \(app_state\.g_sidebar_hover == index\)[^]*?inboxRelTime/);
   assert.doesNotMatch(row, /00d7/);
   assert.match(row, /avatar\.draw/);
-  assert.match(row, /shell\.preview/);
-  assert.match(row, /chatDraftHasForShell/);
+  assert.match(row, /agent_second_line\.zig/);
+  assert.doesNotMatch(row, /shell\.preview|chatDraftHasForShell/);
   assert.match(sidebar, /if \(!app_state\.g_sidebar_collapsed\) \{\s*paintChatSidebarRow/);
 });
 

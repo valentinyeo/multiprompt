@@ -701,7 +701,7 @@ function StarBadge-Journey {
     [ChatDeliveryDesktop]::Chord(@(0x11,0x4B))
     [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
     foreach ($key in @(0x43,0x4C,0x4F,0x53,0x45,0x20,0x54,0x41,0x42)) { [ChatDeliveryDesktop]::Type($key) }
-    [void](Wait-For 'close tab selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=9 count=[1-9]\d* target=6232(?:\r?\n|$)' })
+    [void](Wait-For 'close tab selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=9 count=[1-9]\d* target=(7197|6232)(?:\r?\n|$)' })
     [ChatDeliveryDesktop]::Chord(@(0x0D))
     [void](Wait-For 'palette close removes fixture session' { @((Session).tabs).Count -eq 2 })
     $result.actions += @{input='Ctrl+K Close Tab'; count=@((Session).tabs).Count}

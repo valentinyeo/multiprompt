@@ -12,6 +12,7 @@ updated: 2026-10-03
 
 Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. The Full list below is generated from it by `node tools/shortcuts-doc.mjs`. Every new user-facing function ships with a shortcut (when sensible), a Ctrl+K entry, and an F1 row; regenerate the Full list after changing those rows.
 
+- Ctrl+T / Ctrl+K → New Claude session: Create a live chat manually. Agents can use the [server command](spawn-multibot-session.md) to create a named chat through account sync instead; no additional Windows binding is needed.
 - Ctrl+Shift+Space: Inside multiprompt, start/stop dictation. Escape while recording discards it without changing your draft. Ctrl+K has `Chat View: Toggle Dictation`. From another app, bring multiprompt to the front (global hotkey).
 - Ctrl+Shift+S: Screenshot the active browser-pane tab, upload it, and insert its link followed by exactly one space. Works from multiprompt, Chat View, and the focused docked Chrome/Edge pane through the native hook and bridge, independently of Chrome's shortcut binding. Ctrl+K has `Browser: Screenshot → Chat View / Shell`; F1 lists the chord. In Chat View the composer receives focus with the caret after the space, including extension-menu screenshots and Ctrl+V image attachments. An inactive target receives the link without changing tabs or stealing focus; another foreground application and modal editors keep their focus.
 - Chrome extension screenshot shortcuts: extension 1.0.62 suggests Ctrl+Shift+S and retains Alt+Shift+S. Both commands and the extension context menu use the same capture/upload/paste transaction. Chrome can leave a conflicting suggested key unbound, and unpacked reloads preserve old bindings: assign it manually at `chrome://extensions/shortcuts` if needed. The app-owned Ctrl+Shift+S path still works while a bound multiprompt pane or the app is foreground; this is not a global shortcut for unrelated Chrome windows.
@@ -51,7 +52,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+K opens with your last 5 sessions: with nothing typed, the palette leads with the 5 sessions you viewed most recently across every workspace, newest first, each with its workspace name. The first row is the session you just left, so Ctrl+K then Enter still hops back. Snoozed workspaces and filed-away (hidden) tabs are left out, and the tab you are on is not listed. Below them a Most used header lists your ten most used commands by use count, then every other command sits under a group header (Sessions, Workspaces and windows, Sidebar and tabs, Look and settings, Debug and repair, Browser, Account and usage, Chat View). Within each part safe commands come before closing or removing ones. Up and Down skip headers. Typing a query shows the ranked list without headers.
 - Ctrl+K: Quick switcher — search/switch tabs + spawn new shells by name. Also exposes **"Open sessions in this folder"** (search "folder"/"sessions"/"repo"): when a VPS/tmux tab is focused, bulk-attaches every *other* tmux session on the **same host** whose cwd is under the focused session's folder (prefix match on `#{session_path}`). Requires the VPS list source to emit the path — the inline fallback already sends `-F '#{session_name}|#{session_activity}|#{session_path}'`; for `~/.local/bin/tmux-list.sh` append `|#{session_path}` to its `-F` format (4th field after ram; client parser detects path by leading `/`, ram by all-digits, so it tolerates 2–4 fields). Until a host emits the path, the entry just won't match there.
 - Alt+T: New workspace tmux tab in its configured or inferred remote folder. It starts Claude: with no workspace-scoped `commands.json` default the program is `claude`, which runs the app-owned host with a minted session id instead of typing into the pane ([agent host](../architecture/agent-host.md)). A workspace-scoped `alt_t` still wins and starts that program after shell startup, so `codex` or `pi` keep the typed terminal start. The neutral tab stays available as "New Host 1 VPS Shell" in Ctrl+K. The plus at the end of the sidebar list and Ctrl+T outside browser focus use the same path.
-- Ctrl+T: New workspace tmux tab outside browser focus, same as Alt+T and the plus at the end of the sidebar list, so it also starts Claude by default. In a focused docked browser, Ctrl+T and Ctrl+K go to the browser; Ctrl+Shift+K opens the multiprompt palette.
+- Ctrl+T: New workspace tmux tab outside browser focus, same as Alt+T and the plus at the end of the sidebar list, so it also starts Claude by default. When choosing a folder, search includes project folders without Git and lists up to 256 folders on the selected server. In a focused docked browser, Ctrl+T and Ctrl+K go to the browser; Ctrl+Shift+K opens the multiprompt palette.
 - Ctrl+Shift+1: New CMD tab
 - Ctrl+Shift+2: New TMUX tab
 - Ctrl+Shift+3: New VPS Remote host 1 tab
@@ -95,10 +96,11 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
 - Ctrl+W: Close the active tab/session (both modes; reverted in v0.28.219 — .215's workspace-close granularity was wrong). Workspace close = Ctrl+K 'Close Workspace' (non-destructive, reopenable via Open Workspace); app close = Ctrl+K 'Quit ZigShell'
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
-- F2: Rename active tab
-- Double-click tab: Rename tab
+- F2: Rename the visible session name. With the sidebar open, edit its tab. With the sidebar collapsed or hidden, edit the top title. In Inbox, edit the selected row.
+- Enter saves, Esc cancels, and leaving the name saves.
+- Type `/rename <name>` in Chat View to rename the session.
 - Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Reconnect (remote tabs), Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Mute/Unmute (a muted session is hidden from the Inbox on every device, stays in its workspace tab, and the mute syncs through the account layout), Keep Alive (cmd/pwsh), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
-- Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Bot face also offers Upload image and Reset. Images stay on this computer. Reset shows the chosen face and color. Account-backed tmux face and color choices are shared through the account layout.
+- Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Bot face also offers Upload image and Reset. Pictures for account-backed remote sessions sync to your phone automatically. Local shell pictures stay on this computer. Reset shows the chosen face and color, and removes the shared picture. Offline picture changes sync after reconnecting.
 - No dedicated shortcut — Close all disconnected sessions: use Ctrl+K or right-click a tab. Choose the counted action. Pinned and unpinned disconnected sessions close. Live sessions stay open.
 - No dedicated shortcut — Session ETA: when an agent hook reports a time estimate for the in-flight request, the sidebar row shows a countdown ("12m", "1h 20m", amber "+4m" once overdue) and a thin progress line, Chat View's header shows "ETA 12m, done about 14:27", and Inbox rows show the same countdown. No hook wired up yet -> nothing shows. Ctrl+K → "ETA Countdown Numbers: On/Off" and "ETA Progress Line: On/Off" toggle each independently (both default on); Ctrl+K → "Estimate Accuracy" opens a read-only summary of how each agent's estimates compare to actual time taken, computed from `%APPDATA%\ZigShell\eta-log.jsonl`. Esc closes.
 
@@ -117,8 +119,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Close active tab / session |
-| Ctrl+Shift+W | Close active session completely (tmux kill + tab close) |
+| Ctrl+W | Quit the app; keep server agents and saved chats |
+| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
 | Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
@@ -134,7 +138,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Create Snippet | Save a named paste block |
 | Ctrl+K -&gt; Manage Snippets | Delete saved snippets; Esc cancels |
 | Delete twice in snippets | Delete the selected saved snippet |
-| F2 / double-click | Rename tab or selected Inbox session |
+| F2 | Rename chat title, tab or selected Inbox session |
 
 ### Workspaces (single-window)
 
@@ -157,6 +161,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -184,7 +190,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
-| Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
 | Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer; Escape discards the recording |
 | Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording; Escape discards the recording |
 
@@ -244,7 +249,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
-| Ctrl+K / right-click tab → Bot face / Bot color | Remote faces and colors sync. Pictures stay here. |
+| Ctrl+K / right-click tab → Bot face / Bot color | Remote faces, colors and pictures sync. |
 | Ctrl+K -&gt; Workspace color | Choose a workspace default color or Auto. Manual bot colors stay unchanged. |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | End / Ctrl+K "Chat View: Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
@@ -254,8 +259,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | + button / Ctrl+V in Chat View | Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File) |
 | Right-click Claude message / Ctrl+K reactions | Send a quoted reaction; show its badge |
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty. |
-| Ctrl+K "Chat View: Open or fold all tool steps" | Open or fold all tool groups; click a steps line to toggle one group |
-| Ctrl+Shift+J in Chat View | Open or fold all tool groups |
+| Ctrl+K "Chat View: Open or fold all tool steps" | Open every tool step's details, or fold them all; click one tool line to toggle it |
 | Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the title; also click the todo count |
 | Ctrl+Shift+D in Chat View | Copy latest code block (also its Copy button or Ctrl+K) |
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |

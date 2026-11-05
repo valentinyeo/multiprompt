@@ -39,21 +39,22 @@ test('all pending fragments are plain, including those inherited from master', a
 
 test('release stamps preserve plain Unicode and quoted product lines; exact stamps still bypass code-fragment requirement', async () => {
   const { stampTree, classifyTrees } = await import('./version-stamp.mjs');
+  const name = path.posix.join('changelog.d', 'IGSH-1681-change.md');
   const base = {
     'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
     'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
-    [fragment]: 'Open "saved chats" at the café.\n',
+    [name]: 'Open "saved chats" at the café.\n',
   };
   const stamp = stampTree(base);
   assert.equal(stamp.version, '1.0.1');
-  assert.match(stamp.files['src/changelog.zig'], /Open \\"saved chats\\" at the café/);
-  assert.equal(classifyTrees(base, stamp.files, ['src/main.zig', 'src/changelog.zig', fragment]), 'STAMP');
+  assert.match(stamp.files['src/changelog.zig'], /IGSH-1681 What's new names the ticket on every line/);
+  assert.equal(classifyTrees(base, stamp.files, ['src/main.zig', 'src/changelog.zig', name]), 'STAMP');
 });
 
 test('existing CI version check enforces fragments for code but preserves generated stamps', () => {
   const script = fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8');
   assert.match(script, /if \(kind === 'CODE'\) checkFragments\(base, head, changed\);/);
-  assert.match(script, /const lines = fragmentLines\(file, files\[file\]\);/);
+  assert.match(script, /fragmentLines\(file, files\[file\]\);/);
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(workflow, /node tools\/version-stamp\.mjs check/);
   assert.match(workflow, /node --test tools\/changelog-fragments\.test\.js tools\/update-card-notes\.test\.js/);

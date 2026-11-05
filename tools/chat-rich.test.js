@@ -194,19 +194,20 @@ test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlightin
 
 test('IGSH-717 queued-message clicks do not swallow selection mouse-down', () => {
   const check = source => {
-    const retry = source.slice(source.indexOf('fn chatEchoRetryAt('), source.indexOf('fn chatEchoRetryHover('));
-    assert.doesNotMatch(retry, /chatEchoPushQueuedNow/);
-    assert.match(retry, /chatEchoSendAgain\(id\)/);
-    assert.match(retry, /chatEchoRemove\(id\)/);
+    assert.doesNotMatch(source, /fn chatEchoRetryAt\(|fn chatEchoRetryHover\(|fn chatEchoActionRect\(/);
+    const hit = source.slice(source.indexOf('fn chatEchoAt('), source.indexOf('\n}', source.indexOf('fn chatEchoAt(')) + 2);
+    assert.match(hit, /pointInRect\(app_state\.g_chat_echo_layout\[i\], x, content_y\)/);
+    assert.doesNotMatch(hit, /chatEchoActionRect/);
     const up = source.slice(source.indexOf('        WM_LBUTTONUP => {'), source.indexOf('        WM_LBUTTONDBLCLK => {'));
     assert.match(up, /if \(app_state.g_chat_sel_dragging\) \{[^]*const selected = chatSelRange\(\);/);
     assert.match(up, /if \(selected == null and app_state.g_chat_sel_click_count == 1\) \{\s*if \(chatEchoAt\(GET_X\(lp\), GET_Y\(lp\)\)\) \|id\| \{\s*if \(chatOutboxIndexById\(id\)\) \|ei\| \{\s*const entry = app_state.g_chat_outbox.items\[ei\];\s*if \(entry.state == .delivered and !entry.channel_sent\) chatEchoPushQueuedNow\(\);/);
+    assert.doesNotMatch(up, /chatEchoRetryAt\(|chatEchoRetryHover\(|chatEchoActionRect\(|chatEchoSendAgain\(|chatEchoRemove\(/);
     assert.match(up, /\[chat\] selection chars=\{d\}/);
     assert.match(up, /if \(!app_state.g_chat_sel_active\) \{\s*app_state.g_chat_sel_transcript_focus = false/);
   };
   const chat = fs.readFileSync('src/chat_render.zig', 'utf8');
   check(chat);
-  assert.throws(() => check(chat.replace('fn chatEchoRetryAt(x: i32, y: i32) bool {', 'fn chatEchoRetryAt(x: i32, y: i32) bool {\n    chatEchoPushQueuedNow();')));
+  assert.throws(() => check(chat + '\nfn chatEchoRetryAt(x: i32, y: i32) bool {\n    return false;\n}\n'));
   assert.throws(() => check(chat.replace('selected == null and app_state.g_chat_sel_click_count == 1', 'true')));
 });
 

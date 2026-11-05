@@ -26,6 +26,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Diagnostic verification
 
+- [Room reply grouping](../diagnostics/room-reply-grouping.md): hosted native replay regression; production Rooms and paired Android walkthrough remain required.
+
 - [Remote switch speed](../diagnostics/remote-switch-speed.md): dedicated Windows baseline/candidate workflow, 20 session switches and 20 workspace switches, 2,000 rendered messages, native paint gaps, one-core CPU, and two-second recovery.
 
 - [Account servers](../diagnostics/account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
@@ -38,15 +40,21 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
 - [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.
 
+- [Inbox bottom space](inbox-space.md): a complete existing row fills the screenshot-marked band and native clicking opens that row.
+
+- [Computer menu](computer-menu.md): Computer stays inside the existing chat three-dots menu; real click selects its pane and returning preserves the draft.
+
 - [Settings panel](settings-panel.md): keyboard and palette entry, existing settings persistence, centred native panel and focus-safe dismissal.
 
 - [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
+- [Hosted live working dots](chat-working-live.md): composer send, event subscription and timestamped native pixels with a provider stand-in.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
 - [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 
 - [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
 
+- [What's new](whats-new.md): real keyboard changelog navigation and source-backed screenshot review.
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.
@@ -64,6 +72,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
 - [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.
 - [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
+- [Session actions](session-actions.md): native quit/reopen, ordered right-click actions, single-request deletion and reopening/copying both original histories through explicit synthetic remote boundaries.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
@@ -71,6 +80,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
 - [Session tabs](session-tabs.md): `zsb session-rename`, `session-rebind`, `session-move` and `session-close` repair four background tabs without changing the active tab or foreground window, and the saved layout survives a restart exactly.
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
+- [Inbox without shortcut legend](inbox-no-footer.md): manual paired release/branch pixel proof across Inbox states and themes.
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Inbox order](inbox-order.md): recent sessions lead the Inbox and a newer notification moves the older session above it, checked against app-published timestamps and a visual review of both captures.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
@@ -84,6 +94,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat switch speed](chat-switch-speed.md) (on demand only): 20 Ctrl+N switches across five seeded remote Claude sessions in Chat View with the browser pane closed and open; fail above a 150 ms median click-to-chat-shown time or any 100 ms window hang.
 - [Own browser profile](browser-own-profile.md): a workspace listed in `browser-own-profile.txt` opens its pane in its own empty Chrome profile and pipe, while other workspaces keep the shared profile untouched, including after restart.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
+- [Browser typing](browser-typing.md): real page and address typing, plus one controlled lost Alt release.
 - [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
@@ -95,8 +106,6 @@ A passing selected journey does not cover all listed entry points or every sub-f
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Successful remote/AI/browser journeys still need their real prerequisites and are not verified by this map; the browser recovery journey deliberately has no extension attached.
 
 - [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
-
-- [Hidden agent steps](chat-hidden-steps.md): grey group counts with real open/close clicks and source-preserving command/output disclosure.
 
 ### SSH reconnect maps
 

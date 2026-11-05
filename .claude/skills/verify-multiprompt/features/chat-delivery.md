@@ -9,6 +9,10 @@
 - `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
 - `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and every sent text reached Claude's queue exactly once, in send order, within the same 10 seconds.
 
+### Hosted feedback boundary
+
+The GitHub Linux reader suite runs `tools/chat-history-reader-test.py`. Its Claude, Codex and Pi process stand-ins capture the startup guidance and child environment. Its feedback cases run the real command against a fake Hypertask executable, including denial and failed-vote controls. These cases do not prove the Windows build's embedded version, a live provider, real board writes or the existing desktop delivery journey. Those require separate exact-build and authorized-agent evidence.
+
 ## How to get to it (user POV)
 
 Select an existing remote tmux tab with Ctrl+1. Press Alt+C to open Chat View, type a message in its composer and press Enter. To ask Claude to take a queued message immediately, type in the composer and press Ctrl+X then Ctrl+S instead of Enter.
@@ -67,12 +71,27 @@ It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message 
 Dispatch `verify.yml` on the branch with `feature=chat-instant`.
 This feature selects the existing chat-delivery driver.
 The driver warms the isolated remote chat, then closes the owned app normally so the app writes its launch snapshot.
-It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer before releasing the connection.
+It holds every SSH stand-in connection during a fresh process launch, records the first-paint time and screenshots, copies the rendered saved reply, and types two messages through the real composer.
+Before releasing SSH or issuing either message to the host, it forcibly terminates the owned job, checks the stopped outbox retains both pending wire IDs, and restarts the app with the same profile while SSH remains held.
+The real native transcript must copy both pending messages after reload; the outbox alone is not proof of rendering.
 The independent oracle requires first paint below 1000 ms, two persisted client IDs in order, no matching messages in the pre-connect store, and exactly those IDs once in order in the production host store after release.
 It also checks the absent startup sync banner and zero owned processes after cleanup.
-Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-delivered.png`, `startup-timing.json`, `offline-outbox.json`, and both store snapshots in `verify-chat-delivery`.
+Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-reloaded.png`, `instant-delivered.png`, `startup-timing.json`, the unchanged `offline-outbox.json`, `crash-outbox.json`, `reloaded-outbox.json`, `reloaded-copied.txt`, crash and reload process receipts, and both store snapshots in `verify-chat-delivery`.
 The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
 Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
+
+### Three sent messages and cancellation (IGSH-1624)
+
+Run the same harness revision against the released executable and the branch build:
+
+```sh
+gh workflow run held-queue.yml --ref <branch> -f tag=v0.28.1490
+gh workflow run held-queue.yml --ref <branch>
+```
+
+The wrapper also runs four hosted terminal queue checks: desktop and Android, each against candidate and control readers. The branch must first contain these capture changes. The tag selects the published executable, not its old harness. The driver types three messages, opens the actual middle-message context menu, cancels it, and verifies the other two arrive in order. It selects Light, AMOLED and Edge Grey through Themes before and after cancellation, waits for each app-written theme token and a sampled stable transcript, then restores the initial theme. Edge Grey is not Graphite 2.
+
+The artifact contains `cancel-held-{held,cancelled}-{light,amoled,edgegray}.png`, matching `-transcript.bmp` crops, and `cancel-held/cancel-held-<stage>-<theme>-frame.json` viewport and stability observations. Compare the two runs and retain the existing outbox, transcript, input, Doctor and cleanup evidence. An independent reviewer must inspect the images. The current oracle checks cancellation behavior and the original screenshots; it does not measure these themed pixels or assert the absence of status labels. A green run is not visual proof. The intended old-release visual control is the visible Cancelled label or resulting spacing, but this must be established from the artifact, not inferred from a setup failure. The SSH/tmux and agent are synthetic; no real network or agent is tested.
 
 ## Gotchas
 
@@ -106,13 +125,21 @@ The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exa
 ### Accepted message brightness
 
 Run `verify.yml` with `feature=chat-delivery` and `chat_accepted_proof=true`.
-The owned Windows app sends while busy. The boundary records the exact message enqueue, then removes it with `absorbed_mid_turn` while keeping the agent busy and delaying its user transcript row. Screenshots must show the waiting bubble dimmed, then normal brightness within one second of that receipt, together with working dots. The composer stays empty. `accepted-before.png`, `accepted-after.png`, timestamped frames, transcript, executable doctor and cleanup receipts remain in the artifact. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
+The owned Windows app sends while busy. The stand-in runs the production message dispatcher and connector polling in a Windows-hosted thread, with Windows file locks and notification polling. The queued message must reach the host's `accepted` state and appear once, dimmed. The simulated agent removes it from the queue while busy and delays the transcript: the same bubble must turn normal within one second with working dots. The stand-in then writes a `queued_command` attachment. Timed frames must keep the same bubble normal throughout the handoff, and the rendered transcript must contain it once. The composer stays empty. Screenshots, copied transcripts, host outbox, transcript, executable doctor and cleanup receipts remain in the artifact. The stand-in is not a real agent or SSH server. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
 
 ### Quoted reactions (IGSH-975)
 
 Dispatch `feature=chat-delivery` with `chat_reactions_proof=true`. Supply a published `tag` for the identical signed-executable journey. The fixture supplies two assistant replies sharing an 80-character prefix but different provider IDs. The owned Windows app receives genuine right-click input on the first reply. Its existing menu must offer thumbs-up, thumbs-down and heart. Choose thumbs-up with a real mouse click while keeping a populated composer draft.
 
 Require exactly one quoted transport enqueue and one consumed transcript attachment. Pixel checks require one painted badge attached below the first reply, no additional normal or dim reaction bubble, and the same target after gracefully restarting the owned app with the same profile. An unmatched reaction must remain an ordinary user bubble. `reactions-*.png`, `reactions-proof.json`, the raw transcript, app identity and cleanup receipts remain in `verify-chat-delivery`. The pre-fix signed executable must fail specifically with `IGSH975_REACTIONS_MISSING`, after painting both fixture replies and opening its real menu. The pixel oracle mutation tests reject missing glyphs, moved targets and extra bubbles. This journey uses the existing synthetic remote-shell boundary, not a paid Claude process or real SSH authentication.
+
+### Ordinary answer after reacting (IGSH-1590)
+
+The quoted-reaction journey keeps every existing menu, transport, badge, restart, fallback, emoji-copy and 140-wheel assertion. Its Windows-only worker adapter schedules the unchanged production poll/dispatch functions; fake tmux implements named load/paste/delete buffers, with Enter still required to submit. Reaction reader calls execute those same fake commands in-process to avoid nested Windows process overhead expiring the unchanged production send deadline. The released v0.28.1500 baseline reaches pending/delivered badges but loses the untouched mirrored composer draft at restart. The focused reader regression covers all three existing reaction glyphs without changing ordinary stale-draft cleanup.
+
+After the existing long-history workload, real composer input submits an ordinary follow-up. Only that idle agent submission emits the synthetic ordinary answer. The driver scrolls away, then to newest before inspecting pixels. A real right-click on the painted newest assistant bubble and Copy must return its exact answer text. The independent checker requires one source question/answer, the fully visible newest pair and successful scrolling, while the earlier strict badge frames still reject extra automatic reaction acknowledgements. Missing, clipped, queued and extra answers have negative controls. Keep `reactions-followup*.png`, `followup-copied.txt`, raw transcript, identity and cleanup receipts. This is native desktop/reader verification against simulated SSH/tmux and an agent transcript, not a real provider or network claim.
+
+Android counterpart: https://app.hypertask.ai/detail/project-2060/1551. Its published0.1.390 journey https://github.com/valentinyeo/multiprompt-android/actions/runs/41580387063 already scrolls newest before capture. The desktop fix uses the unchanged reaction wire format; old and new clients remain compatible. The branch journey https://github.com/valentinyeo/multiprompt/actions/runs/41996386948 passes the full original reaction sequence and the ordinary follow-up. Its restart and copied-answer screenshots were inspected; one reaction enqueue, one ordinary question/answer, exact copied answer, 140 moved wheels and zero remaining owned processes were independently read from evidence. A published desktop replay remains required before claiming the release complete.
 
 ### Runner message parity (IGSH-1030)
 

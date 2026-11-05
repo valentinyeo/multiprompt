@@ -292,10 +292,8 @@ fn jump() void {
             if ((at < block.start or at >= block.start + block.len) and
                 !(block.role == .tool and at >= block.detail_start and at < block.detail_start + block.detail_len)) continue;
         }
-        const group = @import("chat_markdown.zig").toolGroup(app_state.g_chat_blocks[0..app_state.g_chat_block_count], i);
-        const closed_tool = if (group) |range| !app_state.g_chat_blocks[range.start].tool_open else false;
-        if (closed_tool or (block.role == .injected and !block.note_open)) {
-            if (group) |range| app_state.g_chat_blocks[range.start].tool_open = true else block.note_open = true;
+        if ((block.role == .tool and !block.tool_open) or (block.role == .injected and !block.note_open)) {
+            if (block.role == .tool) block.tool_open = true else block.note_open = true;
             app_state.g_chat_layout_reuse = 0;
             var client: win32.RECT = std.mem.zeroes(win32.RECT);
             _ = win32.GetClientRect(app_state.g_chat_transcript_hwnd, &client);

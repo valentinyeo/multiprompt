@@ -1,0 +1,37 @@
+# Desktop room reply grouping
+
+## Scope
+
+IGSH-1732 reuses the shared reply protocol from IGSH-1334. Desktop replay retains each question ID and groups authorized answers immediately beneath that question, keeping answer arrival order within each question.
+
+## Hosted checks
+
+Dispatch `test.yml` against the task revision. `tools/room-reply-grouping.test.js` compiles production `acceptEvents`, its JSON helpers, message types and UUID validator with the fixture in `tools/fixtures/igsh-1732/room-replay.zig`. It runs in Windows group 3 and the portable suite. Admission runs the identical fixture against merge-base source and requires an assertion failure before the fix.
+
+The regression calls production `acceptEvents` with two human questions, reverse-order answers and a second answer to the first question. It checks text order, speaker identity, pagination boundaries, independent full/paged replay and rejection of replaying an already consumed page without duplicate messages. The fixture starts after the room-created event with an existing member snapshot. Member hydration is unavailable in this isolated compiler harness; it does not exercise account discovery, room creation, transport or actual disk reopening.
+
+Shared private isolation, offline retention and old-client capability contracts remain in `tools/room-agent-replies.test.js` and the Python room suites. This change does not alter those protocols.
+
+## Preview publication and advancing snapshots
+
+Creation acceptance retains its creation view and pending token until the authoritative room model arrives. At that publication boundary, a view that already owns focus moves it into the real composer; a background publication must not steal focus. `tools/room-creation-focus.test.js` compiles the production view methods to check that handoff, stale callbacks, rejected creation, edit acceptance and background focus. It shares the existing Windows and portable test commands. The native room paint regression still exercises all accepted/pending iterations and the empty-room revision assertion.
+
+If event collection advances beyond a loaded snapshot, replay stops at that snapshot's sequence and member revision, then schedules a fresh snapshot. The replay fixture covers that bounded-page race instead of absorbing newer events into an older membership snapshot.
+
+The separate `igsh-1732-room-proof` branch reuses the existing unreleased Rooms send client and isolated account/SSH/provider fixture. Native run https://github.com/valentinyeo/multiprompt/actions/runs/42076973940 exercised real keyboard creation, legacy draft refusal/reopen and a first question with two painted synthetic replies, verified against scoped store and canonical events. The overall run FAILED because a second question was rejected; it is not two-question or full Rooms acceptance. Its post-send dispatch fix and complete preview harness are not included in this publication-only patch. They remain with IGSH-1313.
+
+## Durable admission behind background reads
+
+The frontend prepares one immutable command in the durable journal before waiting for an existing read. When that read completes, it releases its result and partial model, preserves refresh eligibility, then launches the original command once. Active mutations still reject overlapping admission. Account or route changes prevent launch; transport failure retains the original journal identity for recovery. Creation keeps its empty room identifier.
+
+The compiled `launchQueuedCommand` regression exercises pending reads, exact original identity, changed selection, stale scope, creation, failed launch and metadata/status recovery. The actual `scheduleMetadata` regression requires selected history to refresh even while an interrupted catalog is incomplete; the captured pre-fix function must fail that behavior assertion. Catalog metadata still requires a complete catalog and current route/account.
+
+Controlled preview run https://github.com/valentinyeo/multiprompt/actions/runs/42092334078 rejected the second Enter with `busy=catalog` during an unexpired held catalog response. With admission fixed, https://github.com/valentinyeo/multiprompt/actions/runs/42094500212 stored both questions and four scoped replies but failed the actual painted transcript. It exposed the incomplete-catalog snapshot gate.
+
+Exact preview `4502f672baa9ee8e274e6f9910b554de37a203e5` passed the unchanged forced-overlap journey at https://github.com/valentinyeo/multiprompt/actions/runs/42098078329: one second Enter, unexpired held catalog, no rejections, two questions/four scoped synthetic replies/four canonical turns and two human/four agent painted bubbles before and after restart. Original screenshots retain distinct first and second answer text. Account and owned-process cleanup are zero; hosts, certificate and scratch cleanup succeed. Full Tests https://github.com/valentinyeo/multiprompt/actions/runs/42098074076 passed after rerunning the failed unchanged baseline speed warmup, not changing assertions.
+
+Only generic admission and scheduler changes belong to the default-branch patch. The synthetic transport, unreleased post client, preview workflows and release gate remain separate. These results do not establish real-provider or full Rooms acceptance.
+
+## Remaining user proof
+
+Compiler regressions and the partial preview walkthrough do not establish production Rooms acceptance. Production Rooms remain disabled: `rooms-preview` defaults off and release builds reject it. IGSH-1313 owns desktop Rooms delivery. Once that prerequisite lands, drive two questions through real room input, receive answers in reverse order, switch away and reopen, then restart in the same isolated profile. Inspect native screenshots and independently read persisted events; each answer must occur once beneath its own question. Check private conversation isolation, offline pending delivery and paired Android IGSH-1694 before marking parity complete.

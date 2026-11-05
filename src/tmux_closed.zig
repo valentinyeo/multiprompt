@@ -71,9 +71,9 @@ pub const Closed = struct {
                 if (session.string.len > 0) {
                     const entry = &self.entries.items[self.entries.items.len - 1];
                     const face = json_reader.uintDefault(item, "face", 20);
-                    const color = json_reader.uintDefault(item, "color", 7);
+                    const color = json_reader.uintDefault(item, "color", @import("session_layout.zig").color_count);
                     entry.face = if (face < 20) @intCast(face) else null;
-                    entry.color = if (color < 7) @intCast(color) else null;
+                    entry.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
                 }
             }
         }

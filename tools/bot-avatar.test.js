@@ -27,7 +27,7 @@ test('workspace order owns color and raw session owns face for arbitrary names',
   try {
     const identity = block(source, 'pub const Appearance = struct') + ';';
     const forShell = block(source, 'pub fn forShell(') + '\n' + block(source, 'pub fn forShellWithFace(');
-    fs.writeFileSync(path.join(dir, 'session_layout.zig'), block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
+    fs.writeFileSync(path.join(dir, 'session_layout.zig'), 'pub const color_count = 8;\n' + block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
     fs.writeFileSync(path.join(dir, 'identity.zig'), `const std = @import("std");
 const state = struct {
   pub const Shell = struct {
@@ -47,7 +47,7 @@ test "ordered palette cycles and overrides never change the face" {
     const face = forShell(&shell).face;
     for (0..9) |i| {
         shell.workspace = @intCast(i);
-        try std.testing.expectEqual(@as(u8, @intCast(i % 7)), forShell(&shell).color);
+        try std.testing.expectEqual(@as(u8, @intCast(i % 8)), forShell(&shell).color);
         try std.testing.expectEqual(face, forShell(&shell).face);
         state.g_ws_colors[i] = 6;
         try std.testing.expectEqual(@as(u8, 6), forShell(&shell).color);
@@ -161,9 +161,25 @@ test "tiles wrap and every mouse target remains the painted session" {
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
   const drawing = read('src/drawing.zig');
   assert.match(block(drawing, 'fn paintChatTitlePill('), /avatar\.draw\(hdc, layout\.icon, avatar\.forShell\(shell\)\)/);
-  assert.match(block(sidebar, 'fn paintChatSidebarRow('), /shell\.preview/);
+  assert.match(block(sidebar, 'fn paintChatSidebarRow('), /agent_second_line\.zig/);
 });
 
+
+test('robot proof observes accepted palette actions and retries readable state snapshots', () => {
+  const main = read('src/main.zig');
+  const start = main.indexOf('        WM_APP_SEARCH_CONFIRM => {');
+  assert.ok(start >= 0);
+  const confirm = main.slice(start);
+  const guard = confirm.indexOf('app_state.g_search_revision');
+  const accepted = confirm.indexOf('[palette] confirm target={d}');
+  assert.ok(guard >= 0 && accepted > guard);
+  const driver = read('tools/verify-bot-avatars/drive.ps1');
+  assert.match(driver, /Wait-For 'selected palette action confirmed'/);
+  assert.match(driver, /confirm target=\$Target/);
+  assert.match(driver, /\[int\]\$last\.Groups\[1\]\.Value -eq \$Query\.Length -and \[int\]\$last\.Groups\[2\]\.Value -eq \$Target/);
+  assert.match(driver, /function Read-State[\s\S]*?Wait-For[\s\S]*?Get-Content[\s\S]*?ConvertFrom-Json -ErrorAction Stop[\s\S]*?catch \{ \$null \}/);
+  assert.doesNotMatch(driver, /Get-Content "\$settings\/session\.json"/);
+});
 
 test('robot proof reuses existing verified action pins', () => {
   assert.ok(fs.existsSync(path.join(root, '.github/workflows/bot-avatars.yml')), 'Native robot proof must be wired');

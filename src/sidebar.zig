@@ -335,8 +335,7 @@ const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
-const RepoRow = @import("vps.zig").RepoRow;
-const pickRepoFilteredRows = @import("command_palette.zig").pickRepoFilteredRows;
+const pickRepoPresentedRows = @import("command_palette.zig").pickRepoPresentedRows;
 const workspaceFolderCurrent = @import("command_palette.zig").workspaceFolderCurrent;
 const activeWorkspaceSlot = @import("command_palette.zig").activeWorkspaceSlot;
 const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
@@ -364,8 +363,6 @@ const paletteHeaderIndex = @import("command_palette.zig").paletteHeaderIndex;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const sessionOverviewKindLabel = @import("archive.zig").sessionOverviewKindLabel;
 const drawAttentionDot = @import("archive.zig").drawAttentionDot;
-const drawFavoriteDot = @import("archive.zig").drawFavoriteDot;
-const FAVORITE_DOT_D = @import("archive.zig").FAVORITE_DOT_D;
 const paintAllSessions = @import("archive.zig").paintAllSessions;
 const sidebarContentH = @import("console.zig").sidebarContentH;
 const sidebarVisibleH = @import("console.zig").sidebarVisibleH;
@@ -764,7 +761,7 @@ pub fn noteRestoredBlueDot(i: usize) void {
     _ = setBlueDot(i, .restore, false);
 }
 
-fn markShellUnread(idx: usize) void {
+pub fn markShellUnread(idx: usize) void {
     if (idx >= app_state.shell_count) return;
     _ = setBlueDot(idx, .manual, false);
     if (app_state.shells[idx].inbox_archived) logUnarchive(idx, "explicit mark unread");
@@ -2056,14 +2053,14 @@ fn paletteSessionView(target: usize) ?PaletteSessionView {
     return null;
 }
 
-fn drawStarBadge(hdc: HANDLE, rect: RECT, avatar_size: i32, background: DWORD) void {
+fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
     const badge = @import("star_badge_geometry.zig");
-    const g = badge.geometry(rect.right, rect.bottom, avatar_size, uiScaled);
+    const g = badge.geometry(rect.right, rect.bottom, uiScaled);
     const left = g.center_x - @divTrunc(g.diameter, 2);
     const top = g.center_y - @divTrunc(g.diameter, 2);
     const smooth = @import("smooth.zig");
     smooth.fillEllipse(hdc, .{ .left = left - g.ring, .top = top - g.ring, .right = left + g.diameter + g.ring, .bottom = top + g.diameter + g.ring }, background);
-    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, RGB(240, 196, 75));
+    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) { .disconnected => RGB(255, 145, 55), .unread => RGB(137, 180, 248), .favorite => RGB(240, 196, 75) });
 }
 
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
@@ -2095,25 +2092,21 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
         debugLog(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, appearance);
-    if (shell.favorite) {
+    if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) selectedSessionBackground() else themeSidebarBg();
-        drawStarBadge(hdc, avatar_rect, 36, background);
-    }
-    if (shell.needs_attention or shell.disconnected) {
-        drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(3) else left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+        drawRobotMarker(hdc, avatar_rect, marker, background);
     }
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = avatar_rect.right + uiScaled(10), .top = y + uiScaled(10), .right = right, .bottom = y + uiScaled(29) };
     if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-    _ = SetTextColor(hdc, hint);
+    const second_line = @import("agent_second_line.zig").forShell(@intCast(index));
+    _ = SetTextColor(hdc, if (second_line.question) RGB(137, 180, 248) else hint);
     var preview: [128]u16 = undefined;
-    const len = std.unicode.utf8ToUtf16Le(&preview, shell.preview[0..shell.preview_len]) catch 0;
+    const len = std.unicode.utf8ToUtf16Le(&preview, second_line.text[0..second_line.len]) catch 0;
     var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
-    if (chatDraftHasForShell(index)) {
-        _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_NOPREFIX);
-    } else if (len > 0) {
+    if (len > 0) {
         _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 }
@@ -2143,11 +2136,10 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
-    if (shell.favorite) {
+    if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected and !@import("room_frontend.zig").isActive()) RGB(53, 53, 53) else themeSidebarBg();
-        drawStarBadge(hdc, avatar_rect, 56, background);
+        drawRobotMarker(hdc, avatar_rect, marker, background);
     }
-    if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(4) else left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
@@ -2360,7 +2352,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const session = app_state.g_inbox_rows[row.shell_idx];
                 _ = SelectObject(hdc, font_title);
                 _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220)));
-                drawFavoriteDot(hdc, 12, y + @divTrunc(tabRowH(), 2));
+                if (session.att) drawAttentionDot(hdc, 12, y + @divTrunc(tabRowH(), 2), uiScaled(4), RGB(137, 180, 248));
                 var name: [193]u16 = undefined;
                 const name_len = @import("json_reader.zig").wide(session.name[0..session.name_len], &name);
                 var name_rc = RECT{ .left = 24, .top = y, .right = SIDEBAR_W() - 8, .bottom = y + tabRowH() };
@@ -2440,11 +2432,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
                     }
                     if (!photo_drawn) avatar.draw(hdc, avatar_rect, avatar.forShell(&app_state.shells[i]));
-                    if (app_state.shells[i].disconnected or app_state.shells[i].needs_attention) drawAttentionDot(hdc, left + size - 2, top + size - 2, uiScaled(3), if (app_state.shells[i].disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
-                } else if (app_state.shells[i].disconnected) {
-                    drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, RGB(255, 145, 55));
-                } else if (app_state.shells[i].needs_attention) {
-                    drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, customColorOr("attention", RGB(60, 120, 220)));
                 } else {
                     _ = SelectObject(hdc, font_title);
                     _ = SetTextColor(hdc, if (isRemoteShellKind(app_state.shells[i].kind)) RGB(230, 140, 40) else RGB(150, 150, 150));
@@ -2456,8 +2443,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     var draft_rc = RECT{ .left = 0, .top = y + tabRowH() - uiScaled(14), .right = sw, .bottom = y + tabRowH() };
                     _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_CENTER | DT_NOPREFIX);
                 }
-                if (app_state.shells[i].favorite) {
-                    drawFavoriteDot(hdc, 9, y + 10);
+                if (@import("star_badge_geometry.zig").marker(app_state.shells[i].disconnected, app_state.shells[i].needs_attention, app_state.shells[i].favorite, app_state.g_starred_workspace)) |marker| {
+                    const background = if (i == app_state.active_shell and !@import("room_frontend.zig").isActive()) themeConsoleBg() else themeSidebarBg();
+                    drawRobotMarker(hdc, avatar_rect, marker, background);
                 }
             }
         }
@@ -2553,7 +2541,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             @as(i32, @intCast(visible_capacity)) * row_h + if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) row_h else 0;
         const ox = searchOverlayOx(win_w, overlay_w);
         const oy = @import("drawing.zig").searchOverlayOy(win_h, overlay_h);
-        const overlay_radius: i32 = uiScaled(32);
+        const overlay_radius: i32 = uiScaled(8);
         @import("dialog.zig").dim(hdc, win_w, win_h);
 
         drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, overlay_radius);
@@ -2581,12 +2569,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(bg_pen);
 
         var input_bg_rc = RECT{ .left = ox + uiScaled(16), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(16), .bottom = oy + uiScaled(56) };
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
         input_bg_rc.left += 1;
         input_bg_rc.top += 1;
         input_bg_rc.right -= 1;
         input_bg_rc.bottom -= 1;
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
         _ = SelectObject(hdc, palette_font);
         var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
@@ -2892,7 +2880,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     }
                     if (selected) {
                         const sel_rc = RECT{ .left = row_left, .top = ry, .right = ox + overlay_w - uiScaled(16), .bottom = ry + row_h };
-                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(10), row_color);
+                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(4), row_color);
                     }
                     if (session_view) |view| {
                         const size = uiScaled(24);
@@ -2904,10 +2892,24 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             debugLog(std.fmt.bufPrint(&log, "[palette-avatar] target={d} face={d} color={d} favorite={d} rect={d},{d},{d},{d}", .{ result_idx, view.appearance.face, view.appearance.color, @intFromBool(view.favorite), x, y, x + size, y + size }) catch "[palette-avatar] unavailable");
                         }
                         @import("bot_avatar.zig").draw(hdc, avatar_rc, view.appearance);
-                        if (view.favorite) drawStarBadge(hdc, avatar_rc, 24, row_color);
+                        if (view.favorite and !app_state.g_starred_workspace) drawRobotMarker(hdc, avatar_rc, .favorite, row_color);
                     }
 
-                    if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
+                    const action_index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    const action_pinned = if (action_index) |ti| effPinnedTop(ti) else false;
+                    if (@import("command_palette.zig").chatActionLabel(result_idx, action_pinned)) |label| {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (result_idx == SEARCH_TABCTX_END_TMUX) RGB(220, 70, 70) else primary_color);
+                        var wide: [64]u16 = undefined;
+                        const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                        var rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        if (result_idx == SEARCH_TABCTX_END_TMUX) {
+                            _ = SelectObject(hdc, palette_hint_font);
+                            var hint = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        }
+                    } else if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var text: [80]u8 = undefined;
@@ -3612,10 +3614,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var ar_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (archive_has_tmux) L("Archive Session") else L("Close Session"), -1, &ar_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, palette_hint_font);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        var ar_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Alt+X"), -1, &ar_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_unarchive_hidden) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3674,13 +3672,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
-                        var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - (if (is_chat_tools) @as(i32, 140) else 8), .bottom = ry + row_h };
+                        var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        if (is_chat_tools) {
-                            _ = SelectObject(hdc, palette_hint_font);
-                            var hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = paletteDrawText(hdc, L("Ctrl+Shift+J"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                        }
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3868,14 +3861,23 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var prb_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Back"), -1, &prb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_pick_repo_row) {
-                        var repo_rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-                        const repo_count = pickRepoFilteredRows(repo_rows[0..]);
+                        const repo_rows = pickRepoPresentedRows();
+                        const repo_count = repo_rows.len;
                         const repo_idx = result_idx - SEARCH_PICK_REPO_ROW_OFFSET;
                         if (repo_idx < repo_count) {
                             _ = SelectObject(hdc, palette_font);
-                            _ = SetTextColor(hdc, primary_color);
-                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            drawAscii(hdc, repo_rows[repo_idx].path[0..repo_rows[repo_idx].path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            const row = &repo_rows[repo_idx];
+                            _ = SetTextColor(hdc, if (row.available) primary_color else RGB(120, 120, 130));
+                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 180, .bottom = ry + row_h };
+                            drawAscii(hdc, row.path[0..row.path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            _ = SelectObject(hdc, palette_hint_font);
+                            _ = SetTextColor(hdc, RGB(120, 120, 130));
+                            var label_buf: [160]u8 = undefined;
+                            const label = std.fmt.bufPrint(&label_buf, "{s}{s}", .{ row.host_name[0..row.host_name_len], if (row.available) "" else "  Offline" }) catch "";
+                            var wide: [160]u16 = undefined;
+                            const wide_len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                            var host_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            if (wide_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &wide, @intCast(wide_len), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
                         }
                     } else if (result_idx == SEARCH_PICK_REPO_OFFSET or result_idx == SEARCH_SET_FOLDER_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
@@ -4502,9 +4504,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_computer_on = if (findShellById(app_state.g_tabctx_sid)) |ti| @import("computer_pane.zig").chosenFor(ti) else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
+                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_VIEW) L("Alt+C") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
+                            const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_VIEW) L("Alt+C") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {
                                 _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));

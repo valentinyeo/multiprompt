@@ -1,6 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { hash } from '../worker.js';
 import { run } from '../../tools/mp-layout.mjs';
@@ -135,6 +137,50 @@ test('a concurrent change between read and write is retried onto the winner', as
   assert.equal(after.revision, 5);
   assert.deepEqual(after.layout.workspaces.map(w => w.name), ['inne', 'Work', 'Concurrent', 'Runners']);
   assert.equal(after.layout.tabs.filter(t => t.workspace === 'Runners').length, 2);
+});
+
+test('spawn publishes once through the real service and refuses a workspace escape before setup', async t => {
+  await reset();
+  const home = mkdtempSync(join(tmpdir(), 'mp-layout-spawn-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  let marker, parked = false, runtimeCalls = 0;
+  const errors = [];
+  const opts = {
+    env: { HOME: home, MULTIPROMPT_KEY: adminKey, MULTIPROMPT_URL: base },
+    out() {}, err: line => errors.push(line),
+    fetch: (url, init) => mf.dispatchFetch(url, init),
+    resolveFolder: () => '/work',
+    lock: async () => () => {},
+    tmux: args => {
+      if (args[0] === 'has-session') return { status: parked ? 0 : 1 };
+      if (args[0] === 'display-message') return { status: 0, stdout: `sleep|/work|${marker}` };
+      parked = true; marker = args.at(-1); return { status: 0 };
+    },
+    runtime: args => { runtimeCalls++; return { status: 0, stdout: JSON.stringify({ status: args[1] === 'enable' ? 'enabled' : 'started' }) }; }
+  };
+  const args = ['spawn', '--name', 'New live chat', '--folder', 'work', '--workspace', 'Work', '--group', 'Runners'];
+  assert.equal(await run(args, { ...opts, env: { ...opts.env, MULTIPROMPT_KEY: innerKey } }), 1);
+  assert.equal(runtimeCalls, 0);
+  assert.equal(parked, false);
+  for (let i = 0; i < 2; i++) assert.equal(await run([...args, '--mode', 'headless'], opts), 0, errors.join('\n'));
+  assert.equal(parked, false);
+  assert.equal((await stored()).revision, 3);
+  for (let i = 0; i < 2; i++) assert.equal(await run(args, opts), 0, errors.join('\n'));
+  const result = await stored();
+  assert.equal(result.revision, 4);
+  assert.equal(result.layout.tabs.length, seed().tabs.length + 1);
+  const created = result.layout.tabs.at(-1);
+  assert.equal(created.manual, true);
+  assert.equal(created.name, 'New live chat');
+  assert.equal(created.group, 'Runners');
+  assert.match(created.tmux_session, /^live-[0-9a-f]{32}$/);
+  const headers = { Authorization: 'Bearer ' + adminKey };
+  const legacy = await mf.dispatchFetch(base + '/v1/layout', { headers });
+  const snapshot = await legacy.json();
+  assert.equal(snapshot.layout.tabs.at(-1).group, undefined);
+  const write = await mf.dispatchFetch(base + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: snapshot.revision, layout: snapshot.layout }) });
+  assert.equal(write.status, 200);
+  assert.equal((await stored()).layout.tabs.at(-1).group, 'Runners');
 });
 
 test('the key never appears in output and a missing key is reported', async () => {

@@ -1105,7 +1105,7 @@ fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(codex64, codex);
     _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
     _ = std.base64.standard.Encoder.encode(feedback64, feedback);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, @embedFile("chat_history_reader.py") }) catch null;
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
@@ -1321,6 +1321,8 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             entry.missing_message = @splat(0);
             entry.stalled = false;
             entry.loaded_ms = 0;
+            entry.preview_loaded_ms = 0;
+            entry.preview_status_ms = 0;
             debugLog("[chat] no transcript yet: this is a new chat, showing the empty state");
             ok = true;
         } else if (chat_history.missingReason(wire.items, id)) |reason| {
@@ -1464,6 +1466,7 @@ pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
     var active_changed = false;
+    var preview_changed = false;
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) {
         const live = @import("chat_live.zig");
         const live_shell = app_state.shells[app_state.active_shell].shell_id;
@@ -1472,6 +1475,8 @@ pub fn chatFileOnReady() void {
             g_chat_live_seen_revision = live_revision;
             active_changed = true;
             if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+            chatLiveSyncWorking();
+            preview_changed = true;
             @import("window_layout.zig").chatWorkingIndicatorSync();
             if (live.held(live_shell)) chatFileRequest(key);
         }
@@ -1501,6 +1506,12 @@ pub fn chatFileOnReady() void {
         entry.disk_loaded = true;
         entry.loading_disk = false;
         if (entry.result) |history| {
+            const preview_index = findShellById(entry.key.shell_id);
+            const old_preview = if (preview_index) |idx| @import("agent_second_line.zig").forShell(idx) else null;
+            const preview_status_changed = !std.meta.eql(entry.history.status.question, history.status.question) or
+                !std.meta.eql(entry.history.status.todos, history.status.todos) or entry.history.status.total != history.status.total;
+            const preview_content_changed = !entry.unchanged and !entry.prepended and
+                (entry.incremental or !std.mem.eql(u16, entry.history.text.items, history.text.items));
             const belongs_to_active = chat_history.sameSession(key, entry.key);
             if (belongs_to_active and !disk) @import("chat_live.zig").historyCaughtUp(entry.key.shell_id);
             if (entry.staged) {
@@ -1553,13 +1564,14 @@ pub fn chatFileOnReady() void {
             } else false;
             entry.before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (!has_messages) entry.history.start else 0;
             if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
+            if (!disk and !history.more and preview_content_changed) entry.preview_loaded_ms = history.received_ms;
+            if (!disk and !history.more and (preview_status_changed or entry.preview_status_ms == 0)) entry.preview_status_ms = if (history.received_ms != 0) history.received_ms else GetTickCount64();
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
             if (entry.resync and !disk and !history.more) {
                 entry.resync = false;
-                if (belongs_to_active) showHeaderNoticeAscii("Chat resynced", 3000, false);
                 debugLog("[chat] resync completed");
             }
             entry.next = GetTickCount64() + (if (disk or entry.prepended or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else if (entry.stream != null) @as(u64, 0) else chatFilePollInterval());
@@ -1581,6 +1593,9 @@ pub fn chatFileOnReady() void {
                 }
                 if (changed) saveSession();
             }
+            if (preview_index) |idx| {
+                if (!std.meta.eql(old_preview.?, @import("agent_second_line.zig").forShell(idx))) preview_changed = true;
+            }
         } else if (disk) {
             entry.next = 0;
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
@@ -1590,6 +1605,10 @@ pub fn chatFileOnReady() void {
             chatHistoryStreamStop(entry);
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
         }
+    }
+    if (preview_changed) {
+        @import("window_layout.zig").invalidateSidebar();
+        @import("inbox.zig").publishInboxState();
     }
     if (active_changed and app_state.g_chat_active) {
         layoutChatControls();

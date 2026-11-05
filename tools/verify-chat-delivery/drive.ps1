@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-hidden-steps')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -26,7 +26,7 @@ if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'F
 if ($env:CHAT_NOTES_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Session notes proof requires chat-delivery' }
 if ($env:CHAT_REACTIONS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reactions proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1' -and $Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
-if ($env:CHAT_REPLY_PROOF -eq '1' -or $env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1' -or $env:CHAT_NOTES_PROOF -eq '1' -or $Feature -eq 'chat-hidden-steps') {
+if ($env:CHAT_REPLY_PROOF -eq '1' -or $env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1' -or $env:CHAT_NOTES_PROOF -eq '1') {
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
     [LayoutCapture]::Display()
 }
@@ -39,7 +39,6 @@ $plans = @(
     @{name='send-stays-gone'; mode='busy'; text='send stays gone'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
-if ($Feature -eq 'chat-hidden-steps') { $plans = @(@{name='hidden-steps'; mode='idle'; text='draft stays untouched'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
@@ -62,6 +61,7 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -105,7 +105,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('reply-') -or $Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name.StartsWith('notes-') -or $Name.StartsWith('steps-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('reply-') -or $Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name.StartsWith('notes-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -325,8 +325,8 @@ function Assert-FullHistory([string]$Stage) {
                 $false
             }
         } 2)
-        Shot "full-history-$Stage-latest"
         $latestClock.Stop()
+        Shot "full-history-$Stage-latest"
         Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
         if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
         Doctor $true
@@ -538,7 +538,6 @@ foreach ($plan in $plans) {
     $isCancel = $plan.name -eq 'cancel-held'
     $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
-    $isHiddenSteps = $plan.name -eq 'hidden-steps'
     $isHistory = $plan.name -eq 'full-history'
     $isReply = $plan.name -eq 'reply-reference'
     $isNotes = $plan.name -eq 'session-notes'
@@ -547,7 +546,7 @@ foreach ($plan in $plans) {
     $isInstant = $plan.name -eq 'instant-chat'
     $isModel = $plan.name -eq 'model-settings'
     $socketTemp = $null
-    $hasTranscript = $isModel -or $isHiddenSteps -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isModel -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -619,7 +618,6 @@ foreach ($plan in $plans) {
         }
         if ($isReply) { Shell-Run @('reply-reference') }
         if ($isNotes) { Shell-Run @('session-notes') }
-        if ($isHiddenSteps) { Shell-Run @('hidden-steps') }
         if ($isLiveDelivery -and $env:CHAT_LONG_PROOF -eq '1') { Shell-Run @('history') }
         if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         if ($isSwitch) { Shell-Run @('switch-history') }
@@ -628,6 +626,7 @@ foreach ($plan in $plans) {
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isModel) { $savedSession.tabs[0].csid = $sid }
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
@@ -674,7 +673,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+            . "$PSScriptRoot/working-live.ps1"
+        } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
         } elseif ($isModel) {
             . "$PSScriptRoot/model-settings.ps1"
@@ -724,8 +725,6 @@ foreach ($plan in $plans) {
             Press @(0x0D) 'Enter: send reload plugins' $true
             [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
             $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
-        } elseif ($isHiddenSteps) {
-            . "$PSScriptRoot/hidden-steps.ps1"
         } elseif ($isReaction) {
             . "$PSScriptRoot/reactions.ps1"
         } elseif ($isSwitch) {
@@ -1142,7 +1141,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'initial transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Type-Composer $plan.text
             Press @(0x0D) 'Enter: send busy message' $true
-            [void](Wait-For 'exact message queued' { (Queue-View) -ceq ('queued:' + $plan.text) })
+            [void](Wait-For 'exact message queued' { @((Fake-State).queue) -ccontains $plan.text })
             [void](Wait-For 'composer remains empty' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' })
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
@@ -1153,21 +1152,54 @@ foreach ($plan in $plans) {
             [void](Wait-For 'transport settled while message remains queued' {
                 if (-not (Test-Path "$settings/chat-outbox.json")) { return $false }
                 $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
-                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text -and $_.s -eq 3 }).Count -eq 1
+                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text -and $_.v1 -eq 1 -and $_.phase -ceq 'accepted' }).Count -eq 1
             })
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-queued.json"
             Start-Sleep -Milliseconds 200
             Shot 'accepted-queued'
+            $copyMessage = {
+                $offset = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x4B) 'Ctrl+K: select transcript'
+                [void](Wait-For 'select-all palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+                $query = 'chat view select all'
+                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+                [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=[1-9]\d* target=6364(?:\s|$)') })
+                Press @(0x0D) 'Enter: select transcript'
+                [Windows.Forms.Clipboard]::Clear()
+                Press @(0x11, 0x43) 'Ctrl+C: copy transcript'
+                $copied = [Windows.Forms.Clipboard]::GetText()
+                Press @(0x1B) 'Esc: clear selection'
+                return $copied
+            }
+            $waitingCopy = & $copyMessage
+            [IO.File]::WriteAllText("$caseDir/waiting-copied.txt", $waitingCopy)
+            if ([regex]::Matches($waitingCopy, [regex]::Escape($plan.text)).Count -ne 1) { throw 'Waiting message must appear once' }
             Shell-Run @('accept')
             $frames = [Collections.Generic.List[object]]::new()
             for ($i = 0; $i -lt 16; $i++) {
                 $name = 'accepted-frame-' + $i
                 Shot $name
-                $captureMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-                $frames.Add(@{name=$name; ms=$captureMs})
+                $frames.Add(@{name=$name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()})
                 Start-Sleep -Milliseconds 80
             }
             $observation.frames = $frames.ToArray()
+            Shell-Run @('finish-accepted')
+            $transition = [Collections.Generic.List[object]]::new()
+            for ($i = 0; $i -lt 20; $i++) {
+                $name = 'accepted-transition-' + $i
+                Shot $name
+                $transition.Add(@{name=$name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()})
+                Start-Sleep -Milliseconds 80
+            }
+            $observation.transition = $transition.ToArray()
+            [void](Wait-For 'taken message reconciled with transcript' {
+                $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
+                @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text }).Count -eq 0
+            })
+            $takenCopy = & $copyMessage
+            [IO.File]::WriteAllText("$caseDir/taken-copied.txt", $takenCopy)
+            if ([regex]::Matches($takenCopy, [regex]::Escape($plan.text)).Count -ne 1) { throw 'Taken message must appear once' }
+            Shot 'accepted-taken'
             $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isSendStays) {
@@ -1224,6 +1256,57 @@ foreach ($plan in $plans) {
         } elseif ($isCancel) {
             $texts = @('cancel keep one', 'cancel target two', 'cancel keep three')
             [void](Step 'transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
+            $originalTheme = (Read-Shared "$settings/theme-mode.txt").Trim()
+            if (-not $originalTheme) { $originalTheme = 'dark' }
+            function Cancel-Theme([string]$Token) {
+                $query = if ($Token -in @('edgegray', 'edgegrey')) { 'edge grey' } else { $Token }
+                $saved = if ($Token -eq 'edgegrey') { 'edgegray' } else { $Token }
+                Press @(0x11, 0x4B) 'Ctrl+K: choose the existing theme'
+                foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+                Press @(0x0D) 'Enter: open theme choices'
+                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+                Press @(0x0D) "Enter: choose $query"
+                [void](Wait-For "app saved $saved theme" { (Read-Shared "$settings/theme-mode.txt").Trim() -eq $saved })
+                Press @(0x1B) 'Esc: close Themes'
+                [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            }
+            function Cancel-Captures([string]$Stage) {
+                foreach ($theme in @('light', 'amoled', 'edgegray')) {
+                    Cancel-Theme $theme
+                    Bind-Transcript
+                    $rect = $views[0].Current.BoundingRectangle
+                    $bounds = [Drawing.Rectangle]::new([int]$rect.Left, [int]$rect.Top, [int]$rect.Width, [int]$rect.Height)
+                    if ($bounds.Width -le 200 -or $bounds.Height -le 100) { throw 'Transcript viewport is too small for themed captures' }
+                    $capture = @{previous=$null; samples=0; changed=0}
+                    try {
+                        [void](Wait-For "stable $theme $Stage transcript capture" {
+                            $current = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+                            $graphics = [Drawing.Graphics]::FromImage($current)
+                            try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size) } finally { $graphics.Dispose() }
+                            $changed = 0; $samples = 0
+                            if ($null -ne $capture.previous) {
+                                for ($y = 0; $y -lt $bounds.Height; $y += 8) {
+                                    for ($x = 0; $x -lt $bounds.Width; $x += 8) {
+                                        $samples++
+                                        if ($current.GetPixel($x, $y).ToArgb() -ne $capture.previous.GetPixel($x, $y).ToArgb()) { $changed++ }
+                                    }
+                                }
+                                $capture.previous.Dispose()
+                            }
+                            $capture.previous = $current
+                            $capture.samples = $samples; $capture.changed = $changed
+                            if ($samples -gt 0 -and $changed -le ($samples * 0.005)) { return $true }
+                            Start-Sleep -Milliseconds 400
+                            return $false
+                        } 15)
+                        $name = "cancel-held-$Stage-$theme"
+                        Shot $name
+                        $capture.previous.Save("$Evidence/$name-transcript.bmp", [Drawing.Imaging.ImageFormat]::Bmp)
+                        Save @{theme=$theme; stage=$Stage; transcript=@{left=$bounds.Left; top=$bounds.Top; width=$bounds.Width; height=$bounds.Height}; sampled=$capture.samples; changed=$capture.changed} "$caseDir/$name-frame.json"
+                    } finally { if ($null -ne $capture.previous) { $capture.previous.Dispose() } }
+                }
+                Cancel-Theme $originalTheme
+            }
             foreach ($text in $texts) {
                 Type-Composer $text
                 Press @(0x0D) 'Enter: send composer' $true
@@ -1232,6 +1315,7 @@ foreach ($plan in $plans) {
             [void](Step 'three-messages-held' { (Queue-View) -ceq ('queued:' + ($texts -join '|queued:')) } 30)
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-held.json"
             Shot 'cancel-held-waiting'
+            Cancel-Captures 'held'
             $offered = Find-CancelMenu { param($items, $echo) $items -match 'Cancel message' -and $echo -eq 2 }
             [void](Step 'middle-message-offers-cancel' { $null -ne $offered })
             if ($null -eq $offered) { throw 'Middle message has no Cancel action' }
@@ -1244,6 +1328,7 @@ foreach ($plan in $plans) {
             [void](Step 'other-messages-still-held' { (Queue-View) -ceq ('queued:' + $texts[0] + '|queued:' + $texts[2]) })
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-cancelled.json"
             Shot 'cancel-held-cancelled'
+            Cancel-Captures 'cancelled'
             Shell-Input 'idle'
             [void](Step 'survivors-received-in-order' { (Queue-View) -ceq ('sent:' + $texts[0] + '|sent:' + $texts[2]) } 30)
             [void](Step 'survivor-echoes-settled' {
@@ -1358,7 +1443,7 @@ foreach ($plan in $plans) {
                     Where-Object { $_.Extension -in @('.txt', '.dmp') } |
                     Copy-Item -Destination "$caseDir/crashes/" -ErrorAction Stop
             }
-            if (($isActivity -or $isHiddenSteps) -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
+            if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
             if ($isHax) {
@@ -1386,8 +1471,8 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
-if ($Feature -eq 'chat-hidden-steps') {
-    & node "$PSScriptRoot/../chat-hidden-steps-proof.mjs" $Evidence
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-working-live-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_MODEL_PROOF -eq '1') {

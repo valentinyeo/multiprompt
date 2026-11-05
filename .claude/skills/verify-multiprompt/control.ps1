@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-hidden-steps', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -10,11 +10,16 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Run only on a GitHub Windows runner through verify.yml' }
+if ($Feature -eq 'whats-new' -and $env:RELEASE_TAG) { throw 'whats-new requires a branch build matching the source titles' }
 $shapeProof = $env:CHAT_SHAPE_PROOF -eq '1'
 $shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'
 if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requires the chat-switch-speed journey' }
 if ($shapeProfile -and -not $shapeProof -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profiling requires a native switching journey' }
 switch ($Feature) {
+        'session-actions' {
+            & "$PSScriptRoot/../../../tools/verify-session-actions/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            return
+        }
         'bot-photo' {
             & "$PSScriptRoot/../../../tools/verify-bot-photo/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             return
@@ -26,11 +31,6 @@ switch ($Feature) {
         'chat-full-history' {
             & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             if ($LASTEXITCODE -ne 0) { throw 'Full-session history verification failed' }
-            return
-        }
-        'chat-hidden-steps' {
-            & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
-            if ($LASTEXITCODE -ne 0) { throw 'Hidden steps verification failed' }
             return
         }
         'chat-messages-only' {
@@ -99,6 +99,7 @@ $warmup = $null
 $switchNativeRegistry = $null
 $switchExtensionRoot = $null
 $script:pinnedNotifyListeners = @()
+$script:keyProvider = $null
 $script:uploadReceiver = $null
 $script:uploadReceiverDir = $null
 $script:window = [IntPtr]::Zero
@@ -123,7 +124,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE', 'MP_VERIFY_DEEPGRAM_PORT')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
@@ -204,11 +205,29 @@ try {
         $scheme = if ($env:CAPTION_BROWSER_THEME -eq 'light') { 1 } else { 2 }
         @{ browser = @{ theme = @{ color_scheme = $scheme } } } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $profile 'Default/Preferences')
     }
-    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-612/palette-usage.tsv'
+    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-1743/palette-usage.tsv'
     if ($Feature -eq 'palette-order') {
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
         Copy-Item $paletteUsageFixture (Join-Path $config 'palette-usage.tsv')
+    }
+    if ($Feature -eq 'palette-order') {
+        $paletteRankingSeed = {
+            $config = Join-Path $scratch 'roaming/ZigShell'
+            $seed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'cmd'; name = 'Funeralprints'; manual = $true; shell_id = 1 }) }
+            $registry = @{ windows = @(@{ id = 'closed-fune-fixture'; name = 'Funeralprints'; restore = $false }) }
+            [IO.File]::WriteAllText((Join-Path $config 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $config 'session-closed-fune-fixture.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $config 'windows.json'), (ConvertTo-Json -InputObject $registry -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            foreach ($name in @('session.json', 'session-closed-fune-fixture.json')) {
+                $saved = Get-Content -LiteralPath (Join-Path $config $name) -Raw | ConvertFrom-Json
+                if ($saved.tabs -isnot [array] -or $saved.tabs.Count -ne 1 -or $saved.tabs[0].name -ne 'Funeralprints' -or $saved.tabs[0].kind -ne 'cmd') { throw "palette-order: invalid saved session fixture $name" }
+            }
+            $savedRegistry = Get-Content -LiteralPath (Join-Path $config 'windows.json') -Raw | ConvertFrom-Json
+            if ($savedRegistry.windows -isnot [array] -or $savedRegistry.windows.Count -ne 1 -or $savedRegistry.windows[0].id -ne 'closed-fune-fixture' -or $savedRegistry.windows[0].name -ne 'Funeralprints') { throw 'palette-order: invalid workspace registry fixture' }
+            Save-Json $seed 'palette-ranking-seed-session.json'
+            Save-Json $registry 'palette-ranking-seed-windows.json'
+        }
     }
     $env:MULTIPROMPT_DICTATION_FIXTURE = $null
     if ($Feature -eq 'chat-dictation') {
@@ -240,6 +259,16 @@ try {
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
+    $env:MP_VERIFY_DEEPGRAM_PORT = $null
+    if ($Feature -eq 'settings-panel') {
+        $script:keyProviderDir = Join-Path $scratch 'key-provider'
+        New-Item -ItemType Directory -Force $script:keyProviderDir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $script:keyProviderDir 'mode.txt'), '400')
+        $script:keyProvider = Start-Process -FilePath node -ArgumentList @(('"' + (Join-Path $PSScriptRoot 'settings-key-provider.cjs') + '"'), ('"' + $script:keyProviderDir + '"')) -PassThru -WindowStyle Hidden
+        Wait-Until { Test-Path -LiteralPath (Join-Path $script:keyProviderDir 'port.txt') } 'offline key provider listening' 30
+        $env:MP_VERIFY_DEEPGRAM_PORT = (Get-Content -LiteralPath (Join-Path $script:keyProviderDir 'port.txt') -Raw).Trim()
+        if ($env:MP_VERIFY_DEEPGRAM_PORT -notmatch '^[0-9]{1,5}$') { throw 'Invalid offline provider port' }
+    }
     $env:ZIGSHELL_DEBUG = '1'
     if ($Feature -eq 'sessions') {
         $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
@@ -248,13 +277,16 @@ try {
         & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
-        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; tabs = @(
+        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; workspace_count = 2; workspaces = @(@{ name = 'Other'; wid = 'verify-other' }, @{ name = 'Example'; wid = 'verify-example' }); tabs = @(
             @{ kind = 'tmux'; name = 'First'; manual = $true; tmux_host = 0; tmux_session = 'first'; workspace = 0; cv = $false; pid = 0 },
-            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cv = $false; pid = 0 }
+            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cwd = '/work/projects/beta'; cv = $false; pid = 0 },
+            @{ kind = 'tmux'; name = 'Owner terminal'; manual = $true; tmux_host = 0; tmux_session = 'terminal-owner'; workspace = 1; ccwd = '/home/owner/projects/sample'; cv = $false; pid = 0 }
         ) }
+        $commands = @{ commands = @(@{ label = 'Example folder'; kind = 'vps'; folder_host = '0'; default = $true; workspace = 'Example'; cwd = '~/projects/sample' }) }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/commands.json'), (ConvertTo-Json -InputObject $commands -Depth 6), (New-Object Text.UTF8Encoding($false)))
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
         Save-Json $seed 'seed-session.json'
-        $result.repoPickerBoundary = 'Two saved synthetic tmux tabs in Other, host 0 then active host 2; synthetic SSH repository listing and console-backed tmux; no real SSH, tmux server or agent verified.'
+        $result.repoPickerBoundary = 'Two synthetic tmux tabs in Other, host 0 then active host 2, and an Example terminal with seeded reported cwd; distinct per-host SSH listings, switchable discovery failure and console-backed tmux; no real SSH, tmux server or agent verified.'
     }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
@@ -395,7 +427,7 @@ try {
         Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
         $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
     }
-    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
+    if ($Feature -in @('browser-pane-stuck', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
         if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed', 'live-chat-pane')) {
             $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
             $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
@@ -448,6 +480,9 @@ try {
         'composer-buttons' { $driveFeature = 'chat-view' }
     }
     switch ($driveFeature) {
+        'whats-new' {
+            . (Join-Path $PSScriptRoot 'control-feature-whats-new.ps1')
+        }
         'settings-panel' {
             . (Join-Path $PSScriptRoot 'settings-panel.ps1')
         }
@@ -516,6 +551,9 @@ try {
         'relaunch-saved-sessions' {
             . (Join-Path $PSScriptRoot 'control-feature-relaunch-saved-sessions.ps1')
         }
+        'computer-menu' {
+            . (Join-Path $PSScriptRoot 'control-feature-computer-menu.ps1')
+        }
         'session-open' {
             . (Join-Path $PSScriptRoot 'control-feature-session-open.ps1')
         }
@@ -530,6 +568,12 @@ try {
         }
         'inbox-order' {
             . (Join-Path $PSScriptRoot 'control-feature-inbox-order.ps1')
+        }
+        'inbox-space' {
+            . (Join-Path $PSScriptRoot 'control-feature-inbox-space.ps1')
+        }
+        'inbox-no-footer' {
+            . (Join-Path $PSScriptRoot 'control-feature-inbox-no-footer.ps1')
         }
         'remind-me' {
             . (Join-Path $PSScriptRoot 'control-feature-remind-me.ps1')
@@ -557,6 +601,9 @@ try {
         }
         'browser-pane-stuck' {
             . (Join-Path $PSScriptRoot 'control-feature-browser-pane-stuck.ps1')
+        }
+        'browser-typing' {
+            . (Join-Path $PSScriptRoot 'control-feature-browser-typing.ps1')
         }
         'live-chat-pane' {
             . (Join-Path $PSScriptRoot 'control-feature-live-chat-pane.ps1')
@@ -623,6 +670,7 @@ try {
                 }
                 foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
                 $script:pinnedNotifyListeners = @()
+                if ($null -ne $script:keyProvider -and -not $script:keyProvider.HasExited) { $script:keyProvider.Kill(); $script:keyProvider.WaitForExit() }
                 if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     if ($UpdateFixtureRoot) { Remove-Item -LiteralPath (Join-Path $scratch 'footer-test') -Recurse -Force -ErrorAction Stop }

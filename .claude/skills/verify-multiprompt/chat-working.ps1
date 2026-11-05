@@ -33,6 +33,28 @@ $probe = {
     & node (Join-Path $PSScriptRoot '../../../tools/chat-working-proof.mjs') (Join-Path $Evidence ($name + '.bmp')) (Join-Path $Evidence 'working-area.json') (Join-Path $Evidence ($name + '.json')) $state (Join-Path $Evidence 'working-0.json')
     $LASTEXITCODE -eq 0
 }
+$captureSecondLines = {
+    param([string]$State)
+    Wait-Until {
+        $target = $initial.tabs[$initial.active_tab].shell_id
+        $row = @((Read-Inbox).shells | Where-Object { $_.sid -eq $target })
+        if ($row.Count -ne 1) { return $false }
+        if ($State -eq 'finished') { return $row[0].pv -ceq 'Ready.' -and $row[0].act -eq 0 }
+        $row[0].pv.StartsWith('Inspecting files') -and $row[0].pv -match ' · \d+m$'
+    } ("IGSH-1665 $State semantic second line published") -Seconds 45
+    $result.checks += @{ name = "IGSH-1665-$State-second-line"; preview = @((Read-Inbox).shells | Where-Object { $_.sid -eq $initial.tabs[$initial.active_tab].shell_id })[0].pv }
+    foreach ($theme in @(@{ query = 'light'; saved = 'light' }, @{ query = 'amoled'; saved = 'amoled' }, @{ query = 'edge grey'; saved = 'edgegray' })) {
+        Select-Theme $theme.query ("second-line-$State-$($theme.saved)-theme") $theme.saved
+        Snapshot ("second-line-$State-$($theme.saved)-sidebar")
+        Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: inspect agent second line in Inbox'
+        Wait-Until { (Read-Inbox).inbox_active -eq $true } 'second-line Inbox visible'
+        Press @(0x12, 0x49) 'Alt+I: inspect All agents'
+        Snapshot ("second-line-$State-$($theme.saved)-inbox")
+        Press @(0x1B) 'Esc: return to agent sidebar'
+        Wait-Until { (Read-Inbox).inbox_active -eq $false } 'second-line sidebar restored'
+    }
+    Select-Theme 'dark' ("second-line-$State-restore-dark")
+}
 $owned = Read-Session
 $hookTarget = $owned.tabs[$owned.active_tab].name
 & $Exe --notify ('ACTIVE:' + $hookTarget)
@@ -46,6 +68,7 @@ Wait-Until {
     ($first.dots | ConvertTo-Json -Compress) -cne ($next.dots | ConvertTo-Json -Compress)
 } 'IGSH-924 dots animate' -Seconds 20
 $check.frames += (Get-Content (Join-Path $Evidence 'working-1.json') -Raw | ConvertFrom-Json)
+& $captureSecondLines 'working'
 $ready = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
 $replyEvent = [Threading.EventWaitHandle]::OpenExisting(('Local\MultipromptInlineReply-' + $ready.pid))
 try { [void]$replyEvent.Set() } finally { $replyEvent.Dispose() }
@@ -56,6 +79,7 @@ $screen = -join @($codes | ForEach-Object { [char][int]$_ })
 if ($screen -notmatch 'Ready\.' -or $screen -match 'interrupt') { throw ('Stand-in did not replace its working line: ' + $screen) }
 & $Exe --notify ('DONE:' + $hookTarget)
 Wait-Until { & $probe 'after' 'idle' } 'IGSH-924 dots gone after reply' -Seconds 45
+& $captureSecondLines 'finished'
 $check.passed = $true
 Save-Json $check 'working-proof.json'
 $referencePath = Join-Path $env:TEMP 'inline-working-reference.png'

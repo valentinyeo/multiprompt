@@ -196,6 +196,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
+            .group = if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
             .favorite = shell.favorite,
             .muted = shell.muted,
             .face = shell.face,
@@ -231,12 +232,27 @@ const PendingLayout = struct {
     appearance: []const appearance_intent.Intent = &.{},
 };
 var g_appearance: ?[]appearance_intent.Intent = null;
+var g_palette8_supported = false;
 var g_after_submit: std.ArrayList(appearance_intent.Touch) = .empty;
 var g_tracking = false;
 var g_pending_loaded = false;
 var g_pending_bytes: ?[]u8 = null;
 var g_pending_write_mutex: app_state.SpinMutex = .{};
 var g_sync_log_at: u64 = 0;
+var g_photo_sync: @import("bot_photo_sync.zig").Sync = .{};
+var g_photo_sync_loaded = false;
+var g_photo_sync_saved_generation: u64 = 0;
+const PhotoContext = struct {
+    access: []const u8,
+    pub fn read(_: @This(), digest: [32]u8) !@import("bot_photo_sync.zig").Photo {
+        return @import("bot_photo.zig").readForSync(digest);
+    }
+    pub fn send(self: @This(), method: []const u8, path: []const u8, body: []const u8) !u32 {
+        const response = try account_client.request(method, path, self.access, body);
+        defer response.deinit();
+        return response.status;
+    }
+};
 
 fn syncLogThrottled(msg: []const u8) void {
     const now = GetTickCount64();
@@ -340,16 +356,25 @@ pub fn publishSessionLayout() void {
     var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
     var plain_base = account_layout.withoutAppearance(arena.allocator(), base.value) catch return;
     var plain_synced = account_layout.withoutAppearance(arena.allocator(), synced.value) catch return;
+    if (!app_state.g_account_groups_supported) {
+        plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutGroups(arena.allocator(), plain_synced) catch return;
+    }
     if (!app_state.g_account_colors_supported) {
         plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutColors(arena.allocator(), plain_base) catch return;
         plain_synced = account_layout.withoutColors(arena.allocator(), plain_synced) catch return;
     }
+    if (!g_palette8_supported) {
+        plain_local = account_layout.projectPalette7(arena.allocator(), plain_local, plain_base) catch return;
+        plain_base = account_layout.projectPalette7(arena.allocator(), plain_base, plain_synced) catch return;
+    }
     var eligible = false;
     if (app_state.g_account_appearance_supported) {
         for (local.tabs) |tab| {
             for (intents) |intent| {
-                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent)) eligible = true;
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent) and (g_palette8_supported or intent.touched & appearance_intent.face_bit != 0 or (intent.touched & appearance_intent.color_bit != 0 and intent.color != 7))) eligible = true;
             }
         }
     }
@@ -626,7 +651,7 @@ pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void
     const shell = &app_state.shells[idx];
     const bit: u8 = switch (edit) {
         .face => |face| blk: { if (face != null and face.? >= 20) return error.InvalidAppearance; break :blk appearance_intent.face_bit; },
-        .color => |color| blk: { if (color != null and color.? >= 7) return error.InvalidAppearance; break :blk appearance_intent.color_bit; },
+        .color => |color| blk: { if (color != null and color.? >= @import("session_layout.zig").color_count) return error.InvalidAppearance; break :blk appearance_intent.color_bit; },
     };
     if (app_state.g_account_bypass or shell.kind != .tmux or shell.tmux_session_len == 0) {
         switch (edit) {
@@ -756,8 +781,10 @@ pub fn accountSignOut() void {
     }
     saveSession();
     accountResetAppearanceTracking();
+    g_palette8_supported = false;
     app_state.g_account_colors_supported = false;
     app_state.g_account_appearance_supported = false;
+    app_state.g_account_groups_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -1054,24 +1081,53 @@ fn accountKnownKeyHosts(a: std.mem.Allocator, ssh: []const u8, reply: *LayoutRep
     return aliases.toOwnedSlice(a);
 }
 
-fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !bool {
+fn accountRunKeyCommand(a: std.mem.Allocator, ssh: []const u8, aliases: []const []const u8, remote: []const u8, reply: *LayoutReply) !struct { complete: bool, skipped: []const u8 } {
     const Runner = struct {
         a: std.mem.Allocator,
         ssh: []const u8,
         escaped: []const u8,
+        skipped: ?*std.ArrayList([]const u8),
         pub fn apply(self: *@This(), alias: []const u8) !void {
-            errdefer debugLog2("account-keys: skipped unreachable SSH host:", alias);
+            errdefer {
+                debugLog2("account-keys: skipped unreachable SSH host:", alias);
+                if (self.skipped) |skipped| skipped.appendAssumeCapacity(alias);
+            }
             const command = try std.fmt.allocPrint(self.a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ self.ssh, alias, self.escaped });
             _ = try accountSshOutput(self.a, command, 30000);
         }
     };
-    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\"") };
+    var skipped: std.ArrayList([]const u8) = .empty;
+    if (reply.job.kind == .decide_keys) try skipped.ensureTotalCapacity(a, aliases.len);
+    var runner: Runner = .{ .a = a, .ssh = ssh, .escaped = try std.mem.replaceOwned(u8, a, remote, "\"", "\\\""), .skipped = if (reply.job.kind == .decide_keys) &skipped else null };
     const rollout = account_keys.applyOnHosts(aliases, &runner);
     if (!rollout.reachedAny()) {
         accountDeviceKeyError(reply, "Could not update SSH access on any host. Check your connection and try again.");
-        return error.Process;
     }
-    return rollout.complete();
+    var labels: std.ArrayList(u8) = .empty;
+    if (skipped.items.len > 0) {
+        const known = [_][]const u8{ app_state.SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE };
+        const names = [_][]const u8{ "Host 1", "Host 2", "Remote host 3" };
+        for (skipped.items) |alias| {
+            if (labels.items.len > 0) try labels.appendSlice(a, ", ");
+            var name: []const u8 = "Server";
+            for (known, names, 0..) |target, fallback, slot| {
+                if (std.mem.eql(u8, alias, target)) {
+                    name = account_hosts.displayName(g_account_hosts_cache.hosts, @intCast(slot), fallback);
+                    break;
+                }
+            }
+            try labels.appendSlice(a, name);
+        }
+        if (!rollout.reachedAny()) {
+            if (reply.key_error) |old| {
+                const message = try std.fmt.allocPrint(std.heap.page_allocator, "Could not reach: {s}. Device not approved. Check your connection and try again.", .{labels.items});
+                std.heap.page_allocator.free(old);
+                reply.key_error = message;
+            }
+        }
+    }
+    if (!rollout.reachedAny()) return error.Process;
+    return .{ .complete = rollout.complete(), .skipped = labels.items };
 }
 
 fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutReply) !void {
@@ -1100,23 +1156,31 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
         defer decisions.deinit();
         for (decisions.value) |decision| {
             if (!account_keys.validDeviceId(decision.device_id) or !account_keys.validKey(decision.public_key)) return error.InvalidKey;
-            var current = false;
+            var device_name: ?[]const u8 = null;
             for (listing.value.keys) |key| {
-                if (key.status == .pending and std.mem.eql(u8, key.device_id, decision.device_id) and std.mem.eql(u8, key.public_key, decision.public_key) and !std.mem.eql(u8, key.device_id, listing.value.device_id)) current = true;
+                if (key.status == .pending and std.mem.eql(u8, key.device_id, decision.device_id) and std.mem.eql(u8, key.public_key, decision.public_key) and !std.mem.eql(u8, key.device_id, listing.value.device_id)) device_name = key.name;
             }
-            if (!current) return error.DeviceChanged;
+            const name = device_name orelse return error.DeviceChanged;
+            var skipped: []const u8 = "";
             if (decision.approve) {
                 const aliases = try accountKnownKeyHosts(a, ssh, reply);
                 if (aliases.len == 0) {
                     accountDeviceKeyError(reply, "No configured SSH hosts were found. The device was not approved.");
                     return error.InvalidHosts;
                 }
-                _ = try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
+                const outcome = try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(a, decision.public_key), reply);
+                skipped = outcome.skipped;
             }
             const path = try std.fmt.allocPrint(a, "/v1/device-keys/{s}/{s}", .{ decision.device_id, if (decision.approve) "approve" else "deny" });
             const decided = try account_client.request("POST", path, access, "");
             defer decided.deinit();
             if (decided.status != 200) return error.DecideKey;
+            if (skipped.len > 0) {
+                const old = reply.bytes;
+                const message = try std.fmt.allocPrint(std.heap.page_allocator, "{s}{s} approved on reachable servers. Could not reach: {s}.\n", .{ if (old) |bytes| bytes else "", name, skipped });
+                if (old) |bytes| std.heap.page_allocator.free(bytes);
+                reply.bytes = message;
+            }
         }
         return;
     }
@@ -1128,11 +1192,42 @@ fn accountSyncDeviceKeys(access: []const u8, job: AccountJob, reply: *LayoutRepl
     if (cleaned) |bytes| try state.appendSlice(a, bytes);
     for (listing.value.keys) |key| {
         if (key.status != .revoked or account_keys.isCleaned(state.items, key.public_key) or aliases.len == 0) continue;
-        if (!try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply)) continue;
+        const outcome = try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand(a, key.public_key), reply);
+        if (!outcome.complete) continue;
         try state.appendSlice(a, key.public_key);
         try state.append(a, '\n');
         if (!writeDpapiFile("account-keys-cleaned.dat", state.items)) return error.Storage;
     }
+}
+
+fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const session_layout.Tab) !void {
+    const a = std.heap.page_allocator;
+    const account = try account_client.field(credential, "account_id");
+    defer freeSecret(account);
+    if (!g_photo_sync_loaded) {
+        var path_buf: [512]u8 = undefined;
+        const path = syncAuthPath(&path_buf, "account-photo-base.dat") orelse return error.Storage;
+        var wide_buf: [520]u16 = undefined;
+        const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+        if (GetFileAttributesW(wide.ptr) == 0xffffffff) {
+            const reason = @import("win32.zig").GetLastError();
+            if (reason != 2 and reason != 3) return error.Storage;
+        } else {
+            const bytes = readDpapiFile("account-photo-base.dat", 8 * 1024 * 1024) orelse return error.Storage;
+            defer a.free(bytes);
+            g_photo_sync = try @TypeOf(g_photo_sync).parse(a, bytes);
+            g_photo_sync_saved_generation = g_photo_sync.generation;
+        }
+        g_photo_sync_loaded = true;
+    }
+    const result = g_photo_sync.run(a, account, tabs, PhotoContext{ .access = access });
+    if (g_photo_sync.generation != g_photo_sync_saved_generation) {
+        const encoded = try std.json.Stringify.valueAlloc(a, g_photo_sync, .{});
+        defer a.free(encoded);
+        if (!writeDpapiFile("account-photo-base.dat", encoded)) return error.Storage;
+        g_photo_sync_saved_generation = g_photo_sync.generation;
+    }
+    try result;
 }
 
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
@@ -1160,6 +1255,11 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (response.status != 200) {
         reply.unauthorized = account_state.invalidCredential(response.status, response.bytes);
         return error.Authentication;
+    }
+    if (job.kind == .login) {
+        if (g_account_keys_cache.published_key) |old| std.heap.page_allocator.free(old);
+        g_account_keys_cache.published_key = null;
+        g_account_keys_cache.last_check_ms = null;
     }
     if (@import("room_frontend.zig").enabled and job.kind != .signout) {
         reply.account_id = account_client.field(response.bytes, "account_id") catch null;
@@ -1197,6 +1297,17 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (job.kind == .device_keys or job.kind == .decide_keys) {
         accountSyncDeviceKeys(access, job, reply) catch {
             accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
+            if (job.kind == .decide_keys) {
+                if (reply.bytes) |bytes| {
+                    const error_text = reply.key_error orelse "Could not update device approvals. Please try again.";
+                    if (std.fmt.allocPrint(std.heap.page_allocator, "{s}\n\n{s}", .{ error_text, bytes }) catch null) |combined| {
+                        if (reply.key_error) |old| std.heap.page_allocator.free(old);
+                        reply.key_error = combined;
+                    }
+                    std.heap.page_allocator.free(bytes);
+                }
+                reply.bytes = null;
+            }
         };
         return;
     }
@@ -1205,6 +1316,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
     reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1275,6 +1387,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
         }
         synced_hosts = merged_hosts;
+        if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
+        if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
         if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
@@ -1283,11 +1397,12 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const sent_appearance = remote.appearance_supported;
         const sent_colors = remote.colors_supported;
+        const sent_palette8 = remote.palette8_supported;
         const put = try account_client.requestWithLayoutFeatures("PUT", "/v1/layout", access, body, sent_colors, sent_appearance);
         remote.deinit();
         remote = put;
         appearance_confirmable = sent_appearance and remote.appearance_supported and remote.status == 200;
-        if (((remote.appearance_supported and !sent_appearance) or (remote.colors_supported and !sent_colors)) and (remote.status == 200 or remote.status == 409)) {
+        if (((remote.appearance_supported and !sent_appearance) or (remote.colors_supported and !sent_colors) or (remote.palette8_supported and !sent_palette8)) and (remote.status == 200 or remote.status == 409)) {
             const refreshed = try account_client.request("GET", "/v1/layout", access, "");
             remote.deinit();
             remote = refreshed;
@@ -1303,6 +1418,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     if (remote.status != 200) return error.Conflict;
     reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
@@ -1326,6 +1442,12 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
     reply.appearance_confirmable = appearance_confirmable;
+    reply.palette8_supported = remote.palette8_supported;
+    if (remote.photos_supported) {
+        accountSyncPhotos(access, response.bytes, final_layout.value.tabs) catch {
+            debugLog("account-sync: picture upload deferred");
+        };
+    }
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
@@ -1384,7 +1506,7 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
                         const name = item.object.get("name") orelse continue;
                         if (name != .string or !std.mem.eql(u8, name.string, workspace.name)) continue;
                         const color = item.object.get("color") orelse break;
-                        if (color == .integer and color.integer >= 0 and color.integer < 7) workspace.color = @intCast(color.integer);
+                        if (color == .integer and color.integer >= 0 and color.integer < @import("session_layout.zig").color_count) workspace.color = @intCast(color.integer);
                         break;
                     };
                     restored.workspaces = copy;
@@ -1408,9 +1530,9 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
                                     const host = record.object.get("tmux_host") orelse std.json.Value{ .integer = 0 };
                                     if (session != .string or host != .integer or host.integer != tab.tmux_host or !std.ascii.eqlIgnoreCase(session.string, tab.tmux_session)) continue;
                                     const face = @import("json_reader.zig").uintDefault(record, "face", 20);
-                                    const color = @import("json_reader.zig").uintDefault(record, "color", 7);
+                                    const color = @import("json_reader.zig").uintDefault(record, "color", @import("session_layout.zig").color_count);
                                     tab.face = if (face < 20) @intCast(face) else null;
-                                    tab.color = if (color < 7) @intCast(color) else null;
+                                    tab.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
                                     break;
                                 }
                             }
@@ -1554,6 +1676,28 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
+            if (tab.group) |name| {
+                var wide: [64]u16 = undefined;
+                const len = try std.unicode.utf8ToUtf16Le(&wide, name);
+                var group_id: u32 = 0;
+                if (len > 0) {
+                    if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| {
+                        const current = app_state.groups[gi];
+                        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) group_id = current.id;
+                    }
+                    for (app_state.groups[0..app_state.group_count]) |group| {
+                        if (group_id != 0) break;
+                        if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) {
+                            group_id = group.id;
+                            break;
+                        }
+                    }
+                    if (group_id == 0) group_id = @import("sidebar.zig").createGroup(wide[0..len]);
+                    if (group_id == 0) return error.LayoutCapacity;
+                }
+                shell.group_id = group_id;
+            }
             shell.face = tab.face;
             shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
@@ -1752,7 +1896,6 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         if (reply.job.kind == .startup) {
             accountLock();
         } else {
-            showHeaderNoticeAscii("Sign in again: Ctrl+K > Sign in to Multi Bot", 86400000, true);
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         }
         return;
@@ -1764,7 +1907,17 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             app_state.g_cap_msg_until = 0;
         }
     }
-    if (reply.job.kind == .device_keys or reply.job.kind == .decide_keys) return;
+    if (reply.job.kind == .decide_keys) {
+        if (reply.key_error == null and !reply.cancelled and !reply.unauthorized) {
+            if (reply.bytes) |notice| {
+                app_state.g_account_busy = true;
+                showSyncMessage(notice, false);
+                app_state.g_account_busy = false;
+            }
+        }
+        return;
+    }
+    if (reply.job.kind == .device_keys) return;
     const bytes = reply.bytes orelse {
         @import("room_frontend.zig").setAccount(null);
         accountSyncFailed(reply.has_token or app_state.g_account_has_token);
@@ -1782,7 +1935,9 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const alloc = arena.allocator();
     const server = session_layout.parse(alloc, bytes) catch return;
     defer server.deinit();
+    g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
+    app_state.g_account_groups_supported = reply.groups_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {
@@ -1803,6 +1958,15 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const current = captureSessionLayout(alloc, false) catch return;
         to_apply = session_layout.encode(alloc, account_layout.appearanceFrom(alloc, current_apply.value, current) catch return) catch return;
     }
+    if (!g_palette8_supported and reply.job.base != null and reply.job.edited != null) {
+        const base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer base.deinit();
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.pendingWhiteWorkspaces(alloc, current_apply.value, base.value, edited.value) catch return) catch return;
+    }
     var local_ack: ?[]u8 = null;
     if (!app_state.g_account_bootstrapping and reply.job.edited != null) {
         const edit = reply.job.edited.?;
@@ -1814,6 +1978,11 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
         var ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
         if (!reply.colors_supported) ack = account_layout.withoutColors(alloc, ack) catch return;
+        if (!g_palette8_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            ack = account_layout.unacknowledgedWhiteWorkspaces(alloc, ack, old_base.value, sent.value) catch return;
+        }
         if (!reply.appearance_supported and reply.job.base != null) {
             const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
             defer old_base.deinit();
@@ -1823,6 +1992,11 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const current = accountCapturePush(alloc, sent.value) catch return;
         var apply_remote = if (reply.colors_supported) server.value else account_layout.colorsFrom(alloc, server.value, sent.value) catch return;
         if (!reply.appearance_supported) apply_remote = account_layout.appearanceFrom(alloc, apply_remote, sent.value) catch return;
+        if (!g_palette8_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            apply_remote = account_layout.pendingWhiteWorkspaces(alloc, apply_remote, old_base.value, sent.value) catch return;
+        }
         const rebased = account_layout.rebase(alloc, sent.value, current, apply_remote) catch return;
         to_apply = session_layout.encode(alloc, rebased) catch return;
     }
@@ -1933,7 +2107,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             for (remaining.items) |*intent| {
                 if (!appearance_intent.same(submitted.tmux_host, submitted.tmux_session, intent.*)) continue;
                 if (submitted.touched & appearance_intent.face_bit != 0 and later & appearance_intent.face_bit == 0 and confirmed.face == submitted.face) intent.touched &= ~appearance_intent.face_bit;
-                if (submitted.touched & appearance_intent.color_bit != 0 and later & appearance_intent.color_bit == 0 and confirmed.color == submitted.color) intent.touched &= ~appearance_intent.color_bit;
+                if (submitted.touched & appearance_intent.color_bit != 0 and later & appearance_intent.color_bit == 0 and confirmed.color == submitted.color and (submitted.color != 7 or g_palette8_supported)) intent.touched &= ~appearance_intent.color_bit;
                 break;
             }
         }
@@ -1971,6 +2145,15 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const owned_remaining = appearance_intent.clone(a, remaining.items) catch return;
     var installed_remaining = false;
     defer if (!installed_remaining) appearance_intent.free(a, owned_remaining);
+    if (app_state.g_account_bootstrapping and !g_palette8_supported and reply.job.base != null and reply.job.edited != null) {
+        const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer old_base.deinit();
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const ack = session_layout.parse(alloc, local_ack orelse bytes) catch return;
+        defer ack.deinit();
+        local_ack = session_layout.encode(alloc, account_layout.unacknowledgedWhiteWorkspaces(alloc, ack.value, old_base.value, edited.value) catch return) catch return;
+    }
     const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, bytes) catch return;
     defer ack_parsed.deinit();
     const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
@@ -1995,6 +2178,10 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
+    if (app_state.g_search_pick_repo_mode) {
+        @import("vps.zig").requestAllRepoRefresh();
+        @import("command_palette.zig").updateSearchResults();
+    }
     if (room_prepare_ok and @import("room_frontend.zig").enabled) {
         room_layout_applied = @import("room_frontend.zig").applyAccountLayout(reply.account_id, to_apply);
     }

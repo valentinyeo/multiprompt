@@ -1,13 +1,27 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 
-test('embedded read-only remote reader: bounded first load, lazy history, deltas, partial writes and stdin transport', () => {
-  const run = spawnSync('python3', ['tools/chat-history-reader-test.py'], { encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
-  assert.equal(run.status, 0, run.stdout + run.stderr);
-  assert.match(run.stderr, /Ran \d+ tests/);
-  assert.match(run.stdout, /CPU707 first-load source_bytes=\d+ read_bytes=\d+ ms=/);
+test('embedded read-only remote reader: bounded first load, lazy history, deltas, partial writes and stdin transport', async () => {
+  const runs = await Promise.all([0, 1].map(index => new Promise(resolve => {
+    execFile('python3', ['tools/chat-history-reader-test.py'], {
+      encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024,
+      env: { ...process.env, HISTORY_READER_SHARD: `${index}/2` },
+    }, (error, stdout, stderr) => resolve({ status: error ? error.code : 0, error, stdout, stderr }));
+  })));
+  let total = 0;
+  for (const run of runs) {
+    assert.equal(run.status, 0, `${run.error || ''}\n${run.stdout}${run.stderr}`);
+    assert.doesNotMatch(run.stderr + run.stdout, /ResourceWarning/);
+    const count = run.stderr.match(/Ran (\d+) tests/);
+    assert.ok(count, run.stderr);
+    total += Number(count[1]);
+  }
+  const cpu = runs.map(run => run.stdout.match(/CPU707 first-load source_bytes=\d+ read_bytes=\d+ ms=[^\r\n]*/)).find(Boolean);
+  assert.ok(cpu, runs.map(run => run.stdout).join('\n'));
+  console.log(cpu[0]);
+  console.log(`HISTORY_READER_SUITE_OK Ran ${total} tests`);
 });
 
 test('remote reader preserves paging without truncating message history', () => {

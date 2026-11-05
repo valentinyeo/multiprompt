@@ -1,0 +1,8 @@
+{
+  "stages": ["queued", "accepted-before-event", "turn-started", "tick", "reply-delta", "turn-ended"],
+  "files": ["queued", "accepted", "busy-0", "busy-1", "reply-delta", "answered"],
+  "cases": {
+    "empty": { "elapsed": [0, 25, 800, 1100, 1200, 1300], "dots": [1, 0, 1, 2, 1, 0], "blocks": 0 },
+    "history": { "elapsed": [0, 10, 1001, 1301, 1400, 1500], "dots": [1, 0, 1, 1, 0, 0], "blocks": 2 }
+  }
+}

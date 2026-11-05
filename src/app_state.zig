@@ -300,6 +300,12 @@ pub const Shell = struct {
     turn_pending: bool = false,
     deferred_done: bool = false,
     console_working: bool = false,
+    console_step: [128]u16 = @splat(0),
+    console_step_len: usize = 0,
+    console_step_changed_ms: u64 = 0,
+    console_reply: [128]u16 = @splat(0),
+    console_reply_len: usize = 0,
+    console_reply_changed_ms: u64 = 0,
     last_blue_dot_source: attention_rules.Source = .restore,
     last_blue_dot_time: u64 = 0,
     archive_time: u64 = 0,
@@ -874,7 +880,6 @@ pub const HostCapacity = struct {
 
 pub var g_capacity_policy = CapacityPolicy{};
 pub var g_host_capacity: [2]HostCapacity = .{ .{}, .{} };
-pub var g_capacity_announced: [2]CapacityState = .{ .unknown, .unknown };
 pub var g_capacity_block_notice_until: u64 = 0;
 
 pub var g_tmux_cache: [MAX_TMUX_SESSIONS]TmuxSessionEntry = undefined;
@@ -1043,6 +1048,7 @@ pub const DRAG_MATERIALIZE_THRESH: i32 = 8;
 
 pub var g_edit_hwnd: HANDLE = null;
 pub var g_edit_tab: u32 = 0;
+pub var g_edit_sid: u32 = 0;
 pub var g_edit_orig_proc: isize = 0;
 pub var g_edit_is_group: bool = false;
 pub var g_edit_is_window: bool = false;
@@ -1447,7 +1453,7 @@ pub const SEARCH_PICK_REPO_OFFSET: usize = 6700;
 pub const SEARCH_SET_FOLDER_OFFSET: usize = 6701;
 pub const SEARCH_PICK_REPO_BACK_OFFSET: usize = 6702;
 pub const SEARCH_PICK_REPO_ROW_OFFSET: usize = 6710;
-pub const MAX_REPO_ROWS: usize = 48;
+pub const MAX_REPO_ROWS: usize = 256;
 pub const SEARCH_NEWWIN_OFFSET: usize = 6000;
 pub const SEARCH_CREATEWS_OFFSET: usize = 6001;
 pub const SEARCH_WORKSPACES_MENU_OFFSET: usize = 6200;
@@ -1673,10 +1679,14 @@ pub const SEARCH_TABCTX_UNPIN_PAGE: usize = 7190;
 pub const SEARCH_TABCTX_GOOGLE_SIGNIN: usize = 7191;
 pub const SEARCH_BOT_PHOTO_UPLOAD: usize = 7193;
 pub const SEARCH_BOT_PHOTO_RESET: usize = 7194;
+pub const SEARCH_TABCTX_UNREAD: usize = 7195;
+pub const SEARCH_TABCTX_COPY_ID: usize = 7196;
+pub const SEARCH_TABCTX_HIDE: usize = 7197;
+pub const SEARCH_TABCTX_RENAME: usize = 7198;
 pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
 pub const BOT_FACE_COUNT: usize = 21;
 pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;
-pub const BOT_COLOR_COUNT: usize = 8;
+pub const BOT_COLOR_COUNT: usize = @import("session_layout.zig").color_count + 1;
 pub const SEARCH_TABCTX_START_SESSION: usize = 7184;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
@@ -2293,6 +2303,7 @@ pub var g_account_applying = false;
 pub var g_account_base: ?[]u8 = null;
 pub var g_account_local_base: ?[]u8 = null;
 pub var g_account_colors_supported = false;
+pub var g_account_groups_supported = false;
 pub var g_account_appearance_supported = false;
 pub var g_account_dirty_at: u64 = 0;
 pub var g_account_status: []const u8 = "Sign in to Multi Bot to open your workspaces.";
@@ -2306,12 +2317,13 @@ pub const AppearanceEdit = @import("appearance_intent.zig").Edit;
 pub const AppearanceIntent = @import("appearance_intent.zig").Intent;
 pub const AppearanceTouch = @import("appearance_intent.zig").Touch;
 pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null, appearance: ?[]AppearanceIntent = null };
-pub const LayoutReply = struct { colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
 
 pub const SavedTab = struct {
+    ai_agent: u8 = 0,
     shell_id: u32 = 0,
     chat_id: u64 = 0,
     last_read_message_id: u64 = 0,
@@ -2458,6 +2470,7 @@ pub const TtsChunkRange = struct { start: usize, end: usize };
 pub var g_voice_clean_wide: [24576]u16 = undefined;
 
 pub const ArchivedEntry = struct {
+    ai_agent: u8 = 1,
     name: [64]u8 = std.mem.zeroes([64]u8),
     name_len: u32 = 0,
     tmux_session: [64]u8 = std.mem.zeroes([64]u8),
@@ -2580,9 +2593,9 @@ pub const VPS_PROBE_SCRIPT =
     "grep '^MemAvailable:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; " ++
     "grep '^SwapTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; " ++
     "grep '^SwapFree:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; " ++
-    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; " ++
-    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; " ++
-    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; " ++
+    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
+    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
+    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "printf '\\n'; ";
 pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null";
 
@@ -2658,16 +2671,7 @@ pub var g_all_sessions_filter_buf: [64]u16 = std.mem.zeroes([64]u16);
 pub var g_all_sessions_filter_len: u32 = 0;
 pub var g_archive_arm_sid: u32 = 0;
 pub var g_archive_arm_deadline: u64 = 0;
-pub const PendingSessionKill = struct {
-    host: u8 = 0,
-    session: [64]u8 = std.mem.zeroes([64]u8),
-    session_len: u32 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u32 = 0,
-};
-pub const PENDING_SESSION_KILL_MAX: usize = 8;
-pub var g_pending_session_kills: [PENDING_SESSION_KILL_MAX]PendingSessionKill = [_]PendingSessionKill{.{}} ** PENDING_SESSION_KILL_MAX;
-pub var g_pending_session_kill_count: u32 = 0;
+pub var g_pending_session_kills: @import("session_kills.zig").Queue = .{};
 pub var g_pending_session_kill_mutex: SpinMutex = .{};
 pub var g_all_sessions_sel: u32 = 0;
 pub const AS_TAB_ALL: u32 = 200;
@@ -2931,6 +2935,8 @@ pub const ChatHistoryEntry = struct {
     resync: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
     loaded_ms: i64 = 0,
+    preview_loaded_ms: u64 = 0,
+    preview_status_ms: u64 = 0,
     disk_loaded: bool = false,
     loading_disk: bool = false,
     before: u64 = 0,
@@ -3203,6 +3209,7 @@ pub const ChatOutboxEntry = struct {
     queue_id: u64 = 0,
     message_nonce: u64 = 0,
     message_v1: bool = false,
+    message_admission_epoch: ?u64 = null,
     message_sid: [40]u8 = @splat(0),
     message_phase: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
@@ -3914,6 +3921,7 @@ pub const InboxRow = struct {
     cwd_len: u32 = 0,
     pv: [96]u8 = std.mem.zeroes([96]u8),
     pv_len: u32 = 0,
+    pv_question: bool = false,
     ag: u8 = 0,
     avatar_face: ?u8 = null,
     avatar_color: ?u8 = null,
@@ -3972,6 +3980,7 @@ pub const ChatTmuxSendJob = struct {
     message_nonce: u64 = 0,
     request_nonce: u64 = 0,
     message_v1: bool = false,
+    message_admission_epoch: ?u64 = null,
     message_status: bool = false,
     message_reset: bool = false,
     message_dismiss: bool = false,

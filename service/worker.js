@@ -1,5 +1,6 @@
 import { makeAuth, isAllowed, origins, mailConfigured, googleConfigured } from './auth.js';
 import { appPage, confirmPage } from './pages.js';
+import { remotePhotoKey, validPhotoPng } from './bot-photo.js';
 
 const now = () => Math.floor(Date.now() / 1000);
 const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -11,6 +12,8 @@ const layoutFeature = (request, token) => (request.headers.get('X-Layout-Feature
 function layoutResponse(request, value, status = 200) {
   if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
+    if (!layoutFeature(request, 'groups')) delete visible.group;
+    if (!layoutFeature(request, 'bot_photo')) delete visible.photo;
     if (!layoutFeature(request, 'favorite')) delete visible.favorite;
     if (!layoutFeature(request, 'muted')) delete visible.muted;
     if (!layoutFeature(request, 'used')) delete visible.used;
@@ -20,14 +23,20 @@ function layoutResponse(request, value, status = 200) {
       delete visible.face;
       delete visible.color;
     }
+    if (!layoutFeature(request, 'bot_palette8') && visible.color === 7) delete visible.color;
     return visible;
   }) } };
   if (value.layout && !layoutFeature(request, 'workspace_color')) value.layout.workspaces = value.layout.workspaces.map(({ color, ...workspace }) => workspace);
+  else if (value.layout && !layoutFeature(request, 'bot_palette8')) value.layout.workspaces = value.layout.workspaces.map(workspace => {
+    if (workspace.color !== 7) return workspace;
+    const { color, ...visible } = workspace;
+    return visible;
+  });
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups');
   return response;
 }
 export function validateLayout(x) {
@@ -52,13 +61,13 @@ export function validateLayout(x) {
   }
   const ws = new Set(), ids = new Set();
   for (const w of x.workspaces) {
-    if (!keys(w, ['name', ...(Object.hasOwn(w || {}, 'color') ? ['color'] : [])]) || (Object.hasOwn(w, 'color') && (!Number.isInteger(w.color) || w.color < 0 || w.color >= 7)) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
+    if (!keys(w, ['name', ...(Object.hasOwn(w || {}, 'color') ? ['color'] : [])]) || (Object.hasOwn(w, 'color') && (!Number.isInteger(w.color) || w.color < 0 || w.color >= 8)) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
     ws.add(w.name);
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 7) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' ? t.group !== '' && !text(t.group, 64) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
@@ -100,7 +109,7 @@ async function authenticateKey(db, key, pathname) {
   const keyHash = await hash(key);
   const row = await db.prepare('SELECT hash,account,kind,workspace FROM service_keys WHERE hash=? AND revoked=0').bind(keyHash).first();
   if (!row || row.kind !== (key[4] === 'a' ? 'admin' : 'workspace')) fail(401, 'device_required');
-  if (pathname !== '/v1/layout') fail(403, 'key_scope');
+  if (pathname !== '/v1/layout' && !/^\/v1\/bot-photos\/[0-9a-f]{64}$/.test(pathname)) fail(403, 'key_scope');
   await db.prepare('UPDATE service_keys SET last_used=? WHERE hash=?').bind(now(), keyHash).run();
   return { id: null, account: row.account, keyHash, kind: row.kind, workspace: row.workspace };
 }
@@ -316,6 +325,51 @@ export default {
         if (!result[0].meta.changes && !await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
         return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
       }
+      const photoMatch = url.pathname.match(/^\/v1\/bot-photos\/([0-9a-f]{64})$/);
+      if (photoMatch && ['GET', 'PUT', 'DELETE'].includes(request.method)) {
+        const key = photoMatch[1];
+        let png;
+        if (request.method === 'PUT') {
+          const b = await body(request, 90000, 'invalid_photo');
+          if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).length !== 1 || !validPhotoPng(b.png)) fail(400, 'invalid_photo');
+          png = b.png;
+        }
+        for (let attempt = 0; attempt < 20; attempt++) {
+          const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
+          if (!row) fail(503, 'layout_not_seeded');
+          const layout = JSON.parse(row.layout);
+          const tabs = scoped(device, layout).tabs;
+          let tab;
+          for (const candidate of tabs) {
+            if (await remotePhotoKey(candidate.tmux_host, candidate.tmux_session) === key) { tab = candidate; break; }
+          }
+          if (!tab) fail(404, 'not_found');
+          if (request.method === 'GET') {
+            const result = await db.batch([
+              db.prepare('SELECT png FROM bot_photos WHERE account=? AND key=? AND EXISTS (SELECT 1 FROM layouts WHERE account=? AND revision=?)').bind(device.account, key, device.account, row.revision),
+              db.prepare('SELECT revision FROM layouts WHERE account=?').bind(device.account)
+            ]);
+            if (result[1].results[0]?.revision !== row.revision) continue;
+            return result[0].results.length ? json({ png: result[0].results[0].png }) : json({ error: 'not_found' }, 404);
+          }
+          if (!Number.isSafeInteger(row.revision + 1)) fail(409, 'revision_exhausted');
+          if (request.method === 'PUT') tab.photo = row.revision + 1;
+          else delete tab.photo;
+          layout.revision = row.revision + 1;
+          const alive = device.keyHash ? ['EXISTS (SELECT 1 FROM service_keys WHERE hash=? AND revoked=0)', [device.keyHash]] : ['EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)', [device.id, device.account]];
+          const condition = 'EXISTS (SELECT 1 FROM layouts WHERE account=? AND revision=?) AND ' + alive[0];
+          const mutation = request.method === 'PUT'
+            ? db.prepare('INSERT INTO bot_photos (account,key,png,revision) SELECT ?,?,?,? WHERE ' + condition + ' ON CONFLICT(account,key) DO UPDATE SET png=excluded.png,revision=excluded.revision').bind(device.account, key, png, row.revision + 1, device.account, row.revision, ...alive[1])
+            : db.prepare('DELETE FROM bot_photos WHERE account=? AND key=? AND ' + condition).bind(device.account, key, device.account, row.revision, ...alive[1]);
+          const result = await db.batch([
+            mutation,
+            db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=? AND ' + alive[0]).bind(JSON.stringify(layout), device.account, row.revision, ...alive[1])
+          ]);
+          if (result[1].meta.changes) return json(request.method === 'PUT' ? { photo: tab.photo } : { deleted: true });
+          if (!await db.prepare('SELECT 1 AS ok WHERE ' + alive[0]).bind(...alive[1]).first()) fail(401, 'device_required');
+        }
+        fail(409, 'revision_conflict');
+      }
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
         const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
         if (!row) fail(503, 'layout_not_seeded');
@@ -325,11 +379,18 @@ export default {
         const b = await body(request);
         let layout = validateLayout(b.layout);
         if (!Number.isSafeInteger(b.base_revision) || b.base_revision < 0) fail(400, 'invalid_revision');
-        const row = await db.prepare('SELECT layout FROM layouts WHERE account=?').bind(device.account).first();
+        const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
         const previousLayout = row ? JSON.parse(row.layout) : null;
         const confined = device.kind === 'workspace';
         if (confined) layout = confine(device, layout, previousLayout);
+        if (row && row.revision !== b.base_revision) return reply({ revision: row.revision, layout: scoped(device, previousLayout) }, 409);
         const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal'].includes(feature)).join(',') }) } : request;
+        if (!layoutFeature(req, 'bot_palette8')) {
+          const previous = new Map((previousLayout?.workspaces || []).map(workspace => [workspace.name, workspace]));
+          for (const workspace of layout.workspaces) {
+            if (!Object.hasOwn(workspace, 'color') && previous.get(workspace.name)?.color === 7) workspace.color = 7;
+          }
+        }
         if (!layoutFeature(req, 'workspace_color')) {
           const storedWorkspaces = new Map((previousLayout?.workspaces || []).map(workspace => [workspace.name, workspace]));
           for (const workspace of layout.workspaces) {
@@ -359,8 +420,17 @@ export default {
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
+        const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
+          if (!layoutFeature(req, 'groups')) {
+            if (previous?.group !== undefined) tab.group = previous.group;
+            else delete tab.group;
+          }
+          const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
+          if (photo !== undefined) tab.photo = photo;
+          else delete tab.photo;
+          if (!layoutFeature(req, 'bot_palette8') && !Object.hasOwn(tab, 'color') && previous?.color === 7) tab.color = 7;
           if (!layoutFeature(req, 'bot_appearance')) {
             for (const field of ['face', 'color']) {
               if (previous?.[field] !== undefined) tab[field] = previous[field];

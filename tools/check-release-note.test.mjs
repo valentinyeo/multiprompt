@@ -60,7 +60,7 @@ test('a shipped change since the last release fails without a new fragment', t =
   const r = repo(t);
   r.git('tag', 'v0.28.735');
   r.write({ 'src/main.zig': `${main}pub const faster = 1;\n` });
-  r.commit('IGSH-2: Speed up startup');
+  r.commit('IGSH-154: Speed up startup');
   const result = r.run();
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /App code changed: add changelog\.d/);
@@ -75,7 +75,7 @@ test('a new fragment passes and a released change before the tag is not counted'
   r.commit('IGSH-1: Ship a change');
   r.git('tag', 'v0.28.735');
   r.write({ 'tools/release-note.mjs': 'export const ok = true;\n' });
-  r.commit('IGSH-2: Repair the check');
+  r.commit('IGSH-154: Repair the check');
   assert.equal(r.run().status, 0);
   r.write({ 'src/main.zig': `${main}pub const faster = 1;\n`, 'changelog.d/IGSH-3-startup.md': 'The app opens faster.\n' });
   r.commit('IGSH-3: Speed up startup');
@@ -88,7 +88,7 @@ test('an extension change is a shipped change and needs a note', t => {
   const r = repo(t);
   r.git('tag', 'v0.28.735');
   r.write({ 'extension/manifest.json': '{"version":"1.2.3"}\n' });
-  r.commit('IGSH-2: Repair the bridge');
+  r.commit('IGSH-154: Repair the bridge');
   const result = r.run();
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /App code changed/);
@@ -98,7 +98,7 @@ test('a No-Note commit line passes a change with no visible effect', t => {
   const r = repo(t);
   r.git('tag', 'v0.28.735');
   r.write({ 'src/main.zig': `${main}pub const renamed = 1;\n` });
-  r.commit('IGSH-2: Rename a helper\n\nNo-Note: pure rename, no behaviour change');
+  r.commit('IGSH-154: Rename a helper\n\nNo-Note: pure rename, no behaviour change');
   const result = r.run();
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'No-Note v0.28.735');
@@ -106,13 +106,15 @@ test('a No-Note commit line passes a change with no visible effect', t => {
 
 test('a release stamp passes without a note', t => {
   const r = repo(t);
-  r.write({ 'changelog.d/IGSH-2-startup.md': 'The app opens faster.\n' });
-  r.commit('IGSH-2: Speed up startup');
+  r.write({ 'changelog.d/IGSH-154-startup.md': 'The app opens faster.\n' });
+  r.commit('IGSH-154: Speed up startup');
   r.git('tag', 'v0.28.735');
-  const stamp = stampTree({ ...base(), 'src/main.zig': main, 'changelog.d/IGSH-2-startup.md': 'The app opens faster.\n' });
+  const stamp = stampTree({ ...base(), 'src/main.zig': main, 'changelog.d/IGSH-154-startup.md': 'The app opens faster.\n' });
+  const titles = JSON.parse(fs.readFileSync(new URL('./fixtures/IGSH-1681/ticket-titles.json', import.meta.url), 'utf8'));
+  assert.ok(stamp.files['src/changelog.zig'].includes(`IGSH-154 ${titles['IGSH-154']}`));
   r.write(stamp.files);
   for (const file of stamp.removed) r.remove(file);
-  r.commit(`v${stamp.version}: release IGSH-2`);
+  r.commit(`v${stamp.version}: release IGSH-154`);
   const result = r.run();
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'STAMP v0.28.735');
@@ -121,7 +123,7 @@ test('a release stamp passes without a note', t => {
 test('a repository with no release tag skips the check', t => {
   const r = repo(t);
   r.write({ 'src/main.zig': `${main}pub const faster = 1;\n` });
-  r.commit('IGSH-2: Speed up startup');
+  r.commit('IGSH-154: Speed up startup');
   const result = r.run();
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'SKIP no release tag');

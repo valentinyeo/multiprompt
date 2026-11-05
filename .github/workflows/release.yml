@@ -11,6 +11,8 @@ on:
     secrets:
       MULTIPROMPT_RELEASE_SIGNING_KEY:
         required: true
+      HYPERTASK_AGENT_TOKEN:
+        required: true
 
 permissions:
   contents: write
@@ -26,6 +28,7 @@ jobs:
       release_scan: true
 
   prepare:
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -77,6 +80,25 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve authoritative release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ steps.version.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+        run: |
+          test "$SHA" = "$(git rev-parse HEAD)" || { echo 'Release commit must be the trusted workflow commit' >&2; exit 1; }
+          git merge-base --is-ancestor "$SHA" origin/master
+          node tools/version-stamp.mjs build "$TAG"
+          node tools/release-notes.mjs src/changelog.zig "$TAG" release-notes.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-notes-source
+          path: |
+            src/changelog.zig
+            release-notes.json
+          if-no-files-found: error
+
   build:
     needs: prepare
     timeout-minutes: 15
@@ -103,12 +125,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-notes-source
       - name: Build
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          node tools/version-stamp.mjs build "$TAG"
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
           node --input-type=module - "$TAG" <<'NODE'
           import fs from 'node:fs';
@@ -200,13 +224,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Publish plain versioned update notes
-        env:
-          TAG: ${{ needs.prepare.outputs.tag }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node tools/version-stamp.mjs build "$TAG"
-          node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-notes-source
+      - name: Include versioned update notes
+        run: cp release-notes.json dist/release-notes.json
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
@@ -246,8 +268,19 @@ jobs:
           console.log(index !== -1 && versions[0][index] > versions[1][index]);
           NODE
           )
+          node --input-type=module <<'NODE' > release-body.txt
+          import fs from 'node:fs';
+          const document = JSON.parse(fs.readFileSync('dist/release-notes.json', 'utf8'));
+          const release = document.releases[0];
+          if (document.version !== process.env.TAG.slice(1) || !release?.changes?.length || release.changes.length !== release.tickets?.length) throw new Error('Invalid release notes');
+          for (const [index, line] of release.changes.entries()) {
+            const space = line.indexOf(' ');
+            const title = line.slice(space + 1).replaceAll('&', '&amp;').replace(/[\\`*_{}\[\]()<>#+.!|~-]/g, '\\$&');
+            console.log(`- [${line.slice(0, space)}](${release.tickets[index]}) ${title}`);
+          }
+          NODE
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
-            --latest="$latest" --title "multiprompt $TAG" --generate-notes
+            --latest="$latest" --title "multiprompt $TAG" --notes-file release-body.txt
       - name: Attach the symbolized twins for freeze reports
         continue-on-error: true
         env:

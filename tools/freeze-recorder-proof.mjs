@@ -26,16 +26,34 @@ export function validateFreezeReport(text) {
   for (const line of lines) assert.match(line, /^  \d+ 0x[0-9A-F]+ \d+ (?:terminal|chat|browser|inbox|search|sessions|shortcuts|changelog)$/);
 }
 
+export function validateWatchdogHealth(row) {
+  assert.equal(row.summary, 'Windows watchdog health');
+  assert.equal(row.thread, 'watchdog');
+  assert.equal(row.android_version, 'Windows');
+  const identity = /^watchdog-(\d+)-(\d+)-(\d+)-0$/.exec(row.report_id);
+  assert.ok(identity, 'typed first watchdog receipt identity');
+  const fields = /^observed_ms: (\d+)\nresponsive_ms: (\d+)\nunobserved_ms: (\d+)\nfreezes: (\d+)\n$/.exec(row.stack_trace);
+  assert.ok(fields, 'numeric-only coverage receipt');
+  const [observed, responsive, unobserved, freezes] = fields.slice(1).map(Number);
+  assert.ok(observed >= 60000 && responsive >= 55000 && responsive <= observed);
+  assert.equal(unobserved, 0);
+  assert.equal(freezes, 0);
+  assert.ok(observed <= (row.captured_at - Number(identity[1]) + 2) * 1000);
+}
+
 export function validateEvidence(directory) {
   validateFreezeReport(fs.readFileSync(path.join(directory, 'first-freeze.txt'), 'utf8'));
   const result = JSON.parse(fs.readFileSync(path.join(directory, 'result.json'), 'utf8'));
+  if (result.watchdogHealth) validateWatchdogHealth(JSON.parse(fs.readFileSync(path.join(directory, 'watchdog-health.json'), 'utf8').replace(/^\uFEFF/, '')));
   assert.equal(result.healthyReports, 0);
   assert.equal(result.firstStallReports, 1);
   assert.equal(result.secondStallReports, 2);
-  assert.equal(result.restartNotice, true);
+  assert.equal(result.restartNoticePixels, 0);
+  assert.ok(result.userActionNoticePixels >= 10, 'Explicit user action must still paint its reply');
   assert.equal(result.privateTextAbsent, true);
   assert.match(result.exeHash, /^[0-9A-F]{64}$/);
   assert.ok(fs.statSync(path.join(directory, 'next-start.png')).size > 1000);
+  assert.ok(fs.statSync(path.join(directory, 'user-action.png')).size > 1000);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

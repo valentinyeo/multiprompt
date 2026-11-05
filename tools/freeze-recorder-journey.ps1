@@ -14,6 +14,32 @@ public static class FreezeJourney {
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
+    [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
+    [StructLayout(LayoutKind.Sequential)] struct Keyboard { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
+    [StructLayout(LayoutKind.Explicit)] struct Data { [FieldOffset(0)] public Mouse Mouse; [FieldOffset(0)] public Keyboard Keyboard; }
+    [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public Data Data; }
+    [DllImport("user32.dll")] static extern uint SendInput(uint count, Input[] inputs, int size);
+    public static void Activate(IntPtr window) {
+        Input[] input = new Input[2];
+        for (int i = 0; i < input.Length; i++) {
+            input[i].Type = 1;
+            input[i].Data.Keyboard = new Keyboard { Key = 0x12, Flags = i == 0 ? 0u : 2u };
+        }
+        if (SendInput(2, input, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Activation SendInput failed");
+        SetForegroundWindow(window);
+    }
+    public static void FontBigger() {
+        Input[] input = new Input[4];
+        ushort[] keys = { 0x11, 0xBB, 0xBB, 0x11 };
+        for (int i = 0; i < input.Length; i++) {
+            input[i].Type = 1;
+            input[i].Data.Keyboard = new Keyboard { Key = keys[i], Flags = i < 2 ? 0u : 2u };
+        }
+        if (SendInput(4, input, Marshal.SizeOf(typeof(Input))) != 4) throw new InvalidOperationException("Font command SendInput failed");
+    }
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -42,8 +68,8 @@ if ($AccountState) {
     [IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), $protected)
     Remove-Item Env:MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue
 }
-function Service-Reports {
-    return @((Invoke-RestMethod "$Service/__journey/reports").reports)
+function Service-Reports([string]$Summary = 'Windows freeze') {
+    return @((Invoke-RestMethod "$Service/__journey/reports").reports | Where-Object { $_.summary -eq $Summary })
 }
 function Wait-Uploads([int]$Count) {
     $deadline = [DateTime]::UtcNow.AddSeconds(50)
@@ -69,6 +95,27 @@ function Wait-Window {
     } while ([DateTime]::UtcNow -lt $until)
     throw 'Window never responded'
 }
+function Capture-NoticePixels([string]$Name) {
+    $rect = New-Object FreezeJourney+Rect
+    if (-not [FreezeJourney]::GetWindowRect($script:window, [ref]$rect)) { throw 'Missing owned window bounds' }
+    $bitmap = New-Object Drawing.Bitmap ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $dc = $graphics.GetHdc()
+        try { if (-not [FreezeJourney]::PrintWindow($script:window, $dc, 2)) { throw 'Cannot capture owned window' } }
+        finally { $graphics.ReleaseHdc($dc) }
+        $bitmap.Save((Join-Path $Evidence $Name))
+        $orange = 0
+        $scale = [FreezeJourney]::GetDpiForWindow($script:window) / 96.0
+        for ($y = [int](32 * $scale); $y -lt [Math]::Min([int](64 * $scale), $bitmap.Height); $y++) {
+            for ($x = [int]($bitmap.Width / 2); $x -lt $bitmap.Width - 8; $x++) {
+                $color = $bitmap.GetPixel($x, $y)
+                if ($color.R -ge 120 -and $color.G -ge 60 -and $color.G -le 220 -and $color.B -le 130 -and $color.R -ge $color.G + 20 -and $color.G -ge $color.B + 15) { $orange++ }
+            }
+        }
+        return $orange
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
 function Reports { return @(Get-ChildItem $crashes -Filter 'freeze-*.txt' -ErrorAction SilentlyContinue) }
 function Stall([bool]$VerifyLive = $false) {
     if ([FreezeJourney]::SuspendThread($script:thread) -eq [uint32]::MaxValue) { throw 'Cannot suspend fixture main thread' }
@@ -93,6 +140,22 @@ try {
     $window = Wait-Window $app
     Start-Sleep -Seconds 12
     if (@(Reports).Count -ne 0) { throw 'Healthy window wrote a freeze report' }
+    $healthReceipt = $null
+    if ($Service) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(80)
+        do {
+            $healthRows = @(Service-Reports 'Windows watchdog health')
+            if ($healthRows.Count -gt 0) { break }
+            if ($app.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Actual watchdog coverage never reached the report service' }
+            Start-Sleep -Milliseconds 250
+        } while ($true)
+        if ($healthRows.Count -ne 1) { throw 'Initial coverage receipt was duplicated' }
+        $healthReceipt = $healthRows[0]
+        $coverage = [regex]::Match($healthReceipt.stack_trace, '\Aobserved_ms: (\d+)\nresponsive_ms: (\d+)\nunobserved_ms: (\d+)\nfreezes: (\d+)\n\z')
+        if (!$coverage.Success -or [long]$coverage.Groups[1].Value -lt 60000 -or [long]$coverage.Groups[2].Value -lt 55000 -or [long]$coverage.Groups[4].Value -ne 0 -or $healthReceipt.thread -ne 'watchdog' -or $healthReceipt.report_id -notmatch '^watchdog-\d+-\d+-\d+-0$') { throw 'Watchdog health receipt lacks actual healthy coverage' }
+        $healthReceipt | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $Evidence 'watchdog-health.json')
+        if (@(Reports).Count -ne 0) { throw 'Healthy coverage interval wrote a freeze report' }
+    }
     $privateText = 'PRIVATE-FREEZE-FIXTURE-message-host-path'
     [IO.File]::AppendAllText((Join-Path $env:APPDATA 'ZigShell/debug.log'), $privateText)
     $owner = [uint32]0
@@ -118,18 +181,21 @@ try {
     $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
     $window = Wait-Window $app
     Start-Sleep -Seconds 3
-    $rect = New-Object FreezeJourney+Rect
-    if (-not [FreezeJourney]::GetWindowRect($window, [ref]$rect)) { throw 'Missing notice window bounds' }
-    $bitmap = New-Object Drawing.Bitmap ($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    $dc = $graphics.GetHdc()
-    try { if (-not [FreezeJourney]::PrintWindow($window, $dc, 2)) { throw 'Cannot capture next-start notice' } } finally { $graphics.ReleaseHdc($dc) }
-    $bitmap.Save((Join-Path $Evidence 'next-start.png'))
-    $graphics.Dispose()
-    $bitmap.Dispose()
+    $restartNoticePixels = Capture-NoticePixels 'next-start.png'
+    if ($restartNoticePixels -ne 0) { throw "Unprompted restart notice remains: $restartNoticePixels orange pixels" }
+    [FreezeJourney]::Activate($window)
+    $focusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([FreezeJourney]::GetForegroundWindow() -ne $window) {
+        if ($app.HasExited -or [DateTime]::UtcNow -gt $focusDeadline) { throw 'Cannot focus owned app for action feedback' }
+        Start-Sleep -Milliseconds 50
+    }
+    [FreezeJourney]::FontBigger()
+    Start-Sleep -Milliseconds 250
+    $userActionNoticePixels = Capture-NoticePixels 'user-action.png'
+    if ($userActionNoticePixels -lt 10) { throw 'User font command lost its visible feedback' }
     $log = -join (Get-Content -LiteralPath (Join-Path $env:APPDATA 'ZigShell/debug.log') -Raw)
-    if (-not $log.Contains('Multi Bot froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
-    if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Next-start notice was not consumed' }
+    if (-not $log.Contains('Multi Bot froze last time, a report was saved')) { throw 'Quiet restart lost the saved freeze diagnostic' }
+    if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Quiet restart did not consume the freeze marker' }
     if (@(Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
     if ($Service) {
         if (@(Get-ChildItem $crashes -Filter 'upload-*.json').Count -ne 1) { throw 'Restart lost pending report' }
@@ -156,7 +222,7 @@ try {
         @{ device = $state.device_id; version = ([regex]::Match($text, '(?m)^version: (.+)$')).Groups[1].Value; captured = ([regex]::Match($text, '(?m)^time_unix: (.+)$')).Groups[1].Value } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'live-result.json')
         Write-Host 'FREEZE_LIVE_UPLOAD_OK'
     }
-    @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
+    @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; watchdogHealth = [bool]$healthReceipt; restartNoticePixels = $restartNoticePixels; userActionNoticePixels = $userActionNoticePixels; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
     Stop-Process -Id $app.Id -Force
     if (-not $app.WaitForExit(5000)) { throw 'Original freeze journey process did not exit' }
     $app.Dispose()

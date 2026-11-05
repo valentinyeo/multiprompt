@@ -139,3 +139,40 @@ test('fixture cleanup snapshots each live process path once and tolerates inacce
   assert.match(cleanup, /Stop-Process -Id \$_\.Id -Force -ErrorAction SilentlyContinue/);
   assert.match(cleanup, /WaitForExit\(5000\)/);
 });
+
+const assertSharedLogRetry = suite => {
+  const reader = suite.split('function Read-SharedLog(')[1]?.split('function Wait-CardView(')[0] || '';
+  assert.match(reader, /\$deadline = \[DateTime\]::UtcNow\.AddSeconds\(3\)\s+do \{\s+try \{[\s\S]*?\} catch \{\s+\$cause = \$_\.Exception\.GetBaseException\(\)\s+if \(\$cause -isnot \[IO\.IOException\]\) \{ throw \}\s+\$code = \$cause\.HResult -band 0xffff\s+if \(\$code -in @\(2, 3\)\) \{ return '' \}\s+if \(\$code -notin @\(32, 33\)\) \{ throw \}\s+if \(\$Polling\) \{ return '' \}\s+if \(\[DateTime\]::UtcNow -gt \$deadline\) \{ throw \}\s+Start-Sleep -Milliseconds 25\s+\}\s+\} while \(\$true\)/);
+};
+
+test('shared log retry guard rejects lost failure bounds', () => {
+  const suite = read('tools/update-release.test.ps1');
+  assertSharedLogRetry(suite);
+  for (const [before, after] of [
+    ['AddSeconds(3)', 'AddSeconds(300)'],
+    ['if ([DateTime]::UtcNow -gt $deadline) { throw }', ''],
+    ['if ($Polling) { return \'\' }', ''],
+    ['if ($code -notin @(32, 33)) { throw }', ''],
+    ['if ($cause -isnot [IO.IOException]) { throw }', ''],
+  ]) {
+    assert.ok(suite.includes(before), before);
+    assert.throws(() => assertSharedLogRetry(suite.replace(before, after)), before);
+  }
+});
+
+test('update card journey uses checked native input and reads a live log', () => {
+  const suite = read('tools/update-release.test.ps1');
+  const click = suite.split('function Click-CardMore($View) {')[1].split('function Select-Release')[0];
+  assert.match(click, /SetThreadDpiAwarenessContext\(\[IntPtr\]\(-4\)\)/);
+  assert.match(click, /WindowFromPoint\(\$point\) -eq \$hwnd/);
+  assert.match(click, /GetForegroundWindow\(\) -eq \$hwnd/);
+  assert.match(click, /SetCursorPos\(\$point\.X, \$point\.Y\)[\s\S]*\[UpdateProof\]::Click\(\)/);
+  assert.match(suite, /SendInput\(1, new Input\[\] \{ input \}, Marshal.SizeOf\(typeof\(Input\)\)\) != 1/);
+  assert.match(suite, /new uint\[\] \{ 2, 4 \}/);
+  assert.match(suite, /Click-CardMore \$collapsed\s+\$expanded = Wait-CardView \$log \$collapsed\.logEnd 'expanded'/);
+  assert.match(suite, /Click-CardMore \$expanded\s+\$null = Wait-CardView \$log \$expanded\.logEnd 'collapsed'/);
+  assert.match(suite, /\[IO\.FileShare\]::ReadWrite -bor \[IO\.FileShare\]::Delete/);
+  assertSharedLogRetry(suite);
+  assert.match(suite, /shared log reads while writer remains open/);
+  assert.doesNotMatch(suite, /\[IO\.File\]::ReadAllText\(\$Path\)|Get-Content \$log -Raw/);
+});

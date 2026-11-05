@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
     }
     if (working) {
         COORD status = {0, (SHORT)(info.srWindow.Bottom - 2)};
-        const WCHAR *thinking = L"\x273b Thinking\x2026 (esc to interrupt)";
+        const WCHAR *thinking = inline_working ? L"\x273b Inspecting files\x2026 (esc to interrupt)" : L"\x273b Thinking\x2026 (esc to interrupt)";
         if (!SetConsoleCursorPosition(output, status) || !WriteConsoleW(output, thinking, (DWORD)wcslen(thinking), &written, NULL)) return 4;
     }
     if (!SetConsoleCursorPosition(output, origin)) return 4;
