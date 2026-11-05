@@ -326,6 +326,10 @@ pub fn build(b: *std.Build) void {
     const end_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/end-session.test.js", "tools/session-actions.test.js" });
     test_step.dependOn(&end_session_tests.step);
     vps_test_step.dependOn(&end_session_tests.step);
+    const archive_provider_tests = b.addSystemCommand(&.{ "node", "--test", "tools/archive-provider.test.js" });
+    archive_provider_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&archive_provider_tests.step);
+    vps_test_step.dependOn(&archive_provider_tests.step);
     const session_end_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/session_end.zig"),
         .target = target,
