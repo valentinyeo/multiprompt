@@ -77,7 +77,7 @@ test('reported project cwd takes priority over the terminal carrier', () => {
   assert.match(resolver, /const reported = if \(shell\.claude_cwd_len > 0\) workspaceHomeCandidate\(cwd, shell\.claude_cwd\[0\.\.shell\.claude_cwd_len\]\) else null;/);
   assert.match(resolver, /const candidate = reported orelse if \(live\) continue else blk: \{[\s\S]*shellKnownRemotePath\(shell, host\) orelse continue;[\s\S]*workspaceHomeCandidate\(cwd, known\) orelse continue;/);
   assert.match(resolver, /if \(i == app_state\.active_shell\) return/);
-  assert.match(resolver, /if \(ambiguous\) return null/);
+  assert.match(resolver, /if \(ambiguous\) return cwd/);
 });
 
 test('live launch resolves before passing cwd to host', () => {
