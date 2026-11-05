@@ -73,8 +73,7 @@ test('URL focus waits for modifiers and cancels stale handoffs', () => {
   assert.ok(start >= 0 && end > start);
   const production = browser.slice(start, end)
     .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
-    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()')
-    .replaceAll('@import("win32.zig").GetLastError()', 'GetLastError()');
+    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()');
   const fixture = `
 const std = @import("std");
 const HANDLE = ?*anyopaque;
@@ -83,13 +82,15 @@ const main: HANDLE = @ptrFromInt(1);
 const console: HANDLE = @ptrFromInt(2);
 const parent: HANDLE = @ptrFromInt(3);
 const edit: HANDLE = @ptrFromInt(4);
+const foreign: HANDLE = @ptrFromInt(5);
 var foreground: HANDLE = console;
 var focused: HANDLE = null;
 var held: i32 = 0;
 var now: u64 = 100;
 var owned = true;
-var attach_count: usize = 0;
-var detach_count: usize = 0;
+var foreground_attempts: usize = 0;
+var switch_count: usize = 0;
+var interrupt: u8 = 0;
 var killed: usize = 0;
 const app_state = struct {
     var g_main_hwnd: HANDLE = main;
@@ -103,8 +104,6 @@ const app_state = struct {
     var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 };
 fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
-fn altqLog(_: []const u8, _: anytype) void {}
-fn altqPtr(hwnd: HANDLE) usize { return if (hwnd) |h| @intFromPtr(h) else 0; }
 fn focusGuardReadMouse() void {}
 fn IsWindow(h: HANDLE) i32 { return if (h != null) 1 else 0; }
 fn GetTickCount64() u64 { return now; }
@@ -113,14 +112,13 @@ fn GetAsyncKeyState(key: i32) i16 { return if (key == held) -32768 else 0; }
 fn focusGuard(_: HANDLE) bool { return true; }
 fn GetForegroundWindow() HANDLE { return foreground; }
 fn GetFocus() HANDLE { return focused; }
-fn GetWindowThreadProcessId(h: HANDLE, _: ?*u32) u32 { return if (h == console) 2 else 1; }
-fn GetCurrentThreadId() u32 { return 1; }
-fn GetLastError() u32 { return 0; }
-fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 {
-    if (attach != 0) attach_count += 1 else detach_count += 1;
-    return 1;
+fn SetForegroundWindow(_: HANDLE) i32 {
+    foreground_attempts += 1;
+    if (interrupt == 1) { foreground = foreign; owned = false; }
+    if (interrupt == 2) app_state.g_focus_input_tick = 11;
+    return 0;
 }
-fn SetForegroundWindow(h: HANDLE) i32 { foreground = h; return 1; }
+fn SwitchToThisWindow(h: HANDLE, _: i32) void { switch_count += 1; foreground = h; }
 fn SetFocus(h: HANDLE) HANDLE { const previous = focused; focused = h; return previous; }
 
 ${production}
@@ -140,22 +138,36 @@ fn reset() void {
     held = 0;
     now = 100;
     owned = true;
-    attach_count = 0;
-    detach_count = 0;
+    foreground_attempts = 0;
+    switch_count = 0;
+    interrupt = 0;
     killed = 0;
 }
-test "held modifiers defer without attaching; release focuses the editor" {
+test "held modifiers defer; release focuses after foreground refusal" {
     for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
         reset(); held = key;
         browserUrlFocusTick();
-        try std.testing.expectEqual(@as(usize, 0), attach_count);
+        try std.testing.expectEqual(@as(usize, 0), foreground_attempts);
+        try std.testing.expectEqual(@as(usize, 0), switch_count);
         try std.testing.expectEqual(console, foreground);
         held = 0;
         browserUrlFocusTick();
-        try std.testing.expectEqual(@as(usize, 1), attach_count);
-        try std.testing.expectEqual(@as(usize, 1), detach_count);
+        try std.testing.expectEqual(@as(usize, 1), foreground_attempts);
+        try std.testing.expectEqual(@as(usize, 1), switch_count);
         try std.testing.expectEqual(parent, foreground);
         try std.testing.expectEqual(edit, focused);
+        try std.testing.expectEqual(@as(usize, 1), killed);
+    }
+}
+test "intervening foreign focus or input blocks the fallback" {
+    for ([_]u8{ 1, 2 }) |cause| {
+        reset();
+        interrupt = cause;
+        browserUrlFocusTick();
+        try std.testing.expectEqual(@as(usize, 1), foreground_attempts);
+        try std.testing.expectEqual(@as(usize, 0), switch_count);
+        try std.testing.expectEqual(@as(HANDLE, null), focused);
+        browserUrlFocusTick();
         try std.testing.expectEqual(@as(usize, 1), killed);
     }
 }
@@ -170,7 +182,8 @@ test "foreign foreground, newer input, expired request and destroyed edit cancel
             else => unreachable,
         }
         browserUrlFocusTick();
-        try std.testing.expectEqual(@as(usize, 0), attach_count);
+        try std.testing.expectEqual(@as(usize, 0), foreground_attempts);
+        try std.testing.expectEqual(@as(usize, 0), switch_count);
         try std.testing.expectEqual(@as(usize, 1), killed);
         try std.testing.expectEqual(console, foreground);
     }

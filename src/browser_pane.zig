@@ -197,6 +197,7 @@ const focusGuard = @import("focus.zig").focusGuard;
 const SetForegroundWindow = @import("focus.zig").SetForegroundWindow;
 const SetFocus = @import("focus.zig").SetFocus;
 const AttachThreadInput = @import("focus.zig").AttachThreadInput;
+const SwitchToThisWindow = @import("focus.zig").SwitchToThisWindow;
 const ShowWindow = @import("focus.zig").ShowWindow;
 const ShowWindowAsync = @import("focus.zig").ShowWindowAsync;
 const SetWindowPos = @import("focus.zig").SetWindowPos;
@@ -5878,45 +5879,41 @@ pub fn browserUrlFocusTick() void {
         app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != url_focus_shell_id or
         GetTickCount64() >= url_focus_deadline or app_state.g_focus_input_tick != url_focus_input_tick or !foregroundIsOurs())
     {
-        altqLog("url_timer cancel edit={X} current={X} is_url={} edit_live={} parent_live={} shell={} requested_shell={} now={} deadline={} input={} requested_input={} ours={} fg={X}", .{ altqPtr(url_focus_edit), altqPtr(app_state.g_edit_hwnd), app_state.g_edit_is_browser_urlbar, IsWindow(url_focus_edit) != 0, IsWindow(url_focus_parent) != 0, if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0, url_focus_shell_id, GetTickCount64(), url_focus_deadline, app_state.g_focus_input_tick, url_focus_input_tick, foregroundIsOurs(), altqPtr(GetForegroundWindow()) });
         cancelUrlBarFocus();
         return;
     }
     for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
-        if (GetAsyncKeyState(key) < 0) {
-            altqLog("url_timer held key={X} left={} fg={X}", .{ key, url_focus_deadline -| GetTickCount64(), altqPtr(GetForegroundWindow()) });
-            return;
-        }
+        if (GetAsyncKeyState(key) < 0) return;
     }
     if (!focusGuard(url_focus_parent)) {
-        altqLog("url_timer guard_block parent={X} fg={X} auth={X} until={} input={}", .{ altqPtr(url_focus_parent), altqPtr(GetForegroundWindow()), altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until, app_state.g_focus_input_tick });
         cancelUrlBarFocus();
         return;
     }
     const fg = GetForegroundWindow();
-    const fg_thread = GetWindowThreadProcessId(fg, null);
-    const our_thread = GetCurrentThreadId();
-    const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
-    const attach_error = @import("win32.zig").GetLastError();
-    altqLog("url_timer attach fg={X} current_fg={X} fg_tid={} ui_tid={} attached={} error={} auth={X} until={}", .{ altqPtr(fg), altqPtr(GetForegroundWindow()), fg_thread, our_thread, attached, attach_error, altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until });
-    if (fg_thread != 0 and (fg_thread == our_thread or attached) and GetForegroundWindow() == fg and foregroundIsOurs()) {
-        const foreground_result = SetForegroundWindow(url_focus_parent);
-        altqLog("url_timer foreground result={} fg={X} parent={X} focus={X}", .{ foreground_result, altqPtr(GetForegroundWindow()), altqPtr(url_focus_parent), altqPtr(GetFocus()) });
+    if (!foregroundIsOurs() or GetForegroundWindow() != fg) {
+        cancelUrlBarFocus();
+        return;
+    }
+    if (fg != url_focus_parent) {
+        _ = SetForegroundWindow(url_focus_parent);
         @import("focus.zig").focusGuardReadMouse();
-        if (GetForegroundWindow() == url_focus_parent and app_state.g_focus_input_tick == url_focus_input_tick and
-            app_state.g_edit_hwnd == url_focus_edit and IsWindow(url_focus_edit) != 0 and
+        if (GetForegroundWindow() == fg and foregroundIsOurs() and GetTickCount64() < url_focus_deadline and
+            app_state.g_focus_input_tick == url_focus_input_tick and app_state.g_edit_hwnd == url_focus_edit and
+            IsWindow(url_focus_edit) != 0 and IsWindow(url_focus_parent) != 0 and
             app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
         {
-            app_state.g_focus_authorized_hwnd = url_focus_edit;
-            app_state.g_focus_authorized_until = url_focus_deadline;
-            const previous_focus = SetFocus(url_focus_edit);
-            altqLog("url_timer focus previous={X} focus={X} edit={X} fg={X}", .{ altqPtr(previous_focus), altqPtr(GetFocus()), altqPtr(url_focus_edit), altqPtr(GetForegroundWindow()) });
-        } else {
-            altqLog("url_timer focus_skipped fg={X} parent={X} input={} requested_input={} edit={X} current={X}", .{ altqPtr(GetForegroundWindow()), altqPtr(url_focus_parent), app_state.g_focus_input_tick, url_focus_input_tick, altqPtr(url_focus_edit), altqPtr(app_state.g_edit_hwnd) });
+            SwitchToThisWindow(url_focus_parent, 0);
         }
     }
-    if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
-    altqLog("url_timer detached={} fg={X} parent={X} focus={X} edit={X}", .{ attached, altqPtr(GetForegroundWindow()), altqPtr(url_focus_parent), altqPtr(GetFocus()), altqPtr(url_focus_edit) });
+    @import("focus.zig").focusGuardReadMouse();
+    if (GetForegroundWindow() == url_focus_parent and app_state.g_focus_input_tick == url_focus_input_tick and
+        GetTickCount64() < url_focus_deadline and app_state.g_edit_hwnd == url_focus_edit and IsWindow(url_focus_edit) != 0 and
+        app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
+    {
+        app_state.g_focus_authorized_hwnd = url_focus_edit;
+        app_state.g_focus_authorized_until = url_focus_deadline;
+        _ = SetFocus(url_focus_edit);
+    }
     if (GetForegroundWindow() == url_focus_parent and GetFocus() == url_focus_edit) cancelUrlBarFocus();
 }
 
@@ -5969,8 +5966,7 @@ pub fn startBrowserUrlBarEdit() void {
         url_focus_shell_id = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_focus_authorized_hwnd = edit_parent;
         app_state.g_focus_authorized_until = url_focus_deadline;
-        const timer_result = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
-        altqLog("url_timer start edit={X} parent={X} fg={X} input={} shell={} deadline={} timer={}", .{ altqPtr(url_focus_edit), altqPtr(url_focus_parent), altqPtr(GetForegroundWindow()), url_focus_input_tick, url_focus_shell_id, url_focus_deadline, timer_result });
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
         browserUrlFocusTick();
     }
 }
