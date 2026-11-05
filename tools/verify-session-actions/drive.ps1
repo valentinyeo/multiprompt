@@ -61,6 +61,7 @@ function Focus {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
 }
 function Press([int[]]$Keys) {
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
     if ($app.HasExited -or [ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell' -or [ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Keyboard owner mismatch' }
     $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='keys'; keys=$Keys})
     [VerifyNative]::Chord($Keys)
