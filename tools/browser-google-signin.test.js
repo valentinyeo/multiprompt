@@ -41,9 +41,16 @@ test('IGSH-1507 a rejected Google sign-in page turns the controlled pane into a 
   assert.match(pane, /const browser_signin = @import\("browser_signin\.zig"\);|@import\("browser_signin\.zig"\)/);
   assert.match(pane, /pub fn signInGoogleForShell\(idx: u32\) bool \{/);
   const body = functionBody(pane, 'signInGoogleForShell');
-  assert.match(body, /browser_signin\.plainProfileLaunch\(&cmd_buf, browserExePath\(\), dir, browserProfile\(\)\)/,
-    'the plain window must reuse the tab own profile directory');
-  assert.match(body, /closeBrowserForShell\(idx\);/, 'the controlled Chrome for this pane must be closed first');
+  assert.match(body, /browser_signin\.plainProfileLaunch\(&cmd_buf, exe, dir, browserProfile\(\)\)/,
+    'the plain window must reuse the verified executable and tab own profile directory');
+  assert.match(body, /closeBrowserForShell\(@intCast\(i\)\);/, 'all managed panes sharing the profile must close');
+  assert.match(body, /std\.mem\.eql\(u8, &app_state\.shells\[i\]\.browser_profile_token, &profile\)/);
+  const worker = functionBody(pane, 'browserSigninWorker');
+  assert.ok(worker.indexOf('WaitForSingleObject(job.process, 15_000)') < worker.indexOf('CreateProcessW('),
+    'the actual controlled process must exit before starting plain Chrome');
+  assert.match(worker, /WaitForSingleObject\(pi\.hProcess, 250\)/, 'the reservation must outlive plain Chrome');
+  const launch = functionBody(pane, 'launchBrowserForShellEx');
+  assert.match(launch, /browserSigninProfileBusy\(launch_engine, launch_profile\)/, 'same-profile relaunch must be blocked');
   assert.match(body, /browser_enabled = false;/, 'the pane must not relaunch the controlled browser straight away');
   const hook = pane.slice(pane.indexOf('fn offerPlainSigninForRejectedPage('), pane.indexOf('fn offerPlainSigninForRejectedPage(') + 400);
   assert.match(hook, /browser_signin\.rejectedSigninUrl\(url\)/, 'the rejected page must be recognised from the pane URL');

@@ -287,6 +287,7 @@ pub const WM_APP_BROWSER_LIFECYCLE_DONE: u32 = WM_APP + 208;
 pub const WM_APP_MORE_MENU_ACTION: u32 = WM_APP + 209;
 pub const WM_APP_SETTINGS_OPEN: u32 = WM_APP + 210;
 pub const WM_APP_APP_SAVE_FAILED: u32 = WM_APP + 211;
+pub const WM_APP_BROWSER_SIGNIN_DONE: u32 = WM_APP + 212;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;
@@ -706,6 +707,8 @@ pub extern "kernel32" fn GetEnvironmentVariableW(name: [*:0]const u16, buf: [*]u
 pub extern "kernel32" fn GetCommandLineA() callconv(WINAPI) [*:0]const u8;
 pub extern "kernel32" fn GetSystemDirectoryW([*]u16, UINT) callconv(WINAPI) UINT;
 pub extern "kernel32" fn GetCurrentProcess() callconv(WINAPI) HANDLE;
+pub extern "kernel32" fn DuplicateHandle(HANDLE, HANDLE, HANDLE, *HANDLE, DWORD, BOOL, DWORD) callconv(WINAPI) BOOL;
+pub const DUPLICATE_SAME_ACCESS: DWORD = 0x00000002;
 pub extern "advapi32" fn OpenProcessToken(HANDLE, DWORD, *HANDLE) callconv(WINAPI) BOOL;
 pub extern "advapi32" fn GetTokenInformation(HANDLE, DWORD, ?*anyopaque, DWORD, *DWORD) callconv(WINAPI) BOOL;
 pub extern "advapi32" fn EqualSid(*const anyopaque, *const anyopaque) callconv(WINAPI) BOOL;

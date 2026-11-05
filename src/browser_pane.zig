@@ -3342,6 +3342,16 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_launch, timing_started);
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx) or @import("computer_pane.zig").chosenFor(idx)) return;
+    const launch_engine = app_state.g_browser_engine;
+    var launch_profile_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;
+    const launch_profile = ownProfileTokenForLaunch(idx, &launch_profile_buf) orelse "";
+    if (browserSigninProfileBusy(launch_engine, launch_profile)) {
+        app_state.shells[idx].browser_enabled = false;
+        showHeaderNoticeAscii("Close the Google sign-in window before reopening this profile", 5000, true);
+        saveSession();
+        publishInboxState();
+        return;
+    }
     if (app_state.shells[idx].browser_launch_tick != 0 or app_state.shells[idx].browser_open_failed) return;
     if (app_state.g_browser_adopt_target_idx != 0xFFFFFFFF) return;
     const launch_now = GetTickCount64();
@@ -4264,20 +4274,183 @@ test "IGSH-523 cancelled launches reuse expired slots and evict oldest when full
     try std.testing.expectEqual(@as(usize, 0), cancelledBrowserLaunchSlot(&launches, 1000));
 }
 
+const BrowserSigninReservation = struct {
+    profile: [32]u8,
+    engine: BrowserEngine,
+    operation_id: usize,
+    finished: HANDLE,
+};
+
+const BrowserSigninJob = struct {
+    command: [2048:0]u16,
+    owner: HANDLE,
+    process: HANDLE,
+    start: HANDLE,
+    finished: HANDLE,
+    operation_id: usize,
+};
+
+var browser_signin_reservation: ?BrowserSigninReservation = null;
+var browser_signin_operation_id: usize = 0;
+
+fn clearFinishedBrowserSignin() void {
+    const reservation = browser_signin_reservation orelse return;
+    if (WaitForSingleObject(reservation.finished, 0) != 0) return;
+    _ = CloseHandle(reservation.finished);
+    browser_signin_reservation = null;
+}
+
+fn browserSigninProfileBusy(engine: BrowserEngine, profile: []const u8) bool {
+    clearFinishedBrowserSignin();
+    const reservation = browser_signin_reservation orelse return false;
+    return reservation.engine == engine and std.mem.eql(u8, std.mem.sliceTo(&reservation.profile, 0), profile);
+}
+
+pub fn handleBrowserSigninDone(operation_id: usize, status: usize) void {
+    const reservation = browser_signin_reservation orelse return;
+    if (reservation.operation_id != operation_id) return;
+    clearFinishedBrowserSignin();
+    if (browser_signin_reservation != null or app_state.g_app_closing) return;
+    if (status == 0) showHeaderNoticeAscii("Could not open Google sign-in; close remaining profile windows and retry", 8000, true);
+}
+
+fn browserSigninWorker(job: *BrowserSigninJob) void {
+    crash_recorder.guardThread();
+    defer std.heap.page_allocator.destroy(job);
+    defer _ = CloseHandle(job.process);
+    defer _ = CloseHandle(job.start);
+    defer _ = CloseHandle(job.finished);
+    var status: usize = 0;
+    defer {
+        _ = @import("win32.zig").SetEvent(job.finished);
+        _ = PostMessageW(job.owner, @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE, status, @bitCast(job.operation_id));
+    }
+    if (WaitForSingleObject(job.start, 15_000) != 0) return;
+    if (WaitForSingleObject(job.process, 15_000) != 0) return;
+    if (IsWindow(job.owner) == 0) return;
+    var si = std.mem.zeroes(STARTUPINFOW);
+    si.cb = @sizeOf(STARTUPINFOW);
+    var pi: PROCESS_INFORMATION = undefined;
+    if (CreateProcessW(null, &job.command, null, null, 0, 0, null, null, &si, &pi) == 0) return;
+    _ = CloseHandle(pi.hThread);
+    defer _ = CloseHandle(pi.hProcess);
+    while (IsWindow(job.owner) != 0) {
+        const result = WaitForSingleObject(pi.hProcess, 250);
+        if (result == 0) {
+            status = 1;
+            return;
+        }
+        if (result != 258) return;
+    }
+    status = 1;
+}
+
 pub fn signInGoogleForShell(idx: u32) bool {
-    if (idx >= app_state.shell_count) return false;
+    if (app_state.g_app_closing or idx >= app_state.shell_count) return false;
+    const engine = app_state.g_browser_engine;
     const own_token = browserProfileToken(idx);
-    if (own_token.len == 0) return false;
+    if (engine != .chrome or !browser_own_profile.isToken(own_token)) return false;
+    clearFinishedBrowserSignin();
+    if (browser_signin_reservation != null) {
+        showHeaderNoticeAscii("Close the Google sign-in window before starting another sign-in", 5000, true);
+        return true;
+    }
+    var started = false;
+    defer if (!started) showHeaderNoticeAscii("Could not open Google sign-in; wait for profile panes and retry", 8000, true);
+    const owner = app_state.g_main_hwnd orelse return true;
+    if (IsWindow(owner) == 0) return true;
+    const profile = app_state.shells[idx].browser_profile_token;
+    const win = @import("win32.zig");
+    var process: HANDLE = null;
+    defer {
+        if (!started and process != null) _ = CloseHandle(process);
+    }
+    var canonical_pid: DWORD = 0;
+    for (0..app_state.shell_count) |i| {
+        if (!std.mem.eql(u8, &app_state.shells[i].browser_profile_token, &profile)) continue;
+        const sh = &app_state.shells[i];
+        if (sh.browser_launch_tick != 0 or sh.browser_docking or app_state.g_browser_adopt_target_idx == i) return true;
+        const hwnd = sh.browser_hwnd orelse continue;
+        if (IsWindow(hwnd) == 0 or GetPropW(hwnd, L("ZigShellPaneOwner")) != owner or
+            !edgeWindowClassMatches(hwnd) or !browserWindowProfileMatches(hwnd, @intCast(i))) return true;
+        var pid: DWORD = 0;
+        _ = GetWindowThreadProcessId(hwnd, &pid);
+        if (pid == 0 or (canonical_pid != 0 and canonical_pid != pid)) return true;
+        if (process == null) {
+            process = win.OpenProcess(win.PROCESS_QUERY_LIMITED_INFORMATION | win.PROCESS_SYNCHRONIZE, 0, pid) orelse return true;
+            canonical_pid = pid;
+        }
+    }
+    if (process == null or WaitForSingleObject(process, 0) != 258) return true;
+    var image: [1024]u16 = undefined;
+    var image_len: DWORD = image.len;
+    if (win.QueryFullProcessImageNameW(process, 0, &image, &image_len) == 0) return true;
+    const image_path = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, image[0..image_len]) catch return true;
+    defer std.heap.page_allocator.free(image_path);
+    const exe = browserExePath();
+    if (!std.ascii.eqlIgnoreCase(image_path, exe)) return true;
     var dir_buf: [1024]u8 = undefined;
     const dir = ownBrowserUserDataDir(&dir_buf, own_token);
-    if (dir.len == 0) return false;
+    if (dir.len == 0) return true;
+    const controlled_line = browser_own_profile.processCommandLine(std.heap.page_allocator, process) catch return true;
+    defer std.heap.page_allocator.free(controlled_line);
+    const controlled_dir = (browser_own_profile.userDataArgument(std.heap.page_allocator, controlled_line) catch return true) orelse return true;
+    defer std.heap.page_allocator.free(controlled_dir);
+    if (!std.ascii.eqlIgnoreCase(dir, controlled_dir)) return true;
     var cmd_buf: [2048]u8 = undefined;
-    const cmd = browser_signin.plainProfileLaunch(&cmd_buf, browserExePath(), dir, browserProfile()) orelse return false;
-    app_state.shells[idx].browser_enabled = false;
-    closeBrowserForShell(idx);
-    spawnBrowserCliHidden(cmd);
+    const cmd = browser_signin.plainProfileLaunch(&cmd_buf, exe, dir, browserProfile()) orelse return true;
+    const start = win.CreateEventW(null, 1, 0, null) orelse return true;
+    defer {
+        if (!started) _ = CloseHandle(start);
+    }
+    const finished = win.CreateEventW(null, 1, 0, null) orelse return true;
+    defer {
+        if (!started) _ = CloseHandle(finished);
+    }
+    var worker_start: HANDLE = null;
+    if (win.DuplicateHandle(win.GetCurrentProcess(), start, win.GetCurrentProcess(), &worker_start, 0, 0, win.DUPLICATE_SAME_ACCESS) == 0) return true;
+    defer {
+        if (!started) _ = CloseHandle(worker_start);
+    }
+    var worker_finished: HANDLE = null;
+    if (win.DuplicateHandle(win.GetCurrentProcess(), finished, win.GetCurrentProcess(), &worker_finished, 0, 0, win.DUPLICATE_SAME_ACCESS) == 0) return true;
+    defer {
+        if (!started) _ = CloseHandle(worker_finished);
+    }
+    const job = std.heap.page_allocator.create(BrowserSigninJob) catch return true;
+    defer if (!started) std.heap.page_allocator.destroy(job);
+    job.* = .{
+        .command = std.mem.zeroes([2048:0]u16),
+        .owner = owner,
+        .process = process,
+        .start = worker_start,
+        .finished = worker_finished,
+        .operation_id = 0,
+    };
+    const command_len = std.unicode.utf8ToUtf16Le(job.command[0..job.command.len], cmd) catch return true;
+    job.command[command_len] = 0;
+    browser_signin_operation_id +%= 1;
+    if (browser_signin_operation_id == 0) browser_signin_operation_id = 1;
+    const operation_id = browser_signin_operation_id;
+    job.operation_id = operation_id;
+    browser_signin_reservation = .{ .profile = profile, .engine = engine, .operation_id = operation_id, .finished = finished };
+    const thread = std.Thread.spawn(.{}, browserSigninWorker, .{job}) catch {
+        browser_signin_reservation = null;
+        return true;
+    };
+    started = true;
+    thread.detach();
+    for (0..app_state.shell_count) |i| {
+        if (!std.mem.eql(u8, &app_state.shells[i].browser_profile_token, &profile)) continue;
+        app_state.shells[i].browser_enabled = false;
+        closeBrowserForShell(@intCast(i));
+    }
+    _ = win.SetEvent(start);
+    _ = CloseHandle(start);
     showHeaderNoticeAscii("Sign in to Google in the plain window, then close it", 8000, false);
     saveSession();
+    repositionActive();
+    updateBrowserVisibility();
     return true;
 }
 
