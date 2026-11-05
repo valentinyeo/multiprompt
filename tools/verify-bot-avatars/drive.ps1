@@ -46,6 +46,12 @@ function Read-Log {
     $reader = [IO.StreamReader]::new($stream)
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
+function Read-State([string]$File) {
+    Wait-For "readable $File snapshot" {
+        try { Get-Content (Join-Path $settings $File) -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+        catch { $null }
+    }
+}
 function Appearance([string]$Name) {
     $hash = [uint64]2166136261
     foreach ($byte in [Text.Encoding]::UTF8.GetBytes($Name)) {
@@ -95,20 +101,18 @@ function Palette-Select([string]$Query, [int]$Target, [bool]$Open = $true) {
     for ($step = 0; $step -lt $steps; $step++) { [ChatDeliveryDesktop]::Chord(@(0x28)) }
     $script:paletteTransition = (Read-Log).Length
     [ChatDeliveryDesktop]::Chord(@(0x0d))
-    if ($Target -in @(7188, 4000)) {
-        [void](Wait-For 'selected palette submenu opened' {
-            $tail = (Read-Log).Substring($script:paletteTransition)
-            $ready = [regex]::Matches($tail, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
-            if ($ready.Count) {
-                $last = $ready[$ready.Count - 1]
-                if ($last.Groups[1].Value -eq '0') { return $true }
-                if ([int]$last.Groups[1].Value -eq $Query.Length -and [int]$last.Groups[2].Value -eq $Target) {
-                    [ChatDeliveryDesktop]::Chord(@(0x0d))
-                }
+    [void](Wait-For 'selected palette action confirmed' {
+        $tail = (Read-Log).Substring($script:paletteTransition)
+        if ($tail -match "\[palette\] confirm target=$Target(?:\r?\n|$)") { return $true }
+        $ready = [regex]::Matches($tail, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
+        if ($ready.Count) {
+            $last = $ready[$ready.Count - 1]
+            if ([int]$last.Groups[1].Value -eq $Query.Length -and [int]$last.Groups[2].Value -eq $Target) {
+                [ChatDeliveryDesktop]::Chord(@(0x0d))
             }
-            $false
-        })
-    }
+        }
+        $false
+    })
 }
 function Shot([string]$Name) {
     $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -193,7 +197,7 @@ try {
     $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--no-window-restore')
     $main = Wait-For 'owned main window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'foreground owned app' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
-    [void](Wait-For 'all restored sessions' { if (Test-Path "$settings/inbox-default.json") { $doc = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json; if (@($doc.shells).Count -eq 8) { $true } } })
+    [void](Wait-For 'all restored sessions' { if (Test-Path "$settings/inbox-default.json") { $doc = Read-State 'inbox-default.json'; if (@($doc.shells).Count -eq 8) { $true } } })
     $rows = Wait-For 'large pinned and list robots' { $v = @(Layouts); if (@($v | Where-Object { $_.size -eq (Px 56) }).Count -ge 2 -and @($v | Where-Object { $_.size -eq (Px 36) }).Count -ge 4) { ,$v } }
     $client = [ChatDeliveryDesktop+Rect]::new()
     if (-not [ChatDeliveryDesktop]::GetClientRect($main, [ref]$client)) { throw 'Main client bounds unavailable' }
@@ -206,7 +210,7 @@ try {
     }
     $checks.Add(@{name='eight-row-height'; passed=$true; clientHeight=$client.Bottom; inboxRequired=$inboxRequired; sidebarRequired=$sidebarRequired; screenHeight=$screen.Height})
     [void](Wait-For 'real console messages reach list previews' {
-        $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+        $published = Read-State 'inbox-default.json'
         @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -eq 8
     })
     $checks.Add(@{name='last-message-previews'; passed=$true})
@@ -224,7 +228,7 @@ try {
         }
         [ChatDeliveryDesktop]::PressClient($main, $app.Id, ($live.x + 10), ($live.y + 15))
         $selected = Wait-For 'clicked raw session selected' {
-            $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            $saved = Read-State 'session.json'
             $tab = @($saved.tabs)[$saved.active_tab]
             $expected = Appearance $tab.tmux_session
             $isPin = $entry.name -ne 'list-one'
@@ -259,7 +263,7 @@ try {
     $layoutOffset = (Read-Log).Length
     [ChatDeliveryDesktop]::PressClient($content, $app.Id, ([BotSettingsDesktop]::ColorX($content, 4)), $top)
     [void](Wait-For 'picked palette color persisted' {
-        $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+        $saved = Read-State 'session.json'
         $workspace = @($saved.workspaces)[$WorkspaceIndex]
         if ($workspace.PSObject.Properties['color']) { $workspace.color -eq 4 }
     })
@@ -282,7 +286,7 @@ try {
     $layoutOffset = (Read-Log).Length
     [ChatDeliveryDesktop]::PressClient($content, $app.Id, ([BotSettingsDesktop]::ColorX($content, 7)), $top)
     [void](Wait-For 'white workspace color persisted' {
-        $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+        $saved = Read-State 'session.json'
         $workspace = @($saved.workspaces)[$WorkspaceIndex]
         if ($workspace.PSObject.Properties['color']) { $workspace.color -eq 7 }
     })
@@ -306,7 +310,7 @@ try {
     $main = Wait-For 'restarted owned main window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'restarted app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
     $white = Wait-For 'white workspace restored after restart' {
-        $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+        $saved = Read-State 'session.json'
         $workspace = @($saved.workspaces)[$WorkspaceIndex]
         $v = @(Layouts | Where-Object { $_.color -eq 7 -and $_.size -eq (Px 56) })
         if ($workspace.PSObject.Properties['color'] -and $workspace.color -eq 7 -and @($saved.tabs).Count -eq 8 -and $v.Count -ge 2) { ,$v }
@@ -315,17 +319,17 @@ try {
     Shot 'workspace-white-restarted'
     $checks.Add(@{name='white-restart'; passed=$true; workspace=$WorkspaceName; color=7})
     $colorNames = @('sage', 'clay', 'sand', 'mist', 'lilac', 'rose', 'mint', 'white')
-    $sessionWrite = (Get-Item "$settings/session.json").LastWriteTimeUtc
+    $sessionWrite = Wait-For 'saved session timestamp' { try { (Get-Item "$settings/session.json" -ErrorAction Stop).LastWriteTimeUtc } catch { $null } }
     Palette-Select 'manual' 6218
-    [void](Wait-For 'manual session order saved' { (Get-Item "$settings/session.json").LastWriteTimeUtc -gt $sessionWrite })
-    $orderedTabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+    [void](Wait-For 'manual session order saved' { try { (Get-Item "$settings/session.json" -ErrorAction Stop).LastWriteTimeUtc -gt $sessionWrite } catch { $false } })
+    $orderedTabs = @((Read-State 'session.json').tabs)
     $orderedNames = @($orderedTabs | Where-Object { $_.PSObject.Properties['pinned_top'] -and $_.pinned_top } | ForEach-Object { $_.tmux_session }) + @($orderedTabs | Where-Object { -not $_.PSObject.Properties['pinned_top'] -or -not $_.pinned_top } | ForEach-Object { $_.tmux_session })
     if ($orderedNames.Count -ne 8) { throw 'Manual session order does not contain eight tabs' }
     $selectedNames = @{}
     for ($i = 0; $i -lt 8; $i++) {
         [ChatDeliveryDesktop]::Chord(@(0x11, (0x31 + $i)))
         $selected = Wait-For "session $i selected" {
-            $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            $saved = Read-State 'session.json'
             $tab = @($saved.tabs)[$saved.active_tab]
             if ($tab.tmux_session -eq $orderedNames[$i] -and -not $selectedNames.ContainsKey($tab.tmux_session)) { $tab.tmux_session }
         }
@@ -333,7 +337,7 @@ try {
         Palette-Select 'bot color' 7188
         Palette-Select $colorNames[$i] (7162 + $i) $false
         [void](Wait-For "session $selected color persisted" {
-            $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            $saved = Read-State 'session.json'
             $tab = @($saved.tabs | Where-Object { $_.tmux_session -eq $selected })
             $tab.Count -eq 1 -and $tab[0].PSObject.Properties['color'] -and $tab[0].color -eq $i
         })
@@ -355,7 +359,7 @@ try {
         }
         Shot "sidebar-$($theme.name)-colors"
         [ChatDeliveryDesktop]::Chord(@(0x12, 0x49))
-        [void](Wait-For 'inbox opened' { (Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).inbox_active })
+        [void](Wait-For 'inbox opened' { (Read-State 'inbox-default.json').inbox_active })
         $layoutOffset = (Read-Log).Length
         [ChatDeliveryDesktop]::Chord(@(0x12, 0x49))
         $inboxWidth = [Math]::Min((Px 920), $client.Right - (Px 24))
@@ -370,7 +374,7 @@ try {
         }
         Shot "inbox-$($theme.name)-colors"
         [ChatDeliveryDesktop]::Chord(@(0x1b))
-        [void](Wait-For 'inbox closed' { -not (Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).inbox_active })
+        [void](Wait-For 'inbox closed' { -not (Read-State 'inbox-default.json').inbox_active })
     }
     $result.passed = $true
  } catch {

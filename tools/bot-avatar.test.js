@@ -165,6 +165,22 @@ test "tiles wrap and every mouse target remains the painted session" {
 });
 
 
+test('robot proof observes accepted palette actions and retries readable state snapshots', () => {
+  const main = read('src/main.zig');
+  const start = main.indexOf('        WM_APP_SEARCH_CONFIRM => {');
+  assert.ok(start >= 0);
+  const confirm = main.slice(start);
+  const guard = confirm.indexOf('app_state.g_search_revision');
+  const accepted = confirm.indexOf('[palette] confirm target={d}');
+  assert.ok(guard >= 0 && accepted > guard);
+  const driver = read('tools/verify-bot-avatars/drive.ps1');
+  assert.match(driver, /Wait-For 'selected palette action confirmed'/);
+  assert.match(driver, /confirm target=\$Target/);
+  assert.match(driver, /\[int\]\$last\.Groups\[1\]\.Value -eq \$Query\.Length -and \[int\]\$last\.Groups\[2\]\.Value -eq \$Target/);
+  assert.match(driver, /function Read-State[\s\S]*?Wait-For[\s\S]*?Get-Content[\s\S]*?ConvertFrom-Json -ErrorAction Stop[\s\S]*?catch \{ \$null \}/);
+  assert.doesNotMatch(driver, /Get-Content "\$settings\/session\.json"/);
+});
+
 test('robot proof reuses existing verified action pins', () => {
   assert.ok(fs.existsSync(path.join(root, '.github/workflows/bot-avatars.yml')), 'Native robot proof must be wired');
   const workflow = read('.github/workflows/bot-avatars.yml');

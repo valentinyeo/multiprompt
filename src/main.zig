@@ -4914,6 +4914,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
+                var confirm_trace: [64]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&confirm_trace, "[palette] confirm target={d}", .{target}) catch "[palette] confirm unavailable");
                 if ((app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) and target == SEARCH_TABCTX_BACK) {
                     app_state.g_workspace_color_target = null;
                     app_state.g_bot_look_mode = .none;
