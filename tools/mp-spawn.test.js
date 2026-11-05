@@ -32,7 +32,7 @@ async function fixture() {
       return { status: 200, json: async () => ({ revision }) };
     },
     lock: async () => { let release; const wait = queue; queue = new Promise(r => { release = r; }); await wait; return release; },
-    tmux: args => { calls.push(['tmux', ...args]); if (args[0] === 'has-session') return { status: tmux ? 0 : 1 }; if (args[0] === 'display-message') return { status: 0, stdout: `sleep\t/work\t${marker}\n` }; marker = args.at(-1); tmux = true; return { status: 0 }; },
+    tmux: args => { calls.push(['tmux', ...args]); if (args[0] === 'has-session') return { status: tmux ? 0 : 1 }; if (args[0] === 'display-message') return { status: 0, stdout: `sleep|/work|${marker}\n` }; marker = args.at(-1); tmux = true; return { status: 0 }; },
     runtime: (args, input) => {
       calls.push(['runtime', ...args]);
       if (args[0] === 'host' && args[1] === 'enable') {
@@ -203,7 +203,7 @@ test('lost tmux reply accepts only the claimed parking pane', async () => {
     f.opts.tmux = args => {
       const result = tmux(args);
       if (args[0] === 'new-session') return { status: 1 };
-      if (foreign && args[0] === 'display-message') return { status: 0, stdout: 'sleep\t/work\tforeign' };
+      if (foreign && args[0] === 'display-message') return { status: 0, stdout: 'sleep|/work|foreign' };
       return result;
     };
     assert.equal((await f.invoke()).code, foreign ? 1 : 0);

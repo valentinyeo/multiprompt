@@ -153,7 +153,7 @@ test('spawn publishes once through the real service and refuses a workspace esca
     lock: async () => () => {},
     tmux: args => {
       if (args[0] === 'has-session') return { status: parked ? 0 : 1 };
-      if (args[0] === 'display-message') return { status: 0, stdout: `sleep\t/work\t${marker}` };
+      if (args[0] === 'display-message') return { status: 0, stdout: `sleep|/work|${marker}` };
       parked = true; marker = args.at(-1); return { status: 0 };
     },
     runtime: args => { runtimeCalls++; return { status: 0, stdout: JSON.stringify({ status: args[1] === 'enable' ? 'enabled' : 'started' }) }; }

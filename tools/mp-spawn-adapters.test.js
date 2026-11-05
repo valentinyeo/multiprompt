@@ -45,7 +45,7 @@ test('real flock and reader config/message storage converge without forwarding t
     },
     tmux: args => {
       if (args[0] === 'has-session') return { status: parked ? 0 : 1 };
-      if (args[0] === 'display-message') return { status: 0, stdout: `sleep\t${home}\t${marker}` };
+      if (args[0] === 'display-message') return { status: 0, stdout: `sleep|${home}|${marker}` };
       marker = args.at(-1); parked = true; return { status: 0 };
     }
   };
