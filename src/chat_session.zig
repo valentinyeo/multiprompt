@@ -282,6 +282,7 @@ pub fn chatFileIdentityForShell(idx: u32) chat_transcript.Identity {
     if (s.kind != .tmux and !chatBenchEnabled()) return .{};
     var key = chat_transcript.Identity.init(s.shell_id, s.tmux_host, s.ai_agent == 2 or (chatBenchEnabled() and std.mem.startsWith(u8, s.claude_sid[0..s.claude_sid_len], "codex-")), s.claude_sid[0..s.claude_sid_len], s.claude_cwd[0..s.claude_cwd_len]);
     key.pi = s.ai_agent == 3;
+    key.hax = s.ai_agent == 5;
     if (s.tmux_session_len < key.tmux.len) @memcpy(key.tmux[0..s.tmux_session_len], s.tmux_session[0..s.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return .{};
     for (app_state.g_chat_histories.items) |entry| {
@@ -452,6 +453,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
         shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     if (key.shell_id == 0) return null;
     key.pi = shell.ai_agent == 3;
+    key.hax = shell.ai_agent == 5;
     @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return null;
     return .{ .key = key, .agent = shell.ai_agent };
@@ -459,7 +461,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
 
 fn chatVoiceMatches(key: chat_transcript.Identity, entry: *const ChatHistoryEntry) bool {
     return !entry.retired and key.shell_id == entry.key.shell_id and key.host == entry.key.host and
-        key.codex == entry.key.codex and key.pi == entry.key.pi and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
+        key.codex == entry.key.codex and key.pi == entry.key.pi and key.hax == entry.key.hax and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
         std.mem.eql(u8, &key.cwd, &entry.key.cwd) and
         (key.sid[0] == 0 or std.mem.eql(u8, &key.sid, &entry.key.sid));
 }
@@ -482,6 +484,9 @@ test "voice source rejects permissive cross-session matches" {
     try std.testing.expect(!chatVoiceMatches(key, &entry));
     entry.key = key;
     entry.key.pi = true;
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+    entry.key = key;
+    entry.key.hax = true;
     try std.testing.expect(!chatVoiceMatches(key, &entry));
     entry.key = key;
     entry.retired = true;
@@ -1547,7 +1552,7 @@ pub fn chatFileOnReady() void {
                     changed = true;
                 }
                 if (!disk and app_state.shells[idx].ai_agent == 0) {
-                    app_state.shells[idx].ai_agent = if (entry.key.pi) 3 else if (entry.key.codex) 2 else 1;
+                    app_state.shells[idx].ai_agent = if (entry.key.hax) 5 else if (entry.key.pi) 3 else if (entry.key.codex) 2 else 1;
                     changed = true;
                 }
                 if (changed) saveSession();
@@ -1750,6 +1755,7 @@ fn chatCacheIdentity() chat_transcript.Identity {
     const shell = &app_state.shells[app_state.active_shell];
     var cache_key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     cache_key.pi = shell.ai_agent == 3;
+    cache_key.hax = shell.ai_agent == 5;
     return cache_key;
 }
 

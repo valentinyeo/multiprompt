@@ -57,7 +57,7 @@ test('provider identity stays attached to controls and restored chats', () => {
   assert.match(send, /key\.pi == pending\.key\.pi/);
   const session = read('src/chat_session.zig');
   assert.match(session, /key\.pi == entry\.key\.pi/);
-  assert.match(session, /ai_agent = if \(entry\.key\.pi\) 3 else if \(entry\.key\.codex\) 2 else 1/);
+  assert.match(session, /ai_agent = if \(entry\.key\.hax\) 5 else if \(entry\.key\.pi\) 3 else if \(entry\.key\.codex\) 2 else 1/);
   assert.match(session, /std\.mem\.eql\(u8, current\.provider, key\.provider\(\)\)/);
 });
 

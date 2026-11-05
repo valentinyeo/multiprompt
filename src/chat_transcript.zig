@@ -8,12 +8,13 @@ pub const Identity = struct {
     host: u8 = 0,
     codex: bool = false,
     pi: bool = false,
+    hax: bool = false,
     sid: [40]u8 = @splat(0),
     tmux: [64]u8 = @splat(0),
     cwd: [192]u8 = @splat(0),
 
     pub fn provider(self: Identity) []const u8 {
-        return if (self.pi) "pi" else if (self.codex) "codex" else "claude";
+        return if (self.hax) "hax" else if (self.pi) "pi" else if (self.codex) "codex" else "claude";
     }
 
     pub fn init(shell_id: u32, host: u8, codex: bool, sid: []const u8, cwd: []const u8) Identity {

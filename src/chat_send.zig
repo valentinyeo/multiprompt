@@ -974,7 +974,7 @@ fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: s
     out[pos] = ']';
     pos += 1;
     if (app_state.g_chat_pending_reset) |reset| {
-        const encoded = std.json.Stringify.valueAlloc(allocator, .{ .host = reset.key.host, .codex = reset.key.codex, .pi = reset.key.pi, .tmux = std.mem.sliceTo(&reset.key.tmux, 0), .sid = std.mem.sliceTo(&reset.key.sid, 0), .nonce = reset.nonce, .request_nonce = reset.request_nonce }, .{}) catch { allocator.free(out); return null; };
+        const encoded = std.json.Stringify.valueAlloc(allocator, .{ .host = reset.key.host, .codex = reset.key.codex, .pi = reset.key.pi, .hax = reset.key.hax, .tmux = std.mem.sliceTo(&reset.key.tmux, 0), .sid = std.mem.sliceTo(&reset.key.sid, 0), .nonce = reset.nonce, .request_nonce = reset.request_nonce }, .{}) catch { allocator.free(out); return null; };
         defer allocator.free(encoded);
         const prefix = ",\"reset\":";
         @memcpy(out[pos .. pos + prefix.len], prefix);
@@ -1097,6 +1097,7 @@ pub fn loadChatOutbox() void {
         pending.key.host = @intCast(@min(json_reader.uintDefault(reset, "host", 0), std.math.maxInt(u8)));
         pending.key.codex = json_reader.boolTrue(reset, "codex");
         pending.key.pi = json_reader.boolTrue(reset, "pi");
+        pending.key.hax = json_reader.boolTrue(reset, "hax");
         _ = json_reader.copyString(reset, "tmux", &pending.key.tmux);
         _ = json_reader.copyString(reset, "sid", &pending.key.sid);
         pending.nonce = json_reader.uintDefault(reset, "nonce", 0);
@@ -1190,7 +1191,7 @@ fn chatOutboxDropForKey(key: []const u8) void {
 pub fn chatResetForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const key = chatFileIdentityForShell(idx);
-    if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2 or app_state.shells[idx].ai_agent == 3)) {
+    if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2 or app_state.shells[idx].ai_agent == 3 or app_state.shells[idx].ai_agent == 5)) {
         _ = chatPendingResetDropIfStale();
         if (app_state.g_chat_pending_reset) |pending| {
             if (key.sid[0] != 0 and chatResetSameChat(pending.key, key)) {
@@ -1234,7 +1235,7 @@ fn chatPendingResetStart(idx: u32) void {
     if (app_state.g_chat_tmux_send_job != null) return;
     const pending = app_state.g_chat_pending_reset orelse return;
     const key = chatFileIdentityForShell(idx);
-    if (key.host != pending.key.host or key.codex != pending.key.codex or key.pi != pending.key.pi or !std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
+    if (key.host != pending.key.host or key.codex != pending.key.codex or key.pi != pending.key.pi or key.hax != pending.key.hax or !std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
     const a = std.heap.page_allocator;
     const job = a.create(app_state.ChatTmuxSendJob) catch return;
     job.* = .{ .key = key, .echo_id = 0, .text = a.alloc(u16, 0) catch { a.destroy(job); return; }, .retry = false, .message_v1 = true, .message_reset = true, .message_nonce = pending.nonce, .request_nonce = pending.request_nonce };
@@ -1251,7 +1252,7 @@ fn chatPendingResetStart(idx: u32) void {
 const ChatIdentity = @import("chat_transcript.zig").Identity;
 
 fn chatResetSameChat(pending: ChatIdentity, shell: ChatIdentity) bool {
-    return shell.host == pending.host and shell.codex == pending.codex and shell.pi == pending.pi and std.mem.eql(u8, &shell.sid, &pending.sid);
+    return shell.host == pending.host and shell.codex == pending.codex and shell.pi == pending.pi and shell.hax == pending.hax and std.mem.eql(u8, &shell.sid, &pending.sid);
 }
 
 fn chatResetShellMayOwn(pending: ChatIdentity, shell: ChatIdentity) bool {
@@ -1290,6 +1291,34 @@ test "Chat View reset: a pending reset whose chat is gone no longer blocks reset
     var codex = same;
     codex.codex = true;
     try std.testing.expect(!chatResetShellMayOwn(pending, codex));
+}
+
+test "IGSH-1758 a pending reset keeps the hax provider across the outbox file and the chat match" {
+    const saved = app_state.g_chat_pending_reset;
+    defer app_state.g_chat_pending_reset = saved;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    var reset = app_state.ChatPendingReset{ .nonce = 1, .request_nonce = 2 };
+    reset.key = ChatIdentity.init(1, 0, false, "01234567-89ab-8def-8123-0123456789ab", "");
+    reset.key.hax = true;
+    const tmux = "live-h0123456789ab8def81230123456789ab";
+    @memcpy(reset.key.tmux[0..tmux.len], tmux);
+    app_state.g_chat_pending_reset = reset;
+    var out_len: usize = 0;
+    const bytes = chatOutboxSerialize(&list, std.testing.allocator, &out_len) orelse return error.TestUnexpectedResult;
+    defer std.testing.allocator.free(bytes);
+    var parsed = try json_reader.parse(std.testing.allocator, bytes[0..out_len]);
+    defer parsed.deinit();
+    const field = json_reader.field(parsed.value, "reset");
+    try std.testing.expect(json_reader.boolTrue(field, "hax"));
+    try std.testing.expect(!json_reader.boolTrue(field, "pi"));
+    try std.testing.expect(!json_reader.boolTrue(field, "codex"));
+    var restored = ChatIdentity.init(2, 0, false, "01234567-89ab-8def-8123-0123456789ab", "");
+    restored.hax = json_reader.boolTrue(field, "hax");
+    @memcpy(restored.tmux[0..tmux.len], tmux);
+    try std.testing.expect(chatResetSameChat(reset.key, restored));
+    restored.hax = false;
+    try std.testing.expect(!chatResetSameChat(reset.key, restored));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 5));
 }
 
 fn chatResetLocalForShell(idx: u32) void {
@@ -1570,12 +1599,15 @@ test "IGSH-1266 a chat typed before the tab finished starting still goes to the 
 }
 
 pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
-    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3);
+    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 5);
 }
 
 test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab does not" {
     try std.testing.expect(chatMessageGoesToHost(.tmux, 1));
     try std.testing.expect(chatMessageGoesToHost(.tmux, 2));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 3));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 5));
+    try std.testing.expect(!chatMessageGoesToHost(.tmux, 4));
     try std.testing.expect(!chatMessageGoesToHost(.tmux, 0));
     try std.testing.expect(!chatMessageGoesToHost(.cmd, 1));
     try std.testing.expect(!chatMessageGoesToHost(.vps, 1));
@@ -2281,7 +2313,7 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
     if (e >= app_state.g_chat_outbox.items.len) return false;
     if (app_state.g_chat_pending_reset) |pending| {
         const identity = chatFileIdentityForShell(shell_index);
-        if (identity.host == pending.key.host and identity.codex == pending.key.codex and identity.pi == pending.key.pi and std.mem.eql(u8, &identity.sid, &pending.key.sid)) return false;
+        if (identity.host == pending.key.host and identity.codex == pending.key.codex and identity.pi == pending.key.pi and identity.hax == pending.key.hax and std.mem.eql(u8, &identity.sid, &pending.key.sid)) return false;
     }
     if (!chatOutboxRecoverOlderAdmission(shell_index, e)) return false;
     if (app_state.g_chat_outbox.items[e].message_v1) {
@@ -2351,7 +2383,7 @@ pub fn chatOutboxTick() void {
         for (0..count) |offset| {
             const idx: u32 = @intCast((app_state.g_chat_message_sync_next + offset) % count);
             const shell = app_state.shells[idx];
-            if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3)) continue;
+            if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3 and shell.ai_agent != 5)) continue;
             if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxCountForShell(idx) == 0) continue;
             chatMessageSyncStart(idx);
             if (app_state.g_chat_message_sync_job != null) {
@@ -3328,7 +3360,7 @@ fn chatMessageSyncStart(idx: u32) void {
     const key = chatFileIdentityForShell(idx);
     if (key.sid[0] == 0 or key.tmux[0] == 0) return;
     if (app_state.g_chat_pending_reset) |pending| {
-        if (key.host == pending.key.host and key.codex == pending.key.codex and key.pi == pending.key.pi and std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
+        if (key.host == pending.key.host and key.codex == pending.key.codex and key.pi == pending.key.pi and key.hax == pending.key.hax and std.mem.eql(u8, &key.sid, &pending.key.sid)) return;
     }
     const history = chatHistoryEntry(key) orelse return;
     history.message_v1_owned = true;

@@ -10,7 +10,7 @@ pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
-const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, pi: bool = false, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
+const Header = struct { version: u8 = 7, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, pi: bool = false, hax: bool = false, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
 pub const History = struct {
     status: transcript.Status = .{},
     rows: std.ArrayList(u8) = .empty,
@@ -592,7 +592,7 @@ pub const History = struct {
 
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
         const rows = try self.cacheRows(a);
-        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .pi = key.pi, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
+        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .pi = key.pi, .hax = key.hax, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
         defer a.free(header);
         if (header.len + 1 > 512) return error.InvalidHistory;
         return std.fmt.allocPrint(a, "{s}\n{s}", .{ header, rows });
@@ -604,8 +604,8 @@ pub const History = struct {
         const parsed = try std.json.parseFromSlice(Header, a, bytes[0..end], .{});
         defer parsed.deinit();
         const h = parsed.value;
-        if ((h.version < 2 or h.version > 6) or h.sid.len == 0 or h.sid.len >= 40 or h.read_sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
-            (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or h.pi != key.pi or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
+        if ((h.version < 2 or h.version > 7) or h.sid.len == 0 or h.sid.len >= 40 or h.read_sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
+            (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or h.pi != key.pi or h.hax != key.hax or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
             (key.sid[0] != 0 and !std.mem.eql(u8, h.sid, std.mem.sliceTo(&key.sid, 0)))) return error.InvalidHistory;
         var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 6, .start = h.start, .revision = 1 };
         errdefer result.deinit(a);
@@ -830,11 +830,11 @@ pub fn statusOnly(wire: []const u8) bool {
 
 pub fn cacheKey(key: transcript.Identity) u64 {
     const name = if (key.tmux[0] != 0) std.mem.sliceTo(&key.tmux, 0) else std.mem.sliceTo(&key.sid, 0);
-    return std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &.{ key.host, @intFromBool(key.codex) | (@as(u8, @intFromBool(key.pi)) << 1), @intFromBool(key.tmux[0] != 0) }), name);
+    return std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &.{ key.host, @intFromBool(key.codex) | (@as(u8, @intFromBool(key.pi)) << 1) | (@as(u8, @intFromBool(key.hax)) << 2), @intFromBool(key.tmux[0] != 0) }), name);
 }
 
 pub fn sameSession(a: transcript.Identity, b: transcript.Identity) bool {
-    if (a.shell_id == 0 or b.shell_id == 0 or a.host != b.host or a.codex != b.codex or a.pi != b.pi) return false;
+    if (a.shell_id == 0 or b.shell_id == 0 or a.host != b.host or a.codex != b.codex or a.pi != b.pi or a.hax != b.hax) return false;
     if (a.sid[0] != 0 and b.sid[0] != 0 and !std.mem.eql(u8, &a.sid, &b.sid)) return false;
     if (a.tmux[0] != 0 or b.tmux[0] != 0) return a.tmux[0] != 0 and std.mem.eql(u8, &a.tmux, &b.tmux);
     if (a.sid[0] != 0 or b.sid[0] != 0) return a.sid[0] != 0 and std.mem.eql(u8, &a.sid, &b.sid);
@@ -980,6 +980,35 @@ test "persistent session cache survives runtime id cwd and discovered sid change
     try std.testing.expectEqualSlices(u16, h.text.items, restored.text.items);
     try std.testing.expectEqual(@as(u64, 100), restored.offset);
 }
+test "IGSH-1758 a hax chat key keeps its own provider, cache identity and persisted header" {
+    const a = std.testing.allocator;
+    var key = transcript.Identity.initTmux(1, 0, false, "live-h0123456789ab8def81230123456789ab", "");
+    key.hax = true;
+    try std.testing.expectEqualStrings("hax", key.provider());
+    var plain = key;
+    plain.hax = false;
+    try std.testing.expectEqualStrings("claude", plain.provider());
+    try std.testing.expect(cacheKey(key) != cacheKey(plain));
+    try std.testing.expect(!sameSession(key, plain));
+    try std.testing.expect(sameSession(key, key));
+    const wire = "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\thax\tlive-h0123456789ab8def81230123456789ab\n" ++ row ++ "@@MP_END@@\n";
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, wire, 1, key);
+    var other: History = .{};
+    defer other.deinit(a);
+    try std.testing.expectError(error.InvalidHistory, other.apply(a, wire, 1, plain));
+    const disk = try h.encode(a, key);
+    defer a.free(disk);
+    try std.testing.expect(std.mem.indexOf(u8, disk, "\"hax\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, disk, "\"version\":7") != null);
+    var restored = try History.decode(a, disk, key);
+    defer restored.deinit(a);
+    try std.testing.expectEqualSlices(u16, h.text.items, restored.text.items);
+    try std.testing.expect(!restored.restore_full);
+    try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, plain));
+}
+
 test "delta appends, timeout malformed empty reset and stale offset preserve full history" {
     const a = std.testing.allocator;
     const key = transcript.Identity.initTmux(7, 0, false, "term-1", "");
@@ -1098,6 +1127,9 @@ test "cache headers reject reused sessions hosts providers and hash-path collisi
     try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, key));
     key = original;
     key.codex = true;
+    try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, key));
+    key = original;
+    key.hax = true;
     try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, key));
     try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, transcript.Identity.initTmux(2, 0, false, "another", "")));
     try std.testing.expect(!sameSession(transcript.Identity.init(1, 0, false, "", ""), transcript.Identity.init(2, 0, false, "", "")));
