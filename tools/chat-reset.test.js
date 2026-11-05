@@ -145,7 +145,8 @@ test('reset has all command surfaces and rejects obsolete cache writes/results',
   assert.match(source, /SEARCH_CHAT_RESET_OFFSET => "chat view reset this chat/);
   assert.match(source, /SEARCH_TABCTX_CHAT_RESET => "chat view reset this chat/);
   assert.match(body('updateSearchResults'), /g_search_results\[g_search_result_count\] = SEARCH_CHAT_RESET_OFFSET/);
-  assert.match(body('updateSearchResults'), /g_search_results\[g_search_result_count\] = SEARCH_TABCTX_CHAT_RESET/);
+  assert.match(body('updateSearchResults'), /if \(g_search_len > 0\) appendExtendedChatActions\(index\)/);
+  assert.match(body('appendExtendedChatActions'), /g_search_results\[g_search_result_count\] = SEARCH_TABCTX_CHAT_RESET/);
   assert.match(source, /target == SEARCH_CHAT_RESET_OFFSET[\s\S]*?chatResetForShell\(active_shell\)/);
   assert.match(source, /target == SEARCH_TABCTX_CHAT_RESET[\s\S]*?chatResetForShell\(ti\)/);
   assert.match(source.slice(source.indexOf('const SHORTCUT_ROWS')), /Chat View: Reset this chat/);

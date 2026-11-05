@@ -756,7 +756,7 @@ pub fn noteRestoredBlueDot(i: usize) void {
     _ = setBlueDot(i, .restore, false);
 }
 
-fn markShellUnread(idx: usize) void {
+pub fn markShellUnread(idx: usize) void {
     if (idx >= app_state.shell_count) return;
     _ = setBlueDot(idx, .manual, false);
     if (app_state.shells[idx].inbox_archived) logUnarchive(idx, "explicit mark unread");
@@ -2536,7 +2536,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             @as(i32, @intCast(visible_capacity)) * row_h + if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) row_h else 0;
         const ox = searchOverlayOx(win_w, overlay_w);
         const oy = @import("drawing.zig").searchOverlayOy(win_h, overlay_h);
-        const overlay_radius: i32 = uiScaled(32);
+        const overlay_radius: i32 = uiScaled(8);
         @import("dialog.zig").dim(hdc, win_w, win_h);
 
         drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, overlay_radius);
@@ -2564,12 +2564,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(bg_pen);
 
         var input_bg_rc = RECT{ .left = ox + uiScaled(16), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(16), .bottom = oy + uiScaled(56) };
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
         input_bg_rc.left += 1;
         input_bg_rc.top += 1;
         input_bg_rc.right -= 1;
         input_bg_rc.bottom -= 1;
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
         _ = SelectObject(hdc, palette_font);
         var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
@@ -2874,7 +2874,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     }
                     if (selected) {
                         const sel_rc = RECT{ .left = row_left, .top = ry, .right = ox + overlay_w - uiScaled(16), .bottom = ry + row_h };
-                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(10), row_color);
+                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(4), row_color);
                     }
                     if (session_view) |view| {
                         const size = uiScaled(24);
@@ -2889,7 +2889,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         if (view.favorite and !app_state.g_starred_workspace) drawRobotMarker(hdc, avatar_rc, .favorite, row_color);
                     }
 
-                    if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
+                    const action_index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    const action_pinned = if (action_index) |ti| effPinnedTop(ti) else false;
+                    if (@import("command_palette.zig").chatActionLabel(result_idx, action_pinned)) |label| {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (result_idx == SEARCH_TABCTX_END_TMUX) RGB(220, 70, 70) else primary_color);
+                        var wide: [64]u16 = undefined;
+                        const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                        var rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        if (result_idx == SEARCH_TABCTX_END_TMUX) {
+                            _ = SelectObject(hdc, palette_hint_font);
+                            var hint = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        }
+                    } else if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var text: [80]u8 = undefined;
@@ -3594,10 +3608,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var ar_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (archive_has_tmux) L("Archive Session") else L("Close Session"), -1, &ar_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, palette_hint_font);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        var ar_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Alt+X"), -1, &ar_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_unarchive_hidden) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4467,7 +4477,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
                             const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_VIEW) L("Alt+C") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
+                            const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_VIEW) L("Alt+C") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {
                                 _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
