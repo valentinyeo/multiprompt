@@ -108,7 +108,7 @@ The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exa
 ### Accepted message brightness
 
 Run `verify.yml` with `feature=chat-delivery` and `chat_accepted_proof=true`.
-The owned Windows app sends while busy. The boundary records the exact message enqueue, then removes it with `absorbed_mid_turn` while keeping the agent busy and delaying its user transcript row. Screenshots must show the waiting bubble dimmed, then normal brightness within one second of that receipt, together with working dots. The composer stays empty. `accepted-before.png`, `accepted-after.png`, timestamped frames, transcript, executable doctor and cleanup receipts remain in the artifact. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
+The owned Windows app sends while busy. The stand-in runs the production message dispatcher and connector polling in a Windows-hosted thread, with Windows file locks and notification polling. The queued message must reach the host's `accepted` state and appear once, dimmed. The simulated agent removes it from the queue while busy and delays the transcript: the same bubble must turn normal within one second with working dots. The stand-in then writes a `queued_command` attachment. Timed frames must keep the same bubble normal throughout the handoff, and the rendered transcript must contain it once. The composer stays empty. Screenshots, copied transcripts, host outbox, transcript, executable doctor and cleanup receipts remain in the artifact. The stand-in is not a real agent or SSH server. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
 
 ### Quoted reactions (IGSH-975)
 

@@ -688,6 +688,11 @@ def shell():
             fake_queue_event("remove", text, reason="absorbed_mid_turn")
             (ROOT / "accepted.json").write_text(json.dumps(dict(text=text, ms=time.time_ns() // 1_000_000)), encoding="utf-8")
             return True
+    elif op == "finish-accepted":
+        def change(claude):
+            accepted = json.loads((ROOT / "accepted.json").read_text(encoding="utf-8"))
+            fake_event("attachment", attachment=dict(type="queued_command", prompt=accepted["text"], commandMode="prompt"))
+            return True
     elif op == "idle":
         change = lambda claude: fake_take(claude) is None
     elif op == "busy":
@@ -1125,6 +1130,33 @@ def reader_namespace():
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
+        if state().get("name") == "accepted-message":
+            import threading
+
+            def start_worker(query, source, only_if_work=False):
+                if source is None:
+                    return
+                request = dict(message_protocol=1, tmux=query['tmux'], provider=query['provider'], sid=query['sid'])
+
+                def work():
+                    lock_path = ROOT / 'accepted-message-worker.lock'
+                    with lock_path.open('a') as lock:
+                        try:
+                            locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
+                        except BlockingIOError:
+                            return
+                        while True:
+                            try:
+                                namespace['message_poll'](request['tmux'], request['provider'], request['sid'])
+                                namespace['message_store_request'](dict(request, op='message_dispatch'))
+                            except Exception as error:
+                                record('accepted-worker-errors.jsonl', error=repr(error))
+                            time.sleep(0.25)
+
+                threading.Thread(target=work, daemon=True).start()
+
+            namespace['start_message_worker'] = start_worker
+            record('accepted-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
     if state().get("name") == "working-live":
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
