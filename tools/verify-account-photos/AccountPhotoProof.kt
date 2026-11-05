@@ -5,12 +5,20 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.SystemClock
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toArgb
+import dev.multiprompt.companion.BuildConfig
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import dev.multiprompt.companion.MainActivity
@@ -34,6 +42,57 @@ class AccountPhotoProof {
 
     private var renderedAt: String? = null
     private var error: String? = null
+    private val colorsRequired = BuildConfig.ACCOUNT_ORIGIN.matches(Regex("https://[a-z0-9-]+\\.trycloudflare\\.com"))
+    private var workspaceColors: JSONObject? = null
+
+    private fun dismissDeviceApproval() {
+        if (compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty()) {
+            try {
+                compose.onNodeWithText("No").performClick()
+            } catch (failure: AssertionError) {
+                if (!failure.message.orEmpty().contains("Expected exactly '1' node but could not find any node") ||
+                    compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty() ||
+                    compose.onAllNodesWithText("No").fetchSemanticsNodes().isNotEmpty()) {
+                    throw failure
+                }
+            }
+            compose.waitUntil(60_000) {
+                compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isEmpty()
+            }
+        }
+    }
+
+    private fun openWorkspaceColors() {
+        dismissDeviceApproval()
+        compose.onNodeWithContentDescription("Session list actions").performClick()
+        compose.onNodeWithText("Settings").performClick()
+        compose.waitUntil(180_000) {
+            dismissDeviceApproval()
+            compose.onAllNodesWithText("Auto").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodesWithText("Auto").onFirst().performScrollTo()
+        dismissDeviceApproval()
+    }
+
+    private fun colorCenter(index: Int): Offset {
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val label = compose.onNodeWithText("Work").fetchSemanticsNode().boundsInWindow
+        return Offset(label.left + (index * 36 + 14) * density, label.bottom + 20 * density)
+    }
+
+    private fun colorSelected(index: Int): Boolean {
+        dismissDeviceApproval()
+        val center = colorCenter(index)
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val image = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+        try {
+            val ring = image.getPixel(center.x.toInt(), (center.y - 12 * density).toInt())
+            val expected = Kit.Text.toArgb()
+            return kotlin.math.abs(Color.red(ring) - Color.red(expected)) < 20 &&
+                kotlin.math.abs(Color.green(ring) - Color.green(expected)) < 20 &&
+                kotlin.math.abs(Color.blue(ring) - Color.blue(expected)) < 20
+        } finally { image.recycle() }
+    }
 
     @After
     fun saveEvidence() {
@@ -49,6 +108,8 @@ class AccountPhotoProof {
             .put("status", if (renderedAt != null) "passed" else "failed")
             .put("rendered_at", renderedAt ?: JSONObject.NULL)
             .put("error", error ?: JSONObject.NULL)
+            .put("workspace_colors_required", colorsRequired)
+            .put("workspace_colors", workspaceColors ?: JSONObject.NULL)
             .put("cached_pictures", File(instrumentation.targetContext.filesDir, "bot-photos").listFiles()?.count { it.extension == "png" } ?: 0)
             .toString())
     }
@@ -67,15 +128,32 @@ class AccountPhotoProof {
             }
             avatar.assertIsDisplayed()
             val context = InstrumentationRegistry.getInstrumentation().targetContext
+            if (colorsRequired) {
+                openWorkspaceColors()
+                val center = colorCenter(4)
+                val root = compose.onRoot().fetchSemanticsNode().boundsInWindow
+                compose.onRoot().performTouchInput { click(center - root.topLeft) }
+                compose.waitUntil(60_000) { colorSelected(4) }
+                compose.onNodeWithContentDescription("Back").performClick()
+            }
             runBlocking {
                 withContext(Dispatchers.IO) {
                     val auth = SyncAuthManager(context)
                     var updated = false
-                    repeat(10) {
+                    repeat(60) {
                         if (!updated) {
                             val reply = auth.request("GET", "/v1/layout")
                             check(reply.status == 200)
                             val layout = reply.json.getJSONObject("layout")
+                            if (colorsRequired) {
+                                val workspaces = layout.getJSONArray("workspaces")
+                                val work = (0 until workspaces.length()).map { workspaces.getJSONObject(it) }
+                                    .single { it.getString("name") == "Work" }
+                                if (work.optInt("color", -1) != 4) {
+                                    Thread.sleep(1000)
+                                    return@repeat
+                                }
+                            }
                             val tabs = layout.getJSONArray("tabs")
                             val matches = (0 until tabs.length()).map { tabs.getJSONObject(it) }
                                 .filter { it.optString("tmux_session") == "runner-1" && it.optInt("tmux_host", -1) == 0 }
@@ -104,17 +182,7 @@ class AccountPhotoProof {
             val deadline = SystemClock.elapsedRealtime() + 60_000
             var image: Bitmap? = null
             while (SystemClock.elapsedRealtime() < deadline) {
-                if (compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty()) {
-                    try {
-                        compose.onNodeWithText("No").performClick()
-                    } catch (failure: AssertionError) {
-                        if (!failure.message.orEmpty().contains("Expected exactly '1' node but could not find any node") ||
-                            compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty() ||
-                            compose.onAllNodesWithText("No").fetchSemanticsNodes().isNotEmpty()) {
-                            throw failure
-                        }
-                    }
-                }
+                dismissDeviceApproval()
                 val bounds = avatar.fetchSemanticsNode().boundsInWindow
                 val screen = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
                 val candidate = Bitmap.createBitmap(screen, bounds.left.toInt(), bounds.top.toInt(), bounds.width.toInt(), bounds.height.toInt())
@@ -135,6 +203,11 @@ class AccountPhotoProof {
             check(evidence.mkdirs() || evidence.isDirectory)
             File(evidence, "avatar.png").outputStream().use { check(result.compress(Bitmap.CompressFormat.PNG, 100, it)) }
             result.recycle()
+            if (colorsRequired) {
+                openWorkspaceColors()
+                compose.waitUntil(60_000) { colorSelected(6) }
+                workspaceColors = JSONObject().put("workspace", "Work").put("sent_color", 4).put("received_color", 6)
+            }
             renderedAt = rendered
         } catch (failure: Throwable) {
             error = failure.javaClass.simpleName + ": " + failure.message.orEmpty()
