@@ -96,6 +96,11 @@ pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd:
     return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start {s} {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, name, sid, session, cwd, mode, READER, name, sid, session }) catch null;
 }
 
+pub fn resumeCommandFor(out: []u8, provider: Provider, session: []const u8, sid: []const u8) ?[]const u8 {
+    if (!safeName(session) or !safeSessionId(sid)) return null;
+    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host start {s} {s} --tmux {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, provider.wire(), sid, session, session }) catch null;
+}
+
 pub const MoveTarget = enum { terminal, chat };
 
 pub fn moveRequest(out: []u8, target: MoveTarget, id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8) ?[]const u8 {
@@ -186,4 +191,15 @@ test "IGSH-1546 each provider maps to the agent kind its tab shows" {
     try std.testing.expectEqual(@as(u8, 3), Provider.pi.aiAgent());
     try std.testing.expectEqualStrings("Codex", Provider.codex.label());
     try std.testing.expectEqualStrings("pi", Provider.pi.wire());
+}
+
+test "IGSH-1666 hosted resumes retain provider and host identity" {
+    var out: [1024]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const codex = resumeCommandFor(&out, .codex, "live-codex", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, codex, "host start codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-codex") != null);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "host enable") == null);
+    const pi = resumeCommandFor(&out, .pi, "live-pi", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-pi") != null);
+    try std.testing.expect(resumeCommandFor(&out, .codex, "live-codex", "bad") == null);
 }

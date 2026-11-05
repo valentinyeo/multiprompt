@@ -216,6 +216,21 @@ try {
     Start-App
     Check 'quit-reopen-retains-both-chats' (@((Session).tabs | Where-Object { $_.name -in @('Alpha','Beta') }).Count -eq 2)
     Shot 'after-reopen'
+    Palette 'new cmd' 2000
+    [void](Wait-For 'local CMD tab created' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1 })
+    Palette 'copy chat id' 7196
+    $localId=[Windows.Forms.Clipboard]::GetText()
+    Check 'local-chat-id-minted' ($localId -match '^session:#[0-9a-f]{16}$' -and $localId -ne 'session:#0000000000000000')
+    [void](Wait-For 'local chat id saved' { $s=Session; $tab=@($s.tabs | Where-Object { $_.kind -eq 'cmd' }); $tab.Count -eq 1 -and $tab[0].chat_id -gt 0 })
+    Press @(0x11,0x57)
+    [void](Wait-For 'local ID restart quits' { $app.HasExited })
+    Stop-AppJob
+    Start-App
+    Palette 'copy chat id' 7196
+    Check 'local-chat-id-survives-restart' ([Windows.Forms.Clipboard]::GetText() -ceq $localId)
+    Palette 'close tab' 7197
+    [void](Wait-For 'local CMD tab hidden' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -eq 0 })
+    Palette 'Alpha' 0
     Palette 'close tab' 7197
     [void](Wait-For 'close tab alias hides Alpha' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 0 -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 1 })
     Check 'close-tab-alias-keeps-both-agents' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
