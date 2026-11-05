@@ -2428,12 +2428,12 @@ fn resolveWorkspaceLiveCwd(workspace: u8, host: u8, cwd: []const u8, out: *[256]
             if (!std.mem.eql(u8, previous, candidate)) ambiguous = true;
         } else home = candidate;
     }
-    if (ambiguous) return null;
+    if (ambiguous) return cwd;
     const selected = home orelse return cwd;
     return std.fmt.bufPrint(out, "{s}{s}", .{ selected, cwd[1..] }) catch null;
 }
 
-test "workspace live cwd selects matching terminal and rejects ambiguity" {
+test "workspace live cwd selects matching terminal and leaves ambiguity to the host" {
     const saved_shells = app_state.shells[0..3].*;
     const saved_count = app_state.shell_count;
     const saved_active = app_state.active_shell;
@@ -2463,7 +2463,7 @@ test "workspace live cwd selects matching terminal and rejects ambiguity" {
     app_state.active_shell = 1;
     try std.testing.expectEqualStrings("/home/two/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
     app_state.active_shell = 2;
-    try std.testing.expect(resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) == null);
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
     app_state.shells[1].kind = .vps2;
     try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
     try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 2, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
@@ -2499,7 +2499,7 @@ test "workspace live cwd selects matching terminal and rejects ambiguity" {
     @memcpy(app_state.g_tmux_cache[0].name[0..8], "live-bad");
     try std.testing.expectEqualStrings("/home/explicit/projects/sample", resolveWorkspaceLiveCwd(1, 0, "/home/explicit/projects/sample", &out) orelse return error.TestUnexpectedResult);
     app_state.active_shell = 2;
-    try std.testing.expect(resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) == null);
+    try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
     app_state.shells[1].tmux_host = 2;
     try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
     app_state.shells[1].tmux_host = 0;
