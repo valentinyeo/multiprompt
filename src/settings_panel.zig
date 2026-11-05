@@ -41,6 +41,7 @@ var key_edit: w.HANDLE = null;
 var key_edit_proc: isize = 0;
 var key_control: Control = .dictation;
 var key_save: w.HANDLE = null;
+var key_cancel: w.HANDLE = null;
 var key_status: w.HANDLE = null;
 const KeyRequest = struct {
     refs: std.atomic.Value(u32) = .init(2),
@@ -103,6 +104,7 @@ fn beginKeyCheck() void {
         return;
     }
     key_request = request;
+    _ = @import("focus.zig").SetFocus(key_cancel);
     _ = EnableWindow(key_save, 0);
     _ = EnableWindow(key_edit, 0);
     setKeyStatus(L("Checking key..."));
@@ -388,6 +390,7 @@ fn closeKey() void {
     }
     _ = w.SetWindowTextW(key_edit, L(""));
     key_save = null;
+    key_cancel = null;
     key_status = null;
     _ = EnableWindow(window, 1);
     key_window = null;
@@ -472,6 +475,7 @@ fn openKey(control: Control) void {
     key_status = w.CreateWindowExW(0, L("STATIC"), L(""), 0x40000000, s(24), s(112), width - s(48), s(24), key_window, null, instance, null);
     const save = w.CreateWindowExW(0, L("BUTTON"), L(words.action_save), 0x40000000 | 0x10000000 | 0x00010000 | 1, width - s(108), s(140), s(84), s(36), key_window, @ptrFromInt(1), instance, null);
     key_save = save;
+    key_cancel = cancel;
     for ([_]w.HANDLE{ key_edit, key_status, cancel, save }) |child| _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
     loadKey(control);
     _ = EnableWindow(window, 0);

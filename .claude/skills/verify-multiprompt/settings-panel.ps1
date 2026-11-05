@@ -204,6 +204,7 @@ try {
         [VerifyNative]::Text('settings-close-race-zzzzzzzzzzzzzzzz')
         Click-Setting 'Save' -RootWindow $keyWindow
         Wait-Until { [int](Get-Content (Join-Path $script:keyProviderDir 'requests.txt') -Raw) -eq ($requestsBeforeClose + 1) } 'close race request received'
+        if (-not (Settings-Control 'Cancel' -RootWindow $keyWindow).Current.HasKeyboardFocus) { throw 'Cancel did not receive focus while checking' }
         if ($closeMethod -eq 'button') { Click-Setting 'Cancel' -RootWindow $keyWindow }
         else { Press @(0x12, 0x73) 'Alt+F4: close pending key sheet' }
         Wait-Until { (Settings-Window) -eq $script:settingsWindow } 'close pending key sheet'
