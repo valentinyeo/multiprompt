@@ -3189,12 +3189,10 @@ test "IGSH-1761 long pasted text leaves the composer scrolled so the caret line 
     _ = GetClientRect(edit, &client);
     chatComposerKeepCaretVisible();
     const lines = chatComposerLines(edit);
-    const probe_y = chatComposerCharY(edit, @intCast(len));
-    std.debug.print("IGSH-1761 first={d} visible={d} total={d} client_bottom={d} caret_y={any}\n", .{ lines.first, lines.visible, lines.total, client.bottom, probe_y });
+    const caret_line: i32 = @intCast(SendMessageW(edit, EM_LINEFROMCHAR, len, 0));
     try std.testing.expect(lines.total > lines.visible);
     try std.testing.expect(lines.first > 0);
-    const caret_y = probe_y orelse return error.TestUnexpectedResult;
-    try std.testing.expect(caret_y >= 0 and caret_y < client.bottom);
+    try std.testing.expect(caret_line >= lines.first and caret_line < lines.first + lines.visible);
     try std.testing.expect(chatComposerThumb(edit, client.bottom - client.top) != null);
     _ = SendMessageW(edit, 0x00B1, 0, 0);
     chatComposerKeepCaretVisible();
