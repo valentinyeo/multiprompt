@@ -4,7 +4,7 @@ try {
 $pageJob = New-Object VerifyJob
 $pageRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-typing')).Path
 $url = 'http://127.0.0.1:18792/'
-$pageServer = $pageJob.Start((Get-Command python.exe -ErrorAction Stop).Source, $pageRoot, (Join-Path $Evidence 'browser-typing-page.stdout.log'), (Join-Path $Evidence 'browser-typing-page.stderr.log'), '-m http.server 18792 --bind 127.0.0.1', $true)
+$pageServer = $pageJob.Start((Get-Command python.exe -ErrorAction Stop | Select-Object -First 1).Source, $pageRoot, (Join-Path $Evidence 'browser-typing-page.stdout.log'), (Join-Path $Evidence 'browser-typing-page.stderr.log'), '-m http.server 18792 --bind 127.0.0.1', $true)
 Wait-Until {
     $pageServer.Refresh()
     if ($pageServer.HasExited) { throw 'Local page server exited before readiness' }
@@ -73,7 +73,7 @@ Press @(0x0D) 'Enter: choose browser URL'
 Type-Text $url
 Press @(0x0D) 'Enter: save the synthetic local page URL'
 Wait-Until { (Read-Session).tabs[0].burl -ceq $url } 'synthetic local page URL saved through the app UI'
-Focus-Palette 'browser: use app address bar' 6244
+Focus-Palette 'browser mode' 6244
 Press @(0x0D) 'Enter: use the app address bar'
 Wait-Until {
     $candidate = [VerifyNative]::DockedPaneWindow($script:window)
