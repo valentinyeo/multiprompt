@@ -8737,6 +8737,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (!@import("room_frontend.zig").flushUi()) debugLog("Room UI flush failed on close");
             @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
+            @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             stopUpdateCardWatch();
             _ = KillTimer(hwnd, TIMER_BROWSER_HEALTH);
             _ = KillTimer(hwnd, TIMER_BROWSER_ENGINE_SWITCH);
@@ -8811,6 +8812,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             @import("bot_photo.zig").shutdown();
             computer.shutdown();
             @import("room_frontend.zig").deinit();

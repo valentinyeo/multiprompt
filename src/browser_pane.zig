@@ -349,13 +349,6 @@ fn ownProfileTokenForLaunch(idx: u32, buf: *[browser_own_profile.TOKEN_LEN]u8) ?
     return browser_own_profile.token(buf, profile_seed) catch null;
 }
 
-fn assignBrowserProfileForLaunch(idx: u32) void {
-    app_state.shells[idx].browser_profile_token = std.mem.zeroes([32]u8);
-    var token_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;
-    const own_token = ownProfileTokenForLaunch(idx, &token_buf) orelse return;
-    @memcpy(app_state.shells[idx].browser_profile_token[0..own_token.len], own_token);
-}
-
 pub fn browserProfileToken(idx: u32) []const u8 {
     if (idx >= app_state.shell_count) return "";
     return std.mem.sliceTo(&app_state.shells[idx].browser_profile_token, 0);
@@ -3362,7 +3355,8 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
         return;
     }
     ensureBrowserDefaultUrl(idx);
-    assignBrowserProfileForLaunch(idx);
+    app_state.shells[idx].browser_profile_token = std.mem.zeroes([32]u8);
+    @memcpy(app_state.shells[idx].browser_profile_token[0..launch_profile.len], launch_profile);
     app_state.shells[idx].browser_suspended = false;
     app_state.shells[idx].browser_native = app_state.g_browser_native_default;
     const now = launch_now;
@@ -4292,6 +4286,11 @@ const BrowserSigninJob = struct {
 
 var browser_signin_reservation: ?BrowserSigninReservation = null;
 var browser_signin_operation_id: usize = 0;
+var browser_signin_cancelled = std.atomic.Value(bool).init(false);
+
+pub fn cancelBrowserSigninForShutdown() void {
+    browser_signin_cancelled.store(true, .release);
+}
 
 fn clearFinishedBrowserSignin() void {
     const reservation = browser_signin_reservation orelse return;
@@ -4331,10 +4330,11 @@ fn browserSigninWorker(job: *BrowserSigninJob) void {
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     var pi: PROCESS_INFORMATION = undefined;
+    if (browser_signin_cancelled.load(.acquire)) return;
     if (CreateProcessW(null, &job.command, null, null, 0, 0, null, null, &si, &pi) == 0) return;
     _ = CloseHandle(pi.hThread);
     defer _ = CloseHandle(pi.hProcess);
-    while (IsWindow(job.owner) != 0) {
+    while (!browser_signin_cancelled.load(.acquire) and IsWindow(job.owner) != 0) {
         const result = WaitForSingleObject(pi.hProcess, 250);
         if (result == 0) {
             status = 1;
@@ -4381,7 +4381,8 @@ pub fn signInGoogleForShell(idx: u32) bool {
             canonical_pid = pid;
         }
     }
-    if (process == null or WaitForSingleObject(process, 0) != 258) return true;
+    const controlled_process = process orelse return true;
+    if (WaitForSingleObject(controlled_process, 0) != 258) return true;
     var image: [1024]u16 = undefined;
     var image_len: DWORD = image.len;
     if (win.QueryFullProcessImageNameW(process, 0, &image, &image_len) == 0) return true;
@@ -4392,7 +4393,7 @@ pub fn signInGoogleForShell(idx: u32) bool {
     var dir_buf: [1024]u8 = undefined;
     const dir = ownBrowserUserDataDir(&dir_buf, own_token);
     if (dir.len == 0) return true;
-    const controlled_line = browser_own_profile.processCommandLine(std.heap.page_allocator, process) catch return true;
+    const controlled_line = browser_own_profile.processCommandLine(std.heap.page_allocator, controlled_process) catch return true;
     defer std.heap.page_allocator.free(controlled_line);
     const controlled_dir = (browser_own_profile.userDataArgument(std.heap.page_allocator, controlled_line) catch return true) orelse return true;
     defer std.heap.page_allocator.free(controlled_dir);
