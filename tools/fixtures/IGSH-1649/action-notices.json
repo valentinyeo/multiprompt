@@ -183,6 +183,7 @@
     "wndProc: showHeaderNoticeAscii(\"Could not load skills\",3500,true)",
     "wndProc: showHeaderNoticeAscii(\"Could not parse reminder time\",4000,true)",
     "wndProc: showHeaderNoticeAscii(\"Could not save picture\",4000,true)",
+    "wndProc: showHeaderNoticeAscii(\"Could not start chat in this group\",5000,true)",
     "wndProc: showHeaderNoticeAscii(\"Could not start the new session\",5000,true)",
     "wndProc: showHeaderNoticeAscii(\"Could not start the new session\",5000,true)",
     "wndProc: showHeaderNoticeAscii(\"Could not use that image\",4000,true)",
