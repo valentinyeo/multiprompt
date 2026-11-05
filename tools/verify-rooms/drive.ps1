@@ -115,7 +115,10 @@ function Witness {
     return $null
 }
 function Shot([string]$Name) {
+    $result.phase='screenshot: ' + $Name
+    Save $result (Join-Path $Evidence 'result.json')
     $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='screenshot'; name=$Name})
+    Save @($actions) (Join-Path $Evidence 'actions.json')
     $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
     $bitmap = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -294,6 +297,7 @@ try {
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message
+    Save $result (Join-Path $Evidence 'result.json')
     try {
         $accountError = Join-Path $profile 'account.stderr'
         if (Test-Path $accountError) {
@@ -304,13 +308,12 @@ try {
     } catch {}
     try { $w=Witness; if ($w) { Save $w (Join-Path $Evidence 'witness.json') } } catch {}
     try {
-        $reports = @(Get-ChildItem (Join-Path $settings 'crashes') -Filter 'crash-*.txt' -ErrorAction SilentlyContinue)
+        $reports = @(Get-ChildItem (Join-Path $settings 'crashes') -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(crash|freeze)-.*\.txt$' })
         $frames = @($reports | ForEach-Object {
-            Get-Content $_.FullName | Where-Object { $_ -match '^(exception_code: 0x[0-9A-F]+ \([A-Z_]+\)|exception_address: 0x[0-9A-F]+|module_base: 0x[0-9A-F]+|module_offset: 0x[0-9A-F]+|exe_base: 0x[0-9A-F]+|  0x[0-9A-F]+)$' }
+            Get-Content $_.FullName | Where-Object { $_ -match '^(exception_code: 0x[0-9A-F]+ \([A-Z_]+\)|exception_address: 0x[0-9A-F]+|module_base: 0x[0-9A-F]+|module_offset: 0x[0-9A-F]+|exe_base: 0x[0-9A-F]+|instruction: ([a-zA-Z0-9_]+\+0x[0-9A-F]+|unavailable)|thread_context: (captured|unavailable)|unresponsive_ms: [0-9]+|  0x[0-9A-F]+)$' }
         })
         Save $frames (Join-Path $Evidence 'crash-addresses.json')
     } catch {}
-    try { Shot 'failure' } catch {}
 } finally {
     try {
         if ($null -ne $job) { $stopped=$job.Stop(); $result.cleanup=$stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup=0 }
