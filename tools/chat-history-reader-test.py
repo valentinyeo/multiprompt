@@ -4432,7 +4432,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 23)
+        self.assertEqual(len(base), 24)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
@@ -4620,6 +4620,39 @@ class AgentHostFixture:
 
 
 class AgentHostTest(AgentHostFixture, unittest.TestCase):
+    def test_igsh_1653_headless_host_delivers_without_a_parking_pane(self):
+        identity = bytearray(hashlib.sha256(b'[0,"headless fixture"]').digest()[:16])
+        identity[6] = (identity[6] & 15) | 128
+        identity[8] = (identity[8] & 63) | 128
+        self.sid = str(uuid.UUID(bytes=bytes(identity)))
+        self.tmux = 'live-' + bytes(identity).hex()
+        self.token = 'mp-spawn-' + bytes(identity).hex()
+        self.agent.write_text(FAKE_AGENT.replace("os.environ['FAKE_AGENT_LOG']", repr(str(self.log))))
+        self.enable(spawn_name='headless fixture', spawn_workspace='Work', spawn_group=None,
+                    spawn_mode='headless', permission_mode='bypassPermissions')
+        script = '''
+const {run} = await import(process.argv[1]);
+process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder', process.argv[2], '--workspace', 'Work', '--mode', 'headless', '--task', process.argv[4]], {
+  env: {HOME: process.argv[2], PATH: process.env.PATH, MULTIPROMPT_KEY: 'fixture-key', MULTIPROMPT_READER: process.argv[3]},
+  fetch: async () => ({status: 200, json: async () => ({revision: 0, layout: {workspaces: [{name: 'Work'}], tabs: []}})}),
+  tmux: args => { if (args[0] !== 'has-session') throw new Error('headless created a pane'); return {status: 1}; }
+});
+'''
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            for _ in range(2):
+                result = subprocess.run(['node', '--input-type=module', '-e', script,
+                                         (ROOT / 'tools/mp-layout.mjs').as_uri(), str(self.home),
+                                         str(ROOT / 'src/chat_history_reader.py'), self.text],
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, 'headless spawn must start the native host without a pane')
+                reply = json.loads(result.stdout)
+                self.assertEqual(reply['sid'], self.sid)
+                self.assertEqual(reply['mode'], 'headless')
+                self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+            self.assertEqual(self.user_lines(), [self.text])
+            self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'already')
+            self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
+
     def test_host_delivers_once_with_receipt(self):
         self.enable()
         token = self.seed()

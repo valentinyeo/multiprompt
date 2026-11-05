@@ -216,6 +216,32 @@ try {
     $results.desktop_seconds_to_show_opened_session = [Math]::Round($openSeconds, 2)
     if ($openSeconds -gt 10) { throw "Desktop took $openSeconds seconds to show the opened session" }
 
+    $stage = 'named live chat account import'
+    $liveSession = 'live-0123456789ab8def81230123456789ab'
+    $liveSid = '01234567-89ab-8def-8123-0123456789ab'
+    $start = [DateTime]::UtcNow
+    $liveOpened = Invoke-Layout $secrets.admin_key @('open', $liveSession, '--workspace', 'Runners', '--title', 'Named live chat', '--no-tmux')
+    if ($liveOpened.code -ne 0) { throw 'Could not publish the live account tab' }
+    $groupHeaders = @{ Authorization = "Bearer $($secrets.admin_key)"; 'X-Layout-Features' = 'groups' }
+    $groupSnapshot = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $groupHeaders
+    $groupTab = @($groupSnapshot.layout.tabs | Where-Object { $_.tmux_session -ceq $liveSession })
+    if ($groupTab.Count -ne 1) { throw 'Expected one live tab before grouping' }
+    $groupTab[0] | Add-Member -NotePropertyName group -NotePropertyValue 'Lead runners' -Force
+    $groupBody = @{ base_revision = $groupSnapshot.revision; layout = $groupSnapshot.layout } | ConvertTo-Json -Depth 20 -Compress
+    [void](Invoke-RestMethod -Method Put -Uri "https://$hostName/v1/layout" -Headers $groupHeaders -ContentType 'application/json' -Body $groupBody)
+    [void](Wait-For 'native import saves live identity, Chat View, and group' {
+        try {
+            $snapshot = Get-Content "$settings/session-journey-a.json" -Raw | ConvertFrom-Json
+            $tabs = @($snapshot.tabs | Where-Object { $_.tmux_session -ceq $liveSession })
+            $groups = @($snapshot.groups | Where-Object { $_.name -ceq 'Lead runners' -and $_.id -eq $tabs[0].group_id })
+            $tabs.Count -eq 1 -and $tabs[0].csid -ceq $liveSid -and $tabs[0].cv -eq $true -and $tabs[0].name -ceq 'Named live chat' -and $groups.Count -eq 1
+        } catch { $false }
+    } 15)
+    $liveSeconds = ([DateTime]::UtcNow - $start).TotalSeconds
+    if ($liveSeconds -gt 10) { throw "Native live import took $liveSeconds seconds" }
+    $results.named_live_import = @{ verdict = 'pass'; seconds = [Math]::Round($liveSeconds, 2); group = 'Lead runners'; boundary = 'real account import; no remote host or phone' }
+    Shot 'desktop-live-grouped'
+
     $stage = 'second device authentication'
     $tokenBody = @{ grant_type = 'refresh_token'; refresh_token = $secrets.second_refresh_token } | ConvertTo-Json -Compress
     $tokenB = Invoke-RestMethod -Method Post -Uri "https://$hostName/oauth/token" -ContentType 'application/json' -Body $tokenBody
@@ -304,7 +330,21 @@ try {
     $failure = $true
     $results.verdict = 'fail'
     $results.failed_stage = $stage
+    $message = $_.Exception.Message
+    $results.failure_message = if ($message.StartsWith('Timed out:') -or $message.StartsWith('Could not switch to workspace')) { $message } else { $_.Exception.GetType().FullName }
 } finally {
+    foreach ($entry in @(@{ path = $log; name = 'desktop-a.log' }, @{ path = $logB; name = 'desktop-b.log' })) {
+        if ($entry.path -and (Test-Path $entry.path)) {
+            try {
+                $text = Read-Log $entry.path
+                foreach ($property in $secrets.PSObject.Properties) {
+                    if ($property.Value -is [string] -and $property.Value.Length -gt 20) { $text = $text.Replace($property.Value, '<redacted>') }
+                }
+                $text = $text -replace 'Bearer [A-Za-z0-9._-]+', 'Bearer <redacted>'
+                $text | Set-Content (Join-Path $Output $entry.name)
+            } catch {}
+        }
+    }
     foreach ($ownedProcess in @($appB, $app, $server)) {
         if ($ownedProcess) {
             try {

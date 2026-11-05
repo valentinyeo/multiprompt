@@ -36,6 +36,13 @@ public static class BotSettingsDesktop {
         RedrawWindow(content, IntPtr.Zero, IntPtr.Zero, 0x0101);
     }
     public static int Scale(IntPtr content, int value) { return value * (int)GetDpiForWindow(content) / 96; }
+    public static int ColorX(IntPtr content, int color) {
+        Rect rect;
+        if (!GetClientRect(content, out rect)) throw new InvalidOperationException("Settings bounds unavailable");
+        int cell = Math.Min(Scale(content, 40), (rect.Right - Scale(content, 32)) / 9);
+        if (color < 0 || color >= 8 || cell <= 0) throw new ArgumentOutOfRangeException("color");
+        return Scale(content, 16) + cell * color + cell / 2;
+    }
     public static int ColorsTop(IntPtr content) {
         Rect rect;
         if (!GetClientRect(content, out rect)) throw new InvalidOperationException("Settings bounds unavailable");

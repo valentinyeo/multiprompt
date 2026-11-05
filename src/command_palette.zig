@@ -651,6 +651,7 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
+    if (target == app_state.SEARCH_TABCTX_RENAME) return "Rename session";
     if (target == app_state.SEARCH_TABCTX_COMPUTER) return words.computer_toggle;
     if (target == SEARCH_TABCTX_BROWSER) {
         if (findShellById(app_state.g_tabctx_sid)) |idx| {
@@ -3106,6 +3107,10 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BACK;
         app_state.g_search_result_count += 1;
         const tc_idx = findShellById(app_state.g_tabctx_sid);
+        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Rename session", "rename tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_RENAME;
+            app_state.g_search_result_count += 1;
+        }
         appendPinnedPageResults(app_state.g_tabctx_sid);
         if (tc_idx) |ti| {
             if (@import("bot_look.zig").eligible(ti)) {

@@ -1253,6 +1253,7 @@ comptime {
         _ = @import("sidebar.zig");
         _ = @import("themes.zig");
         _ = @import("browser_pane.zig");
+        _ = @import("computer_pane.zig");
         _ = @import("capacity.zig");
         _ = @import("status_line.zig");
         _ = @import("update_card.zig");
@@ -1286,6 +1287,7 @@ comptime {
         _ = @import("changelog.zig");
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
+        _ = @import("bot_avatar.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
@@ -1797,6 +1799,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC => {
             const child: HANDLE = if (lp == 0) null else @ptrFromInt(@as(usize, @bitCast(lp)));
+            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
+                const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
+                _ = SetTextColor(dc, @import("rename.zig").inline_text_color);
+                _ = SetBkColor(dc, @import("rename.zig").inline_color);
+                if (@import("rename.zig").inlineBrush()) |brush| return @bitCast(@as(usize, @intFromPtr(brush)));
+            }
             if (child == app_state.g_chat_composer_hwnd) {
                 refreshChatBrushes();
                 const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
@@ -1808,8 +1816,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_COMMAND => {
             const notif = @as(u32, @truncate(wp >> 16));
-            if (notif == EN_KILLFOCUS) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COMMIT_RENAME, 0, 0);
+            if (notif == EN_KILLFOCUS and lp != 0 and app_state.g_edit_hwnd != null and @as(usize, @bitCast(lp)) == @intFromPtr(app_state.g_edit_hwnd.?)) {
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COMMIT_RENAME, 0, lp);
             }
             return 0;
         },
@@ -1837,6 +1845,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (@import("chat_composer.zig").chatDictationClick(mx, my)) return 0;
                 if (chatTitleLayout()) |title| {
+                    const name = title.text;
+                    if (@import("room_frontend.zig").privateActionsAllowed() and mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
+                        startThreadTitleRename();
+                        return 0;
+                    }
                     const more = title.more;
                     if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
                         more_menu.open();
@@ -2048,6 +2061,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (@import("room_frontend.zig").privateActionsAllowed() and tth_click > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth_click and
                     (!app_state.g_chat_active or (mx >= chatViewLayout().transcript.left and mx < chatViewLayout().transcript.right)))
                 {
+                    var client: RECT = std.mem.zeroes(RECT);
+                    _ = GetClientRect(hwnd, &client);
+                    if (@import("drawing.zig").threadTitleNameRectFor(client.right, app_state.active_shell)) |name| {
+                        if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
+                            startThreadTitleRename();
+                            return 0;
+                        }
+                    }
                     app_state.g_shell_focused = true;
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -2112,6 +2133,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
+                            if (!isCtrlDown() and (wp & 0x0004) == 0 and @import("room_frontend.zig").privateActionsAllowed()) {
+                                if (@import("rename.zig").sidebarNameRect(tab_idx)) |name| {
+                                    if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
+                                        if (tab_idx != app_state.active_shell or @import("room_frontend.zig").isActive()) @import("console.zig").switchToShellByUser(tab_idx);
+                                        startRename(tab_idx);
+                                        return 0;
+                                    }
+                                }
+                            }
                             commitRename();
                             const ctrl = isCtrlDown();
                             const shift = (wp & 0x0004) != 0;
@@ -2823,12 +2853,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_COMMIT_RENAME => {
+            if (lp != 0 and (app_state.g_edit_hwnd == null or @as(usize, @bitCast(lp)) != @intFromPtr(app_state.g_edit_hwnd.?))) return 0;
             commitRename();
             return 0;
         },
         WM_APP_RENAME_TAB => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            if (app_state.shell_count > 0) {
+            if (app_state.g_inbox_active) {
+                @import("inbox.zig").startInboxRename();
+            } else if (app_state.shell_count > 0) {
                 startRename(app_state.active_shell);
             }
             return 0;
@@ -4912,6 +4945,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
+                var confirm_trace: [64]u8 = undefined;
+                debugLog(std.fmt.bufPrint(&confirm_trace, "[palette] confirm target={d}", .{target}) catch "[palette] confirm unavailable");
                 if ((app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) and target == SEARCH_TABCTX_BACK) {
                     app_state.g_workspace_color_target = null;
                     app_state.g_bot_look_mode = .none;
@@ -6361,10 +6396,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
-                if (target == SEARCH_RENAME_SYNC_OFFSET) {
-                    if (app_state.active_shell < app_state.shell_count) {
-                        _ = beginPaletteRenameInput(app_state.active_shell);
-                    }
+                if (target == SEARCH_RENAME_SYNC_OFFSET or target == app_state.SEARCH_TABCTX_RENAME) {
+                    const idx = if (target == app_state.SEARCH_TABCTX_RENAME) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    if (idx) |shell| _ = beginPaletteRenameInput(shell);
                     return 0;
                 }
                 if (target == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET) {
@@ -8573,14 +8607,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (browser) |metadata| {
                             if (app_state.g_account_locked or app_state.g_restoring or (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored)) return 0;
                             if (!app_state.validBrowserTabTransfer(metadata)) return 0;
-                            if (metadata.appearance.face > 20 or metadata.appearance.color > 7 or metadata.appearance.pending_mask != 0) return 0;
+                            if (metadata.appearance.face > 20 or metadata.appearance.color > @import("session_layout.zig").color_count or metadata.appearance.pending_mask != 0) return 0;
                         }
                         const transfer: *const TabTransfer = @ptrCast(@alignCast(data_ptr));
                         const appearance: ?*const app_state.AppearanceTabTransfer = if (browser) |metadata|
                             (if (metadata.has_appearance != 0) &metadata.appearance else null)
                         else if (cds.cbData == @sizeOf(app_state.AppearanceTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
                         if (appearance) |extended| {
-                            if (extended.face > 20 or extended.color > 7 or extended.pending_mask != 0) return 0;
+                            if (extended.face > 20 or extended.color > @import("session_layout.zig").color_count or extended.pending_mask != 0) return 0;
                         }
                         if (transfer.tmux_identity_len > 63) return 0;
                         if (browser != null and (transfer.console_hwnd == 0 or transfer.kind > 6 or transfer.name_source > 4 or
@@ -8621,7 +8655,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.favorite = transfer.favorite != 0;
                             if (appearance) |extended| {
                                 new_shell.face = if (extended.face < 20) extended.face else null;
-                                new_shell.color = if (extended.color < 7) extended.color else null;
+                                new_shell.color = @import("session_layout.zig").decodeTransferColor(extended.color);
                             }
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;
