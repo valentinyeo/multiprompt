@@ -25,13 +25,15 @@ No saved session, Computer choice or draft is written by the harness.
 Select the chat, enable Chat View, and type a draft through real keyboard input.
 Capture `before.png` to review the plain header.
 Open `Chat View: More Menu` through Ctrl+K and capture the actual native menu in `action.png`.
-Down chooses Terminal, Rename, then Computer; Enter activates the selected row.
+Read the app's diagnostic Computer row rectangle and click its center through real mouse input.
+The UI Automation child must belong to the owned main window.
 Require the app-written `session.json.computer` to contain exactly one selected identity.
 The selected chat and Chat View must remain unchanged.
 Return through the existing Computer palette action and require the saved selection to clear.
 The native composer must still contain the exact draft.
-Inspect before/action/selected/pane/after screenshots, command receipts, saved sessions, choice receipt and `result.json`.
-The same pre-fix journey selects History instead and must fail `Computer menu action selected the pane`, not setup or launch.
+Inspect before/action/pane/after screenshots, command receipts, saved sessions, choice receipt and `result.json`.
+The published pre-fix menu has no Computer row. Require `Three-dots menu has no Computer row` and inspect the actual missing-row screenshot, not a setup or launch failure.
+The initial keyboard-only baseline [41968849113](https://github.com/valentinyeo/multiprompt/actions/runs/41968849113) reached the real menu without Computer, then failed to select the pane. Its screenshots were inspected; keyboard navigation itself was inconclusive, so the final driver clicks the app-published row rectangle.
 
 ## Gotchas
 

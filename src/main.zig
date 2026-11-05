@@ -3755,6 +3755,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_MORE_MENU_ACTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed() and wp != @intFromEnum(more_menu.Item.history)) return 0;
+            if (wp == @intFromEnum(more_menu.Item.computer)) {
+                if (lp <= 0 or lp > std.math.maxInt(u32)) return 0;
+                const target_idx = findShellById(@intCast(lp)) orelse return 0;
+                @import("computer_pane.zig").toggle(target_idx);
+                return 0;
+            }
             if (wp == @intFromEnum(more_menu.Item.bot_face) or wp == @intFromEnum(more_menu.Item.bot_color)) {
                 if (lp <= 0 or lp > std.math.maxInt(u32)) return 0;
                 const target_idx = findShellById(@intCast(lp)) orelse return 0;

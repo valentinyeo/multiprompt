@@ -44,14 +44,21 @@ Press @(0x0D) 'Enter: open the existing three-dots menu'
 Wait-Until {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptMoreMenu')
-    @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count -eq 1
+    $menus = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $condition) | Where-Object { -not $_.Current.IsOffscreen })
+    if ($menus.Count -ne 1) { return $false }
+    $script:computerMenu = [IntPtr]$menus[0].Current.NativeWindowHandle
+    [VerifyNative]::GetAncestor($script:computerMenu, 2) -eq $script:window
 } 'visible owned three-dots menu'
 Snapshot 'action'
-Press @(0x28) 'Down: Terminal'
-Press @(0x28) 'Down: Rename'
-Press @(0x28) 'Down: Computer'
-Snapshot 'computer-selected'
-Press @(0x0D) 'Enter: choose Computer inside the menu'
+$rows = [regex]::Matches((Get-Content -LiteralPath $log -Raw), '\[chat\] menu computer rect=(\d+),(\d+),(\d+),(\d+)')
+if ($rows.Count -eq 0) { throw 'Three-dots menu has no Computer row' }
+$row = $rows[$rows.Count - 1]
+$x = [int](([int]$row.Groups[1].Value + [int]$row.Groups[3].Value) / 2)
+$y = [int](([int]$row.Groups[2].Value + [int]$row.Groups[4].Value) / 2)
+Doctor
+Assert-Foreground
+Record 'Click Computer inside the ownership-checked three-dots menu'
+[VerifyNative]::ClickClient($script:computerMenu, $x, $y)
 $choicePath = Join-Path $scratch 'roaming/ZigShell/session.json.computer'
 Wait-Until {
     (Test-Path -LiteralPath $choicePath) -and (Get-Content -LiteralPath $choicePath -Raw) -match '\A[0-9a-f]{64}1\r?\n\z'
