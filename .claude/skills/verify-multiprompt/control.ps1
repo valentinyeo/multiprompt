@@ -244,13 +244,16 @@ try {
         & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Repository picker SSH boundary compilation failed' }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
-        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; groups = @(@{ id = 17; name = 'Example group' }); tabs = @(
-            @{ kind = 'tmux'; name = 'First'; manual = $true; tmux_host = 0; tmux_session = 'first'; workspace = 0; group_id = 17; cwd = '/home/owner/projects/sample'; cv = $false; pid = 0 },
-            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cwd = '/work/projects/beta'; cv = $false; pid = 0 }
+        $seed = @{ active_tab = 1; active_workspace = 0; single_window = $true; workspace_count = 2; workspaces = @(@{ name = 'Other'; wid = 'verify-other' }, @{ name = 'Example'; wid = 'verify-example' }); tabs = @(
+            @{ kind = 'tmux'; name = 'First'; manual = $true; tmux_host = 0; tmux_session = 'first'; workspace = 0; cv = $false; pid = 0 },
+            @{ kind = 'tmux'; name = 'Second'; manual = $true; tmux_host = 2; tmux_session = 'second'; workspace = 0; cwd = '/work/projects/beta'; cv = $false; pid = 0 },
+            @{ kind = 'tmux'; name = 'Owner terminal'; manual = $true; tmux_host = 0; tmux_session = 'terminal-owner'; workspace = 1; ccwd = '/home/owner/projects/sample'; cv = $false; pid = 0 }
         ) }
+        $commands = @{ commands = @(@{ label = 'Example folder'; kind = 'vps'; folder_host = '0'; default = $true; workspace = 'Example'; cwd = '~/projects/sample' }) }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/commands.json'), (ConvertTo-Json -InputObject $commands -Depth 6), (New-Object Text.UTF8Encoding($false)))
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
         Save-Json $seed 'seed-session.json'
-        $result.repoPickerBoundary = 'Two saved synthetic tmux tabs in Other, host 0 then active host 2; synthetic SSH repository listing and console-backed tmux; no real SSH, tmux server or agent verified.'
+        $result.repoPickerBoundary = 'Two synthetic tmux tabs in Other and one terminal with seeded reported cwd in Example; SSH repository listing and console-backed tmux stand-in; no real SSH, tmux server or agent verified.'
     }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'

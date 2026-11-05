@@ -2205,185 +2205,6 @@ pub fn spawnWorkspaceTmuxSession() bool {
     return spawnWorkspaceSession(true, false);
 }
 
-pub const GroupLaunchTarget = struct {
-    group: u32,
-    host: u8,
-    cwd: [256]u8,
-    cwd_len: usize,
-};
-
-pub fn groupLaunchTarget(sid: u32) ?GroupLaunchTarget {
-    if (sid == 0) return null;
-    const index = findShellById(sid) orelse return null;
-    const group = @import("sidebar.zig").tabGroupId(index);
-    if (group == 0 or @import("sidebar.zig").findGroupIdx(group) == null) return null;
-    const shell = &app_state.shells[index];
-    const host = @import("capacity.zig").remoteHostForShell(shell) orelse return null;
-    const session = shell.tmux_session[0..shell.tmux_session_len];
-    const live = shell.kind == .tmux and (std.mem.eql(u8, session, "live") or std.mem.startsWith(u8, session, "live-"));
-    const cwd = if (live)
-        (if (shell.cached_cwd_len > 0) shell.cached_cwd[0..shell.cached_cwd_len] else if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else return null)
-    else
-        @import("vps.zig").shellKnownRemotePath(shell, host) orelse return null;
-    var target = GroupLaunchTarget{ .group = group, .host = host, .cwd = undefined, .cwd_len = cwd.len };
-    if (cwd.len == 0 or cwd.len > target.cwd.len or cwd[0] != '/' or !remotePathSafeForShell(cwd)) return null;
-    var parts = std.mem.splitScalar(u8, cwd, '/');
-    while (parts.next()) |part| {
-        if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
-    }
-    @memcpy(target.cwd[0..cwd.len], cwd);
-    return target;
-}
-
-test "group launch uses the targeted shell identity" {
-    const saved_shells = app_state.shells[0..2].*;
-    const saved_count = app_state.shell_count;
-    const saved_active = app_state.active_shell;
-    const saved_groups = app_state.groups[0];
-    const saved_group_count = app_state.group_count;
-    const saved_starred = app_state.g_starred_workspace;
-    const saved_cache_count = app_state.g_tmux_cache_count;
-    defer {
-        app_state.shells[0..2].* = saved_shells;
-        app_state.shell_count = saved_count;
-        app_state.active_shell = saved_active;
-        app_state.groups[0] = saved_groups;
-        app_state.group_count = saved_group_count;
-        app_state.g_starred_workspace = saved_starred;
-        app_state.g_tmux_cache_count = saved_cache_count;
-    }
-    app_state.shell_count = 2;
-    app_state.active_shell = 0;
-    app_state.g_starred_workspace = false;
-    app_state.g_tmux_cache_count = 0;
-    app_state.group_count = 1;
-    app_state.groups[0] = .{ .id = 17, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 7 };
-    for (0..2) |i| {
-        app_state.shells[i] = app_state.empty_shell;
-        app_state.shells[i].shell_id = @intCast(i + 1);
-        app_state.shells[i].kind = .tmux;
-        app_state.shells[i].tmux_host = @intCast(i);
-        app_state.shells[i].group_id = 17;
-    }
-    const paths = [_][]const u8{ "/home/login/projects/sample", "/home/owner/projects/sample" };
-    for (paths, 0..) |path, i| {
-        @memcpy(app_state.shells[i].cached_cwd[0..path.len], path);
-        app_state.shells[i].cached_cwd_len = @intCast(path.len);
-    }
-    const target = groupLaunchTarget(2) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@as(u8, 1), target.host);
-    try std.testing.expectEqual(@as(u32, 17), target.group);
-    try std.testing.expectEqualStrings(paths[1], target.cwd[0..target.cwd_len]);
-    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
-    var command_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
-    const command = workspaceLaunchCommand("claude", "live-test", target.cwd[0..target.cwd_len], "ffffffff-ffff-4fff-bfff-ffffffffffff", &host_buf, &command_buf) orelse return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, command, paths[1]) != null);
-    try std.testing.expect(std.mem.indexOf(u8, command, paths[0]) == null);
-    try std.testing.expect(groupLaunchTarget(0) == null);
-    try std.testing.expect(groupLaunchTarget(99) == null);
-    app_state.shells[1].group_id = 0;
-    try std.testing.expect(groupLaunchTarget(2) == null);
-    app_state.shells[1].group_id = 17;
-    app_state.group_count = 0;
-    try std.testing.expect(groupLaunchTarget(2) == null);
-    app_state.group_count = 1;
-    app_state.shells[1].kind = .cmd;
-    try std.testing.expect(groupLaunchTarget(2) == null);
-    app_state.shells[1].kind = .tmux;
-    var long_path: [300]u8 = @splat('a');
-    long_path[0] = '/';
-    @memcpy(app_state.shells[1].cached_cwd[0..long_path.len], &long_path);
-    app_state.shells[1].cached_cwd_len = 220;
-    const longest = groupLaunchTarget(2) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings(long_path[0..220], longest.cwd[0..longest.cwd_len]);
-    for ([_]u32{ 221, 256, 257, 300 }) |len| {
-        app_state.shells[1].cached_cwd_len = len;
-        try std.testing.expect(groupLaunchTarget(2) == null);
-    }
-    app_state.shells[1].cached_cwd_len = 0;
-    try std.testing.expect(groupLaunchTarget(2) == null);
-    for ([_][]const u8{ "~/projects/sample", "/home/owner/../other", "/home/owner/bad;command" }) |path| {
-        @memcpy(app_state.shells[1].cached_cwd[0..path.len], path);
-        app_state.shells[1].cached_cwd_len = @intCast(path.len);
-        try std.testing.expect(groupLaunchTarget(2) == null);
-    }
-}
-
-test "group launch ignores hosted carrier cwd but follows terminal cwd" {
-    const saved_shell = app_state.shells[0];
-    const saved_count = app_state.shell_count;
-    const saved_group = app_state.groups[0];
-    const saved_group_count = app_state.group_count;
-    const saved_starred = app_state.g_starred_workspace;
-    const saved_cache = app_state.g_tmux_cache[0];
-    const saved_cache_count = app_state.g_tmux_cache_count;
-    defer {
-        app_state.shells[0] = saved_shell;
-        app_state.shell_count = saved_count;
-        app_state.groups[0] = saved_group;
-        app_state.group_count = saved_group_count;
-        app_state.g_starred_workspace = saved_starred;
-        app_state.g_tmux_cache[0] = saved_cache;
-        app_state.g_tmux_cache_count = saved_cache_count;
-    }
-    app_state.shell_count = 1;
-    app_state.group_count = 1;
-    app_state.g_starred_workspace = false;
-    app_state.groups[0] = .{ .id = 17, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 7 };
-    app_state.shells[0] = app_state.empty_shell;
-    const shell = &app_state.shells[0];
-    shell.shell_id = 42;
-    shell.kind = .tmux;
-    shell.tmux_host = 1;
-    shell.group_id = 17;
-    const project = "/home/owner/projects/sample";
-    const carrier = "/home/login";
-    @memcpy(shell.cached_cwd[0..project.len], project);
-    shell.cached_cwd_len = project.len;
-    app_state.g_tmux_cache_count = 1;
-    app_state.g_tmux_cache[0] = .{ .name = @splat(0), .name_len = 0, .activity = 0, .host = 1 };
-    const entry = &app_state.g_tmux_cache[0];
-    @memcpy(entry.path[0..carrier.len], carrier);
-    entry.path_len = carrier.len;
-    for ([_][]const u8{ "live-abc", "live" }) |session| {
-        @memcpy(shell.tmux_session[0..session.len], session);
-        shell.tmux_session_len = @intCast(session.len);
-        @memcpy(entry.name[0..session.len], session);
-        entry.name_len = @intCast(session.len);
-        const target = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
-        try std.testing.expectEqual(@as(u8, 1), target.host);
-        try std.testing.expectEqualStrings(project, target.cwd[0..target.cwd_len]);
-        shell.cached_cwd_len = 0;
-        try std.testing.expect(groupLaunchTarget(42) == null);
-        @memcpy(shell.claude_cwd[0..project.len], project);
-        shell.claude_cwd_len = project.len;
-        const reported = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
-        try std.testing.expectEqualStrings(project, reported.cwd[0..reported.cwd_len]);
-        shell.claude_cwd_len = 0;
-        shell.cached_cwd_len = project.len;
-    }
-    const terminal = "terminal";
-    @memcpy(shell.tmux_session[0..terminal.len], terminal);
-    shell.tmux_session_len = terminal.len;
-    @memcpy(entry.name[0..terminal.len], terminal);
-    entry.name_len = terminal.len;
-    const target = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings(carrier, target.cwd[0..target.cwd_len]);
-    entry.host = 0;
-    const other_host = groupLaunchTarget(42) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings(project, other_host.cwd[0..other_host.cwd_len]);
-}
-
-pub fn spawnGroupTmuxSession(target: *const GroupLaunchTarget) bool {
-    var host: u8 = 0;
-    var cwd: [256]u8 = undefined;
-    var cwd_len: u32 = 0;
-    var program: [128]u8 = undefined;
-    var program_len: u32 = 0;
-    _ = workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), &host, &cwd, &cwd_len, &program, &program_len);
-    return spawnWorkspaceSessionAt(target.host, target.cwd[0..target.cwd_len], program[0..program_len], true, false);
-}
-
 pub fn spawnWorkspacePlainClaudeSession() bool {
     return spawnWorkspaceSession(true, true);
 }
@@ -2447,10 +2268,13 @@ fn resolveWorkspaceLiveCwd(workspace: u8, host: u8, cwd: []const u8, out: *[256]
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.workspace != workspace) continue;
-        if (std.mem.startsWith(u8, shell.tmux_session[0..shell.tmux_session_len], "live-") or std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], "live")) continue;
         if ((@import("capacity.zig").remoteHostForShell(shell) orelse continue) != host) continue;
-        const known = @import("vps.zig").shellKnownRemotePath(shell, host) orelse continue;
-        const candidate = workspaceHomeCandidate(cwd, known) orelse continue;
+        const live = std.mem.startsWith(u8, shell.tmux_session[0..shell.tmux_session_len], "live-") or std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], "live");
+        const reported = if (shell.claude_cwd_len > 0) workspaceHomeCandidate(cwd, shell.claude_cwd[0..shell.claude_cwd_len]) else null;
+        const candidate = reported orelse if (live) continue else blk: {
+            const known = @import("vps.zig").shellKnownRemotePath(shell, host) orelse continue;
+            break :blk workspaceHomeCandidate(cwd, known) orelse continue;
+        };
         if (i == app_state.active_shell) return std.fmt.bufPrint(out, "{s}{s}", .{ candidate, cwd[1..] }) catch null;
         if (home) |previous| {
             if (!std.mem.eql(u8, previous, candidate)) ambiguous = true;
@@ -2466,11 +2290,13 @@ test "workspace live cwd selects matching terminal and rejects ambiguity" {
     const saved_count = app_state.shell_count;
     const saved_active = app_state.active_shell;
     const saved_cache_count = app_state.g_tmux_cache_count;
+    const saved_cache = app_state.g_tmux_cache[0];
     defer {
         app_state.shells[0..3].* = saved_shells;
         app_state.shell_count = saved_count;
         app_state.active_shell = saved_active;
         app_state.g_tmux_cache_count = saved_cache_count;
+        app_state.g_tmux_cache[0] = saved_cache;
     }
     app_state.g_tmux_cache_count = 0;
     app_state.shell_count = 3;
@@ -2501,6 +2327,35 @@ test "workspace live cwd selects matching terminal and rejects ambiguity" {
     @memcpy(app_state.shells[1].tmux_session[0..8], "live-bad");
     app_state.shells[1].tmux_session_len = 8;
     app_state.active_shell = 1;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    const reported = "/home/owner/projects/sample/sub";
+    @memcpy(app_state.shells[1].claude_cwd[0..reported.len], reported);
+    app_state.shells[1].claude_cwd_len = reported.len;
+    app_state.g_tmux_cache[0] = .{ .name = @splat(0), .name_len = 8, .activity = 0, .host = 0 };
+    @memcpy(app_state.g_tmux_cache[0].name[0..8], "live-bad");
+    @memcpy(app_state.g_tmux_cache[0].path[0..failed_path.len], failed_path);
+    app_state.g_tmux_cache[0].path_len = failed_path.len;
+    app_state.g_tmux_cache_count = 1;
+    try std.testing.expectEqualStrings("/home/owner/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    @memcpy(app_state.shells[1].tmux_session[0..8], "terminal");
+    @memcpy(app_state.g_tmux_cache[0].name[0..8], "terminal");
+    app_state.shells[1].cached_cwd_len = 0;
+    try std.testing.expectEqualStrings("/home/owner/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    const unrelated = "/home/owner/projects/other";
+    @memcpy(app_state.shells[1].claude_cwd[0..unrelated.len], unrelated);
+    app_state.shells[1].claude_cwd_len = unrelated.len;
+    try std.testing.expectEqualStrings(failed_path, resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    @memcpy(app_state.shells[1].claude_cwd[0..reported.len], reported);
+    app_state.shells[1].claude_cwd_len = reported.len;
+    @memcpy(app_state.shells[1].tmux_session[0..8], "live-bad");
+    @memcpy(app_state.g_tmux_cache[0].name[0..8], "live-bad");
+    try std.testing.expectEqualStrings("/home/explicit/projects/sample", resolveWorkspaceLiveCwd(1, 0, "/home/explicit/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.active_shell = 2;
+    try std.testing.expect(resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) == null);
+    app_state.shells[1].tmux_host = 2;
+    try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
+    app_state.shells[1].tmux_host = 0;
+    app_state.shells[1].workspace = 2;
     try std.testing.expectEqualStrings("/home/one/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);
     app_state.shell_count = 0;
     try std.testing.expectEqualStrings("~/projects/sample", resolveWorkspaceLiveCwd(1, 0, "~/projects/sample", &out) orelse return error.TestUnexpectedResult);

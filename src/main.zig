@@ -7048,8 +7048,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_TABCTX_GROUP_NEW_TAB_IN) {
-                    const group_target = @import("command_palette.zig").groupLaunchTarget(app_state.g_tabctx_sid);
-                    app_state.g_pending_new_tab_group = if (group_target) |t| t.group else 0;
+                    app_state.g_pending_new_tab_group = if (findShellById(app_state.g_tabctx_sid)) |ti| @import("sidebar.zig").tabGroupId(ti) else 0;
                     app_state.g_search_active = false;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
@@ -7060,12 +7059,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_scroll = 0;
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
-                    if (group_target != null and @import("command_palette.zig").spawnGroupTmuxSession(&group_target.?)) {
+                    if (spawnWorkspaceTmuxSession()) {
                         applyPendingGroup();
                         app_state.g_refocus_remaining = 4;
                     } else {
                         app_state.g_pending_new_tab_group = 0;
-                        showHeaderNoticeAscii("Could not start chat in this group", 5000, true);
                     }
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
