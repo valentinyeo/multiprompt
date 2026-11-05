@@ -117,7 +117,6 @@ const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
 const GetFocus = @import("win32.zig").GetFocus;
-const GetKeyState = @import("win32.zig").GetKeyState;
 const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
 const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
@@ -4555,6 +4554,7 @@ pub fn switchBrowserEngine(hwnd: HANDLE) void {
 }
 
 pub fn discardBrowserUrlBarEdit() void {
+    cancelUrlBarFocus();
     if (!app_state.g_edit_is_browser_urlbar or app_state.g_edit_hwnd == null) return;
     _ = DestroyWindow(app_state.g_edit_hwnd);
     app_state.g_edit_hwnd = null;
@@ -5852,20 +5852,67 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
     }
 }
 
-fn logUrlBarFocus(phase: []const u8, parent: HANDLE, result: usize) void {
-    if (!verboseLoggingEnabled()) return;
+var url_focus_edit: HANDLE = null;
+var url_focus_parent: HANDLE = null;
+var url_focus_deadline: u64 = 0;
+var url_focus_input_tick: u64 = 0;
+var url_focus_shell_id: u32 = 0;
+
+fn cancelUrlBarFocus() void {
+    _ = KillTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS);
+    if (app_state.g_focus_authorized_until == url_focus_deadline and
+        (app_state.g_focus_authorized_hwnd == url_focus_parent or app_state.g_focus_authorized_hwnd == url_focus_edit))
+    {
+        app_state.g_focus_authorized_hwnd = null;
+        app_state.g_focus_authorized_until = 0;
+    }
+    url_focus_edit = null;
+    url_focus_parent = null;
+    url_focus_deadline = 0;
+}
+
+pub fn browserUrlFocusTick() void {
+    @import("focus.zig").focusGuardReadMouse();
+    if (url_focus_edit == null or app_state.g_edit_hwnd != url_focus_edit or !app_state.g_edit_is_browser_urlbar or
+        IsWindow(url_focus_edit) == 0 or IsWindow(url_focus_parent) == 0 or
+        app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != url_focus_shell_id or
+        GetTickCount64() >= url_focus_deadline or app_state.g_focus_input_tick != url_focus_input_tick or !foregroundIsOurs())
+    {
+        cancelUrlBarFocus();
+        return;
+    }
+    for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
+        if (GetAsyncKeyState(key) < 0) return;
+    }
+    if (!focusGuard(url_focus_parent)) {
+        cancelUrlBarFocus();
+        return;
+    }
     const fg = GetForegroundWindow();
-    const focus = GetFocus();
-    altqLog("url_focus phase={s} result={X} fg={X} fg_tid={} ui_tid={} focus={X} focus_tid={} parent={X} edit={X} alt={} ctrl={} shift={} refocus={} wait_alt={} action={} input={} auth={X}", .{
-        phase, result, altqPtr(fg), GetWindowThreadProcessId(fg, null), GetCurrentThreadId(), altqPtr(focus), GetWindowThreadProcessId(focus, null), altqPtr(parent), altqPtr(app_state.g_edit_hwnd), GetKeyState(0x12), GetKeyState(0x11), GetKeyState(0x10), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_focus_user_action_tick, app_state.g_focus_input_tick, altqPtr(app_state.g_focus_authorized_hwnd),
-    });
+    const fg_thread = GetWindowThreadProcessId(fg, null);
+    const our_thread = GetCurrentThreadId();
+    const attached = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;
+    if (fg_thread != 0 and (fg_thread == our_thread or attached) and GetForegroundWindow() == fg and foregroundIsOurs()) {
+        _ = SetForegroundWindow(url_focus_parent);
+        @import("focus.zig").focusGuardReadMouse();
+        if (GetForegroundWindow() == url_focus_parent and app_state.g_focus_input_tick == url_focus_input_tick and
+            app_state.g_edit_hwnd == url_focus_edit and IsWindow(url_focus_edit) != 0 and
+            app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
+        {
+            app_state.g_focus_authorized_hwnd = url_focus_edit;
+            app_state.g_focus_authorized_until = url_focus_deadline;
+            _ = SetFocus(url_focus_edit);
+        }
+    }
+    if (attached) _ = AttachThreadInput(our_thread, fg_thread, 0);
+    if (GetForegroundWindow() == url_focus_parent and GetFocus() == url_focus_edit) cancelUrlBarFocus();
 }
 
 pub fn startBrowserUrlBarEdit() void {
-    logUrlBarFocus("start", app_state.g_urlbar_hwnd, 0);
     if (@import("computer_pane.zig").selected()) return;
     if (!focusGuard(app_state.g_main_hwnd)) return;
     if (!activeBrowserShowsUrlBar()) return;
+    cancelUrlBarFocus();
     commitRename();
     if (app_state.active_shell >= app_state.shell_count) return;
     if (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell()) return;
@@ -5902,13 +5949,16 @@ pub fn startBrowserUrlBarEdit() void {
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
-        logUrlBarFocus("before_foreground", edit_parent, 0);
-        const foreground_result = SetForegroundWindow(edit_parent);
-        logUrlBarFocus("after_foreground", edit_parent, @intCast(foreground_result));
-        logUrlBarFocus("before_focus", edit_parent, 0);
-        const previous_focus = SetFocus(app_state.g_edit_hwnd);
-        logUrlBarFocus("after_focus", edit_parent, altqPtr(previous_focus));
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
+        url_focus_edit = app_state.g_edit_hwnd;
+        url_focus_parent = edit_parent;
+        url_focus_deadline = GetTickCount64() + 1400;
+        url_focus_input_tick = app_state.g_focus_input_tick;
+        url_focus_shell_id = app_state.shells[app_state.active_shell].shell_id;
+        app_state.g_focus_authorized_hwnd = edit_parent;
+        app_state.g_focus_authorized_until = url_focus_deadline;
+        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
+        browserUrlFocusTick();
     }
 }
 

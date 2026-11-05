@@ -8173,6 +8173,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 unarchiveNextUnattachedSession(hwnd);
                 return 0;
             }
+            if (wp == @import("win32.zig").TIMER_BROWSER_URL_FOCUS) {
+                @import("browser_pane.zig").browserUrlFocusTick();
+                return 0;
+            }
             if (wp == TIMER_NATIVE_BROWSER_FOCUS) {
                 if (computer.selected()) { cancelPendingNativeBrowserFocus(); return 0; }
                 const pending_sid = app_state.g_native_browser_focus_pending_shell_id;

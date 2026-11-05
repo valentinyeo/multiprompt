@@ -66,6 +66,123 @@ test "held Alt and AltGr are not injected or released" {
   }
 });
 
+test('URL focus waits for modifiers and cancels stale handoffs', () => {
+  const browser = fs.readFileSync(path.join(__dirname, '../src/browser_pane.zig'), 'utf8');
+  const start = browser.indexOf('var url_focus_edit:');
+  const end = browser.indexOf('\npub fn startBrowserUrlBarEdit()', start);
+  assert.ok(start >= 0 && end > start);
+  const production = browser.slice(start, end)
+    .replaceAll('@import("win32.zig").TIMER_BROWSER_URL_FOCUS', 'timer_id')
+    .replaceAll('@import("focus.zig").focusGuardReadMouse()', 'focusGuardReadMouse()');
+  const fixture = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const timer_id: usize = 45;
+const main: HANDLE = @ptrFromInt(1);
+const console: HANDLE = @ptrFromInt(2);
+const parent: HANDLE = @ptrFromInt(3);
+const edit: HANDLE = @ptrFromInt(4);
+var foreground: HANDLE = console;
+var focused: HANDLE = null;
+var held: i32 = 0;
+var now: u64 = 100;
+var owned = true;
+var attached: usize = 0;
+var detached: usize = 0;
+var killed: usize = 0;
+const app_state = struct {
+    var g_main_hwnd: HANDLE = main;
+    var g_edit_hwnd: HANDLE = edit;
+    var g_edit_is_browser_urlbar = true;
+    var g_focus_authorized_hwnd: HANDLE = parent;
+    var g_focus_authorized_until: u64 = 1000;
+    var g_focus_input_tick: u64 = 10;
+    var active_shell: usize = 0;
+    var shell_count: usize = 1;
+    var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
+};
+fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
+fn focusGuardReadMouse() void {}
+fn IsWindow(h: HANDLE) i32 { return if (h != null) 1 else 0; }
+fn GetTickCount64() u64 { return now; }
+fn foregroundIsOurs() bool { return owned; }
+fn GetAsyncKeyState(key: i32) i16 { return if (key == held) -32768 else 0; }
+fn focusGuard(_: HANDLE) bool { return true; }
+fn GetForegroundWindow() HANDLE { return foreground; }
+fn GetFocus() HANDLE { return focused; }
+fn GetWindowThreadProcessId(h: HANDLE, _: ?*u32) u32 { return if (h == console) 2 else 1; }
+fn GetCurrentThreadId() u32 { return 1; }
+fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 {
+    if (attach != 0) attached += 1 else detached += 1;
+    return 1;
+}
+fn SetForegroundWindow(h: HANDLE) i32 { foreground = h; return 1; }
+fn SetFocus(h: HANDLE) HANDLE { const previous = focused; focused = h; return previous; }
+
+${production}
+fn reset() void {
+    url_focus_edit = edit;
+    url_focus_parent = parent;
+    url_focus_deadline = 1000;
+    url_focus_input_tick = 10;
+    url_focus_shell_id = 7;
+    app_state.g_edit_hwnd = edit;
+    app_state.g_edit_is_browser_urlbar = true;
+    app_state.g_focus_authorized_hwnd = parent;
+    app_state.g_focus_authorized_until = 1000;
+    app_state.g_focus_input_tick = 10;
+    foreground = console;
+    focused = null;
+    held = 0;
+    now = 100;
+    owned = true;
+    attached = 0;
+    detached = 0;
+    killed = 0;
+}
+test "held modifiers defer without attaching; release focuses the editor" {
+    for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
+        reset(); held = key;
+        browserUrlFocusTick();
+        try std.testing.expectEqual(@as(usize, 0), attached);
+        try std.testing.expectEqual(console, foreground);
+        held = 0;
+        browserUrlFocusTick();
+        try std.testing.expectEqual(@as(usize, 1), attached);
+        try std.testing.expectEqual(@as(usize, 1), detached);
+        try std.testing.expectEqual(parent, foreground);
+        try std.testing.expectEqual(edit, focused);
+        try std.testing.expectEqual(@as(usize, 1), killed);
+    }
+}
+test "foreign foreground, newer input, expired request and destroyed edit cancel" {
+    for (0..4) |case| {
+        reset();
+        switch (case) {
+            0 => owned = false,
+            1 => app_state.g_focus_input_tick = 11,
+            2 => now = 1000,
+            3 => app_state.g_edit_hwnd = null,
+            else => unreachable,
+        }
+        browserUrlFocusTick();
+        try std.testing.expectEqual(@as(usize, 0), attached);
+        try std.testing.expectEqual(@as(usize, 1), killed);
+        try std.testing.expectEqual(console, foreground);
+    }
+}
+`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'url-focus-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, fixture);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, `${result.error || ''}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('browser focus preserves physical modifiers and never injects keyboard input', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-typing-'));
   try {
