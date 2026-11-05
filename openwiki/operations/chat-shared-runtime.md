@@ -77,6 +77,25 @@ Changing the chat configuration permits another startup attempt.
 Existing message requests and live events remain compatible.
 Ctrl+T, Alt+T, and the existing palette action remain unchanged.
 
+## Model and effort
+
+Use Ctrl+K inside a live Claude chat.
+Choose Model Opus, Sonnet, or Haiku.
+Choose Effort Low, Medium, or High.
+The composer shows the accepted selection.
+“Next” means the current turn finishes first.
+The next message waits for the new agent.
+It resumes the same conversation and keeps history.
+An unconfigured value remains Default.
+No new keyboard shortcut is assigned.
+
+The host accepts `set_model` and `set_effort` requests.
+It reports selections through existing live events.
+The `host.settings` payload includes `model`, `effort`, and `applied`.
+Empty values mean the default remains unchanged.
+Older clients can ignore this event and snapshot metadata.
+The paired Android request needs no phone picker.
+
 ## Limits
 
 - Older launchers still run their embedded reader.

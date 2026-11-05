@@ -452,6 +452,23 @@ pub fn paintChatView(hdc: HANDLE) void {
         var cancel = @import("chat_composer.zig").chatReplyCancelRect();
         _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
+    if (@import("chat_session.zig").chatSettingsEligible()) {
+        const selected: @import("chat_live.zig").Settings = @import("chat_live.zig").settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
+        const model: []const u8 = switch (selected.model) { .unknown => "Default", .opus => "Opus", .sonnet => "Sonnet", .haiku => "Haiku" };
+        const effort: []const u8 = switch (selected.effort) { .unknown => "Default", .low => "Low", .medium => "Medium", .high => "High" };
+        var text: [96]u8 = undefined;
+        const caption = std.fmt.bufPrint(&text, "{s} · {s}{s}", .{ model, effort, if (!selected.applied and (selected.model != .unknown or selected.effort != .unknown)) @as([]const u8, " · Next") else "" }) catch "";
+        var wide: [96]u16 = undefined;
+        const len = std.unicode.utf8ToUtf16Le(&wide, caption) catch 0;
+        var rect = layout.composer_card;
+        rect.left += uiScaled(14);
+        rect.right = layout.mic_btn.left - uiScaled(8);
+        rect.top = rect.bottom - uiScaled(20);
+        const old_font = SelectObject(hdc, ensureChatFont());
+        _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
+        _ = DrawTextW(hdc, &wide, @intCast(len), &rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = SelectObject(hdc, old_font);
+    }
     const has_text = (app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0) or @import("chat_composer.zig").chat_dictation_state != .idle;
     if (layout.send_shown) paintChatButton(hdc, layout.send_btn, has_text, .send);
     if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);

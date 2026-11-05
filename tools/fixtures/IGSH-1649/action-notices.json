@@ -134,7 +134,8 @@
     "sendChatPrompt: showHeaderNoticeAscii(\"Opened in the terminal, press Alt+C to see it\",4000,false)",
     "sendChatPrompt: showHeaderNoticeAscii(\"The selected skill contains invalid text\",3500,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"The skill prompt contains invalid text\",3500,true)",
-    "sendChatPrompt: showHeaderNoticeAscii(\"This quoted reply is too large to send\",3500,true)"
+    "sendChatPrompt: showHeaderNoticeAscii(\"This quoted reply is too large to send\",3500,true)",
+    "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)"
   ],
   "command_palette.zig": [
     "spawnHostedChatSession: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)",
@@ -168,6 +169,7 @@
     "showPickRepoFailure: showHeaderNoticeAscii(\"Set workspace folder: could not save\",4000,true)",
     "wndProc: if(!@import(\"browser_pane.zig\").signInGoogleForShell(ti))showHeaderNoticeAscii(\"Sign in to Google needs a Chrome profile tab\",5000,true)",
     "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
+    "wndProc: if(!@import(\"chat_send.zig\").chatSetLiveSetting(setting))showHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(!@import(\"clipboard.zig\").setUnicodeClipboardTextWithRetry(wide_id[0..len]))showHeaderNoticeAscii(\"Could not copy chat ID\",3000,true)",
     "wndProc: if(!@import(\"command_palette.zig\").startAdoptHost(ti))showHeaderNoticeAscii(\"Move chat: this session cannot move yet\",4000,true)",
     "wndProc: if(!capacityBlockNoticeActive())showHeaderNoticeAscii(\"Archived session restore failed\",4000,true)",

@@ -187,6 +187,12 @@ const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_B
 const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
 const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
 const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
+const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
+const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
+const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
 const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
@@ -2704,7 +2710,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
+                    const is_chat_setting = result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -3991,6 +3998,20 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var chat_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Alt+C"), -1, &chat_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_setting) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var setting_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        const label = switch (result_idx) {
+                            SEARCH_CHAT_MODEL_OPUS_OFFSET => L("Chat View: Model Opus"),
+                            SEARCH_CHAT_MODEL_SONNET_OFFSET => L("Chat View: Model Sonnet"),
+                            SEARCH_CHAT_MODEL_HAIKU_OFFSET => L("Chat View: Model Haiku"),
+                            SEARCH_CHAT_EFFORT_LOW_OFFSET => L("Chat View: Effort Low"),
+                            SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => L("Chat View: Effort Medium"),
+                            SEARCH_CHAT_EFFORT_HIGH_OFFSET => L("Chat View: Effort High"),
+                            else => unreachable,
+                        };
+                        _ = paletteDrawText(hdc, label, -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_chat_allow) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
