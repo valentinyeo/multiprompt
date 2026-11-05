@@ -118,6 +118,8 @@ def room_request():
                 page = bridge_module.runtime_request(dict(op='events_subscribe', provider='claude', sid=member['provider_sid'], after=0))['result']
                 canonical.extend(page['events'])
         witness = dict(rooms=rows, canonical_events=canonical, live=live, boundaries=['Isolated actual account Worker', 'SSH, host ownership and provider stdin/output are synthetic', 'Production canonical transaction and host event reducers run in-process', 'POSIX ownership and dispatch locks are not verified on Windows'])
+        if request.get('op') == 'list' and response.get('ok'):
+            (ROOT / 'catalog-observed.json').write_text(json.dumps(dict(room_ids=[room['id'] for room in response['result']['rooms']])), encoding='utf-8')
         if live and request.get('op') == 'snapshot' and response.get('ok'):
             (ROOT / 'snapshot-live.json').write_text(json.dumps(dict(room_id=request['room_id'])), encoding='utf-8')
         temporary = ROOT / ('witness-' + uuid.uuid4().hex + '.json')

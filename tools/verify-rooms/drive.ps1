@@ -212,6 +212,14 @@ try {
     Shot 'create-members'
     Press @(0x11,0x0d)
     [void](Wait-For 'room saved through remote store' { $w=Witness; $w -and @($w.rooms).Count -eq 1 -and @($w.rooms[0].members).Count -eq 2 })
+    [void](Wait-For 'new room returned in the app catalog' {
+        try {
+            $observed=Get-Content (Join-Path $env:MP_VERIFY_STATE 'catalog-observed.json') -Raw | ConvertFrom-Json
+            $w=Witness
+            $w -and @($observed.room_ids | Where-Object { $_ -ceq $w.rooms[0].id }).Count -eq 1
+        } catch { $false }
+    })
+    Press @(0x11,0x4b); Query 'product sync' 20000; Press @(0x0d)
     $room = Wait-For 'room composer' { $h=Room-Window; if ($h -and [ChatDeliveryDesktop]::Composer($h) -ne [IntPtr]::Zero) { $h } }
     $composer = [ChatDeliveryDesktop]::Composer($room)
     [void](Wait-For 'composer owns focus' { [ChatDeliveryDesktop]::Focus($main)[1] -eq $composer.ToInt64() })
@@ -301,7 +309,10 @@ try {
     try {
         $accountError = Join-Path $profile 'account.stderr'
         if (Test-Path $accountError) {
-            $diagnostic = [IO.File]::ReadAllText($accountError).Replace($profile, '<profile>').Replace($repo, '<repo>')
+            $stream=[IO.File]::Open($accountError, 'Open', 'Read', 'ReadWrite')
+            $buffer=New-Object byte[] 8192
+            try { $length=$stream.Read($buffer, 0, $buffer.Length) } finally { $stream.Dispose() }
+            $diagnostic = [Text.Encoding]::UTF8.GetString($buffer, 0, $length).Replace($profile, '<profile>').Replace($repo, '<repo>')
             $diagnostic = [regex]::Replace($diagnostic, '[A-Za-z0-9_-]{43,}', '<redacted>')
             Save @{exit_code=$(if ($accountServer -and $accountServer.HasExited) { $accountServer.ExitCode } else { $null }); error=$diagnostic.Substring(0, [Math]::Min(8000, $diagnostic.Length))} (Join-Path $Evidence 'account-error.json')
         }
@@ -310,7 +321,7 @@ try {
     try {
         $reports = @(Get-ChildItem (Join-Path $settings 'crashes') -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(crash|freeze)-.*\.txt$' })
         $frames = @($reports | ForEach-Object {
-            Get-Content $_.FullName | Where-Object { $_ -match '^(exception_code: 0x[0-9A-F]+ \([A-Z_]+\)|exception_address: 0x[0-9A-F]+|module_base: 0x[0-9A-F]+|module_offset: 0x[0-9A-F]+|exe_base: 0x[0-9A-F]+|instruction: ([a-zA-Z0-9_]+\+0x[0-9A-F]+|unavailable)|thread_context: (captured|unavailable)|unresponsive_ms: [0-9]+|  0x[0-9A-F]+)$' }
+            Get-Content $_.FullName | Where-Object { $_ -match '^(exception_code: 0x[0-9A-F]+ \([A-Z_]+\)|exception_address: 0x[0-9A-F]+|module_base: 0x[0-9A-F]+|module_offset: 0x[0-9A-F]+|exe_base: 0x[0-9A-F]+|instruction: ([a-zA-Z0-9_.]+\+0x[0-9A-F]+|unavailable)|thread_context: (captured|unavailable)|unresponsive_ms: [0-9]+|  0x[0-9A-F]+)$' }
         })
         Save $frames (Join-Path $Evidence 'crash-addresses.json')
     } catch {}

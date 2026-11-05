@@ -31,6 +31,10 @@ test('Rooms preview boundary retains legacy refusal and one broadcast produces t
     const created = request({ op: 'create', host_uuid: host, command_id: randomUUID(), name: 'Synthetic proof', members });
     assert.equal(created.ok, true, JSON.stringify(created));
     const room = created.result.event.room_id;
+    const listed = request({ op: 'list', host_uuid: host, after: 0, through: null, limit: 100 });
+    assert.equal(listed.ok, true, JSON.stringify(listed));
+    assert.deepEqual(listed.result.rooms.map(row => row.id), [room]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'catalog-observed.json'), 'utf8')).room_ids, [room]);
     const post = { op: 'post_human', host_uuid: host, command_id: randomUUID(), room_id: room, expected_revision: 1, text: 'Both synthetic agents, reply once.', recipients: [] };
     assert.deepEqual(request(post), { ok: false, error: 'unsupported_remote_capability' });
     fs.writeFileSync(path.join(directory, 'live-replies'), 'synthetic providers only');
