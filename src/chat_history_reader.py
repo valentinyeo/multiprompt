@@ -5917,6 +5917,12 @@ def events_push(subscriptions):
         serve_print(dict(id=rid, message_protocol=1, result=page))
 
 
+def serve_retire(interval=2.0):
+    while not superseded_engine():
+        time.sleep(interval)
+    os._exit(0)
+
+
 def serve_push(subscriptions, lock, wake):
     while True:
         if wake is None:
@@ -6000,6 +6006,7 @@ def serve(source):
     wake = events_wake()
     push = threading.Thread(target=serve_push, args=(subscriptions, lock, wake), daemon=True)
     push.start()
+    threading.Thread(target=serve_retire, daemon=True).start()
     for line in sys.stdin.buffer:
         if not line.strip():
             continue
@@ -6034,7 +6041,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 74
+RUNTIME_GENERATION = 75
 
 if __name__ == '__main__':
     import base64 as _base64
