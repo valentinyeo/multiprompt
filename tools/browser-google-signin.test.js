@@ -73,6 +73,19 @@ test('IGSH-1507 hosted sign-in proof checks the actual Chrome owner with two sam
   assert.match(control, /Reopened browser lost the sign-in profile/);
 });
 
+test('IGSH-1507 hosted no-control oracle rejects pipes, ports and automation flags', () => {
+  const control = read('.claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1');
+  const match = control.match(/\$script:signinWindow\.browser\.commandLine -match '([^']+)'/);
+  assert.ok(match, 'actual owning-process command line must be checked');
+  const oracle = new RegExp(match[1].replace('(?i)', ''), 'i');
+  for (const flag of [...CONTROL_FLAGS, '--remote-debugging-port=9222', '--remote-debugging-port=0', '--enable-automation']) {
+    assert.equal(oracle.test(`chrome.exe --user-data-dir=fixture ${flag}`), true, flag);
+  }
+  assert.equal(oracle.test('chrome.exe --user-data-dir=fixture --profile-directory=Default --new-window https://accounts.google.com'), false);
+  assert.match(control, /Plain sign-in window uses another Chrome profile directory/);
+  assert.match(control, /standalone Chrome reads synthetic storage and matching cookie/);
+});
+
 test('IGSH-1507 Sign in to Google is reachable from Ctrl+K, the tab actions and the shortcut list', () => {
   const state = read('src/app_state.zig');
   assert.match(state, /pub const SEARCH_TABCTX_GOOGLE_SIGNIN: usize = \d+;/);
