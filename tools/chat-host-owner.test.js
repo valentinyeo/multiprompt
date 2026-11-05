@@ -7,6 +7,54 @@ const { spawnSync } = require('node:child_process');
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
 
+test('host starts in the validated cross-owner home', () => {
+  const program = String.raw`
+import selectors, tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+outer = {}
+exec(compile(${JSON.stringify(source)}, 'reader', 'exec'), outer)
+r = {}
+exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
+with tempfile.TemporaryDirectory() as directory:
+    r['HOME'] = Path(directory)
+    home = '/home/synthetic_owner'
+    r['pwd'] = SimpleNamespace(getpwnam=lambda name: SimpleNamespace(pw_name=name, pw_uid=1001, pw_dir=home))
+    r['READER_SOURCE'] = outer['READER_SOURCE']
+    r['host_write'](r['host_paths']('claude', 'synthetic-home')['config'], dict(enabled=True, cwd=home))
+    r['host_command'] = lambda *args: ['claude']
+    with patch.object(r['subprocess'], 'run', return_value=SimpleNamespace(returncode=0)), \
+         patch.object(r['subprocess'], 'Popen', return_value=SimpleNamespace(pid=123)) as launch:
+        r['host_agent_start']('claude', 'synthetic-home')
+    args = launch.call_args.args[0]
+    assert args[:5] == ['sudo', '-n', '-H', '-u', 'synthetic_owner'], f'home launch identity: {args[:5]}'
+    assert args[args.index('agent-start') + 1] == home
+    assert r['conversation_owner'](home) is None
+    assert r['conversation_owner'](home, include_home=True) == ('synthetic_owner', Path(home))
+    assert r['conversation_owner'](home + '/../other', include_home=True) is None
+    for uid, account_home in [(0, home), (1001, '/home/other')]:
+        r['pwd'] = SimpleNamespace(getpwnam=lambda name: SimpleNamespace(pw_name=name, pw_uid=uid, pw_dir=account_home))
+        assert r['conversation_owner'](home, include_home=True) is None
+    def unknown(name): raise KeyError(name)
+    r['pwd'] = SimpleNamespace(getpwnam=unknown)
+    assert r['conversation_owner'](home, include_home=True) is None
+    r['pwd'] = SimpleNamespace(getpwnam=lambda name: SimpleNamespace(pw_name=name, pw_uid=1001, pw_dir=home))
+    class Selector:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def register(self, *args): pass
+        def select(self, timeout): return [(SimpleNamespace(data='agent'), None)]
+    state = {}
+    agent = SimpleNamespace(stdin=None, stdout=SimpleNamespace(read1=lambda size: b''))
+    with patch.object(selectors, 'DefaultSelector', Selector):
+        r['host_loop']('claude', 'synthetic-home', 'synthetic-chat', dict(state=state), None, agent)
+    assert state['startup_failure']['reason'] == 'owner_unavailable'
+`;
+  const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test('host launches only the agent as the validated workspace owner', () => {
   const program = String.raw`
 import io, json, os, selectors, sys, tempfile
@@ -50,7 +98,7 @@ with tempfile.TemporaryDirectory() as directory:
     target = Path(directory) / 'target'
     workspace = target / 'workspace'
     workspace.mkdir(parents=True)
-    r['conversation_owner'] = lambda value: ('synthetic_owner', target)
+    r['conversation_owner'] = lambda value, include_home=False: ('synthetic_owner', target)
     config['cwd'] = str(workspace)
     r['host_write'](r['host_paths'](provider, sid)['config'], config)
     original_run = r['subprocess'].run
@@ -81,7 +129,7 @@ with tempfile.TemporaryDirectory() as directory:
         r['host_agent_start'](provider, sid)
         assert '--resume' in captured[-1][0]
     config['cwd'] = cwd
-    r['conversation_owner'] = lambda value: ('synthetic_owner', owner_home)
+    r['conversation_owner'] = lambda value, include_home=False: ('synthetic_owner', owner_home)
     r['host_mark_pane'] = lambda *args: True
     r['host_reap_agent'] = lambda *args: False
     for case, code in [('denied', 1), ('cwd', 72), ('binary', 73)]:
@@ -116,7 +164,7 @@ with tempfile.TemporaryDirectory() as directory:
         def select(self, timeout): return [(SimpleNamespace(data='agent'), None)]
     for local, ready in ((False, False), (False, True), (True, False)):
         sid = 'synthetic-eof-' + str(local) + str(ready)
-        r['conversation_owner'] = (lambda value: None) if local else (lambda value: ('synthetic_owner', owner_home))
+        r['conversation_owner'] = (lambda value, include_home=False: None) if local else (lambda value, include_home=False: ('synthetic_owner', owner_home))
         r['host_write'](r['host_paths'](provider, sid)['config'], config)
         chunks = [b'{"type":"system","subtype":"init"}\n', b''] if ready else [b'']
         agent = SimpleNamespace(stdout=SimpleNamespace(read1=lambda size: chunks.pop(0)))
@@ -157,7 +205,7 @@ with tempfile.TemporaryDirectory(prefix='synthetic home ') as directory:
     workspace.mkdir(parents=True)
     r['host_cwd'] = lambda *args: str(workspace)
     r['HOME'] = root / 'reader'
-    r['conversation_owner'] = lambda value: ('synthetic_owner', target)
+    r['conversation_owner'] = lambda value, include_home=False: ('synthetic_owner', target)
     r['READER_SOURCE'] = outer['READER_SOURCE']
     provider, sid = 'claude', 'synthetic-session'
     r['host_write'](r['host_paths'](provider, sid)['config'], dict(enabled=True, cwd=str(workspace), args=['argument with spaces', 'literal;$value']))

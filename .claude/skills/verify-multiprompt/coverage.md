@@ -153,7 +153,13 @@ A change that alters a mapped feature updates its map and this table in the same
 
 ## IGSH-815 full-session history
 
-`chat-full-history` exercises 50 known messages in a tool-heavy synthetic session through the production Windows reader/layout/copy path, then repeats after restart. Red/green GitHub evidence pending; no live Claude session is claimed.
+`chat-full-history` exercises 50 known messages in a tool-heavy synthetic session through the production Windows reader/layout/copy path, then repeats after restart. The IGSH-1508 branch run https://github.com/valentinyeo/multiprompt/actions/runs/41928456578 and published baseline run https://github.com/valentinyeo/multiprompt/actions/runs/41931424535 both fail before complete history because the Windows boundary lacks its native locking and polling adapters. That boundary repair preserves the complete-message assertions. Rerun pending; no live Claude session is claimed.
+
+## IGSH-1508 startup recovery gates
+
+The Retry regression preserves one saved message across reader restart and keeps older failures blocked until a new Retry. Full PR checks passed at https://github.com/valentinyeo/multiprompt/actions/runs/41926935156. Hosted typing and failure display passed at https://github.com/valentinyeo/multiprompt/actions/runs/41925282532 and https://github.com/valentinyeo/multiprompt/actions/runs/41925277966. Their screenshots and result files were inspected.
+
+The view-switch branch run https://github.com/valentinyeo/multiprompt/actions/runs/41928461537 and released baseline run https://github.com/valentinyeo/multiprompt/actions/runs/41931428831 both fail because the driver selects the pinned session instead of the first unpinned session. The repaired driver follows displayed shortcut order while preserving saved-order assertions. Native history and view-switch reruns remain required before merge.
 
 | IGSH-928 | Skill pills | `chat-skill-pill` | Dark/light draft and sent-history pixels, plain and unknown controls; pre-fix release control required. |
 | IGSH-984 | Clickable answer options and question prompts | `chat-options` | Real mouse click on a reply option card and on a question prompt card; the console must receive the lettered answer and the option number; pre-change master control required. |

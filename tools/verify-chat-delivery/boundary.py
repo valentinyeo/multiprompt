@@ -1004,9 +1004,7 @@ def reader_namespace():
         slash_host = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(slash_host)
         slash_host.install(namespace, ROOT, record)
-        if os.name == "nt":
-            namespace["events_wake"] = lambda: None
-    if os.name == "nt" and state().get("name") in ("instant-chat", "startup-failure"):
+    if os.name == "nt":
         import msvcrt
         import types
 
@@ -1027,8 +1025,10 @@ def reader_namespace():
         locking.flock = flock
         sys.modules["fcntl"] = locking
         namespace["events_wake"] = lambda: None
-        namespace["start_message_worker"] = lambda *args, **kwargs: None
-        record("instant-boundary.jsonl", notification="poll fallback", dispatch="store arrival only")
+        record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
+        if state().get("name") in ("instant-chat", "startup-failure"):
+            namespace["start_message_worker"] = lambda *args, **kwargs: None
+            record("instant-boundary.jsonl", notification="poll fallback", dispatch="store arrival only")
     if state().get("name") == "startup-failure":
         original = namespace["serve_request"]
         sid = "a1b2c3d4-1593-4000-8000-000000001593"

@@ -65,11 +65,11 @@ def claude_config_dirs(home):
     configured = os.environ.get("CLAUDE_CONFIG_DIR") if home == HOME else None
     return ([Path(configured).expanduser()] if configured else []) + [home / ".claude", home / ".config/claude"]
 
-def conversation_owner(cwd):
+def conversation_owner(cwd, include_home=False):
     if pwd is None:
         return None
     parts = Path(cwd).parts
-    if (len(parts) < 4 or parts[:2] != ("/", "home") or ".." in parts or
+    if (len(parts) < (3 if include_home else 4) or parts[:2] != ("/", "home") or ".." in parts or
             not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", parts[2])):
         return None
     try:
@@ -2070,6 +2070,24 @@ def message_store_path():
     return HOME / '.local/state/multiprompt/shared-messages/store.sqlite3'
 
 
+def message_retry_generation(provider, sid):
+    import sqlite3
+    from contextlib import closing
+    path = message_store_path()
+    if not path.exists():
+        return 0
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('message_retries','shared_messages')")}
+        if len(tables) != 2:
+            return 0
+        return db.execute('SELECT COALESCE(MAX(r.rowid),0) FROM message_retries r JOIN shared_messages m ON m.id=r.id WHERE m.provider=? AND m.sid=?', (provider, sid)).fetchone()[0]
+
+
+def host_failure_current(provider, sid, failure, generation):
+    return (isinstance(failure, dict) and failure.get('config') == host_config(provider, sid)
+            and failure.get('retry_generation', generation) >= generation)
+
+
 def message_store_db(tmux):
     import sqlite3
     from contextlib import closing
@@ -2732,7 +2750,7 @@ def host_start(provider, sid, source=None):
     if not host_enabled(provider, sid):
         return dict(status="refused", reason="host_disabled")
     failure = host_session_state(provider, sid).get("startup_failure")
-    if isinstance(failure, dict) and failure.get("config") == host_config(provider, sid):
+    if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
         return dict(status="error", reason=failure.get("reason"), permanent=True)
     if host_alive(provider, sid) and host_request(provider, sid, dict(op="ping"), timeout=2).get("status") == "ok":
         return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
@@ -2750,7 +2768,7 @@ def host_start(provider, sid, source=None):
         if exited is not None:
             host_clear_stale(provider, sid)
             failure = host_session_state(provider, sid).get("startup_failure")
-            if isinstance(failure, dict) and failure.get("config") == host_config(provider, sid):
+            if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
                 return dict(status="error", reason=failure.get("reason"), permanent=True)
             return dict(status="error", reason=HOST_EXIT_REASONS.get(exited, "host_exited"), code=exited)
         time.sleep(0.2)
@@ -3008,7 +3026,7 @@ def host_pi_argv(provider, sid, base):
 
 def host_agent_start(provider, sid):
     cwd = host_cwd(provider, sid)
-    owner = conversation_owner(cwd)
+    owner = conversation_owner(cwd, include_home=True)
     cross_owner = owner is not None and owner[1] != HOME
     if cross_owner:
         config = host_config(provider, sid) or {}
@@ -4180,8 +4198,8 @@ def host_accept_client(provider, sid, tmux, session, server):
             pass
 
 
-def host_startup_failure(provider, sid, tmux, state, reason):
-    state["startup_failure"] = dict(reason=reason, config=host_config(provider, sid))
+def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0):
+    state["startup_failure"] = dict(reason=reason, config=host_config(provider, sid), retry_generation=retry_generation)
     host_state_write(provider, sid, state)
     session = dict(state=state, turn="startup-failure")
     text = {"cwd_unavailable": "Could not start chat: working folder unavailable.",
@@ -4216,10 +4234,10 @@ def host_loop(provider, sid, tmux, session, server, agent):
                     if chunk:
                         session["idle"] = time.time()
                     if not host_agent_read(provider, sid, tmux, session, chunk):
-                        owner = conversation_owner(host_cwd(provider, sid))
+                        owner = conversation_owner(host_cwd(provider, sid), include_home=True)
                         if not session["ready"]:
                             reason = "owner_unavailable" if owner and owner[1] != HOME else "agent_unavailable"
-                            host_startup_failure(provider, sid, tmux, session["state"], reason)
+                            host_startup_failure(provider, sid, tmux, session["state"], reason, session.get("retry_generation", 0))
                         host_log(provider, sid, "agent_closed")
                         return
                 else:
@@ -4238,8 +4256,9 @@ def host_main(provider, sid):
     lock = host_lock(provider, sid)
     if lock is None:
         return 1
+    retry_generation = message_retry_generation(provider, sid)
     failure = host_session_state(provider, sid).get("startup_failure")
-    if isinstance(failure, dict) and failure.get("config") == host_config(provider, sid):
+    if host_failure_current(provider, sid, failure, retry_generation):
         host_release(lock)
         return 5 if failure.get("reason") == "agent_not_found" else 4
     paths = host_paths(provider, sid)
@@ -4272,13 +4291,13 @@ def host_main(provider, sid):
         except RuntimeError as error:
             reason = str(error) if str(error) in ("cwd_unavailable", "agent_not_found", "owner_unavailable") else "owner_unavailable"
         if reason:
-            host_startup_failure(provider, sid, tmux, state, reason)
+            host_startup_failure(provider, sid, tmux, state, reason, retry_generation)
             return 5 if reason == "agent_not_found" else 4
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         state["agent_pid"] = agent.pid
         state["mode"] = (host_config(provider, sid) or {}).get("permission_mode") or "default"
         host_state_write(provider, sid, state)
-        session = dict(state=state)
+        session = dict(state=state, retry_generation=retry_generation)
         host_loop(provider, sid, tmux, session, server, agent)
         if state.get("startup_failure"):
             return 4
@@ -4606,6 +4625,12 @@ def message_store_transaction(q):
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
             if row[6] != 'failed' or row[9] != epoch:
                 raise ValueError('message is not retryable')
+            state = host_session_state(provider, sid)
+            failure = state.get('startup_failure')
+            if (isinstance(failure, dict) and 'retry_generation' not in failure
+                    and failure.get('config') == host_config(provider, sid)):
+                failure['retry_generation'] = message_retry_generation(provider, sid)
+                host_state_write(provider, sid, state)
             attempt = uuid.uuid4().hex
             db.execute('INSERT INTO message_retries VALUES (?,?,?)', (token, request, attempt))
             db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=NULL,receipt=NULL WHERE id=? AND state='failed' AND epoch=?", (attempt, token, epoch))
@@ -5888,7 +5913,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 64
+RUNTIME_GENERATION = 67
 
 if __name__ == '__main__':
     import base64 as _base64
