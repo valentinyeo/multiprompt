@@ -5891,12 +5891,6 @@ pub fn startBrowserUrlBarEdit() void {
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
-        const fg = GetForegroundWindow();
-        const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
-        const our_thread = GetCurrentThreadId();
-        const attached_fg = fg_thread != 0 and fg_thread != our_thread and
-            AttachThreadInput(our_thread, fg_thread, 1) != 0;
-        defer if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
         _ = SetForegroundWindow(app_state.g_main_hwnd);
         _ = SetFocus(app_state.g_edit_hwnd);
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
