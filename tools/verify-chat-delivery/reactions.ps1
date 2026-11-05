@@ -156,8 +156,11 @@ if ($wheel.Count -ne 140 -or @($wheel | Where-Object { [int]$_.Groups[1].Value -
 Save @{method='synchronous WM_MOUSEWHEEL through production window procedure, RedrawWindow and GdiFlush'; messages=200; movedWheels=$wheel.Count; sourceBytes=(Get-Item $cache.FullName).Length; rounds=$measurements; cpuMs=$app.TotalProcessorTime.TotalMilliseconds} "$caseDir/emoji-scroll.json"
 
 [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
-Clear-Composer
+Press @(0x11, 0x41) 'Ctrl+A: select the untouched composer draft'
+Press @(0x08) 'Backspace: clear the selected composer draft'
+[void](Wait-For 'cleared draft reaches both composer and terminal' { [ChatDeliveryDesktop]::Text($composer) -ceq '' -and (Fake-State).box -ceq '' })
 Type-Composer 'What should I do next?'
+if ([ChatDeliveryDesktop]::Text($composer) -cne 'What should I do next?') { throw 'Follow-up composer text differs from the ordinary question' }
 Press @(0x0D) 'Enter: send an ordinary follow-up after reacting'
 [void](Wait-For 'ordinary follow-up answer reached the real transcript cache' {
     Get-ChildItem "$settings/chatcache/*.jsonl" | Where-Object { try { (Read-Shared $_.FullName).Contains('The next answer stays visible after reacting.') } catch [IO.FileNotFoundException] { $false } } | Select-Object -First 1
