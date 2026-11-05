@@ -337,10 +337,16 @@ const KEYEVENTF_KEYUP: u32 = 2;
 const win32 = struct { const WM_COMMAND: u32 = 0x111; };
 const pane: HANDLE = @ptrFromInt(1);
 const main_window: HANDLE = @ptrFromInt(2);
+const foreign_window: HANDLE = @ptrFromInt(3);
 var foreground: HANDLE = main_window;
 var focused: HANDLE = main_window;
 var simulated_alt_down = false;
 var simulated_ctrl_down = false;
+var other_held: i32 = 0;
+var refuse_foreground = false;
+var foreign_on_attempt = false;
+var switch_count: usize = 0;
+var attachments: usize = 0;
 var injections: usize = 0;
 var focus_changes: usize = 0;
 var posted: usize = 0;
@@ -354,7 +360,7 @@ const app_state = struct {
     var g_chat_browser_handoff_until: u64 = 0;
 };
 fn GetAsyncKeyState(key: i32) i16 {
-    const down = if (key == VK_MENU) simulated_alt_down else if (key == 0x11) simulated_ctrl_down else false;
+    const down = if (key == VK_MENU) simulated_alt_down else if (key == 0x11) simulated_ctrl_down else key == other_held;
     return if (down) @bitCast(@as(u16, 0x8000)) else 0;
 }
 fn keybd_event(_: u8, _: u8, _: u32, _: usize) void { injections += 1; }
@@ -368,8 +374,21 @@ fn cancelShellRefocus(_: HANDLE) void {}
 fn GetForegroundWindow() HANDLE { return foreground; }
 fn GetWindowThreadProcessId(hwnd: HANDLE, _: ?*u32) u32 { return if (hwnd == pane) 2 else 3; }
 fn GetCurrentThreadId() u32 { return 1; }
-fn AttachThreadInput(_: u32, _: u32, _: i32) i32 { return 1; }
-fn SetForegroundWindow(hwnd: HANDLE) i32 { foreground = hwnd; focus_changes += 1; return 1; }
+fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 {
+    if (attach != 0) attachments += 1 else attachments -= 1;
+    return 1;
+}
+fn foregroundIsOurs() bool { return foreground != foreign_window; }
+fn SetForegroundWindow(hwnd: HANDLE) i32 {
+    if (foreign_on_attempt) foreground = foreign_window;
+    if (refuse_foreground) return 0;
+    foreground = hwnd; focus_changes += 1; return 1;
+}
+fn SwitchToThisWindow(hwnd: HANDLE, _: i32) void {
+    std.debug.assert(attachments == 0);
+    switch_count += 1;
+    foreground = hwnd;
+}
 fn SetFocus(hwnd: HANDLE) HANDLE { const old = focused; focused = hwnd; focus_changes += 1; return old; }
 fn PostMessageW(hwnd: HANDLE, msg: u32, command: WPARAM, _: isize) i32 {
     if (hwnd == pane and msg == win32.WM_COMMAND) { posted += 1; posted_command = command; }
@@ -383,6 +402,11 @@ fn reset(alt: bool, ctrl: bool) void {
     focused = main_window;
     simulated_alt_down = alt;
     simulated_ctrl_down = ctrl;
+    other_held = 0;
+    refuse_foreground = false;
+    foreign_on_attempt = false;
+    switch_count = 0;
+    attachments = 0;
     injections = 0;
     focus_changes = 0;
     posted = 0;
@@ -413,6 +437,39 @@ test "plain and held Ctrl focus the browser without keyboard injection" {
         try std.testing.expect(!simulated_alt_down);
         try std.testing.expectEqual(ctrl, simulated_ctrl_down);
     }
+}
+test "foreground refusal falls back after detach and focuses page" {
+    reset(false, false);
+    refuse_foreground = true;
+    focusActiveBrowserPane();
+    try std.testing.expectEqual(pane, foreground);
+    try std.testing.expectEqual(@as(usize, 1), switch_count);
+    try std.testing.expectEqual(@as(usize, 1), posted);
+    try std.testing.expectEqual(@as(WPARAM, 39009), posted_command);
+    try std.testing.expectEqual(@as(usize, 0), injections);
+}
+test "held modifiers block the fallback without fake keys" {
+    for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
+        reset(key == 0x12, key == 0x11);
+        if (key != 0x12 and key != 0x11) other_held = key;
+        refuse_foreground = true;
+        focusActiveBrowserPane();
+        try std.testing.expectEqual(main_window, foreground);
+        try std.testing.expectEqual(@as(usize, 0), switch_count);
+        try std.testing.expectEqual(@as(usize, 0), posted);
+        try std.testing.expectEqual(@as(usize, 0), injections);
+        try std.testing.expect(GetAsyncKeyState(key) < 0);
+    }
+}
+test "foreign foreground blocks the fallback" {
+    reset(false, false);
+    refuse_foreground = true;
+    foreign_on_attempt = true;
+    focusActiveBrowserPane();
+    try std.testing.expectEqual(foreign_window, foreground);
+    try std.testing.expectEqual(@as(usize, 0), switch_count);
+    try std.testing.expectEqual(@as(usize, 0), posted);
+    try std.testing.expectEqual(@as(usize, 0), injections);
 }
 `;
     const file = path.join(dir, 'test.zig');

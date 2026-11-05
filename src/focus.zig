@@ -978,6 +978,15 @@ pub fn focusActiveBrowserPaneUnlocked() void {
     _ = SetFocus(bh);
     if (attached_fg) _ = AttachThreadInput(our_thread, fg_thread, 0);
     if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);
+    if (fg != null and fg != bh and GetForegroundWindow() == fg and foregroundIsOurs() and activeBrowserHwndLive() == bh) {
+        var modifier_held = false;
+        for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
+            if (GetAsyncKeyState(key) < 0) modifier_held = true;
+        }
+        if (!modifier_held and GetForegroundWindow() == fg and foregroundIsOurs() and activeBrowserHwndLive() == bh and focusGuard(bh)) {
+            SwitchToThisWindow(bh, 0);
+        }
+    }
     if (browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)) |command| {
         _ = PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0);
     }
