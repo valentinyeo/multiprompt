@@ -15,6 +15,7 @@ public static class FreezeJourney {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)] struct Keyboard { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
     [StructLayout(LayoutKind.Explicit)] struct Data { [FieldOffset(0)] public Mouse Mouse; [FieldOffset(0)] public Keyboard Keyboard; }
@@ -95,7 +96,8 @@ function Capture-NoticePixels([string]$Name) {
         finally { $graphics.ReleaseHdc($dc) }
         $bitmap.Save((Join-Path $Evidence $Name))
         $orange = 0
-        for ($y = 0; $y -lt [Math]::Min(120, $bitmap.Height); $y++) {
+        $scale = [FreezeJourney]::GetDpiForWindow($script:window) / 96.0
+        for ($y = [int](32 * $scale); $y -lt [Math]::Min([int](64 * $scale), $bitmap.Height); $y++) {
             for ($x = [int]($bitmap.Width / 2); $x -lt $bitmap.Width - 8; $x++) {
                 $color = $bitmap.GetPixel($x, $y)
                 if ($color.R -ge 120 -and $color.G -ge 60 -and $color.G -le 220 -and $color.B -le 130 -and $color.R -ge $color.G + 20 -and $color.G -ge $color.B + 15) { $orange++ }
