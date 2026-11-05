@@ -300,7 +300,7 @@ pub fn parseAdoptArgs() void {
                 const start = cur;
                 while (cur < len and haystack[cur] >= '0' and haystack[cur] <= '9') cur += 1;
                 const color = std.fmt.parseInt(u8, haystack[start..cur], 10) catch 7;
-                app_state.g_adopt_color = if (color < 7) color else null;
+                app_state.g_adopt_color = @import("session_layout.zig").decodeTransferColor(color);
                 while (cur < len and haystack[cur] == ' ') cur += 1;
             }
             if (cur < len and haystack[cur] == '"') {
