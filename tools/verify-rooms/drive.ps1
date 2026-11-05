@@ -47,12 +47,18 @@ $app = $null
 $main = [IntPtr]::Zero
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false)) }
 function Wait-For([string]$Name, [scriptblock]$Check) {
+    $result.phase='wait: ' + $Name
+    Save $result (Join-Path $Evidence 'result.json')
+    Write-Host ('ROOM_WAIT ' + $Name)
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($timer.Elapsed.TotalSeconds -lt 90)
     throw "Timed out: $Name"
 }
 function Check([string]$Name, [bool]$Condition) {
     $checks.Add(@{name=$Name; passed=$Condition})
+    $result.phase='check: ' + $Name
+    Save $result (Join-Path $Evidence 'result.json')
+    Write-Host ('ROOM_CHECK ' + $Name + ' passed=' + $Condition)
     if (!$Condition) { throw "Failed: $Name" }
 }
 function Log {
@@ -148,7 +154,7 @@ try {
         @{kind='tmux'; name='Alpha'; manual=$true; tmux_host=0; tmux_session='room-alpha'; workspace='Work'},
         @{kind='tmux'; name='Beta'; manual=$true; tmux_host=0; tmux_session='room-beta'; workspace='Work'}
     )}
-    $published = Invoke-RestMethod -Method Put -Uri "https://$hostName/v1/layout" -ContentType 'application/json' -Headers @{Authorization=('Bearer ' + $account.admin_key); 'X-Layout-Features'='hosts'} -Body (@{base_revision=1; layout=$layout} | ConvertTo-Json -Depth 8 -Compress)
+    $published = Invoke-RestMethod -Method Put -TimeoutSec 20 -Uri "https://$hostName/v1/layout" -ContentType 'application/json' -Headers @{Authorization=('Bearer ' + $account.admin_key); 'X-Layout-Features'='hosts'} -Body (@{base_revision=1; layout=$layout} | ConvertTo-Json -Depth 8 -Compress)
     Check 'isolated-account-layout' ($published.layout.tabs.Count -eq 2 -and $published.layout.hosts.Count -eq 1)
     $secret = [Text.Encoding]::UTF8.GetBytes((@{refresh_token=$account.refresh_token} | ConvertTo-Json -Compress))
     [IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), [Security.Cryptography.ProtectedData]::Protect($secret, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
