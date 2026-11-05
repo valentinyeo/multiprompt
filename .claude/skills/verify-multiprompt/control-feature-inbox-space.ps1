@@ -51,13 +51,18 @@ Wait-Until {
     if ($element.Current.ProcessId -eq $process.Id -and $element.Current.ClassName -eq 'Edit' -and [VerifyNative]::EditText($handle).Length -gt 0) { $script:inboxSpaceRename = $handle; return $true }
     $false
 } 'owned rename edit identifies the sixteenth row'
-$expectedName = [VerifyNative]::EditText($script:inboxSpaceRename)
+$originalName = [VerifyNative]::EditText($script:inboxSpaceRename)
 Snapshot 'inbox-space-rename'
-Press @(0x1B) 'Esc: cancel rename without changing the row'
-Wait-Until { (Read-Inbox).inbox_active -and [VerifyNative]::GetFocusedWindow($script:window) -ne $script:inboxSpaceRename } 'Inbox remains open after cancel'
+$expectedName = 'Inbox bottom row'
+Type-Text $expectedName
+Press @(0x0D) 'Enter: give the visible bottom row a unique test name'
+Wait-Until { $state = Read-Session; @($state.tabs | Where-Object { $_.name -ceq $expectedName }).Count -eq 1 } 'unique bottom-row identity saved by the app'
+$expectedSid = @((Read-Session).tabs | Where-Object { $_.name -ceq $expectedName })[0].shell_id
+Wait-Until { (Read-Inbox).inbox_active -and [VerifyNative]::GetFocusedWindow($script:window) -ne $script:inboxSpaceRename } 'Inbox remains open after renaming'
+Snapshot 'inbox-space-named'
 Record 'Click the newly visible sixteenth Inbox row'
 [VerifyNative]::ClickClient($script:window, 960, ($top + 28))
 Wait-Until { $state = Read-Inbox; $null -ne $state -and -not $state.inbox_active } 'bottom row opens its session'
-Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].name -ceq $expectedName } 'opened session matches the visible bottom row'
+Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].name -ceq $expectedName -and $state.tabs[$state.active_tab].shell_id -eq $expectedSid } 'opened stable session identity matches the visible bottom row'
 Snapshot 'after'
-$result.checks += @{name='inbox-space-bottom-row'; sessions=18; row=16; selectedPixels=$selectedPixels; openedName=$expectedName; clientWidth=1920; clientHeight=1032; rowBottom=998; footerTop=1002; source='real palette-created CMD sessions; no seeded history or settings'}
+$result.checks += @{name='inbox-space-bottom-row'; sessions=18; row=16; selectedPixels=$selectedPixels; openedName=$expectedName; openedSid=$expectedSid; originalName=$originalName; clientWidth=1920; clientHeight=1032; rowBottom=998; footerTop=1002; source='real palette-created CMD sessions; no seeded history or settings'}
