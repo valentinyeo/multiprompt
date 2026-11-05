@@ -1,5 +1,6 @@
 $pageJob = $null
 $pageServer = $null
+$script:typingModeObservation = $null
 try {
 $pageJob = New-Object VerifyJob
 $pageRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-typing')).Path
@@ -20,14 +21,33 @@ $browser = [VerifyNative]::DockedPaneWindow($script:window)
 if ($browser -eq [IntPtr]::Zero -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Typing journey has no owned docked browser' }
 
 function Get-TypingUrlBar {
-    $bar = [IntPtr]::Zero
-    while ($true) {
-        $bar = [VerifyNative]::FindWindowEx([IntPtr]::Zero, $bar, 'ZigShellUrlBar', $null)
-        if ($bar -eq [IntPtr]::Zero) { return $bar }
+    foreach ($entry in [VerifyNative]::DesktopWindows()) {
+        if ($entry['class'] -cne 'ZigShellUrlBar') { continue }
+        $bar = [IntPtr][long]$entry['handle']
         [uint32]$ownedProcessId = 0
         [void][VerifyNative]::GetWindowThreadProcessId($bar, [ref]$ownedProcessId)
         if ($ownedProcessId -eq $process.Id -and [VerifyNative]::GetAncestor($bar, 3) -eq $script:window -and [VerifyNative]::IsWindowVisible($bar)) { return $bar }
     }
+    return [IntPtr]::Zero
+}
+function Get-TypingModeObservation([IntPtr]$OldBrowser) {
+    $current = [VerifyNative]::DockedPaneWindow($script:window)
+    $rect = New-Object VerifyNative+Rect
+    $hasRect = $current -ne [IntPtr]::Zero -and [VerifyNative]::GetWindowRect($current, [ref]$rect)
+    $found = @()
+    $after = [IntPtr]::Zero
+    for ($i = 0; $i -lt 32; $i++) {
+        $after = [VerifyNative]::FindWindowEx([IntPtr]::Zero, $after, 'ZigShellUrlBar', $null)
+        if ($after -eq [IntPtr]::Zero) { break }
+        $found += [VerifyNative]::WindowIdentity($after)
+    }
+    $desktopBars = @([VerifyNative]::DesktopWindows() | Where-Object { $_['class'] -ceq 'ZigShellUrlBar' })
+    $bar = Get-TypingUrlBar
+    $owner = if ($current -ne [IntPtr]::Zero) { [VerifyNative]::GetProp($current, 'ZigShellPaneOwner') } else { [IntPtr]::Zero }
+    $wildcard = $null
+    $wildcardError = $null
+    try { $wildcard = [VerifyNative]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, 'ZigShellUrlBar', [System.Management.Automation.Language.NullString]::Value).ToInt64() } catch { $wildcardError = $_.Exception.Message }
+    return @{ appPid = $process.Id; main = $script:window.ToInt64(); oldBrowser = $OldBrowser.ToInt64(); currentBrowser = $current.ToInt64(); currentOwnerProperty = $owner.ToInt64(); currentRect = if ($hasRect) { @{ left = $rect.Left; top = $rect.Top; right = $rect.Right; bottom = $rect.Bottom } } else { $null }; currentNonzero = $current -ne [IntPtr]::Zero; currentDifferent = $current -ne $OldBrowser; currentOwned = $owner -eq $script:window; findWindowExBars = $found; findWindowExWildcard = $wildcard; findWindowExWildcardError = $wildcardError; desktopBars = $desktopBars; returnedBar = $bar.ToInt64(); barFound = $bar -ne [IntPtr]::Zero }
 }
 function Click-TypingUrlBar {
     $bar = Get-TypingUrlBar
@@ -96,11 +116,16 @@ Press @(0x0D) 'Enter: save the synthetic local page URL'
 Wait-Until { (Read-Session).tabs[0].burl -ceq $url } 'synthetic local page URL saved through the app UI'
 Focus-Palette 'browser mode' 6244
 Press @(0x0D) 'Enter: use the app address bar'
+$oldModeBrowser = $browser
 Wait-Until {
-    $candidate = [VerifyNative]::DockedPaneWindow($script:window)
-    $candidate -ne [IntPtr]::Zero -and $candidate -ne $browser -and
-        [VerifyNative]::GetProp($candidate, 'ZigShellPaneOwner') -eq $script:window -and
-        (Get-TypingUrlBar) -ne [IntPtr]::Zero
+    try {
+        $script:typingModeObservation = Get-TypingModeObservation $oldModeBrowser
+        $script:typingModeObservation.currentNonzero -and $script:typingModeObservation.currentDifferent -and
+            $script:typingModeObservation.currentOwned -and $script:typingModeObservation.barFound
+    } catch {
+        $script:typingModeObservation = @{ appPid = $process.Id; main = $script:window.ToInt64(); oldBrowser = $oldModeBrowser.ToInt64(); error = $_.Exception.Message }
+        throw
+    }
 } 'owned browser shows the app address bar' 30
 $browser = [VerifyNative]::DockedPaneWindow($script:window)
 if ([VerifyNative]::GetForegroundWindow() -ne $browser) { Page-TypingFocus }
@@ -169,6 +194,9 @@ try {
 }
 Snapshot 'after'
 } finally {
+    try {
+        Save-Json $(if ($null -ne $script:typingModeObservation) { $script:typingModeObservation } else { @{ status = 'mode observation not reached' } }) 'browser-typing-mode-observation.json'
+    } finally {
     if ($null -ne $pageJob) {
         try {
             $beforeStop = $pageJob.ReadAccounting()
@@ -182,5 +210,6 @@ Snapshot 'after'
             if ($null -ne $pageServer) { $pageServer.Dispose() }
             $pageJob.Dispose()
         }
+    }
     }
 }
