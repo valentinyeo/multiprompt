@@ -42,21 +42,22 @@ function Click-HostedChoice([int]$Index) {
     [VerifyNative]::ClickClient($hostedTranscript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
     $script:hostedLastClick = [DateTime]::UtcNow
 }
-function Copy-HostedTranscript {
-    [Windows.Forms.Clipboard]::Clear()
-    $offset = (Read-SharedText $hostedLog).Length
-    Palette 'select all text'
-    Wait-SlashPalette 6364 $offset
-    Press @(0x0D) 'Enter: select the actual transcript'
-    $offset = (Read-SharedText $hostedLog).Length
-    Palette 'copy selection'
-    Wait-SlashPalette 6363 $offset
-    Press @(0x0D) 'Enter: copy the actual transcript'
-    Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native transcript copied through palette'
-    $script:hostedCopied = [Windows.Forms.Clipboard]::GetText()
-    Press @(0x1B) 'Escape: clear transcript selection'
-    [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
-    Wait-ChatFocus 'Edit' 'hosted-composer'
+function Copy-HostedContinuation([string]$Id) {
+    foreach ($distance in @(1, 2)) {
+        [Windows.Forms.Clipboard]::Clear()
+        [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
+        Wait-ChatFocus 'Edit' 'hosted-copy-composer'
+        for ($step = 0; $step -lt $distance; $step++) { Press @(0x26) 'Up: focus a recent native message' }
+        $offset = (Read-SharedText $hostedLog).Length
+        Press @(0x0D) 'Enter: open the focused message actions'
+        Wait-Until { (Read-SharedText $hostedLog).Substring($offset) -match '\[chat\] message menu items=[^\r\n]*Copy' } 'focused native message offers Copy'
+        Press @(0x43) 'C: copy the focused native message'
+        Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native message copy completed'
+        $script:hostedCopied = [Windows.Forms.Clipboard]::GetText()
+        [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
+        Wait-ChatFocus 'Edit' 'hosted-composer'
+        if ($script:hostedCopied.Contains('Hosted request continued: ' + $Id)) { return }
+    }
 }
 function Assert-HostedContinued([string]$Id, [string]$Operation, [string]$Behavior) {
     Wait-Until { @(Read-HostedRows 'hosted-continuations' | Where-Object { $_.request_id -ceq $Id }).Count -eq 1 } ('provider resumed ' + $Id) 45
@@ -64,7 +65,7 @@ function Assert-HostedContinued([string]$Id, [string]$Operation, [string]$Behavi
     if ($rows.Count -ne 1 -or $rows[0].query.op -cne $Operation -or $rows[0].sid -cne $remoteSids['live-slash'] -or $rows[0].reply.status -cne 'ok') { throw ('Wrong or duplicate reply: ' + $Id) }
     $response = $rows[0].responses[0].response
     if ($response.request_id -cne $Id -or $response.response.toolUseID -cne ('tool-' + $Id) -or $response.response.behavior -cne $Behavior) { throw ('Wrong provider response: ' + $Id) }
-    Wait-Until { Copy-HostedTranscript; $script:hostedCopied.Contains('Hosted request continued: ' + $Id) } ('continuation copied from native transcript ' + $Id) 45
+    Wait-Until { Copy-HostedContinuation $Id; $script:hostedCopied.Contains('Hosted request continued: ' + $Id) } ('continuation copied from native message ' + $Id) 45
     [IO.File]::WriteAllText((Join-Path $Evidence ($Id + '-transcript.txt')), $script:hostedCopied)
     Snapshot ($Id + '-continued')
     return $rows[0]
