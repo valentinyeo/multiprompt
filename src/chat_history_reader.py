@@ -2772,6 +2772,19 @@ def host_runtime_file():
     return str(path) if path.is_file() else None
 
 
+def host_reader_source():
+    source = globals().get("READER_SOURCE")
+    if isinstance(source, str) and source:
+        return source
+    standalone = host_runtime_file()
+    if standalone is None:
+        return None
+    try:
+        return Path(standalone).read_text(encoding="utf-8") or None
+    except (OSError, UnicodeError):
+        return None
+
+
 def host_spawn(provider, sid, source=None):
     bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
                  "exec(compile(s,'<agent-host>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
@@ -3118,8 +3131,8 @@ def host_agent_start(provider, sid):
         shell = ["/bin/sh", "-l", "-c"]
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
-        source = globals().get("READER_SOURCE")
-        if not isinstance(source, str) or not source:
+        source = host_reader_source()
+        if not source:
             raise RuntimeError("owner_unavailable")
         check = ('import sys;n={"__name__":"host_owner_probe"};'
                  'exec(compile(sys.stdin.read(),"<host-owner>","exec"),n);'
@@ -6021,7 +6034,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 73
+RUNTIME_GENERATION = 74
 
 if __name__ == '__main__':
     import base64 as _base64
