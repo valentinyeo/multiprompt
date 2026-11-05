@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -34,6 +35,14 @@ test('supplied fixture refresh tokens authenticate both devices', { timeout: 600
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Fixture startup timed out')), 30000).unref())
     ]);
+    await new Promise((resolve, reject) => {
+      const upload = request({ host: '127.0.0.1', port, path: '/oauth/token', method: 'POST', headers: { 'content-length': '1000', expect: '100-continue' } });
+      let interrupted = false;
+      upload.on('continue', () => upload.write('partial', () => { interrupted = true; upload.socket.end(); }));
+      upload.on('error', error => { if (error.code !== 'ECONNRESET') reject(error); });
+      upload.on('close', () => interrupted ? resolve() : reject(new Error('Upload was not interrupted')));
+      upload.flushHeaders();
+    });
     for (const [token, device] of [[fixture.desktop_refresh_token, fixture.desktop_device_id], [fixture.android_refresh_token, fixture.android_device_id]]) {
       const response = await fetch(`http://127.0.0.1:${port}/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: token }) });
       assert.equal(response.status, 200);

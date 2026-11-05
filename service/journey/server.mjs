@@ -62,7 +62,7 @@ const handler = async (req, res) => {
     return;
   }
   let body;
-  if (fixture) body = await new Promise((resolve, reject) => {
+  if (fixture) body = await new Promise(resolve => {
     const chunks = [];
     let size = 0;
     let rejected = false;
@@ -78,7 +78,7 @@ const handler = async (req, res) => {
       } else chunks.push(chunk);
     });
     req.on('end', () => { if (!rejected) resolve(Buffer.concat(chunks)); });
-    req.on('error', reject);
+    req.on('error', () => resolve(null));
   });
   else {
     const chunks = [];

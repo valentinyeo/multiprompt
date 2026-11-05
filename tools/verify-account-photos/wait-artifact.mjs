@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 
 const [name, destination] = process.argv.slice(2);
-if (!['session-picture-endpoint', 'session-picture-phone'].includes(name) || !/^\d+$/.test(process.env.GITHUB_RUN_ID || '') || !/^[\w.-]+\/[\w.-]+$/.test(process.env.GITHUB_REPOSITORY || '')) throw new Error('Invalid artifact request');
+const attempt = process.env.GITHUB_RUN_ATTEMPT || '';
+if (!/^[1-9]\d*$/.test(attempt) || !['session-picture-endpoint', 'session-picture-phone'].map(base => `${base}-${attempt}`).includes(name) || !/^\d+$/.test(process.env.GITHUB_RUN_ID || '') || !/^[\w.-]+\/[\w.-]+$/.test(process.env.GITHUB_REPOSITORY || '')) throw new Error('Invalid artifact request');
 const run = (args, timeout = 60000) => spawnSync('gh', args, { encoding: 'utf8', timeout });
 const deadline = Date.now() + 1200000;
 let found = false;

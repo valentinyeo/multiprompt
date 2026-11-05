@@ -163,7 +163,7 @@ jobs:
         if: inputs.pictures_isolated
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: session-picture-endpoint
+          name: session-picture-endpoint-${{ github.run_attempt }}
           path: picture-endpoint/endpoint.txt
           if-no-files-found: error
       - name: Install Zig 0.16.0
@@ -206,7 +206,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: session-picture-desktop
+          name: session-picture-desktop-${{ github.run_attempt }}
           path: |
             desktop-evidence/*.png
             desktop-evidence/desktop.json
@@ -216,7 +216,7 @@ jobs:
         if: ${{ success() && inputs.pictures_isolated }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node tools/verify-account-photos/wait-artifact.mjs session-picture-phone
+        run: node tools/verify-account-photos/wait-artifact.mjs session-picture-phone-${{ github.run_attempt }}
       - name: Stop owned fixture processes
         if: ${{ always() && inputs.pictures_isolated }}
         shell: pwsh
@@ -225,7 +225,7 @@ jobs:
         if: ${{ always() && inputs.pictures_isolated }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: session-picture-fixture-cleanup
+          name: session-picture-fixture-cleanup-${{ github.run_attempt }}
           path: cleanup-evidence/fixture-cleanup.json
           if-no-files-found: error
 
@@ -253,7 +253,7 @@ jobs:
         if: inputs.pictures_isolated
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node tools/verify-account-photos/wait-artifact.mjs session-picture-endpoint picture-endpoint
+        run: node tools/verify-account-photos/wait-artifact.mjs session-picture-endpoint-${{ github.run_attempt }} picture-endpoint
       - name: Substitute Android build origin
         if: inputs.pictures_isolated
         run: node tools/verify-account-photos/substitute-origin.mjs android picture-endpoint/endpoint.txt
@@ -305,7 +305,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: session-picture-phone
+          name: session-picture-phone-${{ github.run_attempt }}
           path: |
             phone-evidence/avatar.png
             phone-evidence/root.png
@@ -326,16 +326,16 @@ jobs:
           node-version: 22
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: session-picture-desktop
+          name: session-picture-desktop-${{ github.run_attempt }}
           path: desktop
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: session-picture-phone
+          name: session-picture-phone-${{ github.run_attempt }}
           path: phone
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         if: inputs.pictures_isolated
         with:
-          name: session-picture-fixture-cleanup
+          name: session-picture-fixture-cleanup-${{ github.run_attempt }}
           path: cleanup
       - name: Require owned fixture cleanup
         if: inputs.pictures_isolated
