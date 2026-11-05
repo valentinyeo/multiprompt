@@ -1592,7 +1592,8 @@ pub fn pollTimer(id: usize) bool {
                 if (!acceptEvents(payload)) { discardBuilding(); last_failure = .{ .kind = .events, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
                 const item = building_model.?;
                 if (item.after == item.highwater) {
-                    if (!publishModel()) { discardBuilding(); view.showUnavailable(); }
+                    const advanced = numberField(payload, "next_after").? > item.highwater;
+                    if (!publishModel()) { discardBuilding(); view.showUnavailable(); } else if (advanced) selection_waiting = true;
                     if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
                 } else if (!c.events(item.value.room_id, item.after)) {
                     discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);

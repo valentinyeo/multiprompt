@@ -19,6 +19,7 @@ using System;
 using System.Runtime.InteropServices;
 public static class RoomNativeStyle {
     [DllImport("user32.dll")] public static extern int GetWindowLongW(IntPtr window, int index);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
 }
 '@
 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/control-native.cs"
@@ -120,6 +121,48 @@ function Room-Composer([IntPtr]$Room) {
     $edit = [ChatDeliveryDesktop]::Composer($Room)
     if ($edit -ne [IntPtr]::Zero -and ([RoomNativeStyle]::GetWindowLongW($edit, -16) -band 4) -ne 0) { return $edit }
     return [IntPtr]::Zero
+}
+function Transcript-Bubbles {
+    $room = Room-Window
+    if (!$room) { return $null }
+    $rect = [ChatDeliveryDesktop+Rect]::new()
+    if (![ChatDeliveryDesktop]::GetWindowRect($room, [ref]$rect)) { return $null }
+    $scale = [RoomNativeStyle]::GetDpiForWindow($room) / 96.0
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
+    if ($scale -le 0 -or $width -lt 1 -or $height -lt 1) { return $null }
+    $bitmap = [Drawing.Bitmap]::new($width, $height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen([Drawing.Point]::new($rect.Left, $rect.Top), [Drawing.Point]::Empty, $bitmap.Size)
+        $left = [int][Math]::Max(20 * $scale, $width / 2 - 380 * $scale)
+        $right = [int][Math]::Min($width - 20 * $scale, $width / 2 + 380 * $scale)
+        $stepX = [int][Math]::Max(1, [Math]::Round(4 * $scale))
+        $stepY = [int][Math]::Max(1, [Math]::Round(2 * $scale))
+        $humans = 0; $agents = 0; $wasHuman = $false; $wasAgent = $false
+        for ($y = [int](78 * $scale); $y -lt $height - 130 * $scale; $y += $stepY) {
+            $humanPixels = 0; $agentPixels = 0
+            for ($x = $left; $x -lt $right; $x += $stepX) {
+                $color = $bitmap.GetPixel($x, $y).ToArgb() -band 0xffffff
+                if ($color -eq 0x2e2e2e) { $humanPixels++ }
+                if ($color -eq 0x1e1e1e) { $agentPixels++ }
+            }
+            $isHuman = $humanPixels -ge 20
+            $isAgent = $agentPixels -ge 20
+            if ($isHuman -and !$wasHuman) { $humans++ }
+            if ($isAgent -and !$wasAgent) { $agents++ }
+            $wasHuman = $isHuman; $wasAgent = $isAgent
+        }
+        return @{humans=$humans; agents=$agents; dpi=[int]($scale * 96); width=$width; height=$height}
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Wait-PaintedMessages([string]$Stage, [int]$Humans, [int]$Agents) {
+    $observed = Wait-For ('painted messages: ' + $Stage) {
+        $value = Transcript-Bubbles
+        if ($value -and $value.humans -eq $Humans -and $value.agents -eq $Agents) { return $value }
+    }
+    Save $observed (Join-Path $Evidence ($Stage + '-paint.json'))
+    Check ($Stage + '-painted-messages') $true
 }
 function Witness {
     $path = Join-Path $env:MP_VERIFY_STATE 'witness.json'
@@ -293,10 +336,11 @@ try {
         Check 'exactly-two-member-replies' ($replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2)
         Check 'reply-parent-binding' (@($replies | Where-Object { $_.parent_event_id -cne $human[0].id }).Count -eq 0)
         Check 'synthetic-reply-content' ((@($replies.text | Sort-Object) -join '|') -ceq 'Synthetic Alpha reply: Ready.|Synthetic Beta reply: Ready.')
-        Check 'canonical-two-turns-only' (@($w.canonical_events | Where-Object { $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($w.canonical_events | Where-Object { $_.event.kind -eq 'turn.ended' }).Count -eq 2)
+        Check 'canonical-two-turns-only' (@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -eq 'turn.ended' }).Count -eq 2)
         Save $w (Join-Path $Evidence 'witness.json')
     }
     Check-Replies
+    Wait-PaintedMessages 'after-send' 1 2
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-synthetic-replies'
     Stop-App
@@ -304,6 +348,7 @@ try {
     [void](Wait-For 'reopened selected room' { Room-Window })
     [void](Wait-For 'post-restart store read' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
     Check-Replies
+    Wait-PaintedMessages 'after-restart' 1 2
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-replies-after-restart'
     $result.status='passed'

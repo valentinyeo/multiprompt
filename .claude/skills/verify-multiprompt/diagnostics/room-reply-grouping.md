@@ -14,7 +14,7 @@ Shared private isolation, offline retention and old-client capability contracts 
 
 ## Accepted-send refresh
 
-Both normal command completion and durable evidence recovery must schedule a selected-room snapshot for accepted posts, not only member edits. The bridge collects canonical replies during event reads; refreshing the catalog alone never invokes that collection. The compiled recovery-path fixture exercises accepted posts and edits, room-creation exclusion, another selected room and rejected sends. Its persistence and transport functions are explicit recording boundaries, not real journal or network proof. The existing `rooms` preview journey exercises normal keyboard send with synthetic providers.
+Both normal command completion and durable evidence recovery must schedule a selected-room snapshot for accepted posts, not only member edits. The bridge collects canonical replies during event reads; refreshing the catalog alone never invokes that collection. If event collection advances beyond the snapshot's sequence, publish only that bounded snapshot and immediately schedule a fresh one; never extend its member-revision boundary to absorb newer replies. The replay fixture includes this bounded-page race. The compiled recovery-path fixture exercises accepted posts and edits, room-creation exclusion, another selected room and rejected sends. Its persistence and transport functions are explicit recording boundaries, not real journal or network proof. The existing `rooms` preview journey exercises normal keyboard send with synthetic providers.
 
 ## Remaining user proof
 

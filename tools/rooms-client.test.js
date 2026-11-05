@@ -13,6 +13,9 @@ test('room input waits for the multiline composer instead of retaining the creat
   assert.match(driver, /Wait-For 'room composer'[^\n]*Room-Composer \$h/);
   assert.match(driver, /Wait-For 'composer owns focus'/);
   assert.match(driver, /Wait-For 'created room selected by the app'/);
+  assert.match(driver, /Wait-PaintedMessages 'after-send' 1 2/);
+  assert.match(driver, /Wait-PaintedMessages 'after-restart' 1 2/);
+  assert.match(driver, /\$_.event.PSObject.Properties\['kind'\]/);
 });
 
 for (const source of ['src/room_message.zig', 'src/room_journal.zig', 'src/rooms.zig']) {
