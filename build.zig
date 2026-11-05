@@ -818,6 +818,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&inbox_reduction_search_tests.step);
     const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js" });
     test_step.dependOn(&dictation_paste_tests.step);
+    const deepgram_key_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/deepgram_key.zig"),
+        .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(deepgram_key_tests).step);
     const deepgram_key_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/deepgram-key-source.test.js" });
     test_step.dependOn(&deepgram_key_source_tests.step);
     const session_state_bucket_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-state-buckets.test.js" });
