@@ -3163,6 +3163,9 @@ def host_agent_env(provider, sid):
     if provider == 'codex':
         for key in HOST_CODEX_SECRETS:
             env.pop(key, None)
+    if provider == 'claude' and config.get('model') in ('opus', 'sonnet', 'haiku'):
+        for key in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+            env.pop(key, None)
     tmux = config.get('tmux')
     if isinstance(tmux, str) and tmux:
         env['MULTIBOT_SESSION'] = tmux
@@ -3281,6 +3284,8 @@ def host_agent_start(provider, sid, mode=None):
         shell = ["/bin/sh", "-l", "-c"]
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
+        if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku"):
+            setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL; '
         source = host_reader_source()
         if not source:
             raise RuntimeError("owner_unavailable")
@@ -3847,6 +3852,9 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="error", reason="invalid_op")
     if provider == "claude" and "settings" in session and (session.get("agent") is None or session.get("starting_settings") != session["settings"]):
         return dict(status="busy", reason="settings_pending")
+    if (provider == "claude" and session.get("ready") and session.get("settings", {}).get("model")
+            and session.get("init_model") and session["init_model"] != session["settings"]["model"]):
+        return host_refuse("model_mismatch")
     token, attempt, epoch, text = request.get("id"), request.get("attempt"), request.get("epoch"), request.get("text")
     if not isinstance(text, str) or not text.strip() or "\x00" in text:
         return host_refuse("invalid_text")
@@ -3964,13 +3972,17 @@ def host_claude_event(provider, sid, tmux, session, event):
         if event.get("subtype") == "init":
             session["ready"] = True
             if "starting_settings" in session:
-                session["applied_settings"] = dict(session["starting_settings"])
-                session["init_model"] = host_model_name(event.get("model"))
+                settings = session["starting_settings"]
+                actual = host_model_name(event.get("model"))
+                session["init_model"] = actual
+                session["applied_settings"] = dict(settings) if actual and (not settings["model"] or settings["model"] == actual) else None
                 host_settings_event(provider, sid, tmux, session)
-                settings = session["applied_settings"]
-                host_log(provider, sid, "model_effort_settings_applied",
-                         dict(model=settings["model"] or session["init_model"] or "default",
-                              effort=settings["effort"] or "default"))
+                if session["applied_settings"] is not None:
+                    host_log(provider, sid, "model_effort_settings_applied",
+                             dict(model=actual, effort=settings["effort"] or "default"))
+                elif settings["model"]:
+                    host_log(provider, sid, "model_settings_mismatch",
+                             dict(requested=settings["model"], actual=actual or "unknown"))
             if isinstance(event.get("session_id"), str):
                 session["state"]["native_session"] = event["session_id"]
             host_state_write(provider, sid, session["state"])
@@ -6325,7 +6337,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 77
+RUNTIME_GENERATION = 78
 
 if __name__ == '__main__':
     import base64 as _base64

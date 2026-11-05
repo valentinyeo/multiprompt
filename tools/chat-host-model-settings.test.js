@@ -56,6 +56,18 @@ with tempfile.TemporaryDirectory() as directory:
         r['host_agent_start'](provider, sid)
     assert '--model' not in calls[-1] and '--effort' not in calls[-1], calls[-1]
     assert r['host_settings'](provider, sid) == dict(model='', effort='')
+    aliases = ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL')
+    with patch.dict(r['os'].environ, dict.fromkeys(aliases, 'remapped') | dict(ANTHROPIC_MODEL='custom', ANTHROPIC_API_KEY='secret')):
+        env = r['host_agent_env'](provider, sid)
+        assert all(env[key] == 'remapped' for key in aliases)
+        config['model'] = 'sonnet'
+        r['host_write'](r['host_paths'](provider, sid)['config'], config)
+        env = r['host_agent_env'](provider, sid)
+        assert all(key not in env for key in aliases)
+        assert env['ANTHROPIC_MODEL'] == 'custom' and env['ANTHROPIC_API_KEY'] == 'secret'
+        assert all(r['host_agent_env']('codex', sid)[key] == 'remapped' for key in aliases)
+        config.pop('model')
+        r['host_write'](r['host_paths'](provider, sid)['config'], config)
     config['args'] = ['--model', 'claude-sonnet-4-5', '--effort', 'high']
     r['host_write'](r['host_paths'](provider, sid)['config'], config)
     with patch.object(r['subprocess'], 'Popen', spawn):
@@ -98,6 +110,26 @@ with tempfile.TemporaryDirectory() as directory:
     r['host_agent_event'](provider, sid, tmux, unknown, json.dumps(dict(type='system', subtype='init', model='claude-opus-4-6')))
     assert ('host.settings', dict(model='opus', effort='', applied=True)) in events
     assert any(log[2:] == ('model_effort_settings_applied', dict(model='opus', effort='default')) for log in logs)
+    for actual in ('claude-opus-4-6', None, 'unrecognized-secret-model'):
+        mismatch = dict(state={}, settings=dict(model='sonnet', effort='low'), starting_settings=dict(model='sonnet', effort='low'))
+        r['host_session_reset'](mismatch, Agent())
+        before_events, before_logs = len(events), len(logs)
+        r['host_agent_event'](provider, sid, tmux, mismatch, json.dumps(dict(type='system', subtype='init', model=actual)))
+        assert mismatch['applied_settings'] is None
+        assert ('host.settings', dict(model='sonnet', effort='low', applied=False)) in events[before_events:]
+        assert not any(log[2] == 'model_effort_settings_applied' for log in logs[before_logs:])
+        assert any(log[2:] == ('model_settings_mismatch', dict(requested='sonnet', actual='opus' if actual == 'claude-opus-4-6' else 'unknown')) for log in logs[before_logs:])
+        if actual == 'claude-opus-4-6':
+            reply = r['host_handle_request'](provider, sid, tmux, mismatch, dict(op='deliver', id='synthetic-message-mismatch', attempt='one', epoch=1, text='hello'))
+            assert reply == dict(status='refused', reason='model_mismatch')
+            assert not mismatch['inflight'] and not mismatch['sends']
+    matching = dict(state={}, settings=dict(model='sonnet', effort='low'), starting_settings=dict(model='sonnet', effort='low'))
+    r['host_session_reset'](matching)
+    before_logs = len(logs)
+    r['host_agent_event'](provider, sid, tmux, matching, json.dumps(dict(type='system', subtype='init', model='claude-sonnet-4-6')))
+    assert matching['applied_settings'] == matching['settings']
+    assert ('host.settings', dict(model='sonnet', effort='low', applied=True)) in events
+    assert any(log[2:] == ('model_effort_settings_applied', dict(model='sonnet', effort='low')) for log in logs[before_logs:])
     session = dict(state={}, agent=None)
     r['host_session_reset'](session)
     session['settings'] = dict(model='sonnet', effort='medium')
@@ -133,7 +165,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert command[command.index('--effort')+1] == 'high', command
     assert command[command.index('--resume')+1] == sid, command
     session['starting_settings'] = dict(session['settings'])
-    r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='system', subtype='init')))
+    r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='system', subtype='init', model='claude-haiku-4-5')))
     assert ('host.settings', dict(model='haiku', effort='high', applied=True)) in events, events
     r['host_attempt'] = lambda *args, **kwargs: dict(status='claimed')
     class Input:
@@ -154,6 +186,7 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(r['subprocess'], 'run', lambda *args, **kwargs: Probe()), patch.object(r['subprocess'], 'Popen', spawn):
         r['host_agent_start'](provider, sid, 'plan')
     command = calls[-1]
+    assert any(all(key in part for key in aliases) and 'unset ' in part for part in command), command
     assert command[command.index('--model')+1] == 'haiku', command
     assert command[command.index('--effort')+1] == 'high', command
     assert command[command.index('--resume')+1] == sid, command
@@ -169,8 +202,8 @@ with tempfile.TemporaryDirectory() as directory:
             self.stdout = Output(*events)
             self.stdin = Input()
             self.pid = 100
-    original = Process(dict(type='system', subtype='init'), dict(type='result', subtype='success'))
-    replacement = Process(dict(type='system', subtype='init'))
+    original = Process(dict(type='system', subtype='init', model='claude-haiku-4-5'), dict(type='result', subtype='success'))
+    replacement = Process(dict(type='system', subtype='init', model='claude-haiku-4-5'))
     steps = ['agent', 'client', 'agent', 'client', 'agent', 'client']
     class Selector:
         def __enter__(self): return self
@@ -220,8 +253,8 @@ with tempfile.TemporaryDirectory() as directory:
             self.stdin = Input()
             self.stdout = DelayedOutput(self, *messages)
             self.pid = 101
-    initial = DelayedProcess(dict(type='system', subtype='init'), dict(type='result', subtype='success'))
-    next_agent = DelayedProcess(dict(type='system', subtype='init'))
+    initial = DelayedProcess(dict(type='system', subtype='init', model='claude-haiku-4-5'), dict(type='result', subtype='success'))
+    next_agent = DelayedProcess(dict(type='system', subtype='init', model='claude-opus-4-6'))
     steps[:] = ['client', 'agent', 'agent', 'client', 'client', 'agent', 'client']
     actions = []
     def delayed_client(p, s, t, current, server):
@@ -251,7 +284,7 @@ with tempfile.TemporaryDirectory() as directory:
     config['model'] = 'haiku'
     r['host_write'](r['host_paths'](provider, sid)['config'], config)
     first_agent = DelayedProcess()
-    selected_agent = DelayedProcess(dict(type='system', subtype='init'))
+    selected_agent = DelayedProcess(dict(type='system', subtype='init', model='claude-haiku-4-5'))
     steps[:] = ['client', 'client', 'agent', 'client']
     actions.clear()
     def preinit_client(p, s, t, current, server):
