@@ -5,11 +5,55 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-const policy = () => import(pathToFileURL(path.join(__dirname, 'header-notice-policy.mjs')).href);
+const policy = async () => {
+  const { tokenize } = await import(pathToFileURL(path.join(__dirname, 'strip-comments.mjs')).href);
+  function noticeCalls(source) {
+    const { tokens, comments } = tokenize(source, 'zig');
+    const positions = [];
+    let cursor = 0;
+    let comment = 0;
+    for (const [, value] of tokens) {
+      while (cursor < source.length) {
+        if (comments[comment]?.start === cursor) cursor = comments[comment++].end;
+        else if (/\s/.test(source[cursor])) cursor++;
+        else break;
+      }
+      if (!source.startsWith(value, cursor)) throw new Error('Cannot locate notice tokens');
+      positions.push(cursor);
+      cursor += value.length;
+    }
+    const declarations = [...source.matchAll(/^(?:pub )?(?:inline )?fn (\w+)\(/gm)];
+    const calls = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i][0] !== 'word' || tokens[i][1] !== 'showHeaderNoticeAscii' || tokens[i + 1]?.[1] !== '(' || tokens[i - 1]?.[1] === 'fn') continue;
+      let end = i + 1;
+      let depth = 0;
+      do {
+        if (tokens[end][1] === '(') depth++;
+        if (tokens[end][1] === ')') depth--;
+        end++;
+      } while (depth > 0 && end < tokens.length);
+      if (depth !== 0) throw new Error('Unterminated notice call');
+      const start = positions[i];
+      const name = declarations.findLast(item => item.index < start)?.[1] || 'unknown';
+      const line = source.slice(source.lastIndexOf('\n', start) + 1, positions[end - 1] + 1);
+      calls.push(`${name}: ${tokenize(line, 'zig').tokens.map(([, value]) => value).join('')}`);
+    }
+    return calls.sort();
+  }
+
+  function noticeInventory(root) {
+    return Object.fromEntries(fs.readdirSync(path.join(root, 'src')).filter(file => file.endsWith('.zig')).sort().flatMap(file => {
+      const calls = noticeCalls(fs.readFileSync(path.join(root, 'src', file), 'utf8'));
+      return calls.length ? [[file, calls]] : [];
+    }));
+  }
+  return { noticeCalls, noticeInventory };
+};
 
 test('only reviewed action replies may produce header notices', async () => {
   const { noticeInventory } = await policy();
-  assert.deepEqual(noticeInventory(root), JSON.parse(read('tools/header-notice-actions.json')), 'New or changed notice: review its user click/key origin; background work must stay quiet');
+  assert.deepEqual(noticeInventory(root), JSON.parse(read('tools/fixtures/IGSH-1649/action-notices.json')), 'New or changed notice: review its user click/key origin; background work must stay quiet');
 });
 
 test('the notice inventory catches automatic producers and ignores quoted code', async () => {
