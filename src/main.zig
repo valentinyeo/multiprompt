@@ -6999,7 +6999,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_TABCTX_GOOGLE_SIGNIN) {
-                    const signin_tab = findShellById(app_state.g_tabctx_sid);
+                    const signin_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
+                    const signin_tab = findShellById(signin_sid);
                     app_state.g_search_active = false;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
