@@ -1151,12 +1151,7 @@ pub fn endTmuxSessionAt(i: usize) void {
 
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
     const outcome = killRemoteTmuxSession(session_buf[0..ts_len], host, sid_buf[0..sid_len], null);
-    if (outcome == .unsafe) {
-        if (parked_focus) focusActiveShell();
-        showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
-        return;
-    }
-    if (outcome == .retry and !queuePendingSessionKill(session_buf[0..ts_len], host, sid_buf[0..sid_len])) {
+    if (outcome == .unsafe or (outcome == .retry and !queuePendingSessionKill(session_buf[0..ts_len], host, sid_buf[0..sid_len]))) {
         if (parked_focus) focusActiveShell();
         showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
         return;
