@@ -196,7 +196,7 @@ fn drawFace(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
         const antennas: [2]f32 = if (twin) .{ 106, 218 } else .{ if (face == 11) 128 else 136, 0 };
         for (antennas[0..@as(usize, if (twin) 2 else 1)]) |x| {
             p.box(grey, x - 7, 0, 14, hb.y + 8, 7);
-            p.box(head, x - 18, 0, 36, 36, 18);
+            p.box(if ((face == 2 or face == 5) and x == 218) eyes else head, x - 18, 0, 36, 36, 18);
         }
     }
     p.box(grey, if (face < 10) 18 else hb.x - 12, hb.y + 72, 40, 84, 12);
@@ -290,6 +290,12 @@ test "IGSH-1192 every robot retains fractional rounded-square edges at 100 and 1
             const rect = w.RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
             draw(dc, rect, .{ .face = @intCast(face), .color = @intCast(index / 20) });
             _ = w.GdiFlush();
+            if (face == 2 or face == 5) {
+                const tip_x: usize = @intCast(left + @divTrunc(size * 218, 256));
+                const tip_y: usize = @intCast(top + @divTrunc(size * 18, 256));
+                const tip = pixels[tip_y * @as(usize, @intCast(width)) + tip_x];
+                inline for (0..3) |channel| try std.testing.expect(((tip >> (channel * 8)) & 255) >= 220);
+            }
             var partial: usize = 0;
             var visible: usize = 0;
             for (0..@intCast(size)) |y| {

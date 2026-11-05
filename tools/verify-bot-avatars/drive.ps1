@@ -363,16 +363,52 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
-    if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
-    if (Test-Path "$state/invocations.jsonl") { Copy-Item "$state/invocations.jsonl" "$Evidence/invocations.jsonl" }
-    if (Test-Path "$state/unsupported.jsonl") { Copy-Item "$state/unsupported.jsonl" "$Evidence/unsupported.jsonl" }
-    if (Test-Path $state) { Get-ChildItem $state -Filter 'reader-*.stderr.log' | Copy-Item -Destination $Evidence }
-    foreach ($file in @('session.json', 'inbox-default.json')) {
-        if (Test-Path "$settings/$file") { Copy-Item "$settings/$file" "$Evidence/final-$file" }
+    $cleanupErrors = [Collections.Generic.List[string]]::new()
+    $ownedStopped = $null -eq $job
+    if ($null -ne $job) {
+        try {
+            $stopped = $job.Stop()
+            $result.cleanup = $stopped.ActiveProcesses
+            $ownedStopped = $stopped.ActiveProcesses -eq 0
+            if (-not $ownedStopped) { $cleanupErrors.Add('Owned processes remain') }
+        } catch { $cleanupErrors.Add("Owned job stop failed: $($_.Exception.Message)") }
+        finally { $job.Dispose() }
+    } else { $result.cleanup = 0 }
+    if (Get-Variable settings -ErrorAction SilentlyContinue) {
+        foreach ($file in @('debug.log', 'session.json', 'inbox-default.json')) {
+            $destination = if ($file -eq 'debug.log') { $file } else { "final-$file" }
+            try { if (Test-Path "$settings/$file") { Copy-Item "$settings/$file" "$Evidence/$destination" } }
+            catch { $cleanupErrors.Add("Evidence copy failed for ${file}: $($_.Exception.Message)") }
+        }
+    }
+    if (Get-Variable state -ErrorAction SilentlyContinue) {
+        foreach ($file in @('invocations.jsonl', 'unsupported.jsonl')) {
+            try { if (Test-Path "$state/$file") { Copy-Item "$state/$file" "$Evidence/$file" } }
+            catch { $cleanupErrors.Add("Evidence copy failed for ${file}: $($_.Exception.Message)") }
+        }
+        try { if (Test-Path $state) { Get-ChildItem $state -Filter 'reader-*.stderr.log' | Copy-Item -Destination $Evidence } }
+        catch { $cleanupErrors.Add("Reader evidence copy failed: $($_.Exception.Message)") }
+    }
+    $result.scratchRemoved = $false
+    if ($ownedStopped) {
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $removeError = $null
+        do {
+            try {
+                if (Test-Path -LiteralPath $profile -ErrorAction Stop) { Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction Stop }
+                $result.scratchRemoved = -not (Test-Path -LiteralPath $profile -ErrorAction Stop)
+                $removeError = $null
+            } catch { $removeError = $_.Exception.Message }
+            if (-not $result.scratchRemoved -and $watch.Elapsed.TotalSeconds -lt 10) { Start-Sleep -Milliseconds 250 }
+        } while (-not $result.scratchRemoved -and $watch.Elapsed.TotalSeconds -lt 10)
+        if (-not $result.scratchRemoved) { $cleanupErrors.Add("Scratch removal failed: $removeError") }
+    } else { $cleanupErrors.Add('Scratch retained because owned job was not verified stopped') }
+    try { [CaptionProof]::RestoreDpi() } catch { $cleanupErrors.Add("Display restore failed: $($_.Exception.Message)") }
+    if ($cleanupErrors.Count) {
+        $result.passed = $false
+        $cleanupError = $cleanupErrors -join '; '
+        $result.error = if ($result.error) { "$($result.error); cleanup: $cleanupError" } else { "Cleanup: $cleanupError" }
     }
     Save $result "$Evidence/result.json"
-    if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
-    [CaptionProof]::RestoreDpi()
 }
 if (-not $result.passed -or $result.cleanup -ne 0) { throw 'Robot avatar acceptance failed; see result.json' }
