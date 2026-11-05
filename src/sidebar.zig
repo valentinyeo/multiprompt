@@ -2536,7 +2536,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             @as(i32, @intCast(visible_capacity)) * row_h + if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) row_h else 0;
         const ox = searchOverlayOx(win_w, overlay_w);
         const oy = @import("drawing.zig").searchOverlayOy(win_h, overlay_h);
-        const overlay_radius: i32 = uiScaled(32);
+        const overlay_radius: i32 = uiScaled(8);
         @import("dialog.zig").dim(hdc, win_w, win_h);
 
         drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, overlay_radius);
@@ -2564,12 +2564,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(bg_pen);
 
         var input_bg_rc = RECT{ .left = ox + uiScaled(16), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(16), .bottom = oy + uiScaled(56) };
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
         input_bg_rc.left += 1;
         input_bg_rc.top += 1;
         input_bg_rc.right -= 1;
         input_bg_rc.bottom -= 1;
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
         _ = SelectObject(hdc, palette_font);
         var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
@@ -2874,7 +2874,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     }
                     if (selected) {
                         const sel_rc = RECT{ .left = row_left, .top = ry, .right = ox + overlay_w - uiScaled(16), .bottom = ry + row_h };
-                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(10), row_color);
+                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(4), row_color);
                     }
                     if (session_view) |view| {
                         const size = uiScaled(24);
