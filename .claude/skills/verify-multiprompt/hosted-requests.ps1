@@ -41,9 +41,13 @@ function Click-HostedChoice([int]$Index) {
 }
 function Copy-HostedTranscript {
     [Windows.Forms.Clipboard]::Clear()
-    Palette 'Chat View: Select All Text'
+    $offset = (Read-SharedText $hostedLog).Length
+    Palette 'select all text'
+    Wait-SlashPalette 6364 $offset
     Press @(0x0D) 'Enter: select the actual transcript'
-    Palette 'Chat View: Copy Selection'
+    $offset = (Read-SharedText $hostedLog).Length
+    Palette 'copy selection'
+    Wait-SlashPalette 6363 $offset
     Press @(0x0D) 'Enter: copy the actual transcript'
     Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native transcript copied through palette'
     $script:hostedCopied = [Windows.Forms.Clipboard]::GetText()
