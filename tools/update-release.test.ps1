@@ -53,7 +53,14 @@ function Wait-CardView([string]$Path, [int]$From, [string]$View, [string[]]$Expe
     Assert ([int]$viewport.Groups[6].Value -eq 0 -and [int]$viewport.Groups[5].Value -le ([int]$viewport.Groups[4].Value - [int]$viewport.Groups[2].Value)) "$View card notes are clipped"
     return @{ view = $View; notes = $notes; remaining = $Remaining; moreX = [int]$position.Groups[1].Value; moreY = [int]$position.Groups[2].Value; viewport = $viewport.Value; logEnd = $From + $viewMatch.Index + $viewMatch.Length }
 }
+$script:lastCardClick = $null
 function Click-CardMore($View) {
+    if ($null -ne $script:lastCardClick) {
+        $threshold = [int][UpdateProof]::GetDoubleClickTime() + 1
+        while (($remaining = $threshold - $script:lastCardClick.ElapsedMilliseconds) -gt 0) {
+            Start-Sleep -Milliseconds ([int]$remaining)
+        }
+    }
     $cardProcess.Refresh()
     $hwnd = $cardProcess.MainWindowHandle
     Assert ($hwnd -ne [IntPtr]::Zero -and [UpdateProof]::SetForegroundWindow($hwnd)) 'Could not focus update card window'
@@ -68,6 +75,7 @@ function Click-CardMore($View) {
     Assert ([UpdateProof]::SetCursorPos($point.X, $point.Y)) 'Cannot move pointer to more row'
     [UpdateProof]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
     [UpdateProof]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    $script:lastCardClick = [Diagnostics.Stopwatch]::StartNew()
 }
 function Select-Release([string]$Version) {
     $script:releaseFolder = Join-Path $Root $Version
@@ -119,7 +127,7 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p); [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p); [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern uint GetDoubleClickTime(); [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
