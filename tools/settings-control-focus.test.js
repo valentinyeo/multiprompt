@@ -19,6 +19,15 @@ test('settings clicks bring the target into view through bounded native Tab focu
   assert.ok(click.indexOf('GetClientRect') < click.indexOf('[VerifyNative]::ClickClient'));
 });
 
+test('key verification saves an unset key and replaces it before opening Chat View', () => {
+  const outside = source.slice(source.indexOf('    Remove-ItemProperty'), source.indexOf("    Snapshot 'settings-backdrop'"));
+  assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-cancelled' -Cancel/);
+  assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-dictation-first'/);
+  assert.match(outside, /Fill-SettingKey 'Dictation key' 'settings-dictation-before'/);
+  assert.match(outside, /savedAndReplaced = \$true; chatOpened = \$false/);
+  assert.ok(outside.indexOf('settings-key-outside-chat') < outside.indexOf("'Alt+C: show the chat behind Settings'"));
+});
+
 test('actual Settings click function handles scrolled, focused and unreachable controls', t => {
   const available = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], { encoding: 'utf8', timeout: 30000 });
   if (available.error?.code === 'ENOENT') return t.skip('PowerShell execution is covered on hosted Windows');

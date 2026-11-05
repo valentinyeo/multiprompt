@@ -80,9 +80,26 @@ $themeFile = Join-Path $env:APPDATA 'ZigShell\theme-mode.txt'
 New-Item -ItemType Directory -Force $uploadDir | Out-Null
 [IO.File]::WriteAllText($uploadConfig, "[upload]`napi_base_url = `"https://example.invalid`"`nupload_secret = `"settings-upload-before`"`n[capture]`nquality = 91`n")
 if (-not (Test-Path -LiteralPath $environmentPath)) { New-Item -Path $environmentPath | Out-Null }
-Set-ItemProperty -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY -Value 'settings-dictation-before'
 try {
+    Remove-ItemProperty -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY -ErrorAction SilentlyContinue
     Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 } 'initial existing session saved'
+    $initial = Read-Session
+    if ($initial.tabs[0].PSObject.Properties['cv'] -and $initial.tabs[0].cv) { throw 'Expected the initial terminal before key editing' }
+    Open-Settings
+    $null = Settings-Control 'Dictation key'
+    Fill-SettingKey 'Dictation key' 'settings-cancelled' -Cancel
+    if (Get-ItemProperty -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY -ErrorAction SilentlyContinue) { throw 'Cancelling an unset key configured it' }
+    Snapshot 'settings-key-unset'
+    Fill-SettingKey 'Dictation key' 'settings-dictation-first'
+    Wait-Until { (Get-ItemPropertyValue -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY) -ceq 'settings-dictation-first' } 'initially unset dictation key saved without Chat View'
+    Fill-SettingKey 'Dictation key' 'settings-dictation-before'
+    Wait-Until { (Get-ItemPropertyValue -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY) -ceq 'settings-dictation-before' } 'dictation key replaced without Chat View'
+    $initial = Read-Session
+    if ($initial.tabs[0].PSObject.Properties['cv'] -and $initial.tabs[0].cv) { throw 'Editing Settings keys opened Chat View' }
+    Snapshot 'settings-key-replaced-terminal'
+    $result.checks += @{ name = 'settings-key-outside-chat'; passed = $true; unsetCancelPreserved = $true; savedAndReplaced = $true; chatOpened = $false }
+    Click-Setting 'Close Settings'
+    Wait-Until { -not [VerifyNative]::IsWindowVisible($script:settingsWindow) } 'Settings key proof returned to the terminal'
     $session = Read-Session
     if (-not ($session.tabs[0].PSObject.Properties['cv'] -and $session.tabs[0].cv)) {
         Press @(0x12, 0x43) 'Alt+C: show the chat behind Settings'
