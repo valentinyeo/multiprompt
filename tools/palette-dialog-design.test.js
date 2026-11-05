@@ -15,10 +15,16 @@ test('IGSH-1061: palette paints the approved neutral card, not blue selection or
   assert.match(paint, /RGB\(0x18, 0x18, 0x18\)/);
   assert.match(paint, /RECENT SESSIONS/);
   assert.match(paint, /Search sessions and commands/);
-  assert.match(paint, /fillRoundRect\(hdc, sel_rc, uiScaled\(10\)/);
-  assert.match(paint, /fillRoundRect\(hdc, input_bg_rc, uiScaled\(20\)/);
+  assert.match(paint, /fillRoundRect\(hdc, sel_rc, uiScaled\(4\)/);
+  assert.match(paint, /fillRoundRect\(hdc, input_bg_rc, uiScaled\(4\)/);
   assert.doesNotMatch(paint, /(?:shells\[shell_idx\]|sess)\.ram_mb/);
   assert.match(paint, /workspaceDisplayName\(app_state\.shells\[shell_idx\]\.workspace/);
+});
+
+test('IGSH-1698: shared palette panel and keycaps use four-pixel corners', () => {
+  assert.match(palette(), /const overlay_radius: i32 = uiScaled\(8\);/);
+  const keycap = read('src/palette_text.zig').split('pub fn keycap(')[1].split('\nfn titleCased(')[0];
+  assert.equal([...keycap.matchAll(/fillRoundRect\([^\n]+drawing\.uiScaled\(4\)/g)].length, 2);
 });
 
 test('IGSH-1061: pointer, wheel, reorder and paint share the new palette geometry', () => {

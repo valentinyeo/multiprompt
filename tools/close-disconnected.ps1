@@ -31,7 +31,7 @@ function Shot([string]$Name) {
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size); $bitmap.Save("$Output/$Name.png") } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
-function Palette([string]$Query, [int]$Target) {
+function Palette([string]$Query, [string]$Target) {
     $offset = (Log).Length
     Press @(0x11, 0x4B)
     [void](Wait-For 'palette opened' { (Log-Tail $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
@@ -106,7 +106,12 @@ try {
     Select-Session 'Dead Single' 0
     Save (Session) "$Output/before-single.json"
     Shot 'before-single-close'
-    Press @(0x11, 0x57)
+    if ($Negative) {
+        Press @(0x11, 0x57)
+    } else {
+        Palette 'close tab' '(7197|6232)'
+        Press @(0x0D)
+    }
     [void](Wait-For 'pinned ordinary close' { $s = Session; $s -and @($s.tabs | Where-Object { $_.name -ceq 'Dead Single' }).Count -eq 0 } 12)
     Save (Session) "$Output/after-single.json"
     Shot 'after-single-close'

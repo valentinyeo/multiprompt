@@ -610,10 +610,15 @@ function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedU
     $result.checks += @{ name = "browser-own-profile screenshot $Step"; windowId = $windowId; url = $expectedUrl; profile = $(if ($Profile -eq '') { 'shared' } else { $Profile }) }
 }
 
-function Palette([string]$Query) {
+function Palette([string]$Query, [string]$Target = '') {
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $offset = if ($Target) { (Read-SharedText $log).Length } else { 0 }
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Wait-Foreground
     Type-Text $Query
+    if ($Target) {
+        Wait-Until { $trace = Read-SharedText $log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)') } "palette $Query selects $Target"
+    }
 }
 
 function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace', [switch]$AllowPlainOk) {

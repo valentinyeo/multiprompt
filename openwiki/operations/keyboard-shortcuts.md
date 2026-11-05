@@ -93,11 +93,11 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Win+Shift+Left/Right: Move the window to the adjacent monitor, preserving maximized state (v0.28.235 — natively these targeted the conhost child and did nothing)
 - Ctrl+K → "Sort Workspaces": drag rows by their ≡ handle (or Ctrl+Up/Down) to reorder the workspace pills; Enter switches to a pill; order persists (registry + session + inbox)
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
-- Ctrl+W: Close the active tab/session (both modes; reverted in v0.28.219 — .215's workspace-close granularity was wrong). Workspace close = Ctrl+K 'Close Workspace' (non-destructive, reopenable via Open Workspace); app close = Ctrl+K 'Quit ZigShell'
+- Ctrl+W: Quit the app without stopping server agents or deleting saved chats. Ctrl+K → Hide from sidebar closes only the selected local tab.
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
 - F2: Rename active tab
 - Double-click tab: Rename tab
-- Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Reconnect (remote tabs), Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Mute/Unmute (a muted session is hidden from the Inbox on every device, stays in its workspace tab, and the mute syncs through the account layout), Keep Alive (cmd/pwsh), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
+- Right-click tab: Open the Ctrl+K palette with Pin, Move to workspace, Mark as unread, Rename, Copy chat ID, Hide from sidebar, and Delete. Type to search other tab actions.
 - Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Bot face also offers Upload image and Reset. Pictures for account-backed remote sessions sync to your phone automatically. Local shell pictures stay on this computer. Reset shows the chosen face and color, and removes the shared picture. Offline picture changes sync after reconnecting.
 - No dedicated shortcut — Close all disconnected sessions: use Ctrl+K or right-click a tab. Choose the counted action. Pinned and unpinned disconnected sessions close. Live sessions stay open.
 - No dedicated shortcut — Session ETA: when an agent hook reports a time estimate for the in-flight request, the sidebar row shows a countdown ("12m", "1h 20m", amber "+4m" once overdue) and a thin progress line, Chat View's header shows "ETA 12m, done about 14:27", and Inbox rows show the same countdown. No hook wired up yet -> nothing shows. Ctrl+K → "ETA Countdown Numbers: On/Off" and "ETA Progress Line: On/Off" toggle each independently (both default on); Ctrl+K → "Estimate Accuracy" opens a read-only summary of how each agent's estimates compare to actual time taken, computed from `%APPDATA%\ZigShell\eta-log.jsonl`. Esc closes.
@@ -117,8 +117,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Close active tab / session |
-| Ctrl+Shift+W | Close active session completely (tmux kill + tab close) |
+| Ctrl+W | Quit the app; keep server agents and saved chats |
+| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
 | Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
@@ -157,6 +159,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -184,7 +188,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
-| Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
 | Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer; Escape discards the recording |
 | Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording; Escape discards the recording |
 
@@ -243,7 +246,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Drag tab: Pinned / Recents | Change its order inside the group or ungrouped list |
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
-| Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
+| Right-click tab | Pin, Move to workspace, Mark as unread, Rename, Copy chat ID, Hide from sidebar, Delete |
 | Ctrl+K / right-click tab → Bot face / Bot color | Remote faces, colors and pictures sync. |
 | Ctrl+K -&gt; Workspace color | Choose a workspace default color or Auto. Manual bot colors stay unchanged. |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |

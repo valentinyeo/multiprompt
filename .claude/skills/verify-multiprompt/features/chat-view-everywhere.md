@@ -34,7 +34,7 @@ Verify on: push
 
 - Ctrl+digits follows displayed sidebar order. Pinning session 3 moves it ahead of sessions 1 and 2 even with manual ordering; unpinning restores creation order.
 - Normal close refuses while a pin exists, so the journey explicitly unpins before its restart. Native session write/load tests cover pinned persistence separately.
-- The native suite covers each refused destructive action and a frozen pre-change session-format fixture. The desktop recipe directly exercises Ctrl+W and view toggles, not remote tmux archive/end operations.
+- The native suite covers each refused destructive action and a frozen pre-change session-format fixture. The desktop recipe exercises view toggles, not pinned close or remote tmux archive/end operations.
 - Do not seed or edit session JSON, send private app messages, or treat screenshots alone as proof of saved state.
 - No live agent, SSH, account synchronization or remote workspace creation is claimed.
 - This is a runnable recipe, not a successful run claim. Require GitHub Windows results and inspect screenshots before reporting desktop verification.
