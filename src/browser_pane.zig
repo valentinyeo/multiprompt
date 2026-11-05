@@ -1003,7 +1003,7 @@ fn shellExecuteEdgeUrl(url: []const u8, offscreen: bool, native_chrome: bool, la
     const own_token = if (launch_idx) |li| browserProfileToken(li) else "";
     const launch_dir = if (own_token.len > 0) ownBrowserUserDataDir(&own_dir_buf, own_token) else user_data_dir;
     if (launch_dir.len == 0) {
-        showHeaderNoticeAscii("Isolated browser profile path is unavailable", 5000, true);
+        debugLog("Isolated browser profile path is unavailable");
         return;
     }
     const chrome_bridge = native_chrome and app_state.g_browser_engine == .chrome and browser_own_profile.isToken(own_token);
@@ -1420,8 +1420,8 @@ fn startDeferredBrowserUrlQuery() void {
     browser_url_query_deferred = null;
     if (!startBrowserUrlQuery(job)) {
         if (job.purpose == .navigate_pin) finishPinnedNavigation(job.shell_id, job.entry_token);
+        if (job.purpose == .pin_page) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
         std.heap.page_allocator.destroy(job);
-        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
     }
 }
 
@@ -1433,7 +1433,7 @@ fn recoverBrowserUrlQuery() void {
                 browser_pin_send_allowed.store(0, .release);
                 finishPinnedNavigation(job.shell_id, job.entry_token);
             }
-            if (job.purpose != .poll and browserUrlQueryOwner(job) != null) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+            if (job.purpose == .pin_page and browserUrlQueryOwner(job) != null) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
         }
         browser_url_query_inflight = 0;
         browser_url_query_inflight_owner = null;
@@ -1531,11 +1531,11 @@ pub fn consumePinnedBrowserEntry(shell_id: u32) void {
         sh.browser_pin_entry_pending = false;
         var buf: [512]u8 = undefined;
         const current: ?[]const u8 = currentWebView2Url(idx, &buf) catch |err| if (err == error.TooLong) null else {
-            @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+            debugLog("Could not read this page");
             return;
         };
         const pin = sh.browser_pinned_url[0..sh.browser_pinned_url_len];
-        if ((if (current) |url| !std.mem.eql(u8, url, pin) else true) and !navigateWebView2(pin)) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        if ((if (current) |url| !std.mem.eql(u8, url, pin) else true) and !navigateWebView2(pin)) debugLog("Could not open this page");
         return;
     }
     if (sh.browser_pin_navigation_token == sh.browser_pin_entry_token) return;
@@ -1550,7 +1550,7 @@ pub fn consumePinnedBrowserEntry(shell_id: u32) void {
         navigateBrowserPaneWithIntent(idx, pin[0..len], .select_preserve_focus);
         if (sh.browser_hwnd == null and sh.browser_launch_tick == 0) {
             finishPinnedNavigation(shell_id, token);
-            @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            debugLog("Could not open this page");
         }
         return;
     }
@@ -1561,7 +1561,7 @@ pub fn consumePinnedBrowserEntry(shell_id: u32) void {
     if (requestBrowserUrl(shell_id, .ensure_pin)) {
         sh.browser_pin_entry_pending = false;
     } else {
-        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+        debugLog("Could not read this page");
     }
 }
 
@@ -1684,7 +1684,7 @@ pub fn handleBrowserUrlQueryDone(raw: usize) void {
         browser_pin_send_allowed.store(0, .release);
         const valid = browserUrlQueryOwner(job) != null;
         finishPinnedNavigation(job.shell_id, job.entry_token);
-        if (valid and job.result != .success) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        if (valid and job.result != .success) debugLog("Could not open this page");
         std.heap.page_allocator.destroy(job);
         if (browser_url_query_deferred != null) startDeferredBrowserUrlQuery();
         return;
@@ -1705,14 +1705,14 @@ pub fn handleBrowserUrlQueryDone(raw: usize) void {
             }
         } else if (job.purpose == .ensure_pin) {
             if (job.result == .failed) {
-                @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+                debugLog("Could not read this page");
             } else if (job.result == .too_long or !std.mem.eql(u8, url, job.pin[0..job.pin_len])) {
                 app_state.shells[idx].browser_pin_navigation_token = job.entry_token;
                 job.purpose = .navigate_pin;
                 job.result = .failed;
                 if (startBrowserUrlQuery(job)) return;
                 finishPinnedNavigation(job.shell_id, job.entry_token);
-                @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+                debugLog("Could not open this page");
             }
         } else if (job.result == .success and !(std.mem.startsWith(u8, url, "data:text/html") and std.mem.indexOf(u8, url, "ZSPANE") != null)) {
             if (offerPlainSigninForRejectedPage(idx, url)) {
@@ -1875,7 +1875,7 @@ fn navigateBrowserPaneWithIntent(idx: u32, raw_url: []const u8, intent: app_stat
             if (idx != app_state.active_shell or token == 0 or sh.browser_pin_navigation_token != token or
                 !std.mem.eql(u8, url, sh.browser_pinned_url[0..sh.browser_pinned_url_len]) or !requestBrowserUrl(sh.shell_id, .navigate_pin)) {
                 finishPinnedNavigation(sh.shell_id, token);
-                @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+                debugLog("Could not open this page");
             }
             return;
         }
@@ -2919,7 +2919,7 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
         if (job.pin_entry_token != 0 and sh.browser_pin_entry_token == job.pin_entry_token and (sh.browser_pin_entry_pending or token == job.pin_entry_token)) {
             sh.browser_pin_entry_pending = false;
             finishPinnedNavigation(shell_id, job.pin_entry_token);
-            if (idx == app_state.active_shell) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            if (idx == app_state.active_shell) debugLog("Could not open this page");
         }
         if (verboseLoggingEnabled()) debugLog2("[browser-resolve] pending profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
         return;
@@ -3340,7 +3340,7 @@ fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     const launch_profile = ownProfileTokenForLaunch(idx, &launch_profile_buf) orelse "";
     if (browserSigninProfileBusy(launch_engine, launch_profile)) {
         app_state.shells[idx].browser_enabled = false;
-        showHeaderNoticeAscii("Close the Google sign-in window before reopening this profile", 5000, true);
+        if (user_initiated) showHeaderNoticeAscii("Close the Google sign-in window before reopening this profile", 5000, true);
         saveSession();
         publishInboxState();
         return;
@@ -3527,7 +3527,7 @@ pub fn adoptBrowserTick() void {
         if (sh.browser_pin_entry_pending or token != 0) {
             sh.browser_pin_entry_pending = false;
             finishPinnedNavigation(sh.shell_id, token);
-            if (target == app_state.active_shell) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            if (target == app_state.active_shell) debugLog("Could not open this page");
         }
         debugLog("browser adopt timed out");
         if (target == app_state.active_shell and app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);

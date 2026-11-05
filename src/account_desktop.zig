@@ -1801,7 +1801,6 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         if (reply.job.kind == .startup) {
             accountLock();
         } else {
-            showHeaderNoticeAscii("Sign in again: Ctrl+K > Sign in to Multi Bot", 86400000, true);
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         }
         return;

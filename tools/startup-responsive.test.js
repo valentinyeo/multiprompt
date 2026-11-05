@@ -276,7 +276,8 @@ const reviewCases = [
     assert.ok(tabs.indexOf('listener_status.load(.acquire)') >= 0 && tabs.indexOf('listener_status.load(.acquire)') < tabs.indexOf('launch_cache.deferred()'));
     assert.match(tabs, /\.pending => return false/);
     const failed = tabs.slice(tabs.indexOf('.failed => {'), tabs.indexOf('.ready =>'));
-    assert.match(failed, /showHeaderNoticeAscii/);
+    assert.match(failed, /debugLog\("Notifications unavailable/);
+    assert.doesNotMatch(failed, /showHeaderNoticeAscii/);
     assert.doesNotMatch(failed, /return true/);
     const listener = body(read('src/notifications.zig'), 'notifyListenerThread');
     assert.ok(listener.indexOf('g_notify_bound_port = bound_port') < listener.indexOf('listener_status.store(.ready, .release)'));
@@ -284,7 +285,8 @@ const reviewCases = [
   ['failed local workers retain a visible terminal error state', read => {
     const complete = body(read('src/console.zig'), 'finishStartupShell');
     assert.match(complete, /launch_failed = true/);
-    assert.match(complete, /showHeaderNoticeAscii\("Could not start terminal/);
+    assert.match(complete, /debugLog\("Could not start terminal/);
+    assert.doesNotMatch(complete, /showHeaderNoticeAscii/);
     const paint = body(read('src/drawing.zig'), 'paintDisconnectedShell');
     assert.match(paint, /if \(!launch_failed and !reconnectNoticeShown/);
     assert.match(paint, /if \(launch_failed\) L\("Terminal could not start/);

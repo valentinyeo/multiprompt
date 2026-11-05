@@ -1814,7 +1814,6 @@ pub fn openChatView() void {
         if (pending.shell_id == app_state.shells[app_state.active_shell].shell_id and pending.len != 0) {
             insertTextIntoChatComposer(pending.text[0..pending.len]);
             pending.* = .{};
-            showHeaderNoticeAscii("Voice text added, press Enter to send", 3500, false);
         }
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);

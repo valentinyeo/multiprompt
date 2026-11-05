@@ -1021,14 +1021,14 @@ fn wakeSnapshotWorkspace(marker: *const ReminderEntry, slot: u8, switch_to: bool
     var path_buf: [512]u8 = undefined;
     const path = snoozeSnapshotPath(&path_buf, marker.workspace_id[0..marker.workspace_id_len]) orelse return false;
     const h = win32OpenRead(path) orelse {
-        showHeaderNoticeAscii("Workspace snapshot is unavailable", 5000, true);
+        if (switch_to) showHeaderNoticeAscii("Workspace snapshot is unavailable", 5000, true);
         return false;
     };
     var json_buf: [SESSION_JSON_CAPACITY]u8 = undefined;
     const n = win32ReadAll(h, &json_buf);
     _ = CloseHandle(h);
     if (!sessionFileIsValid(json_buf[0..n])) {
-        showHeaderNoticeAscii("Workspace snapshot is unavailable", 5000, true);
+        if (switch_to) showHeaderNoticeAscii("Workspace snapshot is unavailable", 5000, true);
         return false;
     }
     var tabs: [MAX_SHELLS]SavedTab = undefined;
@@ -1200,11 +1200,11 @@ fn wakeSnapshotWorkspace(marker: *const ReminderEntry, slot: u8, switch_to: bool
         if (win32WidePath(&wide_path, path)) |wpath| _ = DeleteFileW(wpath.ptr);
         var notice_buf: [96]u8 = undefined;
         const notice = std.fmt.bufPrint(&notice_buf, "Workspace {s} is back", .{marker.workspace_name[0..marker.workspace_name_len]}) catch "Workspace is back";
-        showHeaderNoticeAscii(notice, 3500, false);
+        if (switch_to) showHeaderNoticeAscii(notice, 3500, false);
     } else {
         var notice_buf: [192]u8 = undefined;
         const notice = std.fmt.bufPrint(&notice_buf, "Workspace back, {d} tabs failed: {s}", .{ failed, failed_names[0..failed_len] }) catch "Workspace back, some tabs failed to restore";
-        showHeaderNoticeAscii(notice, 8000, true);
+        if (switch_to) showHeaderNoticeAscii(notice, 8000, true);
     }
     return true;
 }
@@ -1217,7 +1217,7 @@ pub fn wakeWorkspaceByIndex(idx: u32, switch_to: bool) bool {
         app_state.g_reminders[idx].waking = true;
         if (!saveReminders()) {
             app_state.g_reminders[idx].waking = false;
-            showHeaderNoticeAscii("Could not save workspace wake", 4000, true);
+            if (switch_to) showHeaderNoticeAscii("Could not save workspace wake", 4000, true);
             return false;
         }
     }
@@ -1229,7 +1229,7 @@ pub fn wakeWorkspaceByIndex(idx: u32, switch_to: bool) bool {
         publishInboxState();
         saveSession();
         if (switch_to) switchToWorkspace(slot);
-        showHeaderNoticeAscii("Workspace is back, its tabs could not be restored. Ctrl+K: Workspace: Bring Back All Sessions reopens them", 9000, true);
+        if (switch_to) showHeaderNoticeAscii("Workspace is back, its tabs could not be restored. Ctrl+K: Workspace: Bring Back All Sessions reopens them", 9000, true);
         return true;
     }
     const old_ws = app_state.g_active_workspace;
@@ -1264,7 +1264,7 @@ pub fn wakeWorkspaceByIndex(idx: u32, switch_to: bool) bool {
         }
         if (app_state.shells[at].hwnd != null) _ = ShowWindow(app_state.shells[at].hwnd, SW_HIDE);
     }
-    if (!complete) showHeaderNoticeAscii("Workspace back; some tabs could not be restored (see Reminders)", 6500, true);
+    if (switch_to and !complete) showHeaderNoticeAscii("Workspace back; some tabs could not be restored (see Reminders)", 6500, true);
     saveSession();
     if (snoozedWorkspaceIndex(slot)) |marker_idx| {
         removeReminderAt(marker_idx);
@@ -1278,7 +1278,7 @@ pub fn wakeWorkspaceByIndex(idx: u32, switch_to: bool) bool {
     saveSession();
     var notice_buf: [96]u8 = undefined;
     const notice = std.fmt.bufPrint(&notice_buf, "Workspace {s} is back", .{marker.workspace_name[0..marker.workspace_name_len]}) catch "Workspace is back";
-    showHeaderNoticeAscii(notice, 3500, false);
+    if (switch_to) showHeaderNoticeAscii(notice, 3500, false);
     return true;
 }
 
