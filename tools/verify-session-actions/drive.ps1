@@ -257,6 +257,13 @@ try {
     }
     Context 1
     Shot 'right-click-seven-actions'
+    for ($i=0; $i -lt 3; $i++) { Press @(0x28) }
+    Press @(0x0d)
+    [void](Wait-For 'background rename opens inline editor' { $h=[VerifyNative]::GetFocusedWindow($main); $h -ne [IntPtr]::Zero -and [VerifyNative]::Class($h) -eq 'Edit' -and [VerifyNative]::EditText($h) -ceq 'Beta' })
+    Shot 'background-inline-rename'
+    Press @(0x0d)
+    [void](Wait-For 'background rename retains selected chat' { $s=Session; $s -and $s.tabs[$s.active_tab].name -ceq 'Alpha' -and @($s.tabs | Where-Object { $_.name -ceq 'Beta' }).Count -eq 1 })
+    Context 1
     $menu=[Drawing.Bitmap]::new((Join-Path $Evidence 'right-click-seven-actions.png'))
     $red=0
     try { for ($y=0; $y -lt $menu.Height; $y++) { for ($x=0; $x -lt $menu.Width; $x++) { $pixel=$menu.GetPixel($x,$y); if ($pixel.R -gt 140 -and $pixel.G -lt 110 -and $pixel.B -lt 110) { $red++ } } } } finally { $menu.Dispose() }

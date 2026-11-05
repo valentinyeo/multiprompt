@@ -99,7 +99,7 @@ try {
     if (-not $Negative) {
         Context-Action 'sidebar-count-three' $false
         Select-Session 'Dead Unpinned' 2
-        Palette 'unpin from top' 6293
+        Palette 'unpin from top' '(7113|6293)'
         Press @(0x0D)
         [void](Wait-For 'dead session unpinned' { $s = Session; $row = @($s.tabs | Where-Object { $_.name -ceq 'Dead Unpinned' }); $row.Count -eq 1 -and !$row[0].pinned_top -and !$row[0].pid })
     }

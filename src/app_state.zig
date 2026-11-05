@@ -1048,6 +1048,7 @@ pub const DRAG_MATERIALIZE_THRESH: i32 = 8;
 
 pub var g_edit_hwnd: HANDLE = null;
 pub var g_edit_tab: u32 = 0;
+pub var g_edit_sid: u32 = 0;
 pub var g_edit_orig_proc: isize = 0;
 pub var g_edit_is_group: bool = false;
 pub var g_edit_is_window: bool = false;

@@ -1089,6 +1089,7 @@ fn paletteQueryRank(target: usize) u8 {
     const label = palettePrimaryLabel(target) orelse return 1;
     const rank = paletteTextMatchRank(label, app_state.g_search_buf[0..app_state.g_search_len]);
     if (target == app_state.SEARCH_TABCTX_HIDE) return @max(1, rank, paletteTextMatchRank("close tab", app_state.g_search_buf[0..app_state.g_search_len]));
+    if (target == SEARCH_RENAME_SYNC_OFFSET) return @max(1, rank, paletteTextMatchRank("rename session", app_state.g_search_buf[0..app_state.g_search_len]), paletteTextMatchRank("rename tab", app_state.g_search_buf[0..app_state.g_search_len]));
     return if (rank == 0) 1 else rank;
 }
 
@@ -5439,7 +5440,7 @@ fn appendChatActions(index: usize) void {
     for (chat_actions) |action| {
         if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
         const label = chatActionLabel(action.target, @import("sidebar.zig").effPinnedTop(index)).?;
-        if (!labelsMatchQuery(&.{label}, query) and !(action.target == SEARCH_TABCTX_PIN_TOP and labelsMatchQuery(&.{ "pin to top", "unpin from top", "pin tab", "unpin tab", "pinned", "sidebar top", "top" }, query)) and !(action.target == app_state.SEARCH_TABCTX_HIDE and labelsMatchQuery(&.{"close tab"}, query))) continue;
+        if (!labelsMatchQuery(&.{label}, query) and !(action.target == SEARCH_TABCTX_PIN_TOP and labelsMatchQuery(&.{ "pin to top", "unpin from top", "pin tab", "unpin tab", "pinned", "sidebar top", "top" }, query)) and !(action.target == app_state.SEARCH_TABCTX_HIDE and labelsMatchQuery(&.{"close tab"}, query)) and !(action.target == SEARCH_RENAME_SYNC_OFFSET and labelsMatchQuery(&.{ "rename session", "rename tab" }, query))) continue;
         if (std.mem.indexOfScalar(usize, app_state.g_search_results[0..app_state.g_search_result_count], action.target) != null) continue;
         app_state.g_search_results[app_state.g_search_result_count] = action.target;
         app_state.g_search_result_count += 1;

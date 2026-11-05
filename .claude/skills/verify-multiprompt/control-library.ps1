@@ -533,7 +533,7 @@ function Retry-PaletteOpen([string]$Log, [int]$Start) {
     }
 }
 
-function Focus-Palette([string]$Query, [int]$Target) {
+function Focus-Palette([string]$Query, [string]$Target) {
     if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { Activate-OwnedFrame }
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
     $start = ((Get-Content $log -Raw) -join '').Length
