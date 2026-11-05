@@ -3921,7 +3921,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const start = if (display.reply_ref) |r| r.body_start else 0;
     const body_display = display.slice(start);
     _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
-    if (e.state == .delivered and !e.host_confirmed and e.delivery_watch.removed_ms == 0) chatDimQueuedBubble(hdc, bubble);
+    if (e.state == .delivered and !e.host_confirmed and e.delivery_watch.removed_ms == 0 and !std.mem.eql(u8, std.mem.sliceTo(&e.message_phase, 0), "started")) chatDimQueuedBubble(hdc, bubble);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (!app_state.clean_chat and actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
