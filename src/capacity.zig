@@ -273,12 +273,12 @@ pub fn sidebarStickyCardHitTest(my: i32) bool {
 pub const AdmissionOrigin = enum { user, automatic };
 
 fn capacityAdmissionFor(origin: AdmissionOrigin, state: CapacityState, host_busy: u16, host_limit: u16) CapacityAdmission {
+    if (origin == .user) return .allow;
     const saturated = host_limit > 0 and host_busy >= host_limit;
     return switch (state) {
-        .critical => .block_host_pressure,
-        .red => if (origin == .automatic) .block_host_pressure else .warn,
+        .critical, .red => .block_host_pressure,
         .amber => .warn,
-        .green, .unknown => if (saturated) (if (origin == .automatic) .block_host_busy else .warn) else .allow,
+        .green, .unknown => if (saturated) .block_host_busy else .allow,
     };
 }
 
@@ -429,9 +429,10 @@ test "capacity admission blocks host pressure and host saturation only" {
     try std.testing.expectEqual(CapacityAdmission.block_host_busy, capacityAdmissionFor(.automatic, .green, 8, 8));
 }
 
-test "IGSH-1447 a hand-started session opens on a busy host and only critical blocks it" {
-    try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.user, .red, 0, 8));
-    try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.user, .critical, 0, 8));
+test "IGSH-1648 hand-started sessions always proceed without pressure warnings" {
+    for ([_]CapacityState{ .unknown, .green, .amber, .red, .critical }) |state| {
+        try std.testing.expectEqual(CapacityAdmission.allow, capacityAdmissionFor(.user, state, 20, 8));
+    }
     try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.automatic, .red, 0, 8));
     try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.automatic, .amber, 2, 8));
 }
@@ -518,7 +519,7 @@ pub fn ensureCapacityPolicyStarter() void {
     }
     const starter =
         "{\n" ++
-        "  \"_doc\": \"VPS Capacity Guardian. Load thresholds are per-core percentages; PSI values are Linux avg10 percentages. Red/critical pressure blocks new AI workloads but never blocks attaching, inspecting, or ending an existing tmux session.\",\n" ++
+        "  \"_doc\": \"VPS Capacity Guardian. Load thresholds are per-core percentages; PSI values are Linux avg60 percentages. Red/critical pressure blocks automatic AI workloads but never blocks user-started sessions or attaching, inspecting, or ending an existing tmux session.\",\n" ++
         "  \"host1_busy_agents\": 8,\n" ++
         "  \"host2_busy_agents\": 8,\n" ++
         "  \"amber_load_percent\": 75,\n" ++

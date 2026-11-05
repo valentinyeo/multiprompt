@@ -211,8 +211,10 @@ test "quiet sustained PSI stays green and sustained critical PSI still blocks au
     try std.testing.expectEqual(CapacityState.critical, capacityStateForMetrics(metrics, CapacityPolicy{}));
 }
 `);
-    const run = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined);
     assert.equal(run.status, 0, run.stdout + run.stderr);
+    console.log(run.stderr.trim());
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
