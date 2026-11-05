@@ -75,6 +75,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const observation = json('accepted-message/observation.json');
     assert.equal(observation.error, null);
     assert.equal(observation.composerText, '');
+    const rows = file => fs.readFileSync(path.join(root, 'accepted-message/stand-in', file), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line));
+    const workers = rows('accepted-worker.jsonl');
+    assert.ok(workers.some(row => row.stage === 'started'));
+    assert.ok(workers.some(row => row.stage === 'dispatch' && row.result?.message?.text === observation.text));
+    const buffers = rows('tmux-buffers.jsonl');
+    assert.equal(buffers.filter(row => row.argv[0] === 'paste-buffer').length, 1);
+    const inputFrames = rows('frames.jsonl');
+    assert.equal(inputFrames.filter(row => row.origin === 'app' && row.op === 'send-keys' && row.argv.includes('-l') && row.argv.at(-1) === observation.text).length, 1);
     const state = json('accepted-message/stand-in/claude.json');
     assert.equal(state.mode, 'busy');
     assert.deepEqual(state.queue, []);

@@ -1145,10 +1145,13 @@ def reader_namespace():
                             locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
                         except BlockingIOError:
                             return
+                        record('accepted-worker.jsonl', stage='started', request=request)
                         while True:
                             try:
                                 namespace['message_poll'](request['tmux'], request['provider'], request['sid'])
-                                namespace['message_store_request'](dict(request, op='message_dispatch'))
+                                result = namespace['message_store_request'](dict(request, op='message_dispatch'))
+                                if result.get('message') is not None:
+                                    record('accepted-worker.jsonl', stage='dispatch', result=result)
                             except Exception as error:
                                 record('accepted-worker-errors.jsonl', error=repr(error))
                             time.sleep(0.25)

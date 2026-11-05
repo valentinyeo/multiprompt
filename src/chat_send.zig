@@ -1721,7 +1721,7 @@ pub fn chatEchoMatchActive() void {
             continue;
         }
         if (e.message_v1 and e.state == .delivered and app_state.shells[app_state.active_shell].ai_agent == 1) {
-            const facts = chatEchoDeliveryEvidence(e);
+            const facts = chatEchoDeliveryEvidence(app_state.g_chat_outbox.items[i]);
             if (app_state.g_chat_outbox.items[i].delivery_watch.removed_ms != facts.removed_ms) changed = true;
             app_state.g_chat_outbox.items[i].delivery_watch.evidence(facts, now_ms);
         }
@@ -3290,6 +3290,7 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
         _ = json_reader.copyString(message, "id", &entry.message_wire_id);
     }
     const entry = &app_state.g_chat_outbox.items[found.?];
+    if (std.mem.eql(u8, phase, "accepted") and std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")) return true;
     _ = json_reader.copyString(message, "state", &entry.message_phase);
     entry.state = if (std.mem.eql(u8, phase, "failed")) .not_sent else if (std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started")) .delivered else .queued;
     entry.write_started = true;
