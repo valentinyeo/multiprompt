@@ -7,7 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Hosted Windows only' }
-if (!$env:ROOMS_PROOF_CREDENTIAL) { throw 'Disposable room account credential required' }
+Remove-Item Env:ROOMS_PROOF_CREDENTIAL -ErrorAction SilentlyContinue
+$repo = (Resolve-Path "$PSScriptRoot/../..").Path
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
@@ -29,16 +30,18 @@ $env:MP_VERIFY_BOUNDARY = Join-Path $PSScriptRoot 'boundary.py'
 Remove-Item Env:MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue
 $settings = Join-Path $env:APPDATA 'ZigShell'
 New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE, $env:MP_VERIFY_STATE, (Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:USERPROFILE 'Documents') | Out-Null
-$credential = $env:ROOMS_PROOF_CREDENTIAL | ConvertFrom-Json
-Remove-Item Env:ROOMS_PROOF_CREDENTIAL
-$secret = [Text.Encoding]::UTF8.GetBytes((@{ refresh_token=$credential.desktop_refresh_token } | ConvertTo-Json -Compress))
-[IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), [Security.Cryptography.ProtectedData]::Protect($secret, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
-[Array]::Clear($secret, 0, $secret.Length)
-$credential = $null
+$hostName = 'account.multiprompt.dev'
+$hostsFile = "$env:SystemRoot/System32/drivers/etc/hosts"
+$hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
+$hostsChanged = $false
+$cert = $null
+$rootCertAdded = $false
+$accountJob = $null
+$accountServer = $null
 $logPath = Join-Path $settings 'debug.log'
 $checks = [Collections.Generic.List[object]]::new()
 $actions = [Collections.Generic.List[object]]::new()
-$result = @{status='failed'; cleanup='pending'; checks=$checks; error=$null; boundary='Live disposable account; SSH/provider/POSIX ownership stand-ins; legacy-peer UI only'}
+$result = @{status='failed'; cleanup='pending'; account_cleanup='pending'; checks=$checks; error=$null; boundary='Preview only: actual isolated account Worker and native UI plus embedded bridge/store; synthetic SSH, host ownership and provider stdin/output; in-process canonical transaction/host reducers; no POSIX lock or real provider proof'}
 $job = $null
 $app = $null
 $main = [IntPtr]::Zero
@@ -92,6 +95,7 @@ function Shot([string]$Name) {
     try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bitmap.Size); $bitmap.Save((Join-Path $Evidence "$Name.png")) } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Start-App {
+    Remove-Item (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') -ErrorAction SilentlyContinue
     $script:job = [VerifyJob]::new()
     $script:app = $job.Start($Exe, $profile, (Join-Path $profile 'stdout.log'), (Join-Path $profile 'stderr.log'), '--single-window --no-window-restore')
     $script:main = Wait-For 'owned main window' {
@@ -110,6 +114,46 @@ function Stop-App {
 try {
     Check 'binary-sha256' ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -eq $ExpectedHash.ToLowerInvariant())
     Check 'embedded-version' ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;"))
+    & node --test "$repo/tools/rooms-preview-boundary.test.js"
+    Check 'scoped-boundary-contracts' ($LASTEXITCODE -eq 0)
+    Push-Location "$repo/service"
+    try {
+        & npm.cmd ci --no-audit --no-fund --prefer-offline
+        if ($LASTEXITCODE -ne 0) { throw 'Account fixture dependency install failed' }
+        & npx.cmd --no-install wrangler deploy --dry-run --outdir .build
+        if ($LASTEXITCODE -ne 0) { throw 'Account fixture build failed' }
+    } finally { Pop-Location }
+    $passwordText = [guid]::NewGuid().ToString('N')
+    $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
+    $cert = New-SelfSignedCertificate -DnsName $hostName -CertStoreLocation Cert:\LocalMachine\My -NotAfter (Get-Date).AddDays(1)
+    $pfx = Join-Path $profile 'account.pfx'
+    $cer = Join-Path $profile 'account.cer'
+    [void](Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password)
+    [void](Export-Certificate -Cert $cert -FilePath $cer)
+    $rootCertAdded = $true
+    [void](Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root)
+    $hostsChanged = $true
+    [IO.File]::AppendAllText($hostsFile, "`r`n127.0.0.1 $hostName`r`n")
+    $accountState = Join-Path $profile 'account-state.json'
+    $accountJob = [VerifyJob]::new()
+    $accountServer = $accountJob.Start((Get-Command node).Source, $profile, (Join-Path $profile 'account.stdout'), (Join-Path $profile 'account.stderr'), ('"' + "$repo/service/journey/server.mjs" + '" --bind=127.0.0.1 --port=443 --pfx="' + $pfx + '" --pfxpass=' + $passwordText + ' --state="' + $accountState + '"'))
+    $passwordText = $null
+    [void](Wait-For 'isolated account Worker' {
+        if ($accountServer.HasExited) { throw 'Account fixture exited' }
+        Test-Path $accountState
+    })
+    $account = Get-Content $accountState -Raw | ConvertFrom-Json
+    foreach ($key in @('refresh_token', 'admin_key', 'workspace_key', 'other_key')) { Write-Output ('::add-mask::' + $account.$key) }
+    $layout = @{schema=1; revision=1; hosts=@(@{slot=0; name='Synthetic host'; hostname='fixture.invalid'; port=22; user='proof'}); workspaces=@(@{name='Work'}); tabs=@(
+        @{kind='tmux'; name='Alpha'; manual=$true; tmux_host=0; tmux_session='room-alpha'; workspace='Work'},
+        @{kind='tmux'; name='Beta'; manual=$true; tmux_host=0; tmux_session='room-beta'; workspace='Work'}
+    )}
+    $published = Invoke-RestMethod -Method Put -Uri "https://$hostName/v1/layout" -ContentType 'application/json' -Headers @{Authorization=('Bearer ' + $account.admin_key); 'X-Layout-Features'='hosts'} -Body (@{base_revision=1; layout=$layout} | ConvertTo-Json -Depth 8 -Compress)
+    Check 'isolated-account-layout' ($published.layout.tabs.Count -eq 2 -and $published.layout.hosts.Count -eq 1)
+    $secret = [Text.Encoding]::UTF8.GetBytes((@{refresh_token=$account.refresh_token} | ConvertTo-Json -Compress))
+    [IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), [Security.Cryptography.ProtectedData]::Protect($secret, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
+    [Array]::Clear($secret, 0, $secret.Length)
+    $account = $null
     Save @{name='rooms'; mode='idle'; fake=$true; suggestion=''; sessions=@('room-alpha','room-beta')} (Join-Path $env:MP_VERIFY_STATE 'state.json')
     Save @{active_tab=0; single_window=$true; chat_active=$false; workspace_count=1; workspaces=@(@{name='Work'; wid='work'}); tabs=@(
         @{kind='tmux'; name='Alpha'; manual=$true; tmux_host=0; tmux_session='room-alpha'; sync_owned=$true; csid='a1313000-0000-4000-8000-000000000001'; workspace=0; cv=$false; pid=0},
@@ -167,6 +211,49 @@ try {
     Check 'room-and-members-restored' (@($witness.rooms).Count -eq 1 -and @($witness.rooms[0].members).Count -eq 2)
     Save $witness (Join-Path $Evidence 'witness.json')
     Shot 'after-restart'
+    Stop-App
+    [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'live-replies'), 'Synthetic providers only')
+    Start-App
+    $room = Wait-For 'live room restored' { Room-Window }
+    $composer = Wait-For 'live composer focus' {
+        $h = [ChatDeliveryDesktop]::Composer($room)
+        if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Focus($main)[1] -eq $h.ToInt64()) { $h }
+    }
+    [void](Wait-For 'scoped room snapshot loaded' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
+    [void]$app.WaitForInputIdle(5000)
+    Press @(0x24); Press @(0x10,0x23); Press @(0x08)
+    Check 'legacy-draft-cleared-by-keyboard' ([ChatDeliveryDesktop]::Text($composer) -ceq '')
+    [VerifyNative]::Text('Both synthetic agents, reply once.')
+    Check 'native-broadcast-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Both synthetic agents, reply once.')
+    Shot 'before-send'
+    Press @(0x0d)
+    [void](Wait-For 'one broadcast and two scoped synthetic replies' {
+        $w=Witness
+        if (!$w -or @($w.rooms).Count -ne 1) { return $false }
+        $events=@($w.rooms[0].events)
+        @($events | Where-Object { $_.type -eq 'human' }).Count -eq 1 -and @($events | Where-Object { $_.type -eq 'agent_reply' }).Count -eq 2 -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
+    })
+    function Check-Replies {
+        $w=Witness
+        $human=@($w.rooms[0].events | Where-Object { $_.type -eq 'human' })
+        $replies=@($w.rooms[0].events | Where-Object { $_.type -eq 'agent_reply' })
+        Check 'exactly-one-human-post' ($human.Count -eq 1 -and $human[0].text -ceq 'Both synthetic agents, reply once.')
+        Check 'exactly-two-member-replies' ($replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2)
+        Check 'reply-parent-binding' (@($replies | Where-Object { $_.parent_event_id -cne $human[0].id }).Count -eq 0)
+        Check 'synthetic-reply-content' ((@($replies.text | Sort-Object) -join '|') -ceq 'Synthetic Alpha reply: Ready.|Synthetic Beta reply: Ready.')
+        Check 'canonical-two-turns-only' (@($w.canonical_events | Where-Object { $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($w.canonical_events | Where-Object { $_.event.kind -eq 'turn.ended' }).Count -eq 2)
+        Save $w (Join-Path $Evidence 'witness.json')
+    }
+    Check-Replies
+    [void]$app.WaitForInputIdle(5000)
+    Shot 'two-synthetic-replies'
+    Stop-App
+    Start-App
+    [void](Wait-For 'reopened selected room' { Room-Window })
+    [void](Wait-For 'post-restart store read' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
+    Check-Replies
+    [void]$app.WaitForInputIdle(5000)
+    Shot 'two-replies-after-restart'
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message
@@ -180,10 +267,22 @@ try {
     } catch {}
     try { Shot 'failure' } catch {}
 } finally {
-    if ($null -ne $job) { $stopped=$job.Stop(); $result.cleanup=$stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup=0 }
-    if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
-    $result.scratch_removed=!(Test-Path $profile)
-    Save @($actions) (Join-Path $Evidence 'actions.json')
-    Save $result (Join-Path $Evidence 'result.json')
+    try {
+        if ($null -ne $job) { $stopped=$job.Stop(); $result.cleanup=$stopped.ActiveProcesses; $job.Dispose() } else { $result.cleanup=0 }
+        if ($null -ne $accountJob) { $stopped=$accountJob.Stop(); $result.account_cleanup=$stopped.ActiveProcesses; $accountJob.Dispose() } else { $result.account_cleanup=0 }
+    } finally {
+        try {
+            if ($hostsChanged) { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) }
+            if ($rootCertAdded -and $cert) { Remove-Item ("Cert:\LocalMachine\Root\" + $cert.Thumbprint) -Force }
+            if ($cert) { Remove-Item ("Cert:\LocalMachine\My\" + $cert.Thumbprint) -Force }
+            $result.hosts_restored=([Convert]::ToBase64String([IO.File]::ReadAllBytes($hostsFile)) -ceq [Convert]::ToBase64String($hostsOriginal))
+            $result.certificate_removed=(!$cert -or (!(Test-Path ("Cert:\LocalMachine\Root\" + $cert.Thumbprint)) -and !(Test-Path ("Cert:\LocalMachine\My\" + $cert.Thumbprint))))
+            if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
+            $result.scratch_removed=!(Test-Path $profile)
+        } finally {
+            Save @($actions) (Join-Path $Evidence 'actions.json')
+            Save $result (Join-Path $Evidence 'result.json')
+        }
+    }
 }
-if ($result.status -ne 'passed' -or $result.cleanup -ne 0 -or !$result.scratch_removed) { throw 'Room legacy-peer verification failed; see result.json' }
+if ($result.status -ne 'passed' -or $result.cleanup -ne 0 -or $result.account_cleanup -ne 0 -or !$result.scratch_removed -or !$result.hosts_restored -or !$result.certificate_removed) { throw 'Room preview verification failed; see result.json' }
