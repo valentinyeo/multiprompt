@@ -84,8 +84,9 @@ test "offline end prevents stale sync resurrection but not another host" {
     try std.testing.expectEqual(@as(usize, 0), notices);
     try std.testing.expectEqual(@as(usize, 1), saved);
     try std.testing.expect(app_state.g_tmux_closed.contains(0, "session-one"));
-    const kept = try staleLayout(std.testing.allocator);
-    defer std.testing.allocator.free(kept);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const kept = try staleLayout(arena.allocator());
     try std.testing.expectEqual(@as(usize, 1), kept.len);
     try std.testing.expectEqual(@as(u8, 1), kept[0].tmux_host);
     app_state.g_tmux_closed.reopen(0, "session-one");
