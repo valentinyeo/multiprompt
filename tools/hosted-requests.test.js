@@ -15,7 +15,10 @@ with tempfile.TemporaryDirectory() as directory:
     namespace['HOME'] = root
     namespace['serve_request'] = lambda *args: None
     sid = '11111111-2222-4333-8444-555555555555'
-    (root / 'state.json').write_text(json.dumps({'sids': {'live-slash': sid}}))
+    transcript = root / '.claude/projects/synthetic' / (sid + '.jsonl')
+    transcript.parent.mkdir(parents=True)
+    transcript.touch()
+    (root / 'state.json').write_text(json.dumps({'home': str(root), 'sids': {'live-slash': sid}}))
     spec = importlib.util.spec_from_file_location('slash_host', 'tools/verify-chat-delivery/slash_host.py')
     boundary = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(boundary)
@@ -42,6 +45,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert namespace['host_reply'](request)['status'] == 'ok'
         continuation = [row for name, row in records if name == 'hosted-continuations.jsonl'][-1]
         assert continuation['request_id'] == request_id
+        saved = [json.loads(line) for line in transcript.read_text().splitlines()]
+        assert saved[-1]['sessionId'] == sid
+        assert saved[-1]['message']['content'][0]['text'] == continuation['text']
         response = [row for name, row in records if name == 'hosted-replies.jsonl'][-1]['responses'][0]['response']
         assert response['request_id'] == request_id
         assert response['response']['behavior'] == behavior

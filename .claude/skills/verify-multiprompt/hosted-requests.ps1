@@ -101,8 +101,10 @@ $answers = $answered.responses[0].response.response.updatedInput.answers
 if ($answers.'Which colour?' -cne 'Orange' -or $answers.'Which devices?' -cne 'Desktop, Phone' -or $answers.'Which other colour?' -cne 'Blue') { throw 'Hosted answers lost labels, choices or question identity' }
 foreach ($case in @(@{ id = 'hosted-implement'; text = 'implement'; action = 'implement'; behavior = 'allow' }, @{ id = 'hosted-feedback'; text = 'Also cover empty folders'; action = 'feedback'; behavior = 'deny' })) {
     Start-HostedRequest $case.id 'ExitPlanMode' @{ plan = ('## Hosted plan ' + $case.id + "`n1. List the folder") }
-    Wait-Until { Copy-HostedTranscript; $script:hostedCopied.Contains('Hosted plan ' + $case.id) -and $script:hostedCopied.Contains('Plan ready') } 'hosted plan markdown and prompt copied from native transcript' 45
+    Wait-Until { (Read-SharedText $hostedLog).Substring($script:hostedOffset) -match '\[chat-live\] draw shell=\d+ n=[1-9]\d* f=[1-9]' } 'hosted plan reached native transcript layout' 45
     Snapshot ($case.id + '-proposed')
+    [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
+    Wait-ChatFocus 'Edit' 'hosted-plan-composer'
     Type-Text $case.text
     Press @(0x0D) ('Enter: reply to plan with ' + $case.action)
     $planned = Assert-HostedContinued $case.id 'plan_reply' $case.behavior

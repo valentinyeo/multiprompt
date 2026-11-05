@@ -1,6 +1,9 @@
 import io
 import json
 import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 
@@ -21,6 +24,14 @@ def install(namespace, root, sid, record):
             db.close()
 
     def feed(event):
+        if event.get('type') == 'assistant':
+            config = json.loads((root / 'state.json').read_text(encoding='utf-8-sig'))
+            transcripts = list((Path(config['home']) / '.claude' / 'projects').glob('*/' + sid + '.jsonl'))
+            if len(transcripts) != 1:
+                raise RuntimeError('Provider transcript must belong to exactly one seeded chat')
+            row = dict(event, sessionId=sid, uuid=str(uuid.uuid4()), isSidechain=False, timestamp=datetime.now(timezone.utc).isoformat())
+            with transcripts[0].open('ab', buffering=0) as output:
+                output.write((json.dumps(row) + '\n').encode('utf-8'))
         namespace['host_claude_event']('claude', sid, 'live-slash', session, event)
 
     def page(provider, requested_sid, after):
