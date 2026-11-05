@@ -156,7 +156,9 @@ if ($wheel.Count -ne 140 -or @($wheel | Where-Object { [int]$_.Groups[1].Value -
 Save @{method='synchronous WM_MOUSEWHEEL through production window procedure, RedrawWindow and GdiFlush'; messages=200; movedWheels=$wheel.Count; sourceBytes=(Get-Item $cache.FullName).Length; rounds=$measurements; cpuMs=$app.TotalProcessorTime.TotalMilliseconds} "$caseDir/emoji-scroll.json"
 
 [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
-Type-Composer ' '
+Press @(0x1B) 'Esc: dismiss focus activation menu state' $true
+Type-Composer 'x'
+[void](Wait-For 'composer receives real typing before select-all' { [ChatDeliveryDesktop]::Text($composer).Contains('x') })
 Press @(0x11, 0x41) 'Ctrl+A: select composer text before follow-up' $true
 Press @(0x08) 'Backspace: clear the selected composer draft'
 [void](Wait-For 'cleared draft reaches both composer and terminal' { [ChatDeliveryDesktop]::Text($composer) -ceq '' -and (Fake-State).box -ceq '' })
