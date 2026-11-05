@@ -262,7 +262,7 @@ function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
     const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
-    const checks = disabled ? prelude.slice(0, prelude.indexOf('test "VPS')) + String.raw`
+    const checks = disabled ? prelude.slice(0, prelude.indexOf('test "IGSH-1640')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
         reset();
         try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
@@ -281,7 +281,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 8 tests passed/);
+  assert.match(result.stderr, /All 9 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);
