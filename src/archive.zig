@@ -2,6 +2,8 @@ const app_state = @import("app_state.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const session_end = @import("session_end.zig");
+const session_kills = @import("session_kills.zig");
+extern "kernel32" fn ResumeThread(HANDLE) callconv(.winapi) DWORD;
 const agent_host = @import("agent_host.zig");
 const Sleep = @import("win32.zig").Sleep;
 const DWORD = @import("win32.zig").DWORD;
@@ -599,9 +601,9 @@ pub fn requestRemoteTmuxPaneRedraw(idx: u32) void {
     }
 }
 
-const RemoteKillOutcome = enum { gone, retry, unsafe };
+const RemoteKillOutcome = session_kills.Outcome;
 
-fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteKillOutcome {
+fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8, pending: ?session_kills.Token) RemoteKillOutcome {
     if (!remoteTmuxTargetIsSafe(session)) {
         debugLog("killRemoteTmuxSession: unsafe session skipped");
         return .unsafe;
@@ -627,7 +629,21 @@ fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteK
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     var pi: PROCESS_INFORMATION = undefined;
-    if (CreateProcessW(null, @ptrCast(&wcmd), null, null, 0, CREATE_NO_WINDOW_FLAG, null, null, &si, &pi) != 0) {
+    const creation_flags = CREATE_NO_WINDOW_FLAG | @as(DWORD, if (pending != null) 0x4 else 0);
+    if (CreateProcessW(null, @ptrCast(&wcmd), null, null, 0, creation_flags, null, null, &si, &pi) != 0) {
+        if (pending) |token| {
+            while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
+            const active = app_state.g_pending_session_kills.attach(token, pi.hProcess.?);
+            app_state.g_pending_session_kill_mutex.unlock();
+            if (!active) {
+                _ = TerminateProcess(pi.hProcess, 1);
+                _ = WaitForSingleObject(pi.hProcess, 1000);
+                _ = CloseHandle(pi.hProcess);
+                _ = CloseHandle(pi.hThread);
+                return .cancelled;
+            }
+            _ = ResumeThread(pi.hThread);
+        }
         const WAIT_TIMEOUT_CONST: DWORD = 0x00000102;
         const wait = WaitForSingleObject(pi.hProcess, 10000);
         if (wait == WAIT_TIMEOUT_CONST) {
@@ -637,8 +653,15 @@ fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteK
         var exit_code: DWORD = 1;
         _ = GetExitCodeProcess(pi.hProcess, &exit_code);
         if (exit_code == 0xC0000139) sshSpawnFailed();
+        var active = true;
+        if (pending) |token| {
+            while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
+            active = app_state.g_pending_session_kills.detach(token);
+            app_state.g_pending_session_kill_mutex.unlock();
+        }
         _ = CloseHandle(pi.hProcess);
         _ = CloseHandle(pi.hThread);
+        if (!active) return .cancelled;
         if (wait != WAIT_TIMEOUT_CONST and exit_code == 0) {
             debugLog2("killRemoteTmuxSession: killed session=", session);
             return .gone;
@@ -652,41 +675,37 @@ fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteK
     }
 }
 
-fn queuePendingSessionKill(session: []const u8, host: u8, sid: []const u8) void {
+fn queuePendingSessionKill(session: []const u8, host: u8, sid: []const u8) bool {
     while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
     defer app_state.g_pending_session_kill_mutex.unlock();
-    if (app_state.g_pending_session_kill_count >= app_state.PENDING_SESSION_KILL_MAX) {
-        debugLog("queuePendingSessionKill: queue full, kill dropped");
-        return;
+    if (app_state.g_pending_session_kills.add(host, session, sid) == null) {
+        debugLog("queuePendingSessionKill: queue full or invalid target");
+        return false;
     }
-    var entry = app_state.PendingSessionKill{};
-    entry.host = host;
-    const sl = @min(session.len, entry.session.len);
-    @memcpy(entry.session[0..sl], session[0..sl]);
-    entry.session_len = @intCast(sl);
-    const il = @min(sid.len, entry.sid.len);
-    @memcpy(entry.sid[0..il], sid[0..il]);
-    entry.sid_len = @intCast(il);
-    app_state.g_pending_session_kills[app_state.g_pending_session_kill_count] = entry;
-    app_state.g_pending_session_kill_count += 1;
-    debugLog2("queuePendingSessionKill: waiting to end session=", entry.session[0..sl]);
+    debugLog2("queuePendingSessionKill: waiting to end session=", session);
+    return true;
+}
+
+pub fn cancelPendingSessionKill(host: u8, session: []const u8) void {
+    while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
+    defer app_state.g_pending_session_kill_mutex.unlock();
+    if (app_state.g_pending_session_kills.cancel(host, session)) |process| {
+        _ = TerminateProcess(process, 1);
+    }
 }
 
 pub fn retryPendingSessionKills() void {
-    var batch: [app_state.PENDING_SESSION_KILL_MAX]app_state.PendingSessionKill = undefined;
-    var count: u32 = 0;
-    if (!app_state.g_pending_session_kill_mutex.tryLock()) return;
-    count = app_state.g_pending_session_kill_count;
-    for (0..count) |i| batch[i] = app_state.g_pending_session_kills[i];
-    app_state.g_pending_session_kill_count = 0;
-    app_state.g_pending_session_kill_mutex.unlock();
-    for (batch[0..count]) |entry| {
-        const session = entry.session[0..entry.session_len];
-        if (killRemoteTmuxSession(session, entry.host, entry.sid[0..entry.sid_len]) == .gone) {
-            debugLog2("retryPendingSessionKills: ended session=", session);
-        } else {
-            queuePendingSessionKill(session, entry.host, entry.sid[0..entry.sid_len]);
-        }
+    for (0..session_kills.CAPACITY) |slot| {
+        if (!app_state.g_pending_session_kill_mutex.tryLock()) return;
+        const entry = app_state.g_pending_session_kills.begin(slot);
+        app_state.g_pending_session_kill_mutex.unlock();
+        const pending = entry orelse continue;
+        const session = pending.session[0..pending.session_len];
+        const outcome = killRemoteTmuxSession(session, pending.host, pending.sid[0..pending.sid_len], pending.token);
+        while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
+        app_state.g_pending_session_kills.finish(pending.token, outcome);
+        app_state.g_pending_session_kill_mutex.unlock();
+        if (outcome == .gone) debugLog2("retryPendingSessionKills: ended session=", session);
     }
 }
 
@@ -1062,7 +1081,7 @@ pub fn archiveTabAt(i: usize) void {
     const entry = rememberArchivedTab(i) orelse return;
     const ts_len = entry.tmux_session_len;
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
-    if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "") != .gone) {
+    if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "", null) != .gone) {
         if (parked_focus) focusActiveShell();
         showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
         return;
@@ -1131,15 +1150,19 @@ pub fn endTmuxSessionAt(i: usize) void {
     @memcpy(sid_buf[0..sid_len], app_state.shells[i].claude_sid[0..sid_len]);
 
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
-    const outcome = killRemoteTmuxSession(session_buf[0..ts_len], host, sid_buf[0..sid_len]);
+    const outcome = killRemoteTmuxSession(session_buf[0..ts_len], host, sid_buf[0..sid_len], null);
     if (outcome == .unsafe) {
         if (parked_focus) focusActiveShell();
         showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
         return;
     }
-    if (outcome == .retry) queuePendingSessionKill(session_buf[0..ts_len], host, sid_buf[0..sid_len]);
+    if (outcome == .retry and !queuePendingSessionKill(session_buf[0..ts_len], host, sid_buf[0..sid_len])) {
+        if (parked_focus) focusActiveShell();
+        showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
+        return;
+    }
     removePaneSessionFilesForShell(@intCast(i));
-    closeShellRemember(@intCast(i), false);
+    closeShellRemember(@intCast(i), outcome == .retry);
     app_state.g_tmux_fetch_tick = 0;
     fetchTmuxSessions();
     publishInboxState();
@@ -2169,7 +2192,7 @@ fn allSessionsCloseNext(hwnd: HANDLE) void {
     const t = app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_next];
     app_state.g_all_sessions_close_next += 1;
     const sess = t.session[0..t.session_len];
-    const killed = killRemoteTmuxSession(sess, t.host, "") == .gone;
+    const killed = killRemoteTmuxSession(sess, t.host, "", null) == .gone;
     allSessionsCloseLog("all-sessions close-result session={s} ok={d}", .{ sess, @intFromBool(killed) });
     if (killed) {
         removeTmuxCacheEntry(t.host, sess);
@@ -2328,7 +2351,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
                     }
                     buildSessionOverviewRows();
                     showHeaderNoticeAscii("Archived session deleted", 2500, false);
-                } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectPinnedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost, "") == .gone) {
+                } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectPinnedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost, "", null) == .gone) {
                     removeTmuxCacheEntry(rhost, sbuf[0..slen]);
                     buildSessionOverviewRows();
                     app_state.g_tmux_fetch_tick = 0;

@@ -2663,16 +2663,7 @@ pub var g_all_sessions_filter_buf: [64]u16 = std.mem.zeroes([64]u16);
 pub var g_all_sessions_filter_len: u32 = 0;
 pub var g_archive_arm_sid: u32 = 0;
 pub var g_archive_arm_deadline: u64 = 0;
-pub const PendingSessionKill = struct {
-    host: u8 = 0,
-    session: [64]u8 = std.mem.zeroes([64]u8),
-    session_len: u32 = 0,
-    sid: [40]u8 = std.mem.zeroes([40]u8),
-    sid_len: u32 = 0,
-};
-pub const PENDING_SESSION_KILL_MAX: usize = 8;
-pub var g_pending_session_kills: [PENDING_SESSION_KILL_MAX]PendingSessionKill = [_]PendingSessionKill{.{}} ** PENDING_SESSION_KILL_MAX;
-pub var g_pending_session_kill_count: u32 = 0;
+pub var g_pending_session_kills: @import("session_kills.zig").Queue = .{};
 pub var g_pending_session_kill_mutex: SpinMutex = .{};
 pub var g_all_sessions_sel: u32 = 0;
 pub const AS_TAB_ALL: u32 = 200;
