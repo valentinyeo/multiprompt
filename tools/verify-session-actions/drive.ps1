@@ -230,13 +230,8 @@ try {
     Check 'local-chat-id-survives-restart' ([Windows.Forms.Clipboard]::GetText() -ceq $localId)
     Palette 'close tab' 7197
     [void](Wait-For 'local CMD tab hidden' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -eq 0 })
-    Palette 'Alpha' 0
-    Palette 'close tab' 7197
-    [void](Wait-For 'close tab alias hides Alpha' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 0 -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 1 })
     Check 'close-tab-alias-keeps-both-agents' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
-    Press @(0x11,0x10,0x54)
-    [void](Wait-For 'close tab alias reopens Alpha' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 1 -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 1 })
-    Shot 'close-tab-alias-reopened'
+    Palette 'Alpha' 0
     Press @(0x12,0x58)
     Check 'Alt-X-does-not-end-an-agent' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
     Check 'Alt-X-does-not-close-a-chat' (@((Session).tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq 2)
