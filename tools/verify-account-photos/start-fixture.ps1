@@ -26,9 +26,57 @@ function Save-Process($Process, [string]$ExpectedPath) {
 $cloudflared = Join-Path $work 'cloudflared.exe'
 Invoke-WebRequest 'https://github.com/cloudflare/cloudflared/releases/download/2026.10.7/cloudflared-windows-amd64.exe' -OutFile $cloudflared
 if ((Get-FileHash $cloudflared -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343') { throw 'Cloudflared checksum mismatch' }
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class FixtureProcess {
+    [StructLayout(LayoutKind.Sequential)]
+    struct SecurityAttributes { public int Length; public IntPtr SecurityDescriptor; public int InheritHandle; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct StartupInfo {
+        public int cb; public string reserved, desktop, title;
+        public int x, y, xSize, ySize, xCountChars, yCountChars, fillAttribute, flags;
+        public short showWindow, reserved2; public IntPtr reservedPtr, stdInput, stdOutput, stdError;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct ProcessInformation { public IntPtr process, thread; public int processId, threadId; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr CreateFile(string name, uint access, uint share, ref SecurityAttributes security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInformation process);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr handle);
+
+    public static Process Start(string executable, string arguments, string stdout, string stderr) {
+        var security = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), InheritHandle = 1 };
+        IntPtr input = IntPtr.Zero, output = IntPtr.Zero, error = IntPtr.Zero;
+        try {
+            input = CreateFile("NUL", 0x80000000, 3, ref security, 3, 0, IntPtr.Zero);
+            if (input == new IntPtr(-1)) throw new Win32Exception();
+            output = CreateFile(stdout, 0x40000000, 3, ref security, 2, 0, IntPtr.Zero);
+            if (output == new IntPtr(-1)) throw new Win32Exception();
+            error = CreateFile(stderr, 0x40000000, 3, ref security, 2, 0, IntPtr.Zero);
+            if (error == new IntPtr(-1)) throw new Win32Exception();
+            var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>(), flags = 0x101, showWindow = 0, stdInput = input, stdOutput = output, stdError = error };
+            ProcessInformation info;
+            if (!CreateProcess(executable, new StringBuilder("\"" + executable + "\" " + arguments), IntPtr.Zero, IntPtr.Zero, true, 0x10, IntPtr.Zero, null, ref startup, out info)) throw new Win32Exception();
+            try { return Process.GetProcessById(info.processId); }
+            finally { CloseHandle(info.thread); CloseHandle(info.process); }
+        } finally {
+            if (input != IntPtr.Zero && input != new IntPtr(-1)) CloseHandle(input);
+            if (output != IntPtr.Zero && output != new IntPtr(-1)) CloseHandle(output);
+            if (error != IntPtr.Zero && error != new IntPtr(-1)) CloseHandle(error);
+        }
+    }
+}
+'@
 $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source
 $serverPath = (Resolve-Path 'service/journey/server.mjs').Path
-$server = Start-Process -FilePath $nodePath -ArgumentList @(('"' + $serverPath + '"'), '--port=18787', '--bind=127.0.0.1', ('--config="' + $configPath + '"')) -PassThru -RedirectStandardOutput (Join-Path $work 'service.out') -RedirectStandardError (Join-Path $work 'service.err')
+$server = [FixtureProcess]::Start($nodePath, ('"' + $serverPath + '" --port=18787 --bind=127.0.0.1 --config="' + $configPath + '"'), (Join-Path $work 'service.out'), (Join-Path $work 'service.err'))
 Save-Process $server $nodePath
 $timer = [Diagnostics.Stopwatch]::StartNew()
 do {
@@ -37,7 +85,7 @@ do {
     Start-Sleep -Seconds 1
 } while ($timer.Elapsed.TotalSeconds -lt 90)
 if ($timer.Elapsed.TotalSeconds -ge 90) { throw 'Fixture startup timed out' }
-$tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', 'http://127.0.0.1:18787') -PassThru -RedirectStandardOutput (Join-Path $work 'tunnel.out') -RedirectStandardError (Join-Path $work 'tunnel.err')
+$tunnel = [FixtureProcess]::Start($cloudflared, 'tunnel --no-autoupdate --protocol http2 --url http://127.0.0.1:18787', (Join-Path $work 'tunnel.out'), (Join-Path $work 'tunnel.err'))
 Save-Process $tunnel $cloudflared
 $timer.Restart()
 $endpoint = $null

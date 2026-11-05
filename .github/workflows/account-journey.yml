@@ -177,6 +177,22 @@ jobs:
       - name: Substitute desktop build origin
         if: inputs.pictures_isolated
         run: node tools/verify-account-photos/substitute-origin.mjs desktop picture-endpoint/endpoint.txt
+      - name: Check private fixture health
+        if: inputs.pictures_isolated
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            $roots = @(Get-Content (Join-Path $env:RUNNER_TEMP 'account-photo-fixture/processes.json') -Raw | ConvertFrom-Json)
+            if ($roots.Count -ne 2 -or $roots[0].pid -eq $roots[1].pid) { throw 'Invalid roots' }
+            foreach ($root in $roots) {
+              $process = Get-Process -Id ([int]$root.pid) -ErrorAction Stop
+              if ($process.Path -ine [string]$root.path -or $process.StartTime.ToUniversalTime().Ticks -ne [long]$root.started) { throw 'Root identity mismatch' }
+            }
+            $endpoint = (Get-Content 'picture-endpoint/endpoint.txt' -Raw).Trim()
+            $response = Invoke-WebRequest -Uri "$endpoint/v1/layout" -SkipHttpErrorCheck -TimeoutSec 30
+            if ($response.StatusCode -ne 401) { throw 'Unexpected response' }
+          } catch { throw 'Private fixture health check failed' }
       - name: Build the desktop app
         shell: pwsh
         run: |
