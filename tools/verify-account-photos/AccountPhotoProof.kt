@@ -105,7 +105,15 @@ class AccountPhotoProof {
             var image: Bitmap? = null
             while (SystemClock.elapsedRealtime() < deadline) {
                 if (compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty()) {
-                    compose.onNodeWithText("No").performClick()
+                    try {
+                        compose.onNodeWithText("No").performClick()
+                    } catch (failure: AssertionError) {
+                        if (!failure.message.orEmpty().contains("Expected exactly '1' node but could not find any node") ||
+                            compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isNotEmpty() ||
+                            compose.onAllNodesWithText("No").fetchSemanticsNodes().isNotEmpty()) {
+                            throw failure
+                        }
+                    }
                 }
                 val bounds = avatar.fetchSemanticsNode().boundsInWindow
                 val screen = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
