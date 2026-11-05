@@ -67,6 +67,7 @@ function Press([int[]]$Keys) {
     [VerifyNative]::Chord($Keys)
 }
 function Palette([string]$Query, [int]$Target) {
+    $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='palette'; query=$Query; target=$Target})
     Focus
     $offset = (Log).Length
     Press @(0x11,0x4b)
@@ -124,7 +125,7 @@ function Context([int]$Index) {
     [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 6249 7196 7197 7112(?:\s|$)' })
 }
 function Read-History([string]$Name, [string]$Sid, [int]$Fixture) {
-    $saved=@(Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json)
+    [array]$saved=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
     $archiveIndex=-1
     for ($i=0; $i -lt $saved.Count; $i++) { if ($saved[$i].csid -ceq $Sid) { $archiveIndex=$i } }
     Check ('archived-history-entry-'+$Name) ($archiveIndex -ge 0)
