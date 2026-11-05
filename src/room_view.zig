@@ -264,8 +264,8 @@ pub const View = struct {
         const pending = self.pending orelse return;
         if (!std.meta.eql(pending, token_value)) return;
         self.result = result;
-        if (result != .pending) self.pending = null;
-        if (result == .accepted and (token_value.kind == .create or token_value.kind == .edit)) {
+        if (result != .pending and !(result == .accepted and token_value.kind == .create)) self.pending = null;
+        if (result == .accepted and token_value.kind == .edit) {
             const owned_focus = self.ownsFocus();
             self.mode = .room;
             self.layout();
