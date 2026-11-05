@@ -44,7 +44,7 @@ def synthetic_runtime(store, directory):
         if operation == 'message_submit':
             previous = runtime['message_events_page'](query['provider'], query['sid'], 0)
             finished = any(row['event'].get('kind') == 'turn.ended' and row['event'].get('message_id') == query['message_id'] for row in previous['events'])
-            if not finished:
+            if not finished and not (ROOT / 'agents-offline').is_file():
                 member = store.db.execute('SELECT display_name FROM members WHERE id=? AND provider_sid=?', (query['room_scope']['member_id'], query['sid'])).fetchone()
                 if member is None:
                     raise RuntimeError('Synthetic provider identity mismatch')
@@ -98,7 +98,7 @@ def room_request():
     store.host_uuid = store.db.execute("SELECT value FROM meta WHERE key='host_uuid'").fetchone()[0]
     bridge = bridge_module.RoomBridge.__new__(bridge_module.RoomBridge)
     bridge.store = store
-    bridge_module.host_status = lambda sid: dict(status='ok', provider='claude', sid=sid, tmux='proof-' + sid, enabled=True, owner='host', alive=True)
+    bridge_module.host_status = lambda sid: dict(status='ok', provider='claude', sid=sid, tmux='proof-' + sid, enabled=True, owner='host', alive=not (ROOT / 'agents-offline').is_file())
     live = (ROOT / 'live-replies').is_file()
     bridge_module.scoped_runtime = lambda: live
     if live:
@@ -115,11 +115,16 @@ def room_request():
             rows.append(dict(row, members=store.members(row['id']), events=[json.loads(event[0]) for event in
                 store.db.execute('SELECT body FROM events WHERE room_id=? ORDER BY seq', (row['id'],))]))
         canonical = []
+        messages = []
         if live:
             for member in store.db.execute('SELECT DISTINCT provider_sid FROM members'):
                 page = bridge_module.runtime_request(dict(op='events_subscribe', provider='claude', sid=member['provider_sid'], after=0))['result']
                 canonical.extend(page['events'])
-        witness = dict(rooms=rows, canonical_events=canonical, live=live, boundaries=['Isolated actual account Worker', 'SSH, host ownership and provider stdin/output are synthetic', 'Production canonical transaction and host event reducers run in-process', 'POSIX ownership and dispatch locks are not verified on Windows'])
+            for delivery in store.db.execute('SELECT d.id,d.room_id,d.event_id,d.member_id,m.provider_sid FROM deliveries d JOIN members m ON m.id=d.member_id ORDER BY d.delivery_seq'):
+                saved = bridge_module.runtime_request(dict(op='message_status', provider='claude', sid=delivery['provider_sid'], tmux='proof-' + delivery['provider_sid'], message_id=delivery['id']))['result'].get('message')
+                if saved is not None:
+                    messages.append(dict(id=delivery['id'], room_id=delivery['room_id'], parent_event_id=delivery['event_id'], member_id=delivery['member_id'], state=saved['state']))
+        witness = dict(rooms=rows, canonical_events=canonical, room_messages=messages, live=live, boundaries=['Isolated actual account Worker', 'SSH, host ownership and provider stdin/output are synthetic', 'Production canonical transaction and host event reducers run in-process', 'POSIX ownership and dispatch locks are not verified on Windows'])
         if request.get('op') == 'list' and response.get('ok'):
             (ROOT / 'catalog-observed.json').write_text(json.dumps(dict(room_ids=[room['id'] for room in response['result']['rooms']])), encoding='utf-8')
         if live and request.get('op') == 'snapshot' and response.get('ok'):

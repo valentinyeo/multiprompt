@@ -315,6 +315,7 @@ try {
     Shot 'after-restart'
     Stop-App
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'live-replies'), 'Synthetic providers only')
+    [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'agents-offline'), 'Synthetic provider availability only')
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'hold-next-background-read'), 'Synthetic transport latency only')
     Start-App
     $room = Wait-For 'live room restored' { Room-Window }
@@ -330,6 +331,41 @@ try {
     Check 'native-broadcast-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq 'Both synthetic agents, reply once.')
     Shot 'before-send'
     Press @(0x0d)
+    [void](Wait-For 'offline broadcast durably queued without delivery' {
+        $w = Witness
+        if (!$w -or @($w.rooms).Count -ne 1) { return $false }
+        $events = @($w.rooms[0].events)
+        @($events | Where-Object { $_.type -eq 'human' }).Count -eq 1 -and @($events | Where-Object { $_.type -eq 'agent_reply' }).Count -eq 0 -and @($w.room_messages | Where-Object { $_.state -eq 'queued' }).Count -eq 2 -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
+    })
+    function Check-Queued([string]$Stage, [string[]]$ExpectedIds = @()) {
+        $w = Witness
+        $humans = @($w.rooms[0].events | Where-Object { $_.type -eq 'human' })
+        $replies = @($w.rooms[0].events | Where-Object { $_.type -eq 'agent_reply' })
+        Check ($Stage + '-one-question-no-replies') ($humans.Count -eq 1 -and $replies.Count -eq 0 -and $humans[0].text -ceq 'Both synthetic agents, reply once.')
+        $queued = @($w.room_messages)
+        Check ($Stage + '-exact-queued-scope') ($queued.Count -eq 2 -and @($queued | Where-Object { $_.state -ne 'queued' -or $_.room_id -cne $w.rooms[0].id -or $_.parent_event_id -cne $humans[0].id }).Count -eq 0 -and (@($queued.member_id | Sort-Object) -join '|') -ceq (@($humans[0].recipients | Sort-Object) -join '|'))
+        Check ($Stage + '-no-started-or-ended-turns') (@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] -and $_.event.kind -in @('turn.started', 'turn.ended') }).Count -eq 0)
+        if ($ExpectedIds.Count -gt 0) { Check ($Stage + '-same-durable-message-ids') ((@($queued.id | Sort-Object) -join '|') -ceq (@($ExpectedIds | Sort-Object) -join '|')) }
+        Save $w (Join-Path $Evidence ($Stage + '-witness.json'))
+    }
+    Check-Queued 'offline-send'
+    $queuedIds = @((Witness).room_messages.id)
+    Wait-PaintedMessages 'offline-send' 1 0
+    Shot 'offline-question-waiting'
+    Stop-App
+    Start-App
+    $room = Wait-For 'offline selected room restored' { Room-Window }
+    $composer = Wait-For 'offline restored composer' { $h=Room-Composer $room; if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'offline restart store read' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
+    Check-Queued 'offline-restart' $queuedIds
+    Check 'offline-restart-no-resubmitted-draft' ([ChatDeliveryDesktop]::Text($composer) -ceq '')
+    Wait-PaintedMessages 'offline-restart' 1 0
+    Shot 'offline-question-after-restart'
+    Stop-App
+    Remove-Item (Join-Path $env:MP_VERIFY_STATE 'agents-offline')
+    Start-App
+    $room = Wait-For 'reconnected selected room' { Room-Window }
+    $composer = Wait-For 'reconnected composer focus' { $h=Room-Composer $room; if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Focus($main)[1] -eq $h.ToInt64()) { $h } }
     [void](Wait-For 'one broadcast and two scoped synthetic replies' {
         $w=Witness
         if (!$w -or @($w.rooms).Count -ne 1) { return $false }
@@ -355,6 +391,7 @@ try {
         Save $w (Join-Path $Evidence 'witness.json')
     }
     Check-Replies
+    Check 'reconnected-original-message-ids' ((@((Witness).room_messages.id | Sort-Object) -join '|') -ceq (@($queuedIds | Sort-Object) -join '|'))
     Wait-PaintedMessages 'after-send' 1 2
     [void]$app.WaitForInputIdle(5000)
     Shot 'two-synthetic-replies'
