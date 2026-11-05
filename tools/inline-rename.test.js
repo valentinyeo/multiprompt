@@ -30,7 +30,6 @@ test('inline editor keeps the stable shell identity and commits canonically', ()
   assert.match(rename, /if \(wp == 0x1B\) \{\s*app_state\.g_focus_user_action_tick = renameCommitActionTick/);
   assert.match(rename, /fn startRenameInternal[^]*?g_focus_user_action_tick = renameCommitActionTick\(app_state\.g_focus_user_action_tick, GetTickCount64\(\), foregroundIsOurs\(\)\);\s*if \(!focusGuard/);
   assert.match(rename, /in_title and !app_state\.g_chat_active\) name_rc\.bottom - name_rc\.top/);
-  assert.match(main, /if \(tab_idx != app_state\.active_shell or @import\("room_frontend\.zig"\)\.isActive\(\)\) @import\("console\.zig"\)\.switchToShellByUser\(tab_idx\)/);
 });
 
 test('slash rename consumes locally before normal message routing', () => {
@@ -55,17 +54,26 @@ test('hosted journey drives both names and records its boundaries', () => {
   assert.match(driver, /function Rename-Snapshot\([\s\S]*?Rename-WaitChatView\s+Snapshot \$Name/);
   assert.match(driver, /tabs\[\$state\.active_tab\]\.cv/);
   assert.match(driver, /ZigShellChatTranscript/);
-  assert.match(driver, /Click the first sidebar session name/);
+  assert.match(driver, /Rename-ClickNoEdit[^]*?'the first sidebar session name'/);
+  assert.match(driver, /Rename-ClickNoEdit \$titlePoint\[0\] \$titlePoint\[1\] 'the chat title'/);
   assert.doesNotMatch(driver, /Alt\+C:.*shell view/);
   assert.doesNotMatch(driver, /^\s+Snapshot ["']rename-(?!inbox-)/m);
 });
 
-test('F2 and palette route by visible context while title clicks stay explicit', () => {
+test('mouse clicks on a session or title never start a rename', () => {
+  for (const handler of ['WM_LBUTTONDOWN =>', 'WM_LBUTTONDBLCLK =>']) {
+    const start = main.indexOf(handler);
+    assert.ok(start >= 0, handler);
+    const body = main.slice(start, main.indexOf('\n        WM_', start + handler.length));
+    assert.doesNotMatch(body, /startRename\(|startThreadTitleRename\(/, handler);
+  }
+});
+
+test('F2 and palette route by visible context', () => {
   const route = main.slice(main.indexOf('WM_APP_RENAME_TAB =>'), main.indexOf('WM_APP_RENAME_WINDOW =>'));
   assert.match(route, /g_inbox_active[^]*?startInboxRename\(\)[^]*?startRename\(app_state\.active_shell\)/);
   assert.match(rename, /const in_title = thread_title or app_state\.g_hide_sidebar or app_state\.g_sidebar_collapsed/);
   assert.match(rename, /pub fn beginPaletteRenameInput[^]*?startRename\(idx\)/);
-  assert.match(main, /startThreadTitleRename\(\)/);
 });
 
 test('Inbox rename uses selected row colors and name geometry', () => {
