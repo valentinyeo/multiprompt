@@ -85,6 +85,7 @@ Shell-Run @('idle')
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame delivered 2> "$caseDir/oracle-delivered-stderr.log"
     $LASTEXITCODE -eq 0
 })
+[void](Wait-For 'reaction handoff restored the untouched remote draft' { (Fake-State).box -ceq $plan.text })
 Restart-OwnedApp
 $restoredComposer = [ChatDeliveryDesktop]::Composer($main)
 if ($restoredComposer -eq [IntPtr]::Zero) {
@@ -96,6 +97,7 @@ if ($restoredComposer -eq [IntPtr]::Zero) {
     [ChatDeliveryDesktop]::PressClient($restoredComposer, $app.Id, 8, 8)
 }
 Bind-Transcript
+[void](Wait-For 'restarted composer receives the untouched draft' { [ChatDeliveryDesktop]::Text($composer) -ceq $plan.text })
 $observation.restartComposerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.restartComposerText -cne $plan.text) { throw 'Restart lost the untouched composer draft' }
 [void](Wait-For 'restart badge on the same first reply' {

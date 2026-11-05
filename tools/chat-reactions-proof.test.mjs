@@ -204,6 +204,7 @@ test('floating title is not the first reply after the setup prompt', () => {
 });
 
 test('ordinary follow-up requires the full newest pair, not just transcript data', () => {
+  assert.equal(typeof proof.assertFollowup, 'function', 'ordinary newest-answer verification must be available');
   const f = fixture();
   f.fill(0, 0, 300, 300, 0x202020);
   f.fill(20, 10, 250, 60, 0x555555);
