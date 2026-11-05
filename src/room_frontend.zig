@@ -1595,7 +1595,12 @@ pub fn pollTimer(id: usize) bool {
                     const advanced = (numberField(payload, "next_after") orelse item.highwater) > item.highwater;
                     if (!publishModel()) { discardBuilding(); view.showUnavailable(); }
                     if (advanced) selection_waiting = true;
-                    if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                    if (!scheduleMetadata(c)) {
+                        if (c.live_send and front == .selected) {
+                            selection_waiting = true;
+                            _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 1000, null);
+                        } else _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                    }
                 } else if (!c.events(item.value.room_id, item.after)) {
                     discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
                 }

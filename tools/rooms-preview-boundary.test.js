@@ -43,8 +43,12 @@ test('Rooms preview boundary retains legacy refusal and one broadcast produces t
     assert.equal(receipt.ok, true, JSON.stringify(receipt));
     assert.equal(receipt.result.deliveries.length, 2);
     const query = { op: 'events', host_uuid: host, room_id: room, after: 0, limit: 200 };
-    const page = request(query);
-    assert.equal(page.ok, true, JSON.stringify(page));
+    let page;
+    const deadline = Date.now() + 20000;
+    do {
+      page = request(query);
+      assert.equal(page.ok, true, JSON.stringify(page));
+    } while (page.result.events.filter(event => event.type === 'agent_reply').length < 2 && Date.now() < deadline);
     const events = page.result.events;
     assert.equal(events.filter(event => event.type === 'human').length, 1);
     const replies = events.filter(event => event.type === 'agent_reply');
