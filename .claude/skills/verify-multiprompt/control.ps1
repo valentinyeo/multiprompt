@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -16,6 +16,10 @@ $shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'
 if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requires the chat-switch-speed journey' }
 if ($shapeProfile -and -not $shapeProof -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profiling requires a native switching journey' }
 switch ($Feature) {
+        'session-actions' {
+            & "$PSScriptRoot/../../../tools/verify-session-actions/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            return
+        }
         'bot-photo' {
             & "$PSScriptRoot/../../../tools/verify-bot-photo/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             return
@@ -200,11 +204,29 @@ try {
         $scheme = if ($env:CAPTION_BROWSER_THEME -eq 'light') { 1 } else { 2 }
         @{ browser = @{ theme = @{ color_scheme = $scheme } } } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $profile 'Default/Preferences')
     }
-    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-612/palette-usage.tsv'
+    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-1743/palette-usage.tsv'
     if ($Feature -eq 'palette-order') {
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
         Copy-Item $paletteUsageFixture (Join-Path $config 'palette-usage.tsv')
+    }
+    if ($Feature -eq 'palette-order') {
+        $paletteRankingSeed = {
+            $config = Join-Path $scratch 'roaming/ZigShell'
+            $seed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'cmd'; name = 'Funeralprints'; manual = $true; shell_id = 1 }) }
+            $registry = @{ windows = @(@{ id = 'closed-fune-fixture'; name = 'Funeralprints'; restore = $false }) }
+            [IO.File]::WriteAllText((Join-Path $config 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $config 'session-closed-fune-fixture.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $config 'windows.json'), (ConvertTo-Json -InputObject $registry -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            foreach ($name in @('session.json', 'session-closed-fune-fixture.json')) {
+                $saved = Get-Content -LiteralPath (Join-Path $config $name) -Raw | ConvertFrom-Json
+                if ($saved.tabs -isnot [array] -or $saved.tabs.Count -ne 1 -or $saved.tabs[0].name -ne 'Funeralprints' -or $saved.tabs[0].kind -ne 'cmd') { throw "palette-order: invalid saved session fixture $name" }
+            }
+            $savedRegistry = Get-Content -LiteralPath (Join-Path $config 'windows.json') -Raw | ConvertFrom-Json
+            if ($savedRegistry.windows -isnot [array] -or $savedRegistry.windows.Count -ne 1 -or $savedRegistry.windows[0].id -ne 'closed-fune-fixture' -or $savedRegistry.windows[0].name -ne 'Funeralprints') { throw 'palette-order: invalid workspace registry fixture' }
+            Save-Json $seed 'palette-ranking-seed-session.json'
+            Save-Json $registry 'palette-ranking-seed-windows.json'
+        }
     }
     $env:MULTIPROMPT_DICTATION_FIXTURE = $null
     if ($Feature -eq 'chat-dictation') {

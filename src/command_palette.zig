@@ -651,7 +651,6 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
-    if (target == app_state.SEARCH_TABCTX_RENAME) return "Rename session";
     if (target == app_state.SEARCH_TABCTX_COMPUTER) return words.computer_toggle;
     if (target == SEARCH_TABCTX_BROWSER) {
         if (findShellById(app_state.g_tabctx_sid)) |idx| {
@@ -684,6 +683,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         if (idx >= count) return null;
         return rows[idx].path[0..rows[idx].path_len];
     }
+    const action_index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+    if (chatActionLabel(target, if (action_index) |ti| @import("sidebar.zig").effPinnedTop(ti) else false)) |label| return label;
     if (target == SEARCH_OPEN_SESSION_MENU_OFFSET) return "Open session...";
     if (target == SEARCH_SHELLS_MENU_OFFSET) return "More shells...";
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
@@ -1143,7 +1144,8 @@ test "palette recency bands cannot be overpowered by lifetime frequency" {
     try std.testing.expect(paletteFrecencyAt(same_band_often, now) > paletteFrecencyAt(same_band_once, now));
 }
 
-fn paletteResultOutranks(key: usize, prev: usize, now: u64) bool {
+fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, now: u64) bool {
+    if (key_kind != prev_kind) return key_kind < prev_kind;
     if (app_state.g_search_len > 0) {
         const key_match = paletteQueryRank(key);
         const prev_match = paletteQueryRank(prev);
@@ -1166,18 +1168,111 @@ fn paletteResultOutranks(key: usize, prev: usize, now: u64) bool {
 
 fn sortSearchResultsByRank() void {
     const now = nowFileTime();
+    var kinds: [app_state.g_search_results.len]u8 = undefined;
+    for (app_state.g_search_results[0..app_state.g_search_result_count], 0..) |target, i| {
+        kinds[i] = 0;
+        if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) {
+            const index = target - SEARCH_WORKSPACE_OFFSET;
+            if (index < app_state.g_workspace_count) {
+                const workspace = &app_state.g_workspaces[index];
+                kinds[i] = if (@import("workspaces.zig").workspaceIsLiveAnywhere(workspace.id[0..workspace.id_len])) 1 else 2;
+            }
+        }
+    }
     var i: u32 = 1;
     while (i < app_state.g_search_result_count) : (i += 1) {
         const key = app_state.g_search_results[i];
+        const key_kind = kinds[i];
         var j = i;
         while (j > 0) {
             const prev = app_state.g_search_results[j - 1];
-            if (!paletteResultOutranks(key, prev, now)) break;
+            if (!paletteResultOutranks(key, prev, key_kind, kinds[j - 1], now)) break;
             app_state.g_search_results[j] = prev;
+            kinds[j] = kinds[j - 1];
             j -= 1;
         }
         app_state.g_search_results[j] = key;
+        kinds[j] = key_kind;
     }
+}
+
+test "session and workspace ranking beats exact matches and frecency" {
+    const old_shell_name = app_state.shells[0].name;
+    const old_shell_name_len = app_state.shells[0].name_len;
+    const old_shell_count = app_state.shell_count;
+    var old_workspaces: [2 * @sizeOf(app_state.WorkspaceEntry)]u8 = undefined;
+    @memcpy(&old_workspaces, std.mem.sliceAsBytes(app_state.g_workspaces[0..2]));
+    const old_workspace_count = app_state.g_workspace_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_single = app_state.g_single_window;
+    const old_lws_count = app_state.g_lws_count;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_lengths = app_state.g_ws_id_len;
+    defer {
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.g_single_window = old_single;
+        app_state.g_lws_count = old_lws_count;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_lengths;
+        app_state.shells[0].name = old_shell_name;
+        app_state.shells[0].name_len = old_shell_name_len;
+        app_state.shell_count = old_shell_count;
+        @memcpy(std.mem.sliceAsBytes(app_state.g_workspaces[0..2]), &old_workspaces);
+        app_state.g_workspace_count = old_workspace_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+    }
+    app_state.shell_count = 1;
+    for ("Funeralprints", 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = 13;
+    app_state.g_workspace_count = 2;
+    for (0..2) |i| {
+        app_state.g_workspaces[i] = std.mem.zeroes(app_state.WorkspaceEntry);
+        @memcpy(app_state.g_workspaces[i].name[0..4], "fune");
+        app_state.g_workspaces[i].name_len = 4;
+    }
+    for ("fune", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 4;
+    app_state.g_palette_usage_count = 1;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_SOUND_OFFSET, .count = 1000, .last_used = 100 };
+    const live = SEARCH_WORKSPACE_OFFSET;
+    const closed = live + 1;
+    app_state.g_single_window = true;
+    app_state.g_lws_count = 1;
+    @memcpy(app_state.g_ws_ids[0][0..12], "fixture-live");
+    app_state.g_ws_id_len[0] = 12;
+    @memcpy(app_state.g_workspaces[0].id[0..12], "fixture-live");
+    app_state.g_workspaces[0].id_len = 12;
+    app_state.g_workspaces[1].id_len = 0;
+    try std.testing.expect(paletteUsageKey(live) == null);
+    try std.testing.expect(paletteUsageKey(closed) == null);
+    try std.testing.expect(paletteQueryRank(closed) > paletteQueryRank(0));
+    @memcpy(app_state.g_search_results[0..3], &[_]usize{ closed, live, 0 });
+    app_state.g_search_result_count = 3;
+    sortSearchResultsByRank();
+    try std.testing.expectEqualSlices(usize, &.{ 0, live, closed }, app_state.g_search_results[0..3]);
+    try std.testing.expect(paletteResultOutranks(0, closed, 0, 2, 100));
+    try std.testing.expect(paletteResultOutranks(0, live, 0, 1, 100));
+    try std.testing.expect(paletteResultOutranks(live, closed, 1, 2, 100));
+    try std.testing.expect(!paletteResultOutranks(closed, 0, 2, 0, 100));
+    app_state.g_search_len = 0;
+    @memcpy(app_state.g_search_results[0..4], &[_]usize{ closed, live, 0, SEARCH_SOUND_OFFSET });
+    app_state.g_search_result_count = 4;
+    sortSearchResultsByRank();
+    try std.testing.expectEqualSlices(usize, &.{ SEARCH_SOUND_OFFSET, 0, live, closed }, app_state.g_search_results[0..4]);
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, live, 0, 1, 100));
+    try std.testing.expect(paletteResultOutranks(live, closed, 1, 2, 100));
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, closed, 0, 2, 100));
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, 0, 0, 100));
+    try std.testing.expect(!paletteResultOutranks(SEARCH_THEME_MENU_OFFSET, SEARCH_SOUND_OFFSET, 0, 0, 100));
 }
 
 fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
@@ -1312,7 +1407,7 @@ fn groupEmptyPaletteResults(lead: usize) void {
             .group = paletteGroupOf(target) orelse PALETTE_GROUP_SESSIONS,
             .command = command,
             .safe = !paletteTargetIsDestructive(target),
-            .used = false,
+            .used = target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES,
             .usage = if (command) paletteUsageFor(target) else .{},
             .label = (if (command) palettePrimaryLabel(target) else null) orelse "",
         };
@@ -1362,6 +1457,11 @@ fn groupEmptyPaletteResults(lead: usize) void {
             g_palette_order_out[out_len] = rows[i].target;
             out_len += 1;
         }
+    }
+    for (rows) |row| {
+        if (row.target < SEARCH_WORKSPACE_OFFSET or row.target >= SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) continue;
+        g_palette_order_out[out_len] = row.target;
+        out_len += 1;
     }
     @memcpy(app_state.g_search_results[0..out_len], g_palette_order_out[0..out_len]);
     app_state.g_search_result_count = @intCast(out_len);
@@ -1435,6 +1535,11 @@ test "empty Ctrl K lists most used commands first, then job groups with safe com
         &.{ 3, 7, 2000, SEARCH_SHELL_DIAG_OFFSET },
         1,
         &.{ 3, H + 1, 2000, 7, H + 5, SEARCH_SHELL_DIAG_OFFSET },
+    );
+    try expectGroupedPalette(
+        &.{ SEARCH_WORKSPACE_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_WORKSPACE_OFFSET + 1 },
+        0,
+        &.{ H + 4, SEARCH_SOUND_OFFSET, SEARCH_WORKSPACE_OFFSET, SEARCH_WORKSPACE_OFFSET + 1 },
     );
 }
 
@@ -3070,330 +3175,10 @@ pub fn updateSearchResults() void {
     }
     if (app_state.g_search_tabctx_mode) {
         app_state.g_search_result_count = 0;
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BACK;
-        app_state.g_search_result_count += 1;
-        const tc_idx = findShellById(app_state.g_tabctx_sid);
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Rename session", "rename tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-            app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_RENAME;
-            app_state.g_search_result_count += 1;
+        if (findShellById(app_state.g_tabctx_sid)) |index| {
+            if (app_state.g_search_len > 0) appendExtendedChatActions(index);
+            appendChatActions(index);
         }
-        appendPinnedPageResults(app_state.g_tabctx_sid);
-        if (tc_idx) |ti| {
-            if (@import("bot_look.zig").eligible(ti)) {
-                const words = @import("ui_words.zon");
-                for ([_]usize{ app_state.SEARCH_TABCTX_BOT_FACE, app_state.SEARCH_TABCTX_BOT_COLOR }, [_][]const u8{ words.bot_face, words.bot_color }) |id, label| {
-                    if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-                    if (app_state.g_search_len != 0 and !asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
-                    app_state.g_search_results[app_state.g_search_result_count] = id;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        }
-        const sel_count = selectedTabCount();
-        const sel_mode = sel_count > 0;
-        if (tc_idx) |ti| {
-            const k = app_state.shells[ti].kind;
-            if (k == .vps or k == .vps2 or k == .tmux) {
-                if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Reconnect", "restart session", "reattach tab", "reconnect tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
-                        app_state.g_search_result_count += 1;
-                    }
-                }
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            if (tc_idx) |ti| {
-                const tab = &app_state.shells[ti];
-                if (canAdoptHostTab(tab.ai_agent, tab.claude_sid_len, tab.tmux_session_len, app_state.g_chat_screen_working) and
-                    app_state.g_search_result_count < app_state.g_search_results.len and
-                    labelsMatchQuery(&.{ "Move chat to new mode", "adopt", "convert", "transition" }, app_state.g_search_buf[0..app_state.g_search_len]))
-                {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_ADOPT_HOST;
-                    app_state.g_search_result_count += 1;
-                }
-                if (@import("browser_pane.zig").browserProfileToken(ti).len > 0 and
-                    app_state.g_search_result_count < app_state.g_search_results.len and
-                    labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
-                {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GOOGLE_SIGNIN;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            const label = if (tc_idx) |ti| (if (app_state.shells[ti].favorite) "Unfavorite" else "Favorite") else "Favorite";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "favorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_FAVORITE;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            const tc_muted = if (tc_idx) |ti| app_state.shells[ti].muted else false;
-            const mute_str: []const u8 = if (tc_muted) "Unmute Tab" else "Mute Tab";
-            const mute_old: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ mute_str, mute_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MUTE;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            const label = if (tc_idx) |ti| (if (app_state.shells[ti].inbox_excluded) "Inbox: Show This Session Again" else "Inbox: Never Show This Session") else "Inbox: Never Show This Session";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "inbox", "exclude" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_INBOX_EXCLUDE;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            const tc_pinned = if (tc_idx) |ti| @import("sidebar.zig").effPinnedTop(ti) else false;
-            const pin_str: []const u8 = if (tc_pinned) "Unpin from Top" else "Pin to Top";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ pin_str, "pin", "pinned", "unpin", "top", "sidebar top" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_PIN_TOP;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            const tc_kaw = if (tc_idx) |ti| app_state.shells[ti].keep_awake else false;
-            const kaw_str: []const u8 = if (tc_kaw) "Keep Tab Awake: On" else "Keep Tab Awake: Off";
-            if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake", "Let Browser Pane Hibernate", "Keep Tab Awake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPAWAKE;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (tc_idx) |ti| {
-            const k = app_state.shells[ti].kind;
-            if (k == .cmd or k == .pwsh) {
-                if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    const ka_str: []const u8 = if (app_state.shells[ti].keep_alive) "Keep Alive: On" else "Keep Alive: Off";
-                    const ka_old: []const u8 = if (app_state.shells[ti].keep_alive) "Don't Keep Alive" else "Keep Alive on Exit";
-                    if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ ka_str, ka_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPALIVE;
-                        app_state.g_search_result_count += 1;
-                    }
-                }
-            }
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLOSE_DISCONNECTED;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx) |ti| {
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                const action_labels: []const []const u8 = if (app_state.shells[ti].tmux_session_len > 0)
-                    &[_][]const u8{ "Archive Session", "archive", "archived", "dissolve", "dissolved" }
-                else
-                    &[_][]const u8{ "Close Session", "close session", "close tab", "close", "kill session", "end session" };
-                if (app_state.g_search_len == 0 or labelsMatchQuery(action_labels, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_ARCHIVE;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (app_state.shells[ti].tmux_session_len > 0) {
-                if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    const end_labels = [_][]const u8{ "End tmux session", "End tmux", "Kill tmux", "Close tmux", "End session", "multiprompt-browser", "zsb" };
-                    var show_end = (app_state.g_search_len == 0);
-                    if (!show_end) {
-                        for (end_labels) |label| {
-                            if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
-                                show_end = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (show_end) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_END_TMUX;
-                        app_state.g_search_result_count += 1;
-                    }
-                }
-            }
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len) {
-            const browser_labels = [_][]const u8{ "browser", "web", "pane", "show browser", "hide browser", "open browser pane", "close browser pane", "show browser pane", "hide browser pane" };
-            var show_browser = (app_state.g_search_len == 0);
-            if (!show_browser) {
-                for (browser_labels) |label| {
-                    if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
-                        show_browser = true;
-                        break;
-                    }
-                }
-            }
-            if (show_browser) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BROWSER;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (tc_idx) |ti| {
-            if (app_state.shells[ti].tmux_session_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
-                (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "computer", "vps", "screen" }, app_state.g_search_buf[0..app_state.g_search_len])))
-            {
-                app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_COMPUTER;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to shell" else "Switch to chat view";
-                if (@import("chat_view.zig").canToggle(app_state.shells[ti].tmux_session[0..app_state.shells[ti].tmux_session_len]) and
-                    (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])))
-                {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_VIEW;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_TAB_URL;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALLOW;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Always allow", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALWAYS;
-            app_state.g_search_result_count += 1;
-        }
-        if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Deny", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_DENY;
-            app_state.g_search_result_count += 1;
-        }
-        if (app_state.ISSUE_265_WORKING_BAR and tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_STOP;
-            app_state.g_search_result_count += 1;
-        }
-        if (app_state.g_single_window and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations())) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move to Workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_WSMOVE;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        }
-        const tc_grouped = if (tc_idx) |ti| (@import("sidebar.zig").tabGroupId(ti) != 0) else false;
-        if (sel_mode) {
-            if (app_state.group_count < MAX_GROUPS) {
-                if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Add selected tabs to new group", app_state.g_search_buf[0..app_state.g_search_len])) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW;
-                        app_state.g_search_result_count += 1;
-                    }
-                }
-            }
-            if (selectedTabsIncludeGrouped()) {
-                if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Remove selected tabs from groups", app_state.g_search_buf[0..app_state.g_search_len])) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_REMOVE;
-                        app_state.g_search_result_count += 1;
-                    }
-                }
-            }
-            for (0..app_state.group_count) |gi| {
-                if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
-                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-                var glbuf: [72]u8 = undefined;
-                var gli: usize = 0;
-                for ("Add selected to group: ") |c| {
-                    if (gli >= glbuf.len) break;
-                    glbuf[gli] = c;
-                    gli += 1;
-                }
-                for (0..app_state.groups[gi].name_len) |j| {
-                    if (gli >= glbuf.len - 1) break;
-                    glbuf[gli] = @intCast(app_state.groups[gi].name[j] & 0x7F);
-                    gli += 1;
-                }
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(glbuf[0..gli], app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_ADD_OFFSET + gi;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move selected tabs to new workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLEAR_SEL;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        } else if (tc_grouped) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "New chat in this group", "new tab in group", "new claude chat in group" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW_TAB_IN;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Remove from group", app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_REMOVE;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        } else {
-            if (app_state.group_count < MAX_GROUPS) {
-                if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Add to new group", app_state.g_search_buf[0..app_state.g_search_len])) {
-                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW;
-                        app_state.g_search_result_count += 1;
-                    }
-                }
-            }
-            for (0..app_state.group_count) |gi| {
-                if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
-                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-                var glbuf: [72]u8 = undefined;
-                var gli: usize = 0;
-                for ("Add to group: ") |c| {
-                    if (gli >= glbuf.len) break;
-                    glbuf[gli] = c;
-                    gli += 1;
-                }
-                for (0..app_state.groups[gi].name_len) |j| {
-                    if (gli >= glbuf.len - 1) break;
-                    glbuf[gli] = @intCast(app_state.groups[gi].name[j] & 0x7F);
-                    gli += 1;
-                }
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(glbuf[0..gli], app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_ADD_OFFSET + gi;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-            if (sel_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLEAR_SEL;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        }
-        preferFirstFilteredResultAfterBack();
         if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
         return;
     }
@@ -4200,22 +3985,6 @@ pub fn updateSearchResults() void {
         }
     }
 
-    if (app_state.g_single_window and app_state.active_shell < app_state.shell_count and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations()) and app_state.g_search_result_count < app_state.g_search_results.len) {
-        var show_wsmove = (app_state.g_search_len == 0);
-        if (!show_wsmove) {
-            const wsmove_labels = [_][]const u8{ "move", "move to workspace", "transfer", "workspace" };
-            for (wsmove_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    show_wsmove = true;
-                    break;
-                }
-            }
-        }
-        if (show_wsmove) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WSMOVE_MENU_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
 
     if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_groupmove = (app_state.g_search_len == 0);
@@ -4649,21 +4418,7 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
 
-        var show_rename_sync = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const rename_labels = [_][]const u8{ "rename tab", "rename session", "rename shell", "rename tmux", "rename agent", "rename codex", "rename claude", "rename tab tmux agent name" };
-            for (rename_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_rename_sync = true;
-                    break;
-                }
-            }
-        }
-        if (show_rename_sync and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RENAME_SYNC_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
+        appendChatActions(app_state.active_shell);
     }
 
     if (app_state.g_single_window) {
@@ -4714,36 +4469,6 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
 
-        var show_archive = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const archive_labels = [_][]const u8{ "archive session", "archive", "archived", "dissolve session", "dissolve", "dissolved", "session", "tmux" };
-            for (archive_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_archive = true;
-                    break;
-                }
-            }
-        }
-        if (show_archive and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ARCHIVE_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-        var show_end = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const end_labels = [_][]const u8{ "end tmux session", "end tmux", "kill tmux", "close tmux", "close session", "kill session", "terminate session", "end session", "exit agent", "kill agent", "multiprompt-browser", "zsb" };
-            for (end_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_end = true;
-                    break;
-                }
-            }
-        }
-        if (show_end and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_END_TMUX_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
     }
 
     {
@@ -4802,23 +4527,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_DISCONNECTED_OFFSET;
         app_state.g_search_result_count += 1;
     }
-    if (app_state.shell_count > 0) {
-        var show_closetab = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const closetab_labels = [_][]const u8{ "close tab", "close", "tab", "kill" };
-            for (closetab_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_closetab = true;
-                    break;
-                }
-            }
-        }
-        if (show_closetab and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSETAB_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
+
     if (app_state.shell_count > 0) {
         var show_mutetab = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
@@ -4849,23 +4558,7 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
-    if (app_state.active_shell < app_state.shell_count) {
-        var show_pin_top = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const pin_labels = [_][]const u8{ "pin to top", "unpin from top", "pin tab", "unpin tab", "pinned", "sidebar top", "top" };
-            for (pin_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_pin_top = true;
-                    break;
-                }
-            }
-        }
-        if (show_pin_top and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PIN_TOP_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
+
     if (app_state.active_shell < app_state.shell_count) {
         const k = app_state.shells[app_state.active_shell].kind;
         if (k == .cmd or k == .pwsh) {
@@ -5535,6 +5228,324 @@ pub fn updateSearchResults() void {
     } else {
         app_state.g_search_sel = 0;
         app_state.g_search_scroll = 0;
+    }
+}
+
+fn appendExtendedChatActions(tc_idx: ?u32) void {
+    appendPinnedPageResults(if (tc_idx) |ti| app_state.shells[ti].shell_id else 0);
+    if (tc_idx) |ti| {
+        if (@import("bot_look.zig").eligible(ti)) {
+            const words = @import("ui_words.zon");
+            for ([_]usize{ app_state.SEARCH_TABCTX_BOT_FACE, app_state.SEARCH_TABCTX_BOT_COLOR }, [_][]const u8{ words.bot_face, words.bot_color }) |id, label| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                if (app_state.g_search_len != 0 and !asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+                app_state.g_search_results[app_state.g_search_result_count] = id;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+    const sel_count = selectedTabCount();
+    const sel_mode = sel_count > 0;
+    if (tc_idx) |ti| {
+        const k = app_state.shells[ti].kind;
+        if (k == .vps or k == .vps2 or k == .tmux) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Reconnect", "restart session", "reattach tab", "reconnect tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        if (tc_idx) |ti| {
+            const tab = &app_state.shells[ti];
+            if (canAdoptHostTab(tab.ai_agent, tab.claude_sid_len, tab.tmux_session_len, app_state.g_chat_screen_working) and
+                app_state.g_search_result_count < app_state.g_search_results.len and
+                labelsMatchQuery(&.{ "Move chat to new mode", "adopt", "convert", "transition" }, app_state.g_search_buf[0..app_state.g_search_len]))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_ADOPT_HOST;
+                app_state.g_search_result_count += 1;
+            }
+            if (@import("browser_pane.zig").browserProfileToken(ti).len > 0 and
+                app_state.g_search_result_count < app_state.g_search_results.len and
+                labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GOOGLE_SIGNIN;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        const label = if (tc_idx) |ti| (if (app_state.shells[ti].favorite) "Unfavorite" else "Favorite") else "Favorite";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "favorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_FAVORITE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_muted = if (tc_idx) |ti| app_state.shells[ti].muted else false;
+        const mute_str: []const u8 = if (tc_muted) "Unmute Tab" else "Mute Tab";
+        const mute_old: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ mute_str, mute_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MUTE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const label = if (tc_idx) |ti| (if (app_state.shells[ti].inbox_excluded) "Inbox: Show This Session Again" else "Inbox: Never Show This Session") else "Inbox: Never Show This Session";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "inbox", "exclude" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_INBOX_EXCLUDE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_pinned = if (tc_idx) |ti| @import("sidebar.zig").effPinnedTop(ti) else false;
+        const pin_str: []const u8 = if (tc_pinned) "Unpin from Top" else "Pin to Top";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ pin_str, "pin", "pinned", "unpin", "top", "sidebar top" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_PIN_TOP;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_kaw = if (tc_idx) |ti| app_state.shells[ti].keep_awake else false;
+        const kaw_str: []const u8 = if (tc_kaw) "Keep Tab Awake: On" else "Keep Tab Awake: Off";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake", "Let Browser Pane Hibernate", "Keep Tab Awake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPAWAKE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (tc_idx) |ti| {
+        const k = app_state.shells[ti].kind;
+        if (k == .cmd or k == .pwsh) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                const ka_str: []const u8 = if (app_state.shells[ti].keep_alive) "Keep Alive: On" else "Keep Alive: Off";
+                const ka_old: []const u8 = if (app_state.shells[ti].keep_alive) "Don't Keep Alive" else "Keep Alive on Exit";
+                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ ka_str, ka_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPALIVE;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLOSE_DISCONNECTED;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len) {
+        const browser_labels = [_][]const u8{ "browser", "web", "pane", "show browser", "hide browser", "open browser pane", "close browser pane", "show browser pane", "hide browser pane" };
+        var show_browser = (app_state.g_search_len == 0);
+        if (!show_browser) {
+            for (browser_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_browser = true;
+                    break;
+                }
+            }
+        }
+        if (show_browser) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BROWSER;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (tc_idx) |ti| {
+        if (app_state.shells[ti].tmux_session_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
+            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "computer", "vps", "screen" }, app_state.g_search_buf[0..app_state.g_search_len])))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_COMPUTER;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to shell" else "Switch to chat view";
+            if (@import("chat_view.zig").canToggle(app_state.shells[ti].tmux_session[0..app_state.shells[ti].tmux_session_len]) and
+                (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_VIEW;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_TAB_URL;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALLOW;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Always allow", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_ALWAYS;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Deny", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_DENY;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.ISSUE_265_WORKING_BAR and tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_STOP;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_single_window and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations())) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move to Workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_WSMOVE;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+    const tc_grouped = if (tc_idx) |ti| (@import("sidebar.zig").tabGroupId(ti) != 0) else false;
+    if (sel_mode) {
+        if (app_state.group_count < MAX_GROUPS) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Add selected tabs to new group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+        if (selectedTabsIncludeGrouped()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Remove selected tabs from groups", app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_REMOVE;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+        for (0..app_state.group_count) |gi| {
+            if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            var glbuf: [72]u8 = undefined;
+            var gli: usize = 0;
+            for ("Add selected to group: ") |c| {
+                if (gli >= glbuf.len) break;
+                glbuf[gli] = c;
+                gli += 1;
+            }
+            for (0..app_state.groups[gi].name_len) |j| {
+                if (gli >= glbuf.len - 1) break;
+                glbuf[gli] = @intCast(app_state.groups[gi].name[j] & 0x7F);
+                gli += 1;
+            }
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(glbuf[0..gli], app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_ADD_OFFSET + gi;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move selected tabs to new workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLEAR_SEL;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    } else if (tc_grouped) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "New chat in this group", "new tab in group", "new claude chat in group" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW_TAB_IN;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Remove from group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_REMOVE;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    } else {
+        if (app_state.group_count < MAX_GROUPS) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Add to new group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+        for (0..app_state.group_count) |gi| {
+            if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            var glbuf: [72]u8 = undefined;
+            var gli: usize = 0;
+            for ("Add to group: ") |c| {
+                if (gli >= glbuf.len) break;
+                glbuf[gli] = c;
+                gli += 1;
+            }
+            for (0..app_state.groups[gi].name_len) |j| {
+                if (gli >= glbuf.len - 1) break;
+                glbuf[gli] = @intCast(app_state.groups[gi].name[j] & 0x7F);
+                gli += 1;
+            }
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(glbuf[0..gli], app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_ADD_OFFSET + gi;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (sel_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLEAR_SEL;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+}
+
+pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
+    .{ .target = SEARCH_TABCTX_PIN_TOP, .label = "Pin" },
+    .{ .target = SEARCH_TABCTX_WSMOVE, .label = "Move to workspace" },
+    .{ .target = app_state.SEARCH_TABCTX_UNREAD, .label = "Mark as unread" },
+    .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
+    .{ .target = app_state.SEARCH_TABCTX_COPY_ID, .label = "Copy chat ID" },
+    .{ .target = app_state.SEARCH_TABCTX_HIDE, .label = "Hide from sidebar" },
+    .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete" },
+};
+
+pub fn chatActionLabel(target: usize, pinned: bool) ?[]const u8 {
+    for (chat_actions) |action| if (action.target == target) {
+        return if (target == SEARCH_TABCTX_PIN_TOP and pinned) "Unpin" else action.label;
+    };
+    return null;
+}
+
+fn appendChatActions(index: usize) void {
+    const query = app_state.g_search_buf[0..app_state.g_search_len];
+    for (chat_actions) |action| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        const label = chatActionLabel(action.target, @import("sidebar.zig").effPinnedTop(index)).?;
+        if (!labelsMatchQuery(&.{label}, query)) continue;
+        if (std.mem.indexOfScalar(usize, app_state.g_search_results[0..app_state.g_search_result_count], action.target) != null) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = action.target;
+        app_state.g_search_result_count += 1;
     }
 }
 

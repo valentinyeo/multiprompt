@@ -25,7 +25,7 @@ test('IGSH-1527 a new non-Other workspace saves its folder through the palette',
 
 test('IGSH-1527 the named workspace launches without another repo selection', () => {
   const start = sessions.indexOf("Snapshot 'named-workspace-saved-default-before'");
-  const end = sessions.indexOf("'named workspace proof chat closed'", start);
+  const end = sessions.indexOf("$result.checks += @{ name = 'named-workspace-skips-picker'", start);
   assert.ok(start >= 0 && end > start);
   const journey = sessions.slice(start, end);
   assert.match(journey, /Ctrl\+T: named workspace starts directly in its saved folder[\s\S]*\$beforeNamed \+ 1[\s\S]*\$state.active_workspace -ne \$namedSlot[\s\S]*\$tab.cwd -eq '\/work\/projects\/notes-only' -and \$tab.cv -eq \$true[\s\S]*named workspace starts a chat without selecting a repo[\s\S]*Snapshot 'named-workspace-saved-default-chat'/);
