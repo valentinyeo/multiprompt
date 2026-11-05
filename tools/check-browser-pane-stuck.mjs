@@ -40,7 +40,8 @@ function matrixContract(source) {
   assert.ok(features.pr.includes('appearance'), 'PR smoke includes appearance');
   assert.ok(features.full.includes('browser-pane-stuck'), 'master matrix includes browser recovery');
   assert.ok(source.includes('FEATURE: ${{ matrix.feature }}'));
-  for (const trigger of ['src/**', 'tools/check-browser-pane-stuck.mjs']) assert.ok(source.includes(`      - ${trigger}`));
+  assert.match(source, /^  pull_request:/m);
+  assert.doesNotMatch(source, /^\s+paths(?:-ignore)?:/m);
 }
 matrixContract(workflow);
 assert.throws(() => matrixContract(workflow.replace('fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.missing)')));

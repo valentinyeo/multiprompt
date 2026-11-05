@@ -61,7 +61,10 @@ function lifecycleContract(source) {
 
 test('lifecycle dispatch is nonblocking, serializes an inflight freeze before wake and clears markers only on matching acknowledgment', () => {
   lifecycleContract(pane);
-  for (const before of ['sendBrowserLifecycle(idx, false)', 'browser wake sent:', 'std.Thread.spawn(.{}, browserLifecycleWorker, .{job})', 'requestBrowserForWindow(allocator, job.window_id', 'browser_window_id != job.window_id', 'if (job.confirmed) {', 'browser_wake_requested = true', 'wake_requested or idx == app_state.active_shell']) assert.throws(() => lifecycleContract(pane.replace(before, 'false')), `reject lifecycle regression: ${before}`);
+  for (const before of ['sendBrowserLifecycle(idx, false)', 'browser wake sent:', 'std.Thread.spawn(.{}, browserLifecycleWorker, .{job})', 'requestBrowserForWindow(allocator, job.window_id', 'app_state.shells[idx].browser_window_id != job.window_id', 'if (job.confirmed) {', 'browser_wake_requested = true', 'wake_requested or idx == app_state.active_shell']) {
+    assert.ok(pane.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => lifecycleContract(pane.replace(before, 'false')), `reject lifecycle regression: ${before}`);
+  }
   assert.throws(() => lifecycleContract(pane.replace('    if (!sendBrowserLifecycle(idx, false)) return;', '    Sleep(1);\n    if (!sendBrowserLifecycle(idx, false)) return;')));
 });
 
@@ -207,7 +210,9 @@ test('after-paint Chat switches retain native edge masks throughout the old-to-n
 test('shared native pipe transport targets each lifecycle window and isolates concurrent reply pipes without changing its deadlines', () => {
   const native = read('src/bridge.zig');
   assert.match(body(native, 'requestBrowser'), /return requestBrowserForWindow\(allocator, g_window_id, g_profile_token, method, fields_json, deadline\)/);
-  const request = body(native, 'requestBrowserForWindow');
+  const wrapper = body(native, 'requestBrowserForWindow');
+  assert.match(wrapper, /return requestBrowserForWindowCancellable\(allocator, window_id, profile_token, method, fields_json, deadline, null, 0\)/);
+  const request = body(native, 'requestBrowserForWindowCancellable');
   assert.match(request, /request_sequence.fetchAdd\(1, \.monotonic\)/);
   assert.match(request, /buildBrowserRequest\(allocator, id, method, reply_pipe_text, window_id, fields_json\)/);
   assert.match(request, /isolatedPipeName\(&pipe_name_buf, profile_token\)/);

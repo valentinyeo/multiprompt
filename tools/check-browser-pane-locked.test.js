@@ -96,7 +96,7 @@ test('dock guard source contract reuses idempotent positioning and cancels on th
 });
 
 test('dock guard is installed and removed with the app lifetime and dispatched on the main thread', () => {
-  assert.match(main, /app_state.g_main_hwnd = hwnd;\s*@import\("browser_pane.zig"\).installBrowserDockHooks\(\);\s*defer @import\("browser_pane.zig"\).uninstallBrowserDockHooks\(\)/);
+  assert.match(main, /app_state\.g_main_hwnd = hwnd;(?:[^\n]*\n){1,8}\s*@import\("browser_pane\.zig"\)\.installBrowserDockHooks\(\);\s*defer @import\("browser_pane\.zig"\)\.uninstallBrowserDockHooks\(\)/);
   assert.match(main, /if \(msg == @import\("win32.zig"\).WM_APP_BROWSER_DOCK_GUARD\) \{\s*@import\("browser_pane.zig"\).handleBrowserDockGuard\(\)/);
   assert.match(main, /uninstallForegroundHook\(\);\s*@import\("browser_pane.zig"\).uninstallBrowserDockHooks\(\)/);
   for (const [name, value] of [['EVENT_SYSTEM_MOVESIZESTART', '0x000A'], ['EVENT_SYSTEM_MOVESIZEEND', '0x000B'], ['EVENT_OBJECT_LOCATIONCHANGE', '0x800B'], ['WM_CANCELMODE', '0x001F']]) {
