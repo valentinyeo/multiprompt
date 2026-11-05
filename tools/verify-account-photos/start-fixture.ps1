@@ -43,17 +43,27 @@ public static class FixtureProcess {
         public short showWindow, reserved2; public IntPtr reservedPtr, stdInput, stdOutput, stdError;
     }
     [StructLayout(LayoutKind.Sequential)]
+    struct StartupInfoEx { public StartupInfo startup; public IntPtr attributes; }
+    [StructLayout(LayoutKind.Sequential)]
     struct ProcessInformation { public IntPtr process, thread; public int processId, threadId; }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern IntPtr CreateFile(string name, uint access, uint share, ref SecurityAttributes security, uint disposition, uint flags, IntPtr template);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInformation process);
+    static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory, ref StartupInfoEx startup, out ProcessInformation process);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool InitializeProcThreadAttributeList(IntPtr attributes, int count, int flags, ref IntPtr size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool UpdateProcThreadAttribute(IntPtr attributes, uint flags, IntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returnSize);
+    [DllImport("kernel32.dll")]
+    static extern void DeleteProcThreadAttributeList(IntPtr attributes);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool CloseHandle(IntPtr handle);
 
     public static Process Start(string executable, string arguments, string stdout, string stderr) {
         var security = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), InheritHandle = 1 };
         IntPtr input = IntPtr.Zero, output = IntPtr.Zero, error = IntPtr.Zero;
+        IntPtr attributes = IntPtr.Zero, handles = IntPtr.Zero;
+        bool attributesInitialized = false;
         try {
             input = CreateFile("NUL", 0x80000000, 3, ref security, 3, 0, IntPtr.Zero);
             if (input == new IntPtr(-1)) throw new Win32Exception();
@@ -61,12 +71,27 @@ public static class FixtureProcess {
             if (output == new IntPtr(-1)) throw new Win32Exception();
             error = CreateFile(stderr, 0x40000000, 3, ref security, 2, 0, IntPtr.Zero);
             if (error == new IntPtr(-1)) throw new Win32Exception();
-            var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>(), flags = 0x101, showWindow = 0, stdInput = input, stdOutput = output, stdError = error };
+            IntPtr size = IntPtr.Zero;
+            InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
+            if (size == IntPtr.Zero) throw new Win32Exception();
+            attributes = Marshal.AllocHGlobal(size);
+            if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref size)) throw new Win32Exception();
+            attributesInitialized = true;
+            handles = Marshal.AllocHGlobal(3 * IntPtr.Size);
+            Marshal.Copy(new[] { input, output, error }, 0, handles, 3);
+            if (!UpdateProcThreadAttribute(attributes, 0, new IntPtr(0x20002), handles, new IntPtr(3 * IntPtr.Size), IntPtr.Zero, IntPtr.Zero)) throw new Win32Exception();
+            var startup = new StartupInfoEx {
+                startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfoEx>(), flags = 0x101, showWindow = 0, stdInput = input, stdOutput = output, stdError = error },
+                attributes = attributes
+            };
             ProcessInformation info;
-            if (!CreateProcess(executable, new StringBuilder("\"" + executable + "\" " + arguments), IntPtr.Zero, IntPtr.Zero, true, 0x10, IntPtr.Zero, null, ref startup, out info)) throw new Win32Exception();
+            if (!CreateProcess(executable, new StringBuilder("\"" + executable + "\" " + arguments), IntPtr.Zero, IntPtr.Zero, true, 0x00080010, IntPtr.Zero, null, ref startup, out info)) throw new Win32Exception();
             try { return Process.GetProcessById(info.processId); }
             finally { CloseHandle(info.thread); CloseHandle(info.process); }
         } finally {
+            if (attributesInitialized) DeleteProcThreadAttributeList(attributes);
+            if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
+            if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
             if (input != IntPtr.Zero && input != new IntPtr(-1)) CloseHandle(input);
             if (output != IntPtr.Zero && output != new IntPtr(-1)) CloseHandle(output);
             if (error != IntPtr.Zero && error != new IntPtr(-1)) CloseHandle(error);
