@@ -63,6 +63,9 @@ jobs:
       - name: Drive real Windows desktop
         shell: pwsh
         run: ./tools/verify-reconnect/close-unattached.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
+      - name: Prove offline close and explicit reopen
+        shell: pwsh
+        run: ./tools/verify-reconnect/pending-close.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence/pending-close"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

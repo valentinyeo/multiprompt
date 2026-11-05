@@ -31,7 +31,7 @@ function Shot([string]$Name) {
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size); $bitmap.Save("$Output/$Name.png") } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
-function Palette([string]$Query, [int]$Target) {
+function Palette([string]$Query, [string]$Target) {
     $offset = (Log).Length
     Press @(0x11, 0x4B)
     [void](Wait-For 'palette opened' { (Log-Tail $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
@@ -99,14 +99,19 @@ try {
     if (-not $Negative) {
         Context-Action 'sidebar-count-three' $false
         Select-Session 'Dead Unpinned' 2
-        Palette 'unpin from top' 6293
+        Palette 'unpin from top' '(7113|6293)'
         Press @(0x0D)
         [void](Wait-For 'dead session unpinned' { $s = Session; $row = @($s.tabs | Where-Object { $_.name -ceq 'Dead Unpinned' }); $row.Count -eq 1 -and !$row[0].pinned_top -and !$row[0].pid })
     }
     Select-Session 'Dead Single' 0
     Save (Session) "$Output/before-single.json"
     Shot 'before-single-close'
-    Press @(0x11, 0x57)
+    if ($Negative) {
+        Press @(0x11, 0x57)
+    } else {
+        Palette 'close tab' '(7197|6232)'
+        Press @(0x0D)
+    }
     [void](Wait-For 'pinned ordinary close' { $s = Session; $s -and @($s.tabs | Where-Object { $_.name -ceq 'Dead Single' }).Count -eq 0 } 12)
     Save (Session) "$Output/after-single.json"
     Shot 'after-single-close'

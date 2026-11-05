@@ -60,7 +60,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const cleanup = json('cleanup.json');
     assert.equal(cleanup.remaining_owned_processes, 0);
     assert.equal(cleanup.scratch_removed, true);
-    const frames = ['sending-immediate', 'sending-delivered'].map(name => ({ name, ...measureStatus(readBmp(path.join(root, name + '.bmp')), observation.transcript, name === 'sending-delivered') }));
+    const frames = ['sending-immediate', 'sending-delivered'].map(name => ({ name, ...measureStatus(readBmp(path.join(root, name + '.bmp')), observation.transcript) }));
     fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-sending-status', status: 'passed', frames }, null, 2));
     console.log('IGSH-931 Windows send frames have no status row');
   } catch (error) {

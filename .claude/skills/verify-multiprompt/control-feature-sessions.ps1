@@ -44,10 +44,85 @@
             Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_session -ceq 'second' } 'Other workspace and second server restored'
             $beforeClaude = @((Read-Session).tabs).Count
             Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
-            Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'listing-*.txt').Count -gt 0 } 'repository discovery response'
+            Wait-Until { @(0, 1, 2 | Where-Object { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter ("listing-$_-*.txt")).Count -gt 0 }).Count -eq 3 } 'all host discovery responses'
             $repoLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            Wait-Until { (Get-Content -LiteralPath $repoLog -Raw) -match '\[palette\] rows chars=0 count=101 ids=6702 6710 6711' } 'picker shows all 100 project folders'
+            Wait-Until { (Get-Content -LiteralPath $repoLog -Raw) -match '\[palette\] rows chars=0 count=104 ids=6702 6710 6711' } 'picker shows 102 discovered folders and the owner terminal carrier folder'
             Snapshot 'repo-picker-rows'
+            $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
+            Type-Text 'ar'
+            Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore) -match '\[palette\] rows chars=2 count=4 ' } 'combined search shows three matching folders'
+            Snapshot 'repo-picker-all-servers'
+            Press @(0x1B) 'Esc: leave initial picker'
+            Press @(0x1B) 'Esc: close palette'
+            foreach ($case in @(
+                @{ query = 'remote-2 cedar'; host = 1; alias = 'remote-2'; cwd = '/work/secondary/cedar'; proof = 'host1' },
+                @{ query = 'atlas'; host = 0; alias = 'remote-1'; cwd = '/work/primary/atlas'; proof = 'host0' }
+            )) {
+                if ($case.host -eq 1 -and @((Read-Session).tabs | Where-Object { $tab = $_; $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }; $hostId -eq 1 }).Count -ne 0) { throw 'Host 1 already has a seeded tab' }
+                Press @(0x11, 0x54) 'Ctrl+T: choose another server'
+                $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
+                Type-Text $case.query
+                Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore) -match ('\[palette\] rows chars=' + $case.query.Length + ' count=2 ') } 'one matching remote row'
+                Snapshot ('ctrl-t-' + $case.proof + '-picker')
+                Press @(0x0D) 'Enter: select the matching server and folder'
+                Wait-Until {
+                    $state = Read-Session
+                    if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                    $tab = $state.tabs[$state.active_tab]
+                    $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                    $tab.cwd -eq $case.cwd -and $hostId -eq $case.host -and $tab.cv -eq $true
+                } 'selected remote folder and host saved'
+                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('tmux new-session') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
+                Save-Json (Read-Session) ('ctrl-t-' + $case.proof + '-session.json')
+                Snapshot ('ctrl-t-' + $case.proof + '-chat')
+                $result.checks += @{ name = ('cross-host-' + $case.proof); host = $case.host; cwd = $case.cwd; alias = $case.alias }
+                Palette 'hide from sidebar'
+                Press @(0x0D) 'Enter: hide cross-host chat'
+                Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'cross-host chat closed'
+                Palette 'Second'
+                Press @(0x0D) 'Enter: return to host 2'
+                Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before next choice'
+            }
+            $offlineFile = Join-Path $env:MP_VERIFY_STATE 'offline-1'
+            [IO.File]::WriteAllText($offlineFile, 'offline')
+            $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
+            Press @(0x11, 0x54) 'Ctrl+T: reopen after host 1 fails'
+            Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] offline host=1') } 'production publishes host 1 offline'
+            Type-Text 'remote-2 cedar'
+            Snapshot 'ctrl-t-offline-picker'
+            $launches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('tmux new-session') }).Count
+            $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
+            Press @(0x0D) 'Enter: reject offline folder'
+            Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] selection rejected') } 'offline selection rejected'
+            if (@((Read-Session).tabs).Count -ne $beforeClaude) { throw 'Offline selection saved a tab' }
+            $afterLaunches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('tmux new-session') }).Count
+            if ($afterLaunches -ne $launches) { throw 'Offline selection launched SSH' }
+            Press @(0x11, 0x54) 'Ctrl+T: use host 0 while host 1 is offline'
+            Type-Text 'atlas'
+            Snapshot 'ctrl-t-other-host-online-picker'
+            Press @(0x0D) 'Enter: select available folder'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                $tab = $state.tabs[$state.active_tab]
+                $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                $hostId -eq 0 -and $tab.cwd -eq '/work/primary/atlas' -and $tab.cv -eq $true
+            } 'other host stays usable'
+            Palette 'hide from sidebar'
+            Press @(0x0D) 'Enter: hide available host chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'available host chat closed'
+            Palette 'Second'
+            Press @(0x0D) 'Enter: return to host 2'
+            Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active after offline check'
+            Remove-Item -LiteralPath $offlineFile
+            $result.checks += @{ name = 'offline-enter-rejected'; tabs = $beforeClaude; launches = $launches }
+            $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
+            Press @(0x11, 0x54) 'Ctrl+T: recover host 1'
+            Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] online host=1') } 'host 1 discovery recovers'
+            Snapshot 'ctrl-t-recovered-picker'
+            Press @(0x1B) 'Esc: leave recovered picker'
+            Press @(0x1B) 'Esc: close palette'
+            Press @(0x11, 0x54) 'Ctrl+T: select an available server after offline rejection'
             Type-Text 'notes-only'
             Snapshot 'ctrl-t-notes-only-picker'
             Press @(0x0D) 'Enter: select notes-only'

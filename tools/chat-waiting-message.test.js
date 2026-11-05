@@ -61,25 +61,17 @@ test('refusal control targets legacy delivery evidence, not Claude queue evidenc
   assert.match(mutated, /const facts: chat_echo\.DeliveryEvidence = \.\{\};\s+refused = facts\.refused;/);
 });
 
-test('waiting and started echoes use their protocol phase for brightness', () => {
+test('waiting and started echoes always use the normal bubble', () => {
   const source = fs.readFileSync(path.join(root, 'src/chat_render.zig'), 'utf8');
-  const match = source.match(/if \((e\.state == \.delivered[^\n]+)\) chatDimQueuedBubble\(hdc, bubble\);/);
-  assert.ok(match);
-  const expression = match[1]
-    .replace('e.state == .delivered', "e.state === 'delivered'")
-    .replace('!e.host_confirmed', '!e.host_confirmed')
-    .replace('e.delivery_watch.removed_ms == 0', 'e.removed_ms === 0')
-    .replace('!std.mem.eql(u8, std.mem.sliceTo(&e.message_phase, 0), "started")', "e.message_phase !== 'started'")
-    .replaceAll(' and ', ' && ');
-  const dim = new Function('e', `return ${expression};`);
-  const echo = { state: 'delivered', host_confirmed: false, removed_ms: 0, message_phase: 'accepted' };
-  assert.equal(dim(echo), true);
-  assert.equal(dim({ ...echo, message_phase: 'started' }), false);
-  assert.equal(dim({ ...echo, host_confirmed: true }), false);
-  assert.equal(dim({ ...echo, removed_ms: 1 }), false);
+  const start = source.indexOf('fn chatPaintEcho(');
+  const end = source.indexOf('\n}', start);
+  assert.ok(start >= 0 && end > start);
+  const paint = source.slice(start, end);
+  assert.match(paint, /fillBubbleStyled\(hdc, bubble, uiScaled\(CHAT_BUBBLE_RADIUS\), chatUserBubbleColor\(\), true, true\)/);
+  assert.doesNotMatch(paint, /chatDimQueuedBubble|message_phase|host_confirmed|removed_ms|e\.state/);
 });
 
-test('gradient oracle recognizes dim and normal copies without duplicates', async () => {
+test('gradient oracle requires normal matching text without duplicates', async () => {
   const { queuedBubble, normalBubble, countMessageBubbles } = await import(pathToFileURL(path.join(root, 'tools/chat-accepted-proof.mjs')));
   const area = { left: 0, right: 400, top: 0, bottom: 220 };
   function image(dim, copy = false, text = true) {
@@ -92,9 +84,9 @@ test('gradient oracle recognizes dim and normal copies without duplicates', asyn
     }
     return result;
   }
-  const waiting = image(true);
+  const waiting = image(false);
   const bubble = queuedBubble(waiting, area);
-  assert.equal(normalBubble(waiting, bubble), false);
+  assert.equal(normalBubble(image(true), bubble, waiting), false);
   assert.equal(normalBubble(image(false), bubble, waiting), true);
   assert.equal(normalBubble(image(false, false, false), bubble, waiting), false);
   const unrelated = image(false, false, false);
@@ -102,8 +94,8 @@ test('gradient oracle recognizes dim and normal copies without duplicates', asyn
   assert.equal(normalBubble(unrelated, bubble, waiting), false);
   assert.equal(countMessageBubbles(image(false), area, bubble), 1);
   assert.equal(countMessageBubbles(image(false, true), area, bubble), 2);
-  assert.throws(() => queuedBubble(image(false), area), /visibly dimmed/);
-  assert.throws(() => queuedBubble(image(true, false, false), area), /text must remain visible/);
+  assert.throws(() => queuedBubble(image(true), area), /normal bubble/);
+  assert.throws(() => queuedBubble(image(false, false, false), area), /text must remain visible/);
 });
 
 test('pixel oracle rejects a missing or dim taken bubble', async () => {
@@ -117,7 +109,7 @@ test('pixel oracle rejects a missing or dim taken bubble', async () => {
     return result;
   }
   const area = { left: 0, right: 400, top: 0, bottom: 220 };
-  const bubble = queuedBubble(image(0x323232, 50), area);
+  const bubble = queuedBubble(image(0x4d4d4d, 50), area);
   assert.equal(normalBubble(image(0x323232, 50), bubble), false);
   assert.equal(normalBubble(image(0x4d4d4d, 90), bubble), false);
   assert.equal(normalBubble(image(0x4d4d4d, 50), bubble), true);
@@ -129,8 +121,9 @@ test('pixel oracle rejects a missing or dim taken bubble', async () => {
   const dimDuplicate = image(0x323232, 130);
   dimDuplicate.pixels.copy(duplicate.pixels, 130 * 400 * 4, 130 * 400 * 4, 180 * 400 * 4);
   assert.equal(countMessageBubbles(duplicate, area, bubble), 2);
-  const frames = [{ ms: 1050, normal: false, dots: true }, { ms: 1200, normal: true, dots: true }];
-  assert.equal(evaluateFrames(frames, 1000), 200);
+  const frames = [{ ms: 1050, normal: true, dots: true }, { ms: 1200, normal: true, dots: true }];
+  assert.equal(evaluateFrames(frames, 1000), 50);
+  assert.throws(() => evaluateFrames([{ ms: 1050, normal: false, dots: true }, frames[1]], 1000));
   assert.throws(() => evaluateFrames([{ ms: 2100, normal: true, dots: true }], 1000));
   assert.throws(() => evaluateFrames([{ ms: 1200, normal: true, dots: false }], 1000));
 });

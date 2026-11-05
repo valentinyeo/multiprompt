@@ -131,3 +131,136 @@ test("sidebar VPS card explains pressure as percentages with explicit Critical b
   assert.match(source, /return content_end \+ 4 \+ BTN_H \+ 8/);
   assert.match(source, /return @max\(@as\(i32, 0\), rc\.bottom - sidebarStickyCardSpan\(\)\)/);
 });
+
+test('IGSH-1648 manual admission is silent and unlimited while automation stays protected', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const state = fs.readFileSync(path.join(root, 'src/app_state.zig'), 'utf8');
+  const capacity = fs.readFileSync(path.join(root, 'src/capacity.zig'), 'utf8');
+  const between = (text, start, end) => {
+    const a = text.indexOf(start), b = text.indexOf(end, a + start.length);
+    assert.ok(a >= 0 && b > a, `missing production range ${start}`);
+    return text.slice(a, b);
+  };
+  const types = between(state, 'pub const CapacityState =', 'pub var g_capacity_policy =');
+  const admissionType = state.match(/pub const CapacityAdmission = enum \{[^}]+\};/);
+  assert.ok(admissionType, 'production admission decisions exist');
+  const policy = between(capacity, 'pub const AdmissionOrigin =', 'fn capacityHostMetrics(');
+  const admit = between(capacity, 'pub fn capacityAdmitNewAgent(', 'pub fn capacityBlockNoticeActive(');
+  const classify = between(capacity, 'fn capacityStateForMetrics(', 'pub fn applyCapacityHysteresis(');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'capacity-origin-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+const app_state = @This();
+${types}
+${admissionType[0]}
+pub var g_capacity_policy = CapacityPolicy{};
+pub var g_capacity_block_notice_until: u64 = 0;
+var pressure: CapacityState = .critical;
+var busy: u16 = 20;
+var notices: usize = 0;
+var audits: usize = 0;
+fn effectiveCapacityState(_: u8) CapacityState { return pressure; }
+fn hostBusyAgentCount(_: u8) u16 { return busy; }
+fn capacityHostMetrics(_: u8) HostCapacity { return .{ .cores = 8, .load_milli = 64000 }; }
+fn capacityHostLabel(_: u8) []const u8 { return "test host"; }
+fn capacityStateLabel(_: CapacityState) []const u8 { return "test pressure"; }
+fn auditCapacityAdmission(_: u8, _: u8, _: AdmissionOrigin, _: CapacityAdmission, _: []const u8) void { audits += 1; }
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
+fn GetTickCount64() u64 { return 100; }
+${policy}
+${admit}
+${classify}
+test "manual starts proceed silently for every pressure, workspace and busy count" {
+    for ([_]CapacityState{ .unknown, .green, .amber, .red, .critical }) |p| {
+        pressure = p;
+        for ([_]u16{ 0, 8, 20 }) |b| {
+            busy = b;
+            for ([_]u8{ 0, 1, 255 }) |workspace| {
+                for ([_]u8{ 0, 1, 2 }) |host| {
+                    notices = 0;
+                    g_capacity_block_notice_until = 0;
+                    try std.testing.expect(capacityAdmitNewAgent(host, workspace, .user, "manual session"));
+                    try std.testing.expectEqual(@as(usize, 0), notices);
+                    try std.testing.expectEqual(@as(u64, 0), g_capacity_block_notice_until);
+                }
+            }
+        }
+    }
+    try std.testing.expect(audits > 0);
+}
+test "automatic pressure and busy refusals stay quiet and still block" {
+    g_capacity_block_notice_until = 0;
+    for ([_]CapacityState{ .red, .critical }) |p| {
+        pressure = p; busy = 0; notices = 0;
+        try std.testing.expect(!capacityAdmitNewAgent(0, 0, .automatic, "automatic session"));
+        try std.testing.expectEqual(@as(usize, 0), notices);
+        try std.testing.expectEqual(@as(u64, 0), g_capacity_block_notice_until);
+    }
+    pressure = .green; busy = 8; notices = 0;
+    try std.testing.expect(!capacityAdmitNewAgent(0, 0, .automatic, "automatic session"));
+    try std.testing.expectEqual(@as(usize, 0), notices);
+    busy = 0; notices = 0;
+    try std.testing.expect(capacityAdmitNewAgent(0, 0, .automatic, "automatic session"));
+    try std.testing.expectEqual(@as(usize, 0), notices);
+}
+test "quiet sustained PSI stays green and sustained critical PSI still blocks automation" {
+    var metrics = HostCapacity{ .valid = true, .cores = 8, .mem_total_kb = 100000, .mem_available_kb = 50000, .cpu_psi_milli = 1000, .mem_psi_milli = 2000, .io_psi_milli = 3000 };
+    try std.testing.expectEqual(CapacityState.green, capacityStateForMetrics(metrics, CapacityPolicy{}));
+    metrics.cpu_psi_milli = 60000;
+    try std.testing.expectEqual(CapacityState.critical, capacityStateForMetrics(metrics, CapacityPolicy{}));
+}
+`);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.error, undefined);
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    console.log(run.stderr.trim());
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-1648 the real remote probe ignores short PSI spikes and retains sustained pressure', { skip: process.platform === 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const state = fs.readFileSync(path.join(root, 'src/app_state.zig'), 'utf8');
+  const declaration = state.match(/pub const VPS_PROBE_SCRIPT =([\s\S]+?);\n/);
+  assert.ok(declaration, 'production remote probe exists');
+  const script = [...declaration[1].matchAll(/"(?:\\.|[^"\\])*"/g)].map(match => JSON.parse(match[0])).join('');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'capacity-probe-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'pressure'));
+    fs.writeFileSync(path.join(dir, 'loadavg'), '0.10 0.10 0.10 1/10 10\n');
+    fs.writeFileSync(path.join(dir, 'meminfo'), 'MemTotal: 100000 kB\nMemAvailable: 50000 kB\nSwapTotal: 1000 kB\nSwapFree: 1000 kB\n');
+    const probe = () => {
+      const run = spawnSync('/bin/sh', ['-c', script.replaceAll('/proc', dir)], { encoding: 'utf8', timeout: 10000 });
+      assert.equal(run.status, 0, run.stderr);
+      const fields = run.stdout.trim().split('|');
+      assert.equal(fields[0], '@capacity');
+      assert.equal(fields.length, 11, 'wire field count remains compatible');
+      return fields.slice(7, 10).map(Number);
+    };
+    for (const [index, kind] of ['cpu', 'memory', 'io'].entries()) {
+      fs.writeFileSync(path.join(dir, 'pressure', kind), `some avg10=90.00 avg60=${index + 1}.00 avg300=0.00 total=123\n`);
+    }
+    assert.deepEqual(probe(), [1, 2, 3], 'a ten-second spike must not enter the capacity sample');
+    for (const kind of ['cpu', 'memory', 'io']) {
+      fs.writeFileSync(path.join(dir, 'pressure', kind), 'some avg10=0.00 avg60=60.00 avg300=0.00 total=123\n');
+    }
+    assert.deepEqual(probe(), [60, 60, 60], 'sustained pressure must still reach automatic admission');
+    fs.rmSync(path.join(dir, 'pressure'), { recursive: true });
+    assert.deepEqual(probe(), [0, 0, 0], 'missing pressure files retain zero fallback');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-1648 manual launch paths and resurrection retain explicit origins', () => {
+  const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
+  for (const reason of ['c.label[0..c.label_len]', '"new workspace session"', 'reason']) {
+    assert.ok(palette.includes(`capacityAdmitNewAgent(host, workspace, .user, ${reason})`));
+  }
+  const archive = fs.readFileSync(path.join(root, 'src/archive.zig'), 'utf8');
+  assert.ok(archive.includes('capacityAdmitNewAgent(host, workspace, .automatic, "Claude resurrection")'));
+});

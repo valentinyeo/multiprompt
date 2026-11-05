@@ -935,7 +935,7 @@ const writeVpsPollCache = @import("vps.zig").writeVpsPollCache;
 const loadVpsPollCacheIfChanged = @import("vps.zig").loadVpsPollCacheIfChanged;
 const syncLiveTmuxMetadataFromCache = @import("vps.zig").syncLiveTmuxMetadataFromCache;
 const buildFilteredTmux = @import("vps.zig").buildFilteredTmux;
-const requestRepoRefresh = @import("vps.zig").requestRepoRefresh;
+const requestAllRepoRefresh = @import("vps.zig").requestAllRepoRefresh;
 const pickRepoOpen = @import("command_palette.zig").pickRepoOpen;
 const closePickRepo = @import("command_palette.zig").closePickRepo;
 const pickRepoChoose = @import("command_palette.zig").pickRepoChoose;
@@ -1288,6 +1288,7 @@ comptime {
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
         _ = @import("bot_avatar.zig");
+        _ = @import("room_view.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
@@ -1439,6 +1440,10 @@ fn clearSelectionForClick(hwnd: HANDLE, mx: i32, my: i32) void {
 
 fn showPickRepoFailure(saving_folder: bool) void {
     const palette = @import("command_palette.zig");
+    if (palette.g_pick_repo_offline) {
+        showHeaderNoticeAscii("Pick repo: server is offline", 4000, true);
+        return;
+    }
     if (saving_folder) {
         showHeaderNoticeAscii("Set workspace folder: could not save", 4000, true);
         return;
@@ -4242,7 +4247,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             loadCustomCommandsIfChanged();
             loadPaletteUsage();
             loadSnippetsIfChanged();
-            if (app_state.g_search_pick_repo_mode) requestRepoRefresh(app_state.g_search_pick_repo_host);
+            if (app_state.g_search_pick_repo_mode) requestAllRepoRefresh();
             updateSearchResults();
             if (!was_search_active and !app_state.g_search_from_inbox) {
                 captureSearchBackdrop();
@@ -5100,7 +5105,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 1;
                     app_state.g_search_scroll = 0;
-                    requestRepoRefresh(app_state.g_search_pick_repo_host);
+                    requestAllRepoRefresh();
                     updateSearchResults();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
@@ -6401,7 +6406,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_RENAME_SYNC_OFFSET or target == app_state.SEARCH_TABCTX_RENAME) {
-                    const idx = if (target == app_state.SEARCH_TABCTX_RENAME) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    const idx = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
                     if (idx) |shell| _ = beginPaletteRenameInput(shell);
                     return 0;
                 }
@@ -7136,8 +7141,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             closeShell(ti);
                         } else {
                             const shell = &app_state.shells[ti];
-                            var local_id: [16]u8 = undefined;
-                            const id = if (shell.claude_sid_len > 0) shell.claude_sid[0..shell.claude_sid_len] else if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else std.fmt.bufPrint(&local_id, "{d}", .{shell.shell_id}) catch return 0;
+                            var local_id: [40]u8 = undefined;
+                            const id = if (shell.claude_sid_len > 0) shell.claude_sid[0..shell.claude_sid_len] else if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else @import("chat_composer.zig").chatDraftKeyForShell(ti, &local_id);
                             var wide_id: [128]u16 = undefined;
                             const len = std.unicode.utf8ToUtf16Le(&wide_id, id) catch return 0;
                             if (!@import("clipboard.zig").setUnicodeClipboardTextWithRetry(wide_id[0..len])) showHeaderNoticeAscii("Could not copy chat ID", 3000, true);

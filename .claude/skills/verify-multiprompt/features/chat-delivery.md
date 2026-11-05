@@ -9,6 +9,10 @@
 - `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
 - `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and every sent text reached Claude's queue exactly once, in send order, within the same 10 seconds.
 
+### Hosted feedback boundary
+
+The GitHub Linux reader suite runs `tools/chat-history-reader-test.py`. Its Claude, Codex and Pi process stand-ins capture the startup guidance and child environment. Its feedback cases run the real command against a fake Hypertask executable, including denial and failed-vote controls. These cases do not prove the Windows build's embedded version, a live provider, real board writes or the existing desktop delivery journey. Those require separate exact-build and authorized-agent evidence.
+
 ## How to get to it (user POV)
 
 Select an existing remote tmux tab with Ctrl+1. Press Alt+C to open Chat View, type a message in its composer and press Enter. To ask Claude to take a queued message immediately, type in the composer and press Ctrl+X then Ctrl+S instead of Enter.
@@ -75,6 +79,19 @@ It also checks the absent startup sync banner and zero owned processes after cle
 Inspect `instant-first-paint.png`, `instant-buffered.png`, `instant-reloaded.png`, `instant-delivered.png`, `startup-timing.json`, the unchanged `offline-outbox.json`, `crash-outbox.json`, `reloaded-outbox.json`, `reloaded-copied.txt`, crash and reload process receipts, and both store snapshots in `verify-chat-delivery`.
 The delayed SSH stand-in replaces networking. The Windows server stand-in uses the reader's polling notification fallback and native Windows file locks in place of Linux notification and locking APIs. Provider dispatch is disabled for this store-arrival journey. The embedded request validation, SQLite transactions, message IDs, and receipts remain production code. This proves arrival in the production host store, not terminal handoff, a live provider response, or a real SSH server.
 Existing Enter, Alt+C, and Ctrl+K actions remain unchanged.
+
+### Three sent messages and cancellation (IGSH-1624)
+
+Run the same harness revision against the released executable and the branch build:
+
+```sh
+gh workflow run held-queue.yml --ref <branch> -f tag=v0.28.1490
+gh workflow run held-queue.yml --ref <branch>
+```
+
+The wrapper also runs four hosted terminal queue checks: desktop and Android, each against candidate and control readers. The branch must first contain these capture changes. The tag selects the published executable, not its old harness. The driver types three messages, opens the actual middle-message context menu, cancels it, and verifies the other two arrive in order. It selects Light, AMOLED and Edge Grey through Themes before and after cancellation, waits for each app-written theme token and a sampled stable transcript, then restores the initial theme. Edge Grey is not Graphite 2.
+
+The artifact contains `cancel-held-{held,cancelled}-{light,amoled,edgegray}.png`, matching `-transcript.bmp` crops, and `cancel-held/cancel-held-<stage>-<theme>-frame.json` viewport and stability observations. Compare the two runs and retain the existing outbox, transcript, input, Doctor and cleanup evidence. An independent reviewer must inspect the images. The current oracle checks cancellation behavior and the original screenshots; it does not measure these themed pixels or assert the absence of status labels. A green run is not visual proof. The intended old-release visual control is the visible Cancelled label or resulting spacing, but this must be established from the artifact, not inferred from a setup failure. The SSH/tmux and agent are synthetic; no real network or agent is tested.
 
 ## Gotchas
 

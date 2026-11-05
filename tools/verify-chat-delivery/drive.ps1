@@ -1245,6 +1245,57 @@ foreach ($plan in $plans) {
         } elseif ($isCancel) {
             $texts = @('cancel keep one', 'cancel target two', 'cancel keep three')
             [void](Step 'transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
+            $originalTheme = (Read-Shared "$settings/theme-mode.txt").Trim()
+            if (-not $originalTheme) { $originalTheme = 'dark' }
+            function Cancel-Theme([string]$Token) {
+                $query = if ($Token -in @('edgegray', 'edgegrey')) { 'edge grey' } else { $Token }
+                $saved = if ($Token -eq 'edgegrey') { 'edgegray' } else { $Token }
+                Press @(0x11, 0x4B) 'Ctrl+K: choose the existing theme'
+                foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+                Press @(0x0D) 'Enter: open theme choices'
+                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+                Press @(0x0D) "Enter: choose $query"
+                [void](Wait-For "app saved $saved theme" { (Read-Shared "$settings/theme-mode.txt").Trim() -eq $saved })
+                Press @(0x1B) 'Esc: close Themes'
+                [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            }
+            function Cancel-Captures([string]$Stage) {
+                foreach ($theme in @('light', 'amoled', 'edgegray')) {
+                    Cancel-Theme $theme
+                    Bind-Transcript
+                    $rect = $views[0].Current.BoundingRectangle
+                    $bounds = [Drawing.Rectangle]::new([int]$rect.Left, [int]$rect.Top, [int]$rect.Width, [int]$rect.Height)
+                    if ($bounds.Width -le 200 -or $bounds.Height -le 100) { throw 'Transcript viewport is too small for themed captures' }
+                    $capture = @{previous=$null; samples=0; changed=0}
+                    try {
+                        [void](Wait-For "stable $theme $Stage transcript capture" {
+                            $current = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+                            $graphics = [Drawing.Graphics]::FromImage($current)
+                            try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size) } finally { $graphics.Dispose() }
+                            $changed = 0; $samples = 0
+                            if ($null -ne $capture.previous) {
+                                for ($y = 0; $y -lt $bounds.Height; $y += 8) {
+                                    for ($x = 0; $x -lt $bounds.Width; $x += 8) {
+                                        $samples++
+                                        if ($current.GetPixel($x, $y).ToArgb() -ne $capture.previous.GetPixel($x, $y).ToArgb()) { $changed++ }
+                                    }
+                                }
+                                $capture.previous.Dispose()
+                            }
+                            $capture.previous = $current
+                            $capture.samples = $samples; $capture.changed = $changed
+                            if ($samples -gt 0 -and $changed -le ($samples * 0.005)) { return $true }
+                            Start-Sleep -Milliseconds 400
+                            return $false
+                        } 15)
+                        $name = "cancel-held-$Stage-$theme"
+                        Shot $name
+                        $capture.previous.Save("$Evidence/$name-transcript.bmp", [Drawing.Imaging.ImageFormat]::Bmp)
+                        Save @{theme=$theme; stage=$Stage; transcript=@{left=$bounds.Left; top=$bounds.Top; width=$bounds.Width; height=$bounds.Height}; sampled=$capture.samples; changed=$capture.changed} "$caseDir/$name-frame.json"
+                    } finally { if ($null -ne $capture.previous) { $capture.previous.Dispose() } }
+                }
+                Cancel-Theme $originalTheme
+            }
             foreach ($text in $texts) {
                 Type-Composer $text
                 Press @(0x0D) 'Enter: send composer' $true
@@ -1253,6 +1304,7 @@ foreach ($plan in $plans) {
             [void](Step 'three-messages-held' { (Queue-View) -ceq ('queued:' + ($texts -join '|queued:')) } 30)
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-held.json"
             Shot 'cancel-held-waiting'
+            Cancel-Captures 'held'
             $offered = Find-CancelMenu { param($items, $echo) $items -match 'Cancel message' -and $echo -eq 2 }
             [void](Step 'middle-message-offers-cancel' { $null -ne $offered })
             if ($null -eq $offered) { throw 'Middle message has no Cancel action' }
@@ -1265,6 +1317,7 @@ foreach ($plan in $plans) {
             [void](Step 'other-messages-still-held' { (Queue-View) -ceq ('queued:' + $texts[0] + '|queued:' + $texts[2]) })
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-cancelled.json"
             Shot 'cancel-held-cancelled'
+            Cancel-Captures 'cancelled'
             Shell-Input 'idle'
             [void](Step 'survivors-received-in-order' { (Queue-View) -ceq ('sent:' + $texts[0] + '|sent:' + $texts[2]) } 30)
             [void](Step 'survivor-echoes-settled' {

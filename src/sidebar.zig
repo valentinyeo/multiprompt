@@ -329,8 +329,7 @@ const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
 const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
-const RepoRow = @import("vps.zig").RepoRow;
-const pickRepoFilteredRows = @import("command_palette.zig").pickRepoFilteredRows;
+const pickRepoPresentedRows = @import("command_palette.zig").pickRepoPresentedRows;
 const workspaceFolderCurrent = @import("command_palette.zig").workspaceFolderCurrent;
 const activeWorkspaceSlot = @import("command_palette.zig").activeWorkspaceSlot;
 const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
@@ -3855,14 +3854,23 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var prb_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Back"), -1, &prb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_pick_repo_row) {
-                        var repo_rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-                        const repo_count = pickRepoFilteredRows(repo_rows[0..]);
+                        const repo_rows = pickRepoPresentedRows();
+                        const repo_count = repo_rows.len;
                         const repo_idx = result_idx - SEARCH_PICK_REPO_ROW_OFFSET;
                         if (repo_idx < repo_count) {
                             _ = SelectObject(hdc, palette_font);
-                            _ = SetTextColor(hdc, primary_color);
-                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            drawAscii(hdc, repo_rows[repo_idx].path[0..repo_rows[repo_idx].path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            const row = &repo_rows[repo_idx];
+                            _ = SetTextColor(hdc, if (row.available) primary_color else RGB(120, 120, 130));
+                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 180, .bottom = ry + row_h };
+                            drawAscii(hdc, row.path[0..row.path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            _ = SelectObject(hdc, palette_hint_font);
+                            _ = SetTextColor(hdc, RGB(120, 120, 130));
+                            var label_buf: [160]u8 = undefined;
+                            const label = std.fmt.bufPrint(&label_buf, "{s}{s}", .{ row.host_name[0..row.host_name_len], if (row.available) "" else "  Offline" }) catch "";
+                            var wide: [160]u16 = undefined;
+                            const wide_len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                            var host_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            if (wide_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &wide, @intCast(wide_len), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
                         }
                     } else if (result_idx == SEARCH_PICK_REPO_OFFSET or result_idx == SEARCH_SET_FOLDER_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
