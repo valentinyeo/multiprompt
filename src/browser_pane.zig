@@ -5873,6 +5873,7 @@ fn cancelUrlBarFocus() void {
 }
 
 fn abandonUrlBarFocus() void {
+    altqLog("url_focus abandon edit={X} current={X} fg={X} focus={X} now={} deadline={} input={} requested={} auth={X} until={} alt={} ctrl={} shift={}", .{ altqPtr(url_focus_edit), altqPtr(app_state.g_edit_hwnd), altqPtr(GetForegroundWindow()), altqPtr(GetFocus()), GetTickCount64(), url_focus_deadline, app_state.g_focus_input_tick, url_focus_input_tick, altqPtr(app_state.g_focus_authorized_hwnd), app_state.g_focus_authorized_until, GetAsyncKeyState(0x12), GetAsyncKeyState(0x11), GetAsyncKeyState(0x10) });
     if (url_focus_edit != null and app_state.g_edit_hwnd == url_focus_edit and app_state.g_edit_is_browser_urlbar) {
         discardBrowserUrlBarEdit();
         if (@import("computer_pane.zig").selected()) @import("computer_pane.zig").sync();

@@ -98,6 +98,9 @@ fn PostMessageW(_: HANDLE, _: u32, wp: usize, _: isize) i32 { posted_wp = wp; re
 fn GetFocus() HANDLE { return focused; }
 fn discardBrowserUrlBarEdit() void { discarded += 1; app_state.g_edit_hwnd = null; }
 fn updateBrowserVisibility() void { visibility_updates += 1; }
+fn altqLog(_: []const u8, _: anytype) void {}
+fn altqPtr(h: HANDLE) usize { return if (h) |value| @intFromPtr(value) else 0; }
+fn GetForegroundWindow() HANDLE { return main_window; }
 fn postKill(hwnd: HANDLE, msg: u32) void {
 ${sender}
 }
@@ -189,6 +192,8 @@ const app_state = struct {
     var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 };
 fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
+fn altqLog(_: []const u8, _: anytype) void {}
+fn altqPtr(h: HANDLE) usize { return if (h) |value| @intFromPtr(value) else 0; }
 fn DestroyWindow(hwnd: HANDLE) i32 { destroyed = hwnd; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
 fn computerSelected() bool { return computer_selected; }
