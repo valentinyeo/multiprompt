@@ -2361,6 +2361,7 @@ MESSAGE_WORKER_IDLE_SECONDS = 120
 HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
+HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_IDLE_SECONDS = 300
 HOST_DELIVERY_TIMEOUT = 15
@@ -2506,7 +2507,48 @@ def host_folder(value):
     if not isinstance(value, str) or not value or len(value) > 220 or HOST_FOLDER.fullmatch(value) is None:
         return None
     expanded = os.path.expanduser(value)
-    return expanded if os.path.isabs(expanded) else None
+    return host_owner_folder(expanded) if os.path.isabs(expanded) else None
+
+
+def host_owner_folder(folder):
+    if os.path.isdir(folder):
+        return folder
+    try:
+        relative = Path(folder).relative_to(HOME)
+    except ValueError:
+        return folder
+    if not relative.parts or ".." in relative.parts:
+        return folder
+    try:
+        names = sorted(os.listdir(HOST_USER_HOMES))
+    except OSError:
+        return folder
+    found = []
+    for name in names:
+        if name == HOME.name:
+            continue
+        owner = conversation_owner(str(HOST_USER_HOMES / name / relative), include_home=True)
+        if owner is None:
+            continue
+        candidate = str(owner[1] / relative)
+        try:
+            probe = subprocess.run(["sudo", "-n", "-u", owner[0], "--", "test", "-d", candidate],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode == 0:
+            found.append(candidate)
+    if len(found) == 1:
+        return found[0]
+    used = []
+    for path in (HOME / ".local/state/multiprompt/agent-host").glob("*.config.json") if found else ():
+        config = host_read(path)
+        if isinstance(config, dict) and config.get("cwd") in found:
+            try:
+                used.append((path.stat().st_mtime, config["cwd"]))
+            except OSError:
+                pass
+    return max(used)[1] if used else folder
 
 
 def host_cwd(provider, sid):
