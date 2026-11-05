@@ -871,68 +871,69 @@ def capture_screen(escapes):
     return shown
 
 
-def tmux_buffer():
-    name = ARGS[ARGS.index("-b") + 1]
+def tmux_buffer(argv, input):
+    name = argv[argv.index("-b") + 1]
     if not re.fullmatch(r"mp-send-[0-9a-f]{32}", name):
         return 95
     directory = ROOT / "tmux-buffers"
     directory.mkdir(exist_ok=True)
     path = directory / name
-    operation = ARGS[0]
+    operation = argv[0]
     if operation == "load-buffer":
-        path.write_bytes(sys.stdin.buffer.read())
+        path.write_bytes(input.read())
     elif operation == "paste-buffer":
         if not path.exists():
             return 1
-        text = path.read_text(encoding="utf-8")
-        if not fake_send(["send-keys", "-t", ARGS[ARGS.index("-t") + 1], "-l", "--", text]):
+        text = path.read_bytes().decode("utf-8")
+        if not fake_send(["send-keys", "-t", argv[argv.index("-t") + 1], "-l", "--", text]):
             return 95
-        if "-d" in ARGS:
+        if "-d" in argv:
             path.unlink()
     elif path.exists():
         path.unlink()
     else:
         return 1
-    record("tmux-buffers.jsonl", argv=ARGS)
+    record("tmux-buffers.jsonl", argv=argv)
     return 0
 
 
-def tmux():
+def tmux(argv, input, output):
     fake = state().get("fake")
-    if fake and ARGS[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
-        return tmux_buffer()
-    if ARGS[:1] == ["capture-pane"]:
-        shown = capture_screen("-e" in ARGS)
-        record("capture.jsonl", argv=ARGS, screen=shown)
-        sys.stdout.reconfigure(newline="\n")
-        sys.stdout.write(shown)
+    if fake and argv[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
+        return tmux_buffer(argv, input)
+    if argv[:1] == ["capture-pane"]:
+        shown = capture_screen("-e" in argv)
+        record("capture.jsonl", argv=argv, screen=shown)
+        if hasattr(output, "reconfigure"):
+            output.reconfigure(newline="\n")
+        output.write(shown)
         return 0
-    if ARGS[:1] == ["send-keys"] and state().get("sendingProof") and "-l" in ARGS:
+    if argv[:1] == ["send-keys"] and state().get("sendingProof") and "-l" in argv:
         (ROOT / "send-blocked").touch()
         deadline = time.monotonic() + 30
         while not (ROOT / "release-send").exists():
             if time.monotonic() > deadline:
                 return 96
             time.sleep(0.05)
-    if ARGS[:1] == ["send-keys"]:
+    if argv[:1] == ["send-keys"]:
         if stateful(state()):
             return box_send()
-        record("agent-buffer.jsonl", argv=ARGS)
-        if fake and not fake_send(ARGS):
-            record("unsupported.jsonl", argv=ARGS)
+        record("agent-buffer.jsonl", argv=argv)
+        if fake and not fake_send(argv):
+            record("unsupported.jsonl", argv=argv)
             return 95
         return 0
-    if ARGS[:1] == ["list-panes"]:
+    if argv[:1] == ["list-panes"]:
         if fake:
             panes = state().get("panes")
             if panes:
-                target = ARGS[ARGS.index("-t") + 1].lstrip("=") if "-t" in ARGS else ""
+                target = argv[argv.index("-t") + 1].lstrip("=") if "-t" in argv else ""
                 if target in panes:
-                    sys.stdout.write(str(panes[target]) + "\n")
+                    output.write(str(panes[target]) + "\n")
             else:
-                sys.stdout.write(str(state()["panePid"]) + "\n")
+                output.write(str(state()["panePid"]) + "\n")
         return 0
-    record("unsupported.jsonl", argv=ARGS)
+    record("unsupported.jsonl", argv=argv)
     return 95
 
 
@@ -1005,6 +1006,28 @@ def completion(remote):
         sys.stdout.write(reply(base64.b64decode(remote[3]).decode("utf-8")))
         return 0
     return 95
+
+
+def install_reaction_tmux(namespace):
+    import io
+    import types
+
+    original = namespace['subprocess'].run
+
+    def run(command, **kwargs):
+        if command[:1] != ['tmux']:
+            return original(command, **kwargs)
+        output = io.StringIO()
+        code = tmux(command[1:], io.BytesIO(kwargs.get('input', b'')), output)
+        text = kwargs.get('text') or kwargs.get('encoding') or kwargs.get('universal_newlines')
+        stdout = output.getvalue() if text else output.getvalue().encode('utf-8')
+        stderr = '' if text else b''
+        if code and kwargs.get('check'):
+            raise subprocess.CalledProcessError(code, command, stdout, stderr)
+        return subprocess.CompletedProcess(command, code, stdout, stderr)
+
+    namespace['subprocess'] = types.SimpleNamespace(**dict(vars(subprocess), run=run))
+    record('reader-boundary.jsonl', tmux='in-process fake command boundary; production connector unchanged')
 
 
 def install_reaction_worker(namespace):
@@ -1097,6 +1120,7 @@ def reader_namespace():
         namespace["events_wake"] = lambda: None
         record("reader-boundary.jsonl", locking="msvcrt", notification="poll fallback")
         if state().get("name") == "reactions":
+            install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
@@ -1310,4 +1334,4 @@ def ssh():
 
 
 if __name__ == "__main__":
-    sys.exit(tmux() if MODE == "tmux" else shell() if MODE == "shell" else ssh())
+    sys.exit(tmux(ARGS, sys.stdin.buffer, sys.stdout) if MODE == "tmux" else shell() if MODE == "shell" else ssh())

@@ -71,18 +71,25 @@ print('REACTION_WINDOWS_DISPATCH_PROVEN')
 
 test('IGSH-1590 tmux buffers preserve Unicode and paste once without submitting', () => {
   const script = String.raw`
-import ast, io, pathlib, re, sys, tempfile, types
+import ast, io, pathlib, re, subprocess, sys, tempfile, types
 source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
-node = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'tmux_buffer')
+nodes = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in ('tmux_buffer', 'tmux', 'install_reaction_tmux')]
+assert len(nodes) == 3
 with tempfile.TemporaryDirectory() as directory:
     sent, records = [], []
     text = '👍 to: Same first words [mp:6d8e353d25c5fe23]\nsecond line'
     name = 'mp-send-' + 'a' * 32
-    scope = dict(ROOT=pathlib.Path(directory), re=re, sys=types.SimpleNamespace(stdin=types.SimpleNamespace(buffer=io.BytesIO(text.encode('utf-8')))), fake_send=lambda argv: sent.append(argv) or True, record=lambda name, **row: records.append(row))
-    exec(compile(ast.Module(body=[node], type_ignores=[]), '<tmux-buffer>', 'exec'), scope)
+    scope = dict(ROOT=pathlib.Path(directory), re=re, subprocess=subprocess, state=lambda: dict(fake=True), capture_screen=lambda escapes: '❯ draft stays here\n', fake_send=lambda argv: sent.append(argv) or True, record=lambda name, **row: records.append(row))
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), '<tmux-buffer>', 'exec'), scope)
+    external = []
+    namespace = dict(subprocess=types.SimpleNamespace(run=lambda *args, **kwargs: external.append(args) or 'external'))
+    scope['install_reaction_tmux'](namespace)
+    command = namespace['subprocess'].run
+    assert command(['external']) == 'external' and external == [(['external'],)]
+    assert command(['tmux', 'capture-pane', '-p', '-e'], text=True).stdout == '❯ draft stays here\n'
+    assert command(['tmux', 'capture-pane', '-p']).stdout == '❯ draft stays here\n'.encode()
     def run(*args):
-        scope['ARGS'] = list(args)
-        return scope['tmux_buffer']()
+        return command(['tmux', *args], input=text.encode('utf-8')).returncode
     assert run('load-buffer', '-b', name, '-') == 0
     assert not sent
     assert run('paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:') == 0
@@ -90,7 +97,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert run('paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:') == 1
     assert len(sent) == 1
     assert run('delete-buffer', '-b', name) == 1
-    scope['sys'].stdin.buffer = io.BytesIO(b'other')
+    try:
+        command(['tmux', 'paste-buffer', '-p', '-d', '-b', name, '-t', '=verify-agent:'], check=True)
+        raise AssertionError('missing buffer must raise with check=True')
+    except subprocess.CalledProcessError as error:
+        assert error.returncode == 1
     assert run('load-buffer', '-b', name, '-') == 0
     assert run('delete-buffer', '-b', name) == 0
     assert run('load-buffer', '-b', '../outside', '-') == 95
