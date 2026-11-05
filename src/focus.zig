@@ -944,6 +944,16 @@ pub fn activeShellHasForegroundFocus() bool {
     return if (app_state.g_igsh354_paste_focus) pasteFocusLanded(target) else GetForegroundWindow() == target;
 }
 
+pub fn heldModifierMask() u32 {
+    const w = @import("win32.zig");
+    var mods: u32 = 0;
+    if (GetAsyncKeyState(0x12) < 0) mods |= w.MOD_ALT;
+    if (GetAsyncKeyState(0x11) < 0) mods |= w.MOD_CONTROL;
+    if (GetAsyncKeyState(0x10) < 0) mods |= w.MOD_SHIFT;
+    if (GetAsyncKeyState(0x5B) < 0 or GetAsyncKeyState(0x5C) < 0) mods |= w.MOD_WIN;
+    return mods;
+}
+
 pub fn browserPageFocusCommand(pane_foreground: bool, alt_down: bool) ?WPARAM {
     const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;
     return if (pane_foreground and !alt_down) IDC_FOCUS_WEB_CONTENTS_PANE else null;
@@ -974,9 +984,11 @@ pub fn focusActiveBrowserPaneUnlocked() void {
     app_state.g_native_browser_alt_unlocked_at = 0;
     const bh = activeBrowserHwndLive() orelse return;
     if (!focusGuard(bh)) return;
-    const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+    const held_modifiers = heldModifierMask();
+    const phys_alt = held_modifiers & @import("win32.zig").MOD_ALT != 0;
     altqLog("pane_hop enter pane={X} phys_alt={} pane_fg={} fg={X} chat={} mode={}", .{ altqPtr(bh), phys_alt, activeBrowserHasForegroundFocus(), altqPtr(GetForegroundWindow()), app_state.g_chat_active, app_state.g_browser_focus_mode });
     if (phys_alt) return;
+    if (held_modifiers != 0) return;
     cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
 

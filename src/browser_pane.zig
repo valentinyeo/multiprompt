@@ -1955,25 +1955,26 @@ fn activeBrowserShowsUrlBar() bool {
     return sh.browser_pinned_url_len != 0 or (!sh.browser_native and !webView2OwnsActiveShell());
 }
 
-pub var url_bar_hotkey_registered = false;
-var url_bar_hotkey_attempted = false;
-pub var browser_focus_hotkey_registered = false;
-var browser_focus_hotkey_attempted = false;
+const Scope = enum { focus_escape, focus, address, pane_address };
+const Binding = struct { id: i32, modifiers: u32, key: u32, scope: Scope };
+const Registration = enum { inactive, registered, refused };
+const bindings = [_]Binding{
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_URL, .modifiers = @import("win32.zig").MOD_CONTROL | @import("win32.zig").MOD_SHIFT, .key = 0x4C, .scope = .address },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS, .modifiers = @import("win32.zig").MOD_ALT, .key = 0x51, .scope = .focus_escape },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS_ALT_M, .modifiers = @import("win32.zig").MOD_ALT, .key = 0x4D, .scope = .focus_escape },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS_GRAVE, .modifiers = @import("win32.zig").MOD_CONTROL, .key = 0xC0, .scope = .focus },
+    .{ .id = @import("win32.zig").HOTKEY_ID_BROWSER_PANE_URL, .modifiers = @import("win32.zig").MOD_CONTROL, .key = 0x4C, .scope = .pane_address },
+};
+var registrations: [bindings.len]Registration = @splat(.inactive);
 
-pub fn browserFocusHotkeyAllowed() bool {
+fn browserFocusHotkeyAllowed() bool {
     return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
         !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
         !browserChromeHiddenForOverlay() and !app_state.g_search_active and app_state.active_shell < app_state.shell_count and
         (app_state.shells[app_state.active_shell].browser_enabled or webView2OwnsActiveShell()) and foregroundIsOurs();
 }
 
-pub fn unregisterBrowserFocusHotkey() void {
-    if (browser_focus_hotkey_registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS);
-    browser_focus_hotkey_registered = false;
-    browser_focus_hotkey_attempted = false;
-}
-
-pub fn urlBarHotkeyAllowed() bool {
+fn urlBarHotkeyAllowed() bool {
     return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
         !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
         !browserChromeHiddenForOverlay() and !app_state.g_search_active and !app_state.g_chat_find_open and app_state.g_edit_hwnd == null and
@@ -1982,25 +1983,47 @@ pub fn urlBarHotkeyAllowed() bool {
         IsWindowVisible(app_state.g_urlbar_hwnd) != 0 and foregroundIsOurs();
 }
 
-pub fn unregisterUrlBarHotkey() void {
-    if (url_bar_hotkey_registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_URL);
-    url_bar_hotkey_registered = false;
-    url_bar_hotkey_attempted = false;
+fn browserHotkeyScopeAllowed(scope: Scope) bool {
+    return switch (scope) {
+        .focus_escape => browserFocusHotkeyAllowed(),
+        .focus => browserFocusHotkeyAllowed() and !app_state.g_chat_find_open and app_state.g_edit_hwnd == null and (activeBrowserHwndLive() != null or webView2OwnsActiveShell()),
+        .address => urlBarHotkeyAllowed(),
+        .pane_address => urlBarHotkeyAllowed() and activeBrowserHasForegroundFocus(),
+    };
+}
+
+pub fn unregisterBrowserHotkeys() void {
+    for (bindings, 0..) |binding, i| {
+        if (registrations[i] == .registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, binding.id);
+        registrations[i] = .inactive;
+    }
 }
 
 pub fn syncBrowserHotkeys() void {
-    if (!browserFocusHotkeyAllowed()) {
-        unregisterBrowserFocusHotkey();
-    } else if (!browser_focus_hotkey_attempted) {
-        browser_focus_hotkey_attempted = true;
-        browser_focus_hotkey_registered = @import("win32.zig").RegisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_FOCUS, @import("win32.zig").MOD_ALT | @import("win32.zig").MOD_NOREPEAT, 0x51) != 0;
+    for (bindings, 0..) |binding, i| {
+        if (!browserHotkeyScopeAllowed(binding.scope)) {
+            if (registrations[i] == .registered) _ = @import("win32.zig").UnregisterHotKey(app_state.g_main_hwnd, binding.id);
+            registrations[i] = .inactive;
+        } else if (registrations[i] == .inactive) {
+            registrations[i] = if (@import("win32.zig").RegisterHotKey(app_state.g_main_hwnd, binding.id, binding.modifiers | @import("win32.zig").MOD_NOREPEAT, binding.key) != 0) .registered else .refused;
+        }
     }
-    if (!urlBarHotkeyAllowed()) {
-        unregisterUrlBarHotkey();
-    } else if (!url_bar_hotkey_attempted) {
-        url_bar_hotkey_attempted = true;
-        url_bar_hotkey_registered = @import("win32.zig").RegisterHotKey(app_state.g_main_hwnd, @import("win32.zig").HOTKEY_ID_BROWSER_URL, @import("win32.zig").MOD_CONTROL | @import("win32.zig").MOD_SHIFT | @import("win32.zig").MOD_NOREPEAT, 0x4C) != 0;
+}
+
+pub fn browserHotkeyAction(id: usize, lp: isize) ?enum { focus, address } {
+    for (bindings, 0..) |binding, i| {
+        if (id == @as(usize, @intCast(binding.id)) and registrations[i] == .registered and browserHotkeyScopeAllowed(binding.scope) and
+            @as(usize, @bitCast(lp)) == (@as(usize, binding.key) << 16 | binding.modifiers) and @import("focus.zig").heldModifierMask() & ~binding.modifiers == 0)
+            return switch (binding.scope) { .focus_escape, .focus => .focus, .address, .pane_address => .address };
     }
+    return null;
+}
+
+pub fn browserHotkeyPasses(key: u32) bool {
+    for (bindings, 0..) |binding, i| {
+        if (binding.key == key and registrations[i] == .registered and browserHotkeyScopeAllowed(binding.scope) and @import("focus.zig").heldModifierMask() == binding.modifiers) return true;
+    }
+    return false;
 }
 
 pub fn calcBrowserLayout() ?BrowserLayout {
@@ -3999,8 +4022,7 @@ fn hideBrowserWindowHard(hwnd: HANDLE) void {
 
 pub fn hideAllBrowserChrome() void {
     if (app_state.g_chat_browser_swap.shell_id != 0 and !@import("computer_pane.zig").selected()) return;
-    unregisterUrlBarHotkey();
-    unregisterBrowserFocusHotkey();
+    unregisterBrowserHotkeys();
     hideBrowserFloatingChrome();
     for (0..app_state.shell_count) |i| {
         const bh = app_state.shells[i].browser_hwnd;

@@ -46,13 +46,13 @@ function Get-TypingEditChild([IntPtr]$Bar) {
     if ($ownedProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($edit, 2) -ne $Bar) { throw 'URL Edit ownership mismatch' }
     return $edit
 }
-function Leave-TypingBrowser {
-    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Expected owned browser foreground before Alt+Q' }
-    [VerifyNative]::Chord(@(0x12, 0x51))
+function Leave-TypingBrowser([int[]]$Keys = @(0x12, 0x51)) {
+    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Expected owned browser foreground before focus shortcut' }
+    [VerifyNative]::Chord($Keys)
     Wait-Until {
         $foreground = [VerifyNative]::GetForegroundWindow()
         $foreground -ne [IntPtr]::Zero -and $foreground -ne $browser -and [VerifyNative]::GetAncestor($foreground, 3) -eq $script:window
-    } 'Alt+Q returns to owned console or frame' 10 -PollMilliseconds 20
+    } 'focus shortcut returns to owned console or frame' 10 -PollMilliseconds 20
 }
 function Get-TypingEdit([IntPtr]$Bar) {
     $edit = [VerifyNative]::GetFocusedWindow($script:window)
@@ -63,9 +63,9 @@ function Wait-TypingEdit([IntPtr]$Bar) {
     Wait-Until { (Get-TypingEdit $Bar) -ne [IntPtr]::Zero } 'owned URL bar Edit has focus' 5 -PollMilliseconds 20
     return Get-TypingEdit $Bar
 }
-function Page-TypingFocus {
-    [VerifyNative]::Chord(@(0x12, 0x51))
-    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $browser } 'Alt+Q focuses the owned browser page' 10 -PollMilliseconds 20
+function Page-TypingFocus([int[]]$Keys = @(0x12, 0x51)) {
+    [VerifyNative]::Chord($Keys)
+    Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $browser } 'focus shortcut activates the owned browser page' 10 -PollMilliseconds 20
 }
 
 [uint32]$browserPid = 0
@@ -165,6 +165,25 @@ try {
 $heldText = [VerifyNative]::EditText($heldEdit)
 if ($heldText -cne 'abc') { throw "Held-Ctrl release expected address text abc, got '$heldText'" }
 $result.checks += @{ name = 'held-ctrl-release-typing'; text = $heldText }
+[VerifyNative]::Chord(@(0x1B))
+Page-TypingFocus
+foreach ($shortcutCase in @(
+    @{ shortcut = 'Alt+M'; chord = @(0x12, 0x4D) },
+    @{ shortcut = 'Ctrl+`'; chord = @(0x11, 0xC0) }
+)) {
+    Leave-TypingBrowser -Keys $shortcutCase.chord
+    Page-TypingFocus -Keys $shortcutCase.chord
+    if ([VerifyNative]::IsDown(0x12) -or [VerifyNative]::IsDown(0x11)) { throw "Focus alias $($shortcutCase.shortcut) left a modifier down" }
+    $result.checks += @{ name = 'browser-focus-alias'; shortcut = $shortcutCase.shortcut; foreground = [VerifyNative]::GetForegroundWindow().ToInt64() }
+}
+$bar = Get-TypingUrlBar
+if ($bar -eq [IntPtr]::Zero) { throw 'Owned app address bar missing before Ctrl+L alias' }
+[VerifyNative]::Chord(@(0x11, 0x4C))
+$aliasEdit = Wait-TypingEdit $bar
+[VerifyNative]::Text('abc')
+$aliasText = [VerifyNative]::EditText($aliasEdit)
+if ($aliasText -cne 'abc') { throw "Ctrl+L alias expected address text abc, got '$aliasText'" }
+$result.checks += @{ name = 'pane-address-alias'; shortcut = 'Ctrl+L'; text = $aliasText }
 [VerifyNative]::Chord(@(0x1B))
 Page-TypingFocus
 Leave-TypingBrowser

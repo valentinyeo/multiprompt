@@ -720,12 +720,7 @@ test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
 }
 
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-    if (nCode == HC_ACTION and @import("browser_pane.zig").url_bar_hotkey_registered and !@import("browser_pane.zig").urlBarHotkeyAllowed()) {
-        @import("browser_pane.zig").unregisterUrlBarHotkey();
-    }
-    if (nCode == HC_ACTION and @import("browser_pane.zig").browser_focus_hotkey_registered and !@import("browser_pane.zig").browserFocusHotkeyAllowed()) {
-        @import("browser_pane.zig").unregisterBrowserFocusHotkey();
-    }
+    if (nCode == HC_ACTION) @import("browser_pane.zig").syncBrowserHotkeys();
     if (nCode == HC_ACTION and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         if (kb.vkCode == 0x54 and (isCtrlDown() or isAltDown(kb.flags)) and foregroundIsOurs()) {
@@ -772,9 +767,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
         const key_down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
         const key_up = wp == WM_KEYUP or wp == WM_SYSKEYUP;
-        if (key_down and kb.vkCode == 0x51 and isAltDown(kb.flags) and !isCtrlDown() and !app_state.g_browser_focus_chord_held and
-            GetAsyncKeyState(0x10) >= 0 and GetAsyncKeyState(0x5B) >= 0 and GetAsyncKeyState(0x5C) >= 0 and
-            @import("browser_pane.zig").browser_focus_hotkey_registered and @import("browser_pane.zig").browserFocusHotkeyAllowed())
+        if (key_down and !((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and app_state.g_browser_focus_chord_held) and
+            @import("browser_pane.zig").browserHotkeyPasses(kb.vkCode))
         {
             return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
@@ -1957,7 +1951,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 1;
                 }
                 if (shift and kb.vkCode == 0x4C and (kb.flags & 0x20) == 0 and app_state.g_edit_hwnd == null and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
-                    if (@import("browser_pane.zig").url_bar_hotkey_registered and @import("browser_pane.zig").urlBarHotkeyAllowed()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FOCUS_URL, 0, 0);
                     return 1;
                 }

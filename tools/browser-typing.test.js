@@ -268,7 +268,16 @@ test('address hotkey registers only for the owned visible custom bar', () => {
   const root = path.join(__dirname, '..');
   const pane = fs.readFileSync(path.join(root, 'src/browser_pane.zig'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
-  const start = pane.indexOf('pub var url_bar_hotkey_registered');
+  const shortcuts = fs.readFileSync(path.join(root, 'src/shortcuts.zig'), 'utf8');
+  const passthroughStart = shortcuts.indexOf('        if (key_down and !((kb.vkCode == 0x51');
+  const passthroughEnd = shortcuts.indexOf('\n        if (kb.vkCode < computer_consumed_keys.len', passthroughStart);
+  assert.ok(passthroughStart >= 0 && passthroughEnd > passthroughStart);
+  const passthrough = shortcuts.slice(passthroughStart, passthroughEnd)
+    .replaceAll('kb.vkCode', 'key')
+    .replaceAll('app_state.g_browser_focus_chord_held', 'held')
+    .replaceAll('@import("browser_pane.zig")', 'browser')
+    .replace('return CallNextHookEx(app_state.g_hook, nCode, wp, lp);', 'return true;');
+  const start = pane.indexOf('const Scope = enum { focus_escape');
   const end = pane.indexOf('\npub fn calcBrowserLayout(', start);
   const handlerStart = main.indexOf('        WM_HOTKEY => {');
   const handlerEnd = main.indexOf('        0x0011 => {', handlerStart);
@@ -280,6 +289,7 @@ test('address hotkey registers only for the owned visible custom bar', () => {
     .replaceAll('@import("focus.zig").focusActiveShellFromBrowserInput()', 'focusActiveShell()');
   const lifecycle = pane.slice(start, end)
     .replaceAll('@import("win32.zig")', 'win32')
+    .replaceAll('@import("focus.zig").heldModifierMask()', 'heldModifierMask()')
     .replaceAll('@import("computer_pane.zig").selected()', 'computerSelected()')
     .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'privateActionsAllowed()');
   const handler = main.slice(handlerStart, handlerEnd)
@@ -302,11 +312,10 @@ var custom = true;
 var selected = false;
 var private_allowed = true;
 var overlay = false;
-var register_ok = true;
-var registrations: usize = 0;
-var unregistrations: usize = 0;
-var focus_registrations: usize = 0;
-var focus_unregistrations: usize = 0;
+var refused_id: i32 = 0;
+var register_calls: [7]usize = @splat(0);
+var unregister_calls: [7]usize = @splat(0);
+var simulated_modifiers: u32 = 0;
 var launches: usize = 0;
 var simulated_pane_foreground = false;
 var webview_owned = false;
@@ -338,25 +347,24 @@ const app_state = struct {
 const win32 = struct {
     const HOTKEY_ID_BROWSER_URL: i32 = 2;
     const HOTKEY_ID_BROWSER_FOCUS: i32 = 3;
+    const HOTKEY_ID_BROWSER_FOCUS_ALT_M: i32 = 4;
+    const HOTKEY_ID_BROWSER_FOCUS_GRAVE: i32 = 5;
+    const HOTKEY_ID_BROWSER_PANE_URL: i32 = 6;
     const MOD_ALT: u32 = 1;
     const MOD_CONTROL: u32 = 2;
     const MOD_SHIFT: u32 = 4;
+    const MOD_WIN: u32 = 8;
     const MOD_NOREPEAT: u32 = 0x4000;
     fn RegisterHotKey(_: HANDLE, id: i32, mods: u32, key: u32) i32 {
-        if (id == HOTKEY_ID_BROWSER_URL) {
-            std.debug.assert(mods == 0x4006 and key == 0x4C);
-            registrations += 1;
-        } else {
-            std.debug.assert(id == HOTKEY_ID_BROWSER_FOCUS and mods == 0x4001 and key == 0x51);
-            focus_registrations += 1;
-        }
-        return if (register_ok) 1 else 0;
+        const expected_mods = [_]u32{ 0, 0, 6, 1, 1, 2, 2 };
+        const expected_keys = [_]u32{ 0, 0, 0x4C, 0x51, 0x4D, 0xC0, 0x4C };
+        const i: usize = @intCast(id);
+        std.debug.assert(mods == (expected_mods[i] | MOD_NOREPEAT) and key == expected_keys[i]);
+        register_calls[i] += 1;
+        return if (id == refused_id) 0 else 1;
     }
     fn UnregisterHotKey(_: HANDLE, id: i32) i32 {
-        if (id == HOTKEY_ID_BROWSER_URL) unregistrations += 1 else {
-            std.debug.assert(id == HOTKEY_ID_BROWSER_FOCUS);
-            focus_unregistrations += 1;
-        }
+        unregister_calls[@intCast(id)] += 1;
         return 1;
     }
 };
@@ -368,7 +376,11 @@ fn IsWindow(_: HANDLE) i32 { return 1; }
 fn IsWindowVisible(_: HANDLE) i32 { return if (visible) 1 else 0; }
 fn foregroundIsOurs() bool { return owned; }
 fn isCtrlDown() bool { return ctrl_held; }
-fn GetAsyncKeyState(_: i32) i16 { return 0; }
+fn GetAsyncKeyState(key: i32) i16 {
+    const mask: u32 = switch (key) { 0x12 => 1, 0x11 => 2, 0x10 => 4, 0x5B => 8, else => 0 };
+    return if (simulated_modifiers & mask != 0) -32768 else 0;
+}
+fn activeBrowserHwndLive() HANDLE { return if (simulated_pane_foreground) frame else null; }
 fn GetTickCount64() u64 { return 123; }
 fn startBrowserUrlBarEdit() void { launches += 1; }
 fn toggleDictation() void {}
@@ -385,143 +397,108 @@ fn PostMessageW(h: HANDLE, msg: u32, _: usize, _: isize) i32 {
     return 1;
 }
 ${focusHelper}
+${productionFunction('heldModifierMask').replaceAll('@import("win32.zig")', 'win32')}
 const browser = struct {
 ${lifecycle}
 };
+fn nativePass(key: u32, key_down: bool, held: bool) bool {
+${passthrough}
+    return false;
+}
 fn dispatch(wp: WPARAM, lp: isize) isize {
     switch (@as(u32, WM_HOTKEY)) {
 ${handler}
         else => return 1,
     }
 }
-test "owned custom bar registers and foreign or hidden state unregisters" {
+test "five bindings dispatch and release on foreign foreground" {
+    simulated_pane_foreground = true;
     browser.syncBrowserHotkeys();
-    try std.testing.expect(browser.url_bar_hotkey_registered);
-    try std.testing.expectEqual(@as(usize, 1), registrations);
+    for (2..7) |id| try std.testing.expectEqual(@as(usize, 1), register_calls[id]);
     _ = dispatch(2, 0x4C0006);
-    try std.testing.expectEqual(@as(usize, 1), launches);
-    try std.testing.expectEqual(@as(u64, 123), app_state.g_focus_user_action_tick);
+    _ = dispatch(3, 0x510001);
+    _ = dispatch(4, 0x4D0001);
+    _ = dispatch(5, 0xC00002);
+    _ = dispatch(6, 0x4C0002);
+    try std.testing.expectEqual(@as(usize, 2), launches);
+    try std.testing.expectEqual(@as(usize, 3), shell_focuses);
     owned = false;
     _ = dispatch(2, 0x4C0006);
-    try std.testing.expectEqual(@as(usize, 1), launches);
     browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
-    try std.testing.expectEqual(@as(usize, 1), unregistrations);
-    owned = true; custom = false;
-    browser.syncBrowserHotkeys();
-    try std.testing.expectEqual(@as(usize, 1), registrations);
-    custom = true; visible = false;
-    browser.syncBrowserHotkeys();
-    try std.testing.expectEqual(@as(usize, 1), registrations);
-    visible = true;
-    browser.syncBrowserHotkeys();
-    try std.testing.expect(browser.url_bar_hotkey_registered);
-    browser.unregisterUrlBarHotkey();
-    try std.testing.expectEqual(@as(usize, 2), unregistrations);
+    for (2..7) |id| try std.testing.expectEqual(@as(usize, 1), unregister_calls[id]);
+    try std.testing.expectEqual(@as(usize, 2), launches);
 }
-test "mode changes release the registered hotkey" {
-    browser.unregisterUrlBarHotkey();
-    owned = true; custom = true; visible = true; register_ok = true;
-    selected = false; private_allowed = true; app_state.g_account_locked = false;
-    browser.syncBrowserHotkeys();
-    selected = true;
-    browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
-    selected = false;
-    browser.syncBrowserHotkeys();
-    app_state.g_account_locked = true;
-    browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
-    app_state.g_account_locked = false;
-    browser.syncBrowserHotkeys();
+test "find and pane scopes" {
+    browser.unregisterBrowserHotkeys();
+    owned = true; simulated_pane_foreground = true; custom = true;
     app_state.g_chat_find_open = true;
     browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    try std.testing.expect(browser.browserHotkeyAction(3, 0x510001) != null);
+    try std.testing.expect(browser.browserHotkeyAction(4, 0x4D0001) != null);
+    try std.testing.expect(browser.browserHotkeyAction(2, 0x4C0006) == null);
+    try std.testing.expect(browser.browserHotkeyAction(5, 0xC00002) == null);
+    try std.testing.expect(browser.browserHotkeyAction(6, 0x4C0002) == null);
     app_state.g_chat_find_open = false;
-}
-test "Alt Q is independently scoped and Find keeps it available" {
-    browser.unregisterUrlBarHotkey();
-    browser.unregisterBrowserFocusHotkey();
-    owned = true; selected = false; private_allowed = true; overlay = false;
-    app_state.g_account_locked = false; app_state.g_chat_find_open = true;
-    app_state.g_edit_hwnd = bar;
-    app_state.shells[0].browser_enabled = true;
-    register_ok = true;
+    simulated_pane_foreground = false;
     browser.syncBrowserHotkeys();
-    try std.testing.expect(browser.browser_focus_hotkey_registered);
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
-    _ = dispatch(3, 0x510003);
-    ctrl_held = true;
+    try std.testing.expect(browser.browserHotkeyAction(6, 0x4C0002) == null);
+    simulated_pane_foreground = true; custom = false;
+    browser.syncBrowserHotkeys();
+    try std.testing.expect(browser.browserHotkeyAction(6, 0x4C0002) == null);
+    custom = true;
+    browser.syncBrowserHotkeys();
+    try std.testing.expect(browser.browserHotkeyAction(6, 0x4C0002) != null);
+}
+test "focus keeps direct return and legacy toggle paths" {
+    browser.unregisterBrowserHotkeys();
+    owned = true; custom = true; simulated_pane_foreground = true;
+    app_state.g_chat_find_open = true; app_state.g_edit_hwnd = bar;
+    app_state.g_browser_focus_mode = true; app_state.g_chat_browser_handoff_until = 500;
+    browser.syncBrowserHotkeys();
+    const prior_focuses = shell_focuses;
+    const prior_closes = find_closes;
     _ = dispatch(3, 0x510001);
-    ctrl_held = false;
-    try std.testing.expectEqual(@as(usize, 0), posts);
-    try std.testing.expectEqual(@as(usize, 0), shell_focuses);
-    simulated_pane_foreground = true;
-    app_state.g_browser_focus_mode = true;
-    app_state.g_chat_browser_handoff_until = 500;
-    _ = dispatch(3, 0x510001);
-    try std.testing.expectEqual(@as(usize, 1), shell_focuses);
-    try std.testing.expectEqual(@as(usize, 1), cancellations);
-    try std.testing.expectEqual(@as(usize, 1), find_closes);
-    try std.testing.expect(!app_state.g_browser_focus_mode);
-    try std.testing.expect(app_state.g_shell_focused);
+    try std.testing.expectEqual(prior_focuses + 1, shell_focuses);
+    try std.testing.expectEqual(prior_closes + 1, find_closes);
+    try std.testing.expect(!app_state.g_browser_focus_mode and app_state.g_shell_focused);
     try std.testing.expectEqual(@as(u64, 0), app_state.g_chat_browser_handoff_until);
     simulated_pane_foreground = false; webview_owned = true; webview_focused = true;
     app_state.shells[0].browser_enabled = false;
-    _ = dispatch(3, 0x510001);
-    try std.testing.expectEqual(@as(usize, 2), shell_focuses);
+    _ = dispatch(4, 0x4D0001);
+    try std.testing.expectEqual(prior_focuses + 2, shell_focuses);
     webview_focused = false;
+    const prior_posts = posts;
     _ = dispatch(3, 0x510001);
-    try std.testing.expectEqual(@as(usize, 1), frame_activations);
-    try std.testing.expectEqual(@as(usize, 1), posts);
-    try std.testing.expect(alt_held and !ctrl_held);
-    owned = false;
-    _ = dispatch(3, 0x510001);
-    try std.testing.expectEqual(@as(usize, 1), posts);
-    browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.browser_focus_hotkey_registered);
-    try std.testing.expect(focus_unregistrations > 0 and focus_registrations > 0);
-    _ = dispatch(3, 0x510001);
-    try std.testing.expectEqual(@as(usize, 1), posts);
-    browser.unregisterBrowserFocusHotkey();
+    try std.testing.expectEqual(prior_posts + 1, posts);
+    webview_owned = false; app_state.shells[0].browser_enabled = true;
     app_state.g_edit_hwnd = null;
-    app_state.g_chat_find_open = false;
-    app_state.shells[0].browser_enabled = true;
-    webview_owned = false;
-    owned = true;
-    app_state.g_chat_find_open = true;
-    browser.syncBrowserHotkeys();
-    const closes_before = find_closes;
-    _ = dispatch(3, 0x510001);
-    try std.testing.expectEqual(closes_before, find_closes);
-    try std.testing.expect(app_state.g_chat_find_open);
-    try std.testing.expectEqual(@as(usize, 2), posts);
-    app_state.g_chat_find_open = false;
 }
-test "registration refusal and invalid hotkey context do not dispatch" {
-    browser.unregisterUrlBarHotkey();
-    launches = 0;
-    owned = true; custom = true; visible = true;
-    register_ok = false;
+test "refusal retries only after leaving scope and modifiers reject extras" {
+    browser.unregisterBrowserHotkeys();
+    refused_id = 4;
+    const before = register_calls[4];
     browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
-    _ = dispatch(2, 0x4C0006);
-    try std.testing.expectEqual(@as(usize, 0), launches);
-    owned = false;
     browser.syncBrowserHotkeys();
-    owned = true; register_ok = true;
-    browser.syncBrowserHotkeys();
-    _ = dispatch(2, 0x4C0002);
-    selected = true;
-    _ = dispatch(2, 0x4C0006);
-    selected = false; app_state.g_account_locked = true;
-    _ = dispatch(2, 0x4C0006);
-    app_state.g_account_locked = false; private_allowed = false;
-    _ = dispatch(2, 0x4C0006);
-    try std.testing.expectEqual(@as(usize, 0), launches);
-    browser.syncBrowserHotkeys();
-    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    try std.testing.expectEqual(before + 1, register_calls[4]);
+    try std.testing.expect(browser.browserHotkeyAction(4, 0x4D0001) == null);
+    owned = false; browser.syncBrowserHotkeys();
+    refused_id = 0; owned = true; browser.syncBrowserHotkeys();
+    try std.testing.expectEqual(before + 2, register_calls[4]);
+    simulated_modifiers = 3;
+    try std.testing.expect(browser.browserHotkeyAction(4, 0x4D0001) == null);
+    simulated_modifiers = 9;
+    try std.testing.expect(browser.browserHotkeyAction(4, 0x4D0001) == null);
+    simulated_modifiers = 1;
+    try std.testing.expect(browser.browserHotkeyPasses(0x4D));
+    try std.testing.expect(nativePass(0x4D, true, false));
+    try std.testing.expect(!nativePass(0x4D, true, true));
+    try std.testing.expect(!nativePass(0x4D, false, false));
+    try std.testing.expect(!browser.browserHotkeyPasses(0x4C));
+    simulated_modifiers = 0;
+    try std.testing.expect(browser.browserHotkeyAction(4, 0x4D0001) != null);
+    try std.testing.expect(browser.browserHotkeyAction(4, 0x4D0003) == null);
 }
+
 `;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'url-hotkey-'));
   try {
@@ -752,6 +729,7 @@ test('browser focus preserves physical modifiers and never injects keyboard inpu
   try {
     const production = [
       'browserPageFocusCommand',
+      'heldModifierMask',
       'unlockBrowserForeground',
       'focusActiveBrowserPane',
       'focusActiveBrowserPaneUnlocked',
@@ -762,7 +740,7 @@ const HANDLE = ?*anyopaque;
 const WPARAM = usize;
 const VK_MENU: u8 = 0x12;
 const KEYEVENTF_KEYUP: u32 = 2;
-const win32 = struct { const WM_COMMAND: u32 = 0x111; };
+const win32 = struct { const WM_COMMAND: u32 = 0x111; const MOD_ALT: u32 = 1; const MOD_CONTROL: u32 = 2; const MOD_SHIFT: u32 = 4; const MOD_WIN: u32 = 8; };
 const pane: HANDLE = @ptrFromInt(1);
 const main_window: HANDLE = @ptrFromInt(2);
 const foreign_window: HANDLE = @ptrFromInt(3);
@@ -775,6 +753,7 @@ var refuse_foreground = false;
 var foreign_on_attempt = false;
 var switch_count: usize = 0;
 var attachments: usize = 0;
+var attach_calls: usize = 0;
 var injections: usize = 0;
 var focus_changes: usize = 0;
 var posted: usize = 0;
@@ -803,7 +782,13 @@ fn GetForegroundWindow() HANDLE { return foreground; }
 fn GetWindowThreadProcessId(hwnd: HANDLE, _: ?*u32) u32 { return if (hwnd == pane) 2 else 3; }
 fn GetCurrentThreadId() u32 { return 1; }
 fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 {
-    if (attach != 0) attachments += 1 else attachments -= 1;
+    if (attach != 0) {
+        attachments += 1;
+        attach_calls += 1;
+        simulated_alt_down = false;
+        simulated_ctrl_down = false;
+        other_held = 0;
+    } else attachments -= 1;
     return 1;
 }
 fn foregroundIsOurs() bool { return foreground != foreign_window; }
@@ -836,36 +821,46 @@ fn reset(alt: bool, ctrl: bool) void {
     foreign_on_attempt = false;
     switch_count = 0;
     attachments = 0;
+    attach_calls = 0;
     injections = 0;
     focus_changes = 0;
     posted = 0;
     posted_command = 0;
 }
-test "held Alt and AltGr keep focus and keys unchanged" {
-    for ([_]bool{ false, true }) |ctrl| {
-        reset(true, ctrl);
+test "held modifiers wait for release before attaching and focusing" {
+    for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C, 0xFF }) |key| {
+        reset(key == 0x12 or key == 0xFF, key == 0x11 or key == 0xFF);
+        if (key == 0x10 or key == 0x5B or key == 0x5C) other_held = key;
         focusActiveBrowserPane();
         try std.testing.expectEqual(main_window, foreground);
         try std.testing.expectEqual(main_window, focused);
         try std.testing.expectEqual(@as(usize, 0), focus_changes);
+        try std.testing.expectEqual(@as(usize, 0), attach_calls);
         try std.testing.expectEqual(@as(usize, 0), posted);
         try std.testing.expectEqual(@as(usize, 0), injections);
-        try std.testing.expect(simulated_alt_down);
-        try std.testing.expectEqual(ctrl, simulated_ctrl_down);
-    }
-}
-test "plain and held Ctrl focus the browser without keyboard injection" {
-    for ([_]bool{ false, true }) |ctrl| {
-        reset(false, ctrl);
+        if (key == 0xFF) {
+            try std.testing.expect(simulated_alt_down and simulated_ctrl_down);
+        } else {
+            try std.testing.expect(GetAsyncKeyState(key) < 0);
+        }
+        simulated_alt_down = false; simulated_ctrl_down = false; other_held = 0;
         focusActiveBrowserPane();
         try std.testing.expectEqual(pane, foreground);
         try std.testing.expectEqual(pane, focused);
+        try std.testing.expect(attach_calls > 0);
         try std.testing.expectEqual(@as(usize, 1), posted);
         try std.testing.expectEqual(@as(WPARAM, 39009), posted_command);
         try std.testing.expectEqual(@as(usize, 0), injections);
-        try std.testing.expect(!simulated_alt_down);
-        try std.testing.expectEqual(ctrl, simulated_ctrl_down);
     }
+}
+test "plain focus reaches the page without keyboard injection" {
+    reset(false, false);
+    focusActiveBrowserPane();
+    try std.testing.expectEqual(pane, foreground);
+    try std.testing.expectEqual(pane, focused);
+    try std.testing.expectEqual(@as(usize, 1), posted);
+    try std.testing.expectEqual(@as(WPARAM, 39009), posted_command);
+    try std.testing.expectEqual(@as(usize, 0), injections);
 }
 test "foreground refusal falls back after detach and focuses page" {
     reset(false, false);
@@ -885,6 +880,7 @@ test "held modifiers block the fallback without fake keys" {
         focusActiveBrowserPane();
         try std.testing.expectEqual(main_window, foreground);
         try std.testing.expectEqual(@as(usize, 0), switch_count);
+        try std.testing.expectEqual(@as(usize, 0), attach_calls);
         try std.testing.expectEqual(@as(usize, 0), posted);
         try std.testing.expectEqual(@as(usize, 0), injections);
         try std.testing.expect(GetAsyncKeyState(key) < 0);
