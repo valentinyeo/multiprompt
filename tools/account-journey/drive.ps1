@@ -22,6 +22,7 @@ $rootCertAdded = $false
 $failure = $null
 $stage = 'setup'
 . "$PSScriptRoot/diagnostics.ps1"
+. "$PSScriptRoot/foreground.ps1"
 $results = [ordered]@{ native_roundtrip = @{ verdict = 'fail' } }
 $hostsFile = "$env:SystemRoot/System32/drivers/etc/hosts"
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
@@ -51,11 +52,8 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90)
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 100 } while ([DateTime]::UtcNow -lt $deadline)
     throw "Timed out: $Description"
 }
-function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
-    if ($Window -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId -or [ReconnectDesktop]::GetForegroundWindow() -ne $Window) { throw 'App window is not owned and foreground' }
-}
 function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id) {
-    if ([ReconnectDesktop]::GetForegroundWindow() -ne $Window) { [ReconnectDesktop]::Activate($Window) }
+    Set-JourneyForeground $Window $ProcessId
     Start-Sleep -Milliseconds 2000
     Assert-Window $Window $ProcessId
     $bitmap = [Drawing.Bitmap]::new([ReconnectDesktop]::GetSystemMetrics(0), [ReconnectDesktop]::GetSystemMetrics(1))
@@ -66,7 +64,7 @@ function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id)
 }
 function Show-Workspace([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id, [string]$SessionPath = "$settings/session-journey-a.json") {
     for ($n = 2; $n -le 9; $n++) {
-        [ReconnectDesktop]::Activate($Window)
+        Set-JourneyForeground $Window $ProcessId
         Assert-Window $Window $ProcessId
         [ReconnectDesktop]::Key(0x12, $false)
         [ReconnectDesktop]::Key([ushort](0x30 + $n), $false)
@@ -94,7 +92,7 @@ function Type-Ascii([string]$Value, [IntPtr]$Window, [int]$ProcessId, [IntPtr]$E
     }
 }
 function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
-    [ReconnectDesktop]::Activate($Window)
+    Set-JourneyForeground $Window $ProcessId
     Assert-Window $Window $ProcessId
     [ReconnectDesktop]::Key(0x11, $false)
     [ReconnectDesktop]::Type(0x4B)
@@ -167,7 +165,7 @@ try {
     $app = Start-Process $Exe -ArgumentList '--single-window', '--name', 'journey-a', '--no-window-restore' -PassThru
     $results.app_a_pid = $app.Id
     $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    [void][ReconnectDesktop]::SetForegroundWindow($main)
+    Set-JourneyForeground $main $app.Id
     [void](Wait-For 'first layout from the account service' { (Read-Log) -match 'account-sync: applied workspaces=Work\|Notes' } 60)
     Start-Sleep -Seconds 3
     $baseTabs = Tab-Count (Read-Log)

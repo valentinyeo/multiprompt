@@ -117,6 +117,7 @@ jobs:
         run: |
           . ./tools/account-journey/diagnostics.ps1
           & ./tools/account-journey/diagnostics.test.ps1
+          & ./tools/account-journey/foreground.test.ps1
       - name: Drive the real desktop against the account service
         shell: pwsh
         run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
