@@ -53,7 +53,7 @@ if base.MODE == 'ssh' and 'host start ' in command:
     provider, sid, target = started.groups()
     state = base.state()
     original = next((name for name, identity in state['session_ids'].items() if identity == sid and name.startswith('verify-provider-')), None)
-    if original is None or state['providers'][original] != provider or re.fullmatch(re.escape(original) + r'-r\d+', target) is None:
+    if original is None or state['providers'][original] != provider or re.fullmatch(re.escape(original) + r'(?:-r\d+)+', target) is None:
         raise RuntimeError('Archived resume changed the original assistant or identity')
     state['sessions'].append(target)
     state['sids'][target] = sid
