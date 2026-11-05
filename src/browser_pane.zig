@@ -1961,7 +1961,7 @@ var url_bar_hotkey_attempted = false;
 pub fn urlBarHotkeyAllowed() bool {
     return app_state.g_main_hwnd != null and !app_state.g_app_closing and !app_state.g_account_locked and
         !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
-        !browserChromeHiddenForOverlay() and !app_state.g_search_active and app_state.g_edit_hwnd == null and
+        !browserChromeHiddenForOverlay() and !app_state.g_search_active and !app_state.g_chat_find_open and app_state.g_edit_hwnd == null and
         app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled and
         activeBrowserShowsUrlBar() and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0 and
         IsWindowVisible(app_state.g_urlbar_hwnd) != 0 and foregroundIsOurs();

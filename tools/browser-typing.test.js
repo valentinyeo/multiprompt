@@ -184,6 +184,7 @@ const app_state = struct {
     var g_app_closing = false;
     var g_account_locked = false;
     var g_search_active = false;
+    var g_chat_find_open = false;
     var g_focus_user_action_tick: u64 = 0;
     var active_shell: usize = 0;
     var shell_count: usize = 1;
@@ -263,6 +264,11 @@ test "mode changes release the registered hotkey" {
     browser.syncUrlBarHotkey();
     try std.testing.expect(!browser.url_bar_hotkey_registered);
     app_state.g_account_locked = false;
+    browser.syncUrlBarHotkey();
+    app_state.g_chat_find_open = true;
+    browser.syncUrlBarHotkey();
+    try std.testing.expect(!browser.url_bar_hotkey_registered);
+    app_state.g_chat_find_open = false;
 }
 test "registration refusal and invalid hotkey context do not dispatch" {
     browser.unregisterUrlBarHotkey();
