@@ -2066,6 +2066,19 @@ def held_queue_db(tmux):
     return db
 
 
+ROOM_MESSAGE_PROTOCOL = 1
+
+
+def message_room_scope(value):
+    import uuid
+    if not isinstance(value, dict) or set(value) != {'host_uuid', 'room_id', 'parent_event_id', 'member_id'}:
+        raise ValueError('invalid room scope')
+    for field in value.values():
+        if not isinstance(field, str) or str(uuid.UUID(field)) != field:
+            raise ValueError('invalid room scope')
+    return dict(value)
+
+
 def message_store_path():
     return HOME / '.local/state/multiprompt/shared-messages/store.sqlite3'
 
@@ -2115,6 +2128,7 @@ def message_store_db(tmux):
         db.execute("CREATE TABLE IF NOT EXISTS legacy_bindings (token TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, sid TEXT NOT NULL, queued_at INTEGER NOT NULL, origin INTEGER NOT NULL, inode INTEGER NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS legacy_locations (token TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(token,path))")
         db.execute("CREATE TABLE IF NOT EXISTS message_locators (provider TEXT NOT NULL, sid TEXT NOT NULL, tmux TEXT NOT NULL, PRIMARY KEY(provider,sid))")
+        db.execute("CREATE TABLE IF NOT EXISTS message_room_scopes (id TEXT PRIMARY KEY REFERENCES shared_messages(id), scope TEXT NOT NULL)")
     return db
 
 
@@ -2941,12 +2955,21 @@ def host_send(provider, sid, text, tmux=None):
     return dict(status='queued' if state in (None, 'queued') else 'sent', id=token, state=state)
 
 
-def host_deliver(provider, sid, token, attempt, epoch, text):
+def host_deliver(provider, sid, token, attempt, epoch, text, room_scope=None):
     request = dict(op="deliver", id=token, attempt=attempt, epoch=epoch, text=text)
-    reply = host_request(provider, sid, request) if host_owned(provider, sid) else dict(status="unavailable")
+    if room_scope is not None:
+        request["room_scope"] = room_scope
+    def send():
+        if room_scope is not None:
+            ping = host_request(provider, sid, dict(op="ping"))
+            protocol = ping.get("room_message_protocol")
+            if ping.get("status") != "ok" or ping.get("sid") != sid or type(protocol) is not int or protocol != ROOM_MESSAGE_PROTOCOL:
+                return dict(status="busy", reason="room_host_upgrade_required")
+        return host_request(provider, sid, request)
+    reply = send() if host_owned(provider, sid) else dict(status="unavailable")
     if reply.get("status") in ("unavailable", "busy") or reply.get("reason") == "host_unreachable":
         if host_enabled(provider, sid) and host_start(provider, sid).get("status") in ("started", "already"):
-            reply = host_request(provider, sid, request)
+            reply = send()
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
 
@@ -3171,6 +3194,10 @@ def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn
         return
     message = dict(v=HOST_EVENT_VERSION, sid=sid, turn=session.get("turn") if turn is None else turn, kind=kind,
                    at=int(time.time() * 1000), item=item, payload=payload if isinstance(payload, dict) else {})
+    inflight = session.get("inflight")
+    if isinstance(inflight, dict) and inflight.get("room_scope") is not None:
+        message["room_scope"] = inflight["room_scope"]
+        message["message_id"] = inflight["id"]
     try:
         with host_db(provider, sid, tmux, session) as db:
             message_event(db, provider, sid, message)
@@ -3579,7 +3606,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         inflight = session.get("inflight")
         return dict(status="ok", pid=os.getpid(), sid=sid, tmux=tmux,
                     inflight=inflight.get("id") if isinstance(inflight, dict) else None,
-                    parked=len(session["parked"]))
+                    parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
     if operation == "stop":
         session["stop"] = True
         return dict(status="ok")
@@ -3601,10 +3628,22 @@ def host_handle_request(provider, sid, tmux, session, request):
             or not isinstance(attempt, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", attempt)
             or type(epoch) is not int):
         return host_refuse("invalid_message")
+    try:
+        room_scope = message_room_scope(request["room_scope"]) if "room_scope" in request else None
+    except (ValueError, TypeError, AttributeError):
+        return host_refuse("invalid_room_scope")
+    if room_scope is not None and provider != "claude":
+        return host_refuse("unsupported_room_provider")
     written = host_written(session["state"])
     seen = written.get(token)
     if isinstance(seen, dict) and seen.get("epoch") == epoch:
+        if seen.get("room_scope") != room_scope:
+            return host_refuse("room_scope_conflict")
         return dict(status="duplicate", reason="already_written", attempt=seen.get("attempt"))
+    inflight = session.get("inflight")
+    if room_scope is not None or isinstance(inflight, dict) and inflight.get("room_scope") is not None:
+        if session["turn"] is not None or session["sends"] or session["parked"]:
+            return dict(status="busy", reason="isolated_room_turn")
     if tmux is None:
         return host_refuse("no_chat")
     if provider != "claude" and not session.get("ready"):
@@ -3640,6 +3679,9 @@ def host_handle_request(provider, sid, tmux, session, request):
     entry = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False,
                  turn="t-" + str(session["state"]["turns"]),
                  sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), uuid=None)
+    if room_scope is not None:
+        entry["room_scope"] = room_scope
+        written[token]["room_scope"] = room_scope
     session["sends"].append(entry)
     if session["turn"] is None:
         session["turn"] = entry["turn"]
@@ -4580,15 +4622,24 @@ def message_store_transaction(q):
                     db.execute('INSERT INTO legacy_bindings VALUES (?,?,?,?,?,?)', (legacy_token, token, sid, q['queued_at'], info.st_size, info.st_ino))
                 legacy_path = next(path for _, name, path in db.execute('PRAGMA database_list') if name == 'legacy')
                 db.execute('INSERT OR IGNORE INTO legacy_locations VALUES (?,?)', (legacy_token, legacy_path))
+            room_scope = message_room_scope(q['room_scope']) if 'room_scope' in q else None
+            if room_scope is not None and (provider != 'claude' or legacy_token is not None):
+                raise ValueError('unsupported room provider')
+            scope_body = json.dumps(room_scope, sort_keys=True, separators=(',', ':')) if room_scope is not None else None
             existing = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
             if existing:
                 if existing[1:4] != (provider, sid, text):
                     raise ValueError('message id conflict')
+                stored_scope = db.execute('SELECT scope FROM message_room_scopes WHERE id=?', (token,)).fetchone()
+                if (stored_scope[0] if stored_scope else None) != scope_body:
+                    raise ValueError('room scope conflict')
                 if legacy_token is not None:
                     message_event(db, provider, sid, message_row(existing), emit=False)
                 return dict(message=message_row(existing), epoch=epoch, seq=seq)
             position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
             db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,'queued',NULL,NULL,?,?)", (token, provider, sid, text, position, uuid.uuid4().hex, epoch, time.time()))
+            if scope_body is not None:
+                db.execute('INSERT INTO message_room_scopes VALUES (?,?)', (token, scope_body))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
             seq = message_event(db, provider, sid, row)
             return dict(message=row, epoch=epoch, seq=seq)
@@ -4642,6 +4693,9 @@ def message_store_transaction(q):
             if not row:
                 return dict(epoch=epoch, seq=seq, message=None)
             hosting = host_dispatch_switch(provider, sid)
+            scope_row = db.execute('SELECT scope FROM message_room_scopes WHERE id=?', (row[0],)).fetchone()
+            if scope_row is not None and not hosting:
+                return dict(epoch=epoch, seq=seq, message=None)
             resolved = resolve_tmux_agent(provider, tmux, require_bound=True)
             if not hosting and (not resolved or resolved[0] != sid):
                 db.execute("UPDATE shared_messages SET state='failed',receipt='session_unavailable' WHERE id=? AND state='queued'", (row[0],))
@@ -4680,7 +4734,8 @@ def message_store_transaction(q):
             current = db.execute("SELECT state,epoch FROM shared_messages WHERE id=?", (row['id'],)).fetchone()
             if hosting:
                 db.commit()
-                reply = host_deliver(provider, sid, row['id'], row['attempt'], epoch, row['text'])
+                reply = (host_deliver(provider, sid, row['id'], row['attempt'], epoch, row['text'], room_scope=json.loads(scope_row[0]))
+                         if scope_row else host_deliver(provider, sid, row['id'], row['attempt'], epoch, row['text']))
                 db.execute('BEGIN IMMEDIATE')
                 status = reply.get('status')
                 host_log(provider, sid, 'dispatch_delivered', dict(id=row['id'], status=status, reason=reply.get('reason')))
@@ -5821,7 +5876,7 @@ def serve_request(line, source, subscriptions, lock):
             rid = 0
             raise ValueError("invalid request id")
         if query.get("op") == "engine_info":
-            serve_print(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1]))
+            serve_print(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1], room_message_protocols=[ROOM_MESSAGE_PROTOCOL]))
             return
         if query.get("op") == "host_adopt":
             serve_print(dict(id=rid, host_adopt=host_adopt(query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))))
