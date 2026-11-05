@@ -984,7 +984,7 @@ pub fn focusActiveBrowserPaneUnlocked() void {
             if (GetAsyncKeyState(key) < 0) modifier_held = true;
         }
         if (!modifier_held and GetForegroundWindow() == fg and foregroundIsOurs() and activeBrowserHwndLive() == bh and focusGuard(bh)) {
-            SwitchToThisWindow(bh, 0);
+            SwitchToThisWindow(bh, 1);
         }
     }
     if (browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)) |command| {

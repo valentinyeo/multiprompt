@@ -5914,7 +5914,7 @@ pub fn browserUrlFocusTick() void {
             IsWindow(url_focus_edit) != 0 and IsWindow(url_focus_parent) != 0 and
             app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
         {
-            SwitchToThisWindow(url_focus_parent, 0);
+            SwitchToThisWindow(url_focus_parent, 1);
         }
     }
     @import("focus.zig").focusGuardReadMouse();
