@@ -438,7 +438,7 @@ var g_chat_echo_layout_ids: [20]u64 = undefined;
 var g_chat_content_left: i32 = 0;
 var g_chat_content_h: i32 = 0;
 fn chatBlockGapBefore(_: bool, _: enum { user }, _: bool, _: enum { single }) i32 { return 1; }
-fn chatMeasureProjectedEchoRect(_: u8, _: []const u16, _: i32, y: i32, _: bool, _: anytype) RECT { return .{ .bottom = y + 10 }; }
+fn chatMeasureProjectedEchoRect(_: u8, _: []const u16, _: i32, y: i32${source.includes('y: i32, status: bool, projection:') ? ', _: bool' : ''}, _: anytype) RECT { return .{ .bottom = y + 10 }; }
 fn chatShellRowsLayout(_: u8, _: i32, y: i32) i32 { return y; }
 fn uiScaled(n: i32) i32 { return n; }
 fn layoutPending() void {
@@ -2101,12 +2101,12 @@ test('composer always persists through the same outbox before delivery', () => {
   assert.doesNotMatch(send, /sendTextToActiveShellVerified|chatEchoConfirm/);
 });
 
-test('retry UI delegates to evidence-safe resend and pending bubbles never say Sent', () => {
-  assert.match(body('chatEchoRetryAt'), /chatEchoSendAgain\(id\)/);
+test('deliberate recovery remains evidence-safe without automatic retry controls', () => {
+  assert.doesNotMatch(source, /fn chatEchoRetryAt\(/);
   assert.match(body('chatEchoSendAgain'), /chatEchoTryMatchEntry/);
   assert.match(body('chatEchoSendAgain'), /chat_echo.resendDecision/);
   assert.match(body('chatEchoRetryAllForActive'), /write_started/);
-  assert.doesNotMatch(body('chatPaintEchoStatus'), /2713.*Sent/);
+  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect|chatDimQueuedBubble/);
   assert.doesNotMatch(body('chatEchoMatchActive'), /chatEchoRepresentedBlock/);
   assert.match(body('chatDeferTranscriptLoad'), /chatEchoMatchActive\(\)/);
 });

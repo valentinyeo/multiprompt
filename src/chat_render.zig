@@ -1104,14 +1104,12 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
     }
 }
 
-fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, status: bool) RECT {
-    return chatMeasureProjectedEchoRect(hdc, text, width, y, status, null);
+fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32) RECT {
+    return chatMeasureProjectedEchoRect(hdc, text, width, y, null);
 }
 
-fn chatMeasureProjectedEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, status: bool, projection: ?*const chat_reaction.Projection) RECT {
-    var rect = chatMeasureProjectedBlockRect(hdc, text, .{ .start = 0, .len = text.len, .role = .user, .markdown = projection != null }, .single, width, y, null, projection);
-    if (!app_state.clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
-    return rect;
+fn chatMeasureProjectedEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, projection: ?*const chat_reaction.Projection) RECT {
+    return chatMeasureProjectedBlockRect(hdc, text, .{ .start = 0, .len = text.len, .role = .user, .markdown = projection != null }, .single, width, y, null, projection);
 }
 
 test "IGSH-1266 a single newline inside a paragraph keeps its line break" {
@@ -1922,7 +1920,7 @@ fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) voi
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, text, text_rc, false, true, null, SHELL_ROW_SELECTION_OFFSET, null, null, true);
-    chatDimQueuedBubble(hdc, bubble);
+    if (row.injected) chatDimQueuedBubble(hdc, bubble);
 }
 
 fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
@@ -1932,7 +1930,7 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
     for (g_shell_view.rows[0..g_shell_view.count], 0..) |*row, row_index| {
         if (row.local or row.sent or g_reaction_view.hidesPending(chatShellReactionId(row.slice())) or g_shell_rect_count >= g_shell_rect.len) continue;
         y += chatBlockGapBefore(true, .user, true, .single);
-        var rc = chatMeasureEchoRect(hdc, row.slice(), width, y, false);
+        var rc = chatMeasureEchoRect(hdc, row.slice(), width, y);
         if (row.injected) rc.bottom += uiScaled(CHAT_STATUS_H);
         rc.left += app_state.g_chat_content_left;
         rc.right += app_state.g_chat_content_left;
@@ -2160,7 +2158,7 @@ fn chatChoicesLayout(width: i32, start_y: i32) i32 {
             const text = g_choice.group.options[chosen].titleSlice();
             const hdc = GetDC(app_state.g_chat_transcript_hwnd) orelse return y;
             defer _ = ReleaseDC(app_state.g_chat_transcript_hwnd, hdc);
-            var rc = chatMeasureEchoRect(hdc, text, width, y, false);
+            var rc = chatMeasureEchoRect(hdc, text, width, y);
             rc.left += app_state.g_chat_content_left;
             rc.right += app_state.g_chat_content_left;
             g_permission_echo_rect = rc;
@@ -2499,9 +2497,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or g_reaction_view.hidesPending(e.id)) continue;
                 if (chatEchoRowLanded(e)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
-                var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, e.state == .not_sent, g_reaction_view.projectedPending(e.id));
-                if (e.state == .cancelled) rc.bottom += uiScaled(CHAT_STATUS_H);
-                if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
+                var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, g_reaction_view.projectedPending(e.id));
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -3907,12 +3903,9 @@ fn chatPaintProjectedBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos:
 
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
-    const actions = chat_echo.pendingActions(e.state);
-    const status_h = if (e.state == .cancelled or (!app_state.clean_chat and e.state == .not_sent)) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
-    const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
     var display = chatDisplayForBlock(e.text, .{ .start = 0, .len = e.text.len, .role = .user, .markdown = true }, g_reaction_view.projectedPending(e.id));
     display.offset += offset;
-    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
+    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom };
     chatPaintReplyLine(hdc, display.text, display.reply_ref, rc);
     fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
@@ -3921,18 +3914,6 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const start = if (display.reply_ref) |r| r.body_start else 0;
     const body_display = display.slice(start);
     _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
-    if (e.state == .delivered and !e.host_confirmed and e.delivery_watch.removed_ms == 0 and !std.mem.eql(u8, std.mem.sliceTo(&e.message_phase, 0), "started")) chatDimQueuedBubble(hdc, bubble);
-    chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
-    if (!app_state.clean_chat and actions.send_again) {
-        const old = SelectObject(hdc, chatMetadataFont());
-        defer _ = SelectObject(hdc, old);
-        for ([_]bool{ false, true }) |remove| {
-            var button = chatEchoActionRect(rc, remove);
-            fillRoundRectAA(hdc, button, uiScaled(5), chatCodePanelColor());
-            _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-            _ = chatDrawText(hdc, if (remove) L("Remove") else L("Send again"), -1, &button, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-        }
-    }
 }
 
 fn chatStatusRowRect(bubble: RECT) RECT {
@@ -3942,16 +3923,6 @@ fn chatStatusRowRect(bubble: RECT) RECT {
         .right = bubble.right - uiScaled(6),
         .bottom = bubble.bottom + uiScaled(CHAT_STATUS_H),
     };
-}
-
-fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
-    if (e.state != .cancelled and (app_state.clean_chat or e.state != .not_sent)) return;
-    const old = SelectObject(hdc, chatMetadataFont());
-    defer _ = SelectObject(hdc, old);
-    _ = SetTextColor(hdc, customColorOr("danger", if (app_state.g_light_theme) RGB(180, 40, 40) else RGB(240, 120, 120)));
-    const label: [*:0]const u16 = if (e.state == .cancelled) L("Cancelled") else if (e.write_started) L("Delivery unconfirmed") else L("Not sent");
-    var rc = area;
-    _ = chatDrawText(hdc, label, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 fn chatCodeTokenColor(kind: chat_code.Kind) DWORD {
@@ -4190,65 +4161,12 @@ pub fn chatToggleAllTools() void {
     chatImageReady();
 }
 
-fn chatEchoActionRect(rc: RECT, remove: bool) RECT {
-    const right = rc.right - uiScaled(6);
-    return .{
-        .left = right - uiScaled(if (remove) @as(i32, 64) else @as(i32, 164)),
-        .right = if (remove) right else right - uiScaled(70),
-        .top = rc.bottom - uiScaled(24),
-        .bottom = rc.bottom - uiScaled(2),
-    };
-}
-
 fn chatEchoAt(x: i32, y: i32) ?u64 {
     const content_y = y + app_state.g_chat_scroll_y;
     for (0..app_state.g_chat_echo_layout_count) |i| {
-        const rc = app_state.g_chat_echo_layout[i];
-        if (content_y < rc.top or content_y >= rc.bottom) continue;
-        const id = app_state.g_chat_echo_layout_ids[i];
-        const ei = chatOutboxIndexById(id) orelse continue;
-        const actions = chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state);
-        if (pointInRect(rc, x, content_y) or (actions.send_again and
-            (pointInRect(chatEchoActionRect(rc, false), x, content_y) or pointInRect(chatEchoActionRect(rc, true), x, content_y)))) return id;
+        if (pointInRect(app_state.g_chat_echo_layout[i], x, content_y)) return app_state.g_chat_echo_layout_ids[i];
     }
     return null;
-}
-
-fn chatEchoRetryAt(x: i32, y: i32) bool {
-    if (app_state.clean_chat) return false;
-    const id = chatEchoAt(x, y) orelse return false;
-    const ei = chatOutboxIndexById(id) orelse return false;
-    const entry = app_state.g_chat_outbox.items[ei];
-    if (!chat_echo.pendingActions(entry.state).send_again) return false;
-    for (0..app_state.g_chat_echo_layout_count) |i| {
-        if (app_state.g_chat_echo_layout_ids[i] != id) continue;
-        const rc = app_state.g_chat_echo_layout[i];
-        if (pointInRect(chatEchoActionRect(rc, false), x, y + app_state.g_chat_scroll_y)) {
-            chatEchoSendAgain(id);
-            return true;
-        }
-        if (pointInRect(chatEchoActionRect(rc, true), x, y + app_state.g_chat_scroll_y)) {
-            chatEchoRemove(id);
-            return true;
-        }
-    }
-    return false;
-}
-
-fn chatEchoRetryHover(x: i32, y: i32) bool {
-    if (app_state.clean_chat) return false;
-    const id = chatEchoAt(x, y) orelse return false;
-    const ei = chatOutboxIndexById(id) orelse return false;
-    const entry = app_state.g_chat_outbox.items[ei];
-    if (entry.state == .delivered and !entry.channel_sent) return true;
-    if (!chat_echo.pendingActions(entry.state).send_again) return false;
-    for (0..app_state.g_chat_echo_layout_count) |i| {
-        if (app_state.g_chat_echo_layout_ids[i] != id) continue;
-        const rc = app_state.g_chat_echo_layout[i];
-        return pointInRect(chatEchoActionRect(rc, false), x, y + app_state.g_chat_scroll_y) or
-            pointInRect(chatEchoActionRect(rc, true), x, y + app_state.g_chat_scroll_y);
-    }
-    return false;
 }
 
 fn chatWordChar(c: u16) bool {
@@ -5887,7 +5805,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 app_state.g_chat_hover_link = hovered;
                 _ = InvalidateRect(hwnd, null, 0);
             }
-            const echo_hover = copy_hover == null and hovered == null and (chatEchoRetryHover(GET_X(lp), GET_Y(lp)) or chatChoiceAt(GET_X(lp), GET_Y(lp)) != null);
+            const echo_hover = copy_hover == null and hovered == null and chatChoiceAt(GET_X(lp), GET_Y(lp)) != null;
             var hover_url_buf: [chat_image.URL_CAP]u8 = undefined;
             app_state.g_chat_hover_image = chatImageAt(GET_X(lp), GET_Y(lp), &hover_url_buf) != null;
             if (hovered != null or copy_hover != null or echo_hover or app_state.g_chat_hover_image) _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
@@ -5938,7 +5856,6 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             }
             chatNavClear();
             if (chatTableMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
-            if (chatEchoRetryAt(GET_X(lp), GET_Y(lp))) return 0;
             if (chatChoiceAt(GET_X(lp), GET_Y(lp))) |index| {
                 chatChoiceClick(index);
                 return 0;
@@ -6583,7 +6500,7 @@ test "ISSUE-438 copying preserves empty table columns and rendered rich whitespa
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("A\t\tC\r\none\t\tthree"), out[0..n]);
 }
 
-test "IGSH-442 unconfirmed actions hit their own buttons across scroll offsets" {
+test "IGSH-1624 hit testing excludes the former footer" {
     const old_outbox = app_state.g_chat_outbox;
     const old_count = app_state.g_chat_echo_layout_count;
     const old_rect = app_state.g_chat_echo_layout[0];
@@ -6603,17 +6520,10 @@ test "IGSH-442 unconfirmed actions hit their own buttons across scroll offsets" 
     app_state.g_chat_echo_layout[0] = rc;
     app_state.g_chat_echo_layout_ids[0] = 442;
     app_state.g_chat_scroll_y = uiScaled(50);
-    for ([_]bool{ false, true }) |remove| {
-        const button = chatEchoActionRect(rc, remove);
-        const x = button.left + 1;
-        const y = button.top + 1 - app_state.g_chat_scroll_y;
-        try std.testing.expectEqual(@as(?u64, 442), chatEchoAt(x, y));
-        try std.testing.expect(chatEchoRetryHover(x, y));
+    try std.testing.expectEqual(@as(?u64, 442), chatEchoAt(rc.right - 1, rc.top + 1 - app_state.g_chat_scroll_y));
+    for ([_]i32{ rc.right - uiScaled(100), rc.right - uiScaled(20) }) |x| {
+        try std.testing.expectEqual(@as(?u64, null), chatEchoAt(x, rc.bottom + uiScaled(CHAT_STATUS_H + 10) - app_state.g_chat_scroll_y));
     }
-    try std.testing.expect(!chatEchoRetryHover(rc.right - 1, rc.top + 1 - app_state.g_chat_scroll_y));
-    try std.testing.expect(!chatEchoRetryAt(rc.right - 1, rc.top + 1 - app_state.g_chat_scroll_y));
-    entries[0].state = .queued;
-    try std.testing.expect(!chatEchoRetryHover(rc.right - uiScaled(10), rc.bottom - uiScaled(10) - app_state.g_chat_scroll_y));
 }
 
 test "ISSUE-458 real window captures table thumb drags until release and cancels without text selection" {
@@ -6770,18 +6680,11 @@ test "IGSH-759 tool rows have no layout paint targets or hit area through stream
 
 const CleanChatScene = enum {
     blank,
-    sending,
-    queued,
-    waiting,
-    not_sent,
-    unconfirmed,
     confirmed_bubble,
     queued_bubble,
     accepted_bubble,
     sending_bubble,
     shell_bubble,
-    retry,
-    remove,
     shell_queue,
     injected_queue,
     todo_summary,
@@ -6864,19 +6767,8 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
     var entry = ChatOutboxEntry{ .text = @constCast(text), .state = .not_sent };
     switch (scene) {
         .blank => {},
-        .sending, .queued, .waiting, .not_sent, .unconfirmed => {
-            entry.state = switch (scene) {
-                .sending => .sending,
-                .queued => .delivered,
-                .waiting => .queued,
-                else => .not_sent,
-            };
-            entry.write_started = scene == .unconfirmed;
-            app_state.shells[0].disconnected = scene == .waiting;
-            chatPaintEchoStatus(dc, entry, .{ .left = 0, .top = 0, .right = width, .bottom = 24 });
-        },
         .confirmed_bubble, .queued_bubble, .accepted_bubble, .sending_bubble, .shell_bubble => {
-            const rc = chatMeasureEchoRect(dc, text, width, 0, false);
+            const rc = chatMeasureEchoRect(dc, text, width, 0);
             if (scene == .confirmed_bubble) {
                 chatPaintBlock(dc, text, block, .single, rc);
             } else if (scene == .shell_bubble) {
@@ -6890,19 +6782,11 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             }
             crop.bottom = rc.bottom;
         },
-        .retry, .remove => {
-            const rc = chatMeasureEchoRect(dc, text, width, 0, true);
-            var painted_rc = rc;
-            if (!clean) painted_rc.bottom += uiScaled(26);
-            chatPaintEcho(dc, entry, painted_rc, 0);
-            const natural_bottom = rc.bottom - (if (clean) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
-            crop = chatEchoActionRect(.{ .left = rc.left, .top = 0, .right = rc.right, .bottom = natural_bottom + uiScaled(CHAT_STATUS_H + 26) }, scene == .remove);
-        },
         .shell_queue, .injected_queue => {
             var row: chat_shell_sync.Row = .{ .len = text.len, .injected = scene == .injected_queue };
             @memcpy(row.text[0..text.len], text);
             row.sender[0] = 'R';
-            var rc = chatMeasureEchoRect(dc, text, width, 0, false);
+            var rc = chatMeasureEchoRect(dc, text, width, 0);
             const natural_bottom = rc.bottom;
             if (row.injected) rc.bottom += uiScaled(CHAT_STATUS_H);
             chatPaintShellRow(dc, &row, rc);
@@ -7007,42 +6891,87 @@ fn expectCleanChatRowHidden(scene: CleanChatScene) !void {
     try std.testing.expectEqualSlices(u32, blank, on);
 }
 
-test "IGSH-931 normal outbox states never paint per-message status with CLEAN on or off" {
-    const blank = try cleanChatPixels(.blank, true);
-    defer std.testing.allocator.free(blank);
-    for ([_]bool{ false, true }) |clean| {
-        for ([_]CleanChatScene{ .sending, .waiting, .queued }) |scene| {
-            const pixels = try cleanChatPixels(scene, clean);
-            defer std.testing.allocator.free(pixels);
-            try std.testing.expectEqualSlices(u32, blank, pixels);
+test "IGSH-1624 all outbox states paint identical plain bubbles in Light AMOLED and Edge Grey" {
+    const w = @import("win32.zig");
+    const Flush = struct { extern "gdi32" fn GdiFlush() callconv(WINAPI) w.BOOL; };
+    try std.testing.expect(@import("fonts.zig").register());
+    defer @import("fonts.zig").unregister();
+    @import("drawing.zig").resetFontCache();
+    defer @import("drawing.zig").resetFontCache();
+    const saved = .{ app_state.g_light_theme, app_state.g_amoled_theme, app_state.g_edge_gray_theme, app_state.g_mid_theme, app_state.g_multiprompt_theme, app_state.g_dev_theme_active, app_state.clean_chat, app_state.g_chat_sel_active };
+    defer {
+        app_state.g_light_theme = saved[0];
+        app_state.g_amoled_theme = saved[1];
+        app_state.g_edge_gray_theme = saved[2];
+        app_state.g_mid_theme = saved[3];
+        app_state.g_multiprompt_theme = saved[4];
+        app_state.g_dev_theme_active = saved[5];
+        app_state.clean_chat = saved[6];
+        app_state.g_chat_sel_active = saved[7];
+    }
+    app_state.g_mid_theme = false;
+    app_state.g_multiprompt_theme = false;
+    app_state.g_dev_theme_active = false;
+    app_state.g_chat_sel_active = false;
+    const width = 800;
+    const height = 240;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    var canvas = @import("smooth.zig").Canvas.init(dc);
+    defer canvas.deinit();
+    const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. width * height];
+    const reference = try std.testing.allocator.alloc(u32, pixels.len);
+    defer std.testing.allocator.free(reference);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("Plain sent message for every delivery state");
+    const area = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const names = [_]LPCWSTR{ L("chat-shared-plain-sent-light.bmp"), L("chat-shared-plain-sent-amoled.bmp"), L("chat-shared-plain-sent-edge-grey.bmp") };
+    for (0..3) |theme| {
+        app_state.g_light_theme = theme == 0;
+        app_state.g_amoled_theme = theme == 1;
+        app_state.g_edge_gray_theme = theme == 2;
+        const brush = CreateSolidBrush(themeConsoleBg());
+        defer _ = DeleteObject(brush);
+        for ([_]bool{ false, true }) |clean| {
+            app_state.clean_chat = clean;
+            const rc = chatMeasureEchoRect(dc, text, width, 0);
+            const block = ChatBlock{ .start = 0, .len = text.len, .role = .user, .first = true, .markdown = true };
+            const normal = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            try std.testing.expectEqual(normal.bottom, rc.bottom);
+            _ = FillRect(dc, &area, brush);
+            chatPaintBlock(dc, text, block, .single, rc);
+            _ = Flush.GdiFlush();
+            @memcpy(reference, pixels);
+            var changed: usize = 0;
+            for (reference) |pixel| if ((pixel & 0xffffff) != (reference[reference.len - 1] & 0xffffff)) { changed += 1; };
+            try std.testing.expect(changed > 0);
+            for ([_]app_state.ChatEchoState{ .queued, .sending, .delivered, .not_sent, .cancelled }) |state| {
+                _ = FillRect(dc, &area, brush);
+                const entry = ChatOutboxEntry{ .text = @constCast(text), .state = state, .write_started = true };
+                chatPaintEcho(dc, entry, rc, 0);
+                _ = Flush.GdiFlush();
+                try std.testing.expectEqualSlices(u32, reference, pixels);
+                if (clean and state == .not_sent)
+                    try scrollProofSave(names[theme], std.mem.sliceAsBytes(pixels), info.header);
+            }
         }
     }
 }
 
-test "IGSH-872 queued bubbles are half opacity and shell queues use the same rendering" {
-    const blank = try cleanChatPixels(.blank, true);
-    defer std.testing.allocator.free(blank);
+test "IGSH-1624 queued and shell user bubbles are fully opaque" {
     for ([_]bool{ false, true }) |clean| {
-        const full = try cleanChatPixels(.sending_bubble, clean);
+        const full = try cleanChatPixels(.confirmed_bubble, clean);
         defer std.testing.allocator.free(full);
-        const confirmed = try cleanChatPixels(.confirmed_bubble, clean);
-        defer std.testing.allocator.free(confirmed);
-        try std.testing.expectEqualSlices(u32, full, confirmed);
-        const queued = try cleanChatPixels(.queued_bubble, clean);
-        defer std.testing.allocator.free(queued);
-        const shell = try cleanChatPixels(.shell_bubble, clean);
-        defer std.testing.allocator.free(shell);
-        var changed: usize = 0;
-        for (full, queued, blank) |normal, dimmed, background| {
-            if (normal != background) changed += 1;
-            for ([_]u5{ 0, 8, 16 }) |shift| {
-                const expected: i32 = @intCast((((normal >> shift) & 255) + ((background >> shift) & 255)) / 2);
-                const actual: i32 = @intCast((dimmed >> shift) & 255);
-                try std.testing.expect(@abs(actual - expected) <= 1);
-            }
+        for ([_]CleanChatScene{ .sending_bubble, .queued_bubble, .shell_bubble }) |scene| {
+            const pixels = try cleanChatPixels(scene, clean);
+            defer std.testing.allocator.free(pixels);
+            try std.testing.expectEqualSlices(u32, full, pixels);
         }
-        try std.testing.expect(changed > 0);
-        try std.testing.expectEqualSlices(u32, queued, shell);
     }
 }
 
@@ -7060,28 +6989,12 @@ test "IGSH-872 queued caption is absent with CLEAN on and off" {
     const blank = try cleanChatPixels(.blank, true);
     defer std.testing.allocator.free(blank);
     for ([_]bool{ false, true }) |clean| {
-        for ([_]CleanChatScene{ .queued, .shell_queue, .injected_queue }) |scene| {
+        for ([_]CleanChatScene{ .shell_queue, .injected_queue }) |scene| {
             const queued = try cleanChatPixels(scene, clean);
             defer std.testing.allocator.free(queued);
             try std.testing.expectEqualSlices(u32, blank, queued);
         }
     }
-}
-
-test "IGSH-816 CLEAN hides Not sent status pixels" {
-    try expectCleanChatRowHidden(.not_sent);
-}
-
-test "IGSH-816 CLEAN hides Delivery unconfirmed status pixels" {
-    try expectCleanChatRowHidden(.unconfirmed);
-}
-
-test "IGSH-816 CLEAN hides Send again row pixels" {
-    try expectCleanChatRowHidden(.retry);
-}
-
-test "IGSH-816 CLEAN hides Remove row pixels" {
-    try expectCleanChatRowHidden(.remove);
 }
 
 test "IGSH-816 CLEAN hides todo summary footer pixels" {

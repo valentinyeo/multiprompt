@@ -21,7 +21,7 @@
                 Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count -and $state.active_tab -eq $count - 1 } "user-created CMD session $count"
             }
             Snapshot 'sessions-created'
-            Focus-Palette 'pin to top' 6293
+            Focus-Palette 'pin to top' '(7113|6293)'
             Snapshot 'pin-action'
             Press @(0x0D) 'Enter: Pin to Top on session 3'
             Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'
@@ -51,7 +51,7 @@
             Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'
             Press @(0x11, 0x31) 'Ctrl+1: pinned session follows Off Everywhere'
             Wait-ChatViews @($false, $false, $false) 2 'pinned-after-off'
-            Focus-Palette 'unpin from top' 6293
+            Focus-Palette 'unpin from top' '(7113|6293)'
             Press @(0x0D) 'Enter: unpin before normal app close for restart'
             Wait-ChatViews @($false, $false, $false) 2 'unpinned-before-restart' $false
             Restart-ChatView 3

@@ -49,6 +49,8 @@ test('IGSH-1266 a session the server no longer has still counts as ended', () =>
   assert.ok(end.includes(`"true"`));
   assert.ok(end.includes(`"python3 "`));
   assert.ok(end.includes(`" host stop claude '"`));
+  assert.ok(end.includes(`" host stop codex '"`));
+  assert.ok(end.includes(`" host stop pi '"`));
   assert.ok(end.includes(`"' >/dev/null 2>&1; "`));
   assert.match(read('src/agent_host.zig'), /pub const READER = "~\/\.multiprompt-runtime\/reader\.py";/);
   assert.ok(end.includes('python3 ' + READER + ' host stop claude'), 'the host stop must name the reader the launch uses');
@@ -81,7 +83,7 @@ test('IGSH-1266 the end session script is built from the chat id and rejects uns
   assert.match(build, /if \(!safeTarget\(session\)\) return null;/);
   assert.ok(end.includes("try std.testing.expectEqualStrings(\"tmux kill-session -t 'term-abc' 2>/dev/null; true\", script);"));
   assert.ok(end.includes("expectEqualStrings(\"tmux kill-session -t 'term-abc' 2>/dev/null; python3 " + READER + " host stop claude '"));
-  assert.ok(end.includes('expect(build(&out, "~/.multiprompt-runtime/reader.py", "term-a;b", "") == null);'));
+  assert.ok(end.includes('expect(build(&out, "~/.multiprompt-runtime/reader.py", "term-a;b", "", 1) == null);'));
 });
 
 test('IGSH-1266 a kill that never reached the server is retried in the background', () => {
@@ -99,7 +101,7 @@ test('IGSH-1266 a kill that never reached the server is retried in the backgroun
   assert.ok(!end.includes('if (!killRemoteTmuxSession'), 'the tab must not stay open on a failed kill');
 
   const retry = body('src/archive.zig', 'pub fn retryPendingSessionKills(', 'fn remoteNameIsSafe(');
-  assert.ok(retry.includes('if (killRemoteTmuxSession(session, entry.host, entry.sid[0..entry.sid_len]) == .gone) {'));
+  assert.ok(retry.includes('if (killRemoteTmuxSession(session, entry.host, entry.sid[0..entry.sid_len], entry.ai_agent) == .gone) {'));
   assert.match(retry, /queuePendingSessionKill\(/, 'a failed retry must stay queued');
 
   const fetch = body('src/vps.zig', 'fn tmuxFetchThreadDual(', 'fn vpsPollCachePath(');
@@ -108,7 +110,7 @@ test('IGSH-1266 a kill that never reached the server is retried in the backgroun
 
 test('IGSH-1266 the archive keeps its own guard when the server cannot be reached', () => {
   const archive = body('src/archive.zig', 'pub fn archiveTabAt(', 'pub fn archiveActiveTab(');
-  assert.ok(archive.includes('if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "") != .gone) {'));
+  assert.ok(archive.includes('if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "", 1) != .gone) {'));
   assert.match(archive, /showHeaderNoticeAscii\("Could not kill remote tmux session", 4000, true\);/);
   assert.match(body('src/archive.zig', 'pub fn rejectPinnedSessionClose(', 'pub fn anyPinnedSession('), /app_state\.shells\[i\]\.pinned_top/);
 });
