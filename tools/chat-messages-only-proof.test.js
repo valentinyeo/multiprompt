@@ -159,7 +159,7 @@ test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and t
   assert.deepEqual(gates.map(([, number]) => Number(number)), Array.from({ length: gates.length }, (_, i) => i + 1));
   assert.equal(gates.length, 10);
   const { readChangelogEntry } = require('./changelog-entry.js');
-  assert.match(readChangelogEntry('IGSH-816'), /Choose CLEAN chat[\s\S]*keeping messages and the working indicator/);
+  assert.equal(readChangelogEntry('IGSH-816').trim(), 'IGSH-816 Multiprompt Chat View: CLEAN chat option showing only messages');
 });
 
 test('IGSH-857 the stand-in agent writes the todo before the baseline so the status row never appears mid-proof', () => {

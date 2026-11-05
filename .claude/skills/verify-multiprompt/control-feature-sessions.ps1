@@ -9,22 +9,23 @@
             Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
             Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'listing-*.txt').Count -gt 0 } 'repository discovery response'
             $repoLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            Wait-Until { (Get-Content -LiteralPath $repoLog -Raw) -match '\[palette\] rows chars=0 count=3 ids=6702 6710 6711' } 'picker shows both repository rows'
+            Wait-Until { (Get-Content -LiteralPath $repoLog -Raw) -match '\[palette\] rows chars=0 count=101 ids=6702 6710 6711' } 'picker shows all 100 project folders'
             Snapshot 'repo-picker-rows'
-            Type-Text 'beta'
-            Snapshot 'ctrl-t-beta-picker'
-            Press @(0x0D) 'Enter: select beta'
+            Type-Text 'notes-only'
+            Snapshot 'ctrl-t-notes-only-picker'
+            Press @(0x0D) 'Enter: select notes-only'
             Wait-Until {
                 $state = Read-Session
                 if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
                 $tab = @($state.tabs)[$state.active_tab]
-                $tab.cwd -eq '/work/projects/beta' -and $tab.cv -eq $true -and $tab.tmux_host -eq 2
-            } 'Ctrl+T beta chat saved'
-            Snapshot 'ctrl-t-beta-chat'
-            $result.checks += @{ name = 'ctrl-t-beta-chat'; cwd = '/work/projects/beta'; cv = $true; host = 2 }
-            Press @(0x11, 0x57) 'Ctrl+W: close beta chat'
-            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta chat closed'
-            Press @(0x11, 0x32) 'Ctrl+2: return to the seeded third-server session'
+                $tab.cwd -eq '/work/projects/notes-only' -and $tab.cv -eq $true -and $tab.tmux_host -eq 2
+            } 'Ctrl+T notes-only chat saved'
+            Snapshot 'ctrl-t-notes-only-chat'
+            $result.checks += @{ name = 'ctrl-t-notes-only-chat'; cwd = '/work/projects/notes-only'; cv = $true; host = 2 }
+            Press @(0x11, 0x57) 'Ctrl+W: close notes-only chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'notes-only chat closed'
+            Palette 'Second'
+            Press @(0x0D) 'Enter: return to the seeded third-server session'
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal choice'
 
             Palette 'new claude in terminal'
@@ -35,20 +36,21 @@
             $cancelled = Read-Session
             if (@($cancelled.tabs).Count -ne $beforeClaude -or $cancelled.tabs[$cancelled.active_tab].tmux_host -ne 2) { throw 'Cancelling the picker changed tabs or the active host' }
             Press @(0x11, 0x54) 'Ctrl+T: new Claude chat after cancel'
-            Type-Text 'alpha'
-            Snapshot 'ctrl-t-alpha-picker'
-            Press @(0x0D) 'Enter: select alpha'
+            Type-Text 'zz-last-folder'
+            Snapshot 'ctrl-t-zz-last-folder-picker'
+            Press @(0x0D) 'Enter: select zz-last-folder'
             Wait-Until {
                 $state = Read-Session
                 if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
                 $tab = @($state.tabs)[$state.active_tab]
-                $tab.cwd -eq '/work/projects/alpha' -and $tab.cv -eq $true -and $tab.tmux_host -eq 2
-            } 'Ctrl+T alpha chat after cancel saved'
-            Snapshot 'ctrl-t-alpha-chat'
-            $result.checks += @{ name = 'cancel-then-ctrl-t-alpha'; cwd = '/work/projects/alpha'; cv = $true; host = 2 }
-            Press @(0x11, 0x57) 'Ctrl+W: close alpha chat'
-            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'alpha chat closed'
-            Press @(0x11, 0x32) 'Ctrl+2: return to the seeded third-server session'
+                $tab.cwd -eq '/work/projects/zz-last-folder' -and $tab.cv -eq $true -and $tab.tmux_host -eq 2
+            } 'Ctrl+T zz-last-folder chat after cancel saved'
+            Snapshot 'ctrl-t-zz-last-folder-chat'
+            $result.checks += @{ name = 'cancel-then-ctrl-t-zz-last-folder'; cwd = '/work/projects/zz-last-folder'; cv = $true; host = 2 }
+            Press @(0x11, 0x57) 'Ctrl+W: close zz-last-folder chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'zz-last-folder chat closed'
+            Palette 'Second'
+            Press @(0x0D) 'Enter: return to the seeded third-server session'
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal session'
 
             Palette 'new claude in terminal'

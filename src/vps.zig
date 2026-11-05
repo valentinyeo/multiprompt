@@ -1126,7 +1126,7 @@ pub const RepoRow = struct {
 };
 
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
-const REPO_LIST_SCRIPT = "for d in /home/*/projects/*/; do [ -d ${d}.git ] && echo ${d%/}; done 2>/dev/null | head -60";
+const REPO_LIST_SCRIPT = "for d in /home/*/projects/*/; do [ -d \\\"$d\\\" ] && printf '%s\\n' \\\"${d%/}\\\"; done 2>/dev/null";
 
 pub var g_repo_cache: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
 pub var g_repo_cache_count: u32 = 0;

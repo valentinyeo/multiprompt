@@ -237,8 +237,7 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('chat-focus'));
   assert.ok(featureMatrix(workflow).full.includes('chat-focus'));
-  assert.ok(workflow.includes('- tools/chat-focus.test.js'));
-  assert.match(workflow, /run: node --test [^\n]*tools\/chat-focus.test.js/);
+  assert.match(workflow, /run: node --test [^\n]*tools\/chat-focus\.test\.js/);
   const map = read(skill + 'features/chat-focus.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
   for (const required of ['v0.28.848', 'WM_GETTEXTLENGTH (0x000E)', 'WM_GETTEXT (0x000D)', 'without trimming or normalizing', 'WM_GETTEXT JSON key', 'ControlType.Pane', 'same owned Edit', 'restart-typing.text.json', 'Doctor', 'result.json', 'Empty transcript clicks']) assert.ok(map.includes(required), required);
@@ -248,6 +247,6 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.ok(read(skill + 'coverage.md').includes('| IGSH-716 |'));
   const changelog = readChangelogEntry('IGSH-716').trim();
   assert.equal(changelog.split('\n').length, 1);
-  assert.match(changelog, /Alt\+Q.*Find.*no browser pane/);
+  assert.equal(changelog, 'IGSH-716 Multiprompt: after a restart the chat box sometimes has no focus and Alt+Q does nothing');
   assert.doesNotMatch(changelog, /\.zig|WM_APP|ISSUE-|JSON/);
 });

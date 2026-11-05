@@ -1,9 +1,17 @@
 name: Chat perf bisect
-run-name: chat perf ${{ inputs.refs || 'v0.28.900 v0.28.917' }}
+run-name: chat perf ${{ inputs.before || inputs.refs || 'v0.28.900 v0.28.917' }}
 
 on:
   workflow_dispatch:
     inputs:
+      before:
+        description: Optional full pre-fix SHA for five alternating pairs against this branch
+        required: false
+        type: string
+      profile:
+        description: Collect separate untimed call profiles for paired measurements
+        default: true
+        type: boolean
       refs:
         description: Space separated release tags or full 40 character commit SHAs, such as v0.28.900 v0.28.917
         required: true
@@ -22,6 +30,7 @@ permissions:
 
 jobs:
   plan:
+    if: inputs.before == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -109,7 +118,7 @@ jobs:
 
   table:
     needs: measure
-    if: always()
+    if: always() && inputs.before == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -136,3 +145,107 @@ jobs:
             table.md
             rows/
           if-no-files-found: error
+
+  paired:
+    if: inputs.before != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: after
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.before }}
+          path: before
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install pinned Zig
+        run: |
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+          echo '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  '"$RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Check the measurement reader
+        working-directory: after
+        run: node --test tools/chat-update-speed.test.js
+      - name: Build the unchanged native workload
+        env:
+          BEFORE: ${{ inputs.before }}
+        run: |
+          [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]]
+          mkdir evidence
+          for side in before after; do
+            git -C "$side" rev-parse HEAD > "evidence/$side-revision.txt"
+            (cd "$side" && zig test src/chat_perf_test.zig -O ReleaseFast -mcpu=baseline -fno-strip --test-filter 'CPU707 synthetic' --test-no-exec -femit-bin="$GITHUB_WORKSPACE/evidence/$side") > "evidence/$side-build.log" 2>&1
+          done
+          {
+            zig version
+            uname -a
+            lscpu
+            nproc
+            uptime
+            free -m
+            printf '\nReleaseFast, baseline CPU, original CPU707 test; no budget edits.\n'
+          } > evidence/environment.txt
+      - name: Prove the native allocation regression
+        run: |
+          (cd after && zig test src/chat_history.zig --test-filter 'IGSH-1674') > evidence/after-regression.log 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('after/src/chat_history.zig').read_text()
+          marker = 'test "IGSH-1674 appending positioned rows does not decode settled message bodies"'
+          fixture = source[source.index(marker):]
+          with Path('before/src/chat_history.zig').open('a') as target:
+              target.write('\n' + fixture)
+          PY
+          set +e
+          (cd before && zig test src/chat_history.zig --test-filter 'IGSH-1674') > evidence/before-regression.log 2>&1
+          code=$?
+          set -e
+          test "$code" -eq 1
+          grep -F 'FAIL (TestUnexpectedResult)' evidence/before-regression.log
+          grep -F 'expect(appended)' evidence/before-regression.log
+      - name: Measure five alternating pairs
+        run: |
+          for sample in 1 2 3 4 5; do
+            order='before after'
+            if ((sample % 2 == 0)); then order='after before'; fi
+            for side in $order; do
+              printf '%s %s\n' "$sample" "$side" >> evidence/order.txt
+              uptime >> evidence/load.txt
+              set +e
+              "./evidence/$side" > "evidence/$side-$sample.log" 2>&1
+              code=$?
+              set -e
+              printf '%s\n' "$code" > "evidence/$side-$sample.exit"
+            done
+          done
+      - name: Profile separately from reported timings
+        if: inputs.profile
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends linux-tools-generic
+          sudo sysctl kernel.perf_event_paranoid=-1
+          profiler=$(find -L /usr/lib/linux-tools -type f -name perf | head -1)
+          test -n "$profiler"
+          for side in before after; do
+            set +e
+            sudo "$profiler" record -e cpu-clock -F 499 --call-graph dwarf -o "evidence/$side.perf" -- "./evidence/$side" > "evidence/$side-profile.log" 2>&1
+            printf '%s\n' "$?" > "evidence/$side-profile.exit"
+            set -e
+            sudo "$profiler" report --stdio --no-children -i "evidence/$side.perf" > "evidence/$side-profile.txt"
+            sudo chown "$(id -u):$(id -g)" "evidence/$side.perf"
+          done
+      - name: Compare all measured work and unchanged limits
+        run: node after/tools/chat-update-speed.mjs evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: chat-update-speed
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30

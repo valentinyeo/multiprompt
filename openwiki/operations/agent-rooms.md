@@ -1,10 +1,18 @@
 # Room admission store
 
-This phase stores rooms only. It does not send agent messages. Pending intents are not agent delivery. No delivery acknowledgement exists yet. Transport, UI, and cross-host access remain pending. Offline operation and mailbox shipping remain pending. Each shared room has one authoritative home. Clients must address that same home.
+Rooms keep one authoritative home. The home-side bridge can now admit room messages to the existing canonical Claude message store and collect explicitly scoped, completed replies. The desktop room interface belongs to IGSH-1313; Earlier Android room work is IGSH-1317 and IGSH-1510. Scoped reply adoption and phone proof follow in https://app.hypertask.ai/detail/project-2060/1694. This backend change does not release those interfaces.
 
-Future delivery must use shared message storage. Write one stable-ID entry per recipient. Never type room messages into terminal panes. Future offline state requires per-agent session state. Read that state from shared message storage. Never derive offline state through tmux polling. This draft implements neither delivery nor presence. App-owned Claude sessions are replacing terminal transport. Codex and Pi integration follow later.
+Each recipient keeps its stable delivery UUID as its canonical message ID. A room delivery freezes the store UUID, room, human parent event and member. Canonical admission persists this scope beside the message. The host serializes a room turn against every other turn in that agent session, including private messages, rather than mixing their replies. Private messages still use their existing behavior outside a room turn. Room delivery never falls back to terminal typing.
 
-Existing message_protocol 1 and reader bytes remain unchanged. Old clients continue unchanged without rooms. New room clients must require room capability. Reject missing or unsupported room protocol versions. Desktop rooms and paired Android work remain open.
+Only completed, top-level text from the exact scoped message and session becomes an agent reply. Thinking, tools, unscoped private turns and other rooms are not copied. The bridge persists its cursor, ordered final text parts and completion in the room store. Reply admission and cursor completion commit together. Reopening or retrying cannot publish a second copy. A failed or interrupted turn is not published as a successful reply. A host crash without a completed scoped turn provides no reply evidence.
+
+Existing message protocol 1 stays compatible. Room scope is additive and immutable on a message ID. Reader generation 67 advertises `room_message_protocols: [1]` through `engine_info`. An older selected runtime cannot enable sending. Each active host must also advertise scoped room support in its ping response before receiving any room text. An older running host leaves room work queued until it exits and a compatible host starts. Existing room clients retain the legacy store-only capability response. New clients opt in with `{"op":"capabilities","room_messages":1}` and require `live_send: true` and `room_reply_protocol: 1`. Missing support must not fall back to terminal delivery.
+
+With that capability, the bridge accepts the existing `post_human` request plus `host_uuid`. Reading room `events` advances pending submissions and reply collection before returning the ordered events. Refreshes use a bounded, fair delivery sweep. A disabled agent keeps its pending room intent; it is reconsidered on later refreshes. The canonical message worker owns admitted messages and retries, not a second room sender. Clients must keep refreshing the room. This does not provide background collection while every client is closed.
+
+Membership is rechecked under the room write transaction before canonical admission. Removing a recipient first prevents its admission. Already-admitted canonical work may finish; a later removal suppresses publication into the room.
+
+The bridge still refuses client-supplied `agent_reply` and `delivery_work` operations. Its collector alone derives reply provenance from canonical host events. The lower-level store interface below remains a trusted home-side admission interface, not a client authentication boundary.
 
 ## Storage and interface
 

@@ -61,7 +61,10 @@ function lifecycleContract(source) {
 
 test('lifecycle dispatch is nonblocking, serializes an inflight freeze before wake and clears markers only on matching acknowledgment', () => {
   lifecycleContract(pane);
-  for (const before of ['sendBrowserLifecycle(idx, false)', 'browser wake sent:', 'std.Thread.spawn(.{}, browserLifecycleWorker, .{job})', 'requestBrowserForWindow(allocator, job.window_id', 'browser_window_id != job.window_id', 'if (job.confirmed) {', 'browser_wake_requested = true', 'wake_requested or idx == app_state.active_shell']) assert.throws(() => lifecycleContract(pane.replace(before, 'false')), `reject lifecycle regression: ${before}`);
+  for (const before of ['sendBrowserLifecycle(idx, false)', 'browser wake sent:', 'std.Thread.spawn(.{}, browserLifecycleWorker, .{job})', 'requestBrowserForWindow(allocator, job.window_id', 'app_state.shells[idx].browser_window_id != job.window_id', 'if (job.confirmed) {', 'browser_wake_requested = true', 'wake_requested or idx == app_state.active_shell']) {
+    assert.ok(pane.includes(before), `negative control exists: ${before}`);
+    assert.throws(() => lifecycleContract(pane.replace(before, 'false')), `reject lifecycle regression: ${before}`);
+  }
   assert.throws(() => lifecycleContract(pane.replace('    if (!sendBrowserLifecycle(idx, false)) return;', '    Sleep(1);\n    if (!sendBrowserLifecycle(idx, false)) return;')));
 });
 
@@ -124,8 +127,9 @@ test('existing freeze deadlines, exemptions and UI-thread completion wiring rema
   assert.match(workflow, /node --test [^\n]*tools\/frozen-wake.test.js/);
   const release = read('src/changelog.zig').match(/\.ver = "0\.28\.836", \.items = &\.\{([^]*?)\n    \} \}/)[1];
   const released = [...release.matchAll(/\.\{\s*\.text = ("(?:\\.|[^"\\])*"),\s*\.ticket = "IGSH-606"\s*\}/g)].map(match => JSON.parse(match[1]));
-  assert.deepEqual(released, ['Browser session switching now has a dedicated speed check.', 'Switching back to a sleeping browser pane starts waking it immediately, before the session view is drawn.']);
-  assert.deepEqual(readChangelogEntry('IGSH-606').trim().split('\n').filter(line => !released.includes(line)), ['Switching chat sessions with the browser open now shows the browser page faster.']);
+  const title = 'IGSH-606 Multiprompt: Ctrl+Tab between sessions is slow when the browser pane is showing';
+  assert.deepEqual(released, [title, title]);
+  assert.deepEqual(readChangelogEntry('IGSH-606').trim().split('\n'), [title, title, title]);
 });
 
 test('wake changes introduce no code comments', async () => {
@@ -206,7 +210,9 @@ test('after-paint Chat switches retain native edge masks throughout the old-to-n
 test('shared native pipe transport targets each lifecycle window and isolates concurrent reply pipes without changing its deadlines', () => {
   const native = read('src/bridge.zig');
   assert.match(body(native, 'requestBrowser'), /return requestBrowserForWindow\(allocator, g_window_id, g_profile_token, method, fields_json, deadline\)/);
-  const request = body(native, 'requestBrowserForWindow');
+  const wrapper = body(native, 'requestBrowserForWindow');
+  assert.match(wrapper, /return requestBrowserForWindowCancellable\(allocator, window_id, profile_token, method, fields_json, deadline, null, 0\)/);
+  const request = body(native, 'requestBrowserForWindowCancellable');
   assert.match(request, /request_sequence.fetchAdd\(1, \.monotonic\)/);
   assert.match(request, /buildBrowserRequest\(allocator, id, method, reply_pipe_text, window_id, fields_json\)/);
   assert.match(request, /isolatedPipeName\(&pipe_name_buf, profile_token\)/);

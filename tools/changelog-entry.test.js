@@ -27,11 +27,11 @@ test('ticket text survives the real release fold with whitespace and escaping no
   const expected = 'First sentence.\nOpen "saved chats" at the café.\nSecond fragment.\n';
   const root = fixture(t, files);
   assert.equal(readChangelogEntry('IGSH-1', root), expected);
-  const stamp = stampTree(Object.fromEntries(Object.entries(files).map(([file, text]) => [file.split(path.sep).join('/'), text])));
+  const stamp = stampTree(Object.fromEntries(Object.entries(files).map(([file, text]) => [file.split(path.sep).join('/'), text])), undefined, { 'IGSH-1': 'First authoritative title', 'IGSH-10': 'Other authoritative title' });
   fs.writeFileSync(path.join(root, 'src/changelog.zig'), stamp.files['src/changelog.zig']);
   for (const file of stamp.removed) fs.unlinkSync(path.join(root, file));
-  assert.equal(readChangelogEntry('IGSH-1', root), expected);
-  assert.equal(readChangelogEntry('IGSH-10', root), 'Unrelated ticket.\n');
+  assert.equal(readChangelogEntry('IGSH-1', root), 'IGSH-1 First authoritative title\n');
+  assert.equal(readChangelogEntry('IGSH-10', root), 'IGSH-10 Other authoritative title\n');
 });
 
 test('unreleased text takes precedence over older released text for the same ticket', t => {

@@ -29,7 +29,9 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh'];
+  if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs', 'ticket-titles.json');
+  for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
@@ -93,9 +95,15 @@ if (existing.status === 1) execFileSync('git', ['--git-dir', process.env.TEST_RE
 else if (existing.status !== 0) process.exit(existing.status || 1);
 `, { mode: 0o755 });
   return { dir, git, sha, remote, log,
-    run: (name, env = {}, source = workflow) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
+    run: (name, env = {}, source = workflow) => {
+      if (name === 'Publish release') {
+        fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'dist/release-notes.json'), JSON.stringify({ version: (env.TAG || tag).slice(1), releases: [{ changes: ['IGSH-728 Update notes'], tickets: ['https://app.hypertask.ai/detail/project-2060/728'] }] }));
+      }
+      return spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: 'example/multiprompt',
-        TAG: tag, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', GH_STATE: path.join(dir, 'release-state.json'), REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
+        TAG: tag, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', GH_STATE: path.join(dir, 'release-state.json'), REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } });
+    },
     admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
         GH_LOG: log, TEST_REMOTE: remote, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
@@ -138,7 +146,7 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
   assert.match(workflow, /permissions:\n  contents: write/);
   assert.doesNotMatch(workflow, /--draft/);
-  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['HYPERTASK_AGENT_TOKEN', 'MULTIPROMPT_RELEASE_SIGNING_KEY']);
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
@@ -171,6 +179,10 @@ test('release downloads exclude verification evidence from published update asse
   for (const [, inputs] of downloads) {
     const name = inputs.match(/^          name: (.+)$/m)?.[1];
     const destination = inputs.match(/^          path: (.+)$/m)?.[1];
+    if (name === 'release-notes-source') {
+      assert.equal(destination, undefined);
+      continue;
+    }
     assert.equal(destination, 'dist');
     for (const [artifact, files] of artifacts) {
       if (name && artifact !== name) continue;
@@ -355,7 +367,8 @@ test('master publication is latest, targets built SHA and refuses duplicate rele
   assert.equal(create[create.indexOf('--target') + 1], f.sha);
   assert.equal(create[create.indexOf('--title') + 1], `multiprompt ${tag}`);
   assert(create.includes('--latest=true'));
-  assert(create.includes('--generate-notes'));
+  assert(create.includes('--notes-file'));
+  assert.match(fs.readFileSync(path.join(f.dir, 'release-body.txt'), 'utf8'), /IGSH-728.*Update notes/);
   const second = f.run('Publish release');
   assert.notEqual(second.status, 0);
   assert.match(second.stderr, /already exists; refusing publication/);
@@ -384,7 +397,7 @@ test('latest lookup and publication failures do not create a release', { skip: p
 test('packaging includes extension contents, excludes current themes and covers every asset', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   fs.mkdirSync(path.join(f.dir, 'dist'));
-  fs.writeFileSync(path.join(f.dir, 'src/changelog.zig'), '.{ .ver = "1.2.3", .items = &.{\n        .{ .text = "Updates show what changed.", .ticket = "IGSH-728" },\n    } },\n');
+  fs.writeFileSync(path.join(f.dir, 'src/changelog.zig'), '.{ .ver = "1.2.3", .items = &.{\n        .{ .text = "IGSH-728 Updates show what changed.", .ticket = "IGSH-728" },\n    } },\n');
   execFileSync(process.execPath, [path.join(root, 'tools/release-notes.mjs'), 'src/changelog.zig', tag, 'dist/release-notes.json'], { cwd: f.dir });
   fs.mkdirSync(path.join(f.dir, 'extension/themes/current'), { recursive: true });
   fs.writeFileSync(path.join(f.dir, 'extension/themes/current/private.txt'), 'excluded');
@@ -417,7 +430,7 @@ test('automatic release invokes the signed release workflow for master without t
   assert.match(auto, /if: github.ref == 'refs\/heads\/master'/);
   assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
   assert.doesNotMatch(auto, /workflow_run|schedule:|auto-release-admit|gh pr create|gh release create/);
-  assert.deepEqual([...auto.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.deepEqual([...auto.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY', 'HYPERTASK_AGENT_TOKEN']);
 });
 
 test('next release increments the latest tag rather than the source version', () => {
@@ -441,9 +454,9 @@ test('release resolves a build-input tag even when source history has an older v
 
 test('release builds inject the tag, stage matching notes and reject wrong embedded versions', { skip: process.platform === 'win32' }, t => {
   const build = script('Build');
-  assert.match(build, /node tools\/version-stamp\.mjs build "\$TAG"/);
+  assert.match(workflow, /name: release-notes-source/);
   assert.match(build, /zig build -Dtarget=\$\{\{ matrix.target \}\} -Drelease=\$\{\{ github.event_name != 'pull_request' \}\} -Dversion="\$\{TAG#v\}"/);
-  assert.match(script('Publish plain versioned update notes'), /node tools\/version-stamp\.mjs build "\$TAG"\nnode tools\/release-notes\.mjs/);
+  assert.match(script('Resolve authoritative release notes'), /node tools\/version-stamp\.mjs build "\$TAG"\nnode tools\/release-notes\.mjs/);
   const check = build.match(/<<'NODE'\n([\s\S]*?)\nNODE/)[1];
   const f = fixture(t);
   fs.mkdirSync(path.join(f.dir, 'zig-out/bin'), { recursive: true });
@@ -514,9 +527,18 @@ test('release builds authenticate history reads and publish versioned notes', ()
   const build = workflow.split('\n  build:\n')[1].split('\n  launch:\n')[0];
   const release = workflow.split('\n  release:\n')[1];
   assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
-  assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(notes, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" dist\/release-notes\.json/);
+  const prepare = workflow.split('\n  prepare:\n')[1].split('\n  build:\n')[0];
+  assert.match(prepare, /if: github\.ref == 'refs\/heads\/master'/);
+  assert.match(prepare, /test "\$SHA" = "\$\(git rev-parse HEAD\)"/);
+  assert.match(prepare, /HYPERTASK_AGENT_TOKEN: \$\{\{ secrets\.HYPERTASK_AGENT_TOKEN \}\}/);
+  assert.match(prepare, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" release-notes\.json/);
+  assert.match(build, /name: release-notes-source/);
+  assert.doesNotMatch(build, /HYPERTASK_AGENT_TOKEN/);
+  assert.match(release, /name: release-notes-source/);
+  assert.doesNotMatch(release, /HYPERTASK_AGENT_TOKEN/);
+  assert.match(release, /cp release-notes\.json dist\/release-notes\.json/);
+  assert.match(release, /--notes-file release-body\.txt/);
+  assert.doesNotMatch(release, /--generate-notes/);
 });
 
 for (const [published, candidate, latest] of [

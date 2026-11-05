@@ -15,9 +15,12 @@ int main(int argc, char **argv) {
     if (!log) return 3;
     fputs(cmd, log);
     fclose(log);
-    if (strstr(cmd, "for d in /home/*/projects/*/") && strstr(cmd, ".git")) {
+    if (strstr(cmd, "for d in /home/*/projects/*/")) {
         puts("/work/projects/alpha");
         puts("/work/projects/beta");
+        for (int i = 0; i < 96; i++) printf("/work/projects/code-%03d\n", i);
+        puts("/work/projects/notes-only");
+        puts("/work/projects/zz-last-folder");
         fflush(stdout);
         snprintf(path, sizeof(path), "%s\\listing-%lu.txt", root, GetCurrentProcessId());
         FILE *done = fopen(path, "wb");

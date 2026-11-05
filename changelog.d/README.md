@@ -5,5 +5,8 @@ No ticket ids, file names, paths, code names or PR numbers in those sentences.
 Never edit APP_VERSION or .ver lines by hand.
 Automatic releases replace manual `node tools/version-stamp.mjs release`.
 Start every commit with its ticket ID.
-Releases without product notes show linked check notes.
+Release notes use the ticket number and its authoritative board title, not fragment text.
+The checked-in title catalog supports offline builds and historical releases.
+Trusted release jobs resolve missing titles from the board and fail if any title is unavailable or invalid.
+Historical entries without identifiable tickets are omitted; ticketed entries are never silently omitted.
 Releases without ticketed lines cannot publish.

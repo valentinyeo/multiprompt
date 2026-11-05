@@ -415,11 +415,13 @@ const after = 1;
     const files = {
       'src/main.zig': 'pub const APP_VERSION = "1.2.3";\n',
       'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
-      'changelog.d/DEMO-1-change.md': 'Opening tabs works.\n',
+      'changelog.d/IGSH-154-change.md': 'Opening tabs works.\n',
     };
     for (const [file, text] of Object.entries(files)) f.write(file, text);
     const base = f.commit();
     const stamped = stampTree(files);
+    const titles = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
+    assert.ok(stamped.files['src/changelog.zig'].includes(`IGSH-154 ${titles['IGSH-154']}`));
     for (const [file, text] of Object.entries(stamped.files)) f.write(file, text);
     for (const file of stamped.removed) fs.unlinkSync(path.join(f.repo, file));
     f.commit();

@@ -26,14 +26,15 @@ test('sessions installs the SSH boundary before launch', () => {
   assert.match(ssh, /\/work\/projects\/beta/);
 });
 
-test('Ctrl+T picks beta directly and checks the saved chat', () => {
+test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () => {
   const journey = sessions.slice(0, sessions.indexOf("Palette 'new claude in terminal'"));
-  assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\*\.txt[\s\S]*Type-Text 'beta'[\s\S]*Enter: select beta[\s\S]*\$tab\.cwd -eq '\/work\/projects\/beta' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
-  assert.doesNotMatch(journey, /\bPalette\s+'|commands\.json|catch|fallback/i);
+  assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
+  assert.doesNotMatch(journey.slice(0, journey.indexOf('Ctrl+W:')), /\bPalette\s+'|commands\.json|catch|fallback/i);
+  assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
 });
 
-test('cancel precedes alpha chat and beta terminal checks', () => {
-  assert.match(sessions, /cancel repository picker[\s\S]*close palette[\s\S]*\$cancelled\.tabs\[\$cancelled\.active_tab\]\.tmux_host -ne 2[\s\S]*Ctrl\+T: new Claude chat after cancel[\s\S]*Type-Text 'alpha'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/alpha' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2[\s\S]*New Claude in terminal[\s\S]*Type-Text 'beta'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/beta'[\s\S]*\$tab\.cv -eq \$false\) -and \$tab\.tmux_host -eq 2/);
+test('cancel precedes zz-last-folder chat and beta terminal checks', () => {
+  assert.match(sessions, /cancel repository picker[\s\S]*close palette[\s\S]*\$cancelled\.tabs\[\$cancelled\.active_tab\]\.tmux_host -ne 2[\s\S]*Ctrl\+T: new Claude chat after cancel[\s\S]*Type-Text 'zz-last-folder'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/zz-last-folder' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2[\s\S]*New Claude in terminal[\s\S]*Type-Text 'beta'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/beta'[\s\S]*\$tab\.cv -eq \$false\) -and \$tab\.tmux_host -eq 2/);
 });
 
 test('IGSH-1447 executed production host selection follows active server', () => {

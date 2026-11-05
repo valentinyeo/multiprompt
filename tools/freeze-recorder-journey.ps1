@@ -42,8 +42,8 @@ if ($AccountState) {
     [IO.File]::WriteAllBytes((Join-Path $settings 'account-device.dat'), $protected)
     Remove-Item Env:MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue
 }
-function Service-Reports {
-    return @((Invoke-RestMethod "$Service/__journey/reports").reports)
+function Service-Reports([string]$Summary = 'Windows freeze') {
+    return @((Invoke-RestMethod "$Service/__journey/reports").reports | Where-Object { $_.summary -eq $Summary })
 }
 function Wait-Uploads([int]$Count) {
     $deadline = [DateTime]::UtcNow.AddSeconds(50)
@@ -93,6 +93,22 @@ try {
     $window = Wait-Window $app
     Start-Sleep -Seconds 12
     if (@(Reports).Count -ne 0) { throw 'Healthy window wrote a freeze report' }
+    $healthReceipt = $null
+    if ($Service) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(80)
+        do {
+            $healthRows = @(Service-Reports 'Windows watchdog health')
+            if ($healthRows.Count -gt 0) { break }
+            if ($app.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Actual watchdog coverage never reached the report service' }
+            Start-Sleep -Milliseconds 250
+        } while ($true)
+        if ($healthRows.Count -ne 1) { throw 'Initial coverage receipt was duplicated' }
+        $healthReceipt = $healthRows[0]
+        $coverage = [regex]::Match($healthReceipt.stack_trace, '\Aobserved_ms: (\d+)\nresponsive_ms: (\d+)\nunobserved_ms: (\d+)\nfreezes: (\d+)\n\z')
+        if (!$coverage.Success -or [long]$coverage.Groups[1].Value -lt 60000 -or [long]$coverage.Groups[2].Value -lt 55000 -or [long]$coverage.Groups[4].Value -ne 0 -or $healthReceipt.thread -ne 'watchdog' -or $healthReceipt.report_id -notmatch '^watchdog-\d+-\d+-\d+-0$') { throw 'Watchdog health receipt lacks actual healthy coverage' }
+        $healthReceipt | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $Evidence 'watchdog-health.json')
+        if (@(Reports).Count -ne 0) { throw 'Healthy coverage interval wrote a freeze report' }
+    }
     $privateText = 'PRIVATE-FREEZE-FIXTURE-message-host-path'
     [IO.File]::AppendAllText((Join-Path $env:APPDATA 'ZigShell/debug.log'), $privateText)
     $owner = [uint32]0
@@ -156,7 +172,7 @@ try {
         @{ device = $state.device_id; version = ([regex]::Match($text, '(?m)^version: (.+)$')).Groups[1].Value; captured = ([regex]::Match($text, '(?m)^time_unix: (.+)$')).Groups[1].Value } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'live-result.json')
         Write-Host 'FREEZE_LIVE_UPLOAD_OK'
     }
-    @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
+    @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; watchdogHealth = [bool]$healthReceipt; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
     Stop-Process -Id $app.Id -Force
     if (-not $app.WaitForExit(5000)) { throw 'Original freeze journey process did not exit' }
     $app.Dispose()
