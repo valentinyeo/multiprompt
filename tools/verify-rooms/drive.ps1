@@ -389,6 +389,9 @@ try {
         try {
             if ($null -ne $accountJob) { $stopped=$accountJob.Stop(); $result.account_cleanup=$stopped.ActiveProcesses; $accountJob.Dispose() } else { $result.account_cleanup=0 }
         } finally {
+            try {
+                $result.rejections = @([regex]::Matches((Log), '\[rooms\] rejected (controller|busy|host|pending|revision|journal|encode|launch)=([A-Za-z_][A-Za-z0-9_]*)') | ForEach-Object { $_.Groups[1].Value + '=' + $_.Groups[2].Value } | Select-Object -Last 32)
+            } catch { $result.rejections_unavailable = $true }
             if ($result.status -ne 'passed' -and $app -and !$app.HasExited) {
                 $result.phase='diagnostics: app stack'
                 Save $result (Join-Path $Evidence 'result.json')

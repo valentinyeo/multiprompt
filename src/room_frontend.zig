@@ -1820,7 +1820,10 @@ fn matchesPending(item: *const PendingCommand, kind: journal.Kind, room_id: []co
 fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []const u8, revision: u64, name: []const u16, ids: []const []const u8) room_view.ActionResult {
     if (!enabled or !created or ids.len > 64) return .failed;
     if (pending_command) |item| {
-        if (item.evidence == null) return .failed;
+        if (item.evidence == null) {
+            @import("diagnostics.zig").debugLog("[rooms] rejected pending=MissingEvidence");
+            return .failed;
+        }
         const matches = matchesPending(item, kind, room_id, revision, name, ids);
         const accepted = item.evidence_state == .accepted;
         var selected: ?RoomLocation = null;
@@ -1843,8 +1846,18 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
         }
         return if (accepted) .accepted else .failed;
     }
-    const c = if (controller) |*value| value else return .failed;
-    if (c.job != null or !c.has_host_uuid) return .failed;
+    const c = if (controller) |*value| value else {
+        @import("diagnostics.zig").debugLog("[rooms] rejected controller=Absent");
+        return .failed;
+    };
+    if (c.job != null) {
+        @import("diagnostics.zig").debugLog2("[rooms] rejected busy=", @tagName(c.kind));
+        return .failed;
+    }
+    if (!c.has_host_uuid) {
+        @import("diagnostics.zig").debugLog("[rooms] rejected host=Unbound");
+        return .failed;
+    }
     var location = StoreLocation{ .account = @splat(0), .account_len = account_len, .store_uuid = c.host_uuid };
     @memcpy(location.account[0..account_len], account[0..account_len]);
     const scope = commandScope(location) orelse return .failed;
@@ -1853,7 +1866,10 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
     } else {
         if (front != .selected or !sameLocation(front.selected, .{ .store = location, .room_id = front.selected.room_id }) or !std.mem.eql(u8, room_id, &front.selected.room_id)) return .failed;
         const current = owned_model orelse return .failed;
-        if (!std.mem.eql(u8, current.value.room_id, room_id) or current.value.revision != revision) return .failed;
+        if (!std.mem.eql(u8, current.value.room_id, room_id) or current.value.revision != revision) {
+            @import("diagnostics.zig").debugLog("[rooms] rejected revision=Mismatch");
+            return .failed;
+        }
     }
     if (kind == .post and !c.live_send) return .unsupported;
     const item = std.heap.page_allocator.create(PendingCommand) catch return .failed;
@@ -1892,9 +1908,16 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
             @memcpy(&item.id, record.command_id);
         } else item.id = journal.newCommandId() orelse return .failed;
     } else item.id = journal.newCommandId() orelse return .failed;
-    item.request = encodeCommand(a, kind, location, &item.id, room_id, revision, name, members.items, item.bindings) catch return .failed;
-    journal.prepare(scope, kind, &item.id, room_id, revision, item.request, item.bindings) catch return .failed;
-    c.launchPrepared(kind, &item.id, room_id, revision) catch {
+    item.request = encodeCommand(a, kind, location, &item.id, room_id, revision, name, members.items, item.bindings) catch |err| {
+        @import("diagnostics.zig").debugLog2("[rooms] rejected encode=", @errorName(err));
+        return .failed;
+    };
+    journal.prepare(scope, kind, &item.id, room_id, revision, item.request, item.bindings) catch |err| {
+        @import("diagnostics.zig").debugLog2("[rooms] rejected journal=", @errorName(err));
+        return .failed;
+    };
+    c.launchPrepared(kind, &item.id, room_id, revision) catch |err| {
+        @import("diagnostics.zig").debugLog2("[rooms] rejected launch=", @errorName(err));
         if (kind == .post) {
             journal_checked_generation = null;
             scheduleDiscovery(c);
