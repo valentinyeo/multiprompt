@@ -64,8 +64,8 @@ test "normalize bounded hex and opaque keys" {
     const expected = [_]u16{'a'} ** 40;
     try std.testing.expectEqual(@as(usize, 40), hex.len);
     try std.testing.expectEqualSlices(u16, &expected, normalize(&raw, &out).?);
-    const opaque = std.unicode.utf8ToUtf16LeStringLiteral("\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"");
-    try std.testing.expectEqual(@as(usize, 32), normalize(opaque, &out).?.len);
+    const opaque_key = std.unicode.utf8ToUtf16LeStringLiteral("\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"");
+    try std.testing.expectEqual(@as(usize, 32), normalize(opaque_key, &out).?.len);
     try std.testing.expect(normalize(std.unicode.utf8ToUtf16LeStringLiteral("not a key"), &out) == null);
 }
 
