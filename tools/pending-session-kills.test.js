@@ -48,6 +48,7 @@ var admitted = true;
 var notices: usize = 0;
 var saved: usize = 0;
 var queued: usize = 0;
+fn rememberArchivedTab(_: usize) ?u8 { return 0; }
 fn rejectPinnedSessionClose(_: usize) bool { return false; }
 fn parkMainWindowBeforeActiveShellRemoval(_: usize) bool { return true; }
 fn focusActiveShell() void {}
@@ -110,7 +111,7 @@ test "full queue and unsafe target preserve tab, successful end needs no retry" 
     try std.testing.expectEqual(@as(usize, 0), queued);
     try std.testing.expect(!app_state.g_tmux_closed.contains(0, "session-one"));
 }
-`, ['tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
+`, ['tmux_closed.zig', 'tmux_identity.zig', 'json_reader.zig', 'session_layout.zig', 'account_hosts.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
 });
 
 test('IGSH-1516 cancelled retry cannot kill or resurrect a replacement intent', () => {
@@ -182,5 +183,10 @@ test "only explicit accepted reopen cancels end and clears tombstone" {
     try std.testing.expect(app_state.g_pending_session_kills.begin(0) == null);
 }
 test "production queue controls" { std.testing.refAllDecls(session_kills); }
-`, ['session_kills.zig', 'tmux_identity.zig', 'tmux_closed.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
+`, ['session_kills.zig', 'tmux_identity.zig', 'tmux_closed.zig', 'json_reader.zig', 'session_layout.zig', 'account_hosts.zig', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
+});
+
+test('reconnect journey selects the owned main window rather than transient overlays', () => {
+  const window = between(read('tools/verify-reconnect/desktop.cs'), 'public static IntPtr Window(', 'public static IntPtr InputSurface(');
+  assert.match(window, /owner==pid && IsWindowVisible\(h\) && Class\(h\)=="ZigShell"/);
 });
