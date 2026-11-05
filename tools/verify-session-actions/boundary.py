@@ -1,0 +1,47 @@
+import ctypes
+from ctypes import wintypes
+import json
+import os
+from pathlib import Path
+import re
+import importlib.util
+import sys
+
+if os.environ.get('GITHUB_ACTIONS') != 'true' or os.name != 'nt':
+    raise RuntimeError('Hosted Windows only')
+root = Path(os.environ['MP_VERIFY_STATE'])
+command = ' '.join(sys.argv[2:])
+if sys.argv[1] == 'ssh' and 'tmux kill-session' in command:
+    match = re.search(r"tmux kill-session -t '([A-Za-z0-9_-]+)' 2>/dev/null; (?:python3 [A-Za-z0-9_~./-]+ host stop claude '([0-9a-f-]{36})' >/dev/null 2>&1; )?true", command)
+    if match is None:
+        raise RuntimeError('Unexpected session-end command')
+    state = json.loads((root / 'state.json').read_text(encoding='utf-8-sig'))
+    target = match[1]
+    with (root / 'end-requests.jsonl').open('a', encoding='utf-8') as requests:
+        requests.write(json.dumps(dict(session=target, sid=match[2])) + '\n')
+    if target not in state['end_events'] or (match[2] or '') != state['session_ids'][target]:
+        raise RuntimeError('Session-end target or agent identity mismatch')
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.OpenEventW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+    kernel.OpenEventW.restype = wintypes.HANDLE
+    kernel.SetEvent.argtypes = (wintypes.HANDLE,)
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel.OpenEventW(2, False, state['end_events'][target])
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel.SetEvent(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.CloseHandle(handle)
+    state['sessions'] = [name for name in state['sessions'] if name != target]
+    temporary = root / ('state-' + target + '.tmp')
+    temporary.write_text(json.dumps(state), encoding='utf-8')
+    os.replace(temporary, root / 'state.json')
+    (root / ('ended-' + target + '.json')).write_text(json.dumps(dict(session=target, sid=match[2], host_stop=bool(match[2]))), encoding='utf-8')
+    sys.exit(0)
+spec = importlib.util.spec_from_file_location('chat_delivery_boundary', Path(__file__).resolve().parents[1] / 'verify-chat-delivery' / 'boundary.py')
+base = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(base)
+base.session_names = lambda: list(base.state()['sessions'])
+sys.exit(base.tmux() if base.MODE == 'tmux' else base.shell() if base.MODE == 'shell' else base.ssh())
