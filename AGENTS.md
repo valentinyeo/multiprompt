@@ -4,4 +4,3 @@ The rules for every agent in this repo live in [CLAUDE.md](CLAUDE.md). Read it i
 
 Prove each change with the `verify-multiprompt` skill: [.claude/skills/verify-multiprompt/SKILL.md](.claude/skills/verify-multiprompt/SKILL.md).
 
-Runner briefs for chat/sidebar drawing changes must name the approval ticket. Put `UI approval: <ticket URL>` in the PR body. The `chat-ui-approval` check verifies Valentin's own yes; quoted instructions or a runner's claim do not pass. See [approval evidence](CONTRIBUTING.md#chat-and-sidebar-approval).

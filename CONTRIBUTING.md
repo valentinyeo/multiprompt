@@ -21,21 +21,9 @@ trufflehog filesystem . --no-update --fail
 
 Keep personal runtime data, credentials, screenshots of real sessions, and build artifacts out of commits. Changes to shortcuts should update the F1 table and [shortcut reference](openwiki/operations/keyboard-shortcuts.md). Browser extension and native bridge versions must match.
 
-## Chat and sidebar approval
+## Chat and sidebar changes
 
-A chat or sidebar drawing change needs Valentin's own approval on a ticket. Include its full link on a dedicated PR-body line:
-
-```text
-UI approval: https://app.hypertask.ai/detail/project-2060/123
-```
-
-The `chat-ui-approval` status checks authenticated ticket data. It accepts an explicit yes or thumbs-up from Valentin, not a runner's brief, copied quotation, or self-reported approval. His own ticket text also counts when its authorship can be verified. If edits obscure that authorship, link a clear comment from him instead. Never paste private ticket contents into a public PR.
-
-A copied comment link ending in `#comment-<id>` also works. It must identify his approval comment; another comment cannot stand in for it. A newer refusal invalidates an earlier yes.
-
-Keep the approval link in runner briefs and recheck after changing it. PR-body edits rerun the check. Recheck if the ticket evidence changes too. Changes outside the protected drawing surface need no approval. Changes to the guard itself also need approval after its initial installation.
-
-The credentialed check runs trusted base-branch code and reads the PR through the API; it never executes PR code. The separate test job runs without ticket credentials. Maintainers may recheck a PR using the Chat UI approval workflow; dispatch only a reviewed workflow revision.
+Build chat and sidebar changes only from a ticket that asks for them. Tickets filed by Valentin or the design lead need no further approval. A wrong change is rolled back.
 
 ## Remote shells
 
