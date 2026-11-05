@@ -4432,7 +4432,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 23)
+        self.assertEqual(len(base), 24)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
