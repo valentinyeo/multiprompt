@@ -185,6 +185,7 @@
   "IGSH-1661": "Desktop updates stuck: release run fails with invalid tag",
   "IGSH-1663": "Hide the inbox button while the inbox is open",
   "IGSH-1665": "Inbox and sidebar: second line says what the agent is doing",
+  "IGSH-1666": "Ctrl+W closes the app; Ctrl+Shift+W deletes a chat",
   "IGSH-1668": "Live chat: three dots tick while the agent works",
   "IGSH-1676": "Block chat and sidebar changes without Valentin's yes",
   "IGSH-1681": "What's new names the ticket on every line",

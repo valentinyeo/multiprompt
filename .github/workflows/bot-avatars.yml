@@ -48,6 +48,7 @@ jobs:
             [IO.File]::WriteAllText($file, [IO.File]::ReadAllText('tools/fixtures/IGSH-1192/bot-avatar-before.zig') + "`n" + $test)
             zig build test-smooth-shapes 2>&1 | Tee-Object native-shapes-red.log
             if ($LASTEXITCODE -eq 0 -or -not (Select-String -Quiet -Path native-shapes-red.log -Pattern 'IGSH-1192 face=0 scale=100 fractional=')) { throw 'Original avatar clipping did not fail the native fractional-edge assertion' }
+            $global:LASTEXITCODE = 0
             Write-Host 'ORIGINAL_BINARY_CLIP_REJECTED'
           } finally { [IO.File]::WriteAllText($file, $source) }
       - name: Native fractional circle proof

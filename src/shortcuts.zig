@@ -22,7 +22,7 @@ const WM_SYSKEYUP = @import("win32.zig").WM_SYSKEYUP;
 const WM_APP_NEXT_TAB = @import("win32.zig").WM_APP_NEXT_TAB;
 const WM_APP_PREV_TAB = @import("win32.zig").WM_APP_PREV_TAB;
 const WM_APP_SPAWN = @import("win32.zig").WM_APP_SPAWN;
-const WM_APP_CLOSE = @import("win32.zig").WM_APP_CLOSE;
+const WM_APP_QUIT_ALL = @import("win32.zig").WM_APP_QUIT_ALL;
 const WM_APP_RENAME_TAB = @import("win32.zig").WM_APP_RENAME_TAB;
 const WM_APP_SWITCH_TAB = @import("win32.zig").WM_APP_SWITCH_TAB;
 const WM_APP_SEARCH_OPEN = @import("win32.zig").WM_APP_SEARCH_OPEN;
@@ -80,7 +80,6 @@ const WM_APP_CLOSE_SESSION = @import("win32.zig").WM_APP_CLOSE_SESSION;
 const WM_APP_SNIPPETS_OPEN = @import("win32.zig").WM_APP_SNIPPETS_OPEN;
 const WM_APP_ALL_SESSIONS_KEY = @import("win32.zig").WM_APP_ALL_SESSIONS_KEY;
 const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OPEN;
-const WM_APP_ARCHIVE_ARM = @import("win32.zig").WM_APP_ARCHIVE_ARM;
 const WM_APP_BROWSER_SHOTURL = @import("win32.zig").WM_APP_BROWSER_SHOTURL;
 const WM_APP_CHAT_TAB_URL = @import("win32.zig").WM_APP_CHAT_TAB_URL;
 const WM_APP_MARK_ACTIVE_UNREAD = @import("win32.zig").WM_APP_MARK_ACTIVE_UNREAD;
@@ -250,8 +249,10 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+S", .b = "Favorite or unfavorite this session", .header = false },
     .{ .a = "Ctrl+Tab / Ctrl+Shift+Tab", .b = "Next / previous tab", .header = false },
     .{ .a = "Ctrl+1 ... 9", .b = "Open session 1-9 in this workspace, pinned first", .header = false },
-    .{ .a = "Ctrl+W", .b = "Close active tab / session", .header = false },
-    .{ .a = "Ctrl+Shift+W", .b = "Close active session completely (tmux kill + tab close)", .header = false },
+    .{ .a = "Ctrl+W", .b = "Quit the app; keep server agents and saved chats", .header = false },
+    .{ .a = "Ctrl+Shift+W", .b = "Delete the active chat; stop its agent and keep its history", .header = false },
+    .{ .a = "Ctrl+K -> Copy chat ID", .b = "Copy the chosen chat identity", .header = false },
+    .{ .a = "Ctrl+K -> Hide from sidebar", .b = "Hide a chat without stopping its server agent", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (sidebar + inbox)", .header = false },
     .{ .a = "Alt+U", .b = "Mark active session unread / restore blue dot", .header = false },
     .{ .a = "Ctrl+K -> Show Frequent split", .b = "Show or hide Frequent; synced across your account", .header = false },
@@ -267,7 +268,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Create Snippet", .b = "Save a named paste block", .header = false },
     .{ .a = "Ctrl+K -> Manage Snippets", .b = "Delete saved snippets; Esc cancels", .header = false },
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
-    .{ .a = "F2 / double-click", .b = "Rename tab or selected Inbox session", .header = false },
+    .{ .a = "F2 / click or double-click name", .b = "Rename chat title, tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },
     .{ .a = "Alt+1", .b = "Go to Starred workspace", .header = false },
     .{ .a = "Alt+1 ... 9", .b = "Switch workspace: 1 is Starred, 2-9 are stored workspaces", .header = false },
@@ -282,6 +283,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9", .b = "Move / top / bottom / jump row", .header = false },
     .{ .a = "Tab / h / l", .b = "Switch workspace split", .header = false },
     .{ .a = "e or Alt+E / z or Alt+Z / u", .b = "Archive / undo archive / toggle read-unread", .header = false },
+    .{ .a = "Ctrl+K -> Copy chat ID", .b = "Copy the chosen chat identity", .header = false },
+    .{ .a = "Ctrl+K -> Hide from sidebar", .b = "Hide a chat without stopping its server agent", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (global)", .header = false },
     .{ .a = "Alt+I (inside)", .b = "Jump back to ALL split", .header = false },
     .{ .a = "q / Esc", .b = "Close Inbox", .header = false },
@@ -305,7 +308,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+E", .b = "Move active tab to Waiting until it gets a blue dot", .header = false },
     .{ .a = "Alt+Z", .b = "Undo the most recent move to Waiting", .header = false },
     .{ .a = "Ctrl+K -> Restore Waiting", .b = "Restore waiting live sessions in this workspace", .header = false },
-    .{ .a = "Alt+X", .b = "Archive tmux session; close non-tmux tab (press twice; also on inbox rows)", .header = false },
     .{ .a = "Ctrl+D in Chat View", .b = "Start/stop dictation; Enter stops recording into the composer; Escape discards the recording", .header = false },
     .{ .a = "Ctrl+Shift+Space / Enter", .b = "Start/stop dictation; Enter is stop-only while recording; Escape discards the recording", .header = false },
     .{ .a = "Spawn / Windows", .b = "", .header = true },
@@ -701,6 +703,22 @@ test "IGSH-1087 private typing bypasses chat and shell shortcuts except delibera
     try std.testing.expectEqual(@as(?u32, null), computerAppMessage(0x4B, true, true, false, false));
 }
 
+pub const SessionCloseAction = enum { quit, delete };
+
+pub fn sessionCloseShortcut(vk: u32, ctrl: bool, shift: bool, alt: bool, win: bool) ?SessionCloseAction {
+    if (vk != 0x57 or !ctrl or alt or win) return null;
+    return if (shift) .delete else .quit;
+}
+
+test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
+    try std.testing.expectEqual(SessionCloseAction.quit, sessionCloseShortcut(0x57, true, false, false, false).?);
+    try std.testing.expectEqual(SessionCloseAction.delete, sessionCloseShortcut(0x57, true, true, false, false).?);
+    try std.testing.expect(sessionCloseShortcut(0x57, false, false, false, false) == null);
+    try std.testing.expect(sessionCloseShortcut(0x57, true, true, true, false) == null);
+    try std.testing.expect(sessionCloseShortcut(0x57, true, false, false, true) == null);
+    try std.testing.expect(sessionCloseShortcut(0x58, false, false, true, false) == null);
+}
+
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (nCode == HC_ACTION and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
@@ -751,6 +769,21 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (kb.vkCode < computer_consumed_keys.len and computer_consumed_keys[kb.vkCode]) {
             if (key_up) computer_consumed_keys[kb.vkCode] = false;
             return 1;
+        }
+        if (key_down and kb.vkCode == 0x57) {
+            var log_buf: [160]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log_buf, "[session-close] ctrl={} shift={} alt={} win={} ours={} flags={X}", .{
+                isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags), app_state.g_win_held, foregroundIsOurs(), kb.flags,
+            }) catch "[session-close] unavailable");
+        }
+        if (key_down and foregroundIsOurs()) {
+            if (sessionCloseShortcut(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags), app_state.g_win_held)) |action| {
+                switch (action) {
+                    .quit => _ = PostMessageW(app_state.g_main_hwnd, WM_APP_QUIT_ALL, 1, 0),
+                    .delete => _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CLOSE_SESSION, 0, 0),
+                }
+                return 1;
+            }
         }
         if (@import("settings_panel.zig").ownsForeground()) {
             if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = key_down;
@@ -1204,20 +1237,14 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, 29, 0);
             return 1;
         }
-        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and (kb.vkCode == 0x45 or kb.vkCode == 0x58) and foregroundIsOurs() and !app_state.g_search_active and !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null) {
+        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x45 and foregroundIsOurs() and !app_state.g_search_active and !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and app_state.g_edit_hwnd == null) {
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-            if (kb.vkCode == 0x45) {
-                if (app_state.g_inbox_active) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, 24, 0);
-                } else {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_HIDE_TAB_UNTIL_ATTENTION, 0, 0);
-                }
-            } else if (app_state.g_inbox_active) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, 27, 0);
+            if (app_state.g_inbox_active) {
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_INBOX_KEY, 24, 0);
             } else {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ARCHIVE_ARM, 0, 0);
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_HIDE_TAB_UNTIL_ATTENTION, 0, 0);
             }
             return 1;
         }
@@ -1255,10 +1282,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const shift_down = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
                 if (kb.vkCode == 0x09) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_WEBVIEW2_ACTION, if (shift_down) 5 else 4, 0);
-                    return 1;
-                }
-                if (!shift_down and kb.vkCode == 0x57) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_WEBVIEW2_ACTION, 6, 0);
                     return 1;
                 }
             }
@@ -1964,14 +1987,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (!shift and kb.vkCode >= 0x31 and kb.vkCode <= 0x39) {
                     const tab_idx: u32 = kb.vkCode - 0x31;
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_TAB, tab_idx, 0);
-                    return 1;
-                }
-                if (shift and kb.vkCode == 0x57 and (kb.flags & 0x20) == 0) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CLOSE_SESSION, 0, 0);
-                    return 1;
-                }
-                if (!shift and kb.vkCode == 0x57) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CLOSE, 0, 0);
                     return 1;
                 }
                 if (!shift and kb.vkCode == 0x4E) {

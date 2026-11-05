@@ -827,11 +827,8 @@ pub fn syncShellDisplayNameSurfaces(idx: u32, name: []const u8, send_agent_renam
 
 pub fn applyCanonicalSessionRename(idx: u32, raw_name: []const u16, sync_remote: bool) bool {
     if (idx >= app_state.shell_count) return false;
-    if (raw_name.len == 0) {
-        setDefaultName(&app_state.shells[idx], app_state.shells[idx].kind, idx);
-        app_state.shells[idx].name_source = .default;
-        return true;
-    }
+    const name = std.mem.trim(u16, raw_name, &.{ ' ', '\t', '\r', '\n' });
+    if (name.len == 0) return false;
 
     if (sync_remote) {
         var old_live_buf: [64]u8 = undefined;
@@ -843,17 +840,39 @@ pub fn applyCanonicalSessionRename(idx: u32, raw_name: []const u16, sync_remote:
         }
     }
 
-    const name_len = @min(raw_name.len, app_state.shells[idx].name.len - 1);
-    @memcpy(app_state.shells[idx].name[0..name_len], raw_name[0..name_len]);
+    const local_agent = sync_remote and app_state.shells[idx].tmux_session_len == 0 and shellLooksLikeCodingAgent(idx);
+    const name_len = @min(name.len, app_state.shells[idx].name.len - 1);
+    @memcpy(app_state.shells[idx].name[0..name_len], name[0..name_len]);
     app_state.shells[idx].name[name_len] = 0;
     app_state.shells[idx].name_len = @intCast(name_len);
     app_state.shells[idx].name_source = .manual;
     if (sync_remote) {
         var sync_buf: [64]u8 = undefined;
-        const sync_name = shellNameFromU16AsciiTrimmed(raw_name[0..name_len], &sync_buf);
-        if (sync_name.len > 0) syncShellDisplayNameSurfaces(idx, sync_name, true);
+        const sync_name = shellNameFromU16AsciiTrimmed(name[0..name_len], &sync_buf);
+        if (sync_name.len > 0) {
+            syncShellDisplayNameSurfaces(idx, sync_name, true);
+            if (local_agent and !shellLooksLikeCodingAgent(idx)) sendAgentRenameToLocalShell(idx, sync_name);
+        }
     }
     return true;
+}
+
+test "canonical session rename retains blanks and trims names" {
+    const previous_count = app_state.shell_count;
+    const previous_shell = app_state.shells[0];
+    defer {
+        app_state.shell_count = previous_count;
+        app_state.shells[0] = previous_shell;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = app_state.empty_shell;
+    try std.testing.expect(applyCanonicalSessionRename(0, &.{ 'O', 'l', 'd' }, false));
+    try std.testing.expect(!applyCanonicalSessionRename(0, &.{}, false));
+    try std.testing.expect(!applyCanonicalSessionRename(0, &.{ ' ', '\t', '\r', '\n' }, false));
+    try std.testing.expectEqualSlices(u16, &.{ 'O', 'l', 'd' }, app_state.shells[0].name[0..app_state.shells[0].name_len]);
+    try std.testing.expectEqual(app_state.NameSource.manual, app_state.shells[0].name_source);
+    try std.testing.expect(applyCanonicalSessionRename(0, &.{ ' ', '\t', 'N', 'e', 'w', ' ', '\n' }, false));
+    try std.testing.expectEqualSlices(u16, &.{ 'N', 'e', 'w' }, app_state.shells[0].name[0..app_state.shells[0].name_len]);
 }
 
 pub fn shellNameFromU16AsciiTrimmed(src: []const u16, out: *[64]u8) []const u8 {
@@ -995,10 +1014,7 @@ pub fn rejectPinnedGroupClose(gid: u32) bool {
     return false;
 }
 
-pub fn archiveTabAt(i: usize) void {
-    if (i >= app_state.shell_count) return;
-    if (rejectPinnedSessionClose(i)) return;
-    if (app_state.shells[i].tmux_session_len == 0) return;
+fn rememberArchivedTab(i: usize) ?ArchivedEntry {
     loadArchiveFromDisk(true);
     var entry = ArchivedEntry{};
     entry.name_len = @intCast(@min(app_state.shells[i].name_len, @as(u32, 63)));
@@ -1023,19 +1039,28 @@ pub fn archiveTabAt(i: usize) void {
         !remoteResumeFieldsAreSafe(entry.claude_sid[0..entry.claude_sid_len], entry.claude_cwd[0..entry.claude_cwd_len]))
     {
         showHeaderNoticeAscii("Unsafe tmux session name", 4000, true);
-        return;
+        return null;
     }
     if (!upsertArchivedEntry(entry)) {
         debugLog("archiveTabAt: could not grow archive");
         showHeaderNoticeAscii("Archive memory allocation failed", 4000, true);
-        return;
+        return null;
     }
     if (!saveArchive()) {
         debugLog("archiveTabAt: saveArchive failed; leaving tab/session untouched");
         loadArchiveFromDisk(true);
         showHeaderNoticeAscii("Archive save failed - tab left open", 4000, true);
-        return;
+        return null;
     }
+    return entry;
+}
+
+pub fn archiveTabAt(i: usize) void {
+    if (i >= app_state.shell_count) return;
+    if (rejectPinnedSessionClose(i)) return;
+    if (app_state.shells[i].tmux_session_len == 0) return;
+    const entry = rememberArchivedTab(i) orelse return;
+    const ts_len = entry.tmux_session_len;
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
     if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "") != .gone) {
         if (parked_focus) focusActiveShell();
@@ -1095,6 +1120,7 @@ pub fn endTmuxSessionAt(i: usize) void {
     if (i >= app_state.shell_count) return;
     if (rejectPinnedSessionClose(i)) return;
     if (app_state.shells[i].tmux_session_len == 0) return;
+    _ = rememberArchivedTab(i) orelse return;
 
     var session_buf: [64]u8 = std.mem.zeroes([64]u8);
     const ts_len: usize = @intCast(@min(app_state.shells[i].tmux_session_len, @as(u32, 63)));

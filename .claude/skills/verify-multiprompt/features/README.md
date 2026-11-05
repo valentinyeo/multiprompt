@@ -39,6 +39,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
 - [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.
 
+- [Inbox bottom space](inbox-space.md): a complete existing row fills the screenshot-marked band and native clicking opens that row.
+
 - [Computer menu](computer-menu.md): Computer stays inside the existing chat three-dots menu; real click selects its pane and returning preserves the draft.
 
 - [Settings panel](settings-panel.md): keyboard and palette entry, existing settings persistence, centred native panel and focus-safe dismissal.
@@ -69,6 +71,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
 - [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.
 - [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
+- [Session actions](session-actions.md): native quit/reopen, ordered right-click actions, single-request deletion and reopening/copying both original histories through explicit synthetic remote boundaries.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
@@ -76,6 +79,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
 - [Session tabs](session-tabs.md): `zsb session-rename`, `session-rebind`, `session-move` and `session-close` repair four background tabs without changing the active tab or foreground window, and the saved layout survives a restart exactly.
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
+- [Inbox without shortcut legend](inbox-no-footer.md): manual paired release/branch pixel proof across Inbox states and themes.
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Inbox order](inbox-order.md): recent sessions lead the Inbox and a newer notification moves the older session above it, checked against app-published timestamps and a visual review of both captures.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.

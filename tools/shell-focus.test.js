@@ -421,7 +421,8 @@ function assertRenameCommitFocus(rename) {
   assert.ok(guard);
   const allows = new Function('now', 'action_tick', 'same_surface', 'authorized', 'foreground_owned', guard.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||'));
   const commit = body(rename, 'commitRename', 'openTabContextPalette');
-  const tail = commit.slice(commit.lastIndexOf('    app_state.g_shell_focused = true;'), commit.lastIndexOf('}'));
+  const tail = commit.match(/if \(had_focus\) \{\s*(app_state\.g_shell_focused = true;[^]*?)\n    \}/)?.[1];
+  assert.ok(tail, 'rename only returns focus when the editor owned it');
   const finish = new Function('app_state', 'focusActiveShell', 'activeShellHasForegroundFocus', 'requestShellRefocus', tail);
   for (const owned of [false, true]) {
     for (const dispatched of [0, 1000, 5000]) {

@@ -12,6 +12,7 @@ updated: 2026-10-03
 
 Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. The Full list below is generated from it by `node tools/shortcuts-doc.mjs`. Every new user-facing function ships with a shortcut (when sensible), a Ctrl+K entry, and an F1 row; regenerate the Full list after changing those rows.
 
+- Ctrl+T / Ctrl+K → New Claude session: Create a live chat manually. Agents can use the [server command](spawn-multibot-session.md) to create a named chat through account sync instead; no additional Windows binding is needed.
 - Ctrl+Shift+Space: Inside multiprompt, start/stop dictation. Escape while recording discards it without changing your draft. Ctrl+K has `Chat View: Toggle Dictation`. From another app, bring multiprompt to the front (global hotkey).
 - Ctrl+Shift+S: Screenshot the active browser-pane tab, upload it, and insert its link followed by exactly one space. Works from multiprompt, Chat View, and the focused docked Chrome/Edge pane through the native hook and bridge, independently of Chrome's shortcut binding. Ctrl+K has `Browser: Screenshot → Chat View / Shell`; F1 lists the chord. In Chat View the composer receives focus with the caret after the space, including extension-menu screenshots and Ctrl+V image attachments. An inactive target receives the link without changing tabs or stealing focus; another foreground application and modal editors keep their focus.
 - Chrome extension screenshot shortcuts: extension 1.0.62 suggests Ctrl+Shift+S and retains Alt+Shift+S. Both commands and the extension context menu use the same capture/upload/paste transaction. Chrome can leave a conflicting suggested key unbound, and unpacked reloads preserve old bindings: assign it manually at `chrome://extensions/shortcuts` if needed. The app-owned Ctrl+Shift+S path still works while a bound multiprompt pane or the app is foreground; this is not a global shortcut for unrelated Chrome windows.
@@ -95,8 +96,10 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
 - Ctrl+W: Close the active tab/session (both modes; reverted in v0.28.219 — .215's workspace-close granularity was wrong). Workspace close = Ctrl+K 'Close Workspace' (non-destructive, reopenable via Open Workspace); app close = Ctrl+K 'Quit ZigShell'
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
-- F2: Rename active tab
-- Double-click tab: Rename tab
+- F2: Rename the visible session name. With the sidebar open, edit its tab. With the sidebar collapsed or hidden, edit the top title. In Inbox, edit the selected row.
+- Click or double-click a chat title or tab name: Rename in place
+- Enter saves, Esc cancels, and leaving the name saves.
+- Type `/rename <name>` in Chat View to rename the session.
 - Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Reconnect (remote tabs), Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Mute/Unmute (a muted session is hidden from the Inbox on every device, stays in its workspace tab, and the mute syncs through the account layout), Keep Alive (cmd/pwsh), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
 - Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Bot face also offers Upload image and Reset. Pictures for account-backed remote sessions sync to your phone automatically. Local shell pictures stay on this computer. Reset shows the chosen face and color, and removes the shared picture. Offline picture changes sync after reconnecting.
 - No dedicated shortcut — Close all disconnected sessions: use Ctrl+K or right-click a tab. Choose the counted action. Pinned and unpinned disconnected sessions close. Live sessions stay open.
@@ -117,8 +120,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Close active tab / session |
-| Ctrl+Shift+W | Close active session completely (tmux kill + tab close) |
+| Ctrl+W | Quit the app; keep server agents and saved chats |
+| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
 | Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
@@ -134,7 +139,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Create Snippet | Save a named paste block |
 | Ctrl+K -&gt; Manage Snippets | Delete saved snippets; Esc cancels |
 | Delete twice in snippets | Delete the selected saved snippet |
-| F2 / double-click | Rename tab or selected Inbox session |
+| F2 / click or double-click name | Rename chat title, tab or selected Inbox session |
 
 ### Workspaces (single-window)
 
@@ -157,6 +162,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -184,7 +191,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
-| Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
 | Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer; Escape discards the recording |
 | Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording; Escape discards the recording |
 

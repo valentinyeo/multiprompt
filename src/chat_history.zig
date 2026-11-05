@@ -1681,6 +1681,32 @@ test "IGSH-813 reaching bottom resets but scrolling elsewhere retains the count"
     try std.testing.expect(!counter.visible(true));
 }
 
+test "IGSH-1653 an unpositioned append does not allocate scratch space for older rows" {
+    var tracked = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const a = tracked.allocator();
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t1000\t9\t0\tclaude\tterm-1\n");
+    for (0..1000) |_| try wire.appendSlice(a, "{\"role\":\"user\",\"text\":\"" ++ ("escaped\\u0078" ** 32) ++ "\"}\n");
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, wire.items, 1, key);
+    var next = try h.suffix(a);
+    defer next.deinit(a);
+    try next.apply(a, "@mp\t2\thistory\tok\tsid\t1000\t1100\t9\t0\tclaude\tterm-1\n{\"role\":\"user\",\"text\":\"new prompt\"}\n@@MP_END@@\n", 2, key);
+    try h.rows.ensureUnusedCapacity(a, next.rows.items.len);
+    try h.text.ensureUnusedCapacity(a, next.text.items.len);
+    try h.blocks.ensureUnusedCapacity(a, next.blocks.items.len);
+    const before = tracked.allocated_bytes;
+    try h.appendParsed(a, &next);
+    try std.testing.expect(tracked.allocated_bytes - before < 64 * 1024);
+    try std.testing.expectEqual(@as(usize, 1001), h.blocks.items.len);
+    const last = h.blocks.items[h.blocks.items.len - 1];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), h.text.items[last.start..][0..last.len]);
+}
+
 test "IGSH-813 close hides without losing the count including later arrivals" {
     var counter: NewMessages = .{};
     counter.arrive(2, true);
