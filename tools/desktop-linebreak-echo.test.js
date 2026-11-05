@@ -66,7 +66,8 @@ test "IGSH-1642 live CRLF transcript hides its local copy but keeps deliberate r
     try std.testing.expect(live.applyPage(101, sid, page));
     try std.testing.expect(!chatEchoRowLanded(pending));
     const row = "{\"role\":\"user\",\"id\":\"user-1\",\"offset\":0,\"end\":100,\"timestamp\":\"2026-11-01T12:00:00Z\",\"text\":\"First line\\r\\nSecond line 😀   \"}";
-    try h.upsertNativeRows(a, &.{row}, 1, 0);
+    const key = @import("chat_transcript.zig").Identity.initTmux(101, 0, false, "desktop", sid);
+    try h.apply(a, "@mp\t1\thistory\tok\t" ++ sid ++ "\t0\t100\t1\t0\tclaude\tdesktop\n" ++ row ++ "\n@@MP_END@@\n", 1, key);
     g_chat_blocks = h.blocks.items;
     g_chat_block_count = h.blocks.items.len;
     try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
