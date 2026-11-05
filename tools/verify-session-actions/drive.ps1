@@ -82,7 +82,7 @@ function Shot([string]$Name) {
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save((Join-Path $Evidence "$Name.png")) } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Start-App {
-    $launchOffset = (Log).Length
+    $launchAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $script:job = [VerifyJob]::new()
     $script:app = $job.Start($Exe, $profile, (Join-Path $profile 'stdout.log'), (Join-Path $profile 'stderr.log'), '--single-window --no-window-restore')
     $script:main = Wait-For 'owned main window' {
@@ -90,7 +90,12 @@ function Start-App {
         $window = [ChatDeliveryDesktop]::Window([uint32]$app.Id)
         if ($window -ne [IntPtr]::Zero) { $window }
     }
-    [void](Wait-For 'both restored transports ready' { $trace=Log; $trace.Length -ge $launchOffset -and [regex]::Matches($trace.Substring($launchOffset), 'ssh-reconnect ok id=\d+').Count -ge 2 })
+    [void](Wait-For 'both restored transports painted their consoles' {
+        $consoleLog=Join-Path $env:MP_VERIFY_STATE 'console.jsonl'
+        if (!(Test-Path $consoleLog)) { return $false }
+        $painted=@(Get-Content $consoleLog | ForEach-Object { try { $_ | ConvertFrom-Json } catch {} } | Where-Object { $_.ms -ge $launchAt } | Select-Object -ExpandProperty session -Unique)
+        @($names | Where-Object { $_ -in $painted }).Count -eq 2
+    })
     [void](Wait-For 'saved remote tabs' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq 2 })
     Save @{pid=$app.Id; hwnd=$main.ToInt64(); path=$app.MainModule.FileName; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; class=[ChatDeliveryDesktop]::Class($main)} (Join-Path $Evidence ('launch-'+$app.Id+'.json'))
     Focus
