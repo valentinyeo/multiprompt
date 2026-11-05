@@ -56,6 +56,9 @@ class AccountPhotoProof {
                     throw failure
                 }
             }
+            compose.waitUntil(60_000) {
+                compose.onAllNodesWithText("Approve this device?").fetchSemanticsNodes().isEmpty()
+            }
         }
     }
 
