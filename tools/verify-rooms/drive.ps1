@@ -291,7 +291,8 @@ try {
         Check 'exactly-two-member-replies' ($replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2)
         Check 'reply-parent-binding' (@($replies | Where-Object { $_.parent_event_id -cne $human[0].id }).Count -eq 0)
         Check 'synthetic-reply-content' ((@($replies.text | Sort-Object) -join '|') -ceq 'Synthetic Alpha reply: Ready.|Synthetic Beta reply: Ready.')
-        Check 'canonical-two-turns-only' (@($w.canonical_events | Where-Object { $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($w.canonical_events | Where-Object { $_.event.kind -eq 'turn.ended' }).Count -eq 2)
+        $turns=@($w.canonical_events | Where-Object { $_.event.PSObject.Properties['kind'] })
+        Check 'canonical-two-turns-only' (@($turns | Where-Object { $_.event.kind -eq 'turn.started' }).Count -eq 2 -and @($turns | Where-Object { $_.event.kind -eq 'turn.ended' }).Count -eq 2)
         Save $w (Join-Path $Evidence 'witness.json')
     }
     Check-Replies
