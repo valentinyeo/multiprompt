@@ -25,6 +25,10 @@ function Click-Setting([string]$Name, [IntPtr]$RootWindow = $script:settingsWind
     Doctor
     Assert-Foreground
     $element = Settings-Control $Name -RootWindow $RootWindow
+    for ($attempt = 0; $attempt -lt 12 -and -not $element.Current.HasKeyboardFocus; $attempt++) {
+        Press @(0x09) ('Tab: bring Settings control into view: ' + $Name)
+    }
+    if (-not $element.Current.HasKeyboardFocus) { throw "Settings control did not receive keyboard focus: $Name" }
     $handle = [IntPtr]$element.Current.NativeWindowHandle
     $rect = New-Object VerifyNative+Rect
     if (-not [VerifyNative]::GetClientRect($handle, [ref]$rect)) { throw "Missing Settings control rectangle: $Name" }
