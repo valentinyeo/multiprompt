@@ -190,16 +190,17 @@ test "manual starts proceed silently for every pressure, workspace and busy coun
     }
     try std.testing.expect(audits > 0);
 }
-test "automatic pressure and busy refusals still notify and block" {
+test "automatic pressure and busy refusals stay quiet and still block" {
+    g_capacity_block_notice_until = 0;
     for ([_]CapacityState{ .red, .critical }) |p| {
         pressure = p; busy = 0; notices = 0;
         try std.testing.expect(!capacityAdmitNewAgent(0, 0, .automatic, "automatic session"));
-        try std.testing.expectEqual(@as(usize, 1), notices);
-        try std.testing.expectEqual(@as(u64, 8100), g_capacity_block_notice_until);
+        try std.testing.expectEqual(@as(usize, 0), notices);
+        try std.testing.expectEqual(@as(u64, 0), g_capacity_block_notice_until);
     }
     pressure = .green; busy = 8; notices = 0;
     try std.testing.expect(!capacityAdmitNewAgent(0, 0, .automatic, "automatic session"));
-    try std.testing.expectEqual(@as(usize, 1), notices);
+    try std.testing.expectEqual(@as(usize, 0), notices);
     busy = 0; notices = 0;
     try std.testing.expect(capacityAdmitNewAgent(0, 0, .automatic, "automatic session"));
     try std.testing.expectEqual(@as(usize, 0), notices);
