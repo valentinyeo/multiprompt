@@ -1251,11 +1251,17 @@ test "IGSH-1697 synthetic native create and room paint" {
             view.presented_revision = 99;
             try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
+            try std.testing.expectEqual(@as(u64, 99), view.presented_revision);
+            view.resetScope(&empty);
+            try std.testing.expectEqual(Mode.room, view.mode);
+            try std.testing.expect(view.pending == null);
+            try std.testing.expect(w.IsWindowVisible(view.composer) != 0);
+            try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
             try std.testing.expectEqual(@as(u64, 0), view.presented_revision);
             try std.testing.expect(w.InvalidateRect(view.composer, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.composer) != 0);
 
-            view.resetScope(&empty);
             create_arena.deinit();
             create_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             const r = room_arena.allocator();

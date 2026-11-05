@@ -260,11 +260,15 @@ try {
     Stop-App
     [IO.File]::WriteAllText((Join-Path $env:MP_VERIFY_STATE 'live-replies'), 'Synthetic providers only')
     Start-App
-    $room = Wait-For 'live room restored' { Room-Window }
-    $composer = Wait-For 'live composer focus' {
+    [void](Wait-For 'live room restored' { Room-Window })
+    $composer = Wait-For 'live room draft restored' {
+        $room = Room-Window
+        if (!$room) { return $false }
         $h = [ChatDeliveryDesktop]::Composer($room)
-        if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Focus($main)[1] -eq $h.ToInt64()) { $h }
+        if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::Text($h) -ceq 'Keep this draft on old peers') { $h }
     }
+    Invoke-NativeInput @{kind='click-composer'; target=$composer.ToInt64(); text=$null; keys=$null}
+    [void](Wait-For 'live composer focus' { [ChatDeliveryDesktop]::Focus($main)[1] -eq $composer.ToInt64() })
     [void](Wait-For 'scoped room snapshot loaded' { Test-Path (Join-Path $env:MP_VERIFY_STATE 'snapshot-live.json') })
     [void]$app.WaitForInputIdle(5000)
     Press @(0x24); Press @(0x10,0x23); Press @(0x08)

@@ -12,4 +12,12 @@ if ($value.kind -ceq 'keys') {
     [VerifyNative]::Chord([int[]]$value.keys)
 } elseif ($value.kind -ceq 'text') {
     [VerifyNative]::Text([string]$value.text)
+} elseif ($value.kind -ceq 'click-composer') {
+    $room = [VerifyNative]::FindWindowEx($main, [IntPtr]::Zero, 'MultiPromptRoomView', 'Room')
+    if ($room -eq [IntPtr]::Zero -or ![VerifyNative]::IsWindowVisible($room)) { throw 'Room is not visible' }
+    $composer = [ChatDeliveryDesktop]::Composer($room)
+    if ($composer -eq [IntPtr]::Zero -or $composer.ToInt64() -ne [long]$value.target -or [ChatDeliveryDesktop]::Class($composer) -cne 'Edit') { throw 'Composer changed before click' }
+    $bounds = New-Object ChatDeliveryDesktop+Rect
+    if (![ChatDeliveryDesktop]::GetClientRect($composer, [ref]$bounds)) { throw 'Composer geometry unavailable' }
+    [ChatDeliveryDesktop]::PressClient($composer, [uint32]$value.pid, [int](($bounds.Right - $bounds.Left) / 2), [int](($bounds.Bottom - $bounds.Top) / 2))
 } else { throw 'Invalid native input kind' }
