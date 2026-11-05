@@ -1,3 +1,18 @@
+$pageJob = $null
+$pageServer = $null
+try {
+$pageJob = New-Object VerifyJob
+$pageRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-typing')).Path
+$url = 'http://127.0.0.1:18792/'
+$pageServer = $pageJob.Start((Get-Command python.exe -ErrorAction Stop).Source, $pageRoot, (Join-Path $Evidence 'browser-typing-page.stdout.log'), (Join-Path $Evidence 'browser-typing-page.stderr.log'), '-m http.server 18792 --bind 127.0.0.1', $true)
+Wait-Until {
+    $pageServer.Refresh()
+    if ($pageServer.HasExited) { throw 'Local page server exited before readiness' }
+    try {
+        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
+        $response.StatusCode -eq 200 -and $response.Content -ceq [IO.File]::ReadAllText((Join-Path $pageRoot 'index.html'))
+    } catch { $false }
+} 'owned local page server responds with the typing fixture' 20
 Add-Type -ReferencedAssemblies System, System.Core -Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-typing/fault.cs')
 $script:browserShellId = (Read-Inbox).shells[0].sid
 $null = Open-BrowserPane 'typing'
@@ -46,8 +61,6 @@ Wait-Until {
     $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
     $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus
 } 'owned browser omnibox focused for local page setup' 5
-$html = '<title>typing-ready</title><input autofocus oninput="document.title=this.value">'
-$url = 'data:text/html,' + [Uri]::EscapeDataString($html)
 [VerifyNative]::Text($url)
 Wait-Until {
     $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
@@ -139,3 +152,19 @@ try {
     try { $fault.Dispose() } finally { Save-Json $record 'browser-typing-fault.json' }
 }
 Snapshot 'after'
+} finally {
+    if ($null -ne $pageJob) {
+        try {
+            $beforeStop = $pageJob.ReadAccounting()
+            $stopped = $pageJob.Stop()
+            Save-Json @{ totalProcesses = $stopped.TotalProcesses; activeBeforeStop = $beforeStop.ActiveProcesses; activeAfterStop = $stopped.ActiveProcesses } 'browser-typing-page-cleanup.json'
+            if ($stopped.ActiveProcesses -ne 0) { throw 'Local page server job still has active processes' }
+        } catch {
+            Save-Json @{ error = $_.Exception.Message } 'browser-typing-page-cleanup.json'
+            throw
+        } finally {
+            if ($null -ne $pageServer) { $pageServer.Dispose() }
+            $pageJob.Dispose()
+        }
+    }
+}
