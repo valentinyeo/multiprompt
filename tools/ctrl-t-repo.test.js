@@ -33,6 +33,12 @@ test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () =
   assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
 });
 
+test('IGSH-1680 native search checks both partial-name queries and the chosen host folder', () => {
+  const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
+  assert.ok(ssh.indexOf('puts("/work/soft-tools/factory/alpha")') < ssh.indexOf('puts("/work/projects/software-factory")'));
+  assert.match(sessions, /foreach \(\$query in @\('soft', 'factory soft'\)\)[\s\S]*Type-Text \$query[\s\S]*Snapshot \(\$searchProof \+ '-picker'\)[\s\S]*Enter: select software-factory before path-only matches[\s\S]*\$tab\.cwd -eq '\/work\/projects\/software-factory' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2[\s\S]*Save-Json \(Read-Session\)/);
+});
+
 test('cancel precedes zz-last-folder chat and beta terminal checks', () => {
   assert.match(sessions, /cancel repository picker[\s\S]*close palette[\s\S]*\$cancelled\.tabs\[\$cancelled\.active_tab\]\.tmux_host -ne 2[\s\S]*Ctrl\+T: new Claude chat after cancel[\s\S]*Type-Text 'zz-last-folder'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/zz-last-folder' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2[\s\S]*New Claude in terminal[\s\S]*Type-Text 'beta'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/beta'[\s\S]*\$tab\.cv -eq \$false\) -and \$tab\.tmux_host -eq 2/);
 });
@@ -74,6 +80,78 @@ test "active server and workspace fallback" {
     app_state.shells[1].tmux_session_len = 0;
     app_state.shells[2].tmux_session_len = 0;
     try std.testing.expectEqual(@as(u8, 0), workspaceHostForNewTab(0));
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, `${result.error || ''}\n${result.stdout}\n${result.stderr}`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('repository search executes production matching and ranking', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const source = readFileSync('src/command_palette.zig', 'utf8');
+  const start = source.indexOf('fn repoPathMatchesQuery(');
+  const end = source.indexOf('pub fn workspaceHostForNewTab', start);
+  const lower = source.indexOf('pub fn u16ToLower(');
+  const lowerEnd = source.indexOf('pub fn u16ContainsInsensitive', lower);
+  assert.ok(start >= 0 && end > start && lower >= 0 && lowerEnd > lower);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-search-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, `const std = @import("std");
+const MAX_REPO_ROWS = 8;
+const RepoRow = struct { host: u8 = 0, path_len: u16 = 0, path: [255]u8 = [_]u8{0} ** 255 };
+const app_state = struct {
+    var g_search_pick_repo_host: u8 = 2;
+    var g_search_buf: [128]u16 = undefined;
+    var g_search_len: usize = 0;
+};
+const paths = [_][]const u8{ "/soft/archive", "/work/software-factory", "/SOFT/other", "/work/soft-tools", "/factory/software", "/work/software-factory-two" };
+fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
+    for (paths, 0..) |p, i| {
+        out[i].host = host;
+        out[i].path_len = @intCast(p.len);
+        @memcpy(out[i].path[0..p.len], p);
+    }
+    return paths.len;
+}
+${source.slice(lower, lowerEnd)}
+${source.slice(start, end)}
+fn search(query: []const u8, out: []RepoRow) u32 {
+    for (query, 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = query.len;
+    return pickRepoFilteredRows(out);
+}
+fn expectRow(row: RepoRow, expected: []const u8) !void {
+    try std.testing.expectEqualStrings(expected, row.path[0..row.path_len]);
+    try std.testing.expectEqual(@as(u8, 2), row.host);
+}
+test "partial words and stable ranking" {
+    var out: [MAX_REPO_ROWS]RepoRow = undefined;
+    try std.testing.expect(repoPathMatchesQuery("/work/software-factory", &.{ 's', 'o', 'f', 't' }));
+    try std.testing.expectEqual(@as(u32, 6), search("soft", &out));
+    try expectRow(out[0], paths[1]);
+    try expectRow(out[1], paths[3]);
+    try expectRow(out[2], paths[4]);
+    try expectRow(out[3], paths[5]);
+    try expectRow(out[4], paths[0]);
+    try expectRow(out[5], paths[2]);
+    try std.testing.expectEqual(@as(u32, 3), search("factory soft", &out));
+    try expectRow(out[0], paths[1]);
+    try expectRow(out[1], paths[5]);
+    try expectRow(out[2], paths[4]);
+    try std.testing.expectEqual(@as(u32, 3), search("  FaCtOrY\\tSoFt  ", &out));
+    try std.testing.expectEqual(@as(u32, 0), search("soft missing", &out));
+    try std.testing.expectEqual(@as(u32, 6), search("", &out));
+    for (paths, 0..) |p, i| try expectRow(out[i], p);
+    try std.testing.expectEqual(@as(u32, 6), search(" \\t ", &out));
+    for (paths, 0..) |p, i| try expectRow(out[i], p);
+    try std.testing.expectEqual(@as(u32, 2), search("soft", out[0..2]));
+    try expectRow(out[0], paths[1]);
+    try expectRow(out[1], paths[3]);
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });

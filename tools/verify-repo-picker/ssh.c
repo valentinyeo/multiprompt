@@ -18,7 +18,9 @@ int main(int argc, char **argv) {
     if (strstr(cmd, "for d in /home/*/projects/*/")) {
         puts("/work/projects/alpha");
         puts("/work/projects/beta");
-        for (int i = 0; i < 96; i++) printf("/work/projects/code-%03d\n", i);
+        for (int i = 0; i < 94; i++) printf("/work/projects/code-%03d\n", i);
+        puts("/work/soft-tools/factory/alpha");
+        puts("/work/projects/software-factory");
         puts("/work/projects/notes-only");
         puts("/work/projects/zz-last-folder");
         fflush(stdout);
