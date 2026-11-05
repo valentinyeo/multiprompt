@@ -177,6 +177,7 @@ try {
     } finally { $fault.Disarm() }
     Wait-Until { (Get-TypingEditChild $bar) -ne [IntPtr]::Zero } 'owned URL bar Edit exists after Ctrl+Shift+L' 5 -PollMilliseconds 20
     $edit = Get-TypingEditChild $bar
+    if (-not $fault.Down) { $edit = Wait-TypingEdit $bar }
     $record.injectedDown = $fault.Down
     $record.droppedUp = $fault.Dropped
     $record.events = @($fault.Events)
