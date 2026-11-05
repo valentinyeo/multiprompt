@@ -56,6 +56,10 @@ class AccountPhotoProof {
     @Test
     fun desktopPhotoAppearsOnRealAvatar() {
         try {
+            compose.waitUntil(180_000) {
+                compose.onAllNodesWithText("All").fetchSemanticsNodes().size == 1
+            }
+            compose.onNodeWithText("All").performClick()
             val avatar = compose.onNodeWithContentDescription("Robot runner-1", useUnmergedTree = true)
             compose.waitUntil(180_000) {
                 compose.onAllNodesWithContentDescription("Robot runner-1", useUnmergedTree = true)
