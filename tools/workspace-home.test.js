@@ -52,10 +52,14 @@ print(json.dumps(ns['host_agent_start']('claude', 'test'))) `;
   assert.ok(command.includes('/home/owner/projects/sample'));
 });
 
-test('unknown home falls back and hosted chats are excluded', () => {
+test('reported project cwd takes priority over the terminal carrier', () => {
   const resolver = palette.slice(palette.indexOf('fn resolveWorkspaceLiveCwd('), palette.indexOf('test "workspace live cwd'));
   assert.match(resolver, /home orelse return cwd/);
-  assert.match(resolver, /startsWith\(u8, shell\.tmux_session\[0\.\.shell\.tmux_session_len\], "live-"\)/);
+  assert.match(resolver, /shell\.workspace != workspace\) continue[\s\S]*remoteHostForShell\(shell\) orelse continue\) != host\) continue/);
+  assert.match(resolver, /const reported = if \(shell\.claude_cwd_len > 0\) workspaceHomeCandidate\(cwd, shell\.claude_cwd\[0\.\.shell\.claude_cwd_len\]\) else null;/);
+  assert.match(resolver, /const candidate = reported orelse if \(live\) continue else blk: \{[\s\S]*shellKnownRemotePath\(shell, host\) orelse continue;[\s\S]*workspaceHomeCandidate\(cwd, known\) orelse continue;/);
+  assert.match(resolver, /if \(i == app_state\.active_shell\) return/);
+  assert.match(resolver, /if \(ambiguous\) return null/);
 });
 
 test('live launch resolves before passing cwd to host', () => {

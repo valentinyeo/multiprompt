@@ -36,6 +36,15 @@ int main(int argc, char **argv) {
         puts("@@MP_LIVE@@");
         return 0;
     }
+    if (strstr(cmd, "tmux list-sessions")) {
+        for (int i = 1; i < argc; i++) {
+            if (!strcmp(argv[i], "remote-1") || !strcmp(argv[i], "vps")) {
+                puts("terminal-owner|1|0|/home/login|bash|terminal-owner");
+                break;
+            }
+        }
+        return 0;
+    }
     if (strstr(cmd, "tmux attach") || strstr(cmd, "tmux new-session")) {
         puts("Verification terminal");
         fflush(stdout);
