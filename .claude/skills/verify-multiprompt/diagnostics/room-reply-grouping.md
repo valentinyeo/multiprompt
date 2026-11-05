@@ -20,6 +20,18 @@ If event collection advances beyond a loaded snapshot, replay stops at that snap
 
 The separate `igsh-1732-room-proof` branch reuses the existing unreleased Rooms send client and isolated account/SSH/provider fixture. Native run https://github.com/valentinyeo/multiprompt/actions/runs/42076973940 exercised real keyboard creation, legacy draft refusal/reopen and a first question with two painted synthetic replies, verified against scoped store and canonical events. The overall run FAILED because a second question was rejected; it is not two-question or full Rooms acceptance. Its post-send dispatch fix and complete preview harness are not included in this publication-only patch. They remain with IGSH-1313.
 
+## Durable admission behind background reads
+
+The frontend prepares one immutable command in the durable journal before waiting for an existing read. When that read completes, it releases its result and partial model, preserves refresh eligibility, then launches the original command once. Active mutations still reject overlapping admission. Account or route changes prevent launch; transport failure retains the original journal identity for recovery. Creation keeps its empty room identifier.
+
+The compiled `launchQueuedCommand` regression exercises pending reads, exact original identity, changed selection, stale scope, creation, failed launch and metadata/status recovery. The actual `scheduleMetadata` regression requires selected history to refresh even while an interrupted catalog is incomplete; the captured pre-fix function must fail that behavior assertion. Catalog metadata still requires a complete catalog and current route/account.
+
+Controlled preview run https://github.com/valentinyeo/multiprompt/actions/runs/42092334078 rejected the second Enter with `busy=catalog` during an unexpired held catalog response. With admission fixed, https://github.com/valentinyeo/multiprompt/actions/runs/42094500212 stored both questions and four scoped replies but failed the actual painted transcript. It exposed the incomplete-catalog snapshot gate.
+
+Exact preview `4502f672baa9ee8e274e6f9910b554de37a203e5` passed the unchanged forced-overlap journey at https://github.com/valentinyeo/multiprompt/actions/runs/42098078329: one second Enter, unexpired held catalog, no rejections, two questions/four scoped synthetic replies/four canonical turns and two human/four agent painted bubbles before and after restart. Original screenshots retain distinct first and second answer text. Account and owned-process cleanup are zero; hosts, certificate and scratch cleanup succeed. Full Tests https://github.com/valentinyeo/multiprompt/actions/runs/42098074076 passed after rerunning the failed unchanged baseline speed warmup, not changing assertions.
+
+Only generic admission and scheduler changes belong to the default-branch patch. The synthetic transport, unreleased post client, preview workflows and release gate remain separate. These results do not establish real-provider or full Rooms acceptance.
+
 ## Remaining user proof
 
 Compiler regressions and the partial preview walkthrough do not establish production Rooms acceptance. Production Rooms remain disabled: `rooms-preview` defaults off and release builds reject it. IGSH-1313 owns desktop Rooms delivery. Once that prerequisite lands, drive two questions through real room input, receive answers in reverse order, switch away and reopen, then restart in the same isolated profile. Inspect native screenshots and independently read persisted events; each answer must occur once beneath its own question. Check private conversation isolation, offline pending delivery and paired Android IGSH-1694 before marking parity complete.
