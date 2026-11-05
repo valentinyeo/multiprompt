@@ -121,7 +121,10 @@ class RoomBridge:
             if opted_in and (type(request['room_messages']) is not int or request['room_messages'] != 1):
                 fail('unsupported_remote_capability')
             live = opted_in and scoped_runtime()
-            return {'room_protocol': 1, 'host_uuid': self.store.host_uuid, 'store_only': not live, 'live_send': live, 'room_reply_protocol': 1 if live else None, 'reason': None if live else 'unsupported_remote_capability'}
+            result = {'room_protocol': 1, 'host_uuid': self.store.host_uuid, 'store_only': not live, 'live_send': live, 'reason': None if live else 'unsupported_remote_capability'}
+            if opted_in:
+                result['room_reply_protocol'] = 1 if live else None
+            return result
         if op == 'status':
             fields(request, ('op', 'host_uuid', 'sid'))
             if identifier(request['host_uuid']) != self.store.host_uuid:

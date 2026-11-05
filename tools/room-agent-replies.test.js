@@ -52,7 +52,8 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         bridge = room_bridge.RoomBridge(rooms)
         host = bridge.execute(dict(op='capabilities'))['host_uuid']
         assert bridge.execute(dict(op='capabilities', room_messages=1))['live_send']
-        assert not bridge.execute(dict(op='capabilities'))['live_send']
+        legacy_capabilities = bridge.execute(dict(op='capabilities'))
+        assert legacy_capabilities == dict(room_protocol=1, host_uuid=host, store_only=True, live_send=False, reason='unsupported_remote_capability')
         member = dict(alias='alpha', display_name='Alpha', host_uuid=host, provider='claude', provider_sid=sid, session_identity='claude:' + sid)
         def create():
             return bridge.execute(dict(op='create', host_uuid=host, command_id=uid(), name='Room', members=[member]))['event']['room_id']
