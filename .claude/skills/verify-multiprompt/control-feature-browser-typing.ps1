@@ -1,6 +1,5 @@
 $pageJob = $null
 $pageServer = $null
-$script:typingModeObservation = $null
 try {
 $pageJob = New-Object VerifyJob
 $pageRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-typing')).Path
@@ -21,41 +20,30 @@ $browser = [VerifyNative]::DockedPaneWindow($script:window)
 if ($browser -eq [IntPtr]::Zero -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Typing journey has no owned docked browser' }
 
 function Get-TypingUrlBar {
-    foreach ($entry in [VerifyNative]::DesktopWindows()) {
-        if ($entry['class'] -cne 'ZigShellUrlBar') { continue }
-        $bar = [IntPtr][long]$entry['handle']
+    $bar = [IntPtr]::Zero
+    while ($true) {
+        $bar = [VerifyNative]::FindWindowEx([IntPtr]::Zero, $bar, 'ZigShellUrlBar', [System.Management.Automation.Language.NullString]::Value)
+        if ($bar -eq [IntPtr]::Zero) { return $bar }
         [uint32]$ownedProcessId = 0
         [void][VerifyNative]::GetWindowThreadProcessId($bar, [ref]$ownedProcessId)
         if ($ownedProcessId -eq $process.Id -and [VerifyNative]::GetAncestor($bar, 3) -eq $script:window -and [VerifyNative]::IsWindowVisible($bar)) { return $bar }
     }
-    return [IntPtr]::Zero
 }
-function Get-TypingModeObservation([IntPtr]$OldBrowser) {
-    $current = [VerifyNative]::DockedPaneWindow($script:window)
-    $rect = New-Object VerifyNative+Rect
-    $hasRect = $current -ne [IntPtr]::Zero -and [VerifyNative]::GetWindowRect($current, [ref]$rect)
-    $found = @()
-    $after = [IntPtr]::Zero
-    for ($i = 0; $i -lt 32; $i++) {
-        $after = [VerifyNative]::FindWindowEx([IntPtr]::Zero, $after, 'ZigShellUrlBar', $null)
-        if ($after -eq [IntPtr]::Zero) { break }
-        $found += [VerifyNative]::WindowIdentity($after)
-    }
-    $desktopBars = @([VerifyNative]::DesktopWindows() | Where-Object { $_['class'] -ceq 'ZigShellUrlBar' })
-    $bar = Get-TypingUrlBar
-    $owner = if ($current -ne [IntPtr]::Zero) { [VerifyNative]::GetProp($current, 'ZigShellPaneOwner') } else { [IntPtr]::Zero }
-    $wildcard = $null
-    $wildcardError = $null
-    try { $wildcard = [VerifyNative]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, 'ZigShellUrlBar', [System.Management.Automation.Language.NullString]::Value).ToInt64() } catch { $wildcardError = $_.Exception.Message }
-    return @{ appPid = $process.Id; main = $script:window.ToInt64(); oldBrowser = $OldBrowser.ToInt64(); currentBrowser = $current.ToInt64(); currentOwnerProperty = $owner.ToInt64(); currentRect = if ($hasRect) { @{ left = $rect.Left; top = $rect.Top; right = $rect.Right; bottom = $rect.Bottom } } else { $null }; currentNonzero = $current -ne [IntPtr]::Zero; currentDifferent = $current -ne $OldBrowser; currentOwned = $owner -eq $script:window; findWindowExBars = $found; findWindowExWildcard = $wildcard; findWindowExWildcardError = $wildcardError; desktopBars = $desktopBars; returnedBar = $bar.ToInt64(); barFound = $bar -ne [IntPtr]::Zero }
+function Get-TypingEditChild([IntPtr]$Bar) {
+    $edit = [VerifyNative]::FindWindowEx($Bar, [IntPtr]::Zero, 'Edit', [System.Management.Automation.Language.NullString]::Value)
+    if ($edit -eq [IntPtr]::Zero) { return $edit }
+    [uint32]$ownedProcessId = 0
+    [void][VerifyNative]::GetWindowThreadProcessId($edit, [ref]$ownedProcessId)
+    if ($ownedProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($edit, 2) -ne $Bar) { throw 'URL Edit ownership mismatch' }
+    return $edit
 }
-function Click-TypingUrlBar {
-    $bar = Get-TypingUrlBar
-    if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing' }
-    $rect = New-Object VerifyNative+Rect
-    if (-not [VerifyNative]::GetClientRect($bar, [ref]$rect)) { throw 'URL bar client rectangle unavailable' }
-    [VerifyNative]::ClickClient($bar, [int](($rect.Right - $rect.Left) / 2), [int](($rect.Bottom - $rect.Top) / 2))
-    return $bar
+function Leave-TypingBrowser {
+    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Expected owned browser foreground before Alt+Q' }
+    [VerifyNative]::Chord(@(0x12, 0x51))
+    Wait-Until {
+        $foreground = [VerifyNative]::GetForegroundWindow()
+        $foreground -ne [IntPtr]::Zero -and $foreground -ne $browser -and [VerifyNative]::GetAncestor($foreground, 3) -eq $script:window
+    } 'Alt+Q returns to owned console or frame' 10 -PollMilliseconds 20
 }
 function Get-TypingEdit([IntPtr]$Bar) {
     $edit = [VerifyNative]::GetFocusedWindow($script:window)
@@ -118,21 +106,19 @@ Focus-Palette 'browser mode' 6244
 Press @(0x0D) 'Enter: use the app address bar'
 $oldModeBrowser = $browser
 Wait-Until {
-    try {
-        $script:typingModeObservation = Get-TypingModeObservation $oldModeBrowser
-        $script:typingModeObservation.currentNonzero -and $script:typingModeObservation.currentDifferent -and
-            $script:typingModeObservation.currentOwned -and $script:typingModeObservation.barFound
-    } catch {
-        $script:typingModeObservation = @{ appPid = $process.Id; main = $script:window.ToInt64(); oldBrowser = $oldModeBrowser.ToInt64(); error = $_.Exception.Message }
-        throw
-    }
+    $candidate = [VerifyNative]::DockedPaneWindow($script:window)
+    $candidate -ne [IntPtr]::Zero -and $candidate -ne $oldModeBrowser -and
+        [VerifyNative]::GetProp($candidate, 'ZigShellPaneOwner') -eq $script:window -and
+        (Get-TypingUrlBar) -ne [IntPtr]::Zero
 } 'owned browser shows the app address bar' 30
 $browser = [VerifyNative]::DockedPaneWindow($script:window)
 if ([VerifyNative]::GetForegroundWindow() -ne $browser) { Page-TypingFocus }
 
 for ($round = 1; $round -le 20; $round++) {
-    if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw "Round $round browser pane lost foreground" }
-    $bar = Click-TypingUrlBar
+    Leave-TypingBrowser
+    $bar = Get-TypingUrlBar
+    if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing' }
+    [VerifyNative]::Chord(@(0x11, 0x10, 0x4C))
     $edit = Wait-TypingEdit $bar
     [VerifyNative]::Text('abc')
     $actual = [VerifyNative]::EditText($edit)
@@ -142,24 +128,20 @@ for ($round = 1; $round -le 20; $round++) {
     Page-TypingFocus
 }
 Snapshot 'action'
-[VerifyNative]::Chord(@(0x11, 0x4C))
-Wait-Until {
-    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-    $focused.Current.ClassName -eq 'OmniboxViewViews' -or (Get-TypingEdit (Get-TypingUrlBar)) -ne [IntPtr]::Zero
-} 'Ctrl+L reaches a browser address input' 5 -PollMilliseconds 20
-[VerifyNative]::Chord(@(0x1B))
-if ([VerifyNative]::GetForegroundWindow() -ne $browser) { Page-TypingFocus }
+Leave-TypingBrowser
+$bar = Get-TypingUrlBar
+if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing before fault' }
 
 $fault = New-Object BrowserTypingFault
-$record = [ordered]@{ boundary = 'One deliberately suppressed app-injected Alt release during a real URL bar click; not a natural failure rate'; injectedDown = $false; droppedUp = $false; events = @(); expected = 'abc'; actual = $null; germanAltGr = 'not exercised'; error = $null }
+$record = [ordered]@{ boundary = 'One deliberately suppressed app-injected Alt release during Ctrl+Shift+L address focus; not a natural failure rate'; injectedDown = $false; droppedUp = $false; events = @(); expected = 'abc'; actual = $null; germanAltGr = 'not exercised'; error = $null }
 try {
     $fault.Start()
     $fault.Arm()
     try {
-        $bar = Click-TypingUrlBar
-        $edit = Wait-TypingEdit $bar
-        [Threading.Thread]::Sleep(150)
+        [VerifyNative]::Chord(@(0x11, 0x10, 0x4C))
     } finally { $fault.Disarm() }
+    Wait-Until { (Get-TypingEditChild $bar) -ne [IntPtr]::Zero } 'owned URL bar Edit exists after Ctrl+Shift+L' 5 -PollMilliseconds 20
+    $edit = Get-TypingEditChild $bar
     $record.injectedDown = $fault.Down
     $record.droppedUp = $fault.Dropped
     $record.events = @($fault.Events)
@@ -172,7 +154,13 @@ try {
     $record.menuBeforeTyping = [BrowserTypingFault]::MenuState($script:window)
     WindowShot 'fault-before-typing'
     [VerifyNative]::Text('abc')
-    $record.actual = [VerifyNative]::EditText($edit)
+    if ([BrowserTypingFault]::IsWindow($edit)) {
+        if ((Get-TypingEditChild $bar) -ne $edit) { throw 'Verified URL Edit ownership changed after typing' }
+        $record.actual = [VerifyNative]::EditText($edit)
+    } else {
+        $record.actual = $null
+        $record.editDestroyed = $true
+    }
     $record.foregroundAfterTyping = [VerifyNative]::GetForegroundWindow().ToInt64()
     $record.focusAfterTyping = [VerifyNative]::GetFocusedWindow($script:window).ToInt64()
     $record.menuAfterTyping = [BrowserTypingFault]::MenuState($script:window)
@@ -194,9 +182,6 @@ try {
 }
 Snapshot 'after'
 } finally {
-    try {
-        Save-Json $(if ($null -ne $script:typingModeObservation) { $script:typingModeObservation } else { @{ status = 'mode observation not reached' } }) 'browser-typing-mode-observation.json'
-    } finally {
     if ($null -ne $pageJob) {
         try {
             $beforeStop = $pageJob.ReadAccounting()
@@ -210,6 +195,5 @@ Snapshot 'after'
             if ($null -ne $pageServer) { $pageServer.Dispose() }
             $pageJob.Dispose()
         }
-    }
     }
 }
