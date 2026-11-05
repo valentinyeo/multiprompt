@@ -382,7 +382,10 @@ fn chatOutboxInputRowIdle(_: u32) bool { return input_idle; }
 `;
 const pendingStart = source.indexOf('    g_chat_echo_layout_count = 0;\n    if (active_shell < shell_count)');
 assert.ok(pendingStart >= 0, 'production pending layout');
-const pendingEnd = source.indexOf('    if (@import("window_layout.zig").chatStopVisible()) {', pendingStart);
+const dotsBoundary = source.includes('    if (chatWorkingDotsVisible()) {', pendingStart)
+  ? '    if (chatWorkingDotsVisible()) {'
+  : '    if (@import("window_layout.zig").chatStopVisible()) {';
+const pendingEnd = source.indexOf(dotsBoundary, pendingStart);
 assert.ok(pendingEnd > pendingStart);
 const pendingLayout = `
 const RECT = struct { left: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
@@ -1717,6 +1720,42 @@ function runHarness(control = false) {
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'sent-pile' || control === 'sent-pile-fixed' ? 'IGSH-1633' : control === 'question-old' ? 'IGSH-1063' : control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+test('working dots hide for a reply unless another send is queued', () => {
+  const helper = source.includes('fn chatWorkingDotsVisible(')
+    ? body('chatWorkingDotsVisible')
+      .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible')
+      .replaceAll('@import("chat_send.zig").chatOutboxWorkingForShell', 'chatOutboxWorkingForShell')
+      .replaceAll('@import("chat_live.zig").replyPresent', 'replyPresent')
+    : `fn chatWorkingDotsVisible() bool { return ${dotsBoundary.match(/if \((.*)\) \{/)[1].replace('@import("window_layout.zig").chatStopVisible', 'chatStopVisible')}; }`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-dots-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, `
+const std = @import("std");
+var stop = false;
+var queued = false;
+var reply = false;
+var active_shell: u32 = 0;
+const shells = [_]struct { shell_id: u32 }{.{ .shell_id = 42 }};
+fn chatStopVisible() bool { return stop; }
+fn chatOutboxWorkingForShell(idx: u32) bool { std.debug.assert(idx == 0); return queued; }
+fn replyPresent(id: u32) bool { std.debug.assert(id == 42); return reply; }
+${helper}
+test "working dots visibility" {
+    stop = false; queued = true; reply = true;
+    try std.testing.expect(!chatWorkingDotsVisible());
+    stop = true; queued = false; reply = false;
+    try std.testing.expect(chatWorkingDotsVisible());
+    reply = true;
+    try std.testing.expect(!chatWorkingDotsVisible());
+    queued = true;
+    try std.testing.expect(chatWorkingDotsVisible());
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 test('IGSH-1415 the pending layout drops a local copy the transcript already carries', () => {
   assert.match(body('chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
 });

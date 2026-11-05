@@ -219,6 +219,14 @@ pub fn build(b: *std.Build) void {
     run_smooth_shape_tests.has_side_effects = true;
     b.step("test-smooth-shapes", "Run native fractional avatar pixel proof").dependOn(&run_smooth_shape_tests.step);
 
+    const live_working_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"IGSH-1668 hosted live events"},
+    });
+    const run_live_working_tests = b.addRunArtifact(live_working_tests);
+    run_live_working_tests.has_side_effects = true;
+    b.step("test-live-working", "Investigate live working events with the native painter").dependOn(&run_live_working_tests.step);
+
     const clean_chat_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-816 CLEAN"},
