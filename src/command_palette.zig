@@ -2205,6 +2205,115 @@ pub fn spawnWorkspaceTmuxSession() bool {
     return spawnWorkspaceSession(true, false);
 }
 
+pub const GroupLaunchTarget = struct {
+    group: u32,
+    host: u8,
+    cwd: [256]u8,
+    cwd_len: usize,
+};
+
+pub fn groupLaunchTarget(sid: u32) ?GroupLaunchTarget {
+    if (sid == 0) return null;
+    const index = findShellById(sid) orelse return null;
+    const group = @import("sidebar.zig").tabGroupId(index);
+    if (group == 0 or @import("sidebar.zig").findGroupIdx(group) == null) return null;
+    const shell = &app_state.shells[index];
+    const host = @import("capacity.zig").remoteHostForShell(shell) orelse return null;
+    const cwd = @import("vps.zig").shellKnownRemotePath(shell, host) orelse return null;
+    var target = GroupLaunchTarget{ .group = group, .host = host, .cwd = undefined, .cwd_len = cwd.len };
+    if (cwd.len == 0 or cwd.len > target.cwd.len or cwd[0] != '/' or !remotePathSafeForShell(cwd)) return null;
+    var parts = std.mem.splitScalar(u8, cwd, '/');
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return null;
+    }
+    @memcpy(target.cwd[0..cwd.len], cwd);
+    return target;
+}
+
+test "group launch uses the targeted shell identity" {
+    const saved_shells = app_state.shells[0..2].*;
+    const saved_count = app_state.shell_count;
+    const saved_active = app_state.active_shell;
+    const saved_groups = app_state.groups[0];
+    const saved_group_count = app_state.group_count;
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_cache_count = app_state.g_tmux_cache_count;
+    defer {
+        app_state.shells[0..2].* = saved_shells;
+        app_state.shell_count = saved_count;
+        app_state.active_shell = saved_active;
+        app_state.groups[0] = saved_groups;
+        app_state.group_count = saved_group_count;
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_tmux_cache_count = saved_cache_count;
+    }
+    app_state.shell_count = 2;
+    app_state.active_shell = 0;
+    app_state.g_starred_workspace = false;
+    app_state.g_tmux_cache_count = 0;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 17, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 7 };
+    for (0..2) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(i + 1);
+        app_state.shells[i].kind = .tmux;
+        app_state.shells[i].tmux_host = @intCast(i);
+        app_state.shells[i].group_id = 17;
+    }
+    const paths = [_][]const u8{ "/home/login/projects/sample", "/home/owner/projects/sample" };
+    for (paths, 0..) |path, i| {
+        @memcpy(app_state.shells[i].cached_cwd[0..path.len], path);
+        app_state.shells[i].cached_cwd_len = @intCast(path.len);
+    }
+    const target = groupLaunchTarget(2) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 1), target.host);
+    try std.testing.expectEqual(@as(u32, 17), target.group);
+    try std.testing.expectEqualStrings(paths[1], target.cwd[0..target.cwd_len]);
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    var command_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
+    const command = workspaceLaunchCommand("claude", "live-test", target.cwd[0..target.cwd_len], "ffffffff-ffff-4fff-bfff-ffffffffffff", &host_buf, &command_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, command, paths[1]) != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, paths[0]) == null);
+    try std.testing.expect(groupLaunchTarget(0) == null);
+    try std.testing.expect(groupLaunchTarget(99) == null);
+    app_state.shells[1].group_id = 0;
+    try std.testing.expect(groupLaunchTarget(2) == null);
+    app_state.shells[1].group_id = 17;
+    app_state.group_count = 0;
+    try std.testing.expect(groupLaunchTarget(2) == null);
+    app_state.group_count = 1;
+    app_state.shells[1].kind = .cmd;
+    try std.testing.expect(groupLaunchTarget(2) == null);
+    app_state.shells[1].kind = .tmux;
+    var long_path: [300]u8 = @splat('a');
+    long_path[0] = '/';
+    @memcpy(app_state.shells[1].cached_cwd[0..long_path.len], &long_path);
+    app_state.shells[1].cached_cwd_len = 220;
+    const longest = groupLaunchTarget(2) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(long_path[0..220], longest.cwd[0..longest.cwd_len]);
+    for ([_]u32{ 221, 256, 257, 300 }) |len| {
+        app_state.shells[1].cached_cwd_len = len;
+        try std.testing.expect(groupLaunchTarget(2) == null);
+    }
+    app_state.shells[1].cached_cwd_len = 0;
+    try std.testing.expect(groupLaunchTarget(2) == null);
+    for ([_][]const u8{ "~/projects/sample", "/home/owner/../other", "/home/owner/bad;command" }) |path| {
+        @memcpy(app_state.shells[1].cached_cwd[0..path.len], path);
+        app_state.shells[1].cached_cwd_len = @intCast(path.len);
+        try std.testing.expect(groupLaunchTarget(2) == null);
+    }
+}
+
+pub fn spawnGroupTmuxSession(target: *const GroupLaunchTarget) bool {
+    var host: u8 = 0;
+    var cwd: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    var program: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    _ = workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), &host, &cwd, &cwd_len, &program, &program_len);
+    return spawnWorkspaceSessionAt(target.host, target.cwd[0..target.cwd_len], program[0..program_len], true, false);
+}
+
 pub fn spawnWorkspacePlainClaudeSession() bool {
     return spawnWorkspaceSession(true, true);
 }
