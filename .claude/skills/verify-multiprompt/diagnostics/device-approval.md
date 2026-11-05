@@ -14,7 +14,9 @@ Discover a new pending device during account sync. Show the existing approval di
 
 The Test workflow runs `tools/account-keys.test.js` through the existing Zig integration test graph. Its extracted production prompt and reply-dispatch fixture covers first discovery, unchanged pending keys after Cancel, new devices, changed keys, explicit retries and invalid reply guards. `src/account_keys.zig` and `src/account_keys_shell_test.zig` cover all-host rollout, unreachable hosts and idempotent authorized-key editing.
 
-These checks substitute account and SSH boundaries. They do not prove live sign-in, an actual native prompt screenshot, phone connectivity or cross-device delivery. Never run the compiled fixtures on the shared server.
+The auto-discovered `tools/device-approval-1636.test.js` compiles the production key rollout and device-key sync functions with fake SSH, account API, key publication, host discovery and protected storage. It checks named partial and total failures, approval ordering, denial, API errors, quiet background cleanup and retry. Two-device cases check that each confirmed approval retains its own skipped servers, including when a later approval fails. It checks the native result dispatch in source. The hosted red gate runs the same suite against the full merge-base source. Hosted runs must pass before this is evidence; no run is claimed here.
+
+These checks substitute account and SSH boundaries. They do not prove live sign-in, real SSH installation, an actual native prompt screenshot, phone connectivity or cross-device delivery. Never run the compiled fixtures on the shared server.
 
 ## Live acceptance proof
 

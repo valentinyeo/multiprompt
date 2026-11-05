@@ -25,16 +25,16 @@ function audit(source) {
   assert.match(publish, /request\("PUT", "\/v1\/device-key", access, body\)/);
   const sync = section(source, 'accountSyncDeviceKeys');
   assert.ok(sync.indexOf('accountPublishDeviceKey(') < sync.indexOf('request("GET", "/v1/device-keys"'));
-  assert.match(sync, /key.status == \.pending and std.mem.eql\(u8, key.device_id, decision.device_id\) and std.mem.eql\(u8, key.public_key, decision.public_key\)/);
-  assert.match(sync, /if \(!current\) return error.DeviceChanged/);
+  assert.match(sync, /key.status == \.pending and std.mem.eql\(u8, key.device_id, decision.device_id\) and std.mem.eql\(u8, key.public_key, decision.public_key\) and !std.mem.eql\(u8, key.device_id, listing.value.device_id\)/);
+  assert.match(sync, /const name = device_name orelse return error.DeviceChanged/);
   assert.match(sync, /if \(aliases.len == 0\)/);
-  assert.match(sync, /_ = try accountRunKeyCommand\(a, ssh, aliases, try account_keys.addCommand/);
+  assert.match(sync, /const outcome = try accountRunKeyCommand\(a, ssh, aliases, try account_keys.addCommand/);
   assert.ok(sync.indexOf('try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand(') < sync.indexOf('request("POST", path'));
   assert.match(sync, /"\/v1\/device-keys\/\{s\}\/\{s\}"/);
   assert.match(sync, /if \(decision.approve\) "approve" else "deny"/);
   assert.match(sync, /key.status != \.revoked or account_keys.isCleaned\(state.items, key.public_key\)/);
   assert.ok(sync.indexOf('account_keys.removeCommand(') < sync.indexOf('writeDpapiFile("account-keys-cleaned.dat"'));
-  assert.match(sync, /if \(!try accountRunKeyCommand\(a, ssh, aliases, try account_keys.removeCommand\(a, key.public_key\), reply\)\) continue;/);
+  assert.match(sync, /const outcome = try accountRunKeyCommand\(a, ssh, aliases, try account_keys.removeCommand\(a, key.public_key\), reply\);\s*if \(!outcome.complete\) continue;/);
   const hosts = section(source, 'accountKnownKeyHosts');
   assert.match(hosts, /SSH_TARGET_DE, app_state.SSH_TARGET_UK, app_state.SSH_TARGET_INNE/);
   assert.match(hosts, /if \(!account_hosts.shouldImport\(alias, resolved\)\) try aliases.append\(a, alias\)/);
@@ -43,7 +43,7 @@ function audit(source) {
   assert.match(remote, /_ = try accountSshOutput\(self.a, command, 30000\)/);
   assert.match(remote, /const rollout = account_keys.applyOnHosts\(aliases, &runner\)/);
   assert.match(remote, /if \(!rollout.reachedAny\(\)\) \{\s*accountDeviceKeyError\(reply, "Could not update SSH access on any host\./);
-  assert.match(remote, /return rollout.complete\(\)/);
+  assert.match(remote, /complete = rollout.complete\(\)/);
   const prompt = section(source, 'accountPromptDeviceKeys');
   assert.match(prompt, /key.status != \.pending or std.mem.eql\(u8, key.device_id, listing.value.device_id\)/);
   assert.match(prompt, /Approve this device\? \{s\} asks to reach your servers\./);
@@ -59,12 +59,21 @@ function audit(source) {
   assert.match(section(source, 'startAccountJob'), /std.Thread.spawn\(\.\{\}, layoutSyncWorker/);
 }
 
+test('confirmed partial approvals name the device and skipped servers', () => {
+  const sync = section(desktop, 'accountSyncDeviceKeys');
+  const confirmed = sync.indexOf('if (decided.status != 200) return error.DecideKey;');
+  const notice = sync.indexOf('approved on reachable servers. Could not reach:');
+  assert.ok(confirmed >= 0 && notice > confirmed, 'named partial notice must follow API confirmation');
+  assert.match(sync, /\{ if \(old\) \|bytes\| bytes else "", name, skipped \}/);
+  assert.match(sync, /skipped = outcome.skipped;/);
+});
+
 test('device-key transport, worker SSH, UI decisions and durable cleanup fail closed', () => {
   audit(desktop);
   for (const [before, after] of [
     ['readFileAllocWin32(public_path, 4096)', 'readFileAllocWin32(private_path, 4096)'],
     ['"PUT", "/v1/device-key"', '"PUT", "/v1/device-keys"'],
-    ['if (!current) return error.DeviceChanged;', ''],
+    ['const name = device_name orelse return error.DeviceChanged;', 'const name = "unknown";'],
     ['try accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand', 'accountRunKeyCommand(a, ssh, aliases, try account_keys.addCommand'],
     ['try accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand', 'accountRunKeyCommand(a, ssh, aliases, try account_keys.removeCommand'],
     ['if (answer != 6 and answer != 7) continue;', ''],
@@ -72,8 +81,8 @@ test('device-key transport, worker SSH, UI decisions and durable cleanup fail cl
     ['key.status != .revoked or account_keys.isCleaned(state.items, key.public_key)', 'false'],
     ['-o BatchMode=yes -o ConnectTimeout=10', '-o ConnectTimeout=1'],
     ['if (!rollout.reachedAny()) {', 'if (false) {'],
-    ['return rollout.complete();', 'return true;'],
-    ['reply)) continue;', 'reply)) {}'],
+    ['complete = rollout.complete()', 'complete = true'],
+    ['if (!outcome.complete) continue;', ''],
   ]) {
     assert.ok(desktop.includes(before), before);
     assert.throws(() => audit(desktop.replace(before, after)), before);
