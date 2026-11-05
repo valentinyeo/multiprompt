@@ -353,6 +353,49 @@ pub const DeliveryWatch = struct {
     }
 };
 
+pub fn phaseTaken(phase: []const u8) bool {
+    return std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started");
+}
+
+pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, busy: bool, now_ms: i64, loaded_ms: i64) bool {
+    if (state != .delivered or !phaseTaken(phase)) return false;
+    watch.observe(busy, now_ms);
+    if (busy) return false;
+    if (watch.idle_since_ms == 0) watch.idle_since_ms = now_ms;
+    return watch.due(now_ms, loaded_ms);
+}
+
+test "IGSH-1766 a message the agent took settles once the chat idles past the grace and history reloads" {
+    var watch = DeliveryWatch{};
+    try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, 1000, 1000));
+    try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, 1000 + SETTLE_GRACE_MS - 1, 1000 + SETTLE_GRACE_MS - 1));
+    try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, 1000 + SETTLE_GRACE_MS, 1000 + SETTLE_GRACE_MS - 1));
+    try std.testing.expect(takenSettled(&watch, .delivered, "accepted", false, 1000 + SETTLE_GRACE_MS, 1000 + SETTLE_GRACE_MS));
+}
+
+test "IGSH-1766 a busy chat keeps the taken message waiting and restarts the idle clock" {
+    var watch = DeliveryWatch{};
+    try std.testing.expect(!takenSettled(&watch, .delivered, "started", false, 1000, 1000));
+    try std.testing.expect(!takenSettled(&watch, .delivered, "started", true, 50_000, 50_000));
+    try std.testing.expectEqual(@as(i64, 0), watch.idle_since_ms);
+    try std.testing.expect(!takenSettled(&watch, .delivered, "started", true, 500_000, 500_000));
+    try std.testing.expect(!takenSettled(&watch, .delivered, "started", false, 500_001, 500_001));
+    try std.testing.expect(takenSettled(&watch, .delivered, "started", false, 500_001 + SETTLE_GRACE_MS, 500_001 + SETTLE_GRACE_MS));
+}
+
+test "IGSH-1766 only delivered entries in a taken phase can settle without a transcript row" {
+    for ([_][]const u8{ "", "queued", "sent", "failed", "cancelled" }) |phase| {
+        var watch = DeliveryWatch{};
+        _ = takenSettled(&watch, .delivered, phase, false, 1000, 1000);
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, 1_000_000, 1_000_000));
+    }
+    for ([_]OutboxState{ .queued, .sending, .not_sent, .cancelled }) |state| {
+        var watch = DeliveryWatch{};
+        _ = takenSettled(&watch, state, "accepted", false, 1000, 1000);
+        try std.testing.expect(!takenSettled(&watch, state, "accepted", false, 1_000_000, 1_000_000));
+    }
+}
+
 pub fn refusesCommand(warning: []const u16, text: []const u16) bool {
     var normalized: [16384]u16 = undefined;
     const norm = normalize(text, &normalized);
