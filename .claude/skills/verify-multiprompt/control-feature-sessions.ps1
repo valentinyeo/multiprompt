@@ -2,9 +2,46 @@
             Wait-Until {
                 $state = Read-Session
                 $inbox = Read-Inbox
-                $null -ne $state -and $null -ne $inbox -and $state.active_workspace -eq 0 -and @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'tmux' -and $state.tabs[1].tmux_session -eq 'second' -and $state.tabs[1].tmux_host -eq 2 -and $inbox.active_workspace -eq 0 -and $inbox.active_shell_id -eq $state.tabs[1].shell_id -and @($inbox.shells | Where-Object { $_.sid -eq $inbox.active_shell_id -and $_.name -eq 'Second' }).Count -eq 1
+                $null -ne $state -and $null -ne $inbox -and $state.active_workspace -eq 0 -and @($state.tabs).Count -eq 3 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'tmux' -and $state.tabs[1].tmux_session -eq 'second' -and $state.tabs[1].tmux_host -eq 2 -and $inbox.active_workspace -eq 0 -and $inbox.active_shell_id -eq $state.tabs[1].shell_id -and @($inbox.shells | Where-Object { $_.sid -eq $inbox.active_shell_id -and $_.name -eq 'Second' }).Count -eq 1
             } 'second seeded remote tab active in Other' 60
             Save-Json @{ session = (Read-Session); inbox = (Read-Inbox) } 'sessions-initial.json'
+            Press @(0x12, 0x33) 'Alt+3: switch to Example workspace'
+            Wait-Until {
+                $state = Read-Session
+                $tab = $state.tabs[$state.active_tab]
+                $state.active_workspace -eq 1 -and $tab.tmux_session -ceq 'terminal-owner' -and (-not $tab.PSObject.Properties['cwd'] -or -not $tab.cwd) -and $tab.ccwd -ceq '/home/owner/projects/sample' -and @($state.tabs | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 1 }).Count -eq 1
+            } 'Example workspace has only the owner terminal' 60
+            $cachePath = Join-Path $scratch 'roaming/ZigShell/poll-cache-vps.json'
+            Wait-Until {
+                if (-not (Test-Path $cachePath)) { return $false }
+                try { $cache = Get-Content $cachePath -Raw | ConvertFrom-Json } catch { return $false }
+                @($cache.sessions | Where-Object { $_.name -ceq 'terminal-owner' -and $_.host -eq 0 -and $_.path -ceq '/home/login' }).Count -eq 1
+            } 'app-published tmux cache contains the login-home carrier' 90
+            Copy-Item $cachePath (Join-Path $Evidence 'workspace-carrier-cache.json')
+            Save-Json (Read-Session) 'workspace-owner-before.json'
+            Snapshot 'workspace-owner-before'
+            $priorInvocations = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | ForEach-Object { $_.Name })
+            Press @(0x11, 0x54) 'Ctrl+T: new chat in Example workspace'
+            Wait-Until {
+                $state = Read-Session
+                if (@($state.tabs).Count -ne 4 -or $state.active_workspace -ne 1) { return $false }
+                $tab = $state.tabs[$state.active_tab]
+                $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                $tab.PSObject.Properties['workspace'] -and $tab.workspace -eq 1 -and $hostId -eq 0 -and $tab.PSObject.Properties['cwd'] -and $tab.cwd -ceq '/home/owner/projects/sample' -and $tab.PSObject.Properties['cv'] -and $tab.cv -eq $true
+            } 'workspace new chat saved with reported owner folder' 60
+            Wait-Until {
+                $script:workspaceLaunch = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $_.Name -notin $priorInvocations -and (Get-Content $_.FullName -Raw) -match 'host enable claude.*--cwd /home/owner/projects/sample' })
+                $script:workspaceLaunch.Count -ge 1
+            } 'workspace hosted launch uses absolute owner folder' 60
+            Copy-Item $script:workspaceLaunch[0].FullName (Join-Path $Evidence 'workspace-hosted-launch.txt')
+            Save-Json (Read-Session) 'workspace-owner-new-session.json'
+            Snapshot 'workspace-owner-new-chat'
+            $result.checks += @{ name = 'workspace-reported-owner'; workspace = 'Example'; host = 0; cwd = '/home/owner/projects/sample'; boundary = 'Seeded provider-reported cwd and SSH stand-in; no real provider or server' }
+            Palette 'hide from sidebar'
+            Press @(0x0D) 'Enter: hide Example workspace chat'
+            Wait-Until { @((Read-Session).tabs).Count -eq 3 } 'Example workspace chat hidden'
+            Press @(0x12, 0x32) 'Alt+2: return to Other workspace'
+            Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_session -ceq 'second' } 'Other workspace and second server restored'
             $beforeClaude = @((Read-Session).tabs).Count
             Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
             Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'listing-*.txt').Count -gt 0 } 'repository discovery response'
@@ -44,7 +81,8 @@
                 Save-Json (Read-Session) ($searchProof + '-session.json')
                 Snapshot ($searchProof + '-chat')
                 $result.checks += @{ name = $searchProof; query = $query; cwd = '/work/projects/software-factory'; cv = $true; host = 2 }
-                Press @(0x11, 0x57) 'Ctrl+W: close software-factory chat'
+                Palette 'hide from sidebar'
+                Press @(0x0D) 'Enter: hide software-factory chat'
                 Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'software-factory chat closed'
                 Palette 'Second'
                 Press @(0x0D) 'Enter: return to the seeded third-server session'
