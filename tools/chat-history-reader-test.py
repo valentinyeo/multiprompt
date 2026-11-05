@@ -3706,6 +3706,77 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.request('dispatch')
         self.assertEqual(self.send.call_count, 1)
 
+    def test_admission_epoch_reset_before_submit_creates_tombstone(self):
+        before = self.request('snapshot')
+        reset = self.request('reset', reset_id='reset_admission_0001')
+        token = 'message_admission_0001'
+        values = dict(message_id=token, text='late prompt', admission_epoch=reset['epoch'] - 1)
+        result = self.request('submit', **values)
+        message = result['message']
+        self.assertEqual((message['id'], message['state'], message['epoch']), (token, 'cancelled', reset['epoch']))
+        self.assertEqual(self.request('submit', **values)['message'], message)
+        self.assertEqual(self.status(token), message)
+        snapshot = self.request('snapshot')
+        self.assertIn(message, [item['message'] for item in snapshot['items'] if 'message' in item])
+        events = [item['event'] for item in self.request('events', after=before['seq'])['events'] if item['event'].get('id') == token]
+        self.assertEqual(events, [message])
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 0)
+
+    def test_admission_epoch_submit_before_reset_preserves_existing(self):
+        accepted = self.request('submit', message_id='message_admission_0002', text='accepted prompt', admission_epoch=0)['message']
+        self.request('dispatch')
+        self.accept('accepted prompt')
+        started = self.request('submit', message_id='message_admission_0003', text='started prompt', admission_epoch=0)['message']
+        self.request('dispatch')
+        self.append(dict(type='user', sessionId='sid', message=dict(role='user', content='started prompt')))
+        self.poll()
+        self.assertEqual(self.status(accepted['id'])['state'], 'accepted')
+        self.assertEqual(self.status(started['id'])['state'], 'started')
+        pending = self.request('submit', message_id='message_admission_0004', text='pending prompt', admission_epoch=0)['message']
+        before = self.path.read_text()
+        reset = self.request('reset', reset_id='reset_admission_0002')
+        for original in (accepted, started, pending):
+            current = self.status(original['id'])
+            for epoch in (0, reset['epoch'] + 1):
+                replay = self.request('submit', message_id=original['id'], text=original['text'], admission_epoch=epoch)['message']
+                self.assertEqual(replay, current)
+            self.assertEqual(current['attempt'], original['attempt'])
+        self.assertEqual(self.status(accepted['id'])['state'], 'accepted')
+        self.assertEqual(self.status(started['id'])['state'], 'started')
+        self.assertEqual(self.status(pending['id'])['state'], 'cancelled')
+        with self.assertRaises(ValueError):
+            self.request('submit', message_id=accepted['id'], text='conflict', admission_epoch=reset['epoch'] + 1)
+        with self.assertRaises(ValueError):
+            reader.message_store_request(dict(self.base, sid='other', op='message_submit', message_id=accepted['id'], text=accepted['text'], admission_epoch=reset['epoch'] + 1))
+        self.assertEqual(self.path.read_text(), before)
+        self.assertTrue(any('native_message' in item for item in self.request('snapshot')['items']))
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 2)
+
+    def test_admission_epoch_legacy_null_equal_and_future(self):
+        reset = self.request('reset', reset_id='reset_admission_0003')
+        for index, extra in enumerate(({}, {'admission_epoch': None}, {'admission_epoch': reset['epoch']})):
+            message = self.request('submit', message_id='message_admission_legacy_%d' % index, text='prompt %d' % index, **extra)['message']
+            self.assertEqual((message['state'], message['epoch']), ('queued', reset['epoch']))
+        token = 'message_admission_future'
+        with self.assertRaises(ValueError):
+            self.request('submit', message_id=token, text='future prompt', admission_epoch=reset['epoch'] + 1)
+        self.assertIsNone(self.status(token))
+        for _ in range(3):
+            self.request('dispatch')
+        self.assertEqual(self.send.call_count, 3)
+
+    def test_admission_epoch_rejects_invalid_types_without_insert(self):
+        for index, value in enumerate((True, False, -1, '0', 0.5)):
+            with self.subTest(value=value):
+                token = 'message_admission_invalid_%d' % index
+                with self.assertRaises(ValueError):
+                    self.request('submit', message_id=token, text='invalid prompt', admission_epoch=value)
+                self.assertIsNone(self.status(token))
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 0)
+
     def test_old_poll_callback_cannot_resurrect_reset_message(self):
         self.submit()
         self.request('dispatch')

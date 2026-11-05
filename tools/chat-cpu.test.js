@@ -220,6 +220,7 @@ var g_chat_content_h: i32 = 0;
 var g_working_rect: ?RECT = null;
 const g_shell_rect_count: usize = 0;
 fn chatStopVisible() bool { return false; }
+fn chatWorkingDotsVisible() bool { return false; }
 var g_chat_echo_layout_count: usize = 0;
 var g_chat_sel_anchor: usize = 0;
 var g_chat_sel_caret: usize = 0;
@@ -295,6 +296,36 @@ test "prefix rectangles survive repeated layout and suffix updates; resize and f
     try std.testing.expectEqual(@as(usize, 4005), measured);
 }
 `;
+test('working dots follow stop, reply and queued state', () => {
+  const helper = source.includes('fn chatWorkingDotsVisible(')
+    ? body(source, 'chatWorkingDotsVisible')
+      .replaceAll('@import("chat_send.zig").chatOutboxWorkingForShell', 'chatOutboxWorkingForShell')
+      .replaceAll('@import("chat_live.zig").replyPresent', 'replyPresent')
+    : `fn chatWorkingDotsVisible() bool { return ${body(source, 'chatRelayout').match(/if \((chatStopVisible\(\))\) \{/)[1]}; }`;
+  const result = run(`
+const std = @import("std");
+var stop = false;
+var queued = false;
+var reply = false;
+var active_shell: u32 = 0;
+const shells = [_]struct { shell_id: u32 }{.{ .shell_id = 42 }};
+fn chatStopVisible() bool { return stop; }
+fn chatOutboxWorkingForShell(idx: u32) bool { std.debug.assert(idx == 0); return queued; }
+fn replyPresent(id: u32) bool { std.debug.assert(id == 42); return reply; }
+${helper}
+test "working dots visibility" {
+    stop = false; queued = true; reply = false;
+    try std.testing.expect(!chatWorkingDotsVisible());
+    stop = true; queued = false; reply = false;
+    try std.testing.expect(chatWorkingDotsVisible());
+    reply = true;
+    try std.testing.expect(!chatWorkingDotsVisible());
+    queued = true;
+    try std.testing.expect(chatWorkingDotsVisible());
+}
+`);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
 test('production layout measures only changed suffixes and caches unchanged geometry', () => {
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);

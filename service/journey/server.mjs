@@ -29,8 +29,10 @@ const mf = new Miniflare(convertV4MiniflareOptions({
 const db = await mf.getD1Database('DB');
 for (const sql of readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').split(';').filter(s => s.trim())) await db.prepare(sql).run();
 
-const refresh = secret();
-const secondRefresh = args['second-device'] === 'true' ? secret() : null;
+const fixture = args.config ? JSON.parse(readFileSync(args.config, 'utf8')) : null;
+if (fixture && (fixture.account_id !== account || fixture.desktop_device_id !== 'journey-device' || fixture.android_device_id !== 'journey-device-b' || typeof fixture.desktop_refresh_token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(fixture.desktop_refresh_token) || typeof fixture.android_refresh_token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(fixture.android_refresh_token) || fixture.desktop_refresh_token === fixture.android_refresh_token)) throw new Error('Invalid fixture credentials');
+const refresh = fixture ? fixture.desktop_refresh_token : secret();
+const secondRefresh = fixture ? fixture.android_refresh_token : args['second-device'] === 'true' ? secret() : null;
 const keys = { admin: 'mpk_a_' + secret(), workspace: 'mpk_w_' + secret(), other: 'mpk_w_' + secret() };
 await db.prepare('INSERT INTO layouts VALUES (?,?,?)').bind(account, 1, JSON.stringify(layout)).run();
 await db.prepare('INSERT INTO devices (id,account,name,refresh_hash,created,last_seen) VALUES (?,?,?,?,?,?)').bind('journey-device', account, 'Journey', await hash(refresh), 1, 1).run();
@@ -59,9 +61,31 @@ const handler = async (req, res) => {
     res.end(JSON.stringify({ error: 'fixture_offline' }));
     return;
   }
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const body = Buffer.concat(chunks);
+  let body;
+  if (fixture) body = await new Promise(resolve => {
+    const chunks = [];
+    let size = 0;
+    let rejected = false;
+    req.on('data', chunk => {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > 1024 * 1024) {
+        rejected = true;
+        chunks.length = 0;
+        res.writeHead(413);
+        res.end();
+        resolve(null);
+      } else chunks.push(chunk);
+    });
+    req.on('end', () => { if (!rejected) resolve(Buffer.concat(chunks)); });
+    req.on('error', () => resolve(null));
+  });
+  else {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    body = Buffer.concat(chunks);
+  }
+  if (body === null) return;
   const headers = { ...req.headers };
   delete headers.host;
   const response = await mf.dispatchFetch('http://localhost' + req.url, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body });
