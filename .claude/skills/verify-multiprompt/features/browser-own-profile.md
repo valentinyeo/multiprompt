@@ -16,6 +16,8 @@ Verify on: push
 - Create or pick a workspace, find its id (`wid` in the app-written `session.json`), and add that id on its own line to `browser-own-profile.txt` next to `browser-engine.txt`.
 - Open a browser pane in that workspace with Ctrl+K `open browser`, Enter. It starts signed out in a fresh profile; panes in other workspaces stay signed in as before.
 - After an app restart the restored pane in that workspace opens in the same own profile again.
+- In an existing Chrome own-profile tab, Ctrl+K `sign in to google` opens Google Accounts outside the controlled pane. All managed panes sharing that profile close first; unrelated profiles stay open. Close the plain sign-in window before reopening the pane.
+- The sign-in reservation lasts for this app instance. Restarting the app while plain Chrome survives, or launching another external Chrome on that profile concurrently, is outside this handoff proof.
 
 ## Driving it with control.ps1
 
