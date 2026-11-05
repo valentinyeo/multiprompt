@@ -58,7 +58,11 @@ function Log {
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 function Focus {
-    [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $main) })
+    [void](Wait-For 'owned foreground' {
+        $typingTarget=[ChatDeliveryDesktop]::Composer($main)
+        if ($typingTarget -eq [IntPtr]::Zero) { $typingTarget=$main }
+        [ChatDeliveryDesktop]::FocusOwnedWindow($main, [uint32]$app.Id, $typingTarget)
+    })
 }
 function Press([int[]]$Keys) {
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
