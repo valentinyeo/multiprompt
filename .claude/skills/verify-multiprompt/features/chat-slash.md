@@ -18,7 +18,11 @@ gh workflow run verify.yml --ref igsh-1522-live-chat-slash -f feature=chat-slash
 
 The journey selects an isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
 
-Retain screenshots, raw controls, acknowledgements, resulting mode, executable identity, actions and zero-process cleanup together. This journey is independent of the structured-question card journey.
+Retain screenshots, raw controls, acknowledgements, resulting mode, executable identity, actions and zero-process cleanup together.
+
+The same live tab then receives scripted Claude control requests through the production host event adapter, not terminal menus. Real input allows and cancels approvals, answers single/multiple/Other questions, and implements or gives feedback on plans. Each response must target its original request and tool, reach the provider stdin exactly once, and produce a continuation copied from the real transcript through Ctrl+K. Plan markdown must also appear in the copied transcript. Retain hosted request, reply and continuation JSONL alongside the native card and plan screenshots. Answers must not enter ordinary message delivery.
+
+This covers existing desktop support referenced by the paired Android request https://app.hypertask.ai/detail/project-2060/1622 and desktop follow-up https://app.hypertask.ai/detail/project-2060/1644. It does not run Android or prove account transport.
 
 ## Gotchas
 

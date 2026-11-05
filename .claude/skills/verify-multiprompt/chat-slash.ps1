@@ -97,3 +97,4 @@ if (Test-Path $outboxPath) {
 Snapshot 'slash-after'
 Snapshot 'after'
 $result.checks += @{ name = 'live-chat-slash'; commands = @('/plan', '/permissions', '/model', '/resume', '/rewind'); modes = @('plan', 'manual', 'acceptEdits'); controls = $controls.Count; target = 'live-slash'; screenshots = $true; ordinarySends = 0 }
+. (Join-Path $PSScriptRoot 'hosted-requests.ps1')

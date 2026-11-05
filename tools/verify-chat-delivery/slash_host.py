@@ -34,3 +34,8 @@ def install(namespace, root, record):
     namespace['host_owned'] = owned
     namespace['host_request'] = request
     namespace['host_control_request'] = control
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('hosted_requests', Path(__file__).with_name('hosted_requests.py'))
+    hosted = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hosted)
+    hosted.install(namespace, root, sid, record)
