@@ -8,6 +8,14 @@ pub const Provider = enum {
     codex,
     pi,
 
+    pub fn fromAiAgent(agent: u8) Provider {
+        return switch (agent) {
+            2 => .codex,
+            3 => .pi,
+            else => .claude,
+        };
+    }
+
     pub fn wire(self: Provider) []const u8 {
         return @tagName(self);
     }

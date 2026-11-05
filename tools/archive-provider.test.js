@@ -17,7 +17,7 @@ test('IGSH-1747 actual archive serialization and resume retain the original assi
   const source = read('archive.zig');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-provider-'));
   try {
-    for (const file of ['agent_host.zig', 'json_reader.zig', 'archive_rules.zig']) fs.copyFileSync(path.join(root, 'src', file), path.join(directory, file));
+    for (const file of ['agent_host.zig', 'json_reader.zig', 'archive_rules.zig', 'session_end.zig']) fs.copyFileSync(path.join(root, 'src', file), path.join(directory, file));
     fs.writeFileSync(path.join(directory, 'proof.zig'), `const std = @import("std");
 const agent_host = @import("agent_host.zig");
 const json_reader = @import("json_reader.zig");
@@ -26,6 +26,19 @@ ${extract(source, 'pub fn appendAsciiBuf(', 'fn getArchivePath(')}
 ${extract(read('workspaces.zig'), 'pub fn appendJsonEscaped(', 'fn lockWorkspaceRegistry(')}
 ${extract(source, 'fn archiveJsonCapacity(', 'test "archive JSON grows')}
 ${extract(source, 'fn buildClaudeResumePayload(', 'pub fn resurrectArchivedByKey(')}
+test "stop requests target only the original provider" {
+    const session_end = @import("session_end.zig");
+    for ([_]agent_host.Provider{ .claude, .codex, .pi }) |provider| {
+        var buffer: [512]u8 = undefined;
+        const command = if (@typeInfo(@TypeOf(session_end.build)).@"fn".params.len == 5)
+            session_end.build(&buffer, "~/reader.py", "chosen-chat", provider, "ffffffff-ffff-4fff-bfff-ffffffffffff")
+        else
+            session_end.build(&buffer, "~/reader.py", "chosen-chat", "ffffffff-ffff-4fff-bfff-ffffffffffff");
+        var expected_buffer: [128]u8 = undefined;
+        const expected = try std.fmt.bufPrint(&expected_buffer, "host stop {s} 'ffffffff-ffff-4fff-bfff-ffffffffffff'", .{provider.wire()});
+        try std.testing.expect(std.mem.indexOf(u8, command orelse return error.TestUnexpectedResult, expected) != null);
+    }
+}
 test "archive providers round trip and legacy Claude stays readable" {
     const allocator = std.testing.allocator;
     for ([_]agent_host.Provider{ .claude, .codex, .pi }) |provider| {
@@ -57,6 +70,9 @@ test "archive providers round trip and legacy Claude stays readable" {
             try std.testing.expect(std.mem.indexOf(u8, command, "claude") == null);
         }
     }
+    var invalid: std.ArrayList(ArchivedEntry) = .empty;
+    defer invalid.deinit(allocator);
+    try std.testing.expect(!parseArchiveJson(allocator, "[{\\"tmux_session\\":\\"unsafe\\",\\"provider\\":\\"unknown\\"}]", &invalid));
     var legacy: std.ArrayList(ArchivedEntry) = .empty;
     defer legacy.deinit(allocator);
     try std.testing.expect(parseArchiveJson(allocator, "[{\\"tmux_session\\":\\"old-chat\\",\\"csid\\":\\"ffffffff-ffff-4fff-bfff-ffffffffffff\\"}]", &legacy));

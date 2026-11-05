@@ -214,6 +214,9 @@ fn parseArchiveJson(allocator: std.mem.Allocator, json: []const u8, parsed: *std
     defer document.deinit();
     for (json_reader.array(document.value)) |obj| {
         var e = ArchivedEntry{};
+        const provider_value = json_reader.field(obj, "provider");
+        const provider = if (provider_value == .null) "claude" else json_reader.string(provider_value) orelse return false;
+        e.provider = std.meta.stringToEnum(agent_host.Provider, provider) orelse return false;
         e.name_len = json_reader.copyString(obj, "name", &e.name);
         e.tmux_session_len = json_reader.copyString(obj, "tmux_session", &e.tmux_session);
         e.tmux_identity_len = json_reader.copyString(obj, "tmux_identity", &e.tmux_identity);
@@ -252,6 +255,12 @@ fn serializeArchiveJson(entries: []const ArchivedEntry, out: []u8) ?usize {
         @memcpy(out[pos .. pos + h_pre.len], h_pre);
         pos += h_pre.len;
         out[pos] = '0' + e.tmux_host;
+        pos += 1;
+        const provider_prefix = ",\"provider\":\"";
+        @memcpy(out[pos .. pos + provider_prefix.len], provider_prefix);
+        pos += provider_prefix.len;
+        appendJsonEscaped(out, &pos, e.provider.wire());
+        out[pos] = '"';
         pos += 1;
         if (e.claude_sid_len > 0) {
             const cs_pre = ",\"csid\":\"";
@@ -432,11 +441,11 @@ fn applyArchivedEntryToShell(idx: u32, entry: *const ArchivedEntry) void {
         app_state.shells[idx].tmux_session_len = entry.tmux_session_len;
     }
     app_state.shells[idx].tmux_host = entry.tmux_host;
+    app_state.shells[idx].ai_agent = entry.provider.aiAgent();
     if (entry.claude_sid_len > 0) {
         @memcpy(app_state.shells[idx].claude_sid[0..entry.claude_sid_len], entry.claude_sid[0..entry.claude_sid_len]);
         app_state.shells[idx].claude_sid_len = entry.claude_sid_len;
         app_state.shells[idx].claude_session = true;
-        app_state.shells[idx].ai_agent = 1;
     }
     if (entry.claude_cwd_len > 0) {
         @memcpy(app_state.shells[idx].claude_cwd[0..entry.claude_cwd_len], entry.claude_cwd[0..entry.claude_cwd_len]);
@@ -444,7 +453,6 @@ fn applyArchivedEntryToShell(idx: u32, entry: *const ArchivedEntry) void {
         @memcpy(app_state.shells[idx].cached_cwd[0..entry.claude_cwd_len], entry.claude_cwd[0..entry.claude_cwd_len]);
         app_state.shells[idx].cached_cwd_len = entry.claude_cwd_len;
         app_state.shells[idx].claude_session = true;
-        app_state.shells[idx].ai_agent = 1;
     }
 }
 
@@ -466,6 +474,13 @@ fn buildClaudeResumePayload(entry: *const ArchivedEntry, buf: []u8) ?[]const u8 
 
 fn buildArchiveResurrectCommand(entry: *const ArchivedEntry, out: []u8) ?[]const u8 {
     const ts = entry.tmux_session[0..entry.tmux_session_len];
+    if (entry.provider != .claude) {
+        if (out.len == 0) return null;
+        const cwd = if (entry.claude_cwd_len > 0) entry.claude_cwd[0..entry.claude_cwd_len] else "~";
+        const command = agent_host.launchCommandFor(out[0 .. out.len - 1], entry.provider, ts, cwd, entry.claude_sid[0..entry.claude_sid_len]) orelse return null;
+        out[command.len] = '"';
+        return out[0 .. command.len + 1];
+    }
     var payload_buf: [512]u8 = undefined;
     const payload = buildClaudeResumePayload(entry, &payload_buf) orelse return null;
     var pos: usize = 0;
@@ -492,7 +507,7 @@ pub fn resurrectArchivedByKey(hwnd: HANDLE, host: u8, session: []const u8) bool 
     const ar_idx = findArchivedEntry(host, session) orelse return false;
     const ar_copy = app_state.g_archived.items[ar_idx];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!capacityAdmitNewAgent(host, workspace, .automatic, "Claude resurrection")) return false;
+    if (!capacityAdmitNewAgent(host, workspace, .automatic, "chat resurrection")) return false;
     var ar_run = ar_copy;
     ar_run.tmux_identity = @splat(0);
     ar_run.tmux_identity_len = 0;
@@ -601,14 +616,14 @@ pub fn requestRemoteTmuxPaneRedraw(idx: u32) void {
 
 const RemoteKillOutcome = enum { gone, retry, unsafe };
 
-fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteKillOutcome {
+fn killRemoteTmuxSession(session: []const u8, host: u8, provider: agent_host.Provider, sid: []const u8) RemoteKillOutcome {
     if (!remoteTmuxTargetIsSafe(session)) {
         debugLog("killRemoteTmuxSession: unsafe session skipped");
         return .unsafe;
     }
     const CREATE_NO_WINDOW_FLAG: DWORD = 0x08000000;
     var script: [256]u8 = undefined;
-    const remote = session_end.build(&script, agent_host.READER, session, sid) orelse {
+    const remote = session_end.build(&script, agent_host.READER, session, provider, sid) orelse {
         debugLog("killRemoteTmuxSession: unsafe session or chat skipped");
         return .unsafe;
     };
@@ -652,7 +667,7 @@ fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteK
     }
 }
 
-fn queuePendingSessionKill(session: []const u8, host: u8, sid: []const u8) void {
+fn queuePendingSessionKill(session: []const u8, host: u8, provider: agent_host.Provider, sid: []const u8) void {
     while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
     defer app_state.g_pending_session_kill_mutex.unlock();
     if (app_state.g_pending_session_kill_count >= app_state.PENDING_SESSION_KILL_MAX) {
@@ -660,6 +675,7 @@ fn queuePendingSessionKill(session: []const u8, host: u8, sid: []const u8) void 
         return;
     }
     var entry = app_state.PendingSessionKill{};
+    entry.provider = provider;
     entry.host = host;
     const sl = @min(session.len, entry.session.len);
     @memcpy(entry.session[0..sl], session[0..sl]);
@@ -682,10 +698,10 @@ pub fn retryPendingSessionKills() void {
     app_state.g_pending_session_kill_mutex.unlock();
     for (batch[0..count]) |entry| {
         const session = entry.session[0..entry.session_len];
-        if (killRemoteTmuxSession(session, entry.host, entry.sid[0..entry.sid_len]) == .gone) {
+        if (killRemoteTmuxSession(session, entry.host, entry.provider, entry.sid[0..entry.sid_len]) == .gone) {
             debugLog2("retryPendingSessionKills: ended session=", session);
         } else {
-            queuePendingSessionKill(session, entry.host, entry.sid[0..entry.sid_len]);
+            queuePendingSessionKill(session, entry.host, entry.provider, entry.sid[0..entry.sid_len]);
         }
     }
 }
@@ -1017,6 +1033,7 @@ pub fn rejectPinnedGroupClose(gid: u32) bool {
 fn rememberArchivedTab(i: usize) ?ArchivedEntry {
     loadArchiveFromDisk(true);
     var entry = ArchivedEntry{};
+    entry.provider = agent_host.Provider.fromAiAgent(app_state.shells[i].ai_agent);
     entry.name_len = @intCast(@min(app_state.shells[i].name_len, @as(u32, 63)));
     for (0..entry.name_len) |j| entry.name[j] = @intCast(app_state.shells[i].name[j] & 0xFF);
     const ts_len: u32 = @intCast(@min(app_state.shells[i].tmux_session_len, @as(u32, 63)));
@@ -1030,9 +1047,11 @@ fn rememberArchivedTab(i: usize) ?ArchivedEntry {
         @memcpy(entry.claude_sid[0..cs_len], app_state.shells[i].claude_sid[0..cs_len]);
         entry.claude_sid_len = cs_len;
     }
-    const cc_len: u32 = @intCast(@min(app_state.shells[i].claude_cwd_len, @as(u32, 191)));
+    const shell = &app_state.shells[i];
+    const cwd = if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else shell.cached_cwd[0..shell.cached_cwd_len];
+    const cc_len: u32 = @intCast(@min(cwd.len, 191));
     if (cc_len > 0) {
-        @memcpy(entry.claude_cwd[0..cc_len], app_state.shells[i].claude_cwd[0..cc_len]);
+        @memcpy(entry.claude_cwd[0..cc_len], cwd[0..cc_len]);
         entry.claude_cwd_len = cc_len;
     }
     if (!remoteTmuxTargetIsSafe(entry.tmux_session[0..entry.tmux_session_len]) or
@@ -1062,7 +1081,7 @@ pub fn archiveTabAt(i: usize) void {
     const entry = rememberArchivedTab(i) orelse return;
     const ts_len = entry.tmux_session_len;
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
-    if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, "") != .gone) {
+    if (killRemoteTmuxSession(entry.tmux_session[0..ts_len], entry.tmux_host, entry.provider, "") != .gone) {
         if (parked_focus) focusActiveShell();
         showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
         return;
@@ -1126,18 +1145,19 @@ pub fn endTmuxSessionAt(i: usize) void {
     const ts_len: usize = @intCast(@min(app_state.shells[i].tmux_session_len, @as(u32, 63)));
     @memcpy(session_buf[0..ts_len], app_state.shells[i].tmux_session[0..ts_len]);
     const host = app_state.shells[i].tmux_host;
+    const provider = agent_host.Provider.fromAiAgent(app_state.shells[i].ai_agent);
     var sid_buf: [40]u8 = std.mem.zeroes([40]u8);
     const sid_len: usize = @intCast(@min(app_state.shells[i].claude_sid_len, @as(u32, 36)));
     @memcpy(sid_buf[0..sid_len], app_state.shells[i].claude_sid[0..sid_len]);
 
     const parked_focus = parkMainWindowBeforeActiveShellRemoval(i);
-    const outcome = killRemoteTmuxSession(session_buf[0..ts_len], host, sid_buf[0..sid_len]);
+    const outcome = killRemoteTmuxSession(session_buf[0..ts_len], host, provider, sid_buf[0..sid_len]);
     if (outcome == .unsafe) {
         if (parked_focus) focusActiveShell();
         showHeaderNoticeAscii("Could not kill remote tmux session", 4000, true);
         return;
     }
-    if (outcome == .retry) queuePendingSessionKill(session_buf[0..ts_len], host, sid_buf[0..sid_len]);
+    if (outcome == .retry) queuePendingSessionKill(session_buf[0..ts_len], host, provider, sid_buf[0..sid_len]);
     removePaneSessionFilesForShell(@intCast(i));
     closeShellRemember(@intCast(i), false);
     app_state.g_tmux_fetch_tick = 0;
@@ -2169,7 +2189,7 @@ fn allSessionsCloseNext(hwnd: HANDLE) void {
     const t = app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_next];
     app_state.g_all_sessions_close_next += 1;
     const sess = t.session[0..t.session_len];
-    const killed = killRemoteTmuxSession(sess, t.host, "") == .gone;
+    const killed = killRemoteTmuxSession(sess, t.host, .claude, "") == .gone;
     allSessionsCloseLog("all-sessions close-result session={s} ok={d}", .{ sess, @intFromBool(killed) });
     if (killed) {
         removeTmuxCacheEntry(t.host, sess);
@@ -2328,7 +2348,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
                     }
                     buildSessionOverviewRows();
                     showHeaderNoticeAscii("Archived session deleted", 2500, false);
-                } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectPinnedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost, "") == .gone) {
+                } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectPinnedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost, .claude, "") == .gone) {
                     removeTmuxCacheEntry(rhost, sbuf[0..slen]);
                     buildSessionOverviewRows();
                     app_state.g_tmux_fetch_tick = 0;

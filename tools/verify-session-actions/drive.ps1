@@ -118,9 +118,9 @@ function Start-App {
         $consoleLog=Join-Path $env:MP_VERIFY_STATE 'console.jsonl'
         if (!(Test-Path $consoleLog)) { return $false }
         $painted=@(Get-Content $consoleLog | ForEach-Object { try { $_ | ConvertFrom-Json } catch {} } | Where-Object { $_.ms -ge $launchAt } | Select-Object -ExpandProperty session -Unique)
-        @($names | Where-Object { $_ -in $painted }).Count -eq 2
+        @($names | Where-Object { $_ -in $painted }).Count -eq $names.Count
     })
-    [void](Wait-For 'saved remote tabs' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq 2 })
+    [void](Wait-For 'saved remote tabs' { $s=Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq $names.Count })
     Save @{pid=$app.Id; hwnd=$main.ToInt64(); path=$app.MainModule.FileName; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; class=[ChatDeliveryDesktop]::Class($main)} (Join-Path $Evidence ('launch-'+$app.Id+'.json'))
     Focus
 }
@@ -261,6 +261,65 @@ try {
     for ($i=0; $i -lt $transcripts.Count; $i++) { Check 'history-read-does-not-rewrite-original-transcript' ((Get-FileHash $transcripts[$i].FullName -Algorithm SHA256).Hash -ceq $hashes[$i]) }
     $result.history_ui_readability='Both deleted chats reopened through the existing archived resume action; native visible transcript layout and copied original question/answer verified. Resume transport is synthetic; not a read-only viewer or real provider restart.'
     $result.theme_review='Captured built-in Light, AMOLED and Mid. Mid is not claimed to be the Graphite 2 Figma theme. Independent design QA remains required.'
+    $providerStart=$servers.Count
+    $providerState=Get-Content (Join-Path $env:MP_VERIFY_STATE 'state.json') -Raw | ConvertFrom-Json
+    $providerState | Add-Member -NotePropertyName providers -NotePropertyValue @{}
+    [array]$providerArchive=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
+    if ($null -eq $providerArchive) { $providerArchive=@() }
+    $providerCases=@(@{name='codex'; sid='a1b2c3d4-1747-4000-8000-000000000001'}, @{name='pi'; sid='a1b2c3d4-1747-4000-8000-000000000002'})
+    foreach ($case in $providerCases) {
+        $baseName='verify-provider-'+$case.name
+        $eventName='Local\MultipromptProof-'+[guid]::NewGuid().ToString('N')
+        $providerState.session_ids | Add-Member -NotePropertyName $baseName -NotePropertyValue $case.sid
+        $providerState.sids | Add-Member -NotePropertyName $baseName -NotePropertyValue $case.sid
+        $providerState.panes | Add-Member -NotePropertyName $baseName -NotePropertyValue (4244+$servers.Count-$providerStart)
+        $providerState.end_events | Add-Member -NotePropertyName $baseName -NotePropertyValue $eventName
+        $providerState.providers[$baseName]=$case.name
+        $ready=Join-Path $env:MP_VERIFY_STATE ('server-'+$case.name+'.json')
+        $owned=[VerifyJob]::new()
+        $server=@{job=$owned; process=$null}
+        $servers.Add($server)
+        $server.process=$owned.Start($env:MP_VERIFY_PYTHON, $profile, (Join-Path $profile ('server-'+$case.name+'.out')), (Join-Path $profile ('server-'+$case.name+'.err')), ('-u "'+$PSScriptRoot+'/server.py" "'+$eventName+'" "'+$ready+'"'), $true)
+        [void](Wait-For ('original synthetic '+$case.name+' agent ready') { Test-Path $ready })
+        $providerArchive+=@{name=('Deleted '+$case.name); tmux_session=$baseName; csid=$case.sid; ccwd=('/verify/'+$case.name); provider=$case.name; host=0}
+    }
+    $names=@((Session).tabs | Where-Object { $_.kind -eq 'tmux' } | ForEach-Object { $_.tmux_session })
+    Stop-AppJob
+    Save $providerState (Join-Path $env:MP_VERIFY_STATE 'state.json')
+    Save $providerArchive (Join-Path $settings 'archive.json')
+    Start-App
+    for ($providerIndex=0; $providerIndex -lt $providerCases.Count; $providerIndex++) {
+        $case=$providerCases[$providerIndex]
+        for ($reopen=0; $reopen -lt 2; $reopen++) {
+            [array]$savedArchive=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json
+            $archiveIndex=-1
+            for ($i=0; $i -lt $savedArchive.Count; $i++) { if ($savedArchive[$i].csid -ceq $case.sid) { $archiveIndex=$i } }
+            Check ($case.name+'-archive-provider-'+$reopen) ($archiveIndex -ge 0 -and $savedArchive[$archiveIndex].provider -ceq $case.name)
+            Palette ('Deleted '+$case.name) (7300+$archiveIndex)
+            [void](Wait-For ('reopen original '+$case.name+' identity') { @((Session).tabs | Where-Object { $_.csid -ceq $case.sid -and $_.name -ceq ('Deleted '+$case.name) }).Count -eq 1 })
+            [void](Wait-For ('original provider command '+$case.name) {
+                $path=Join-Path $env:MP_VERIFY_STATE 'provider-resumed.jsonl'
+                if (!(Test-Path $path)) { return $false }
+                $resumes=@(Get-Content $path | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.provider -ceq $case.name -and $_.sid -ceq $case.sid -and $_.cwd -ceq ('/verify/'+$case.name) })
+                $resumes.Count -eq (1+$reopen)
+            })
+            Shot ($case.name+'-reopened-'+$reopen)
+            if ($reopen -eq 0) {
+                Press @(0x11,0x10,0x57)
+                [void](Wait-For ('delete stops only '+$case.name) { $servers[$providerStart+$providerIndex].process.HasExited -and @((Session).tabs | Where-Object { $_.csid -ceq $case.sid }).Count -eq 0 })
+                if ($providerIndex -eq 0) { Check 'Codex-delete-keeps-Pi-agent' (!$servers[$providerStart+1].process.HasExited) }
+                $names=@((Session).tabs | Where-Object { $_.kind -eq 'tmux' } | ForEach-Object { $_.tmux_session })
+                Stop-AppJob
+                Start-App
+            }
+        }
+        $providerRequests=@(Get-Content (Join-Path $env:MP_VERIFY_STATE 'end-requests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.sid -ceq $case.sid })
+        Check ($case.name+'-one-stop-matching-provider') ($providerRequests.Count -eq 1 -and $providerRequests[0].provider -ceq $case.name)
+        Check ($case.name+'-original-agent-stays-stopped') ($servers[$providerStart+$providerIndex].process.HasExited)
+    }
+    Copy-Item (Join-Path $env:MP_VERIFY_STATE 'provider-resumed.jsonl') (Join-Path $Evidence 'provider-resumed.jsonl')
+    Copy-Item (Join-Path $env:MP_VERIFY_STATE 'end-requests.jsonl') (Join-Path $Evidence 'provider-end-commands.jsonl')
+    $result.provider_reopen='Codex and Pi archive fixtures reopen through their existing hosted provider commands with matching saved identities and folders. Real shortcut deletion stops only the selected synthetic provider process; app-written archives survive restart and reopen through that same provider. No provider binary or paid service runs.'
     $result.status='passed'
 } catch {
     $result.error=$_.Exception.Message

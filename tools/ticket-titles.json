@@ -189,6 +189,7 @@
   "IGSH-1668": "Live chat: three dots tick while the agent works",
   "IGSH-1676": "Block chat and sidebar changes without Valentin's yes",
   "IGSH-1681": "What's new names the ticket on every line",
+  "IGSH-1747": "Deleted chats reopen through the wrong assistant",
   "IGSH-212": "zsb: type sends multi-line text into chat composers (newlines fire as Enter)",
   "IGSH-221": "zsb: cdp cannot hold a session across calls, so Profiler/Tracing brackets around a reload are impossible",
   "IGSH-224": "Per-workspace isolated browser profiles and independent bookmarks",

@@ -2463,6 +2463,7 @@ pub const TtsChunkRange = struct { start: usize, end: usize };
 pub var g_voice_clean_wide: [24576]u16 = undefined;
 
 pub const ArchivedEntry = struct {
+    provider: @import("agent_host.zig").Provider = .claude,
     name: [64]u8 = std.mem.zeroes([64]u8),
     name_len: u32 = 0,
     tmux_session: [64]u8 = std.mem.zeroes([64]u8),
@@ -2664,6 +2665,7 @@ pub var g_all_sessions_filter_len: u32 = 0;
 pub var g_archive_arm_sid: u32 = 0;
 pub var g_archive_arm_deadline: u64 = 0;
 pub const PendingSessionKill = struct {
+    provider: @import("agent_host.zig").Provider = .claude,
     host: u8 = 0,
     session: [64]u8 = std.mem.zeroes([64]u8),
     session_len: u32 = 0,
