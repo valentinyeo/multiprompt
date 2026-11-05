@@ -96,7 +96,7 @@ def room_request():
     store.host_uuid = store.db.execute("SELECT value FROM meta WHERE key='host_uuid'").fetchone()[0]
     bridge = bridge_module.RoomBridge.__new__(bridge_module.RoomBridge)
     bridge.store = store
-    bridge_module.host_status = lambda sid: dict(status='ok', provider='claude', sid=sid, tmux='proof-' + sid, enabled=True, owner='synthetic', alive=True)
+    bridge_module.host_status = lambda sid: dict(status='ok', provider='claude', sid=sid, tmux='proof-' + sid, enabled=True, owner='host', alive=True)
     live = (ROOT / 'live-replies').is_file()
     bridge_module.scoped_runtime = lambda: live
     if live:
