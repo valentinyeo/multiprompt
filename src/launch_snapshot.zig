@@ -78,7 +78,7 @@ fn valid(s: Snapshot) bool {
             if (face >= 20) return false;
         }
         if (row.color) |color| {
-            if (color >= 7) return false;
+            if (color >= @import("session_layout.zig").color_count) return false;
         }
         for (s.rows[0..i]) |previous| if (previous.id == row.id) return false;
         if (row.id == s.active) active = true;
@@ -86,7 +86,7 @@ fn valid(s: Snapshot) bool {
     for (s.groups) |group| if (group.name.len > 63 or group.color >= 8) return false;
     for (s.workspaces) |name| if (name.len > 31) return false;
     if (s.workspace_colors.len != 0 and s.workspace_colors.len != s.workspaces.len) return false;
-    for (s.workspace_colors) |color| if (color != null and color.? >= 7) return false;
+    for (s.workspace_colors) |color| if (color != null and color.? >= @import("session_layout.zig").color_count) return false;
     for (s.blocks) |block| {
         if (block.kind != .list and block.level > 6) return false;
         if (block.start > s.text.len or block.len > s.text.len - block.start or block.prefix > block.len or block.detail_start > s.text.len or block.detail_len > s.text.len - block.detail_start or block.diff_start > s.text.len or block.diff_len > s.text.len - block.diff_start) return false;
@@ -244,17 +244,17 @@ test "IGSH-1172 launch cache preserves colors and raw face identity" {
         .active = 1,
         .rows = &.{.{ .id = 1, .name = &.{'X'}, .tmux_session = "agent-one", .workspace = 1 }},
         .workspaces = &.{ "Cedar", "Orbit" },
-        .workspace_colors = &.{ null, 6 },
+        .workspace_colors = &.{ null, 7 },
     });
     defer a.free(bytes);
     const parsed = (try decode(a, bytes)).?;
     defer parsed.deinit();
     try std.testing.expectEqualStrings("agent-one", parsed.value.rows[0].tmux_session);
-    try std.testing.expectEqualSlices(?u8, &.{ null, 6 }, parsed.value.workspace_colors);
+    try std.testing.expectEqualSlices(?u8, &.{ null, 7 }, parsed.value.workspace_colors);
     try std.testing.expectError(error.InvalidSnapshot, encode(a, .{
         .active = 1,
         .rows = &.{.{ .id = 1, .name = &.{'X'} }},
         .workspaces = &.{"Cedar"},
-        .workspace_colors = &.{7},
+        .workspace_colors = &.{8},
     }));
 }

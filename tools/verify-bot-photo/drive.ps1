@@ -193,7 +193,17 @@ function Pick([string]$Path, [bool]$SwitchAway = $false) {
         }
         return
     }
-    Submit-File $dialog $Path
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $dialog) { throw 'File dialog lost foreground' }
+    [VerifyNative]::Chord(@(0x12, 0x4e))
+    $filename = Wait-For 'owned filename input' {
+        $edit = [VerifyNative]::GetFocusedWindow($dialog)
+        if ([ChatDeliveryDesktop]::GetForegroundWindow() -eq $dialog -and [ChatDeliveryDesktop]::Owner($edit) -eq [uint32]$app.Id -and [VerifyNative]::Class($edit) -eq 'Edit') { $edit }
+    }
+    [VerifyNative]::Chord(@(0x11, 0x41))
+    [VerifyNative]::Text($Path)
+    [void](Wait-For 'filename typed exactly' { [VerifyNative]::EditText($filename) -ceq $Path })
+    [VerifyNative]::Chord(@(0x0d))
+    [void](Wait-For 'file dialog closed' { -not [PhotoDialogOwner]::IsWindow($dialog) })
     [void](Wait-For 'import completed' { $trace = Log; $trace.Length -ge $start -and $trace.Substring($start) -match '\[bot-photo\] import=(ok|failed)' })
 }
 function Shot([string]$Name) {
@@ -219,10 +229,50 @@ function Assert-Avatar([string]$Surface, [int]$Index, [string]$Name, [bool]$Tall
         $corner = $bitmap.GetPixel(0, 0)
         $centerOk = if ($Tall) { $green.R -gt 150 -and $green.G -gt 150 -and $green.B -lt 100 -and $blue.R -gt 120 -and $blue.B -gt 120 -and $blue.G -lt 100 } else { $green.G -gt 140 -and $green.R -lt 100 -and $blue.B -gt 120 -and $blue.R -lt 100 }
         $cornerIsPhoto = if ($Tall) { $corner.R -gt 150 -and $corner.G -gt 150 -and $corner.B -lt 100 } else { $corner.G -gt 140 -and $corner.R -lt 100 }
+        $bitmap.Save((Join-Path $Evidence "$Name.png"))
         Check "$Name-circle-center" $centerOk
         Check "$Name-circle-corner" (-not $cornerIsPhoto)
-        $bitmap.Save((Join-Path $Evidence "$Name.png"))
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool]$Generated = $false) {
+    $index = Index-For $Id
+    $tab = @((State).tabs)[$index]
+    $wasChat = $tab.PSObject.Properties['cv'] -and $tab.cv
+    Focus
+    if (-not $tab.PSObject.Properties['favorite'] -or -not $tab.favorite) {
+        Press @(0x12, 0x53)
+        [void](Wait-For 'favorite saved' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['favorite'] -and $saved.favorite })
+    }
+    Press @(0x12, 0x31)
+    [void](Wait-For 'Starred workspace' { $saved = State; $saved.PSObject.Properties['starred_view'] -and $saved.starred_view })
+    if (-not $wasChat) {
+        Press @(0x12, 0x43)
+        [void](Wait-For 'chat title visible' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['cv'] -and $saved.cv })
+    }
+    Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
+    [void](Wait-For 'Starred tile pinned' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['starred_pinned_top'] -and $saved.starred_pinned_top })
+    Shot "$Name-starred-header"
+    if ($Generated) { Assert-Generated $index "$Name-starred" 'pinned' } else { Assert-Avatar 'pinned' $index "$Name-starred" $Tall }
+    $failures = @()
+    try {
+        if ($Generated) { Assert-Generated $index "$Name-header" 'header' } else { Assert-Avatar 'header' $index "$Name-header" $Tall }
+    } catch { $failures += $_.Exception.Message }
+    Press @(0x11, 0x10, 0x49)
+    [void](Wait-For 'Inbox opened' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; $s.inbox_active })
+    Shot "$Name-inbox-window"
+    try {
+        if ($Generated) { Assert-Generated ([int]$tab.shell_id) "$Name-inbox" 'inbox' } else { Assert-Avatar 'inbox' ([int]$tab.shell_id) "$Name-inbox" $Tall }
+    } catch { $failures += $_.Exception.Message }
+    Press @(0x1b)
+    [void](Wait-For 'Inbox closed' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; -not $s.inbox_active })
+    Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Press @(0x12, 0x32)
+    [void](Wait-For 'home workspace' { -not (State).starred_view })
+    if (-not $wasChat) {
+        Press @(0x12, 0x43)
+        [void](Wait-For 'shell view restored' { $saved = @((State).tabs)[(Index-For $Id)]; -not $saved.PSObject.Properties['cv'] -or -not $saved.cv })
+    }
+    if ($failures.Count -gt 0) { throw ($failures -join '; ') }
 }
 function Capture-Avatar([int]$Index, [string]$Name) {
     $pattern = "\[photo-proof\] expanded target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
@@ -235,11 +285,13 @@ function Capture-Avatar([int]$Index, [string]$Name) {
     try { $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size); $bitmap.Save((Join-Path $Evidence "$Name.png")) } finally { $graphics.Dispose(); $bitmap.Dispose() }
     return (Get-FileHash (Join-Path $Evidence "$Name.png") -Algorithm SHA256).Hash
 }
-function Assert-Generated([int]$Index, [string]$Name) {
-    $pattern = "\[photo-proof\] expanded target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
+function Assert-Generated([int]$Index, [string]$Name, [string]$Surface = 'expanded') {
+    $pattern = "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
     $match = Wait-For 'generated avatar coordinates' { $found = [regex]::Matches((Log), $pattern); if ($found.Count -gt 0) { $found[$found.Count-1] } }
     $x = [int]$match.Groups[1].Value; $y = [int]$match.Groups[2].Value
     $size = [int]$match.Groups[3].Value - $x
+    $rect = "$x,$y,$($match.Groups[3].Value),$($match.Groups[4].Value)"
+    Check "$Name-chosen-face-color" ((Log).Contains("[bots] face=6 color=0 rect=$rect"))
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, $x, $y)
     $bitmap = [Drawing.Bitmap]::new($size, $size)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -348,7 +400,22 @@ try {
     Check 'other-local-bot-unchanged' (@((State).tabs | Where-Object { $_.name -eq 'Photo Beta' -and $_.PSObject.Properties['avatar_local_id'] }).Count -eq 0)
     Shot 'uploaded-wide'
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-wide'
+    Assert-AllFaces $firstId 'matching-wide'
     Check 'other-bot-pixels-unchanged' ((Capture-Avatar (Index-Name 'Photo Beta') 'other-after') -eq $otherBefore)
+    foreach ($theme in @(
+        @{ name='light'; query='light'; target=4012; saved='light' },
+        @{ name='amoled'; query='amoled'; target=4013; saved='amoled' },
+        @{ name='edge-grey'; query='edge'; target=4014; saved='edgegray' }
+    )) {
+        Focus; Press @(0x11, 0x4b); Query 'themes' 4000; Press @(0x0d)
+        Query $theme.query $theme.target; Press @(0x0d)
+        [void](Wait-For "$($theme.name) theme saved" {
+            $path = Join-Path $settings 'theme-mode.txt'
+            (Test-Path $path) -and (Get-Content $path -Raw).Trim() -ceq $theme.saved
+        })
+        Press @(0x1b)
+        Assert-AllFaces $firstId ("matching-" + $theme.name)
+    }
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
     Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
     Focus; Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
@@ -386,6 +453,7 @@ try {
     $replacementHash = (Get-FileHash $first.FullName -Algorithm SHA256).Hash
     Shot 'uploaded-tall'
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-tall' $true
+    Assert-AllFaces $firstId 'matching-replacement' $true
     $secondIndex = Index-Name 'Photo Beta'
     Focus; Press @(0x11, 0x4b); Query 'photo beta' $secondIndex; Press @(0x0d)
     Pick $wide
@@ -435,6 +503,7 @@ try {
     $saved = @((State).tabs | Where-Object { $_.name -eq 'Renamed Alpha' })[0]
     Check 'reset-retains-face-and-color' ($saved.face -eq 6 -and $saved.color -eq 0)
     Assert-Generated (Index-For $firstId) 'generated-after-reset'
+    Assert-AllFaces $firstId 'matching-reset' $false $true
     Shot 'reset'
     Stop-App
     Start-App
