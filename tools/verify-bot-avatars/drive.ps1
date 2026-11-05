@@ -57,12 +57,14 @@ function Appearance([string]$Name) {
 function Layouts {
     $log = Read-Log
     $matches = [regex]::Matches($log.Substring([Math]::Min($layoutOffset, $log.Length)), '\[bots\] face=(\d+) color=(\d+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
-    $unique = @{}
+    $unique = [ordered]@{}
     foreach ($match in $matches) {
         $g = $match.Groups
         $row = @{face=[int]$g[1].Value; color=[int]$g[2].Value; x=[int]$g[3].Value; y=[int]$g[4].Value; right=[int]$g[5].Value; bottom=[int]$g[6].Value}
         $row.size = $row.right - $row.x
-        $unique["$($row.x),$($row.y),$($row.size)"] = $row
+        $key = "$($row.x),$($row.y),$($row.size)"
+        if ($unique.Contains($key)) { $unique.Remove($key) }
+        $unique[$key] = $row
     }
     @($unique.Values)
 }
@@ -129,6 +131,23 @@ function Check-Pixels($Row, [string]$Name) {
         $bitmap.Save("$Evidence/$Name.png")
         $checks.Add(@{name=$Name; passed=$true; face=$Row.face; color=$Row.color; size=$Row.size; bright=$bright; dark=$dark; tint=$tint; workspaceTint=$workspaceTint; whiteBody=$whiteBody})
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Wait-Pixels([string]$Name, [scriptblock]$FindRows) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $lastError = 'no matching layout'
+    do {
+        $candidates = @(& $FindRows)
+        [Array]::Reverse($candidates)
+        foreach ($row in $candidates) {
+            try { Check-Pixels $row $Name; return $row }
+            catch {
+                $lastError = $_.Exception.Message
+                if ($lastError -notmatch '^(Robot pixels absent|Workspace hue absent|White robot body absent):') { throw }
+            }
+        }
+        Start-Sleep -Milliseconds 150
+    } while ($watch.Elapsed.TotalSeconds -lt 10)
+    throw "Timed out waiting for pixels: $Name ($lastError)"
 }
 try {
     [CaptionProof]::SetDpi($Dpi)
@@ -199,17 +218,17 @@ try {
         }
         $checks.Add(@{name=($entry.name + '-click'); passed=$true; selected=$selected})
         $expected = Appearance $selected
-        $painted = Wait-For 'selected robot repainted' {
-            $v = @(Layouts | Where-Object { $_.size -eq $entry.row.size -and $_.face -eq $expected.face -and $_.color -eq $expected.color })
-            if ($v.Count) { $v[-1] }
-        }
-        Check-Pixels $painted $entry.name
+        [void](Wait-Pixels $entry.name {
+            Layouts | Where-Object { $_.size -eq $entry.row.size -and $_.face -eq $expected.face -and $_.color -eq $expected.color }
+        })
     }
     Shot 'sidebar-amoled'
+    $layoutOffset = (Read-Log).Length
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
     [void](Wait-For 'native chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero })
-    $title = Wait-For 'matching title robot' { $v = @(Layouts | Where-Object { $_.size -eq (Px 28) -and $_.x -gt 300 }); if ($v.Count) { $v[-1] } }
-    Check-Pixels $title 'chat-title-robot'
+    $title = Wait-Pixels 'chat-title-robot' {
+        Layouts | Where-Object { $_.size -eq (Px 28) -and $_.x -gt 300 -and $_.face -eq $expected.face -and $_.color -eq $expected.color }
+    }
     $selectedRow = @($list | Where-Object { $_.face -eq $title.face -and $_.color -eq $title.color })
     if ($selectedRow.Count -eq 0) { throw 'Chat title robot differs from the selected session' }
     [void](Wait-For 'selected conversation has loaded' { (Read-Log) -match '\[chat\] transcript load shell=\d+ ok' })
@@ -238,7 +257,7 @@ try {
         $v = @(Layouts | Where-Object { $_.color -eq 4 -and $_.size -eq (Px 56) })
         if ($v.Count -ge 2) { ,$v }
     }
-    Check-Pixels $overridden[0] 'overridden-workspace-robot'
+    [void](Wait-Pixels 'overridden-workspace-robot' { $overridden[0] })
     Shot 'workspace-override'
     [ChatDeliveryDesktop]::Chord(@(0x11, 0xbc))
     $panel = Wait-For 'settings palette panel for white' { $h = [BotSettingsDesktop]::Panel($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
@@ -260,14 +279,14 @@ try {
         $v = @(Layouts | Where-Object { $_.color -eq 7 -and $_.size -eq (Px 56) })
         if ($v.Count -ge 2) { ,$v }
     }
-    Check-Pixels $white[0] 'white-workspace-robot'
+    [void](Wait-Pixels 'white-workspace-robot' { $white[0] })
     Shot 'workspace-white'
     Copy-Item "$settings/debug.log" "$Evidence/before-restart-debug.log"
     $stopped = $job.Stop()
     if ($stopped.ActiveProcesses -ne 0) { throw 'Owned app did not stop for white restart' }
     $job.Dispose()
     $job = [VerifyJob]::new()
-    $layoutOffset = 0
+    $layoutOffset = (Read-Log).Length
     $app = $job.Start($Exe, $profile, "$Evidence/restart-stdout.log", "$Evidence/restart-stderr.log", '--no-window-restore')
     $main = Wait-For 'restarted owned main window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'restarted app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
@@ -277,7 +296,7 @@ try {
         $v = @(Layouts | Where-Object { $_.color -eq 7 -and $_.size -eq (Px 56) })
         if ($workspace.PSObject.Properties['color'] -and $workspace.color -eq 7 -and @($saved.tabs).Count -eq 8 -and $v.Count -ge 2) { ,$v }
     }
-    Check-Pixels $white[0] 'white-restarted-robot'
+    [void](Wait-Pixels 'white-restarted-robot' { $white[0] })
     Shot 'workspace-white-restarted'
     $checks.Add(@{name='white-restart'; passed=$true; workspace=$WorkspaceName; color=7})
     $colorNames = @('sage', 'clay', 'sand', 'mist', 'lilac', 'rose', 'mint', 'white')
@@ -315,7 +334,10 @@ try {
             $v = @(Layouts | Where-Object { ($_.size -eq (Px 56) -or $_.size -eq (Px 36)) -and $_.x -ge 0 -and $_.right -le (Px 300) -and $_.y -ge 0 -and $_.bottom -le $client.Bottom })
             if (@($v | ForEach-Object { $_.color } | Select-Object -Unique).Count -eq 8) { ,$v }
         }
-        foreach ($row in $sidebarRows) { Check-Pixels $row "sidebar-$($theme.name)-$($row.color)" }
+        foreach ($row in $sidebarRows) {
+            $pixelRow = $row
+            [void](Wait-Pixels "sidebar-$($theme.name)-$($row.color)" { $pixelRow })
+        }
         Shot "sidebar-$($theme.name)-colors"
         [ChatDeliveryDesktop]::Chord(@(0x12, 0x49))
         [void](Wait-For 'inbox opened' { (Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).inbox_active })
@@ -327,7 +349,10 @@ try {
             $v = @(Layouts | Where-Object { $_.size -eq (Px 40) -and $_.x -eq $inboxX -and $_.y -ge 0 -and $_.bottom -le $client.Bottom })
             if (@($v | ForEach-Object { $_.color } | Select-Object -Unique).Count -eq 8) { ,$v }
         }
-        foreach ($row in $inboxRows) { Check-Pixels $row "inbox-$($theme.name)-$($row.color)" }
+        foreach ($row in $inboxRows) {
+            $pixelRow = $row
+            [void](Wait-Pixels "inbox-$($theme.name)-$($row.color)" { $pixelRow })
+        }
         Shot "inbox-$($theme.name)-colors"
         [ChatDeliveryDesktop]::Chord(@(0x1b))
         [void](Wait-For 'inbox closed' { -not (Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).inbox_active })
