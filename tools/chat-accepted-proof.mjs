@@ -42,20 +42,23 @@ export function queuedBubble(image, area) {
   const bubble = groups.filter(g => g.bottom - g.top > 20).sort((a, b) => b.bottom - a.bottom)[0];
   assert.ok(bubble, 'queued message must have a normal bubble');
   const { left, right, top, bottom } = bubble;
-  return { left, right, top, bottom, bg };
+  const result = { left, right, top, bottom, bg };
+  assert.ok(normalBubble(image, result), 'queued message text must remain visible');
+  return result;
 }
 
-export function normalBubble(image, bubble) {
+export function normalBubble(image, bubble, reference) {
   const { left, right, top, bottom, bg } = bubble;
   const palette = bubbleColors(bg);
   const colors = palette.normal;
   const brightest = Math.max(...colors);
   let fill = 0, ink = 0;
+  const isInk = value => [0, 8, 16].every(s => ((value >> s) & 255) > ((brightest >> s) & 255) + 20);
   for (let y = top + 4; y < bottom - 4; y++) for (let x = left + 8; x < right - 8; x++) {
     const color = image.pixels.readUIntLE((y * image.width + x) * 4, 3);
     if (colors.has(color)) fill++;
-    else if ([0, 8, 16].every(s => ((color >> s) & 255) > ((brightest >> s) & 255) + 20)) ink++;
-
+    else if (isInk(color)) ink++;
+    if (reference && isInk(color) !== isInk(reference.pixels.readUIntLE((y * reference.width + x) * 4, 3))) return false;
   }
   return fill > (right - left - 16) * (bottom - top - 8) * 0.5 && ink > 20;
 }
@@ -145,7 +148,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       for (let left = observation.area.left; left < observation.area.right - 40 && !working; left += 140) {
         working = dots(image, { ...observation.area, left, top: bubble.bottom + 2 });
       }
-      return { ...frame, normal: normalBubble(image, bubble), dots: !!working, count: countMessageBubbles(image, observation.area, bubble) };
+      return { ...frame, normal: normalBubble(image, bubble, queued), dots: !!working, count: countMessageBubbles(image, observation.area, bubble) };
     });
     const receipt = json('accepted-message/stand-in/accepted.json');
     assert.equal(receipt.text, observation.text);
@@ -154,11 +157,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     assert.ok(observation.transition.length >= 20);
     for (const frame of observation.transition) {
       const image = readBmp(path.join(root, frame.name + '.bmp'));
-      assert.ok(normalBubble(image, bubble), 'message vanished or dimmed during transcript handoff');
+      assert.ok(normalBubble(image, bubble, queued), 'message vanished or dimmed during transcript handoff');
       assert.equal(countMessageBubbles(image, observation.area, bubble), 1, 'message duplicated during transcript handoff');
     }
     const taken = readBmp(path.join(root, 'accepted-taken.bmp'));
-    assert.ok(normalBubble(taken, bubble), 'taken message must stay normal at its original position');
+    assert.ok(normalBubble(taken, bubble, queued), 'taken message must stay normal at its original position');
     writeCrop(queued, { ...observation.area, top: Math.max(observation.area.top, bubble.top - 8) }, 1, path.join(root, 'accepted-before.png'));
     writeCrop(taken, { ...observation.area, top: Math.max(observation.area.top, bubble.top - 8) }, 1, path.join(root, 'accepted-after.png'));
     fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-accepted-message', status: 'passed', latencyMs, frames, transition: observation.transition }, null, 2));
