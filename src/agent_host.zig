@@ -30,17 +30,17 @@ pub const Provider = enum {
             .hax => 5,
         };
     }
-
-    pub fn fromAiAgent(agent: u8) ?Provider {
-        return switch (agent) {
-            1 => .claude,
-            2 => .codex,
-            3 => .pi,
-            5 => .hax,
-            else => null,
-        };
-    }
 };
+
+pub fn fromAiAgent(agent: u8) ?Provider {
+    return switch (agent) {
+        1 => .claude,
+        2 => .codex,
+        3 => .pi,
+        5 => .hax,
+        else => null,
+    };
+}
 
 pub const CLAUDE_SESSION_LEN: usize = 37;
 pub const HAX_SESSION_LEN: usize = 38;
