@@ -1837,7 +1837,10 @@ pub fn closeChatView() void {
     app_state.g_chat_screen_status_len = 0;
     chatSelectionClear();
     app_state.g_chat_sel_transcript_focus = false;
-    if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on = false;
+    if (app_state.active_shell < app_state.shell_count) {
+        const closing = &app_state.shells[app_state.active_shell];
+        closing.chat_view_on = @import("chat_view.zig").forSession(closing.tmux_session[0..closing.tmux_session_len], false);
+    }
     if (app_state.g_voice_mode_active) {
         if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 750, null);
     } else if (app_state.g_main_hwnd != null) {
