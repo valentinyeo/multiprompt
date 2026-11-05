@@ -1400,7 +1400,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     }
     if (fresh and state == .accepted) {
         if (visible and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
-        if (item.kind == .edit and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
+        if ((item.kind == .edit or item.kind == .post) and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
         if (!startSnapshot(c)) {
             selection_waiting = false;
             if (!pumpRefresh(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
@@ -1592,7 +1592,9 @@ pub fn pollTimer(id: usize) bool {
                 if (!acceptEvents(payload)) { discardBuilding(); last_failure = .{ .kind = .events, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
                 const item = building_model.?;
                 if (item.after == item.highwater) {
+                    const advanced = (numberField(payload, "next_after") orelse item.highwater) > item.highwater;
                     if (!publishModel()) { discardBuilding(); view.showUnavailable(); }
+                    if (advanced) selection_waiting = true;
                     if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
                 } else if (!c.events(item.value.room_id, item.after)) {
                     discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
@@ -1784,7 +1786,7 @@ pub fn retryCommandEvidence() !void {
         if (item.kind == .post and !clearPostedDraft(.{ .store = item.location, .room_id = item.room_id }, item.request)) return error.DraftNotSaved;
         if (!enqueueRefresh(item.location)) return error.RefreshQueueFull;
         if (commandScope(item.location) != null) if (controller) |*c| {
-            if (item.kind == .edit and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
+            if ((item.kind == .edit or item.kind == .post) and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
             if (!startSnapshot(c) and c.job == null) { selection_waiting = false; _ = pumpRefresh(c); }
         };
     }
