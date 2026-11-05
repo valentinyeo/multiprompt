@@ -76,6 +76,8 @@ Wait-Until {
 } 'local page URL typed into owned browser omnibox' 5
 [VerifyNative]::Chord(@(0x0D))
 Wait-Until { [VerifyNative]::Title($browser).StartsWith('typing-ready', [StringComparison]::Ordinal) } 'local data page loaded in owned browser' 20
+if ([VerifyNative]::GetForegroundWindow() -ne $browser -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw 'Local page browser is not owned and foreground' }
+[VerifyNative]::ClickBrowserContent($browser, $script:window)
 $expectedPage = ''
 for ($round = 1; $round -le 20; $round++) {
     if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw "Native round $round browser page lost foreground" }

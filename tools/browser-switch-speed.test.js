@@ -717,13 +717,9 @@ function assertsPageFocus(focus, main, pane, driver) {
   assert.equal((handoff.match(/keybd_event\(|SendInput\(/g) ?? []).length, 0);
   assert.match(read('src/shortcuts.zig'), /kb\.vkCode != 0xFF and kb\.vkCode != 0xE8 and\n\s+foregroundIsOurs\(\)\)/);
   const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
+  const unlockTick = timer.indexOf('if ((app_state.g_native_browser_alt_unlocked_at == 0 or GetTickCount64() -| app_state.g_native_browser_alt_unlocked_at > 100) and !activeBrowserHasForegroundFocus()) {\n                    unlockBrowserForeground();');
   const activation = timer.indexOf('focusActiveBrowserPaneUnlocked();');
-  assert.ok(activation >= 0 && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
-  const wrapper = focus.slice(focus.indexOf('pub fn focusActiveBrowserPane()'), focus.indexOf('pub fn focusActiveBrowserPaneUnlocked()'));
-  const request = focus.slice(focus.indexOf('pub fn requestNativeBrowserFocus()'), focus.indexOf('pub fn requestShellRefocus('));
-  for (const source of [timer, wrapper, request, handoff]) {
-    assert.doesNotMatch(source, /unlockBrowserForeground\(|keybd_event\(|SendInput\(/);
-  }
+  assert.ok(unlockTick >= 0 && unlockTick < activation && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
   assert.match(pane, /if \(idx == app_state.active_shell\) @import\("focus.zig"\)\.requestNativeBrowserFocus\(\);/);
   assert.match(pane, /browserFocusRequestMatches\(app_state.g_focus_browser_shell_id, app_state.shells\[idx\]\.shell_id, foregroundIsOurs\(\)\)/);
   assert.match(focus, /return requested_sid != 0 and requested_sid == active_sid and foreground_owned;/);
@@ -782,9 +778,7 @@ test('IGSH-724 native handoff targets Chrome web contents and real keys distingu
     assert.throws(() => assertsPageFocus(focus.replace(before, ''), main, browser, journey));
   }
   assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPaneUnlocked();', ''), browser, journey));
-  assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPaneUnlocked();', '                unlockBrowserForeground();\n                focusActiveBrowserPaneUnlocked();'), browser, journey));
-  assert.throws(() => assertsPageFocus(focus.replace('pub fn focusActiveBrowserPane() void {', 'pub fn focusActiveBrowserPane() void {\n    unlockBrowserForeground();'), main, browser, journey));
-  assert.throws(() => assertsPageFocus(focus.replace('pub fn requestNativeBrowserFocus() void {', 'pub fn requestNativeBrowserFocus() void {\n    unlockBrowserForeground();'), main, browser, journey));
+  assert.throws(() => assertsPageFocus(focus, main.replace('                    unlockBrowserForeground();\n', ''), browser, journey));
   assert.throws(() => assertsPageFocus(focus, main, browser.replace('if (idx == app_state.active_shell) @import("focus.zig").requestNativeBrowserFocus();', ''), journey));
   for (const before of ['IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome', '++keys', 'foreach ($round in 1..5)', 'Alt+Q sent a page key to the browser menu']) {
     assert.throws(() => assertsPageFocus(focus, main, browser, journey.replace(before, '')));
