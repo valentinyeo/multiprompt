@@ -32,7 +32,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - **Never use Ctrl+Alt shortcuts** (AltGr on US-International layouts).
 - The browser extension targets Chrome and loads unpacked from `extension/`.
 - **The Chat View shows no status elements around messages:** no sending clock, "Sending...", read checks, ETA, model or capacity badges. Only a real send failure may show. Valentin removed these one by one; do not add new ones.
-- **Minimal chat UI:** never add a new line, label, banner or element to the chat or sidebar without Valentin's yes on that element. New actions go into Ctrl+K. Busy state is only the three ticking dots.
+- **Minimal chat UI:** add a chat or sidebar element only when a ticket asks for it. Tickets filed by Valentin or the design lead need no further yes; a wrong change is rolled back. New actions go into Ctrl+K. Busy state is only the three ticking dots.
 - Keep this file under 80 lines.
 
 ## Rules and what enforces them
@@ -49,4 +49,3 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |
-| Chat/sidebar drawing changes need a linked yes from Valentin, not a runner's claim. | `chat-ui-approval` PR status, `tools/check-chat-ui-approval.cjs`; add `UI approval: <ticket URL>` to the PR body. |
