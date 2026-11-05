@@ -1152,7 +1152,7 @@ foreach ($plan in $plans) {
                 [void](Wait-For 'select-all palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
                 $query = 'chat view select all'
                 foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-                [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+                [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=[1-9]\d* target=6364(?:\s|$)') })
                 Press @(0x0D) 'Enter: select transcript'
                 [Windows.Forms.Clipboard]::Clear()
                 Press @(0x11, 0x43) 'Ctrl+C: copy transcript'

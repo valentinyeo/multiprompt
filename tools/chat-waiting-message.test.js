@@ -8,6 +8,22 @@ const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
 
+test('accepted proof selects the exact transcript command among multiple matches', () => {
+  const driver = fs.readFileSync(path.join(root, 'tools/verify-chat-delivery/drive.ps1'), 'utf8');
+  const accepted = driver.slice(driver.indexOf("} elseif ($isAccepted) {"), driver.indexOf("} elseif ($isSendStays) {"));
+  const match = accepted.match(/Wait-For 'select-all command ready'[^\n]+-match \('([^']+)' \+ \$query\.Length \+ '([^']+)'\)/);
+  assert.ok(match, 'accepted proof must check the typed query and selected target');
+  const ready = new RegExp(match[1] + 'chat view select all'.length + match[2]);
+  assert.equal(ready.test('[palette] ready chars=20 count=2 target=6364\n'), true);
+  assert.equal(ready.test('[palette] ready chars=20 count=2 target=6366\n'), false);
+  assert.equal(ready.test('[palette] ready chars=20 count=0 target=6364\n'), false);
+  assert.equal(ready.test('[palette] ready chars=19 count=2 target=6364\n'), false);
+  assert.equal(ready.test('[palette] ready chars=20 count=2 target=63640\n'), false);
+  assert.match(accepted, /Press @\(0x0D\) 'Enter: select transcript'/);
+  assert.match(accepted, /Press @\(0x11, 0x43\) 'Ctrl\+C: copy transcript'/);
+  assert.match(accepted, /Matches\(\$takenCopy, \[regex\]::Escape\(\$plan\.text\)\)\.Count -ne 1/);
+});
+
 test('accepted fixture passes production buffer handoff to the busy fake agent', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'accepted-tmux-'));
   try {
