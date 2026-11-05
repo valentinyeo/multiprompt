@@ -67,8 +67,26 @@ function Focus {
 function Press([int[]]$Keys) {
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { Focus }
     if ($app.HasExited -or [ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell' -or [ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Keyboard owner mismatch' }
-    $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='keys'; keys=$Keys})
-    [VerifyNative]::Chord($Keys)
+    $held=[Collections.Generic.List[int]]::new()
+    try {
+        for ($keyIndex=0; $keyIndex -lt $Keys.Length-1; $keyIndex++) {
+            $modifier=$Keys[$keyIndex]
+            if ($modifier -notin @(0x10,0x11,0x12)) { throw 'Only modifier keys may precede the action key' }
+            [VerifyNative]::KeyDown($modifier)
+            $held.Add($modifier)
+            [void](Wait-For 'modifier held before action' { [VerifyNative]::IsDown($modifier) })
+            $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='modifier-held'; key=$modifier})
+        }
+        $foreground=[ChatDeliveryDesktop]::GetForegroundWindow()
+        if ($foreground -ne $main) { throw 'Owned foreground changed while holding modifiers' }
+        foreach ($expectedModifier in @(0x10,0x11,0x12,0x5b,0x5c)) {
+            if ([VerifyNative]::IsDown($expectedModifier) -ne $held.Contains($expectedModifier)) { throw 'Unexpected modifier state before action' }
+        }
+        $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='keys'; keys=$Keys; foreground=$foreground.ToInt64(); ctrl=[VerifyNative]::IsDown(0x11); shift=[VerifyNative]::IsDown(0x10); alt=[VerifyNative]::IsDown(0x12); win=([VerifyNative]::IsDown(0x5b) -or [VerifyNative]::IsDown(0x5c))})
+        [VerifyNative]::Chord(@($Keys[-1]))
+    } finally {
+        for ($keyIndex=$held.Count-1; $keyIndex -ge 0; $keyIndex--) { [VerifyNative]::KeyUp($held[$keyIndex]) }
+    }
 }
 function Palette([string]$Query, [int]$Target) {
     $actions.Add(@{at=[DateTime]::UtcNow.ToString('o'); kind='palette'; query=$Query; target=$Target})
