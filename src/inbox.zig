@@ -9,7 +9,6 @@ const WPARAM = @import("win32.zig").WPARAM;
 const HANDLE = @import("win32.zig").HANDLE;
 const WS_VISIBLE = @import("win32.zig").WS_VISIBLE;
 const WS_CHILD = @import("win32.zig").WS_CHILD;
-const WS_BORDER = @import("win32.zig").WS_BORDER;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
 const SW_HIDE = @import("win32.zig").SW_HIDE;
 const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
@@ -108,7 +107,6 @@ const editSubclassProc = @import("rename.zig").editSubclassProc;
 const commitRename = @import("rename.zig").commitRename;
 const clearSearchBackdrop = @import("rename.zig").clearSearchBackdrop;
 const uiScaled = @import("drawing.zig").uiScaled;
-const uiFontInboxTitle = @import("drawing.zig").uiFontInboxTitle;
 const browserInboxState = @import("drawing.zig").browserInboxState;
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const asciiContainsQueryInsensitive = @import("command_palette.zig").asciiContainsQueryInsensitive;
@@ -1208,7 +1206,9 @@ pub fn findShellById(sid: u32) ?u32 {
     return null;
 }
 
-fn startInboxRename() void {
+var inbox_rename_font: HANDLE = null;
+
+pub fn startInboxRename() void {
     const ri = inboxNthVisible(app_state.g_inbox_sel) orelse {
         showHeaderNoticeAscii("No session selected", 2500, true);
         return;
@@ -1236,6 +1236,7 @@ fn startInboxRename() void {
     commitRename();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
     app_state.g_edit_tab = idx;
+    app_state.g_edit_sid = app_state.shells[idx].shell_id;
     app_state.g_edit_idx = idx;
     app_state.g_edit_is_group = false;
     app_state.g_edit_is_window = false;
@@ -1245,14 +1246,20 @@ fn startInboxRename() void {
     app_state.g_edit_sync_remote_name = true;
 
     const y = layout.top + @as(i32, @intCast(app_state.g_inbox_sel - layout.scroll)) * layout.stride;
-    const edit_h = uiScaled(22);
+    const edit_h = uiScaled(19);
+    const rename = @import("rename.zig");
+    rename.setInlineColors(if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(53, 53, 53), if (app_state.g_light_theme) RGB(30, 30, 30) else RGB(242, 242, 242));
+    if (inbox_rename_font != null) _ = DeleteObject(inbox_rename_font);
+    inbox_rename_font = if (row.att) @import("fonts.zig").create(uiScaled(-14), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 4, 0, L(@import("fonts.zig").UI_MEDIUM_FACE)) else null;
+    const font = inbox_rename_font orelse @import("drawing.zig").uiFontBot(.name);
 
-    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, name.left, y + uiScaled(6), edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
+    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, name.left, y + uiScaled(8), edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
     if (app_state.g_edit_hwnd != null) {
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
-        _ = SendMessageW(app_state.g_edit_hwnd, 0x0030, @intFromPtr(uiFontInboxTitle()), 1);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x0030, @intFromPtr(font), 1);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x00D3, 3, 0);
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&app_state.shells[idx].name));
         _ = SetFocus(app_state.g_edit_hwnd);
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));

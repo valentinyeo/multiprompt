@@ -523,6 +523,23 @@ pub fn sendChatPrompt() void {
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var text_buf: [16384]u16 = undefined;
     const text_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text_buf, @intCast(text_buf.len));
+    if (text_len_i > 0) {
+        const text = text_buf[0..@intCast(text_len_i)];
+        if (std.mem.startsWith(u16, text, L("/rename ")[0..8])) {
+            const name = std.mem.trim(u16, text[8..], &.{ ' ', '\t', '\r', '\n' });
+            if (name.len > 0 and @import("room_frontend.zig").privateActionsAllowed()) {
+                _ = @import("archive.zig").applyCanonicalSessionRename(app_state.active_shell, name, true);
+                saveSession();
+                @import("inbox.zig").publishInboxState();
+                @import("workspaces.zig").updateMainWindowTitle();
+                _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+                app_state.g_chat_draft_dirty = true;
+                chatDraftFlush();
+                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+            }
+            return;
+        }
+    }
     if (text_len_i > 0 and app_state.g_chat_skill_name_len == 0 and app_state.g_chat_reply_len == 0) {
         const text = text_buf[0..@intCast(text_len_i)];
         const shell = &app_state.shells[app_state.active_shell];

@@ -95,8 +95,10 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
 - Ctrl+W: Close the active tab/session (both modes; reverted in v0.28.219 — .215's workspace-close granularity was wrong). Workspace close = Ctrl+K 'Close Workspace' (non-destructive, reopenable via Open Workspace); app close = Ctrl+K 'Quit ZigShell'
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
-- F2: Rename active tab
-- Double-click tab: Rename tab
+- F2: Rename the visible session name. With the sidebar open, edit its tab. With the sidebar collapsed or hidden, edit the top title. In Inbox, edit the selected row.
+- Click or double-click a chat title or tab name: Rename in place
+- Enter saves, Esc cancels, and leaving the name saves.
+- Type `/rename <name>` in Chat View to rename the session.
 - Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Reconnect (remote tabs), Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Mute/Unmute (a muted session is hidden from the Inbox on every device, stays in its workspace tab, and the mute syncs through the account layout), Keep Alive (cmd/pwsh), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
 - Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Bot face also offers Upload image and Reset. Pictures for account-backed remote sessions sync to your phone automatically. Local shell pictures stay on this computer. Reset shows the chosen face and color, and removes the shared picture. Offline picture changes sync after reconnecting.
 - No dedicated shortcut — Close all disconnected sessions: use Ctrl+K or right-click a tab. Choose the counted action. Pinned and unpinned disconnected sessions close. Live sessions stay open.
@@ -134,7 +136,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Create Snippet | Save a named paste block |
 | Ctrl+K -&gt; Manage Snippets | Delete saved snippets; Esc cancels |
 | Delete twice in snippets | Delete the selected saved snippet |
-| F2 / double-click | Rename tab or selected Inbox session |
+| F2 / click or double-click name | Rename chat title, tab or selected Inbox session |
 
 ### Workspaces (single-window)
 

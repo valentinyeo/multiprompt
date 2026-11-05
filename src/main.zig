@@ -1797,6 +1797,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC => {
             const child: HANDLE = if (lp == 0) null else @ptrFromInt(@as(usize, @bitCast(lp)));
+            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
+                const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
+                _ = SetTextColor(dc, @import("rename.zig").inline_text_color);
+                _ = SetBkColor(dc, @import("rename.zig").inline_color);
+                if (@import("rename.zig").inlineBrush()) |brush| return @bitCast(@as(usize, @intFromPtr(brush)));
+            }
             if (child == app_state.g_chat_composer_hwnd) {
                 refreshChatBrushes();
                 const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
@@ -1808,8 +1814,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_COMMAND => {
             const notif = @as(u32, @truncate(wp >> 16));
-            if (notif == EN_KILLFOCUS) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COMMIT_RENAME, 0, 0);
+            if (notif == EN_KILLFOCUS and lp != 0 and app_state.g_edit_hwnd != null and @as(usize, @bitCast(lp)) == @intFromPtr(app_state.g_edit_hwnd.?)) {
+                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_COMMIT_RENAME, 0, lp);
             }
             return 0;
         },
@@ -1837,6 +1843,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (@import("chat_composer.zig").chatDictationClick(mx, my)) return 0;
                 if (chatTitleLayout()) |title| {
+                    const name = title.text;
+                    if (@import("room_frontend.zig").privateActionsAllowed() and mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
+                        startThreadTitleRename();
+                        return 0;
+                    }
                     const more = title.more;
                     if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
                         more_menu.open();
@@ -2048,6 +2059,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (@import("room_frontend.zig").privateActionsAllowed() and tth_click > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth_click and
                     (!app_state.g_chat_active or (mx >= chatViewLayout().transcript.left and mx < chatViewLayout().transcript.right)))
                 {
+                    var client: RECT = std.mem.zeroes(RECT);
+                    _ = GetClientRect(hwnd, &client);
+                    if (@import("drawing.zig").threadTitleNameRectFor(client.right, app_state.active_shell)) |name| {
+                        if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
+                            startThreadTitleRename();
+                            return 0;
+                        }
+                    }
                     app_state.g_shell_focused = true;
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -2112,6 +2131,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
+                            if (!isCtrlDown() and (wp & 0x0004) == 0 and @import("room_frontend.zig").privateActionsAllowed()) {
+                                if (@import("rename.zig").sidebarNameRect(tab_idx)) |name| {
+                                    if (mx >= name.left and mx < name.right and my >= name.top and my < name.bottom) {
+                                        if (tab_idx != app_state.active_shell or @import("room_frontend.zig").isActive()) @import("console.zig").switchToShellByUser(tab_idx);
+                                        startRename(tab_idx);
+                                        return 0;
+                                    }
+                                }
+                            }
                             commitRename();
                             const ctrl = isCtrlDown();
                             const shift = (wp & 0x0004) != 0;
@@ -2823,12 +2851,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_COMMIT_RENAME => {
+            if (lp != 0 and (app_state.g_edit_hwnd == null or @as(usize, @bitCast(lp)) != @intFromPtr(app_state.g_edit_hwnd.?))) return 0;
             commitRename();
             return 0;
         },
         WM_APP_RENAME_TAB => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            if (app_state.shell_count > 0) {
+            if (app_state.g_inbox_active) {
+                @import("inbox.zig").startInboxRename();
+            } else if (app_state.shell_count > 0) {
                 startRename(app_state.active_shell);
             }
             return 0;
@@ -6361,10 +6392,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
-                if (target == SEARCH_RENAME_SYNC_OFFSET) {
-                    if (app_state.active_shell < app_state.shell_count) {
-                        _ = beginPaletteRenameInput(app_state.active_shell);
-                    }
+                if (target == SEARCH_RENAME_SYNC_OFFSET or target == app_state.SEARCH_TABCTX_RENAME) {
+                    const idx = if (target == app_state.SEARCH_TABCTX_RENAME) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    if (idx) |shell| _ = beginPaletteRenameInput(shell);
                     return 0;
                 }
                 if (target == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET) {
