@@ -25,7 +25,7 @@ var second_down: ?u8 = null;
 var revoked = false;
 var escaped_removal = false;
 var stored: ?[]const u8 = null;
-const aliases = [_][]const u8{ "alpha", "beta", "gamma" };
+const fixture_aliases = [_][]const u8{ "alpha", "beta", "gamma" };
 const decision_yes = "[{\"device_id\":\"other\",\"public_key\":\"ssh-ed25519 AAAA\",\"approve\":true}]";
 const decision_no = "[{\"device_id\":\"other\",\"public_key\":\"ssh-ed25519 AAAA\",\"approve\":false}]";
 const decision_two = "[{\"device_id\":\"other\",\"public_key\":\"ssh-ed25519 AAAA\",\"approve\":true},{\"device_id\":\"second\",\"public_key\":\"ssh-ed25519 BBBB\",\"approve\":true}]";
@@ -34,10 +34,10 @@ const removed = "{\"device_id\":\"self\",\"keys\":[{\"device_id\":\"other\",\"na
 fn GetTickCount64() u64 { return 1000000; }
 fn debugLog2(_: []const u8, _: []const u8) void {}
 fn accountPublishDeviceKey(_: std.mem.Allocator, _: []const u8, _: []const u8, _: AccountJobKind) anyerror!void {}
-fn accountKnownKeyHosts(_: std.mem.Allocator, _: []const u8, _: *LayoutReply) ![]const []const u8 { return &aliases; }
+fn accountKnownKeyHosts(_: std.mem.Allocator, _: []const u8, _: *LayoutReply) ![]const []const u8 { return &fixture_aliases; }
 fn accountSshOutput(_: std.mem.Allocator, command: []const u8, _: u32) ![]const u8 {
     if (std.mem.indexOf(u8, command, "\\\"$tmp\\\"") != null) escaped_removal = true;
-    for (aliases, 0..) |alias, i| {
+    for (fixture_aliases, 0..) |alias, i| {
         const needle = switch (i) { 0 => " alpha ", 1 => " beta ", else => " gamma " };
         _ = alias;
         if (std.mem.indexOf(u8, command, needle) != null) {
