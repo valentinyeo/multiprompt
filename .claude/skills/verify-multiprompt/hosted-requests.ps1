@@ -42,22 +42,29 @@ function Click-HostedChoice([int]$Index) {
     [VerifyNative]::ClickClient($hostedTranscript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
     $script:hostedLastClick = [DateTime]::UtcNow
 }
-function Copy-HostedContinuation([string]$Id) {
-    foreach ($distance in @(1, 2)) {
-        [Windows.Forms.Clipboard]::Clear()
-        [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
-        Wait-ChatFocus 'Edit' 'hosted-copy-composer'
-        for ($step = 0; $step -lt $distance; $step++) { Press @(0x26) 'Up: focus a recent native message' }
-        $offset = (Read-SharedText $hostedLog).Length
-        Press @(0x0D) 'Enter: open the focused message actions'
-        Wait-Until { (Read-SharedText $hostedLog).Substring($offset) -match '\[chat\] message menu items=[^\r\n]*Copy' } 'focused native message offers Copy'
-        Press @(0x43) 'C: copy the focused native message'
-        Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native message copy completed'
-        $script:hostedCopied = [Windows.Forms.Clipboard]::GetText()
-        [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
-        Wait-ChatFocus 'Edit' 'hosted-composer'
-        if ($script:hostedCopied.Contains('Hosted request continued: ' + $Id)) { return }
-    }
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$script:hostedOcr = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]::TryCreateFromUserProfileLanguages()
+if ($null -eq $script:hostedOcr) { throw 'Windows screenshot text recognition is unavailable' }
+$script:hostedAsTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+function Await-HostedOperation($Operation, [Type]$ResultType) {
+    $task = $script:hostedAsTask.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
+    if (-not $task.Wait(15000)) { throw 'Windows screenshot text recognition timed out' }
+    return $task.Result
+}
+function Read-HostedScreenText([string]$Name) {
+    Snapshot $Name
+    $path = (Resolve-Path (Join-Path $Evidence ($Name + '.png'))).Path
+    $file = Await-HostedOperation ([Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime])
+    $stream = Await-HostedOperation ($file.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType=WindowsRuntime])
+    try {
+        $decoder = Await-HostedOperation ([Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime])
+        $bitmap = Await-HostedOperation ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType=WindowsRuntime])
+        try {
+            $recognized = Await-HostedOperation ($script:hostedOcr.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType=WindowsRuntime])
+            $script:hostedScreenText = $recognized.Text
+            [IO.File]::WriteAllText((Join-Path $Evidence ($Name + '-screen.txt')), $script:hostedScreenText)
+        } finally { $bitmap.Dispose() }
+    } finally { $stream.Dispose() }
 }
 function Assert-HostedContinued([string]$Id, [string]$Operation, [string]$Behavior) {
     Wait-Until { @(Read-HostedRows 'hosted-continuations' | Where-Object { $_.request_id -ceq $Id }).Count -eq 1 } ('provider resumed ' + $Id) 45
@@ -65,11 +72,12 @@ function Assert-HostedContinued([string]$Id, [string]$Operation, [string]$Behavi
     if ($rows.Count -ne 1 -or $rows[0].query.op -cne $Operation -or $rows[0].sid -cne $remoteSids['live-slash'] -or $rows[0].reply.status -cne 'ok') { throw ('Wrong or duplicate reply: ' + $Id) }
     $response = $rows[0].responses[0].response
     if ($response.request_id -cne $Id -or $response.response.toolUseID -cne ('tool-' + $Id) -or $response.response.behavior -cne $Behavior) { throw ('Wrong provider response: ' + $Id) }
-    Wait-Until { Copy-HostedContinuation $Id; $script:hostedCopied.Contains('Hosted request continued: ' + $Id) } ('continuation copied from native message ' + $Id) 45
-    [IO.File]::WriteAllText((Join-Path $Evidence ($Id + '-transcript.txt')), $script:hostedCopied)
-    Snapshot ($Id + '-continued')
+    $expected = ('Hosted request continued: ' + $Id).ToLowerInvariant() -replace '[^a-z0-9]', ''
+    Wait-Until { Read-HostedScreenText ($Id + '-continued'); ($script:hostedScreenText.ToLowerInvariant() -replace '[^a-z0-9]', '').Contains($expected) } ('continuation visible in native screenshot ' + $Id) 45
     return $rows[0]
 }
+Read-HostedScreenText 'hosted-before'
+if (($script:hostedScreenText.ToLowerInvariant() -replace '[^a-z0-9]', '').Contains('hostedrequestcontinued')) { throw 'Screenshot oracle found a continuation before any hosted request' }
 Start-HostedRequest 'hosted-allow' 'Bash' @{ command = 'printf hosted-proof' }
 Wait-HostedChoices 3
 Snapshot 'hosted-approval'
@@ -110,7 +118,8 @@ if ($answers.'Which colour?' -cne 'Orange' -or $answers.'Which devices?' -cne 'D
 foreach ($case in @(@{ id = 'hosted-implement'; text = 'implement'; action = 'implement'; behavior = 'allow' }, @{ id = 'hosted-feedback'; text = 'Also cover empty folders'; action = 'feedback'; behavior = 'deny' })) {
     Start-HostedRequest $case.id 'ExitPlanMode' @{ plan = ('## Hosted plan ' + $case.id + "`n1. List the folder") }
     Wait-Until { (Read-SharedText $hostedLog).Substring($script:hostedOffset) -match '\[chat-live\] draw shell=\d+ n=[1-9]\d* f=[1-9]' } 'hosted plan reached native transcript layout' 45
-    Snapshot ($case.id + '-proposed')
+    $expectedPlan = ('Hosted plan ' + $case.id).ToLowerInvariant() -replace '[^a-z0-9]', ''
+    Wait-Until { Read-HostedScreenText ($case.id + '-proposed'); $visible = $script:hostedScreenText.ToLowerInvariant() -replace '[^a-z0-9]', ''; $visible.Contains($expectedPlan) -and $visible.Contains('planready') -and $visible.Contains('listthefolder') } 'exact hosted plan words visible in native screenshot' 45
     [VerifyNative]::ClickClient($script:slashComposer, 8, 8)
     Wait-ChatFocus 'Edit' 'hosted-plan-composer'
     Type-Text $case.text
