@@ -152,7 +152,7 @@ class BoardFeedbackTest(unittest.TestCase):
         state = dict(tasks=[self.task(1, 'Multibot wish: capture', ('Other', 'Agent Feedback')), self.task(2, 'Multibot wish: capture more'), self.task(3, 'Multibot wish: capture', status='Archive')], comments={})
         self.write_board(state)
         result = self.run_cli('capture')
-        self.assertIn('IGSH-3', result.stdout)
+        self.assertEqual(result.stdout.strip(), 'Feedback voted: https://app.hypertask.ai/detail/project-2060/3')
         self.assertEqual(len(self.read_board()['tasks']), 3)
         state['tasks'].append(self.task(4, 'Multibot wish: deleted', status='Deleted'))
         self.write_board(state)

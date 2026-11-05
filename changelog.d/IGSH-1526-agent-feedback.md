@@ -1,1 +1,1 @@
-Agents can share Multibot wishes and vote on matching feedback.
+Claude live chat can save feedback locally. It does not file board tickets.
