@@ -28,6 +28,9 @@ Preconditions:
 - **Create.** Press Ctrl+N and require exactly one new saved workspace and CMD session.
 - **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first workspace row, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
 - **Themes.** Capture the header and open card in dark, Multiprompt, light, AMOLED, mid, edge grey and system themes. Check native card fill and dismiss with Escape without switching.
+- **Compact geometry.** Require 28px rows, 6px panel insets and a 7px divider gap: height is `19 + rowCount * 28` at the journey’s 100% scale. Zero/unknown counts are blank; current rows use semibold names without ticks.
+- **Keyboard.** Exercise Up/Down and Enter to select the first workspace, then return by mouse. Inspect `workspace-keyboard-selected.png`. Escape is checked in every theme. Scrolling and divider hit boundaries retain executable Zig coverage.
+- **Theme limitation.** Graphite 2 is not shipped. Record it unavailable; Edge Grey screenshots are separately labelled, never substitutes.
 - **New workspace.** Click the card's New workspace row. Require exactly one additional workspace and a closed card.
 - **Proof.** Inspect `workspace-first.png`, `workspace-created.png`, `workspace-<theme>-header.png`, `workspace-<theme>-card.png`, `after.png`, saved session files, actions and `result.json`. These are real native windows on GitHub, never the user's desktop.
 
