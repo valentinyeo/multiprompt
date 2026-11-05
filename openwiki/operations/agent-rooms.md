@@ -10,6 +10,8 @@ Existing message protocol 1 stays compatible. Room scope is additive and immutab
 
 With that capability, the bridge accepts the existing `post_human` request plus `host_uuid`. Reading room `events` advances pending submissions and reply collection before returning the ordered events. Refreshes use a bounded, fair delivery sweep. A disabled agent keeps its pending room intent; it is reconsidered on later refreshes. The canonical message worker owns admitted messages and retries, not a second room sender. Clients must keep refreshing the room. This does not provide background collection while every client is closed.
 
+Membership is rechecked under the room write transaction before canonical admission. Removing a recipient first prevents its admission. Already-admitted canonical work may finish; a later removal suppresses publication into the room.
+
 The bridge still refuses client-supplied `agent_reply` and `delivery_work` operations. Its collector alone derives reply provenance from canonical host events. The lower-level store interface below remains a trusted home-side admission interface, not a client authentication boundary.
 
 ## Storage and interface

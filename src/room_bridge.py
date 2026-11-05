@@ -194,9 +194,22 @@ class RoomBridge:
                     fail('runtime_unavailable')
                 self.store.db.execute('UPDATE reply_progress SET after_seq=? WHERE delivery_id=? AND after_seq IS NULL', (initial['seq'], work['message_id']))
             if status['enabled']:
-                submitted = runtime_request(dict(identity, op='message_submit', message_id=work['message_id'], text=work['text'], room_scope=scope)).get('result')
-                if not isinstance(submitted, dict) or not isinstance(submitted.get('message'), dict) or submitted['message'].get('id') != work['message_id']:
-                    fail('runtime_unavailable')
+                self.store.db.execute('BEGIN IMMEDIATE')
+                try:
+                    if self.store.view(dict(op='delivery_work', room_id=room_id, delivery_id=work['message_id'])) != work:
+                        fail('invalid_scope')
+                    submitted = runtime_request(dict(identity, op='message_submit', message_id=work['message_id'], text=work['text'], room_scope=scope)).get('result')
+                    if not isinstance(submitted, dict) or not isinstance(submitted.get('message'), dict) or submitted['message'].get('id') != work['message_id']:
+                        fail('runtime_unavailable')
+                    self.store.db.execute('COMMIT')
+                except RoomError as error:
+                    self.store.db.execute('ROLLBACK')
+                    if error.code == 'invalid_scope':
+                        continue
+                    raise
+                except BaseException:
+                    self.store.db.execute('ROLLBACK')
+                    raise
             progress = self.store.db.execute('SELECT * FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()
             page = runtime_request(dict(op='events_subscribe', provider='claude', sid=work['provider_sid'], after=progress['after_seq'])).get('result')
             if not isinstance(page, dict) or not isinstance(page.get('events'), list) or type(page.get('next_after')) is not int or page['next_after'] < progress['after_seq']:
@@ -211,7 +224,8 @@ class RoomBridge:
         self.store.db.execute('BEGIN IMMEDIATE')
         try:
             current = self.store.db.execute('SELECT after_seq,done FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()
-            if current['done'] or current['after_seq'] != after:
+            active = self.store.db.execute("SELECT 1 FROM deliveries d JOIN members m ON m.id=d.member_id WHERE d.id=? AND d.status='pending' AND m.active=1", (work['message_id'],)).fetchone()
+            if current['done'] or current['after_seq'] != after or active is None:
                 self.store.db.execute('COMMIT')
                 return
             for row in page['events']:
