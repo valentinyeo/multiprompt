@@ -39,10 +39,10 @@ $app = $null
 $main = [IntPtr]::Zero
 $result = @{status='failed'; checks=$checks; error=$null; cleanup='pending'; boundary='Offline account; synthetic SSH, provider processes and transcripts; real native app and production session-end commands'}
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false)) }
-function Wait-For([string]$Name, [scriptblock]$Check) {
+function Wait-For([string]$ConditionName, [scriptblock]$Check) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($timer.Elapsed.TotalSeconds -lt 90)
-    throw "Timed out: $Name"
+    throw "Timed out: $ConditionName"
 }
 function Check([string]$Name, [bool]$Condition) {
     $checks.Add(@{name=$Name; passed=$Condition})
