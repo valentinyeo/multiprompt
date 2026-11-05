@@ -1123,16 +1123,30 @@ pub const RepoRow = struct {
     host: u8 = 0,
     path_len: u16 = 0,
     path: [255]u8 = [_]u8{0} ** 255,
+    available: bool = true,
+    generation: u64 = 0,
+    host_name_len: u8 = 0,
+    host_name: [128]u8 = [_]u8{0} ** 128,
 };
 
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
 const REPO_LIST_SCRIPT = "for d in /home/*/projects/*/; do [ -d \\\"$d\\\" ] && printf '%s\\n' \\\"${d%/}\\\"; done 2>/dev/null";
 
-pub var g_repo_cache: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-pub var g_repo_cache_count: u32 = 0;
-pub var g_repo_cache_host: u8 = 0;
-pub var g_repo_cache_tick: u64 = 0;
-pub var g_repo_fetching: bool = false;
+const RepoStatus = enum { unknown, online, offline };
+const RepoCache = struct {
+    rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS,
+    count: u32 = 0,
+    status: RepoStatus = .unknown,
+    fetching: bool = false,
+    enabled: bool = false,
+    generation: u64 = 0,
+    identity: [512]u8 = [_]u8{0} ** 512,
+    identity_len: usize = 0,
+    name: [128]u8 = [_]u8{0} ** 128,
+    name_len: usize = 0,
+};
+var g_repo_caches: [3]RepoCache = [_]RepoCache{.{}} ** 3;
+var g_repo_mutex: std.Thread.Mutex = .{};
 
 fn repoPathSafe(path: []const u8) bool {
     if (path.len == 0 or path.len > 255 or path[0] != '/') return false;
@@ -1184,7 +1198,21 @@ pub fn repoRowMatches(row: *const RepoRow, query: []const u8) bool {
     return false;
 }
 
+fn repoSuccessfulListing(success: bool, text: []const u8) ?[]const u8 {
+    const marker = "\n@@MP_REPOS_OK@@\n";
+    const crlf_marker = "\r\n@@MP_REPOS_OK@@\r\n";
+    if (!success) return null;
+    if (std.mem.endsWith(u8, text, marker)) return text[0 .. text.len - marker.len];
+    if (std.mem.endsWith(u8, text, crlf_marker)) return text[0 .. text.len - crlf_marker.len];
+    return null;
+}
+
 pub fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
+    if (host >= g_repo_caches.len) return 0;
+    g_repo_mutex.lock();
+    defer g_repo_mutex.unlock();
+    const cache = &g_repo_caches[host];
+    if (!cache.enabled) return 0;
     var count: u32 = 0;
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
@@ -1194,14 +1222,24 @@ pub fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
         const raw = shellKnownRemotePath(shell, host) orelse continue;
         repoListAdd(host, remoteRepoRoot(raw), out, &count);
     }
-    if (g_repo_cache_host == host) {
-        var i: u32 = 0;
-        while (i < g_repo_cache_count) : (i += 1) {
-            const cached = &g_repo_cache[i];
-            repoListAdd(host, cached.path[0..cached.path_len], out, &count);
-        }
+    for (cache.rows[0..cache.count]) |row| {
+        repoListAdd(host, row.path[0..row.path_len], out, &count);
+    }
+    for (out[0..count]) |*row| {
+        row.available = cache.status != .offline;
+        row.generation = cache.generation;
+        row.host_name_len = @intCast(cache.name_len);
+        @memcpy(row.host_name[0..cache.name_len], cache.name[0..cache.name_len]);
     }
     return count;
+}
+
+pub fn repoRowAvailable(row: *const RepoRow) bool {
+    if (row.host >= g_repo_caches.len or !row.available) return false;
+    g_repo_mutex.lock();
+    defer g_repo_mutex.unlock();
+    const cache = &g_repo_caches[row.host];
+    return cache.enabled and cache.generation == row.generation and cache.status != .offline;
 }
 
 fn repoFetchCommand(host: u8, buf: *[2048]u8) ?[]const u8 {
@@ -1209,37 +1247,106 @@ fn repoFetchCommand(host: u8, buf: *[2048]u8) ?[]const u8 {
     if (!appendSshExe(buf, &pos)) return null;
     if (!appendAsciiBuf(buf, &pos, "-T -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=5 ")) return null;
     if (!appendAsciiBuf(buf, &pos, tmuxSshTarget(host))) return null;
-    if (!appendAsciiBuf(buf, &pos, " \"" ++ REPO_LIST_SCRIPT ++ "\"")) return null;
+    if (!appendAsciiBuf(buf, &pos, " \"" ++ REPO_LIST_SCRIPT ++ "; printf '\\n@@MP_REPOS_OK@@\\n'\"")) return null;
     if (pos == 0 or pos >= buf.len) return null;
     return buf[0..pos];
 }
 
-fn repoFetchThread(host: u8) void {
+fn repoPublish(cache: *RepoCache, generation: u64, success: bool, rows: []const RepoRow) void {
+    if (cache.generation != generation or !cache.enabled) return;
+    if (success) {
+        cache.count = @intCast(@min(rows.len, cache.rows.len));
+        @memcpy(cache.rows[0..cache.count], rows[0..cache.count]);
+        cache.status = .online;
+    } else {
+        cache.status = .offline;
+    }
+    cache.fetching = false;
+}
+
+fn repoFetchThread(host: u8, generation: u64) void {
     crash_recorder.guardThread();
     var command_buf: [2048]u8 = undefined;
     var text_buf: [65536]u8 = undefined;
     var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
     var count: u32 = 0;
+    var success = false;
     if (repoFetchCommand(host, &command_buf)) |command| {
-        const total = sshOneShotCapture(command, &text_buf);
-        if (total > 0) count = parseRepoListing(host, text_buf[0..total], rows[0..]);
+        const result = sshOneShotCaptureInput(command, &text_buf, null, 10_000);
+        if (repoSuccessfulListing(result.success, text_buf[0..result.len])) |listing| {
+            count = parseRepoListing(host, listing, rows[0..]);
+            success = true;
+        }
     }
-    g_repo_cache = rows;
-    g_repo_cache_count = count;
-    g_repo_cache_host = host;
-    g_repo_cache_tick = GetTickCount64();
-    g_repo_fetching = false;
+    g_repo_mutex.lock();
+    repoPublish(&g_repo_caches[host], generation, success, rows[0..count]);
+    g_repo_mutex.unlock();
     if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_TMUX_LIST_READY, 0, 0);
 }
 
+fn repoConfigure(host: u8, enabled: bool, identity: []const u8, name: []const u8) void {
+    g_repo_mutex.lock();
+    defer g_repo_mutex.unlock();
+    const cache = &g_repo_caches[host];
+    if (cache.enabled != enabled or !std.mem.eql(u8, cache.identity[0..cache.identity_len], identity)) {
+        cache.generation +%= 1;
+        cache.count = 0;
+        cache.status = .unknown;
+        cache.fetching = false;
+        cache.enabled = enabled;
+        cache.identity_len = @min(identity.len, cache.identity.len);
+        @memcpy(cache.identity[0..cache.identity_len], identity[0..cache.identity_len]);
+    }
+    cache.name_len = @min(name.len, cache.name.len);
+    @memcpy(cache.name[0..cache.name_len], name[0..cache.name_len]);
+}
+
 pub fn requestRepoRefresh(host: u8) void {
-    if (g_repo_fetching) return;
-    g_repo_fetching = true;
-    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, repoFetchThread, .{host}) catch {
-        g_repo_fetching = false;
+    if (host >= g_repo_caches.len) return;
+    g_repo_mutex.lock();
+    const cache = &g_repo_caches[host];
+    if (!cache.enabled or cache.fetching) {
+        g_repo_mutex.unlock();
+        return;
+    }
+    cache.fetching = true;
+    const generation = cache.generation;
+    g_repo_mutex.unlock();
+    const thread = std.Thread.spawn(.{ .stack_size = 512 * 1024 }, repoFetchThread, .{ host, generation }) catch {
+        g_repo_mutex.lock();
+        repoPublish(cache, generation, false, &.{});
+        g_repo_mutex.unlock();
         return;
     };
     thread.detach();
+}
+
+pub fn requestAllRepoRefresh() void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const layout: ?std.json.Parsed(@import("session_layout.zig").Layout) = if (app_state.g_account_base) |base| @import("session_layout.zig").parse(arena.allocator(), base) catch null else null;
+    for (0..3) |i| {
+        const host: u8 = @intCast(i);
+        const alias = tmuxSshTarget(host);
+        var enabled = true;
+        var name: []const u8 = alias;
+        var identity: []const u8 = alias;
+        var identity_buf: [512]u8 = undefined;
+        if (layout) |parsed| {
+            if (parsed.value.removed_hosts) |removed| {
+                if (std.mem.indexOfScalar(u8, removed, host) != null) enabled = false;
+            }
+            if (parsed.value.hosts) |hosts| {
+                for (hosts) |entry| if (entry.slot == host) {
+                    name = entry.name;
+                    identity = std.fmt.bufPrint(&identity_buf, "{d}:{s}:{d}:{s}", .{ host, entry.hostname, entry.port, entry.user }) catch alias;
+                    break;
+                };
+            }
+        }
+        repoConfigure(host, enabled, identity, name);
+        if (enabled) requestRepoRefresh(host);
+    }
 }
 
 pub fn buildFilteredTmux() void {

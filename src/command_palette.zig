@@ -677,10 +677,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
     if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
     if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
-        var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-        const count = pickRepoFilteredRows(rows[0..]);
+        const rows = pickRepoPresentedRows();
         const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
-        if (idx >= count) return null;
+        if (idx >= rows.len) return null;
         return rows[idx].path[0..rows[idx].path_len];
     }
     const action_index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
@@ -1750,20 +1749,55 @@ fn repoPathMatchesQuery(path: []const u8, query: []const u16) bool {
     return true;
 }
 
+fn repoRowMatchesQuery(row: *const RepoRow, query: []const u16) bool {
+    var host_wide: [128]u16 = undefined;
+    const host_len = std.unicode.utf8ToUtf16Le(&host_wide, row.host_name[0..row.host_name_len]) catch 0;
+    var words = std.mem.tokenizeAny(u16, query, &.{ ' ', '\t', '\n', '\r', 0x0b, 0x0c });
+    while (words.next()) |word| {
+        var found = false;
+        if (word.len <= host_len) {
+            for (0..host_len - word.len + 1) |i| {
+                var equal = true;
+                for (word, 0..) |c, j| if (u16ToLower(c) != u16ToLower(host_wide[i + j])) {
+                    equal = false;
+                    break;
+                };
+                if (equal) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found and !repoPathMatchesQuery(row.path[0..row.path_len], word)) return false;
+    }
+    return true;
+}
+
+var g_presented_repo_rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+var g_presented_repo_count: u32 = 0;
+
+pub fn pickRepoPresentedRows() []const RepoRow {
+    return g_presented_repo_rows[0..g_presented_repo_count];
+}
+
 pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
     var all: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-    const total = repoRowsForHost(app_state.g_search_pick_repo_host, all[0..]);
     const query = app_state.g_search_buf[0..app_state.g_search_len];
+    const active = app_state.g_search_pick_repo_host;
     var count: u32 = 0;
     for ([_]bool{ true, false }) |name_match| {
-        var i: u32 = 0;
-        while (i < total and count < out.len) : (i += 1) {
-            const path = all[i].path[0..all[i].path_len];
-            const name_start = if (std.mem.lastIndexOfAny(u8, path, "/\\")) |index| index + 1 else 0;
-            if (repoPathMatchesQuery(path[name_start..], query) != name_match) continue;
-            if (!name_match and !repoPathMatchesQuery(path, query)) continue;
-            out[count] = all[i];
-            count += 1;
+        for (0..3) |offset| {
+            const host: u8 = @intCast((@as(usize, active) + offset) % 3);
+            const total = repoRowsForHost(host, all[0..]);
+            for (all[0..total]) |row| {
+                if (count >= out.len) return count;
+                const path = row.path[0..row.path_len];
+                const name_start = if (std.mem.lastIndexOfAny(u8, path, "/\\")) |index| index + 1 else 0;
+                if (repoPathMatchesQuery(path[name_start..], query) != name_match) continue;
+                if (!repoRowMatchesQuery(&row, query)) continue;
+                out[count] = row;
+                count += 1;
+            }
         }
     }
     return count;
@@ -1891,18 +1925,23 @@ pub fn pickRepoChoose(target: usize) bool {
     const plain_claude = app_state.g_search_pick_repo_plain_claude;
     closePickRepo();
     g_pick_row_gone = false;
+    g_pick_repo_offline = false;
     g_start_fail = .none;
     if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
         g_pick_row_gone = true;
         @import("diagnostics.zig").debugLog("[pick] chosen row is outside the repo list");
         return false;
     }
-    var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-    const count = pickRepoFilteredRows(rows[0..]);
+    const rows = pickRepoPresentedRows();
     const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
-    if (idx >= count) {
+    if (idx >= rows.len) {
         g_pick_row_gone = true;
         @import("diagnostics.zig").debugLog("[pick] chosen row is no longer in the repo list");
+        return false;
+    }
+    if (!@import("vps.zig").repoRowAvailable(&rows[idx])) {
+        @import("diagnostics.zig").debugLog("[repo] selection rejected");
+        g_pick_repo_offline = true;
         return false;
     }
     const path = rows[idx].path[0..rows[idx].path_len];
@@ -2341,6 +2380,7 @@ pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
 
 pub var g_start_fail: StartFail = .none;
 pub var g_pick_row_gone: bool = false;
+pub var g_pick_repo_offline: bool = false;
 
 fn workspaceHomeCandidate(configured: []const u8, known: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, configured, "~/") or !std.mem.startsWith(u8, known, "/home/")) return null;
@@ -2787,8 +2827,15 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count = 0;
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_BACK_OFFSET;
         app_state.g_search_result_count += 1;
-        var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
-        const filtered = pickRepoFilteredRows(rows[0..]);
+        g_presented_repo_count = pickRepoFilteredRows(g_presented_repo_rows[0..]);
+        const filtered = g_presented_repo_count;
+        var traced = [_]bool{false} ** 3;
+        for (g_presented_repo_rows[0..filtered]) |row| {
+            if (row.host >= traced.len or traced[row.host]) continue;
+            traced[row.host] = true;
+            var trace: [64]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[repo] {s} host={d}", .{ if (row.available) "online" else "offline", row.host }) catch "[repo] trace overflow");
+        }
         var i: u32 = 0;
         while (i < filtered) : (i += 1) {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;

@@ -28,9 +28,17 @@ test('sessions installs the SSH boundary before launch', () => {
 
 test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () => {
   const journey = sessions.slice(0, sessions.indexOf("Palette 'new claude in terminal'"));
-  assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
-  assert.doesNotMatch(journey.slice(0, journey.indexOf("Palette 'hide from sidebar'")), /\bPalette\s+'|commands\.json|catch|fallback/i);
+  assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\$_-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
+  const notes = journey.slice(journey.indexOf("Ctrl+T: select an available server after offline rejection"), journey.indexOf("Palette 'hide from sidebar'"));
+  assert.ok(notes.startsWith("Ctrl+T: select an available server after offline rejection"));
+  assert.doesNotMatch(notes, /\bPalette\s+'|commands\.json|settings|catch|fallback/i);
+  assert.doesNotMatch(journey, /commands\.json|settings|catch|fallback/i);
   assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
+});
+
+test('cross-host and offline journeys require the selected host and rejection', () => {
+  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*tmux_host -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)/);
+  assert.match(sessions, /offline-1[\s\S]*\[repo\] offline host=1[\s\S]*\$logBefore = [^\n]+[\s\S]*Enter: reject offline folder[\s\S]*\$log\.Substring\(\$logBefore\)\.Contains\('\[repo\] selection rejected'\)[\s\S]*Offline selection saved a tab[\s\S]*Offline selection launched SSH[\s\S]*other host stays usable[\s\S]*\[repo\] online host=1/);
 });
 
 test('IGSH-1680 native search checks both partial-name queries and the chosen host folder', () => {
@@ -103,15 +111,42 @@ test('repository search executes production matching and ranking', () => {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, `const std = @import("std");
 const MAX_REPO_ROWS = 8;
-const RepoRow = struct { host: u8 = 0, path_len: u16 = 0, path: [255]u8 = [_]u8{0} ** 255 };
+const RepoRow = struct { host: u8 = 0, path_len: u16 = 0, path: [255]u8 = [_]u8{0} ** 255, host_name_len: u8 = 0, host_name: [128]u8 = [_]u8{0} ** 128 };
 const app_state = struct {
     var g_search_pick_repo_host: u8 = 2;
     var g_search_buf: [128]u16 = undefined;
     var g_search_len: usize = 0;
 };
 const paths = [_][]const u8{ "/soft/archive", "/work/software-factory", "/SOFT/other", "/work/soft-tools", "/factory/software", "/work/software-factory-two" };
+var cross_host = false;
 fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
+    if (cross_host) {
+        if (host == 2) {
+            for (out) |*row| {
+                row.* = .{};
+                row.host = host;
+                const p = "/work/other";
+                row.path_len = p.len;
+                @memcpy(row.path[0..p.len], p);
+            }
+            return @intCast(out.len);
+        }
+        if (host == 0 or host == 1) {
+            const p = "/work/shared";
+            const name = if (host == 0) "North" else "South";
+            out[0] = .{};
+            out[0].host = host;
+            out[0].path_len = p.len;
+            @memcpy(out[0].path[0..p.len], p);
+            out[0].host_name_len = name.len;
+            @memcpy(out[0].host_name[0..name.len], name);
+            return 1;
+        }
+        return 0;
+    }
+    if (host != 2) return 0;
     for (paths, 0..) |p, i| {
+        out[i] = .{};
         out[i].host = host;
         out[i].path_len = @intCast(p.len);
         @memcpy(out[i].path[0..p.len], p);
@@ -152,6 +187,79 @@ test "partial words and stable ranking" {
     try std.testing.expectEqual(@as(u32, 2), search("soft", out[0..2]));
     try expectRow(out[0], paths[1]);
     try expectRow(out[1], paths[3]);
+}
+test "all hosts are filtered before the result limit" {
+    cross_host = true;
+    var out: [MAX_REPO_ROWS]RepoRow = undefined;
+    try std.testing.expectEqual(@as(u32, 2), search("shared", &out));
+    try std.testing.expectEqual(@as(u8, 0), out[0].host);
+    try std.testing.expectEqual(@as(u8, 1), out[1].host);
+    try std.testing.expectEqualStrings(out[0].path[0..out[0].path_len], out[1].path[0..out[1].path_len]);
+    try std.testing.expectEqual(@as(u32, 1), search("south shared", &out));
+    try std.testing.expectEqual(@as(u8, 1), out[0].host);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, `${result.error || ''}\n${result.stdout}\n${result.stderr}`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('offline repository selection does not start or save anything', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const source = readFileSync('src/command_palette.zig', 'utf8');
+  const start = source.indexOf('pub fn pickRepoChoose(');
+  const end = source.indexOf('\nfn customCmdMatchesQuery', start);
+  assert.ok(start >= 0 && end > start);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-offline-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, `const std = @import("std");
+const MAX_REPO_ROWS = 2;
+const SEARCH_PICK_REPO_ROW_OFFSET = 100;
+const RepoRow = struct { host: u8 = 0, path_len: u16 = 0, path: [255]u8 = [_]u8{0} ** 255, available: bool = true };
+const app_state = struct {
+    var g_search_pick_repo_folder_mode = false;
+    var g_search_pick_repo_with_agent = true;
+    var g_search_pick_repo_plain_claude = false;
+};
+var g_pick_row_gone = false;
+var g_pick_repo_offline = false;
+var g_start_fail: enum { none } = .none;
+var spawned = false;
+var saved = false;
+var chosen_host: u8 = 255;
+var live_host: u8 = 1;
+fn closePickRepo() void {}
+var presented = [_]RepoRow{.{ .host = 1, .available = false }};
+fn pickRepoPresentedRows() []const RepoRow { return &presented; }
+fn repoRowAvailable(row: *const RepoRow) bool { return row.available; }
+fn pickRepoFilteredRows(out: []RepoRow) u32 {
+    out[0] = presented[0];
+    out[0].host = live_host;
+    return 1;
+}
+fn saveWorkspaceFolder(_: u8, _: []const u8) bool { saved = true; return true; }
+fn activeWorkspaceSlot() u8 { return 0; }
+fn workspaceConfiguredTerminalFolder(_: u8, _: *u8, _: *[256]u8, _: *u32, _: *[128]u8, _: *u32) bool { return false; }
+fn spawnWorkspaceSessionAt(host: u8, _: []const u8, _: []const u8, _: bool, _: bool) bool { spawned = true; chosen_host = host; return true; }
+${source.slice(start, end).replaceAll('@import("diagnostics.zig").debugLog', 'debugLog').replaceAll('@import("vps.zig").repoRowAvailable', 'repoRowAvailable')}
+fn debugLog(_: []const u8) void {}
+test "offline row is not selectable" {
+    try std.testing.expect(!pickRepoChoose(100));
+    try std.testing.expect(!spawned and !saved);
+    app_state.g_search_pick_repo_folder_mode = true;
+    try std.testing.expect(!pickRepoChoose(100));
+    try std.testing.expect(!spawned and !saved);
+}
+test "publication cannot retarget the displayed row" {
+    presented[0] = .{ .host = 1, .available = true };
+    live_host = 0;
+    app_state.g_search_pick_repo_folder_mode = false;
+    try std.testing.expect(pickRepoChoose(100));
+    try std.testing.expectEqual(@as(u8, 1), chosen_host);
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });

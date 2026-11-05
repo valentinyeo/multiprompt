@@ -935,7 +935,7 @@ const writeVpsPollCache = @import("vps.zig").writeVpsPollCache;
 const loadVpsPollCacheIfChanged = @import("vps.zig").loadVpsPollCacheIfChanged;
 const syncLiveTmuxMetadataFromCache = @import("vps.zig").syncLiveTmuxMetadataFromCache;
 const buildFilteredTmux = @import("vps.zig").buildFilteredTmux;
-const requestRepoRefresh = @import("vps.zig").requestRepoRefresh;
+const requestAllRepoRefresh = @import("vps.zig").requestAllRepoRefresh;
 const pickRepoOpen = @import("command_palette.zig").pickRepoOpen;
 const closePickRepo = @import("command_palette.zig").closePickRepo;
 const pickRepoChoose = @import("command_palette.zig").pickRepoChoose;
@@ -1439,6 +1439,10 @@ fn clearSelectionForClick(hwnd: HANDLE, mx: i32, my: i32) void {
 
 fn showPickRepoFailure(saving_folder: bool) void {
     const palette = @import("command_palette.zig");
+    if (palette.g_pick_repo_offline) {
+        showHeaderNoticeAscii("Pick repo: server is offline", 4000, true);
+        return;
+    }
     if (saving_folder) {
         showHeaderNoticeAscii("Set workspace folder: could not save", 4000, true);
         return;
@@ -4242,7 +4246,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             loadCustomCommandsIfChanged();
             loadPaletteUsage();
             loadSnippetsIfChanged();
-            if (app_state.g_search_pick_repo_mode) requestRepoRefresh(app_state.g_search_pick_repo_host);
+            if (app_state.g_search_pick_repo_mode) requestAllRepoRefresh();
             updateSearchResults();
             if (!was_search_active and !app_state.g_search_from_inbox) {
                 captureSearchBackdrop();
@@ -5100,7 +5104,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 1;
                     app_state.g_search_scroll = 0;
-                    requestRepoRefresh(app_state.g_search_pick_repo_host);
+                    requestAllRepoRefresh();
                     updateSearchResults();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
