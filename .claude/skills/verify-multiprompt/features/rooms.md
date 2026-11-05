@@ -6,7 +6,7 @@ Create a room with two agents. Persist its selection, members and draft. Refuse 
 
 ## How to get to it (user POV)
 
-Open Ctrl+K and choose New room. Name it, select two agents, then press Ctrl+Enter. Type a draft and press Enter. Reopen the app with the same profile.
+Open Ctrl+K and choose New room. Name it, select two agents, then press Ctrl+Enter. Type a draft and press Enter. Reopen the app with the same profile. Click the restored message box before typing the broadcast.
 
 ## Driving it with control.ps1
 
