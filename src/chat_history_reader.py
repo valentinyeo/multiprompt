@@ -1561,6 +1561,9 @@ def resolve_response_path(q, source=None, as_owner=False):
     rid = q["id"]
     agent = q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q["codex"] else "claude"
     sid, tmux, cwd = q["sid"], q["tmux"], q["cwd"]
+    hosted = host_config(agent, sid) if isinstance(sid, str) and SESSION_ID.fullmatch(sid) else None
+    if isinstance(hosted, dict) and isinstance(hosted.get("cwd"), str) and Path(hosted["cwd"]).is_absolute():
+        cwd = q["cwd"] = hosted["cwd"]
     if (not isinstance(rid, int) or rid < 0 or
             sid and not SESSION_ID.fullmatch(sid) or
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
