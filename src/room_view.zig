@@ -227,6 +227,7 @@ pub const View = struct {
     pub fn setModel(self: *View, model: *const ViewModel) bool {
         if (!validModel(model)) return false;
         const same = sameRoom(self.model, model);
+        const focus_composer = !same and self.ownsFocus();
         self.clearHits();
         if (!same) {
             self.retire();
@@ -238,6 +239,7 @@ pub const View = struct {
         }
         self.model = model;
         self.layout();
+        if (focus_composer) self.setFocus(self.composer);
         return true;
     }
 
@@ -264,8 +266,8 @@ pub const View = struct {
         const pending = self.pending orelse return;
         if (!std.meta.eql(pending, token_value)) return;
         self.result = result;
-        if (result != .pending) self.pending = null;
-        if (result == .accepted and (token_value.kind == .create or token_value.kind == .edit)) {
+        if (result != .pending and !(result == .accepted and token_value.kind == .create)) self.pending = null;
+        if (result == .accepted and token_value.kind == .edit) {
             const owned_focus = self.ownsFocus();
             self.mode = .room;
             self.layout();
@@ -1244,17 +1246,19 @@ test "IGSH-1697 synthetic native create and room paint" {
                 try std.testing.expectEqual(Mode.create, view.mode);
                 view.completeAction(action, .accepted);
             } else view.completeAction(action, .accepted);
-            try std.testing.expectEqual(Mode.room, view.mode);
-            try std.testing.expect(view.pending == null);
+            try std.testing.expectEqual(Mode.create, view.mode);
+            try std.testing.expectEqual(action, view.pending.?);
             std.debug.print("IGSH-1697 {s} iteration {d}: pre-publication paint\n", .{ @tagName(response), iteration });
-            view.presented_revision = 99;
             try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
-            try std.testing.expectEqual(@as(u64, 0), view.presented_revision);
             try std.testing.expect(w.InvalidateRect(view.composer, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.composer) != 0);
 
             view.resetScope(&empty);
+            view.presented_revision = 99;
+            try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
+            try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
+            try std.testing.expectEqual(@as(u64, 0), view.presented_revision);
             create_arena.deinit();
             create_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             const r = room_arena.allocator();
@@ -1264,6 +1268,8 @@ test "IGSH-1697 synthetic native create and room paint" {
             const room = ViewModel{ .room_id = try r.dupe(u8, "room"), .name = try r.dupe(u16, L("Product sync")), .revision = 1, .members = room_members, .candidates = room_members, .messages = &.{} };
             std.debug.print("IGSH-1697 {s} iteration {d}: authoritative paint\n", .{ @tagName(response), iteration });
             try std.testing.expect(view.setModel(&room));
+            try std.testing.expectEqual(Mode.room, view.mode);
+            try std.testing.expect(view.pending == null);
             try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
             try std.testing.expect(w.UpdateWindow(view.hwnd) != 0);
             try std.testing.expectEqual(@as(u64, 1), view.presented_revision);
