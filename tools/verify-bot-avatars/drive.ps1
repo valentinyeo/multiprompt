@@ -95,6 +95,20 @@ function Palette-Select([string]$Query, [int]$Target, [bool]$Open = $true) {
     for ($step = 0; $step -lt $steps; $step++) { [ChatDeliveryDesktop]::Chord(@(0x28)) }
     $script:paletteTransition = (Read-Log).Length
     [ChatDeliveryDesktop]::Chord(@(0x0d))
+    if ($Target -in @(7188, 4000)) {
+        [void](Wait-For 'selected palette submenu opened' {
+            $tail = (Read-Log).Substring($script:paletteTransition)
+            $ready = [regex]::Matches($tail, '\[palette\] ready chars=(\d+) count=\d+ target=(\d+)')
+            if ($ready.Count) {
+                $last = $ready[$ready.Count - 1]
+                if ($last.Groups[1].Value -eq '0') { return $true }
+                if ([int]$last.Groups[1].Value -eq $Query.Length -and [int]$last.Groups[2].Value -eq $Target) {
+                    [ChatDeliveryDesktop]::Chord(@(0x0d))
+                }
+            }
+            $false
+        })
+    }
 }
 function Shot([string]$Name) {
     $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
