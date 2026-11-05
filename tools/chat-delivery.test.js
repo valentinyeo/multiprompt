@@ -1631,7 +1631,7 @@ test "delivery: IGSH-1640 restored intent waits for final tabs before taking a s
     launch_cache.tabs_restored = true;
     chatOutboxTick();
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
-    try std.testing.expectEqualSlices(u8, &wire_id, &g_chat_outbox.items[0].message_wire_id);
+    try std.testing.expectEqualStrings(std.mem.sliceTo(&wire_id, 0), std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0));
 }
 test "delivery: IGSH-1640 a live unknown admission is not invented during retry" {
     clear();
@@ -1676,7 +1676,7 @@ test "delivery: IGSH-1640 durable enqueue admission round trips, including zero 
     try std.testing.expect(saveChatOutbox());
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
     try reload();
-    try std.testing.expectEqualSlices(u8, &wire_id, &g_chat_outbox.items[0].message_wire_id);
+    try std.testing.expectEqualStrings(std.mem.sliceTo(&wire_id, 0), std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0));
     try std.testing.expectEqual(@as(?u64, 0), g_chat_outbox.items[0].message_admission_epoch);
     try std.testing.expect(g_chat_outbox.items[0].from_disk);
     g_chat_outbox.items[0].message_admission_epoch = null;
@@ -1704,7 +1704,7 @@ test "delivery: IGSH-1640 enqueue captures before durable save" {
     const wire_id = g_chat_outbox.items[index].message_wire_id;
     try std.testing.expectEqual(@as(?u64, 17), g_chat_outbox.items[index].message_admission_epoch);
     try reload();
-    try std.testing.expectEqualSlices(u8, &wire_id, &g_chat_outbox.items[0].message_wire_id);
+    try std.testing.expectEqualStrings(std.mem.sliceTo(&wire_id, 0), std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0));
     try std.testing.expectEqual(@as(?u64, 17), g_chat_outbox.items[0].message_admission_epoch);
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
 }
@@ -1751,7 +1751,7 @@ test "delivery: IGSH-1640 older reservation persists recovery and rolls back fai
     try std.testing.expectEqual(id, entry.id);
     try std.testing.expectEqual(@as(?u64, 8), entry.message_admission_epoch);
     try reload();
-    try std.testing.expectEqualSlices(u8, &wire_id, &g_chat_outbox.items[0].message_wire_id);
+    try std.testing.expectEqualStrings(std.mem.sliceTo(&wire_id, 0), std.mem.sliceTo(&g_chat_outbox.items[0].message_wire_id, 0));
     try std.testing.expectEqual(@as(?u64, 8), g_chat_outbox.items[0].message_admission_epoch);
     try std.testing.expectEqual(ChatEchoState.queued, g_chat_outbox.items[0].state);
     try std.testing.expect(!g_chat_outbox.items[0].write_started and !g_chat_outbox.items[0].retryable);
