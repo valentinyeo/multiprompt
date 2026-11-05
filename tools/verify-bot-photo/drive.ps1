@@ -402,6 +402,20 @@ try {
     Assert-Avatar 'expanded' (Index-For $firstId) 'expanded-wide'
     Assert-AllFaces $firstId 'matching-wide'
     Check 'other-bot-pixels-unchanged' ((Capture-Avatar (Index-Name 'Photo Beta') 'other-after') -eq $otherBefore)
+    foreach ($theme in @(
+        @{ name='light'; query='light'; target=4012; saved='light' },
+        @{ name='amoled'; query='amoled'; target=4013; saved='amoled' },
+        @{ name='edge-grey'; query='edge'; target=4014; saved='edgegray' }
+    )) {
+        Focus; Press @(0x11, 0x4b); Query 'themes' 4000; Press @(0x0d)
+        Query $theme.query $theme.target; Press @(0x0d)
+        [void](Wait-For "$($theme.name) theme saved" {
+            $path = Join-Path $settings 'theme-mode.txt'
+            (Test-Path $path) -and (Get-Content $path -Raw).Trim() -ceq $theme.saved
+        })
+        Press @(0x1b)
+        Assert-AllFaces $firstId ("matching-" + $theme.name)
+    }
     Focus; Press @(0x11, 0x4b); Query 'bot face' 7187; Press @(0x0d)
     Query 'circle dots' 7141; Shot 'generated-face-previews'; Press @(0x1b)
     Focus; Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)

@@ -22,4 +22,6 @@ test('hosted photo journey measures Starred, header and Inbox again after replac
   for (const surface of ['pinned', 'header', 'inbox']) assert.ok(driver.includes(`Assert-Avatar '${surface}'`));
   assert.ok(driver.includes("Assert-AllFaces $firstId 'matching-wide'"));
   assert.ok(driver.includes("Assert-AllFaces $firstId 'matching-replacement' $true"));
+  for (const theme of ['light', 'amoled', 'edge-grey']) assert.ok(driver.includes(`name='${theme}'`));
+  assert.ok(driver.includes('Assert-AllFaces $firstId ("matching-" + $theme.name)'));
 });
