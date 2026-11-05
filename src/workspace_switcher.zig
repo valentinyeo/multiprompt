@@ -72,8 +72,8 @@ pub fn paintHeader(dc: w.HANDLE) void {
     const bg = w.CreateSolidBrush(@import("themes.zig").themeSidebarBg());
     _ = w.FillRect(dc, &band, bg);
     _ = w.DeleteObject(bg);
-    fillRoundRect(dc, rc, scale(4), outlineColor());
-    fillRoundRect(dc, inset(rc, scale(1)), scale(4), if (app_state.g_light_theme) RGB(245, 245, 247) else RGB(31, 31, 31));
+    fillRoundRect(dc, rc, scale(18), outlineColor());
+    fillRoundRect(dc, inset(rc, scale(1)), scale(17), if (app_state.g_light_theme) RGB(245, 245, 247) else RGB(31, 31, 31));
     const font_height = -scale(14);
     if (header_font == null or header_font_height != font_height) {
         if (header_font != null) _ = w.DeleteObject(header_font);
@@ -163,8 +163,8 @@ fn paint(dc: w.HANDLE) void {
     const border = themes.customColorOr("overlay_border", outlineColor());
     const divider = themes.customColorOr("overlay_divider", if (app_state.g_light_theme) RGB(230, 230, 234) else RGB(60, 60, 60));
     const muted = themes.customColorOr("muted", hintColor());
-    fillRoundRect(dc, bounds, scale(4), border);
-    fillRoundRect(dc, inset(bounds, scale(1)), scale(4), panel);
+    fillRoundRect(dc, bounds, scale(16), border);
+    fillRoundRect(dc, inset(bounds, scale(1)), scale(15), panel);
     const font_height = -scale(13);
     if (row_font == null or current_font == null or row_font_height != font_height) {
         if (row_font != null) _ = w.DeleteObject(row_font);
@@ -189,7 +189,7 @@ fn paint(dc: w.HANDLE) void {
             _ = w.FillRect(dc, &line, brush);
             _ = w.DeleteObject(brush);
         }
-        if (is_current or selected == index) fillRoundRect(dc, rc, scale(2), if (is_current) divider else @import("chat_scrollbar.zig").blend(panel, divider, 153));
+        if (is_current or selected == index) fillRoundRect(dc, rc, scale(10), if (is_current) divider else @import("chat_scrollbar.zig").blend(panel, divider, 153));
         var buf: [12]u8 = undefined;
         const count = countLabel(if (is_action) null else sessionCount(index), &buf);
         var label = rc;
