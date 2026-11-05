@@ -160,7 +160,7 @@ try {
     $main = Wait-For 'owned main window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'foreground owned app' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
     [void](Wait-For 'all restored sessions' { if (Test-Path "$settings/inbox-default.json") { $doc = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json; if (@($doc.shells).Count -eq 8) { $true } } })
-    $rows = Wait-For 'large pinned and list robots' { $v = @(Layouts); if (@($v | Where-Object { $_.size -eq (Px 56) }).Count -ge 2 -and @($v | Where-Object { $_.size -eq (Px 40) }).Count -ge 4) { ,$v } }
+    $rows = Wait-For 'large pinned and list robots' { $v = @(Layouts); if (@($v | Where-Object { $_.size -eq (Px 56) }).Count -ge 2 -and @($v | Where-Object { $_.size -eq (Px 36) }).Count -ge 4) { ,$v } }
     $client = [ChatDeliveryDesktop+Rect]::new()
     if (-not [ChatDeliveryDesktop]::GetClientRect($main, [ref]$client)) { throw 'Main client bounds unavailable' }
     $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -176,13 +176,13 @@ try {
         @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -eq 8
     })
     $checks.Add(@{name='last-message-previews'; passed=$true})
-    Save @{ requestedDpi=$Dpi; listSize=(Px 40); pinSize=(Px 56); uiScale=100 } "$Evidence/display.json"
+    Save @{ requestedDpi=$Dpi; listSize=(Px 36); pinSize=(Px 56); uiScale=100 } "$Evidence/display.json"
     $expectedColor = (Appearance $names[0]).color
     if (@($rows | Where-Object { $_.color -ne $expectedColor }).Count) { throw 'Workspace robot color mismatch' }
     $checks.Add(@{name='workspace-colors'; passed=$true; workspace=$WorkspaceName; color=$expectedColor})
     $rows = @(Layouts)
     $pins = @($rows | Where-Object { $_.size -eq (Px 56) } | Sort-Object x)
-    $list = @($rows | Where-Object { $_.size -eq (Px 40) } | Sort-Object y)
+    $list = @($rows | Where-Object { $_.size -eq (Px 36) } | Sort-Object y)
     foreach ($entry in @(@{row=$pins[0]; name='pin-one'}, @{row=$pins[1]; name='pin-two'}, @{row=$list[0]; name='list-one'})) {
         $live = Wait-For 'current clicked robot position' {
             $v = @(Layouts | Where-Object { $_.size -eq $entry.row.size -and $_.face -eq $entry.row.face -and $_.color -eq $entry.row.color })
@@ -312,7 +312,7 @@ try {
         [void](Wait-For "theme $($theme.name) persisted" { (Get-Content "$settings/theme-mode.txt" -Raw).Trim() -eq $theme.name })
         [ChatDeliveryDesktop]::Chord(@(0x1b))
         $sidebarRows = Wait-For "sidebar colors $($theme.name)" {
-            $v = @(Layouts | Where-Object { ($_.size -eq (Px 56) -or $_.size -eq (Px 40)) -and $_.x -ge 0 -and $_.right -le (Px 300) -and $_.y -ge 0 -and $_.bottom -le $client.Bottom })
+            $v = @(Layouts | Where-Object { ($_.size -eq (Px 56) -or $_.size -eq (Px 36)) -and $_.x -ge 0 -and $_.right -le (Px 300) -and $_.y -ge 0 -and $_.bottom -le $client.Bottom })
             if (@($v | ForEach-Object { $_.color } | Select-Object -Unique).Count -eq 8) { ,$v }
         }
         foreach ($row in $sidebarRows) { Check-Pixels $row "sidebar-$($theme.name)-$($row.color)" }
