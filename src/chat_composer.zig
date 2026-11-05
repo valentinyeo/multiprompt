@@ -80,9 +80,7 @@ const BeginPaint = @import("win32.zig").BeginPaint;
 const EndPaint = @import("win32.zig").EndPaint;
 const GetDC = @import("win32.zig").GetDC;
 const ReleaseDC = @import("win32.zig").ReleaseDC;
-const ShowScrollBar = @import("win32.zig").ShowScrollBar;
-const SB_VERT = @import("win32.zig").SB_VERT;
-const EM_SCROLLCARET = @import("win32.zig").EM_SCROLLCARET;
+const scroll_ui = @import("chat_scrollbar.zig");
 const FillRect = @import("win32.zig").FillRect;
 const DrawTextW = @import("win32.zig").DrawTextW;
 const chatDrawText = @import("dwrite_text.zig").draw;
@@ -116,7 +114,10 @@ const SendMessageW = @import("win32.zig").SendMessageW;
 const CallWindowProcW = @import("win32.zig").CallWindowProcW;
 const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
+const GET_X = @import("startup.zig").GET_X;
 const GET_Y = @import("startup.zig").GET_Y;
+const SetCapture = @import("win32.zig").SetCapture;
+const ReleaseCapture = @import("win32.zig").ReleaseCapture;
 const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
 const customColorOr = @import("themes.zig").customColorOr;
 const themeConsoleBg = @import("themes.zig").themeConsoleBg;
@@ -748,14 +749,135 @@ fn chatComposerAutoGrow() void {
         layoutChatControls();
     } else {
         chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
-        _ = SendMessageW(app_state.g_chat_composer_hwnd, EM_SCROLLCARET, 0, 0);
+        chatComposerKeepCaretVisible();
     }
 }
 
 fn chatComposerSetScrollBar(show: bool) void {
     if (show == app_state.g_chat_composer_scroll_shown or app_state.g_chat_composer_hwnd == null) return;
     app_state.g_chat_composer_scroll_shown = show;
-    _ = ShowScrollBar(app_state.g_chat_composer_hwnd, SB_VERT, if (show) 1 else 0);
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 0);
+}
+
+const EM_GETLINECOUNT: UINT = 0x00BA;
+const EM_LINEINDEX: UINT = 0x00BB;
+const EM_LINEFROMCHAR: UINT = 0x00C9;
+const EM_GETFIRSTVISIBLELINE: UINT = 0x00CE;
+const EM_POSFROMCHAR: UINT = 0x00D6;
+const EM_LINESCROLL: UINT = 0x00B6;
+
+const ComposerLines = struct { first: i32, visible: i32, total: i32 };
+
+fn chatComposerCharY(hwnd: HANDLE, index: isize) ?i32 {
+    const packed_point: u32 = @truncate(@as(usize, @bitCast(SendMessageW(hwnd, EM_POSFROMCHAR, @intCast(@max(0, index)), 0))));
+    if (packed_point == 0xffffffff) return null;
+    return @as(i16, @bitCast(@as(u16, @truncate(packed_point >> 16))));
+}
+
+fn chatComposerNativeLineH(hwnd: HANDLE, total: isize) i32 {
+    if (total >= 2) {
+        const y0 = chatComposerCharY(hwnd, SendMessageW(hwnd, EM_LINEINDEX, 0, 0));
+        const y1 = chatComposerCharY(hwnd, SendMessageW(hwnd, EM_LINEINDEX, 1, 0));
+        if (y0 != null and y1 != null and y1.? > y0.?) return y1.? - y0.?;
+    }
+    return chatComposerLineH();
+}
+
+fn chatComposerLines(hwnd: HANDLE) ComposerLines {
+    var rect: RECT = std.mem.zeroes(RECT);
+    _ = SendMessageW(hwnd, 0x00B2, 0, @bitCast(@intFromPtr(&rect)));
+    const total = SendMessageW(hwnd, EM_GETLINECOUNT, 0, 0);
+    const line_h = @max(1, chatComposerNativeLineH(hwnd, total));
+    return .{
+        .first = @intCast(SendMessageW(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0)),
+        .visible = @max(1, @divTrunc(rect.bottom - rect.top, line_h)),
+        .total = @intCast(@min(total, 100000)),
+    };
+}
+
+fn chatComposerScrollLines(hwnd: HANDLE, delta: i32) void {
+    if (delta == 0) return;
+    _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, EM_LINESCROLL, 0, @as(isize, delta));
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+fn chatComposerKeepCaretVisible() void {
+    const hwnd = app_state.g_chat_composer_hwnd;
+    if (hwnd == null) return;
+    var start: u32 = 0;
+    var end: u32 = 0;
+    _ = SendMessageW(hwnd, 0x00B0, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+    const caret: i32 = @intCast(SendMessageW(hwnd, EM_LINEFROMCHAR, end, 0));
+    const lines = chatComposerLines(hwnd);
+    chatComposerScrollLines(hwnd, scroll_ui.caretScrollLines(lines.first, lines.visible, lines.total, caret));
+}
+
+fn chatComposerEditMessage(msg: UINT, wp: WPARAM) bool {
+    if (msg == WM_KEYDOWN) return !(wp >= 0x10 and wp <= 0x12) and !(wp >= 0xA0 and wp <= 0xA5);
+    return msg == 0x0102 or msg == 0x000C or msg == 0x00C2 or msg == 0x0300 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304 or msg == 0x00C7;
+}
+
+fn chatComposerThumb(hwnd: HANDLE, track_h: i32) ?scroll_ui.Span {
+    const lines = chatComposerLines(hwnd);
+    return scroll_ui.fixedThumb(lines.total, lines.visible, lines.first, track_h, uiScaled(scroll_ui.THUMB_HEIGHT_PX));
+}
+
+fn chatComposerPaintScroll(hwnd: HANDLE, dc: HANDLE, client: RECT) void {
+    const span = chatComposerThumb(hwnd, client.bottom - client.top) orelse return;
+    const width = uiScaled(scroll_ui.THUMB_WIDTH_PX);
+    const x = client.right - uiScaled(scroll_ui.THUMB_MARGIN_PX) - width;
+    const thumb = RECT{ .left = x, .top = client.top + span.top, .right = x + width, .bottom = client.top + span.top + span.height };
+    @import("chat_render.zig").fillRoundRectAA(dc, thumb, @divTrunc(width, 2), chat_style.scrollThumbColor(app_state.g_chat_input_color));
+}
+
+var chat_composer_scroll_grab: ?i32 = null;
+
+fn chatComposerScrollDragTo(hwnd: HANDLE, y: i32, grab: i32) void {
+    var client: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(hwnd, &client) == 0) return;
+    const track = client.bottom - client.top;
+    const span = chatComposerThumb(hwnd, track) orelse return;
+    const lines = chatComposerLines(hwnd);
+    const target = scroll_ui.scrollForThumbTop(lines.total, lines.visible, track, span.height, y - grab);
+    chatComposerScrollLines(hwnd, scroll_ui.clampedLineScroll(lines.first, target - lines.first, lines.visible, lines.total));
+}
+
+fn chatComposerScrollMouse(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
+    if (hwnd != app_state.g_chat_composer_hwnd) return false;
+    switch (msg) {
+        0x020A => {
+            const lines = chatComposerLines(hwnd);
+            if (lines.total <= lines.visible) return false;
+            const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+            chatComposerScrollLines(hwnd, scroll_ui.clampedLineScroll(lines.first, scroll_ui.wheelLines(delta, 3), lines.visible, lines.total));
+            return true;
+        },
+        0x0201 => {
+            var client: RECT = std.mem.zeroes(RECT);
+            if (GetClientRect(hwnd, &client) == 0) return false;
+            if (GET_X(lp) < client.right - uiScaled(16)) return false;
+            const track = client.bottom - client.top;
+            const span = chatComposerThumb(hwnd, track) orelse return false;
+            const y = GET_Y(lp);
+            const grab = if (y >= span.top and y < span.top + span.height) y - span.top else @divTrunc(span.height, 2);
+            chat_composer_scroll_grab = grab;
+            _ = SetCapture(hwnd);
+            chatComposerScrollDragTo(hwnd, y, grab);
+            return true;
+        },
+        0x0200 => {
+            const grab = chat_composer_scroll_grab orelse return false;
+            chatComposerScrollDragTo(hwnd, GET_Y(lp), grab);
+            return true;
+        },
+        0x0202 => {
+            if (chat_composer_scroll_grab == null) return false;
+            chat_composer_scroll_grab = null;
+            _ = ReleaseCapture();
+            return true;
+        },
+        else => return false,
+    }
 }
 var chat_frame_logged: [12]i32 = @splat(std.math.minInt(i32));
 
@@ -815,7 +937,7 @@ pub fn layoutChatControls() void {
     }
     @import("chat_float.zig").syncChatRegion();
     chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
-    _ = SendMessageW(app_state.g_chat_composer_hwnd, EM_SCROLLCARET, 0, 0);
+    chatComposerKeepCaretVisible();
     chatAcLayout();
 }
 
@@ -1425,9 +1547,11 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         return 0;
     }
     if (!@import("room_frontend.zig").privateActionsAllowed() and (msg == WM_KEYDOWN or msg == 0x0102 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304)) return 0;
+    defer if (hwnd == app_state.g_chat_composer_hwnd and chatComposerEditMessage(msg, wp)) chatComposerKeepCaretVisible();
     const redraw = @import("chat_composer_text.zig").suspendNativePaint(hwnd, msg);
     defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
     if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
+    if (chatComposerScrollMouse(hwnd, msg, wp, lp)) return 0;
     if (msg == 0x0233) {
         if (!@import("room_frontend.zig").privateActionsAllowed()) { @import("win32.zig").DragFinish(@ptrFromInt(wp)); return 0; }
         chatDropFiles(@ptrFromInt(wp));
@@ -1551,6 +1675,7 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
         defer @import("chat_composer_text.zig").native_paint = false;
         _ = CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x0318, @intFromPtr(dc), 4);
     }
+    chatComposerPaintScroll(hwnd, dc, client);
     return w.BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, w.GDI_SRCCOPY) != 0;
 }
 
@@ -1612,6 +1737,9 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
             _ = SelectObject(dc, ensureChatFont());
             _ = SetTextColor(dc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
             _ = chatDrawText(dc, L("Message this session"), -1, &rc, DT_SINGLELINE | DT_NOPREFIX);
+        } else {
+            var client: RECT = std.mem.zeroes(RECT);
+            if (GetClientRect(hwnd, &client) != 0) chatComposerPaintScroll(hwnd, dc, client);
         }
         return result;
     }
@@ -3033,4 +3161,43 @@ test "IGSH-1266 Enter sends from the key down and leaves the composer text alone
     app_state.g_chat_enter_key_sent_tick = 0;
     _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
     try std.testing.expect(w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1) != 0);
+}
+
+test "IGSH-1761 long pasted text leaves the composer scrolled so the caret line is in view" {
+    const w = @import("win32.zig");
+    const saved = .{ .composer = app_state.g_chat_composer_hwnd, .orig = app_state.g_chat_composer_orig_proc };
+    defer {
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 600, 400, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L(""), WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, 0, 0, 400, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    _ = ShowWindow(parent, 4);
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    var text: [512]u16 = undefined;
+    var len: usize = 0;
+    for (0..40) |row| {
+        text[len] = 'a' + @as(u16, @intCast(row % 26));
+        text[len + 1] = '\r';
+        text[len + 2] = '\n';
+        len += 3;
+    }
+    text[len] = 0;
+    _ = SetWindowTextW(edit, text[0..len :0].ptr);
+    _ = SendMessageW(edit, 0x00B1, len, @intCast(len));
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(edit, &client);
+    chatComposerKeepCaretVisible();
+    const lines = chatComposerLines(edit);
+    const caret_line: i32 = @intCast(SendMessageW(edit, EM_LINEFROMCHAR, len, 0));
+    try std.testing.expect(lines.total > lines.visible);
+    try std.testing.expect(lines.first > 0);
+    try std.testing.expect(caret_line >= lines.first and caret_line < lines.first + lines.visible);
+    try std.testing.expect(chatComposerThumb(edit, client.bottom - client.top) != null);
+    _ = SendMessageW(edit, 0x00B1, 0, 0);
+    chatComposerKeepCaretVisible();
+    try std.testing.expectEqual(@as(i32, 0), chatComposerLines(edit).first);
 }
