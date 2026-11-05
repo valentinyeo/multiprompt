@@ -212,9 +212,15 @@ try {
     Shot 'create-members'
     Press @(0x11,0x0d)
     [void](Wait-For 'room saved through remote store' { $w=Witness; $w -and @($w.rooms).Count -eq 1 -and @($w.rooms[0].members).Count -eq 2 })
-    $room = Wait-For 'room composer' { $h=Room-Window; if ($h -and [ChatDeliveryDesktop]::Composer($h) -ne [IntPtr]::Zero) { $h } }
-    $composer = [ChatDeliveryDesktop]::Composer($room)
-    [void](Wait-For 'composer owns focus' { [ChatDeliveryDesktop]::Focus($main)[1] -eq $composer.ToInt64() })
+    $earlyComposer = [ChatDeliveryDesktop]::Composer((Room-Window))
+    $composer = Wait-For 'room composer owns focus' {
+        $room = Room-Window
+        if (!$room) { return $false }
+        $candidate = [ChatDeliveryDesktop]::Composer($room)
+        $focused = [ChatDeliveryDesktop]::Focus($main)[1]
+        Save @{name=$nameEdit.ToInt64(); early=$earlyComposer.ToInt64(); candidate=$candidate.ToInt64(); focused=$focused} (Join-Path $Evidence 'composer-selection.json')
+        if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $nameEdit -and $focused -eq $candidate.ToInt64()) { $candidate }
+    }
     [void](Wait-For 'created room selected by the app' {
         try {
             $files=@(Get-ChildItem $settings -Filter 'room-ui-*.json')

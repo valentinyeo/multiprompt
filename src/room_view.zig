@@ -1243,8 +1243,10 @@ test "IGSH-1697 synthetic native create and room paint" {
                 try std.testing.expectEqual(Mode.create, view.mode);
                 view.completeAction(action, .accepted);
             } else view.completeAction(action, .accepted);
-            try std.testing.expectEqual(Mode.room, view.mode);
-            try std.testing.expect(view.pending == null);
+            try std.testing.expectEqual(Mode.create, view.mode);
+            try std.testing.expectEqual(action, view.pending.?);
+            try std.testing.expect(w.IsWindowVisible(view.name_edit) != 0);
+            try std.testing.expect(w.IsWindowVisible(view.composer) == 0);
             std.debug.print("IGSH-1697 {s} iteration {d}: pre-publication paint\n", .{ @tagName(response), iteration });
             view.presented_revision = 99;
             try std.testing.expect(w.InvalidateRect(view.hwnd, null, 0) != 0);
