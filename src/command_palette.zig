@@ -1143,7 +1143,8 @@ test "palette recency bands cannot be overpowered by lifetime frequency" {
     try std.testing.expect(paletteFrecencyAt(same_band_often, now) > paletteFrecencyAt(same_band_once, now));
 }
 
-fn paletteResultOutranks(key: usize, prev: usize, now: u64) bool {
+fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, now: u64) bool {
+    if (key_kind != prev_kind) return key_kind < prev_kind;
     if (app_state.g_search_len > 0) {
         const key_match = paletteQueryRank(key);
         const prev_match = paletteQueryRank(prev);
@@ -1166,18 +1167,111 @@ fn paletteResultOutranks(key: usize, prev: usize, now: u64) bool {
 
 fn sortSearchResultsByRank() void {
     const now = nowFileTime();
+    var kinds: [app_state.g_search_results.len]u8 = undefined;
+    for (app_state.g_search_results[0..app_state.g_search_result_count], 0..) |target, i| {
+        kinds[i] = 0;
+        if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) {
+            const index = target - SEARCH_WORKSPACE_OFFSET;
+            if (index < app_state.g_workspace_count) {
+                const workspace = &app_state.g_workspaces[index];
+                kinds[i] = if (@import("workspaces.zig").workspaceIsLiveAnywhere(workspace.id[0..workspace.id_len])) 1 else 2;
+            }
+        }
+    }
     var i: u32 = 1;
     while (i < app_state.g_search_result_count) : (i += 1) {
         const key = app_state.g_search_results[i];
+        const key_kind = kinds[i];
         var j = i;
         while (j > 0) {
             const prev = app_state.g_search_results[j - 1];
-            if (!paletteResultOutranks(key, prev, now)) break;
+            if (!paletteResultOutranks(key, prev, key_kind, kinds[j - 1], now)) break;
             app_state.g_search_results[j] = prev;
+            kinds[j] = kinds[j - 1];
             j -= 1;
         }
         app_state.g_search_results[j] = key;
+        kinds[j] = key_kind;
     }
+}
+
+test "session and workspace ranking beats exact matches and frecency" {
+    const old_shell_name = app_state.shells[0].name;
+    const old_shell_name_len = app_state.shells[0].name_len;
+    const old_shell_count = app_state.shell_count;
+    var old_workspaces: [2 * @sizeOf(app_state.WorkspaceEntry)]u8 = undefined;
+    @memcpy(&old_workspaces, std.mem.sliceAsBytes(app_state.g_workspaces[0..2]));
+    const old_workspace_count = app_state.g_workspace_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_single = app_state.g_single_window;
+    const old_lws_count = app_state.g_lws_count;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_lengths = app_state.g_ws_id_len;
+    defer {
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.g_single_window = old_single;
+        app_state.g_lws_count = old_lws_count;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_lengths;
+        app_state.shells[0].name = old_shell_name;
+        app_state.shells[0].name_len = old_shell_name_len;
+        app_state.shell_count = old_shell_count;
+        @memcpy(std.mem.sliceAsBytes(app_state.g_workspaces[0..2]), &old_workspaces);
+        app_state.g_workspace_count = old_workspace_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+    }
+    app_state.shell_count = 1;
+    for ("Funeralprints", 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = 13;
+    app_state.g_workspace_count = 2;
+    for (0..2) |i| {
+        app_state.g_workspaces[i] = std.mem.zeroes(app_state.WorkspaceEntry);
+        @memcpy(app_state.g_workspaces[i].name[0..4], "fune");
+        app_state.g_workspaces[i].name_len = 4;
+    }
+    for ("fune", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 4;
+    app_state.g_palette_usage_count = 1;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_SOUND_OFFSET, .count = 1000, .last_used = 100 };
+    const live = SEARCH_WORKSPACE_OFFSET;
+    const closed = live + 1;
+    app_state.g_single_window = true;
+    app_state.g_lws_count = 1;
+    @memcpy(app_state.g_ws_ids[0][0..12], "fixture-live");
+    app_state.g_ws_id_len[0] = 12;
+    @memcpy(app_state.g_workspaces[0].id[0..12], "fixture-live");
+    app_state.g_workspaces[0].id_len = 12;
+    app_state.g_workspaces[1].id_len = 0;
+    try std.testing.expect(paletteUsageKey(live) == null);
+    try std.testing.expect(paletteUsageKey(closed) == null);
+    try std.testing.expect(paletteQueryRank(closed) > paletteQueryRank(0));
+    @memcpy(app_state.g_search_results[0..3], &[_]usize{ closed, live, 0 });
+    app_state.g_search_result_count = 3;
+    sortSearchResultsByRank();
+    try std.testing.expectEqualSlices(usize, &.{ 0, live, closed }, app_state.g_search_results[0..3]);
+    try std.testing.expect(paletteResultOutranks(0, closed, 0, 2, 100));
+    try std.testing.expect(paletteResultOutranks(0, live, 0, 1, 100));
+    try std.testing.expect(paletteResultOutranks(live, closed, 1, 2, 100));
+    try std.testing.expect(!paletteResultOutranks(closed, 0, 2, 0, 100));
+    app_state.g_search_len = 0;
+    @memcpy(app_state.g_search_results[0..4], &[_]usize{ closed, live, 0, SEARCH_SOUND_OFFSET });
+    app_state.g_search_result_count = 4;
+    sortSearchResultsByRank();
+    try std.testing.expectEqualSlices(usize, &.{ SEARCH_SOUND_OFFSET, 0, live, closed }, app_state.g_search_results[0..4]);
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, live, 0, 1, 100));
+    try std.testing.expect(paletteResultOutranks(live, closed, 1, 2, 100));
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, closed, 0, 2, 100));
+    try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, 0, 0, 100));
+    try std.testing.expect(!paletteResultOutranks(SEARCH_THEME_MENU_OFFSET, SEARCH_SOUND_OFFSET, 0, 0, 100));
 }
 
 fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
@@ -1312,7 +1406,7 @@ fn groupEmptyPaletteResults(lead: usize) void {
             .group = paletteGroupOf(target) orelse PALETTE_GROUP_SESSIONS,
             .command = command,
             .safe = !paletteTargetIsDestructive(target),
-            .used = false,
+            .used = target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES,
             .usage = if (command) paletteUsageFor(target) else .{},
             .label = (if (command) palettePrimaryLabel(target) else null) orelse "",
         };
@@ -1362,6 +1456,11 @@ fn groupEmptyPaletteResults(lead: usize) void {
             g_palette_order_out[out_len] = rows[i].target;
             out_len += 1;
         }
+    }
+    for (rows) |row| {
+        if (row.target < SEARCH_WORKSPACE_OFFSET or row.target >= SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) continue;
+        g_palette_order_out[out_len] = row.target;
+        out_len += 1;
     }
     @memcpy(app_state.g_search_results[0..out_len], g_palette_order_out[0..out_len]);
     app_state.g_search_result_count = @intCast(out_len);
@@ -1435,6 +1534,11 @@ test "empty Ctrl K lists most used commands first, then job groups with safe com
         &.{ 3, 7, 2000, SEARCH_SHELL_DIAG_OFFSET },
         1,
         &.{ 3, H + 1, 2000, 7, H + 5, SEARCH_SHELL_DIAG_OFFSET },
+    );
+    try expectGroupedPalette(
+        &.{ SEARCH_WORKSPACE_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_WORKSPACE_OFFSET + 1 },
+        0,
+        &.{ H + 4, SEARCH_SOUND_OFFSET, SEARCH_WORKSPACE_OFFSET, SEARCH_WORKSPACE_OFFSET + 1 },
     );
 }
 
