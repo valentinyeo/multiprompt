@@ -139,3 +139,20 @@ test('fixture cleanup snapshots each live process path once and tolerates inacce
   assert.match(cleanup, /Stop-Process -Id \$_\.Id -Force -ErrorAction SilentlyContinue/);
   assert.match(cleanup, /WaitForExit\(5000\)/);
 });
+
+test('update card journey uses checked native input and reads a live log', () => {
+  const suite = read('tools/update-release.test.ps1');
+  const click = suite.split('function Click-CardMore($View) {')[1].split('function Select-Release')[0];
+  assert.match(click, /SetThreadDpiAwarenessContext\(\[IntPtr\]\(-4\)\)/);
+  assert.match(click, /WindowFromPoint\(\$point\) -eq \$hwnd/);
+  assert.match(click, /GetForegroundWindow\(\) -eq \$hwnd/);
+  assert.match(click, /SetCursorPos\(\$point\.X, \$point\.Y\)[\s\S]*\[UpdateProof\]::Click\(\)/);
+  assert.match(suite, /SendInput\(1, new Input\[\] \{ input \}, Marshal.SizeOf\(typeof\(Input\)\)\) != 1/);
+  assert.match(suite, /new uint\[\] \{ 2, 4 \}/);
+  assert.match(suite, /Click-CardMore \$collapsed\s+\$expanded = Wait-CardView \$log \$collapsed\.logEnd 'expanded'/);
+  assert.match(suite, /Click-CardMore \$expanded\s+\$null = Wait-CardView \$log \$expanded\.logEnd 'collapsed'/);
+  assert.match(suite, /\[IO\.FileShare\]::ReadWrite -bor \[IO\.FileShare\]::Delete/);
+  assert.match(suite, /catch \[IO\.IOException\] \{\s+if \(\[DateTime\]::UtcNow -gt \$deadline\) \{ throw \}/);
+  assert.match(suite, /shared log reads while writer remains open/);
+  assert.doesNotMatch(suite, /\[IO\.File\]::ReadAllText\(\$Path\)|Get-Content \$log -Raw/);
+});
