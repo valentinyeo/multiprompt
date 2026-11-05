@@ -140,11 +140,18 @@ class BoardFeedbackTest(unittest.TestCase):
         task = board['tasks'][0]
         self.assertEqual(task['title'], 'Multibot wish: browser screenshots')
         self.assertEqual({label['name'] for label in task['labels']}, {'Multiprompt', 'Agent Feedback'})
+        self.assertIn(task['ticketNumber'], board['comments'])
         self.assertEqual(len(board['comments'][task['ticketNumber']]), 2)
+        for heading in ('Problem', 'Fix', 'Done when', 'Risk', 'Decision'):
+            self.assertIn('<strong>' + heading + '</strong>', task['description'])
+        self.assertIn('Capture is slow', task['description'])
+        self.assertIn('Browser  screenshots', task['description'])
+        self.assertIn('The requested capability works in Multibot.', task['description'])
         self.assertIn('1.2.3', task['description'])
         self.assertIn('codex', task['description'])
         for private in ('private-workspace', 'private-chat', 'credential-one', str(self.home)):
             self.assertNotIn(private, json.dumps(board))
+        self.assertTrue(self.log.exists())
         self.assertEqual(len(self.log.read_text().splitlines()), 3)
         self.assertIn('private-chat', self.log.read_text())
 
@@ -182,7 +189,9 @@ class BoardFeedbackTest(unittest.TestCase):
         retry = self.run_cli('a safe feature')
         self.assertIn('Feedback voted:', retry.stdout)
         self.assertEqual(len(self.read_board()['tasks']), 1)
-        self.assertEqual(len(next(iter(self.read_board()['comments'].values()))), 1)
+        comments = self.read_board()['comments']
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(len(next(iter(comments.values()))), 1)
 
     def test_simultaneous_submissions_and_retry_share_one_ticket_and_vote(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
@@ -191,6 +200,7 @@ class BoardFeedbackTest(unittest.TestCase):
         self.assertTrue(all('Feedback ' in result.stdout and 'Board submission not confirmed' not in result.stdout for result in results))
         board = self.read_board()
         self.assertEqual(len(board['tasks']), 1)
+        self.assertIn(board['tasks'][0]['ticketNumber'], board['comments'])
         self.assertEqual(len(board['comments'][board['tasks'][0]['ticketNumber']]), 1)
 
     def test_full_activity_window_refuses_unverifiable_vote(self):
@@ -228,6 +238,32 @@ class BoardFeedbackTest(unittest.TestCase):
                 self.assertIn('Board submission not confirmed', result.stdout)
                 self.assertNotIn('agent-one', result.stdout + result.stderr)
         self.assertEqual(self.read_board()['tasks'], [])
+        self.assertTrue(self.log.exists())
         self.assertEqual(len(self.log.read_text().splitlines()), 5)
+        self.assertTrue(self.calls.exists())
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertFalse(any(call[1:3] in (['task', 'create'], ['comment', 'add']) for call in calls))
+
+    def test_common_session_names_do_not_block_wishes_or_attach_context(self):
+        for session, wish in [('k', 'keyboard shortcut'), ('browser', 'browser capture')]:
+            with self.subTest(session=session):
+                result = self.run_cli(wish, MULTIBOT_SESSION=session)
+                self.assertIn('Feedback submitted:', result.stdout)
+        board = self.read_board()
+        self.assertEqual(len(board['tasks']), 2)
+        for private in ('private-workspace', 'private-chat', str(self.home)):
+            self.assertNotIn(private, json.dumps(board))
+        self.assertNotIn('Session type: browser', json.dumps(board))
+        self.assertNotIn('Session type: k', json.dumps(board))
+
+    def test_description_escapes_deliberate_input(self):
+        result = self.run_cli('capture <screen>', '--why', 'Less <work> & time')
+        self.assertIn('Feedback submitted:', result.stdout)
+        tasks = self.read_board()['tasks']
+        self.assertEqual(len(tasks), 1)
+        self.assertIn('capture &lt;screen&gt;', tasks[0]['description'])
+        self.assertIn('Less &lt;work&gt; &amp; time', tasks[0]['description'])
+
+
+if __name__ == '__main__':
+    unittest.main()

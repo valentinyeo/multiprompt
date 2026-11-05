@@ -71,7 +71,7 @@ def contains_secret(text):
 
 def safe_text(*parts):
     text = '\n'.join(parts)
-    private = [os.getcwd(), os.path.basename(os.getcwd()), str(Path.home()), session_name()]
+    private = [os.getcwd(), str(Path.home())]
     if any(value and value in text for value in private) or contains_secret(text):
         return False
     return not re.search(r'(?i)(?:https?://|(?:^|\s)(?:/|~/|[a-z]:\\)|\b[\w.-]+/[\w./-]+)', text)
@@ -221,7 +221,12 @@ def submit_locked(row, agent, title, version, provider):
         raise BoardError('duplicate wishes require review')
     created = not active
     if created:
-        description = '<p>Want: ' + html.escape(row['want']) + '</p><p>Why: ' + html.escape(row['why']) + '</p><p>App version: ' + html.escape(version) + '</p><p>Session type: ' + provider + '</p>'
+        description = ('<p><strong>Problem</strong></p><p>' + html.escape(row['why'] or 'No reason provided.') + '</p>'
+                       '<p><strong>Fix</strong></p><p>' + html.escape(row['want']) + '</p>'
+                       '<p><strong>Done when</strong></p><p>The requested capability works in Multibot.</p>'
+                       '<p><strong>Risk</strong></p><p>Review the wish before building. Undo changes if needed.</p>'
+                       '<p><strong>Decision</strong></p><p>None.</p>'
+                       '<p>App version: ' + html.escape(version) + '</p><p>Session type: ' + html.escape(provider) + '</p>')
         response = cli('task', 'create', '--project', PROJECT, '--title', title,
                        '--description', description, '--labels', 'Agent Feedback,Multiprompt')
         if response.get('success') is not True:

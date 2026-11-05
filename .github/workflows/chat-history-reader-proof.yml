@@ -101,7 +101,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Verify feedback stand-ins
-        run: python3 -m unittest discover -s tools -p multibot_feedback_test.py
+        run: python3 tools/multibot-feedback-test.py
       - name: Capture fresh Codex guidance
         run: |
           mkdir -p evidence

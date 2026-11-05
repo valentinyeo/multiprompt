@@ -19,7 +19,7 @@ import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-FEEDBACK_SPEC = importlib.util.spec_from_file_location('multibot_feedback_test', ROOT / 'tools/multibot_feedback_test.py')
+FEEDBACK_SPEC = importlib.util.spec_from_file_location('multibot_feedback_test', ROOT / 'tools/multibot-feedback-test.py')
 FEEDBACK_TESTS = importlib.util.module_from_spec(FEEDBACK_SPEC)
 FEEDBACK_SPEC.loader.exec_module(FEEDBACK_TESTS)
 BoardFeedbackTest = FEEDBACK_TESTS.BoardFeedbackTest

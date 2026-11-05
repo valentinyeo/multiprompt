@@ -8,7 +8,7 @@ To describe a missing capability:
 multibot-feedback "a browser screenshot shortcut" --why "capturing a screenshot takes too many steps"
 ```
 
-Each wish is saved in the local user's private feedback log first. The local record keeps session and working-folder context. Never put credentials in feedback. The command rejects known credentials and refuses to send paths or session names to the board. Review the deliberate want and why before submitting; automatic checks cannot recognize every secret.
+Each wish is saved in the local user's private feedback log first. The local record keeps session and working-folder context. Never put credentials in feedback. The command rejects known credentials and paths. Session names and folder names are not attached automatically. Review the deliberate want and why before submitting; automatic checks cannot recognize every secret.
 
 Board submission requires the installed `hypertask` CLI and an already-authorized agent's `HT_TOKEN` in that agent's environment. No token is bundled or saved by this command. The command checks that the explicit token authenticates an agent. It never falls back to the CLI's saved login for a write. A different workspace account does not inherit the host account's token.
 
