@@ -628,6 +628,10 @@ pub fn build(b: *std.Build) void {
     chat_skill_tab_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_skill_tab_tests.step);
     vps_test_step.dependOn(&chat_skill_tab_tests.step);
+    const room_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/room-reply-grouping.test.js" });
+    room_reply_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&room_reply_tests.step);
+    vps_test_step.dependOn(&room_reply_tests.step);
     const chat_drafts_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-drafts.test.js" });
     chat_drafts_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drafts_tests.step);
