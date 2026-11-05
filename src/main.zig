@@ -3171,6 +3171,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_QUIT_ALL => {
+            if (wp == 1) {
+                quitAllZigShellWindows(hwnd);
+                return 0;
+            }
             app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
             app_state.requestAppClose(hwnd, .quit_all);
@@ -6356,9 +6360,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_RENAME_SYNC_OFFSET) {
-                    if (app_state.active_shell < app_state.shell_count) {
-                        _ = beginPaletteRenameInput(app_state.active_shell);
-                    }
+                    const index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    if (index) |ti| _ = beginPaletteRenameInput(ti);
                     return 0;
                 }
                 if (target == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET) {
@@ -6991,7 +6994,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_workspace_delete_confirm = null;
                     app_state.g_search_ws_sort_mode = false;
                     app_state.g_search_theme_mode = false;
-                    app_state.g_wsmove_tab_sid = app_state.g_tabctx_sid;
+                    app_state.g_wsmove_tab_sid = if (app_state.g_tabctx_sid != 0) app_state.g_tabctx_sid else if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
@@ -7078,10 +7081,34 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
+                if (target == app_state.SEARCH_TABCTX_UNREAD or target == app_state.SEARCH_TABCTX_COPY_ID or target == app_state.SEARCH_TABCTX_HIDE) {
+                    const index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (index) |ti| {
+                        if (target == app_state.SEARCH_TABCTX_UNREAD) {
+                            @import("sidebar.zig").markShellUnread(ti);
+                        } else if (target == app_state.SEARCH_TABCTX_HIDE) {
+                            closeShell(ti);
+                        } else {
+                            const shell = &app_state.shells[ti];
+                            var local_id: [16]u8 = undefined;
+                            const id = if (shell.claude_sid_len > 0) shell.claude_sid[0..shell.claude_sid_len] else if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else std.fmt.bufPrint(&local_id, "{d}", .{shell.shell_id}) catch return 0;
+                            var wide_id: [128]u16 = undefined;
+                            const len = std.unicode.utf8ToUtf16Le(&wide_id, id) catch return 0;
+                            if (!@import("clipboard.zig").setUnicodeClipboardTextWithRetry(wide_id[0..len])) showHeaderNoticeAscii("Could not copy chat ID", 3000, true);
+                        }
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
-                    const tc_sid = if (target == SEARCH_TABCTX_START_SESSION and app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
+                    const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
                     const tc_sel_mode = selectedTabCount() > 0;
                     var rename_group_idx: ?u32 = null;
                     if (findShellById(tc_sid)) |ti| {
@@ -7130,7 +7157,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         } else if (target == SEARCH_TABCTX_ARCHIVE) {
                             if (app_state.shells[ti].tmux_session_len > 0) archiveTabAt(ti) else closeNonTmuxTabAt(ti);
                         } else if (target == SEARCH_TABCTX_END_TMUX) {
-                            if (app_state.shells[ti].tmux_session_len > 0) endTmuxSessionAt(ti);
+                            if (app_state.shells[ti].tmux_session_len > 0) endTmuxSessionAt(ti) else closeNonTmuxTabAt(ti);
                         } else if (target == SEARCH_TABCTX_BROWSER) {
                             const from_computer = computer.chosenFor(ti);
                             computer.chooseBrowser(ti);

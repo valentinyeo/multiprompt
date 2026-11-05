@@ -756,7 +756,7 @@ pub fn noteRestoredBlueDot(i: usize) void {
     _ = setBlueDot(i, .restore, false);
 }
 
-fn markShellUnread(idx: usize) void {
+pub fn markShellUnread(idx: usize) void {
     if (idx >= app_state.shell_count) return;
     _ = setBlueDot(idx, .manual, false);
     if (app_state.shells[idx].inbox_archived) logUnarchive(idx, "explicit mark unread");
@@ -2889,7 +2889,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         if (view.favorite and !app_state.g_starred_workspace) drawRobotMarker(hdc, avatar_rc, .favorite, row_color);
                     }
 
-                    if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
+                    const action_index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    const action_pinned = if (action_index) |ti| effPinnedTop(ti) else false;
+                    if (@import("command_palette.zig").chatActionLabel(result_idx, action_pinned)) |label| {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (result_idx == SEARCH_TABCTX_END_TMUX) RGB(220, 70, 70) else primary_color);
+                        var wide: [64]u16 = undefined;
+                        const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                        var rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        if (result_idx == SEARCH_TABCTX_END_TMUX) {
+                            _ = SelectObject(hdc, palette_hint_font);
+                            var hint = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        }
+                    } else if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var text: [80]u8 = undefined;

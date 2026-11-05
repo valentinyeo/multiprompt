@@ -117,8 +117,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Close active tab / session |
-| Ctrl+Shift+W | Close active session completely (tmux kill + tab close) |
+| Ctrl+W | Quit the app; keep server agents and saved chats |
+| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
 | Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
@@ -157,6 +159,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | j/k or Alt+J/K  gg/G or Alt+G Alt+G / Alt+Shift+G  1-9 | Move / top / bottom / jump row |
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
+| Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
+| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -184,7 +188,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
-| Alt+X | Archive tmux session; close non-tmux tab (press twice; also on inbox rows) |
 | Ctrl+D in Chat View | Start/stop dictation; Enter stops recording into the composer; Escape discards the recording |
 | Ctrl+Shift+Space / Enter | Start/stop dictation; Enter is stop-only while recording; Escape discards the recording |
 
