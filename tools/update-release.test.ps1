@@ -26,17 +26,22 @@ function Wait-File([string]$Path) {
         Start-Sleep -Milliseconds 100
     }
 }
-function Read-SharedLog([string]$Path) {
+function Read-SharedLog([string]$Path, [switch]$Polling) {
     $deadline = [DateTime]::UtcNow.AddSeconds(3)
     do {
         try {
-            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
             try {
                 $reader = New-Object IO.StreamReader($stream)
                 try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
             } finally { $stream.Dispose() }
-        } catch [IO.FileNotFoundException] { return '' }
-        catch [IO.IOException] {
+        } catch {
+            $cause = $_.Exception.GetBaseException()
+            if ($cause -isnot [IO.IOException]) { throw }
+            $code = $cause.HResult -band 0xffff
+            if ($code -in @(2, 3)) { return '' }
+            if ($code -notin @(32, 33)) { throw }
+            if ($Polling) { return '' }
             if ([DateTime]::UtcNow -gt $deadline) { throw }
             Start-Sleep -Milliseconds 25
         }
@@ -46,7 +51,7 @@ function Wait-CardView([string]$Path, [int]$From, [string]$View, [string[]]$Expe
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         if ($cardProcess.HasExited) { throw 'Update card process exited before painting' }
-        $text = Read-SharedLog $Path
+        $text = Read-SharedLog $Path -Polling
         $fresh = if ($text.Length -ge $From) { $text.Substring($From) } else { '' }
         $views = [regex]::Matches($fresh, '(?s)\[update\] card view=(collapsed|expanded) n=(\d+) first=([^\r\n]*)[^\n]*\n(.*?)\[update\] card remaining=([^\r\n]*)\r?\n')
         $matching = @($views | Where-Object { $_.Groups[1].Value -ceq $View })
@@ -133,6 +138,19 @@ try {
     Copy-Item -LiteralPath $Verifier -Destination "$Root/verifier.exe" -Force
     $env:MULTIPROMPT_TEST_VERIFIER = "$Root/verifier.exe"
     if ($TestGroup -ne 'Rollback') {
+        $readerFixture = Join-Path $Root 'live-log-reader.txt'
+        [IO.File]::WriteAllText($readerFixture, 'wrong data')
+        $writer = [IO.File]::Open($readerFixture, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        try { Assert ((Read-SharedLog $readerFixture -Polling) -ceq 'wrong data') 'Live reader changed log contents' } finally { $writer.Dispose() }
+        $locked = [IO.File]::Open($readerFixture, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { Assert ((Read-SharedLog $readerFixture -Polling) -ceq '') 'Live reader did not defer a locked file' } finally { $locked.Dispose() }
+        Assert ((Read-SharedLog $readerFixture -Polling) -ceq 'wrong data') 'Live reader did not recover after unlock'
+        Remove-Item -LiteralPath $readerFixture
+        Assert ((Read-SharedLog $readerFixture -Polling) -ceq '') 'Live reader did not defer a missing file'
+        $accessDenied = $false
+        try { $null = Read-SharedLog $Root -Polling } catch { $accessDenied = $_.Exception.GetBaseException() -is [UnauthorizedAccessException] }
+        Assert $accessDenied 'Live reader swallowed an access error'
+        Passed 'live log reader handles sharing and preserves failures'
         $eventName = 'Local\MultipromptSignIn-' + [guid]::NewGuid().ToString('N')
         $event = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $eventName)
         $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -261,7 +279,7 @@ try {
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
                 do {
-                    if ((Test-Path -LiteralPath $log) -and (Read-SharedLog $log).Contains('update-card: launch path stamp captured')) { break }
+                    if ((Read-SharedLog $log -Polling).Contains('update-card: launch path stamp captured')) { break }
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not capture its launch stamp' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
@@ -275,7 +293,7 @@ try {
                 $message = [Convert]::ToUInt32($appMessage.Groups[1].Value.Substring(2), 16) + [uint32]$updateMessage.Groups[1].Value
                 Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, $message, [IntPtr]::Zero, [IntPtr]::Zero)) 'Update notification failed'
                 do {
-                    $cardLog = Read-SharedLog $log
+                    $cardLog = Read-SharedLog $log -Polling
                     if ($cardLog.Contains('update-card: new version ready ' + $newVersion)) { break }
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Installed update was not offered on the card' }
                     Start-Sleep -Milliseconds 100
