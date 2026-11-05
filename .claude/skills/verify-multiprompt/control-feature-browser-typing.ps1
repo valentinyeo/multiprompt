@@ -1,5 +1,14 @@
 $pageJob = $null
 $pageServer = $null
+$typingObservations = New-Object 'System.Collections.Generic.List[object]'
+function Observe-TypingFocus([string]$Phase, [int]$Round) {
+    $typingObservations.Add(@{
+        phase = $Phase; round = $Round; time = [DateTime]::UtcNow.ToString('o')
+        foreground = [VerifyNative]::GetForegroundWindow().ToInt64()
+        focus = [VerifyNative]::GetFocusedWindow($script:window).ToInt64()
+        alt = [VerifyNative]::IsDown(0x12); ctrl = [VerifyNative]::IsDown(0x11); shift = [VerifyNative]::IsDown(0x10)
+    })
+}
 try {
 $pageJob = New-Object VerifyJob
 $pageRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-typing')).Path
@@ -117,12 +126,16 @@ $browser = [VerifyNative]::DockedPaneWindow($script:window)
 if ([VerifyNative]::GetForegroundWindow() -ne $browser) { Page-TypingFocus }
 
 for ($round = 1; $round -le 20; $round++) {
+    Observe-TypingFocus 'before-leave' $round
     Leave-TypingBrowser
+    Observe-TypingFocus 'after-leave' $round
     $bar = Get-TypingUrlBar
     if ($bar -eq [IntPtr]::Zero) { throw 'Owned visible ZigShellUrlBar missing' }
     [VerifyNative]::Chord(@(0x11, 0x10, 0x4C))
     $edit = Wait-TypingEdit $bar
+    Observe-TypingFocus 'before-text' $round
     [VerifyNative]::Text('abc')
+    Observe-TypingFocus 'after-text' $round
     $actual = [VerifyNative]::EditText($edit)
     $result.checks += @{ name = 'ordinary-address-typing'; round = $round; text = $actual }
     if ($actual -cne 'abc') { throw "Round $round expected address text abc, got '$actual'" }
@@ -184,6 +197,7 @@ try {
 }
 Snapshot 'after'
 } finally {
+    try { Save-Json @($typingObservations.ToArray()) 'browser-typing-observations.json' } catch { Write-Warning $_.Exception.Message }
     if ($null -ne $pageJob) {
         try {
             $beforeStop = $pageJob.ReadAccounting()

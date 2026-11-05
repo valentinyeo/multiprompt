@@ -116,6 +116,8 @@ const DestroyWindow = @import("win32.zig").DestroyWindow;
 const InternalGetWindowText = @import("win32.zig").InternalGetWindowText;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
+const GetFocus = @import("win32.zig").GetFocus;
+const GetKeyState = @import("win32.zig").GetKeyState;
 const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
 const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
@@ -5850,7 +5852,17 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
     }
 }
 
+fn logUrlBarFocus(phase: []const u8, parent: HANDLE, result: usize) void {
+    if (!verboseLoggingEnabled()) return;
+    const fg = GetForegroundWindow();
+    const focus = GetFocus();
+    altqLog("url_focus phase={s} result={X} fg={X} fg_tid={} ui_tid={} focus={X} focus_tid={} parent={X} edit={X} alt={} ctrl={} shift={} refocus={} wait_alt={} action={} input={} auth={X}", .{
+        phase, result, altqPtr(fg), GetWindowThreadProcessId(fg, null), GetCurrentThreadId(), altqPtr(focus), GetWindowThreadProcessId(focus, null), altqPtr(parent), altqPtr(app_state.g_edit_hwnd), GetKeyState(0x12), GetKeyState(0x11), GetKeyState(0x10), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_focus_user_action_tick, app_state.g_focus_input_tick, altqPtr(app_state.g_focus_authorized_hwnd),
+    });
+}
+
 pub fn startBrowserUrlBarEdit() void {
+    logUrlBarFocus("start", app_state.g_urlbar_hwnd, 0);
     if (@import("computer_pane.zig").selected()) return;
     if (!focusGuard(app_state.g_main_hwnd)) return;
     if (!activeBrowserShowsUrlBar()) return;
@@ -5890,8 +5902,12 @@ pub fn startBrowserUrlBarEdit() void {
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
-        _ = SetForegroundWindow(edit_parent);
-        _ = SetFocus(app_state.g_edit_hwnd);
+        logUrlBarFocus("before_foreground", edit_parent, 0);
+        const foreground_result = SetForegroundWindow(edit_parent);
+        logUrlBarFocus("after_foreground", edit_parent, @intCast(foreground_result));
+        logUrlBarFocus("before_focus", edit_parent, 0);
+        const previous_focus = SetFocus(app_state.g_edit_hwnd);
+        logUrlBarFocus("after_focus", edit_parent, altqPtr(previous_focus));
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
     }
 }
