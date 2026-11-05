@@ -126,4 +126,3 @@ test "endpoint replacement excludes old shell but permits discovery" {
   const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
-

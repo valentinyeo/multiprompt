@@ -48,13 +48,17 @@
             $repoLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             Wait-Until { (Get-Content -LiteralPath $repoLog -Raw) -match '\[palette\] rows chars=0 count=104 ids=6702 6710 6711' } 'picker shows 102 discovered folders and the owner terminal carrier folder'
             Snapshot 'repo-picker-rows'
+            $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
+            Type-Text 'ar'
+            Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore) -match '\[palette\] rows chars=2 count=4 ' } 'combined search shows three matching folders'
+            Snapshot 'repo-picker-all-servers'
             Press @(0x1B) 'Esc: leave initial picker'
             Press @(0x1B) 'Esc: close palette'
             foreach ($case in @(
                 @{ query = 'remote-2 cedar'; host = 1; alias = 'remote-2'; cwd = '/work/secondary/cedar'; proof = 'host1' },
                 @{ query = 'atlas'; host = 0; alias = 'remote-1'; cwd = '/work/primary/atlas'; proof = 'host0' }
             )) {
-                if ($case.host -eq 1 -and @((Read-Session).tabs | Where-Object { $_.tmux_host -eq 1 }).Count -ne 0) { throw 'Host 1 already has a seeded tab' }
+                if ($case.host -eq 1 -and @((Read-Session).tabs | Where-Object { $tab = $_; $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }; $hostId -eq 1 }).Count -ne 0) { throw 'Host 1 already has a seeded tab' }
                 Press @(0x11, 0x54) 'Ctrl+T: choose another server'
                 $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
                 Type-Text $case.query
@@ -63,7 +67,10 @@
                 Press @(0x0D) 'Enter: select the matching server and folder'
                 Wait-Until {
                     $state = Read-Session
-                    $null -ne $state -and @($state.tabs).Count -eq $beforeClaude + 1 -and $state.tabs[$state.active_tab].cwd -eq $case.cwd -and $state.tabs[$state.active_tab].tmux_host -eq $case.host -and $state.tabs[$state.active_tab].cv -eq $true
+                    if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                    $tab = $state.tabs[$state.active_tab]
+                    $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                    $tab.cwd -eq $case.cwd -and $hostId -eq $case.host -and $tab.cv -eq $true
                 } 'selected remote folder and host saved'
                 Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('tmux new-session') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
                 Save-Json (Read-Session) ('ctrl-t-' + $case.proof + '-session.json')
@@ -93,7 +100,13 @@
             Type-Text 'atlas'
             Snapshot 'ctrl-t-other-host-online-picker'
             Press @(0x0D) 'Enter: select available folder'
-            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $beforeClaude + 1 -and $state.tabs[$state.active_tab].tmux_host -eq 0 -and $state.tabs[$state.active_tab].cwd -eq '/work/primary/atlas' } 'other host stays usable'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or @($state.tabs).Count -ne $beforeClaude + 1) { return $false }
+                $tab = $state.tabs[$state.active_tab]
+                $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
+                $hostId -eq 0 -and $tab.cwd -eq '/work/primary/atlas' -and $tab.cv -eq $true
+            } 'other host stays usable'
             Press @(0x11, 0x57) 'Ctrl+W: close available host chat'
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'available host chat closed'
             Palette 'Second'

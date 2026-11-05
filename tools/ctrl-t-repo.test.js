@@ -42,9 +42,16 @@ test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () =
   assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
 });
 
+test('initial picker captures the combined all-server search', () => {
+  assert.match(sessions, /Snapshot 'repo-picker-rows'\s+\$logBefore = \(Get-Content -LiteralPath \$repoLog -Raw\)\.Length\s+Type-Text 'ar'\s+Wait-Until \{ \$log = Get-Content -LiteralPath \$repoLog -Raw; \$log\.Length -gt \$logBefore -and \$log\.Substring\(\$logBefore\) -match '\\\[palette\\\] rows chars=2 count=4 ' \}[^\n]*\s+Snapshot 'repo-picker-all-servers'\s+Press @\(0x1B\) 'Esc: leave initial picker'/);
+});
+
 test('cross-host and offline journeys require the selected host and rejection', () => {
-  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*tmux_host -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
-  assert.match(sessions, /tmux_host -eq \$case\.host -and \$state\.tabs\[\$state\.active_tab\]\.cv -eq \$true/);
+  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('tmux new-session'\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
+  const normalizeHost = /\$hostId = if \(\$tab\.PSObject\.Properties\['tmux_host'\]\) \{ \[int\]\$tab\.tmux_host \} else \{ 0 \}/.source;
+  assert.match(sessions, new RegExp(`Where-Object \\{ \\$tab = \\$_; ${normalizeHost}; \\$hostId -eq 1 \\}\\)\\.Count -ne 0`));
+  assert.match(sessions, new RegExp(`${normalizeHost}\\s+\\$tab\\.cwd -eq \\$case\\.cwd -and \\$hostId -eq \\$case\\.host -and \\$tab\\.cv -eq \\$true`));
+  assert.match(sessions, new RegExp(`${normalizeHost}\\s+\\$hostId -eq 0 -and \\$tab\\.cwd -eq '/work/primary/atlas' -and \\$tab\\.cv -eq \\$true`));
   assert.match(sessions, /offline-1[\s\S]*\[repo\] offline host=1[\s\S]*\$logBefore = [^\n]+[\s\S]*Enter: reject offline folder[\s\S]*\$log\.Substring\(\$logBefore\)\.Contains\('\[repo\] selection rejected'\)[\s\S]*Offline selection saved a tab[\s\S]*Offline selection launched SSH[\s\S]*other host stays usable[\s\S]*\[repo\] online host=1/);
 });
 
