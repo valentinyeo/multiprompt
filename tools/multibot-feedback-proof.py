@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import base64
 import importlib.util
+import hashlib
+import struct
+import urllib.parse
+import zlib
 import json
 import os
 from pathlib import Path
@@ -90,7 +94,7 @@ def main():
                 return original_cli(*args)
             except module.BoardError as error:
                 verbs = ('status', 'labels', 'task', 'comment')
-                subcommands = ('list', 'create', 'add')
+                subcommands = ('list', 'create', 'add', 'get', 'update')
                 failed_command = [args[0] if args and args[0] in verbs else 'other',
                                   args[1] if len(args) > 1 and args[1] in subcommands else None]
                 safe_diagnose(error)
@@ -108,14 +112,22 @@ def main():
 
         stage = 'search'
         before = matching()
-        if len(before) > 1 or any(status == 'Deleted' for status, _ in before):
-            raise RuntimeError('existing wish conflict')
+        if len(before) != 1 or before[0][0] == 'Deleted' or before[0][1]['ticketNumber'] != 'IGSH-1746':
+            raise RuntimeError('canonical existing wish missing or conflicting')
         before_votes = len(module.votes(before[0][1])) if before else 0
         already_voted = bool(before and agent in module.votes(before[0][1]))
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
+        image = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)) +
+                 chunk(b'IDAT', zlib.compress(b'\x00\x12\x34\x56')) + chunk(b'IEND', b''))
+        image_hash = hashlib.sha256(image).hexdigest()
+        image_path = home / 'synthetic.png'
+        image_path.write_bytes(image)
         outputs = []
         stage = 'submission'
         for _ in range(2):
-            result = subprocess.run([sys.executable, str(tool), WISH, '--why', WHY], capture_output=True, text=True, timeout=180)
+            result = subprocess.run([sys.executable, str(tool), WISH, '--why', WHY, '--attach', str(image_path)], capture_output=True, text=True, timeout=180)
             output = result.stdout.strip()
             if result.returncode or not re.fullmatch(r'Feedback (submitted|voted): https://app\.hypertask\.ai/detail/project-2060/\d+', output):
                 error = RuntimeError('submission not confirmed')
@@ -133,6 +145,23 @@ def main():
         url = module.ticket_url(task)
         if not all(output.endswith(url) for output in outputs):
             raise RuntimeError('ticket links differ')
+        stage = 'attachment readback'
+        attachments = module.attachment_readback(task['ticketNumber'])
+        matches = [item for item in attachments if item.get('fileName') == image_hash + '.png' and item.get('fileSize') == len(image)]
+        if len(matches) != 1 or not isinstance(matches[0].get('fileSource'), str):
+            raise RuntimeError('attachment missing or duplicated')
+        source = matches[0]['fileSource']
+        parsed = urllib.parse.urlsplit(source)
+        if parsed.scheme != 'https' or parsed.netloc != 'files.hypertask.app':
+            raise RuntimeError('invalid attachment source')
+        result = subprocess.run(['curl', '--fail', '--silent', '--show-error', '--location',
+                                 '--proto', '=https', '--proto-redir', '=https', '--max-time', '30',
+                                 '--retry', '3', '--retry-all-errors', '--retry-delay', '2', '--', source],
+                                capture_output=True, timeout=135, check=False)
+        if result.returncode:
+            raise RuntimeError('attachment download failed')
+        if hashlib.sha256(result.stdout).hexdigest() != image_hash:
+            raise RuntimeError('attachment bytes differ')
         stage = 'ranking'
         ranking = subprocess.run([sys.executable, str(tool), '--weekly'], capture_output=True, text=True, timeout=180)
         if ranking.returncode:
@@ -146,6 +175,7 @@ def main():
         evidence = dict(revision=os.environ.get('GITHUB_SHA', ''), source_version=version, ticket_url=url,
                         command_outputs=outputs, vote_count_before=before_votes, vote_count_after=len(votes),
                         saved_row_count=len(rows), weekly_ranking=lines,
+                        attachment=dict(sha256=image_hash, size=len(image), matches=len(matches), download_verified=True),
                         second_agent='hosted stand-in tests only')
         destination = ROOT / 'evidence/feedback-proof.json'
         destination.parent.mkdir(exist_ok=True)

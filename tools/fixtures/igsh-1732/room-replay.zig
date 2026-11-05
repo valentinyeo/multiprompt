@@ -11,7 +11,8 @@ test "IGSH-1732 room answers stay beneath their questions across pages and repla
         std.unicode.utf8ToUtf16LeStringLiteral("Question 2"),
         std.unicode.utf8ToUtf16LeStringLiteral("Answer 2"),
     };
-    for ([_]bool{ false, true }) |paged| {
+    const Replay = enum { full, paged, advanced };
+    for ([_]Replay{ .full, .paged, .advanced }) |replay| {
         var item = OwnedModel{
             .arena = std.heap.ArenaAllocator.init(std.testing.allocator),
             .value = .{ .room_id = "10000000-0000-4000-8000-000000000001", .name = &.{}, .revision = 1, .members = &.{}, .candidates = &.{}, .messages = &.{} },
@@ -27,13 +28,24 @@ test "IGSH-1732 room answers stay beneath their questions across pages and repla
         const events = parsed.value.object.getPtr("events").?;
         const all = events.array.items;
         const next = parsed.value.object.getPtr("next_after").?;
-        var start: usize = 0;
-        for ([_]usize{ 2, 4, 5 }) |end| {
-            if (!paged and end != all.len) continue;
-            events.array.items = all[start..end];
-            next.* = .{ .integer = @intCast(end + 1) };
+        if (replay == .advanced) {
+            item.highwater = 3;
             try std.testing.expect(acceptEvents(parsed.value));
-            start = end;
+            try std.testing.expectEqual(@as(u64, 3), item.after);
+            try std.testing.expectEqual(@as(usize, 2), item.messages.items.len);
+            try std.testing.expect(numberField(parsed.value, "next_after").? > item.highwater);
+            item.highwater = 6;
+            events.array.items = all[2..];
+            try std.testing.expect(acceptEvents(parsed.value));
+        } else {
+            var start: usize = 0;
+            for ([_]usize{ 2, 4, 5 }) |end| {
+                if (replay == .full and end != all.len) continue;
+                events.array.items = all[start..end];
+                next.* = .{ .integer = @intCast(end + 1) };
+                try std.testing.expect(acceptEvents(parsed.value));
+                start = end;
+            }
         }
         try std.testing.expectEqual(@as(u64, 6), item.after);
         try std.testing.expectEqual(expected.len, item.messages.items.len);

@@ -987,7 +987,6 @@ const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const activeShellHasForegroundFocus = @import("focus.zig").activeShellHasForegroundFocus;
 const focusActiveBrowserPaneUnlocked = @import("focus.zig").focusActiveBrowserPaneUnlocked;
-const unlockBrowserForeground = @import("focus.zig").unlockBrowserForeground;
 const cancelPendingNativeBrowserFocus = @import("focus.zig").cancelPendingNativeBrowserFocus;
 const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
@@ -1457,6 +1456,21 @@ fn showPickRepoFailure(saving_folder: bool) void {
         .launch_command => showHeaderNoticeAscii("Pick repo: that folder path cannot start a session", 5000, true),
         .spawn_shell => showHeaderNoticeAscii("Pick repo: the new tab did not start", 5000, true),
         .none => showHeaderNoticeAscii("Pick repo: nothing started", 4000, true),
+    }
+}
+
+fn browserFocusHotkey() void {
+    const pane_foreground = activeBrowserHasForegroundFocus() or webView2HasInputFocus();
+    if (pane_foreground) {
+        if (app_state.g_chat_find_open) @import("chat_find_ui.zig").close(false);
+        cancelPendingNativeBrowserFocus();
+        app_state.g_chat_browser_handoff_until = 0;
+        app_state.g_browser_focus_mode = false;
+        app_state.g_shell_focused = true;
+        @import("focus.zig").focusActiveShellFromBrowserInput();
+    } else {
+        _ = SetForegroundWindow(app_state.g_main_hwnd);
+        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FOCUS_TOGGLE, 0, 0);
     }
 }
 
@@ -3140,7 +3154,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_URLBAR_DISMISS => {
-            if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null and GetFocus() != app_state.g_edit_hwnd) {
+            if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null and wp == @intFromPtr(app_state.g_edit_hwnd) and GetFocus() != app_state.g_edit_hwnd) {
+                altqLog("url_focus dismiss edit={X} focus={X} fg={X}", .{ wp, altqPtr(GetFocus()), altqPtr(GetForegroundWindow()) });
                 discardBrowserUrlBarEdit();
                 updateBrowserVisibility();
             }
@@ -8174,6 +8189,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 unarchiveNextUnattachedSession(hwnd);
                 return 0;
             }
+            if (wp == @import("win32.zig").TIMER_BROWSER_URL_FOCUS) {
+                @import("browser_pane.zig").browserUrlFocusTick();
+                return 0;
+            }
             if (wp == TIMER_NATIVE_BROWSER_FOCUS) {
                 if (computer.selected()) { cancelPendingNativeBrowserFocus(); return 0; }
                 const pending_sid = app_state.g_native_browser_focus_pending_shell_id;
@@ -8187,9 +8206,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_shell_focused = true;
                     return 0;
                 }
-                const alt_down = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
-                if (alt_down) altqLog("timer_alt waiting retries={} chat={} pane_fg={}", .{ app_state.g_native_browser_focus_retries, app_state.g_chat_active, activeBrowserHasForegroundFocus() });
-                if (alt_down) return 0;
+                const held_modifiers = @import("focus.zig").heldModifierMask();
+                if (held_modifiers != 0) {
+                    altqLog("timer_modifiers waiting mods={X} retries={} chat={} pane_fg={}", .{ held_modifiers, app_state.g_native_browser_focus_retries, app_state.g_chat_active, activeBrowserHasForegroundFocus() });
+                    return 0;
+                }
 
                 if (activeBrowserHwndLive() == null) {
                     if (app_state.g_native_browser_focus_retries > 0) app_state.g_native_browser_focus_retries -= 1;
@@ -8203,11 +8224,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
 
-                if ((app_state.g_native_browser_alt_unlocked_at == 0 or GetTickCount64() -| app_state.g_native_browser_alt_unlocked_at > 100) and !activeBrowserHasForegroundFocus()) {
-                    unlockBrowserForeground();
-                    if (app_state.g_native_browser_alt_unlocked_at != 0) _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 10, null);
-                    return 0;
-                }
                 focusActiveBrowserPaneUnlocked();
                 _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
                 if (activeBrowserHasForegroundFocus()) {
@@ -8864,6 +8880,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_HOTKEY => {
+            if (@import("browser_pane.zig").browserHotkeyAction(wp, lp)) |action| {
+                app_state.g_focus_user_action_tick = GetTickCount64();
+                switch (action) {
+                    .focus => browserFocusHotkey(),
+                    .address => startBrowserUrlBarEdit(),
+                }
+                return 0;
+            }
             if (wp == @as(WPARAM, @intCast(HOTKEY_ID_FOCUS))) {
                 if (!@import("room_frontend.zig").privateActionsAllowed() and foregroundIsOurs()) return 0;
                 toggleDictation();
@@ -8884,6 +8908,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            @import("browser_pane.zig").unregisterBrowserHotkeys();
             @import("browser_pane.zig").cancelBrowserSigninForShutdown();
             @import("bot_photo.zig").shutdown();
             computer.shutdown();

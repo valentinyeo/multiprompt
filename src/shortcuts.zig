@@ -720,6 +720,7 @@ test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
 }
 
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (nCode == HC_ACTION) @import("browser_pane.zig").syncBrowserHotkeys();
     if (nCode == HC_ACTION and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         if (kb.vkCode == 0x54 and (isCtrlDown() or isAltDown(kb.flags)) and foregroundIsOurs()) {
@@ -766,6 +767,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
         const key_down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
         const key_up = wp == WM_KEYUP or wp == WM_SYSKEYUP;
+        if (key_down and !((kb.vkCode == 0x51 or kb.vkCode == 0x4D) and app_state.g_browser_focus_chord_held) and
+            @import("browser_pane.zig").browserHotkeyPasses(kb.vkCode))
+        {
+            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        }
         if (kb.vkCode < computer_consumed_keys.len and computer_consumed_keys[kb.vkCode]) {
             if (key_up) computer_consumed_keys[kb.vkCode] = false;
             return 1;
