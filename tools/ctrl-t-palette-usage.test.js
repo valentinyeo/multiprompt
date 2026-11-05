@@ -114,11 +114,12 @@ test("Ctrl+K ranks intent, workspace context, and decaying usage stably", () => 
     "an exact live-tab search must outrank unrelated learned commands");
 
   const outranks = functionBody("paletteResultOutranks", "sortSearchResultsByRank");
+  const kindPos = outranks.indexOf("if (key_kind != prev_kind) return key_kind < prev_kind;");
   const matchPos = outranks.indexOf("paletteQueryRank(key)");
   const workspacePos = outranks.indexOf("paletteWorkspaceRank(key)");
   const frecencyPos = outranks.indexOf("paletteFrecencyAt(key_usage, now)");
-  assert.ok(matchPos >= 0 && matchPos < workspacePos && workspacePos < frecencyPos,
-    "typed match quality must outrank workspace context, which must outrank usage");
+  assert.ok(kindPos >= 0 && kindPos < matchPos && matchPos < workspacePos && workspacePos < frecencyPos,
+    "row kind must outrank match quality, workspace context and usage");
   assert.match(outranks, /else \{[\s\S]*?paletteTargetIsDestructive/,
     "an empty palette must keep destructive actions below ordinary commands");
   assert.doesNotMatch(outranks, /key_usage\.count > prev_usage\.count/,
@@ -131,7 +132,7 @@ test("Ctrl+K ranks intent, workspace context, and decaying usage stably", () => 
     "frequency must be capped below the gap between recency bands");
 
   const sort = functionBody("sortSearchResultsByRank", "asciiEqualsCI");
-  assert.match(sort, /paletteResultOutranks\(key, prev, now\)/);
+  assert.match(sort, /paletteResultOutranks\(key, prev, key_kind, kinds\[j - 1\], now\)/);
   assert.match(sort, /if \(!paletteResultOutranks/,
     "equal/unseen commands must preserve their curated fallback order");
 

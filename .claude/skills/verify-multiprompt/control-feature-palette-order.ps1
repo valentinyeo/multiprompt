@@ -62,4 +62,38 @@
             }
             $result.checks += @{ name = 'palette-order'; mostUsed = $expected; selected = $selected; headers = $headers; removedRowCount = 0; renamedFound = $found; entry = 'Ctrl+K' }
             Snapshot 'after'
+            Restart-SessionRestore 'palette-ranking' $false $false {
+                $config = Join-Path $scratch 'roaming/ZigShell'
+                $seed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'cmd'; name = 'Funeralprints'; manual = $true; shell_id = 1 }) }
+                $registry = @{ windows = @(@{ id = 'closed-fune-fixture'; name = 'Funeralprints'; restore = $false }) }
+                [IO.File]::WriteAllText((Join-Path $config 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+                [IO.File]::WriteAllText((Join-Path $config 'windows.json'), (ConvertTo-Json -InputObject $registry -Depth 6), (New-Object Text.UTF8Encoding($false)))
+                Save-Json $seed 'palette-ranking-seed-session.json'
+                Save-Json $registry 'palette-ranking-seed-windows.json'
+            }
+            $result.paletteRankingBoundary = 'One saved local CMD session and one closed workspace registry entry are seeded before relaunch; no setter or remote service is used.'
+            Wait-Until { @((Read-Inbox).shells | Where-Object { $_.name -eq 'Funeralprints' }).Count -eq 1 } 'saved Funeralprints session restored'
+            $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+            $workspaceIndex = -1
+            for ($i = 0; $i -lt @($registry.windows).Count; $i++) { if ($registry.windows[$i].id -eq 'closed-fune-fixture') { $workspaceIndex = $i } }
+            if ($workspaceIndex -lt 0) { throw 'palette-order: closed workspace fixture missing from registry' }
+            $workspaceId = [string](6500 + $workspaceIndex)
+            $start = ((Get-Content $log -Raw) -join '').Length
+            Press @(0x11, 0x4B) 'Ctrl+K: open palette for session and workspace ranking'
+            Wait-Until {
+                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and
+                [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
+            } 'ranking palette ready and focused'
+            Type-Text 'fune'
+            Wait-Until {
+                ((Get-Content $log -Raw) -join '').Substring($start) -match '\[palette\] ready chars=4 count=(?:[2-9]|[1-9]\d+) target=0(?:\r?\n|$)'
+            } 'typed ranking selects session with at least two rows'
+            $trace = ((Get-Content $log -Raw) -join '').Substring($start)
+            $matches = [regex]::Matches($trace, '\[palette\] rows chars=4 count=\d+ ids=([^\r\n]*)')
+            $ranked = @($matches[$matches.Count - 1].Groups[1].Value -split ' ')
+            if ($ranked.Count -lt 2 -or $ranked -notcontains $workspaceId -or $ranked[0] -ne '0' -or $ranked[-1] -ne $workspaceId) { throw "palette-order: expected session 0 first and closed workspace $workspaceId last, got $($ranked -join ' ')" }
+            Snapshot 'typed-session-workspace'
+            Save-Json @{ ids = $ranked; session = '0'; closedWorkspace = $workspaceId; query = 'fune' } 'palette-ranking-rows.json'
+            $result.checks += @{ name = 'session-workspace-ranking'; ids = $ranked; entry = 'Ctrl+K fune' }
+            Press @(0x1B) 'Esc: close ranking palette'
         

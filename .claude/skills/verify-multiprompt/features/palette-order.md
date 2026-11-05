@@ -29,11 +29,13 @@ Preconditions:
 - **Open.** Press Ctrl+K and wait for `[palette] ready chars=0`. Capture `action.png`.
 - **Order.** The selected target must be the highest count in the fixture. The last `[palette] rows chars=0` line must start with `h0`, list the ten highest counts in order (ties by newer use), then a group header. The fixture's lowest count, stamped in 2030, must not be in that band. `palette-order-rows.json` keeps the ids.
 - **Removed and renamed.** Reopen Ctrl+K for each query. `chat view per tab` must log `ready chars=17 count=0 target=0` (`removed-absent.png`). Every other query must log a `rows` line for its full length that contains the expected id (`renamed.png` for `copy session diagnostics`).
-- **Proof.** `result.json` check `palette-order` records the expected band, the selected row, the headers and the matched queries. Compare `before.png`, `action.png` and `after.png`.
+- **Session ranking.** After the empty-query checks, close the owned app. Seed one saved local CMD session and one closed workspace, both named `Funeralprints`, in the isolated profile, then relaunch with restoration. Press Ctrl+K and type `fune`. Require focus before typing, at least two logged rows, session 0 selected and first, and the closed workspace present and last. Save `palette-ranking-rows.json` and `typed-session-workspace.png`.
+- **Proof.** `result.json` records both checks. Compare `before.png`, `action.png`, `after.png` and `typed-session-workspace.png` with the row logs.
 
 ## Gotchas
 
 - The seeded file is usage history, not a setting; the app reads it on every palette open. It holds only numeric ids for commands shown on an empty search, with distinct counts, and no destructive commands.
 - Releases before this change ranked by recency first, so the 2030 entry was selected first. A tag run must fail with `palette-order: selected row ...`.
 - Row ids come from `[palette] rows` debug lines; headers appear as `h<index>`, where `h0` is Most used.
-- This journey does not run the commands it finds and does not cover recent session rows or tab context menus.
+- The ranking case seeds `session.json` and `windows.json` once between owned launches. It does not use a test-only setter or verify remote sessions. The initial empty-query checks still use the original unseeded session.
+- This journey does not run the commands it finds or cover tab context menus.
