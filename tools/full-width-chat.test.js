@@ -201,7 +201,7 @@ test('ISSUE-440 palette, restoration and terminal return retain the same indepen
   assert.match(palette, /showActiveShellAfterOverlay\(\);[^]*WM_APP_TOGGLE_FULLWIDTH/);
   assert.doesNotMatch(palette, /closeChatView|toggleChatView|chat_view_lock\s*=/);
   const restore = body(source, 'restoreBrowserStateFromSavedTab');
-  for (const field of ['chat_view_on = tab.cv', 'full_width = tab.fw']) assert.ok(restore.includes(field));
+  for (const field of ['chat_view_on = @import("chat_view.zig").forSession(shells[idx].tmux_session[0..shells[idx].tmux_session_len], tab.cv)', 'full_width = tab.fw']) assert.ok(restore.includes(field));
   const close = body(source, 'closeChatView');
   assert.match(close, /if \(ISSUE_440_FULL_WIDTH_CHAT and shells\[active_shell\]\.full_width_pending_console_resize\)/);
   assert.match(close, /full_width_pending_console_resize = false;[^]*applyBlackConsoleBackground/);

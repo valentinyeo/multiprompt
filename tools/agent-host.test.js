@@ -139,5 +139,7 @@ test('IGSH-1762 every live chat tab is forced into chat view at creation, restor
   assert.match(read('src/console.zig'), /chat_view_on = @import\("chat_view\.zig"\)\.forSession\(app_state\.shells\[idx\]\.tmux_session\[0\.\.app_state\.shells\[idx\]\.tmux_session_len\], pending_chat_view\);/);
   assert.match(read('src/session.zig'), /chat_view_on = @import\("chat_view\.zig"\)\.forSession\(app_state\.shells\[idx\]\.tmux_session\[0\.\.app_state\.shells\[idx\]\.tmux_session_len\], tab\.cv\);/);
   assert.match(read('src/chat_composer.zig'), /closing\.chat_view_on = @import\("chat_view\.zig"\)\.forSession\(closing\.tmux_session\[0\.\.closing\.tmux_session_len\], false\);/);
+  const main = read('src/main.zig');
+  assert.equal(main.split('new_shell.chat_view_on = @import("chat_view.zig").forSession(new_shell.tmux_session[0..new_shell.tmux_session_len], new_shell.chat_view_on);').length - 1, 2);
   assert.match(read('src/account_desktop.zig'), /kept user on active tab"\);\s*@import\("chat_composer\.zig"\)\.applySessionView\(\);/);
 });

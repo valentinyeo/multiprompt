@@ -152,7 +152,7 @@ test "IGSH-1653 synced named live chats restore their identity and chat view" {
     restoreSyncedSession(&shell, "live-ffffffffffff8fff8fffffffffffffff");
     try std.testing.expect(shell.chat_view_on);
     try std.testing.expectEqualStrings("01234567-89ab-8def-8123-0123456789ab", shell.claude_sid[0..shell.claude_sid_len]);
-    for ([_][]const u8{ "live-hypertask-mw3zcxfn", "live-h0123456789ab8def81230123456789ab", "live-123", "live-0123456789ab8def81230123456789ag", "live-0123456789AB8def81230123456789ab", "live-0123456789ab8def81230123456789ab0" }) |name| {
+    for ([_][]const u8{ "live-project-abc123", "live-h0123456789ab8def81230123456789ab", "live-123", "live-0123456789ab8def81230123456789ag", "live-0123456789AB8def81230123456789ab", "live-0123456789ab8def81230123456789ab0" }) |name| {
         var named_shell: Session = .{};
         restoreSyncedSession(&named_shell, name);
         try std.testing.expect(named_shell.chat_view_on);

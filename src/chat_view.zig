@@ -59,7 +59,7 @@ fn named(name: []const u8) NamedSession {
 }
 
 test "IGSH-1762 every live chat name keeps chat view while terminal tabs follow the user" {
-    for ([_][]const u8{ "live-0123456789ab8def81230123456789ab", "live-h0123456789ab8def81230123456789ab", "live-hypertask-mw3zcxfn", "live-1a2b3c", "live-" }) |name| {
+    for ([_][]const u8{ "live-0123456789ab8def81230123456789ab", "live-h0123456789ab8def81230123456789ab", "live-project-abc123", "live-1a2b3c", "live-" }) |name| {
         try std.testing.expect(isLive(name));
         try std.testing.expect(forSession(name, false));
         try std.testing.expect(forSession(name, true));
@@ -72,7 +72,7 @@ test "IGSH-1762 every live chat name keeps chat view while terminal tabs follow 
 }
 
 test "IGSH-1762 chat view off everywhere leaves live chats in chat view" {
-    var sessions = [_]NamedSession{ named("live-hypertask-mw3zcxfn"), named("term-abc"), named("live-0123456789ab8def81230123456789ab"), .{} };
+    var sessions = [_]NamedSession{ named("live-project-abc123"), named("term-abc"), named("live-0123456789ab8def81230123456789ab"), .{} };
     setEverywhere(&sessions, true);
     for (sessions) |session| try std.testing.expect(shouldShow(session.chat_view_on));
     setEverywhere(&sessions, false);
