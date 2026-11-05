@@ -181,9 +181,9 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         const tab = &tabs[count];
         tab.* = std.mem.zeroes(Tab);
         const face = uintDefault(obj, "face", 20);
-        const color = uintDefault(obj, "color", 7);
+        const color = uintDefault(obj, "color", @import("session_layout.zig").color_count);
         tab.face = if (face < 20) @intCast(face) else null;
-        tab.color = if (color < 7) @intCast(color) else null;
+        tab.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
         tab.kind = if (std.mem.eql(u8, kind, "pwsh")) .pwsh else if (std.mem.eql(u8, kind, "vps")) .vps else if (std.mem.eql(u8, kind, "tmux")) .tmux else if (std.mem.eql(u8, kind, "vps2")) .vps2 else if (std.mem.eql(u8, kind, "bash")) .bash else if (std.mem.eql(u8, kind, "gitbash")) .gitbash else .cmd;
         tab.name_len = copyWide(obj, "name", &tab.name);
         tab.tmux_session_len = copyString(obj, "tmux_session", &tab.tmux_session);
@@ -339,4 +339,14 @@ test "visits cache distinguishes unknown and empty and rejects invalid arrays" {
     const empty = try parse(std.testing.allocator, "{\"visits\":[]}");
     defer empty.deinit();
     try std.testing.expectEqual(@as(u8, 1), visits(empty.value).known);
+}
+
+test "IGSH-1533 saved colors distinguish white missing and invalid" {
+    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"White\",\"color\":7},{\"kind\":\"cmd\",\"name\":\"Auto\"},{\"kind\":\"cmd\",\"name\":\"Invalid\",\"color\":8}]}");
+    defer parsed.deinit();
+    var tabs: [3]@import("app_state.zig").SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 3), sessionTabs(parsed.value, &tabs, 9));
+    try std.testing.expectEqual(@as(?u8, 7), tabs[0].color);
+    try std.testing.expectEqual(@as(?u8, null), tabs[1].color);
+    try std.testing.expectEqual(@as(?u8, null), tabs[2].color);
 }

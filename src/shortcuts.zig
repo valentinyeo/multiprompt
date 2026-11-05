@@ -358,7 +358,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag tab: Pinned / Recents", .b = "Change its order inside the group or ungrouped list", .header = false },
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped Pinned or Recents", .header = false },
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
-    .{ .a = "Right-click tab", .b = "Pin, Move to workspace, Mark as unread, Rename, Copy chat ID, Hide from sidebar, Delete", .header = false },
+    .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reattach / mute / close / move / group)", .header = false },
     .{ .a = "Ctrl+K / right-click tab → Bot face / Bot color", .b = "Remote faces, colors and pictures sync.", .header = false },
     .{ .a = "Ctrl+K -> Workspace color", .b = "Choose a workspace default color or Auto. Manual bot colors stay unchanged.", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },

@@ -118,7 +118,7 @@ def install(namespace, source, root):
     emit('bootstrap', full_sha256=hashlib.sha256(source.encode('utf-8')).hexdigest(),
          inner_sha256=hashlib.sha256(namespace['READER_SOURCE'].encode('utf-8')).hexdigest(),
          generation=namespace.get('RUNTIME_GENERATION'), namespace=namespace.get('__name__'),
-         selector='bypassed: verified_remote_reader', worker='disabled by fixture')
+         selector='bypassed: verified_remote_reader', held_worker='disabled by fixture')
     namespace['sys'] = Proxy(sys, stdin=Proxy(sys.stdin, buffer=Input(sys.stdin.buffer)))
     namespace['subprocess'] = Proxy(subprocess, run=run)
     namespace['print'] = printed

@@ -58,11 +58,11 @@ Closing a workspace should not delete its sessions. It should mark that window a
 
 ## Closing vs Ending tmux
 
-`Ctrl+W` quits the app without stopping server agents or deleting saved chats. Use `Hide from sidebar` in `Ctrl+K` or the tab's right-click menu to close only the local tab. The remote tmux session stays alive and can be reattached.
+Closing a tmux-backed tab with the tab X, `Ctrl+W`, or `Close Tab` closes only the local multiprompt tab. The remote tmux session stays alive and can be reattached.
 
-Use `Delete` in `Ctrl+K` or the tab's right-click menu, or press `Ctrl+Shift+W`, to stop the selected agent. Its saved history remains available.
+Lock a long-running session from Ctrl+K or its right-click menu when even a local close would be disruptive. Locked sessions keep an inline padlock in their current custom group or ungrouped section and reject close, dissolve, end-tmux, group-close, and workspace deletion until explicitly unlocked. Close Workspace may still hibernate them because it preserves the remote tmux session and saved lock bit. The lock survives restart, reconnect, and workspace/tab moves.
 
-Right-click a tab for Pin, Move to workspace, Mark as unread, Rename, Copy chat ID, Hide from sidebar, and Delete. Type to search other tab actions.
+Use `End tmux session` from Ctrl+K or the tab right-click actions when the intent is destructive teardown. That command kills the remote tmux session, removes the browser binding files for the tab, closes any docked browser pane, closes the local tab, and skips reopen history because there is no remote session left to reopen.
 
 ## Moving Shells
 

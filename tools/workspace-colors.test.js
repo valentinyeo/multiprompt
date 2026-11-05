@@ -11,9 +11,9 @@ test('ordered palette is portable metadata, not a workspace name mapping', () =>
   const palette = read('src/bot_avatar.zig').match(/pub const colors = \[_\]u32\{([^}]+)\}/);
   assert.ok(palette);
   const colors = palette[1].match(/0x[0-9A-F]+/g).map(Number);
-  assert.equal(colors.length, 7);
-  assert.equal(new Set(colors).size, 7);
-  for (const value of colors) assert.notEqual(value >> 16 & 255, value & 255);
+  assert.deepEqual(colors, [0x8FCB6B, 0xE9875A, 0xE8C65A, 0x6F9FE0, 0xA77FE0, 0xE77B98, 0x5CCFC0, 0xEDEDED]);
+  assert.equal(new Set(colors).size, 8);
+  for (const value of colors.slice(0, 7)) assert.notEqual(value >> 16 & 255, value & 255);
   for (const file of ['session_layout.zig', 'account_layout.zig', 'launch_snapshot.zig']) {
     const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', `src/${file}`, '--test-filter', 'IGSH-1172'], {cwd: root, encoding: 'utf8', timeout: 120000});
     assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -32,4 +32,16 @@ test('settings persist overrides, account sync advertises them and startup cache
   assert.match(read('src/account_desktop.zig'), /\.color = app_state.g_ws_colors\[ws\]/);
   assert.match(read('src/launch_cache.zig'), /\.workspace_colors = state.g_ws_colors/);
   assert.match(read('src/workspaces.zig'), /std.mem.swap\(\?u8, &app_state.g_ws_colors\[a\], &app_state.g_ws_colors\[b\]\)/);
+});
+
+test('native transfer preserves old Auto and rejects unsupported white without losing the source', () => {
+  const domain = read('src/session_layout.zig');
+  assert.match(domain, /encodeTransferColor[\s\S]*?color orelse return 7;[\s\S]*?value == 7\) 8/);
+  assert.match(domain, /decodeTransferColor[\s\S]*?value < 7[\s\S]*?value == 8\) 7 else null/);
+  const sender = read('src/workspaces.zig');
+  assert.match(sender, /appearance_transfer\.color = .*encodeTransferColor\(shell\.color\)/);
+  assert.match(sender, /if \(sent == 0 or copy_result == 0\) \{[\s\S]*?SetParent\(shell\.hwnd, app_state\.g_main_hwnd\)[\s\S]*?return false;/);
+  const receiver = read('src/main.zig');
+  assert.match(receiver, /extended\.color > @import\("session_layout\.zig"\)\.color_count/);
+  assert.match(receiver, /decodeTransferColor\(extended\.color\)/);
 });

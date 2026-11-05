@@ -29,9 +29,12 @@ test('sessions installs the SSH boundary before launch', () => {
 test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () => {
   const journey = sessions.slice(0, sessions.indexOf("Palette 'new claude in terminal'"));
   assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
-  const cleanup = journey.indexOf("Palette 'close tab' '(7197|6232)'");
-  assert.ok(cleanup >= 0, 'notes-only cleanup exists');
-  assert.doesNotMatch(journey.slice(0, cleanup), /\bPalette\s+'|commands\.json|catch|fallback/i);
+  const pickerStart = journey.indexOf('$beforeClaude = @((Read-Session).tabs).Count');
+  const pickerEnd = journey.indexOf("Palette 'close tab' '(7197|6232)'", pickerStart);
+  assert.ok(pickerStart >= 0 && pickerEnd > pickerStart, 'notes-only picker boundaries must exist');
+  assert.doesNotMatch(journey.slice(pickerStart, pickerEnd), /\bPalette\s+'|commands\.json|catch|fallback/i);
+  assert.match(journey.slice(pickerEnd), /^Palette 'close tab' '\(7197\|6232\)'\s*\n\s*Press @\(0x0D\) 'Enter: hide notes-only chat'/);
+  assert.match(journey.slice(0, pickerStart), /workspace-carrier-cache\.json[\s\S]*Ctrl\+T: new chat in Example workspace[\s\S]*host enable claude\.\*--cwd \/home\/owner\/projects\/sample[\s\S]*workspace-hosted-launch\.txt/);
   assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
 });
 

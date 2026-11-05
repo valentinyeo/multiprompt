@@ -150,7 +150,7 @@ function Context([int]$Index) {
     $offset = (Log).Length
     Write-Host "[session-actions] right-click: tab $Index"
     [ChatDeliveryDesktop]::RightClickClient($main, [uint32]$app.Id, [int](($pair[0]+$pair[2])/2), [int](($pair[1]+$pair[3])/2))
-    [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 6249 7196 7197 7112(?:\s|$)' })
+    [void](Wait-For 'seven ordered context actions' { $trace=Log; $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] rows chars=0 count=7 ids=7113 7104 7195 7198 7196 7197 7112(?:\s|$)' })
 }
 function Read-History([string]$Name, [string]$Sid, [int]$Fixture) {
     [array]$saved=Get-Content (Join-Path $settings 'archive.json') -Raw | ConvertFrom-Json

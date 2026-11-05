@@ -63,4 +63,4 @@ if base.MODE == 'ssh' and 'tmux new-session -d -s ' in command and 'claude --res
     base.record('resumed.jsonl', session=target, original=original, sid=sid_match[1], boundary='synthetic resume transport; original transcript unchanged')
     base.attach_fake(target)
     sys.exit(0)
-sys.exit(base.tmux() if base.MODE == 'tmux' else base.shell() if base.MODE == 'shell' else base.ssh())
+sys.exit(base.tmux(base.ARGS, sys.stdin.buffer, sys.stdout) if base.MODE == 'tmux' else base.shell() if base.MODE == 'shell' else base.ssh())

@@ -196,6 +196,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .kind = if (remote) "tmux" else @tagName(shell.kind),
             .name = name,
             .manual = shell.name_source == .manual,
+            .group = if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
             .favorite = shell.favorite,
             .muted = shell.muted,
             .face = shell.face,
@@ -231,6 +232,7 @@ const PendingLayout = struct {
     appearance: []const appearance_intent.Intent = &.{},
 };
 var g_appearance: ?[]appearance_intent.Intent = null;
+var g_palette8_supported = false;
 var g_after_submit: std.ArrayList(appearance_intent.Touch) = .empty;
 var g_tracking = false;
 var g_pending_loaded = false;
@@ -354,16 +356,25 @@ pub fn publishSessionLayout() void {
     var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
     var plain_base = account_layout.withoutAppearance(arena.allocator(), base.value) catch return;
     var plain_synced = account_layout.withoutAppearance(arena.allocator(), synced.value) catch return;
+    if (!app_state.g_account_groups_supported) {
+        plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutGroups(arena.allocator(), plain_synced) catch return;
+    }
     if (!app_state.g_account_colors_supported) {
         plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutColors(arena.allocator(), plain_base) catch return;
         plain_synced = account_layout.withoutColors(arena.allocator(), plain_synced) catch return;
     }
+    if (!g_palette8_supported) {
+        plain_local = account_layout.projectPalette7(arena.allocator(), plain_local, plain_base) catch return;
+        plain_base = account_layout.projectPalette7(arena.allocator(), plain_base, plain_synced) catch return;
+    }
     var eligible = false;
     if (app_state.g_account_appearance_supported) {
         for (local.tabs) |tab| {
             for (intents) |intent| {
-                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent)) eligible = true;
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent) and (g_palette8_supported or intent.touched & appearance_intent.face_bit != 0 or (intent.touched & appearance_intent.color_bit != 0 and intent.color != 7))) eligible = true;
             }
         }
     }
@@ -640,7 +651,7 @@ pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void
     const shell = &app_state.shells[idx];
     const bit: u8 = switch (edit) {
         .face => |face| blk: { if (face != null and face.? >= 20) return error.InvalidAppearance; break :blk appearance_intent.face_bit; },
-        .color => |color| blk: { if (color != null and color.? >= 7) return error.InvalidAppearance; break :blk appearance_intent.color_bit; },
+        .color => |color| blk: { if (color != null and color.? >= @import("session_layout.zig").color_count) return error.InvalidAppearance; break :blk appearance_intent.color_bit; },
     };
     if (app_state.g_account_bypass or shell.kind != .tmux or shell.tmux_session_len == 0) {
         switch (edit) {
@@ -770,8 +781,10 @@ pub fn accountSignOut() void {
     }
     saveSession();
     accountResetAppearanceTracking();
+    g_palette8_supported = false;
     app_state.g_account_colors_supported = false;
     app_state.g_account_appearance_supported = false;
+    app_state.g_account_groups_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -1303,6 +1316,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
     reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1373,6 +1387,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
         }
         synced_hosts = merged_hosts;
+        if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
+        if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
         if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
@@ -1381,11 +1397,12 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
         const sent_appearance = remote.appearance_supported;
         const sent_colors = remote.colors_supported;
+        const sent_palette8 = remote.palette8_supported;
         const put = try account_client.requestWithLayoutFeatures("PUT", "/v1/layout", access, body, sent_colors, sent_appearance);
         remote.deinit();
         remote = put;
         appearance_confirmable = sent_appearance and remote.appearance_supported and remote.status == 200;
-        if (((remote.appearance_supported and !sent_appearance) or (remote.colors_supported and !sent_colors)) and (remote.status == 200 or remote.status == 409)) {
+        if (((remote.appearance_supported and !sent_appearance) or (remote.colors_supported and !sent_colors) or (remote.palette8_supported and !sent_palette8)) and (remote.status == 200 or remote.status == 409)) {
             const refreshed = try account_client.request("GET", "/v1/layout", access, "");
             remote.deinit();
             remote = refreshed;
@@ -1401,6 +1418,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     if (remote.status != 200) return error.Conflict;
     reply.colors_supported = remote.colors_supported;
+    reply.groups_supported = remote.groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
@@ -1424,6 +1442,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
     reply.appearance_confirmable = appearance_confirmable;
+    reply.palette8_supported = remote.palette8_supported;
     if (remote.photos_supported) {
         accountSyncPhotos(access, response.bytes, final_layout.value.tabs) catch {
             debugLog("account-sync: picture upload deferred");
@@ -1487,7 +1506,7 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
                         const name = item.object.get("name") orelse continue;
                         if (name != .string or !std.mem.eql(u8, name.string, workspace.name)) continue;
                         const color = item.object.get("color") orelse break;
-                        if (color == .integer and color.integer >= 0 and color.integer < 7) workspace.color = @intCast(color.integer);
+                        if (color == .integer and color.integer >= 0 and color.integer < @import("session_layout.zig").color_count) workspace.color = @intCast(color.integer);
                         break;
                     };
                     restored.workspaces = copy;
@@ -1511,9 +1530,9 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
                                     const host = record.object.get("tmux_host") orelse std.json.Value{ .integer = 0 };
                                     if (session != .string or host != .integer or host.integer != tab.tmux_host or !std.ascii.eqlIgnoreCase(session.string, tab.tmux_session)) continue;
                                     const face = @import("json_reader.zig").uintDefault(record, "face", 20);
-                                    const color = @import("json_reader.zig").uintDefault(record, "color", 7);
+                                    const color = @import("json_reader.zig").uintDefault(record, "color", @import("session_layout.zig").color_count);
                                     tab.face = if (face < 20) @intCast(face) else null;
-                                    tab.color = if (color < 7) @intCast(color) else null;
+                                    tab.color = if (color < @import("session_layout.zig").color_count) @intCast(color) else null;
                                     break;
                                 }
                             }
@@ -1657,6 +1676,28 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
+            if (tab.group) |name| {
+                var wide: [64]u16 = undefined;
+                const len = try std.unicode.utf8ToUtf16Le(&wide, name);
+                var group_id: u32 = 0;
+                if (len > 0) {
+                    if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| {
+                        const current = app_state.groups[gi];
+                        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) group_id = current.id;
+                    }
+                    for (app_state.groups[0..app_state.group_count]) |group| {
+                        if (group_id != 0) break;
+                        if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) {
+                            group_id = group.id;
+                            break;
+                        }
+                    }
+                    if (group_id == 0) group_id = @import("sidebar.zig").createGroup(wide[0..len]);
+                    if (group_id == 0) return error.LayoutCapacity;
+                }
+                shell.group_id = group_id;
+            }
             shell.face = tab.face;
             shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
@@ -1894,7 +1935,9 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const alloc = arena.allocator();
     const server = session_layout.parse(alloc, bytes) catch return;
     defer server.deinit();
+    g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
+    app_state.g_account_groups_supported = reply.groups_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {
@@ -1915,6 +1958,15 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const current = captureSessionLayout(alloc, false) catch return;
         to_apply = session_layout.encode(alloc, account_layout.appearanceFrom(alloc, current_apply.value, current) catch return) catch return;
     }
+    if (!g_palette8_supported and reply.job.base != null and reply.job.edited != null) {
+        const base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer base.deinit();
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.pendingWhiteWorkspaces(alloc, current_apply.value, base.value, edited.value) catch return) catch return;
+    }
     var local_ack: ?[]u8 = null;
     if (!app_state.g_account_bootstrapping and reply.job.edited != null) {
         const edit = reply.job.edited.?;
@@ -1926,6 +1978,11 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
         var ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
         if (!reply.colors_supported) ack = account_layout.withoutColors(alloc, ack) catch return;
+        if (!g_palette8_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            ack = account_layout.unacknowledgedWhiteWorkspaces(alloc, ack, old_base.value, sent.value) catch return;
+        }
         if (!reply.appearance_supported and reply.job.base != null) {
             const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
             defer old_base.deinit();
@@ -1935,6 +1992,11 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const current = accountCapturePush(alloc, sent.value) catch return;
         var apply_remote = if (reply.colors_supported) server.value else account_layout.colorsFrom(alloc, server.value, sent.value) catch return;
         if (!reply.appearance_supported) apply_remote = account_layout.appearanceFrom(alloc, apply_remote, sent.value) catch return;
+        if (!g_palette8_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            apply_remote = account_layout.pendingWhiteWorkspaces(alloc, apply_remote, old_base.value, sent.value) catch return;
+        }
         const rebased = account_layout.rebase(alloc, sent.value, current, apply_remote) catch return;
         to_apply = session_layout.encode(alloc, rebased) catch return;
     }
@@ -2045,7 +2107,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             for (remaining.items) |*intent| {
                 if (!appearance_intent.same(submitted.tmux_host, submitted.tmux_session, intent.*)) continue;
                 if (submitted.touched & appearance_intent.face_bit != 0 and later & appearance_intent.face_bit == 0 and confirmed.face == submitted.face) intent.touched &= ~appearance_intent.face_bit;
-                if (submitted.touched & appearance_intent.color_bit != 0 and later & appearance_intent.color_bit == 0 and confirmed.color == submitted.color) intent.touched &= ~appearance_intent.color_bit;
+                if (submitted.touched & appearance_intent.color_bit != 0 and later & appearance_intent.color_bit == 0 and confirmed.color == submitted.color and (submitted.color != 7 or g_palette8_supported)) intent.touched &= ~appearance_intent.color_bit;
                 break;
             }
         }
@@ -2083,6 +2145,15 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const owned_remaining = appearance_intent.clone(a, remaining.items) catch return;
     var installed_remaining = false;
     defer if (!installed_remaining) appearance_intent.free(a, owned_remaining);
+    if (app_state.g_account_bootstrapping and !g_palette8_supported and reply.job.base != null and reply.job.edited != null) {
+        const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer old_base.deinit();
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const ack = session_layout.parse(alloc, local_ack orelse bytes) catch return;
+        defer ack.deinit();
+        local_ack = session_layout.encode(alloc, account_layout.unacknowledgedWhiteWorkspaces(alloc, ack.value, old_base.value, edited.value) catch return) catch return;
+    }
     const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, bytes) catch return;
     defer ack_parsed.deinit();
     const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
