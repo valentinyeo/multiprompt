@@ -138,8 +138,7 @@ pub fn editSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callcon
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (msg == WM_KILLFOCUS and app_state.g_edit_is_browser_urlbar and app_state.g_main_hwnd != null) {
-        const posted = PostMessageW(app_state.g_main_hwnd, WM_APP_URLBAR_DISMISS, 0, 0);
-        @import("diagnostics.zig").altqLog("url_focus killfocus edit={X} current={X} next={X} fg={X} focus={X} posted={}", .{ @import("diagnostics.zig").altqPtr(hwnd), @import("diagnostics.zig").altqPtr(app_state.g_edit_hwnd), wp, @import("diagnostics.zig").altqPtr(GetForegroundWindow()), @import("diagnostics.zig").altqPtr(@import("win32.zig").GetFocus()), posted });
+        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_URLBAR_DISMISS, @intFromPtr(hwnd), 0);
     }
     if (msg == @import("win32.zig").WM_LBUTTONDBLCLK and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar and !app_state.g_edit_is_inbox) {
         _ = SendMessageW(hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));

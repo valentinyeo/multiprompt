@@ -66,6 +66,77 @@ test "held Alt and AltGr are not injected or released" {
   }
 });
 
+test('queued URL dismissal only closes its originating editor', () => {
+  const root = path.join(__dirname, '..');
+  const main = fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8');
+  const rename = fs.readFileSync(path.join(root, 'src/rename.zig'), 'utf8');
+  const start = main.indexOf('        WM_APP_URLBAR_DISMISS => {');
+  const end = main.indexOf('        WM_APP_BROWSER_FOCUS_URL => {', start);
+  const postStart = rename.indexOf('    if (msg == WM_KILLFOCUS and app_state.g_edit_is_browser_urlbar');
+  const postEnd = rename.indexOf('    if (msg == WM_KEYDOWN)', postStart);
+  assert.ok(start >= 0 && end > start && postStart >= 0 && postEnd > postStart);
+  const handler = main.slice(start, end);
+  const sender = rename.slice(postStart, postEnd);
+  const fixture = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const WM_KILLFOCUS: u32 = 8;
+const WM_APP_URLBAR_DISMISS: u32 = 1;
+const old_edit: HANDLE = @ptrFromInt(1);
+const new_edit: HANDLE = @ptrFromInt(2);
+const main_window: HANDLE = @ptrFromInt(3);
+var posted_wp: usize = 0;
+var focused: HANDLE = null;
+var discarded: usize = 0;
+var visibility_updates: usize = 0;
+const app_state = struct {
+    var g_main_hwnd: HANDLE = main_window;
+    var g_edit_hwnd: HANDLE = old_edit;
+    var g_edit_is_browser_urlbar = true;
+};
+fn PostMessageW(_: HANDLE, _: u32, wp: usize, _: isize) i32 { posted_wp = wp; return 1; }
+fn GetFocus() HANDLE { return focused; }
+fn discardBrowserUrlBarEdit() void { discarded += 1; app_state.g_edit_hwnd = null; }
+fn updateBrowserVisibility() void { visibility_updates += 1; }
+fn postKill(hwnd: HANDLE, msg: u32) void {
+${sender}
+}
+fn dispatch(wp: usize) isize {
+    switch (@as(u32, WM_APP_URLBAR_DISMISS)) {
+${handler}
+        else => return 1,
+    }
+}
+test "old queued dismissal cannot discard the new unfocused editor" {
+    postKill(old_edit, WM_KILLFOCUS);
+    try std.testing.expectEqual(@intFromPtr(old_edit), posted_wp);
+    app_state.g_edit_hwnd = new_edit;
+    _ = dispatch(posted_wp);
+    try std.testing.expectEqual(new_edit, app_state.g_edit_hwnd);
+    try std.testing.expectEqual(@as(usize, 0), discarded);
+    try std.testing.expectEqual(@as(usize, 0), visibility_updates);
+    postKill(new_edit, WM_KILLFOCUS);
+    focused = new_edit;
+    _ = dispatch(posted_wp);
+    try std.testing.expectEqual(new_edit, app_state.g_edit_hwnd);
+    focused = null;
+    _ = dispatch(posted_wp);
+    try std.testing.expectEqual(@as(HANDLE, null), app_state.g_edit_hwnd);
+    try std.testing.expectEqual(@as(usize, 1), discarded);
+    try std.testing.expectEqual(@as(usize, 1), visibility_updates);
+}
+`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'url-dismiss-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, fixture);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, `${result.error || ''}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('URL focus waits for modifiers and cancels stale handoffs', () => {
   const browser = fs.readFileSync(path.join(__dirname, '../src/browser_pane.zig'), 'utf8');
   const start = browser.indexOf('var url_focus_edit:');
@@ -118,8 +189,6 @@ const app_state = struct {
     var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 };
 fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
-fn altqLog(_: []const u8, _: anytype) void {}
-fn altqPtr(hwnd: HANDLE) usize { return if (hwnd) |h| @intFromPtr(h) else 0; }
 fn DestroyWindow(hwnd: HANDLE) i32 { destroyed = hwnd; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
 fn computerSelected() bool { return computer_selected; }

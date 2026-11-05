@@ -3139,8 +3139,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_URLBAR_DISMISS => {
-            altqLog("url_focus dismiss edit={X} is_url={} focus={X} fg={X}", .{ altqPtr(app_state.g_edit_hwnd), app_state.g_edit_is_browser_urlbar, altqPtr(GetFocus()), altqPtr(GetForegroundWindow()) });
-            if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null and GetFocus() != app_state.g_edit_hwnd) {
+            if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null and wp == @intFromPtr(app_state.g_edit_hwnd) and GetFocus() != app_state.g_edit_hwnd) {
                 discardBrowserUrlBarEdit();
                 updateBrowserVisibility();
             }
