@@ -3171,11 +3171,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_QUIT_ALL => {
+            app_state.g_quit_all_in_progress = true;
             if (wp == 1) {
                 quitAllZigShellWindows(hwnd);
                 return 0;
             }
-            app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
             app_state.requestAppClose(hwnd, .quit_all);
             return 0;
@@ -6360,8 +6360,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_RENAME_SYNC_OFFSET) {
-                    const index = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
-                    if (index) |ti| _ = beginPaletteRenameInput(ti);
+                    if (app_state.g_search_tabctx_mode) {
+                        if (findShellById(app_state.g_tabctx_sid)) |ti| _ = beginPaletteRenameInput(ti);
+                    } else if (app_state.active_shell < app_state.shell_count) {
+                        _ = beginPaletteRenameInput(app_state.active_shell);
+                    }
                     return 0;
                 }
                 if (target == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET) {
