@@ -17,6 +17,15 @@ const server = http.createServer((request, response) => {
   request.on('data', chunk => chunks.push(chunk));
   request.on('end', () => {
     const body = Buffer.concat(chunks);
+    if (request.method === 'GET' && request.url === '/signin-storage') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(`<!doctype html><title>Sign-in storage</title><script>
+const value = localStorage.getItem('mp_signin_proof');
+const cookieMatch = value !== null && document.cookie.split(';').some(cookie => cookie.trim() === 'mp_signin_proof=' + value);
+document.title = 'mp_signin_proof=' + value + '; cookie-match=' + cookieMatch;
+</script>`);
+      return;
+    }
     if (request.method !== 'POST' || request.url !== '/api/upload-screenshot') {
       response.writeHead(404).end('not found');
       return;

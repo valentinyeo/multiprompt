@@ -268,7 +268,8 @@
                 Save-Json @{ plain = $script:signinWindow; windows = @([VerifyNative]::DesktopWindows()); originalAlive = ($null -ne (Get-Process -Id $first.pid -ErrorAction SilentlyContinue)); decoyAlive = ($null -ne (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) } 'signin-after.json'
             }
             Snapshot 'signin-window'
-            if ($script:signinWindow.browser.commandLine -match '(?i)--(remote-debugging-pipe|enable-unsafe-extension-debugging|load-extension|disable-sync)(?:[=\s"]|$)') { throw 'Sign-in window is owned by a controlled Chrome process' }
+            if ($script:signinWindow.browser.commandLine -match '(?i)--(remote-debugging-pipe|remote-debugging-port|enable-automation|enable-unsafe-extension-debugging|load-extension|disable-sync)(?:[=\s"]|$)') { throw 'Sign-in window is owned by a controlled Chrome process' }
+            if ($script:signinWindow.browser.commandLine -notmatch '(?i)(?:^|\s)"?--profile-directory=(?:"Default"|Default"?)(?=\s|$)') { throw 'Plain sign-in window uses another Chrome profile directory' }
             Wait-Until { $null -eq (Get-Process -Id $first.pid -ErrorAction SilentlyContinue) } 'original controlled Chrome process exited' 30
             if ($null -eq (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) { throw 'Unrelated profile process exited during sign-in' }
             $plainHandle = [IntPtr]::new([long]$script:signinWindow.browser.hwnd)
@@ -277,6 +278,56 @@
             if ($plainOwner -ne $script:signinWindow.browser.pid -or [VerifyNative]::GetProp($plainHandle, 'ZigShellPaneOwner') -ne [IntPtr]::Zero) { throw 'Sign-in window ownership changed before close' }
             $plainProcess = Get-Process -Id $script:signinWindow.browser.pid
             [void]$plainProcess.Handle
+            $focusPlain = {
+                Doctor
+                $current = Get-PaneUserDataDir $plainHandle
+                $owner = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $current.pid)
+                if ($current.hwnd -ne $script:signinWindow.browser.hwnd -or $current.pid -ne $script:signinWindow.browser.pid -or
+                    $current.userDataDir -ine $stableRoot -or $null -eq $owner -or $owner.ExecutablePath -ine $stableChrome -or
+                    $current.commandLine -cne $script:signinWindow.browser.commandLine -or
+                    [VerifyNative]::Class($plainHandle) -cne 'Chrome_WidgetWin_1' -or -not [VerifyNative]::IsWindowVisible($plainHandle) -or
+                    [VerifyNative]::GetProp($plainHandle, 'ZigShellPaneOwner') -ne [IntPtr]::Zero) { throw 'Standalone Chrome identity changed before input' }
+                Wait-Until {
+                    [void][VerifyNative]::SetForegroundWindow($plainHandle)
+                    [VerifyNative]::GetForegroundWindow() -eq $plainHandle
+                } 'standalone Chrome foreground' 10
+                [uint32]$foregroundOwner = 0
+                $foreground = [VerifyNative]::GetForegroundWindow()
+                [void][VerifyNative]::GetWindowThreadProcessId($foreground, [ref]$foregroundOwner)
+                if ($foreground -ne $plainHandle -or $foregroundOwner -ne $script:signinWindow.browser.pid) { throw 'Refusing input outside standalone Chrome' }
+            }
+            $shotPlain = {
+                param([string]$Name)
+                [void][VerifyNative]::DwmFlush()
+                $rect = New-Object VerifyNative+Rect
+                if (-not [VerifyNative]::GetWindowRect($plainHandle, [ref]$rect)) { throw 'Standalone Chrome rectangle unavailable' }
+                $bitmap = New-Object Drawing.Bitmap(($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                try {
+                    $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+                    $bitmap.Save((Join-Path $Evidence ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
+                } finally { $graphics.Dispose(); $bitmap.Dispose() }
+            }
+            Wait-Until { [VerifyNative]::Title($plainHandle) -match '(?i)google' } 'standalone Google page title' 60
+            & $focusPlain
+            & $shotPlain 'signin-plain-google'
+            Record 'Ctrl+L: focus standalone Chrome address bar'
+            & $focusPlain
+            [VerifyNative]::Chord(@(0x11, 0x4C))
+            Record ('Type standalone storage URL ' + $storageUrl)
+            & $focusPlain
+            [VerifyNative]::Text($storageUrl)
+            Record 'Enter: open standalone storage page'
+            & $focusPlain
+            [VerifyNative]::Chord(@(0x0D))
+            $expectedTitle = 'mp_signin_proof=' + $marker + '; cookie-match=true'
+            Wait-Until { [VerifyNative]::Title($plainHandle).StartsWith($expectedTitle) } 'standalone Chrome reads synthetic storage and matching cookie' 60
+            & $focusPlain
+            $plainTitle = [VerifyNative]::Title($plainHandle)
+            if (-not $plainTitle.StartsWith($expectedTitle)) { throw 'Standalone Chrome storage title changed' }
+            Save-Json @{ browser = $script:signinWindow.browser; title = $plainTitle; url = $storageUrl; boundary = 'Synthetic browser storage, not Google authentication' } 'signin-storage-plain.json'
+            & $shotPlain 'signin-storage-plain'
+            if ($null -eq (Get-Process -Id $decoy.pid -ErrorAction SilentlyContinue)) { throw 'Unrelated profile process exited during standalone storage read' }
             if (-not [VerifyNative]::PostMessage($plainHandle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw 'Could not close the owned sign-in window' }
             Wait-Until { [VerifyNative]::GetWindowThreadProcessId($plainHandle, [ref]$plainOwner) -eq 0 } 'standalone sign-in window closed' 30
             if (-not $plainProcess.WaitForExit(30000)) { throw 'Standalone sign-in Chrome process did not exit before reopening' }
