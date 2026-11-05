@@ -629,6 +629,9 @@ jobs:
           retention-days: 1
           overwrite: true
 
+      - name: Compile the Rooms integration
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: zig build -Dtarget=x86_64-windows-gnu -Dcpu=x86_64_v3 -Drooms-preview=true --prefix "$RUNNER_TEMP/rooms-preview" --summary all
       - name: Build newer native update fixture
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=9.99.999 --prefix "$RUNNER_TEMP/native-update" --summary all

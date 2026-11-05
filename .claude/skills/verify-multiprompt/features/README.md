@@ -35,6 +35,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [Rooms](rooms.md): two-member room creation, saved selection and draft, restart restoration and legacy-peer send refusal; live replies remain outside this journey.
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
 - [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.
 

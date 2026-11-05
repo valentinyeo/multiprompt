@@ -7,10 +7,10 @@ const max_file = 2 * 1024 * 1024;
 const max_request = 131071;
 const max_evidence = 262144;
 
-pub const Kind = enum { create, edit };
+pub const Kind = enum { create, edit, post };
 pub const State = enum { prepared, uncertain, accepted, rejected };
 pub const Scope = struct { account_digest: [64]u8, store_uuid: [36]u8 };
-pub const Binding = struct { alias: []const u8, id: []const u8 };
+pub const Binding = @import("room_message.zig").Binding;
 pub const Record = struct {
     account_digest: []const u8,
     store_uuid: []const u8,
@@ -126,6 +126,27 @@ fn validateRequest(r: Record) bool {
     const op = text(obj, "op") orelse return false;
     const command = text(obj, "command_id") orelse return false;
     const host = text(obj, "host_uuid") orelse return false;
+    if (r.kind == .post) {
+        if (!std.mem.eql(u8, op, "post_human") or !std.mem.eql(u8, command, r.command_id) or !std.mem.eql(u8, host, r.store_uuid) or !uuidValid(r.room_id) or r.revision == 0 or !std.mem.eql(u8, text(obj, "room_id") orelse return false, r.room_id) or (number(obj, "expected_revision") orelse 0) != r.revision) return false;
+        for (r.bindings, 0..) |binding, i| {
+            if (!uuidValid(binding.id) or binding.alias.len == 0 or binding.alias.len > 32) return false;
+            for (r.bindings[0..i]) |old| if (std.mem.eql(u8, old.id, binding.id) or std.mem.eql(u8, old.alias, binding.alias)) return false;
+        }
+        const plan = @import("room_message.zig").plan(text(obj, "text") orelse return false, r.bindings) catch return false;
+        const recipients = field(obj, "recipients") orelse return false;
+        if (recipients != .array or recipients.array.items.len != plan.alias_count) return false;
+        for (recipients.array.items, 0..) |recipient, i| {
+            if (recipient != .string) return false;
+            for (recipients.array.items[0..i]) |old| if (std.mem.eql(u8, old.string, recipient.string)) return false;
+            var found = false;
+            for (plan.recipients()) |alias| if (std.mem.eql(u8, alias, recipient.string)) {
+                found = true;
+                break;
+            };
+            if (!found) return false;
+        }
+        return true;
+    }
     const name = text(obj, "name") orelse return false;
     if (!std.mem.eql(u8, op, if (r.kind == .create) "create" else "edit") or !std.mem.eql(u8, command, r.command_id) or !std.mem.eql(u8, host, r.store_uuid) or !validText(name, 256)) return false;
     if (r.kind == .create) {
@@ -162,11 +183,38 @@ fn validateEvidence(r: Record) bool {
     if (r.state == .rejected) {
         if (obj.object.count() != 1) return false;
         const code = text(obj, "error") orelse return false;
-        for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op" }) |known| if (std.mem.eql(u8, code, known)) return true;
+        for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op", "invalid_recipients", "invalid_mentions", "runtime_unsupported" }) |known| if (std.mem.eql(u8, code, known)) return true;
         return false;
     }
     const event = field(obj, "event") orelse return false;
     const deliveries = field(obj, "deliveries") orelse return false;
+    if (r.kind == .post) {
+        if (obj.object.count() != 2 or event != .object or event.object.count() != 7 or deliveries != .array) return false;
+        const event_id = text(event, "id") orelse return false;
+        const seq = number(event, "seq") orelse return false;
+        if (!uuidValid(event_id) or seq == 0 or !std.mem.eql(u8, text(event, "room_id") orelse return false, r.room_id) or !std.mem.eql(u8, text(event, "type") orelse return false, "human") or (number(event, "revision") orelse 0) != r.revision) return false;
+        var request = std.json.parseFromSlice(std.json.Value, allocator, r.request, .{ .allocate = .alloc_always }) catch return false;
+        defer request.deinit();
+        const message = text(request.value, "text") orelse return false;
+        if (!std.mem.eql(u8, text(event, "text") orelse return false, message)) return false;
+        const plan = @import("room_message.zig").plan(message, r.bindings) catch return false;
+        const recipients = field(event, "recipients") orelse return false;
+        if (recipients != .array or recipients.array.items.len != plan.target_count or deliveries.array.items.len != plan.target_count) return false;
+        for (plan.targets[0..plan.target_count]) |target| {
+            var recipient_count: usize = 0;
+            var delivery_count: usize = 0;
+            for (recipients.array.items) |recipient| {
+                if (recipient != .string) return false;
+                if (std.mem.eql(u8, recipient.string, target)) recipient_count += 1;
+            }
+            for (deliveries.array.items) |delivery| {
+                if (!uuidValid(text(delivery, "id") orelse return false) or !std.mem.eql(u8, text(delivery, "room_id") orelse return false, r.room_id) or !std.mem.eql(u8, text(delivery, "event_id") orelse return false, event_id) or (number(delivery, "event_seq") orelse 0) != seq or (number(delivery, "delivery_seq") orelse 0) == 0) return false;
+                if (std.mem.eql(u8, text(delivery, "member_id") orelse return false, target)) delivery_count += 1;
+            }
+            if (recipient_count != 1 or delivery_count != 1) return false;
+        }
+        return true;
+    }
     if (obj.object.count() != 2 or event != .object or event.object.count() != 7 or deliveries != .array or deliveries.array.items.len != 0) return false;
     const event_id = text(event, "id") orelse return false;
     const room = text(event, "room_id") orelse return false;
@@ -315,4 +363,41 @@ pub fn updateLocked(guard: *const Lock, command_id: []const u8, state: State, ev
     record.state = state;
     record.evidence = evidence;
     try persist(scope, record);
+}
+
+test "room post journal fences requests and receipts to their room and mentioned members" {
+    const a = std.testing.allocator;
+    const host = "10000000-0000-4000-8000-000000000001";
+    const room = "20000000-0000-4000-8000-000000000002";
+    const command = "30000000-0000-4000-8000-000000000003";
+    const alpha = "40000000-0000-4000-8000-000000000004";
+    const beta = "50000000-0000-4000-8000-000000000005";
+    const event = "60000000-0000-4000-8000-000000000006";
+    const delivery = "70000000-0000-4000-8000-000000000007";
+    const bindings = [_]Binding{ .{ .alias = "alpha", .id = alpha }, .{ .alias = "beta", .id = beta } };
+    const request = try std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .host_uuid = host, .command_id = command, .room_id = room, .expected_revision = 3, .text = "@alpha reply", .recipients = [_][]const u8{"alpha"} }, .{});
+    defer a.free(request);
+    var record = Record{ .account_digest = "", .store_uuid = host, .kind = .post, .command_id = command, .room_id = room, .revision = 3, .request = request, .bindings = &bindings, .state = .prepared, .evidence = "" };
+    try std.testing.expect(validateRequest(record));
+    try std.testing.expect(validateEvidence(record));
+    record.state = .accepted;
+    for ([_][]const u8{ alpha, beta }) |target| {
+        const evidence = try std.json.Stringify.valueAlloc(a, .{
+            .event = .{ .id = event, .room_id = room, .seq = 4, .type = "human", .text = "@alpha reply", .revision = 3, .recipients = [_][]const u8{target} },
+            .deliveries = .{.{ .id = delivery, .room_id = room, .event_id = event, .event_seq = 4, .member_id = target, .status = "pending", .delivery_seq = 1 }},
+        }, .{});
+        defer a.free(evidence);
+        record.evidence = evidence;
+        try std.testing.expectEqual(std.mem.eql(u8, target, alpha), validateEvidence(record));
+        if (std.mem.eql(u8, target, alpha)) {
+            record.room_id = host;
+            try std.testing.expect(!validateRequest(record));
+            try std.testing.expect(!validateEvidence(record));
+            record.room_id = room;
+            record.revision = 2;
+            try std.testing.expect(!validateRequest(record));
+            try std.testing.expect(!validateEvidence(record));
+            record.revision = 3;
+        }
+    }
 }
