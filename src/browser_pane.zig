@@ -4555,6 +4555,7 @@ pub fn switchBrowserEngine(hwnd: HANDLE) void {
 }
 
 pub fn discardBrowserUrlBarEdit() void {
+    if (app_state.g_edit_is_browser_urlbar) altqLog("url_focus discard edit={X} focus={X} fg={X}", .{ altqPtr(app_state.g_edit_hwnd), altqPtr(GetFocus()), altqPtr(GetForegroundWindow()) });
     cancelUrlBarFocus();
     if (!app_state.g_edit_is_browser_urlbar or app_state.g_edit_hwnd == null) return;
     _ = DestroyWindow(app_state.g_edit_hwnd);
@@ -5860,6 +5861,7 @@ var url_focus_input_tick: u64 = 0;
 var url_focus_shell_id: u32 = 0;
 
 fn cancelUrlBarFocus() void {
+    if (url_focus_edit != null) altqLog("url_focus cancel edit={X} current={X} fg={X} focus={X}", .{ altqPtr(url_focus_edit), altqPtr(app_state.g_edit_hwnd), altqPtr(GetForegroundWindow()), altqPtr(GetFocus()) });
     _ = KillTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS);
     if (app_state.g_focus_authorized_until == url_focus_deadline and
         (app_state.g_focus_authorized_hwnd == url_focus_parent or app_state.g_focus_authorized_hwnd == url_focus_edit))
@@ -5873,6 +5875,8 @@ fn cancelUrlBarFocus() void {
 }
 
 fn abandonUrlBarFocus() void {
+    altqLog("url_focus abandon edit={X} current={X} fg={X} focus={X} now={} deadline={} input={} requested={} locked={} computer={} private={}", .{ altqPtr(url_focus_edit), altqPtr(app_state.g_edit_hwnd), altqPtr(GetForegroundWindow()), altqPtr(GetFocus()), GetTickCount64(), url_focus_deadline, app_state.g_focus_input_tick, url_focus_input_tick, app_state.g_account_locked, @import("computer_pane.zig").selected(), @import("room_frontend.zig").privateActionsAllowed() });
+    altqLog("url_focus validity is_url={} edit_live={} parent_live={} shell={} requested_shell={} ours={}", .{ app_state.g_edit_is_browser_urlbar, IsWindow(url_focus_edit) != 0, IsWindow(url_focus_parent) != 0, if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0, url_focus_shell_id, foregroundIsOurs() });
     if (url_focus_edit != null and app_state.g_edit_hwnd == url_focus_edit and app_state.g_edit_is_browser_urlbar) {
         discardBrowserUrlBarEdit();
         if (@import("computer_pane.zig").selected()) @import("computer_pane.zig").sync();
@@ -5893,9 +5897,13 @@ pub fn browserUrlFocusTick() void {
         return;
     }
     for ([_]i32{ 0x10, 0x11, 0x12, 0x5B, 0x5C }) |key| {
-        if (GetAsyncKeyState(key) < 0) return;
+        if (GetAsyncKeyState(key) < 0) {
+            altqLog("url_focus held key={X} edit={X} left={}", .{ key, altqPtr(url_focus_edit), url_focus_deadline -| GetTickCount64() });
+            return;
+        }
     }
     if (!focusGuard(url_focus_parent)) {
+        altqLog("url_focus guard_block parent={X} fg={X}", .{ altqPtr(url_focus_parent), altqPtr(GetForegroundWindow()) });
         abandonUrlBarFocus();
         return;
     }
@@ -5905,7 +5913,8 @@ pub fn browserUrlFocusTick() void {
         return;
     }
     if (fg != url_focus_parent) {
-        _ = SetForegroundWindow(url_focus_parent);
+        const foreground_result = SetForegroundWindow(url_focus_parent);
+        altqLog("url_focus foreground result={} before={X} fg={X} parent={X} edit={X} focus={X}", .{ foreground_result, altqPtr(fg), altqPtr(GetForegroundWindow()), altqPtr(url_focus_parent), altqPtr(url_focus_edit), altqPtr(GetFocus()) });
         @import("focus.zig").focusGuardReadMouse();
         if (GetForegroundWindow() == fg and foregroundIsOurs() and GetTickCount64() < url_focus_deadline and
             !app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
@@ -5914,6 +5923,7 @@ pub fn browserUrlFocusTick() void {
             app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == url_focus_shell_id)
         {
             SwitchToThisWindow(url_focus_parent, 0);
+            altqLog("url_focus switch fg={X} parent={X} edit={X} focus={X}", .{ altqPtr(GetForegroundWindow()), altqPtr(url_focus_parent), altqPtr(url_focus_edit), altqPtr(GetFocus()) });
         }
     }
     @import("focus.zig").focusGuardReadMouse();
@@ -5924,7 +5934,8 @@ pub fn browserUrlFocusTick() void {
     {
         app_state.g_focus_authorized_hwnd = url_focus_edit;
         app_state.g_focus_authorized_until = url_focus_deadline;
-        _ = SetFocus(url_focus_edit);
+        const previous_focus = SetFocus(url_focus_edit);
+        altqLog("url_focus setfocus previous={X} focus={X} edit={X} fg={X}", .{ altqPtr(previous_focus), altqPtr(GetFocus()), altqPtr(url_focus_edit), altqPtr(GetForegroundWindow()) });
     }
     if (!app_state.g_account_locked and !@import("computer_pane.zig").selected() and @import("room_frontend.zig").privateActionsAllowed() and
         GetForegroundWindow() == url_focus_parent and GetFocus() == url_focus_edit) cancelUrlBarFocus();
@@ -5979,7 +5990,8 @@ pub fn startBrowserUrlBarEdit() void {
         url_focus_shell_id = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_focus_authorized_hwnd = edit_parent;
         app_state.g_focus_authorized_until = url_focus_deadline;
-        _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
+        const timer_result = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_BROWSER_URL_FOCUS, 20, null);
+        altqLog("url_focus start edit={X} parent={X} fg={X} deadline={} input={} timer={}", .{ altqPtr(url_focus_edit), altqPtr(url_focus_parent), altqPtr(GetForegroundWindow()), url_focus_deadline, url_focus_input_tick, timer_result });
         browserUrlFocusTick();
     }
 }

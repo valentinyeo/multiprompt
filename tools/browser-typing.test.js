@@ -118,6 +118,8 @@ const app_state = struct {
     var shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 };
 fn KillTimer(_: HANDLE, _: usize) i32 { killed += 1; return 1; }
+fn altqLog(_: []const u8, _: anytype) void {}
+fn altqPtr(hwnd: HANDLE) usize { return if (hwnd) |h| @intFromPtr(h) else 0; }
 fn DestroyWindow(hwnd: HANDLE) i32 { destroyed = hwnd; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
 fn computerSelected() bool { return computer_selected; }
