@@ -12,8 +12,8 @@ import uuid
 
 
 ROOT = Path(os.environ['MP_VERIFY_STATE'])
-if os.environ.get('GITHUB_ACTIONS') != 'true' or os.name != 'nt':
-    raise RuntimeError('Hosted Windows fixture only')
+if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_OS') not in ('Windows', 'Linux'):
+    raise RuntimeError('GitHub-hosted fixture only')
 
 
 def synthetic_runtime(store, directory):

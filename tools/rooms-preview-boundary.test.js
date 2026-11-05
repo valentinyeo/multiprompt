@@ -7,12 +7,13 @@ const { randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 
-test('Rooms preview boundary retains legacy refusal and one broadcast produces two scoped synthetic replies', { skip: process.platform !== 'win32' }, () => {
-  assert.equal(process.env.GITHUB_ACTIONS, 'true', 'hosted Windows only');
+test('Rooms preview boundary retains legacy refusal and one broadcast produces two scoped synthetic replies', () => {
+  assert.equal(process.env.GITHUB_ACTIONS, 'true', 'GitHub-hosted only');
+  assert.ok(fs.existsSync(path.join(root, 'tools/verify-rooms/boundary.py')), 'The executable Rooms preview boundary must exist');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rooms-preview-boundary-'));
   const source = ['src/room_service.py', 'src/room_bridge.py'].map(file => fs.readFileSync(path.join(root, file)).toString('base64'));
   function request(query) {
-    const result = spawnSync('python', [path.join(root, 'tools/verify-rooms/boundary.py'), 'ssh', 'room_service'], {
+    const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', [path.join(root, 'tools/verify-rooms/boundary.py'), 'ssh', 'room_service'], {
       cwd: root, env: { ...process.env, MP_VERIFY_STATE: directory },
       input: [...source, 'a'.repeat(64), JSON.stringify(query), ''].join('\n'), encoding: 'utf8', timeout: 30000,
     });

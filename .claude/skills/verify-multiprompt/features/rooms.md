@@ -16,7 +16,7 @@ The driver builds the existing account Worker through a local-only Wrangler dry 
 
 Real keyboard input opens the palette and member picker, types Product sync, creates the room, attempts a legacy send, and checks draft persistence after restart. Switching only the remote boundary to scoped synthetic replies then exercises one real native broadcast send. Independent SQLite reads require exactly one human event and two distinct member replies bound to that event. Canonical event reads require exactly two started and ended turns. Reopening the owned app must load the same selected room without adding messages or turns. No room events or drafts are inserted by the driver.
 
-Evidence includes real desktop screenshots before sending, after both replies and after restart, action traces, synthetic room/canonical witnesses, binary identity and cleanup checks under `verify-rooms`. The Windows boundary contract test also verifies legacy refusal, broadcast fan-out, command replay and read-after-reopen idempotency. It is not desktop proof by itself.
+Evidence includes real desktop screenshots before sending, after both replies and after restart, action traces, synthetic room/canonical witnesses, binary identity and cleanup checks under `verify-rooms`. The hosted Windows/Linux boundary contract test also verifies legacy refusal, broadcast fan-out, command replay and read-after-reopen idempotency. It is not desktop proof by itself.
 
 ## Gotchas
 
