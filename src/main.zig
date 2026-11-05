@@ -8573,14 +8573,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (browser) |metadata| {
                             if (app_state.g_account_locked or app_state.g_restoring or (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored)) return 0;
                             if (!app_state.validBrowserTabTransfer(metadata)) return 0;
-                            if (metadata.appearance.face > 20 or metadata.appearance.color > 7 or metadata.appearance.pending_mask != 0) return 0;
+                            if (metadata.appearance.face > 20 or metadata.appearance.color > @import("session_layout.zig").color_count or metadata.appearance.pending_mask != 0) return 0;
                         }
                         const transfer: *const TabTransfer = @ptrCast(@alignCast(data_ptr));
                         const appearance: ?*const app_state.AppearanceTabTransfer = if (browser) |metadata|
                             (if (metadata.has_appearance != 0) &metadata.appearance else null)
                         else if (cds.cbData == @sizeOf(app_state.AppearanceTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
                         if (appearance) |extended| {
-                            if (extended.face > 20 or extended.color > 7 or extended.pending_mask != 0) return 0;
+                            if (extended.face > 20 or extended.color > @import("session_layout.zig").color_count or extended.pending_mask != 0) return 0;
                         }
                         if (transfer.tmux_identity_len > 63) return 0;
                         if (browser != null and (transfer.console_hwnd == 0 or transfer.kind > 6 or transfer.name_source > 4 or
@@ -8621,7 +8621,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.favorite = transfer.favorite != 0;
                             if (appearance) |extended| {
                                 new_shell.face = if (extended.face < 20) extended.face else null;
-                                new_shell.color = if (extended.color < 7) extended.color else null;
+                                new_shell.color = @import("session_layout.zig").decodeTransferColor(extended.color);
                             }
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;

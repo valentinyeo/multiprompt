@@ -27,7 +27,7 @@ test('workspace order owns color and raw session owns face for arbitrary names',
   try {
     const identity = block(source, 'pub const Appearance = struct') + ';';
     const forShell = block(source, 'pub fn forShell(') + '\n' + block(source, 'pub fn forShellWithFace(');
-    fs.writeFileSync(path.join(dir, 'session_layout.zig'), block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
+    fs.writeFileSync(path.join(dir, 'session_layout.zig'), 'pub const color_count = 8;\n' + block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
     fs.writeFileSync(path.join(dir, 'identity.zig'), `const std = @import("std");
 const state = struct {
   pub const Shell = struct {
@@ -47,7 +47,7 @@ test "ordered palette cycles and overrides never change the face" {
     const face = forShell(&shell).face;
     for (0..9) |i| {
         shell.workspace = @intCast(i);
-        try std.testing.expectEqual(@as(u8, @intCast(i % 7)), forShell(&shell).color);
+        try std.testing.expectEqual(@as(u8, @intCast(i % 8)), forShell(&shell).color);
         try std.testing.expectEqual(face, forShell(&shell).face);
         state.g_ws_colors[i] = 6;
         try std.testing.expectEqual(@as(u8, 6), forShell(&shell).color);

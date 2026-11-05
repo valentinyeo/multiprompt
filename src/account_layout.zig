@@ -85,6 +85,53 @@ pub fn withoutColors(a: Allocator, target: Layout) !Layout {
     return result;
 }
 
+pub fn projectPalette7(a: Allocator, target: Layout, server: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| {
+        if (workspace.color != 7) continue;
+        workspace.color = if (workspaceIndex(server.workspaces, workspace.name)) |i| server.workspaces[i].color else null;
+        if (workspace.color == 7) workspace.color = null;
+    }
+    const tabs = try a.dupe(Tab, target.tabs);
+    for (tabs) |*tab| {
+        if (tab.color != 7) continue;
+        tab.color = if (find(server.tabs, tab.*)) |i| server.tabs[i].color else null;
+        if (tab.color == 7) tab.color = null;
+    }
+    result.workspaces = workspaces;
+    result.tabs = tabs;
+    return result;
+}
+
+pub fn pendingWhiteWorkspaces(a: Allocator, target: Layout, base: Layout, edited: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| {
+        const i = workspaceIndex(edited.workspaces, workspace.name) orelse continue;
+        if (edited.workspaces[i].color != 7) continue;
+        if (workspaceIndex(base.workspaces, workspace.name)) |bi| {
+            if (base.workspaces[bi].color == 7) continue;
+        }
+        workspace.color = 7;
+    }
+    result.workspaces = workspaces;
+    return result;
+}
+
+pub fn unacknowledgedWhiteWorkspaces(a: Allocator, target: Layout, base: Layout, edited: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| {
+        if (workspace.color != 7) continue;
+        const i = workspaceIndex(edited.workspaces, workspace.name) orelse continue;
+        if (edited.workspaces[i].color != 7) continue;
+        workspace.color = if (workspaceIndex(base.workspaces, workspace.name)) |bi| base.workspaces[bi].color else null;
+    }
+    result.workspaces = workspaces;
+    return result;
+}
+
 pub fn appearanceFrom(a: Allocator, target: Layout, source: Layout) !Layout {
     var result = target;
     const tabs = try a.dupe(Tab, target.tabs);
@@ -324,8 +371,8 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
                         const w = workspaces.array.items[@intCast(index.integer)];
                         if (w == .object) if (w.object.get("name")) |n| {
                             if (n == .string) name = n.string;
-                            const value = @import("json_reader.zig").uintDefault(w, "color", 7);
-                            color = if (value < 7) @intCast(value) else null;
+                            const value = @import("json_reader.zig").uintDefault(w, "color", @import("session_layout.zig").color_count);
+                            color = if (value < @import("session_layout.zig").color_count) @intCast(value) else null;
                         };
                     }
                 }
@@ -1022,13 +1069,13 @@ test "IGSH-1172 colors rebase independently reset reorder and survive cache" {
     defer arena.deinit();
     const a = arena.allocator();
     const base = Layout{ .workspaces = &.{ .{ .name = "Cedar", .color = 1 }, .{ .name = "Orbit" } }, .tabs = &.{} };
-    const edited = Layout{ .workspaces = &.{ .{ .name = "Orbit", .color = 4 }, .{ .name = "Cedar", .color = null } }, .tabs = &.{} };
+    const edited = Layout{ .workspaces = &.{ .{ .name = "Orbit", .color = 7 }, .{ .name = "Cedar", .color = null } }, .tabs = &.{} };
     const remote = Layout{ .revision = 2, .workspaces = &.{ .{ .name = "Cedar", .color = 5 }, .{ .name = "Orbit", .color = 6 }, .{ .name = "Lagoon", .color = 2 } }, .tabs = &.{} };
     try std.testing.expect(!equal(base, edited));
     try std.testing.expect(publishNeeded(edited, base, base));
     const result = try rebase(a, base, edited, remote);
     try std.testing.expectEqualStrings("Orbit", result.workspaces[0].name);
-    try std.testing.expectEqual(@as(?u8, 4), result.workspaces[0].color);
+    try std.testing.expectEqual(@as(?u8, 7), result.workspaces[0].color);
     try std.testing.expectEqual(@as(?u8, null), result.workspaces[1].color);
     try std.testing.expectEqual(@as(?u8, 2), result.workspaces[2].color);
     const unchanged = try rebase(a, base, base, remote);
@@ -1037,7 +1084,7 @@ test "IGSH-1172 colors rebase independently reset reorder and survive cache" {
     const parsed = try std.json.parseFromSlice(std.json.Value, a, cache, .{});
     defer parsed.deinit();
     const workspaces = parsed.value.object.get("workspaces").?.array.items;
-    try std.testing.expectEqual(@as(i64, 4), workspaces[0].object.get("color").?.integer);
+    try std.testing.expectEqual(@as(i64, 7), workspaces[0].object.get("color").?.integer);
     try std.testing.expect(!workspaces[1].object.contains("color"));
     try std.testing.expectEqual(@as(i64, 2), workspaces[2].object.get("color").?.integer);
     const applied = try apply(a, base, &.{}, remote, 9, 256);
@@ -1072,4 +1119,35 @@ test "old server sync preserves pending workspace color until upgrade" {
     const honored = try rebase(a, upgraded, upgraded, server_reset);
     try std.testing.expectEqual(@as(?u8, null), honored.workspaces[0].color);
     try std.testing.expectEqual(@as(u8, 1), layout.workspaceColor(1, honored.workspaces[0].color));
+}
+
+test "IGSH-1533 old palette projects white without losing pending edits" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var old_tab = one;
+    old_tab.face = 2;
+    old_tab.color = 3;
+    const base = Layout{ .workspaces = &.{.{ .name = "Other", .color = 1 }}, .tabs = &.{old_tab} };
+    var edited_tab = old_tab;
+    edited_tab.name = "Renamed";
+    edited_tab.face = 5;
+    edited_tab.color = 7;
+    const edited = Layout{ .workspaces = &.{.{ .name = "Other", .color = 7 }}, .tabs = &.{edited_tab} };
+    const outbound = try projectPalette7(a, edited, base);
+    try std.testing.expectEqual(@as(?u8, 1), outbound.workspaces[0].color);
+    try std.testing.expectEqual(@as(?u8, 3), outbound.tabs[0].color);
+    try std.testing.expectEqual(@as(?u8, 5), outbound.tabs[0].face);
+    try std.testing.expectEqualStrings("Renamed", outbound.tabs[0].name);
+    const ack = try apply(a, edited, &.{true}, outbound, 9, 256);
+    try std.testing.expectEqual(@as(?u8, 1), ack.workspaces[0].color);
+    const preserved = try pendingWhiteWorkspaces(a, outbound, base, edited);
+    try std.testing.expectEqual(@as(?u8, 7), preserved.workspaces[0].color);
+    const upgraded = try rebase(a, ack, preserved, outbound);
+    try std.testing.expectEqual(@as(?u8, 7), upgraded.workspaces[0].color);
+    const no_pending = try pendingWhiteWorkspaces(a, outbound, edited, edited);
+    try std.testing.expectEqual(@as(?u8, 1), no_pending.workspaces[0].color);
+    const new_values = try projectPalette7(a, edited, .{ .workspaces = &.{}, .tabs = &.{} });
+    try std.testing.expectEqual(@as(?u8, null), new_values.workspaces[0].color);
+    try std.testing.expectEqual(@as(?u8, null), new_values.tabs[0].color);
 }
