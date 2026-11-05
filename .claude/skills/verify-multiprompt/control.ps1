@@ -204,11 +204,29 @@ try {
         $scheme = if ($env:CAPTION_BROWSER_THEME -eq 'light') { 1 } else { 2 }
         @{ browser = @{ theme = @{ color_scheme = $scheme } } } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $profile 'Default/Preferences')
     }
-    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-612/palette-usage.tsv'
+    $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-1743/palette-usage.tsv'
     if ($Feature -eq 'palette-order') {
         $config = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $config | Out-Null
         Copy-Item $paletteUsageFixture (Join-Path $config 'palette-usage.tsv')
+    }
+    if ($Feature -eq 'palette-order') {
+        $paletteRankingSeed = {
+            $config = Join-Path $scratch 'roaming/ZigShell'
+            $seed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'cmd'; name = 'Funeralprints'; manual = $true; shell_id = 1 }) }
+            $registry = @{ windows = @(@{ id = 'closed-fune-fixture'; name = 'Funeralprints'; restore = $false }) }
+            [IO.File]::WriteAllText((Join-Path $config 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $config 'session-closed-fune-fixture.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $config 'windows.json'), (ConvertTo-Json -InputObject $registry -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            foreach ($name in @('session.json', 'session-closed-fune-fixture.json')) {
+                $saved = Get-Content -LiteralPath (Join-Path $config $name) -Raw | ConvertFrom-Json
+                if ($saved.tabs -isnot [array] -or $saved.tabs.Count -ne 1 -or $saved.tabs[0].name -ne 'Funeralprints' -or $saved.tabs[0].kind -ne 'cmd') { throw "palette-order: invalid saved session fixture $name" }
+            }
+            $savedRegistry = Get-Content -LiteralPath (Join-Path $config 'windows.json') -Raw | ConvertFrom-Json
+            if ($savedRegistry.windows -isnot [array] -or $savedRegistry.windows.Count -ne 1 -or $savedRegistry.windows[0].id -ne 'closed-fune-fixture' -or $savedRegistry.windows[0].name -ne 'Funeralprints') { throw 'palette-order: invalid workspace registry fixture' }
+            Save-Json $seed 'palette-ranking-seed-session.json'
+            Save-Json $registry 'palette-ranking-seed-windows.json'
+        }
     }
     $env:MULTIPROMPT_DICTATION_FIXTURE = $null
     if ($Feature -eq 'chat-dictation') {
