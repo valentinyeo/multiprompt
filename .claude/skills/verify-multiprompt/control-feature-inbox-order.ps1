@@ -11,6 +11,8 @@
             Press @(0x12, 0x49) 'Alt+I: open All Inbox'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'Inbox open'
             Snapshot 'inbox-order-before'
+            Snapshot 'action'
+            $beforeHash = (Get-FileHash (Join-Path $Evidence 'inbox-order-before.png')).Hash
             $notifyPorts = @(Get-NotifyPorts)
             Wait-Until {
                 @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -eq $process.Id -and $_.LocalPort -in $notifyPorts }).Count -eq 1
@@ -40,5 +42,10 @@
             if ($afterOlder.Count -ne 1 -or $afterNewer.Count -ne 1 -or $afterOlder[0].att -ne 1 -or $afterNewer[0].att -ne 0) { throw 'Expected older unread and newer read after notification' }
             Save-Json $after 'inbox-order-after.json'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'Inbox visible for after capture'
+            Wait-Until {
+                WindowShot 'inbox-order-render-wait'
+                (Get-FileHash (Join-Path $Evidence 'inbox-order-render-wait.png')).Hash -ne $beforeHash
+            } 'Inbox repaint after activity update' 15
             Snapshot 'inbox-order-after'
+            Snapshot 'after'
             $result.checks += @{ name = 'inbox-order-capture-only'; olderSid = $older.sid; newerSid = $newer.sid; visualReviewRequired = $true; update = 'local scripted notification, not a cloud reply' }

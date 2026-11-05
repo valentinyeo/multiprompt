@@ -31,6 +31,10 @@ test('captures depend on published activity and retain visual review', () => {
     assert.match(driver, new RegExp(`Save-Json \\$${stage} 'inbox-order-${stage}\\.json'`));
     assert.match(driver, new RegExp(`Snapshot 'inbox-order-${stage}'`));
   }
+  assert.match(driver, /Snapshot 'inbox-order-before'\s+Snapshot 'action'/);
+  assert.match(driver, /Snapshot 'inbox-order-after'\s+Snapshot 'after'/);
+  assert.match(driver, /Snapshot 'action'\s+\$beforeHash = \(Get-FileHash \(Join-Path \$Evidence 'inbox-order-before\.png'\)\)\.Hash[\s\S]*GetBytes\('NOTIFICATION:Inbox Older'\)/);
+  assert.match(driver, /'scripted update published for older session' 45[\s\S]*Wait-Until \{\s*WindowShot 'inbox-order-render-wait'\s*\(Get-FileHash \(Join-Path \$Evidence 'inbox-order-render-wait\.png'\)\)\.Hash -ne \$beforeHash\s*\} 'Inbox repaint after activity update' 15\s*Snapshot 'inbox-order-after'/);
   assert.match(driver, /Inbox visible for after capture/);
   assert.match(driver, /visualReviewRequired = \$true/);
   assert.match(recipe, /scripted local notification/);
