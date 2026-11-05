@@ -770,6 +770,12 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (key_up) computer_consumed_keys[kb.vkCode] = false;
             return 1;
         }
+        if (key_down and kb.vkCode == 0x57) {
+            var log_buf: [160]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log_buf, "[session-close] ctrl={} shift={} alt={} win={} ours={} flags={X}", .{
+                isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags), app_state.g_win_held, foregroundIsOurs(), kb.flags,
+            }) catch "[session-close] unavailable");
+        }
         if (key_down and foregroundIsOurs()) {
             if (sessionCloseShortcut(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags), app_state.g_win_held)) |action| {
                 switch (action) {
