@@ -122,17 +122,24 @@ try {
     Start-Sleep -Seconds 1
     Chord 0x57 $true
     [void](Wait-For 'second offline close persisted' { Is-Closed 'verify-two' })
+    Shot 'second-offline-closed'
     New-Item "$state/kill-hold" -ItemType File | Out-Null
     Remove-Item "$state/kill-offline"
     Refresh
     $held = Wait-For 'connecting retry process' { Get-ChildItem "$state/kill-held-*.txt" -ErrorAction SilentlyContinue | Select-Object -First 1 }
     $heldId = [int]($held.BaseName -replace '^kill-held-', '')
+    $heldProcess = Get-Process -Id $heldId -ErrorAction Stop
+    if ($heldProcess.Path -ne $Ssh -or $heldProcess.HasExited) { throw 'Expected the owned retry still connecting before reopen' }
+    $cancelClock = [Diagnostics.Stopwatch]::StartNew()
     Chord 0x54 $true
     [void](Wait-For 'explicit reopen saved' {
         $saved = Saved
         $saved -and @($saved.tabs | Where-Object { $_.tmux_session -eq 'verify-two' }).Count -eq 1 -and @($saved.closed_tmux | Where-Object { $_.session -eq 'verify-two' }).Count -eq 0
     })
-    [void](Wait-For 'cancelled connecting process exits' { !(Get-Process -Id $heldId -ErrorAction SilentlyContinue) } 15)
+    [void](Wait-For 'cancelled connecting process exits' { !(Get-Process -Id $heldId -ErrorAction SilentlyContinue) } 5)
+    $heldAgeMs = ([DateTime]::UtcNow - $held.LastWriteTimeUtc).TotalMilliseconds
+    if ($heldAgeMs -ge 9000) { throw 'Cannot distinguish cancellation from the normal ten-second timeout' }
+    @{pid=$heldId; cancelled_after_ms=$cancelClock.Elapsed.TotalMilliseconds; held_age_ms=$heldAgeMs; owned_path_checked=$true; exited=$true} | ConvertTo-Json | Set-Content "$Output/cancellation.json"
     Copy-Item "$settings/session.json" "$Output/reopened-session.json"
     Shot 'reopened'
     Remove-Item "$state/kill-hold"
@@ -158,6 +165,7 @@ try {
     if (Test-Path $state) { Copy-Item $state "$Output/stand-in" -Recurse -Force }
     $alive = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $Ssh -or ($app -and $_.ProcessId -eq $app.Id) })
     @{app_pid=$(if ($app) { $app.Id } else { $null }); remaining_owned_processes=$alive.Count; evidence_preserved=(Test-Path "$Output/debug.log")} | ConvertTo-Json | Set-Content "$Output/cleanup.json"
+    if ($alive.Count -ne 0) { $failure = 'Owned processes survived cleanup' }
     Remove-Item $profile -Recurse -Force -ErrorAction SilentlyContinue
     Stop-Transcript
 }

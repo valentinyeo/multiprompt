@@ -76,7 +76,10 @@ fn reset() void {
     notices = 0; saved = 0; queued = 0;
 }
 test "offline end prevents stale sync resurrection but not another host" {
-    defer app_state.g_tmux_closed.entries.deinit(std.testing.allocator);
+    defer {
+        app_state.g_tmux_closed.entries.deinit(std.testing.allocator);
+        app_state.g_tmux_closed = .{};
+    }
     reset();
     endTmuxSessionAt(0);
     try std.testing.expectEqual(@as(usize, 0), app_state.shell_count);
