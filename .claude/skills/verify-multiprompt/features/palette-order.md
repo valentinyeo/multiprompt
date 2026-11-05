@@ -37,5 +37,5 @@ Preconditions:
 - The seeded file is usage history, not a setting; the app reads it on every palette open. It holds only numeric ids for commands shown on an empty search, with distinct counts, and no destructive commands.
 - Releases before this change ranked by recency first, so the 2030 entry was selected first. A tag run must fail with `palette-order: selected row ...`.
 - Row ids come from `[palette] rows` debug lines; headers appear as `h<index>`, where `h0` is Most used.
-- The ranking case seeds `session.json` and `windows.json` once between owned launches. It does not use a test-only setter or verify remote sessions. The initial empty-query checks still use the original unseeded session.
+- The ranking case seeds `session.json`, `windows.json` and the closed workspace's `session-closed-fune-fixture.json` once between owned launches. It checks the saved arrays before relaunch. The closed workspace needs its own session file to survive registry reconciliation. No test-only setter or remote session is used. The initial empty-query checks still use the original unseeded session.
 - This journey does not run the commands it finds or cover tab context menus.

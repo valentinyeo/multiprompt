@@ -62,16 +62,8 @@
             }
             $result.checks += @{ name = 'palette-order'; mostUsed = $expected; selected = $selected; headers = $headers; removedRowCount = 0; renamedFound = $found; entry = 'Ctrl+K' }
             Snapshot 'after'
-            Restart-SessionRestore 'palette-ranking' $false $false {
-                $config = Join-Path $scratch 'roaming/ZigShell'
-                $seed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'cmd'; name = 'Funeralprints'; manual = $true; shell_id = 1 }) }
-                $registry = @{ windows = @(@{ id = 'closed-fune-fixture'; name = 'Funeralprints'; restore = $false }) }
-                [IO.File]::WriteAllText((Join-Path $config 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
-                [IO.File]::WriteAllText((Join-Path $config 'windows.json'), (ConvertTo-Json -InputObject $registry -Depth 6), (New-Object Text.UTF8Encoding($false)))
-                Save-Json $seed 'palette-ranking-seed-session.json'
-                Save-Json $registry 'palette-ranking-seed-windows.json'
-            }
-            $result.paletteRankingBoundary = 'One saved local CMD session and one closed workspace registry entry are seeded before relaunch; no setter or remote service is used.'
+            Restart-SessionRestore 'palette-ranking' $false $false $paletteRankingSeed
+            $result.paletteRankingBoundary = 'One saved local CMD session, one closed workspace registry entry and its saved session file are seeded before relaunch; no setter or remote service is used.'
             Wait-Until { @((Read-Inbox).shells | Where-Object { $_.name -eq 'Funeralprints' }).Count -eq 1 } 'saved Funeralprints session restored'
             $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
             $workspaceIndex = -1
