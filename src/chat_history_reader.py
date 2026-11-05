@@ -2941,10 +2941,17 @@ def host_deliver(provider, sid, token, attempt, epoch, text, room_scope=None):
     request = dict(op="deliver", id=token, attempt=attempt, epoch=epoch, text=text)
     if room_scope is not None:
         request["room_scope"] = room_scope
-    reply = host_request(provider, sid, request) if host_owned(provider, sid) else dict(status="unavailable")
+    def send():
+        if room_scope is not None:
+            ping = host_request(provider, sid, dict(op="ping"))
+            protocol = ping.get("room_message_protocol")
+            if ping.get("status") != "ok" or ping.get("sid") != sid or type(protocol) is not int or protocol != ROOM_MESSAGE_PROTOCOL:
+                return dict(status="busy", reason="room_host_upgrade_required")
+        return host_request(provider, sid, request)
+    reply = send() if host_owned(provider, sid) else dict(status="unavailable")
     if reply.get("status") in ("unavailable", "busy") or reply.get("reason") == "host_unreachable":
         if host_enabled(provider, sid) and host_start(provider, sid).get("status") in ("started", "already"):
-            reply = host_request(provider, sid, request)
+            reply = send()
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
 
@@ -3581,7 +3588,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         inflight = session.get("inflight")
         return dict(status="ok", pid=os.getpid(), sid=sid, tmux=tmux,
                     inflight=inflight.get("id") if isinstance(inflight, dict) else None,
-                    parked=len(session["parked"]))
+                    parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
     if operation == "stop":
         session["stop"] = True
         return dict(status="ok")
@@ -5936,7 +5943,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 66
+RUNTIME_GENERATION = 67
 
 if __name__ == '__main__':
     import base64 as _base64

@@ -32,6 +32,14 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         except room_bridge.RoomError as error:
             assert error.code == 'unsupported_remote_capability'
         legacy.close()
+    sent_to_host = []
+    def old_host(provider, session, request):
+        sent_to_host.append(request['op'])
+        return dict(status='ok', sid=session)
+    with patch.dict(r, host_owned=lambda *a: True, host_request=old_host, host_start=lambda *a: dict(status='already')):
+        scope = {key: uid() for key in ('host_uuid', 'room_id', 'parent_event_id', 'member_id')}
+        refused = r['host_deliver']('claude', sid, uid(), 'attempt', 0, 'Room request', room_scope=scope)
+        assert refused['status'] == 'busy' and sent_to_host == ['ping', 'ping'], 'older host received a scoped delivery'
     calls = []
     def rpc(query):
         calls.append(query)
