@@ -1566,6 +1566,8 @@ def resolve_response_path(q, source=None, as_owner=False):
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
+    if agent == "hax":
+        return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     if agent == "pi":
         try:
             path = conversation_path(agent, sid, cwd or host_cwd(agent, sid)) if sid else None
@@ -2356,9 +2358,9 @@ def import_legacy_messages(db, sid, transcript, epoch):
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
-HOST_PROVIDERS = ('claude', 'codex', 'pi')
+HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax')
 MESSAGE_WORKER_IDLE_SECONDS = 120
-HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi'}
+HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
@@ -2393,6 +2395,66 @@ HOST_CODEX_APPROVALS = ('item/commandExecution/requestApproval', 'item/fileChang
                         'execCommandApproval', 'applyPatchApproval')
 HOST_CODEX_LEGACY = {'accept': 'approved', 'acceptForSession': 'approved_for_session', 'decline': 'denied', 'cancel': 'abort'}
 HOST_PI_DIALOGS = ('select', 'confirm', 'input', 'editor')
+HOST_HAX_MODEL = ('--provider=codex', '--model=gpt-6.1-sol', '--effort=medium')
+HOST_HAX_BRIDGE = (
+    "import json,os,signal,subprocess,sys,threading\n"
+    "hax=sys.argv[1:]\n"
+    "resume=None\n"
+    "if '--hax-resume' in hax:\n"
+    "    i=hax.index('--hax-resume');resume=hax[i+1];del hax[i:i+2]\n"
+    "child=None\n"
+    "out=threading.Lock()\n"
+    "def emit(o):\n"
+    "    with out:\n"
+    "        sys.stdout.write(json.dumps(o,separators=(',',':'))+'\\n');sys.stdout.flush()\n"
+    "def run(token,text):\n"
+    "    global child,resume\n"
+    "    outcome,code='error',None\n"
+    "    try:\n"
+    "        p=subprocess.Popen(hax+['--json']+(['--resume='+resume] if resume else []),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)\n"
+    "    except OSError:\n"
+    "        emit(dict(type='bridge_end',id=token,outcome='spawn_failed',session=resume));return\n"
+    "    child=p\n"
+    "    emit(dict(type='bridge_start',id=token))\n"
+    "    try:\n"
+    "        p.stdin.write(text.encode('utf-8'));p.stdin.close()\n"
+    "    except OSError:\n"
+    "        pass\n"
+    "    for line in p.stdout:\n"
+    "        try:\n"
+    "            record=json.loads(line)\n"
+    "        except ValueError:\n"
+    "            continue\n"
+    "        if not isinstance(record,dict):\n"
+    "            continue\n"
+    "        if record.get('type')=='session' and isinstance(record.get('id'),str):\n"
+    "            resume=record['id']\n"
+    "        if record.get('type')=='result':\n"
+    "            outcome=record.get('outcome') or 'complete'\n"
+    "            resume=record.get('session_id') or resume\n"
+    "        emit(dict(type='hax',id=token,record=record))\n"
+    "    code=p.wait();child=None\n"
+    "    emit(dict(type='bridge_end',id=token,outcome=outcome,exit=code,session=resume))\n"
+    "worker=None\n"
+    "for line in sys.stdin:\n"
+    "    try:\n"
+    "        message=json.loads(line)\n"
+    "    except ValueError:\n"
+    "        continue\n"
+    "    if not isinstance(message,dict):\n"
+    "        continue\n"
+    "    if message.get('type')=='prompt' and isinstance(message.get('id'),str) and isinstance(message.get('message'),str):\n"
+    "        if worker is not None and worker.is_alive():\n"
+    "            emit(dict(type='bridge_busy',id=message['id']));continue\n"
+    "        worker=threading.Thread(target=run,args=(message['id'],message['message']),daemon=True);worker.start()\n"
+    "    elif message.get('type')=='abort' and child is not None:\n"
+    "        try:\n"
+    "            os.killpg(child.pid,signal.SIGINT)\n"
+    "        except OSError:\n"
+    "            pass\n"
+    "if worker is not None:\n"
+    "    worker.join()\n"
+)
 HOST_CODEX_SANDBOXES = {'danger-full-access': {'type': 'dangerFullAccess'},
                         'read-only': {'type': 'readOnly', 'networkAccess': False},
                         'workspace-write': {'type': 'workspaceWrite', 'writableRoots': [], 'networkAccess': False,
@@ -3104,6 +3166,13 @@ def host_pi_argv(provider, sid, base):
     return base + ["--mode", "rpc", *HOST_PI_MODEL, "--session-id", sid, "--append-system-prompt", HOST_APPEND_PROMPT]
 
 
+def host_hax_argv(provider, sid, base):
+    chosen = any(part.startswith(("--provider", "--model", "--preset")) for part in base[1:])
+    native = host_session_state(provider, sid).get("native_session")
+    resume = ["--hax-resume", native] if isinstance(native, str) and SESSION_ID.fullmatch(native) else []
+    return ["python3", "-u", "-c", HOST_HAX_BRIDGE] + base + ([] if chosen else list(HOST_HAX_MODEL)) + resume
+
+
 def host_agent_start(provider, sid):
     cwd = host_cwd(provider, sid)
     owner = conversation_owner(cwd, include_home=True)
@@ -3706,6 +3775,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         return host_refuse("no_chat")
     if provider != "claude" and not session.get("ready"):
         return dict(status="busy", reason="agent_starting")
+    if provider == "hax" and (session["turn"] is not None or session["sends"]):
+        return dict(status="busy", reason="hax_run_active")
     if provider == "codex" and not isinstance(session.get("native_turn"), str) and "turn" in session["rpc"].values():
         return dict(status="busy", reason="turn_starting")
     binding = dict(v=1, mode=adapter["binding"], host=os.getpid(), session=sid)
@@ -4243,6 +4314,75 @@ def host_pi_set_mode(provider, sid, session, mode):
     return host_refuse("pi_always_full_access")
 
 
+def host_hax_open(provider, sid, tmux, session):
+    session["ready"] = True
+    session["hax_message"] = 0
+    host_log(provider, sid, "init", dict(session=session["state"].get("native_session")))
+    host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
+
+
+def host_hax_write(provider, sid, session, token, text):
+    return host_control_send(session, dict(type="prompt", id=token, message=text))
+
+
+def host_hax_record(provider, sid, tmux, session, record):
+    kind = record.get("kind")
+    if kind == "assistant" and isinstance(record.get("text"), str) and record["text"]:
+        session["hax_message"] += 1
+        block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
+        host_complete(provider, sid, tmux, session, block, record["text"])
+    elif kind == "tool_call" and isinstance(record.get("call_id"), str):
+        tool = record.get("tool_name") if isinstance(record.get("tool_name"), str) else "tool"
+        try:
+            arguments = json.loads(record.get("arguments") or "{}")
+        except (TypeError, ValueError):
+            arguments = {"arguments": record.get("arguments")}
+        host_event(provider, sid, tmux, session, "item.started",
+                   dict(type="tool_call", tool=tool, input=arguments if isinstance(arguments, dict) else {},
+                        title=tool, display_name=tool), record["call_id"])
+    elif kind == "tool_result" and isinstance(record.get("call_id"), str):
+        failed = bool(record.get("is_error"))
+        host_event(provider, sid, tmux, session, "item.done",
+                   dict(status="failed" if failed else "completed", output=host_tool_output(record.get("output")),
+                        is_error=failed), record["call_id"])
+
+
+def host_hax_event(provider, sid, tmux, session, event):
+    kind = event.get("type")
+    token = event.get("id")
+    if kind == "bridge_start" and isinstance(token, str):
+        host_accept(provider, sid, tmux, session, event, token)
+    elif kind == "bridge_busy" and isinstance(token, str):
+        host_unsent(provider, sid, tmux, session, token)
+    elif kind == "hax" and isinstance(event.get("record"), dict):
+        host_hax_record(provider, sid, tmux, session, event["record"])
+    elif kind == "bridge_end":
+        native = event.get("session")
+        if isinstance(native, str) and SESSION_ID.fullmatch(native):
+            session["state"]["native_session"] = native
+        if event.get("outcome") == "spawn_failed" and isinstance(token, str):
+            host_unsent(provider, sid, tmux, session, token)
+        if session.get("interrupted"):
+            status = "interrupted"
+        else:
+            status = "completed" if event.get("outcome") == "complete" and event.get("exit") == 0 else "failed"
+        host_turn_end(provider, sid, tmux, session, dict(status=status, stop_reason=event.get("outcome"), usage={}),
+                      dict(subtype=status))
+
+
+def host_hax_interrupt(provider, sid, session):
+    if not host_control_send(session, dict(type="abort")):
+        return dict(status="error", reason="stdin_write_failed")
+    session["interrupted"] = True
+    inflight = session.get("inflight")
+    host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
+    return dict(status="ok")
+
+
+def host_hax_set_mode(provider, sid, session, mode):
+    return host_refuse("hax_mode_fixed")
+
+
 HOST_ADAPTERS = {
     "claude": dict(argv=host_claude_argv, open=host_claude_open, write=host_claude_write, event=host_claude_event,
                    answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
@@ -4253,6 +4393,9 @@ HOST_ADAPTERS = {
     "pi": dict(argv=host_pi_argv, open=host_pi_open, write=host_pi_write, event=host_pi_event,
                answer=host_pi_answer, interrupt=host_pi_interrupt, set_mode=host_pi_set_mode,
                binding="pi_rpc_prompt", provenance="pi_prompt_accepted"),
+    "hax": dict(argv=host_hax_argv, open=host_hax_open, write=host_hax_write, event=host_hax_event,
+                answer=host_pi_answer, interrupt=host_hax_interrupt, set_mode=host_hax_set_mode,
+                binding="hax_bridge_prompt", provenance="hax_run_started"),
 }
 
 
@@ -6041,7 +6184,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 75
+RUNTIME_GENERATION = 76
 
 if __name__ == '__main__':
     import base64 as _base64
