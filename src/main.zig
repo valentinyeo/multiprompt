@@ -1276,6 +1276,7 @@ comptime {
         _ = @import("console_snapshot.zig");
         _ = @import("chat_session.zig");
         _ = @import("chat_render.zig");
+        _ = @import("more_menu.zig");
         _ = @import("chat_find_ui.zig");
         _ = @import("chat_send.zig");
         _ = @import("window_layout.zig");

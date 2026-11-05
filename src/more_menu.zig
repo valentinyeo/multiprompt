@@ -157,6 +157,7 @@ test "IGSH-1630 Computer and every existing menu action fit and hit independentl
         try std.testing.expect(g.cells[@intFromEnum(Item.rename)].bottom == g.cells[@intFromEnum(Item.computer)].top);
         try std.testing.expect(g.cells[@intFromEnum(Item.computer)].bottom == g.cells[@intFromEnum(Item.history)].top);
     }
+    std.debug.print("IGSH-1630 menu geometry verified at four heights\n", .{});
 }
 
 fn shrink(rc: RECT, by: i32) RECT {
