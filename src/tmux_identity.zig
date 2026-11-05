@@ -41,12 +41,13 @@ fn quote(writer: *std.Io.Writer, value: []const u8) !void {
 }
 
 pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, create: bool) ![]const u8 {
+    if (create and std.mem.startsWith(u8, session, "live-")) return error.LiveChatHasNoTerminal;
     var writer = std.Io.Writer.fixed(buf);
     if (identity.len == 0) {
         try writer.writeAll(if (create) "tmux new-session -A -s " else "tmux attach -t ");
         var target: [66]u8 = undefined;
         try quote(&writer, if (create) session else try std.fmt.bufPrint(&target, "={s}", .{session}));
-        if (create and std.mem.startsWith(u8, session, "live-")) try writer.writeAll(" 'exec sleep infinity'");
+
     } else {
         if (!validIdentity(identity)) return error.InvalidIdentity;
         var target: [66]u8 = undefined;
@@ -165,7 +166,7 @@ test "IGSH-985 first attach is exact and shell metacharacters remain quoted" {
 
 test "IGSH-1447 a recreated live chat session parks on an idle wait instead of a shell" {
     var buf: [2048]u8 = undefined;
-    try std.testing.expectEqualStrings("tmux new-session -A -s 'live-abc' 'exec sleep infinity'", try attachCommand(&buf, "live-abc", "", true));
+    try std.testing.expectError(error.LiveChatHasNoTerminal, attachCommand(&buf, "live-abc", "", true));
     try std.testing.expectEqualStrings("tmux attach -t '=live-abc'", try attachCommand(&buf, "live-abc", "", false));
     try std.testing.expectEqualStrings("tmux new-session -A -s 'term-abc'", try attachCommand(&buf, "term-abc", "", true));
 }

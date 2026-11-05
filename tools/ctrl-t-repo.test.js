@@ -47,7 +47,7 @@ test('initial picker captures the combined all-server search', () => {
 });
 
 test('cross-host and offline journeys require the selected host and rejection', () => {
-  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('tmux new-session'\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
+  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*-not \$text\.Contains\('tmux new-session'\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
   const normalizeHost = /\$hostId = if \(\$tab\.PSObject\.Properties\['tmux_host'\]\) \{ \[int\]\$tab\.tmux_host \} else \{ 0 \}/.source;
   assert.match(sessions, new RegExp(`Where-Object \\{ \\$tab = \\$_; ${normalizeHost}; \\$hostId -eq 1 \\}\\)\\.Count -ne 0`));
   assert.match(sessions, new RegExp(`${normalizeHost}\\s+\\$tab\\.cwd -eq \\$case\\.cwd -and \\$hostId -eq \\$case\\.host -and \\$tab\\.cv -eq \\$true`));

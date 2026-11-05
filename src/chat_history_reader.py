@@ -3017,6 +3017,14 @@ def host_terminal(provider, sid, tmux=None):
         host_stop(provider, sid)
         host_write(host_paths(provider, sid)['owner'], dict(owner='terminal', at=time.time()))
         return dict(status='already', reason='pane_agent')
+    if tmux.startswith('live-'):
+        try:
+            exists = subprocess.run(['tmux', 'has-session', '-t', '=' + tmux], capture_output=True, timeout=5)
+            if exists.returncode != 0:
+                subprocess.run(['tmux', 'new-session', '-d', '-s', tmux, '-c', host_cwd(provider, sid)],
+                               capture_output=True, timeout=5, check=True)
+        except (OSError, subprocess.SubprocessError):
+            return dict(status='refused', reason='terminal_unavailable')
     if not host_pane_is_shell(tmux) and host_pane_prompt(tmux) is None:
         return dict(status='refused', reason='pane_busy')
     host_stop(provider, sid)
@@ -6188,7 +6196,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 77
+RUNTIME_GENERATION = 78
 
 if __name__ == '__main__':
     import base64 as _base64

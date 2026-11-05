@@ -64,7 +64,7 @@ test('real flock and reader config/message storage converge without forwarding t
   assert.equal(await run(args, opts), 0, errors.join('\n'));
 });
 
-test('real tmux parking markers survive repeated visible spawn', { skip: !unix }, async t => {
+test('real tmux has no parking session after repeated visible spawn', { skip: !unix }, async t => {
   const { spawnSync } = require('node:child_process');
   const { run } = await import('./mp-layout.mjs');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-spawn-tmux-'));
@@ -97,7 +97,6 @@ test('real tmux parking markers survive repeated visible spawn', { skip: !unix }
   assert.equal(output[0].sid, output[1].sid);
   assert.equal(layout.tabs.length, 1);
   assert.equal(revision, 1);
-  const markers = tmux(['display-message', '-p', '-t', '=' + output[0].session + ':', '#{@mp_spawn_sid}|#{@mp_host_sid}']);
-  assert.equal(markers.status, 0, markers.stderr);
-  assert.equal(markers.stdout.trim(), output[0].sid + '|' + output[0].sid);
+  const parked = tmux(['has-session', '-t', '=' + output[0].session]);
+  assert.notEqual(parked.status, 0, 'visible live chat must not create a terminal');
 });

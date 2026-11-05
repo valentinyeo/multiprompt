@@ -1645,7 +1645,7 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
         } else {
             if (!appendRemoteZsbCommandStart(buf, &pos, zsb_shell_id)) return null;
             var attach_buf: [1536]u8 = undefined;
-            const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session) catch return null;
+            const attach = if (@import("chat_view.zig").isLive(tmux_session.?)) "true" else @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session) catch return null;
             for (attach) |c| {
                 if (c == '"') {
                     if (!appendWideAscii(buf, &pos, "\\\"")) return null;

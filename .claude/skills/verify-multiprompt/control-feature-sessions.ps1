@@ -72,7 +72,8 @@
                     $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
                     $tab.cwd -eq $case.cwd -and $hostId -eq $case.host -and $tab.cv -eq $true
                 } 'selected remote folder and host saved'
-                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('tmux new-session') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
+                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and -not $text.Contains('tmux new-session') -and -not $text.Contains('tmux attach') -and -not $text.Contains('sleep infinity') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
+                Wait-Until { $state = Read-Session; $tab = $state.tabs[$state.active_tab]; $tab.pid -eq 0 -and $tab.cv -eq $true } 'live chat stays open after its finite startup command exits'
                 Save-Json (Read-Session) ('ctrl-t-' + $case.proof + '-session.json')
                 Snapshot ('ctrl-t-' + $case.proof + '-chat')
                 $result.checks += @{ name = ('cross-host-' + $case.proof); host = $case.host; cwd = $case.cwd; alias = $case.alias }
@@ -90,12 +91,12 @@
             Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] offline host=1') } 'production publishes host 1 offline'
             Type-Text 'remote-2 cedar'
             Snapshot 'ctrl-t-offline-picker'
-            $launches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('tmux new-session') }).Count
+            $launches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('host enable claude') }).Count
             $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
             Press @(0x0D) 'Enter: reject offline folder'
             Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] selection rejected') } 'offline selection rejected'
             if (@((Read-Session).tabs).Count -ne $beforeClaude) { throw 'Offline selection saved a tab' }
-            $afterLaunches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('tmux new-session') }).Count
+            $afterLaunches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('host enable claude') }).Count
             if ($afterLaunches -ne $launches) { throw 'Offline selection launched SSH' }
             Press @(0x11, 0x54) 'Ctrl+T: use host 0 while host 1 is offline'
             Type-Text 'atlas'
