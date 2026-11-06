@@ -3953,7 +3953,7 @@ def host_claude_event(provider, sid, tmux, session, event):
 
 
 def host_claude_open(provider, sid, tmux, session):
-    pass
+    host_control_request(session, dict(subtype="remote_control", enabled=True))
 
 
 HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
@@ -6345,7 +6345,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 86
+RUNTIME_GENERATION = 87
 
 if __name__ == '__main__':
     import base64 as _base64
