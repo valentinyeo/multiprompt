@@ -56,8 +56,14 @@ try {
         do {
             $process.Refresh()
             if ($process.HasExited) { break }
-            $candidate = $process.MainWindowHandle
-            if ($candidate -ne [IntPtr]::Zero -and [ReconnectDesktop]::IsWindowVisible($candidate) -and [ReconnectDesktop]::Class($candidate) -like 'WindowsForms10.*') { $window = $candidate; break }
+            $candidates = [System.Collections.Generic.List[IntPtr]]::new()
+            $callback = [ReconnectDesktop+EnumProc]{
+                param([IntPtr]$h, [IntPtr]$p)
+                if ([ReconnectDesktop]::Owner($h) -eq [uint32]$process.Id -and [ReconnectDesktop]::IsWindowVisible($h) -and [ReconnectDesktop]::Class($h) -like 'WindowsForms10.*') { $candidates.Add($h); return $false }
+                return $true
+            }
+            [void][ReconnectDesktop]::EnumWindows($callback, [IntPtr]::Zero)
+            if ($candidates.Count -gt 0) { $window = $candidates[0]; break }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
         if ($window -eq [IntPtr]::Zero) {
