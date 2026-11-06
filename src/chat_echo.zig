@@ -233,8 +233,8 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
 
 pub const V1_SENDING_DEADLINE_MS: i64 = 120_000;
 
-pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, channel_sent_ms: i64, now_ms: i64) bool {
-    return state == .sending and !channel_pending and channel_sent_ms > 0 and now_ms >= channel_sent_ms and now_ms - channel_sent_ms >= V1_SENDING_DEADLINE_MS;
+pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, sent_tick_ms: i64, now_ms: i64) bool {
+    return state == .sending and !channel_pending and sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
 }
 
 test "a host message left sending with no job settles after the deadline" {

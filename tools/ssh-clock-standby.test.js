@@ -300,7 +300,7 @@ const Entry = struct {
     state: chat_echo.OutboxState = .delivered, host_held: bool = false, id: u64 = 1, channel_pending: bool = false,
     transcript_queued: bool = false, retryable: bool = false, left_box_ms: u64 = 0, message_v1: bool = false,
     key: [1]u8 = .{0}, key_len: usize = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
-    anchor: chat_echo.Anchor = .{ .sent_ms = 8_000_000 }, sent_tick_ms: i64 = 100_000, channel_sent_ms: i64 = 0,
+    anchor: chat_echo.Anchor = .{ .sent_ms = 8_000_000 }, sent_tick_ms: i64 = 100_000,
 };
 var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };

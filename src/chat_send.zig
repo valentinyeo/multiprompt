@@ -2395,7 +2395,7 @@ pub fn chatOutboxTick() void {
     const now_ms: i64 = @intCast(GetTickCount64());
     for (app_state.g_chat_outbox.items) |*entry| {
         if (entry.message_v1) {
-            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.channel_sent_ms, now_ms)) {
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms)) {
                 entry.state = .not_sent;
                 entry.retryable = true;
                 changed = true;
@@ -3645,6 +3645,7 @@ fn chatTmuxSendFinish() void {
                 history.send_retry_step = 0;
             }
             entry.channel_sent_ms = @intCast(GetTickCount64());
+            entry.sent_tick_ms = entry.channel_sent_ms;
         }
         history.message_next_tick = 0;
         _ = saveChatOutbox();
