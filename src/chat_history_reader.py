@@ -143,8 +143,9 @@ def conversation_path(agent, sid, cwd, home=None):
 def transcript_inside(path, root):
     if path.resolve().is_relative_to(root.resolve()):
         return True
+    target = path.resolve()
     return (path.is_symlink() and path.parent.resolve().is_relative_to(root.resolve()) and
-            path.resolve().stat().st_uid == os.getuid())
+            target.name == path.name and target.is_file() and target.stat().st_uid == os.getuid())
 
 def owner_response(q, owner, source):
     user, _home = owner

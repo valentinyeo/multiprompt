@@ -42,6 +42,12 @@ test('a transcript the disk cleanup moved to another volume and linked back stil
     const plainFound = JSON.parse(execFileSync('python3', ['-I', '-X', 'utf8', '-c', probe, home, reader, plain, cwd], { encoding: 'utf8' }));
     assert.equal(plainFound, path.join(folder, plain + '.jsonl'));
 
+    const renamed = 'c3d4e5f6-0000-4000-8000-000000000000';
+    fs.writeFileSync(path.join(dir, 'secret.txt'), 'not a transcript\n');
+    fs.symlinkSync(path.join(dir, 'secret.txt'), path.join(folder, renamed + '.jsonl'));
+    const renamedFound = JSON.parse(execFileSync('python3', ['-I', '-X', 'utf8', '-c', probe, home, reader, renamed, cwd], { encoding: 'utf8' }));
+    assert.equal(renamedFound, null, 'a link to some other file outside the projects folder is not a transcript');
+
     const outsider = 'b2c3d4e5-0000-4000-8000-000000000000';
     fs.symlinkSync(path.join(dir, 'missing-target.jsonl'), path.join(folder, outsider + '.jsonl'));
     const outsiderFound = JSON.parse(execFileSync('python3', ['-I', '-X', 'utf8', '-c', probe, home, reader, outsider, cwd], { encoding: 'utf8' }));
