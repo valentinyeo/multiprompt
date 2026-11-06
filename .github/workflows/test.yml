@@ -572,7 +572,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        if: steps.paths.outputs.heavy == 'true'
         with:
           node-version: 22
       - name: Restore Zig toolchain (PR)
@@ -616,6 +616,12 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Test Zig syntax preflight
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: node --test tools/check-zig-syntax.test.mjs
+      - name: Check Zig syntax
+        if: steps.paths.outputs.heavy == 'true'
+        run: node tools/check-zig-syntax.mjs
       - name: Build release executables for arm64
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'arm64'
         run: zig build -Dtarget=aarch64-windows-gnu --summary all
