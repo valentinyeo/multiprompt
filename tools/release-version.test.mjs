@@ -148,15 +148,15 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
   assert.match(workflow, /permissions:\n  contents: write/);
   assert.doesNotMatch(workflow, /--draft/);
-  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['HYPERTASK_AGENT_TOKEN', 'MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['HYPERTASK_AGENT_TOKEN', 'HYPERTASK_AGENT_TOKEN', 'MULTIPROMPT_RELEASE_SIGNING_KEY']);
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
-  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 3);
+  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 4);
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
-  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks\]/);
+  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: false$/m);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');

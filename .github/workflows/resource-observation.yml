@@ -1,0 +1,49 @@
+name: Resource guard
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test guard
+        run: node --test tools/resource-guard/evaluate.test.mjs tools/resource-guard/verify-baseline.test.mjs tools/resource-warning-ticket.test.mjs tools/release-version.test.mjs
+      - name: Prepare synthetic SSH and pinned baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/resource-guard/setup.ps1
+      - name: Build candidate
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=0.0.0
+      - name: Measure baseline
+        shell: pwsh
+        run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin
+      - name: Measure candidate
+        shell: pwsh
+        run: ./tools/resource-guard/measure.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
+      - name: Observe single-session synthetic send latency
+        timeout-minutes: 8
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = "$pwd/zig-out/bin/multiprompt.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/verify-multiprompt/control.ps1 -Feature chat-send-latency -Exe $exe -ExpectedVersion 0.0.0 -ExpectedHash $hash -Evidence "$pwd/resource-evidence/latency"
+      - name: Evaluate resource gate
+        if: always()
+        run: node tools/resource-guard/evaluate.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr-resource-observation
+          path: resource-evidence/
+          if-no-files-found: warn
