@@ -4208,7 +4208,7 @@ def host_claude_event(provider, sid, tmux, session, event):
 
 
 def host_claude_open(provider, sid, tmux, session):
-    pass
+    host_control_request(session, dict(subtype="remote_control", enabled=True))
 
 
 HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
