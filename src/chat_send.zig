@@ -2486,6 +2486,7 @@ pub fn armSshReconnectTimerIfNeeded() void {
     var urgent = any;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         any = true;
         if (shell.disconnected or shell.ssh_reconnect.phase != .connected) urgent = true;
@@ -2507,6 +2508,7 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
     for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
         if (affected != null and affected.? != i) continue;
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         if (affected != null) {
             shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
@@ -2522,6 +2524,10 @@ pub fn sshDisconnect(idx: u32, reason: []const u8) void {
     if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
     if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) return;
+    if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) {
+        markSshTabDisconnected(idx);
+        return;
+    }
     var exit_code: DWORD = std.math.maxInt(DWORD);
     const got_code = shell.process != null and GetExitCodeProcess(shell.process, &exit_code) != 0;
     if (shell.kind == .tmux and got_code and exit_code == 1 and GetTickCount64() -| shell.spawn_tick <= 3000) {
@@ -2572,6 +2578,7 @@ pub fn sshAutoReconnectTick() void {
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         if (shell.process == null and !shell.disconnected) {
             sshDisconnect(@intCast(i), "process-missing-poll");
@@ -2686,6 +2693,7 @@ fn sshProbeStart() void {
     const job = std.heap.page_allocator.create(SshProbeJob) catch return;
     job.* = .{ .started_tick = GetTickCount64() };
     for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.tmux_session_len == 0 or (!shell.ssh_reconnect.awaiting_probe and shell.ssh_reconnect.phase != .reconnecting and GetTickCount64() -| shell.spawn_tick < 3000)) continue;
         job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len, .spawn_tick = shell.spawn_tick };
         job.count += 1;

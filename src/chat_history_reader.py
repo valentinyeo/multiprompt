@@ -1577,6 +1577,8 @@ def resolve_response_path(q, source=None, as_owner=False):
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
+    if not sid and tmux and not as_owner:
+        sid = q["sid"] = host_sid_for_tmux(agent, tmux) or ""
     if agent == "hax":
         return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     if agent == "pi":
@@ -1585,8 +1587,6 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             return agent, sid, None, missing_response(q, "permission denied")
         return (agent, sid, path, None) if path else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
-    if not sid and tmux and agent == "claude" and not as_owner:
-        sid = q["sid"] = host_sid_for_tmux(agent, tmux) or ""
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
     if follow and agent == "claude" and isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
         follow = q["follow"] = False
@@ -2662,6 +2662,54 @@ def host_chat_name(provider, sid):
     return located if isinstance(located, str) and TMUX_NAME.fullmatch(located) else None
 
 
+def host_chats(include_terminal=False):
+    root = HOME / ".local/state/multiprompt/agent-host"
+    chats = []
+    for path in sorted(root.glob("*.config.json")):
+        config = host_read(path) or {}
+        state = host_read(path.with_name(path.name[:-len(".config.json")] + ".state.json")) or {}
+        provider, sid = config.get("provider", state.get("provider")), config.get("sid", state.get("sid"))
+        name = config.get("tmux")
+        if (config.get("enabled") is not True or not host_identity(provider, sid) or
+                host_key(provider, sid) + ".config.json" != path.name or
+                not isinstance(name, str) or TMUX_NAME.fullmatch(name) is None or (not include_terminal and host_handed_over(provider, sid))):
+            continue
+        try:
+            activity = int(path.stat().st_mtime)
+        except OSError:
+            continue
+        chats.append(dict(provider=provider, sid=sid, name=name, cwd=host_cwd(provider, sid),
+                          activity=activity, visible=config.get("spawn_mode") != "headless"))
+    return chats
+
+
+def host_connect(name):
+    chats = [chat for chat in host_chats(include_terminal=True) if chat["name"] == name]
+    if len(chats) != 1:
+        return dict(status="refused", reason="unknown_or_ambiguous_chat")
+    chat = chats[0]
+    if host_handed_over(chat["provider"], chat["sid"]):
+        os.execvp("tmux", ["tmux", "attach", "-t", "=" + name])
+    return host_start(chat["provider"], chat["sid"])
+
+
+def host_list_lines():
+    try:
+        physical = set(subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"], capture_output=True,
+                                      text=True, timeout=5).stdout.splitlines())
+    except (OSError, subprocess.SubprocessError):
+        physical = set()
+    lines = []
+    for chat in host_chats():
+        if chat["name"] in physical or not chat["visible"]:
+            continue
+        cwd = chat["cwd"]
+        if any(c in cwd for c in "|\r\n"):
+            continue
+        lines.append("|".join([chat["name"], str(chat["activity"]), "0", cwd, chat["provider"], ""]))
+    return "\n".join(lines)
+
+
 def host_pane_option(tmux, value):
     if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
         return False
@@ -2756,8 +2804,8 @@ def host_sid_for_tmux(provider, tmux):
         if not isinstance(config, dict) or config.get("enabled") is not True or config.get("tmux") != tmux:
             continue
         state = host_read(path.with_name(path.name[:-len(".config.json")] + ".state.json")) or {}
-        sid = state.get("sid")
-        if state.get("provider") == provider and host_identity(provider, sid) and host_key(provider, sid) + ".config.json" == path.name:
+        sid = config.get("sid", state.get("sid"))
+        if config.get("provider", state.get("provider")) == provider and host_identity(provider, sid) and host_key(provider, sid) + ".config.json" == path.name:
             found.add(sid)
     return found.pop() if len(found) == 1 else None
 
@@ -3050,6 +3098,13 @@ def host_terminal(provider, sid, tmux=None):
         host_stop(provider, sid)
         host_write(host_paths(provider, sid)['owner'], dict(owner='terminal', at=time.time()))
         return dict(status='already', reason='pane_agent')
+    try:
+        exists = subprocess.run(['tmux', 'has-session', '-t', '=' + tmux], capture_output=True, timeout=5).returncode == 0
+        if not exists:
+            subprocess.run(['tmux', 'new-session', '-d', '-s', tmux, '-c', host_cwd(provider, sid)],
+                           capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return dict(status='error', reason='terminal_create_failed')
     if not host_pane_is_shell(tmux) and host_pane_prompt(tmux) is None:
         return dict(status='refused', reason='pane_busy')
     host_stop(provider, sid)
@@ -4663,6 +4718,10 @@ def host_status(provider, sid):
 
 
 def host_cli(argv):
+    if argv == ["list"]:
+        return dict(chats=host_chats())
+    if len(argv) == 2 and argv[0] == "connect":
+        return host_connect(argv[1])
     if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
@@ -4685,7 +4744,7 @@ def host_cli(argv):
     paths = host_paths(provider, sid)
     if command == "enable":
         config = host_read(paths["config"]) or {}
-        config["enabled"] = True
+        config.update(enabled=True, provider=provider, sid=sid)
         if tmux is not None:
             config["tmux"] = tmux
         if folder is not None:
@@ -6313,6 +6372,8 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
     sys.exit(host_main(sys.argv[2], sys.argv[3]))
+elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
+    print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     print(json.dumps(host_cli(sys.argv[2:]), separators=(",", ":")))
 elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
@@ -6333,7 +6394,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 84
+RUNTIME_GENERATION = 85
 
 if __name__ == '__main__':
     import base64 as _base64
