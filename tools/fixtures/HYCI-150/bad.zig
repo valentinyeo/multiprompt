@@ -1,4 +1,4 @@
-fn paint() void {
+fn paint(entry: anytype, hdc: anytype, layout: anytype, noteSelection: anytype, idx: anytype, drawChangeRow: anytype, text: anytype, dim: anytype, selected: anytype, body_font: anytype, action_font: anytype, selectionRange: anytype, app_state: anytype) void {
             if (entry.items.len == 0) {
                 if (entry.summary.len > 0) drawChangeRow(hdc, layout, noteSelection(idx, 0), entry.summary, entry.ticket, text, dim, selected, body_font, action_font.handle);
             } else for (entry.items, 0..) |item, i| {

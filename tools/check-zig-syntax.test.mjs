@@ -23,16 +23,18 @@ test('compiler preflight rejects the historical regression and checks generated 
     assert.match(bad, /bad\.zig:\d+:\d+: error:/);
     check(run(process.cwd(), path.join(fixtures, 'fixed.zig')), 0, `fixed ${i + 1}`);
   }
+  const badSource = fs.readFileSync(path.join(fixtures, 'bad.zig'));
+  const fixedSource = fs.readFileSync(path.join(fixtures, 'fixed.zig'));
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'zig-syntax-'));
   try {
     fs.mkdirSync(path.join(temp, 'src', 'nested'), { recursive: true });
     fs.writeFileSync(path.join(temp, 'build.zig'), 'pub fn main( ) void { }\n');
     fs.writeFileSync(path.join(temp, 'src', 'nested', 'valid.zig'), 'pub fn main( ) void { }\n');
-    fs.copyFileSync(path.join(fixtures, 'bad.zig'), path.join(temp, 'src', 'changelog.zig'));
+    fs.writeFileSync(path.join(temp, 'src', 'changelog.zig'), badSource);
     assert.match(check(run(temp), 1, 'generated invalid changelog'), /changelog\.zig:\d+:\d+: error:/);
-    fs.copyFileSync(path.join(fixtures, 'fixed.zig'), path.join(temp, 'src', 'changelog.zig'));
+    fs.writeFileSync(path.join(temp, 'src', 'changelog.zig'), fixedSource);
     check(run(temp), 0, 'generated fixed changelog and unformatted source');
-    fs.copyFileSync(path.join(fixtures, 'bad.zig'), path.join(temp, 'src', 'nested', 'valid.zig'));
+    fs.writeFileSync(path.join(temp, 'src', 'nested', 'valid.zig'), badSource);
     assert.match(check(run(temp), 1, 'nested invalid source'), /valid\.zig:\d+:\d+: error:/);
     check(run(process.cwd(), 'src/changelog.zig'), 0, 'current changelog');
   } finally {
