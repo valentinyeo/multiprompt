@@ -317,7 +317,8 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.match(settle, /\.activity == \.active/);
   assert.doesNotMatch(settle, /chatTmuxSendStart|pasteText|sendEnterToShell/);
   assert.match(body('chatEchoMatchActive'), /e\.state == \.delivered and !enqueued/);
-  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatDimQueuedBubble|chatEchoActionRect/);
+  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect/);
+  assert.match(body('chatPaintEcho'), /if \(e\.waiting\(\)\) chatDimQueuedBubble\(hdc, rc\)/);
 });
 
 test('IGSH-1063 question worker sends numeric key arrays through the reader protocol', () => {

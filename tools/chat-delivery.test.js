@@ -2127,7 +2127,8 @@ test('deliberate recovery remains evidence-safe without automatic retry controls
   assert.match(body('chatEchoSendAgain'), /chatEchoTryMatchEntry/);
   assert.match(body('chatEchoSendAgain'), /chat_echo.resendDecision/);
   assert.match(body('chatEchoRetryAllForActive'), /write_started/);
-  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect|chatDimQueuedBubble/);
+  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect/);
+  assert.match(body('chatPaintEcho'), /if \(e\.waiting\(\)\) chatDimQueuedBubble\(hdc, rc\)/);
   assert.doesNotMatch(body('chatEchoMatchActive'), /chatEchoRepresentedBlock/);
   assert.match(body('chatDeferTranscriptLoad'), /chatEchoMatchActive\(\)/);
 });
