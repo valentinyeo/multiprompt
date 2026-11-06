@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
+if ($env:GITHUB_ACTIONS -ne 'true') { throw 'GitHub Actions only' }
 . "$PSScriptRoot/snapshot.ps1"
 function Start-Sleep { param([int]$Milliseconds) $script:delays++ }
 class FakeProcess {
