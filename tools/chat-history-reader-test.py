@@ -3660,12 +3660,20 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual([call.args[2] for call in log.call_args_list].count('worker_watchdog'), 1)
 
     def test_idle_accepted_chat_is_not_a_watchdog_jam(self):
+        from contextlib import nullcontext
+        self.assertTrue(hasattr(reader, 'MESSAGE_WORKER_STALL_SECONDS'))
+
+        def deadline(seconds):
+            self.assertGreater(seconds, 0, 'idle time consumed the pending-message budget')
+            return nullcontext()
+
         self.submit()
         db = reader.message_store_db('fixture')
         with db:
             db.execute("UPDATE shared_messages SET state='accepted',deadline=NULL")
         db.close()
         with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 0.1), \
+                patch.object(reader, 'message_worker_deadline', side_effect=deadline), \
                 patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
                 patch.object(reader, 'message_poll'), \
                 patch.object(reader, 'host_log') as log:
