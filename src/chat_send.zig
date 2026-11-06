@@ -2399,7 +2399,6 @@ pub fn chatOutboxTick() void {
                 entry.state = .not_sent;
                 entry.retryable = true;
                 changed = true;
-                debugLog("[chat] outbox self-heal: a message stuck sending with no job is now not sent");
             }
             continue;
         }
