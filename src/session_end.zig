@@ -11,7 +11,12 @@ pub fn build(out: []u8, reader: []const u8, session: []const u8, sid: []const u8
     if (sid.len != 0) {
         if (!append(out, &pos, "python3 ")) return null;
         if (!append(out, &pos, reader)) return null;
-        const command = switch (agent) { 2 => " host stop codex '", 3 => " host stop pi '", else => " host stop claude '" };
+        const live = @import("chat_view.zig").isLive(session);
+        const command = switch (agent) {
+            2 => if (live) " host disable codex '" else " host stop codex '",
+            3 => if (live) " host disable pi '" else " host stop pi '",
+            else => if (live) " host disable claude '" else " host stop claude '",
+        };
         if (!append(out, &pos, command)) return null;
         if (!append(out, &pos, sid)) return null;
         if (!append(out, &pos, "' >/dev/null 2>&1; ")) return null;
@@ -75,7 +80,7 @@ test "IGSH-1666 stopping a hosted chat selects its provider" {
     var out: [256]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
     const codex = build(&out, "~/.multiprompt-runtime/reader.py", "live-codex", sid, 2) orelse return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, codex, "host stop codex 'ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "host disable codex 'ffffffff") != null);
     const pi = build(&out, "~/.multiprompt-runtime/reader.py", "live-pi", sid, 3) orelse return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, pi, "host stop pi 'ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "host disable pi 'ffffffff") != null);
 }

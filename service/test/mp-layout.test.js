@@ -166,6 +166,7 @@ test('spawn publishes once through the real service and refuses a workspace esca
   assert.equal(parked, false);
   assert.equal((await stored()).revision, 3);
   for (let i = 0; i < 2; i++) assert.equal(await run(args, opts), 0, errors.join('\n'));
+  assert.equal(parked, false);
   const result = await stored();
   assert.equal(result.revision, 4);
   assert.equal(result.layout.tabs.length, seed().tabs.length + 1);

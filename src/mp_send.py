@@ -133,7 +133,7 @@ def run(args):
     if not text.strip() or "\x00" in text:
         raise ValueError("empty message")
     reader = reader_module(args.reader)
-    tmux = args.tmux or locator_tmux(reader, args.provider, args.sid)
+    tmux = args.tmux or reader.host_chat_name(args.provider, args.sid) or locator_tmux(reader, args.provider, args.sid)
     if not tmux:
         raise ValueError("no terminal binding for this session; pass --tmux")
     message = submit(reader, args.provider, args.sid, tmux, text, args.message_id)
