@@ -1312,6 +1312,7 @@ pub var g_chat_sel_dragging: bool = false;
 pub var g_chat_sel_transcript_focus: bool = false;
 pub var g_chat_nav_active: bool = false;
 pub var g_chat_nav_index: usize = 0;
+pub var g_chat_nav_echo_id: u64 = 0;
 pub var g_chat_nav_source: u64 = 0;
 pub var g_chat_nav_segment: u64 = 0;
 pub var g_chat_nav_stamp: i64 = 0;
@@ -3222,6 +3223,19 @@ pub const ChatOutboxEntry = struct {
     transcript_queued: bool = false,
     anchor: chat_echo.Anchor = .{},
     from_disk: bool = false,
+
+    pub fn waiting(self: ChatOutboxEntry) bool {
+        if (!self.message_v1 or self.state == .not_sent or self.state == .cancelled) return false;
+        const phase = std.mem.sliceTo(&self.message_phase, 0);
+        return !std.mem.eql(u8, phase, "accepted") and !std.mem.eql(u8, phase, "started");
+    }
+
+    pub fn removable(self: ChatOutboxEntry) bool {
+        if (!self.message_v1) return chat_echo.pendingActions(self.state).remove;
+        const phase = std.mem.sliceTo(&self.message_phase, 0);
+        return !self.channel_pending and (self.state == .not_sent or self.state == .queued) and
+            (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
+    }
 };
 
 pub const ChatConfirmedEcho = struct {

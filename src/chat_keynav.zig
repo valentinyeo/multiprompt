@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Action = enum { none, start, up, down, open, leave };
+pub const Action = enum { none, start, up, down, open, remove, leave };
 
 pub const Step = union(enum) { focus: usize, leave, stay };
 
@@ -14,6 +14,7 @@ pub fn action(active: bool, vk: usize, composer_empty: bool, suggestions_open: b
         0x26 => .up,
         0x28 => .down,
         0x0D => .open,
+        0x2E => .remove,
         0x1B => .leave,
         else => .none,
     };
@@ -123,4 +124,14 @@ test "IGSH-992 focus follows its message when older history is added above it" {
     const after_stamps = [_]i64{ 1, 5, 10, 55 };
     try std.testing.expectEqual(@as(?usize, 3), resolve(anchor, 1, &after_sources, &after_segments, &after_stamps));
     try std.testing.expectEqual(@as(?usize, null), resolve(anchor, 1, &before_sources, &before_segments, &[_]i64{ 10, 56 }));
+}
+
+
+test "IGSH-1810 Delete only removes a message while message focus owns the keys" {
+    try std.testing.expectEqual(Action.remove, action(true, 0x2E, true, false, false, false, false));
+    try std.testing.expectEqual(Action.none, action(false, 0x2E, true, false, false, false, false));
+    try std.testing.expectEqual(Action.none, action(false, 0x2E, false, false, false, false, false));
+    try std.testing.expectEqual(Action.none, action(true, 0x2E, true, false, true, false, false));
+    try std.testing.expectEqual(Action.none, action(true, 0x2E, true, false, false, true, false));
+    try std.testing.expectEqual(Action.none, action(true, 0x2E, true, false, false, false, true));
 }

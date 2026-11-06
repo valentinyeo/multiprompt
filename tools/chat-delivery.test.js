@@ -1067,6 +1067,27 @@ test "delivery: IGSH-442 Remove persists only the selected message and rolls bac
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expectEqualSlices(u16, two, g_chat_outbox.items[0].text);
 }
+test "delivery: IGSH-1810 queued live removal waits for server confirmation and cannot recall received input" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("cancel only this waiting message");
+    try enqueue(text, .queued);
+    const id = g_chat_outbox.items[0].id;
+    g_chat_outbox.items[0].message_v1 = true;
+    g_chat_outbox.items[0].write_started = true;
+    @memcpy(g_chat_outbox.items[0].message_phase[0..6], "queued");
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expect(g_chat_outbox.items[0].channel_pending);
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    g_chat_outbox.items[0].channel_pending = false;
+    @memcpy(g_chat_outbox.items[0].message_phase[0..8], "accepted");
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), writes + enters);
+}
 test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("already arrived");
@@ -2106,7 +2127,8 @@ test('deliberate recovery remains evidence-safe without automatic retry controls
   assert.match(body('chatEchoSendAgain'), /chatEchoTryMatchEntry/);
   assert.match(body('chatEchoSendAgain'), /chat_echo.resendDecision/);
   assert.match(body('chatEchoRetryAllForActive'), /write_started/);
-  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect|chatDimQueuedBubble/);
+  assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect/);
+  assert.match(body('chatPaintEcho'), /if \(e\.waiting\(\)\) chatDimQueuedBubble\(hdc, rc\)/);
   assert.doesNotMatch(body('chatEchoMatchActive'), /chatEchoRepresentedBlock/);
   assert.match(body('chatDeferTranscriptLoad'), /chatEchoMatchActive\(\)/);
 });
