@@ -207,7 +207,7 @@ test('release builds both architectures independently of the report-only Tests w
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.build, /needs: prepare/);
-  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks\]/);
+  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.doesNotMatch(jobs.release, /journeys|update-test|test-result/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
