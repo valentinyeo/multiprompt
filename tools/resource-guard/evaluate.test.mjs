@@ -5,6 +5,13 @@ assert.ok(fs.existsSync(new URL('./evaluate.mjs', import.meta.url)), 'Resource e
 const { evaluateResources, evaluateLatency } = await import('./evaluate.mjs');
 const limits = { workload: 'fixture', sessionCount: 30, resources: { memoryToleranceBytes: 16, cardinalityGrowth: 0 }, latency: { sendPaintMs: 300, typingMs: 50 } };
 const normal = { workload: 'fixture', sessionCount: 30, readySessions: 30, cleaned: true, appAlive: true, processes: 2, jobActiveProcesses: 2, rawProcesses: [{}, {}], syntheticSshProcesses: 1, syntheticSshReaders: 1, jobConsoleProcesses: 0, workingSetBytes: 100, idleCpuPercent: 1 };
+test('resource workflows pass versions safely to PowerShell', () => {
+  const pr = fs.readFileSync(new URL('../../.github/workflows/resource-observation.yml', import.meta.url), 'utf8');
+  const release = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(pr, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=0\.0\.0"/);
+  assert.match(pr, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion "0\.0\.0" -ExpectedHash \$hash/);
+  assert.match(release, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion \$version -ExpectedHash \$hash/);
+});
 test('comparison fails closed and blocks regressions', () => {
   assert.deepEqual(evaluateResources(limits, normal, normal), []);
   assert.match(evaluateResources(limits, normal, { ...normal, syntheticSshProcesses: 2 }).join(), /syntheticSshProcesses/);

@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./tools/resource-guard/setup.ps1
       - name: Build candidate
-        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=0.0.0
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=0.0.0"
       - name: Measure baseline
         shell: pwsh
         run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin
@@ -37,7 +37,7 @@ jobs:
         run: |
           $exe = "$pwd/zig-out/bin/multiprompt.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/verify-multiprompt/control.ps1 -Feature chat-send-latency -Exe $exe -ExpectedVersion 0.0.0 -ExpectedHash $hash -Evidence "$pwd/resource-evidence/latency"
+          powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/verify-multiprompt/control.ps1 -Feature chat-send-latency -Exe $exe -ExpectedVersion "0.0.0" -ExpectedHash $hash -Evidence "$pwd/resource-evidence/latency"
       - name: Evaluate resource gate
         if: always()
         run: node tools/resource-guard/evaluate.mjs
