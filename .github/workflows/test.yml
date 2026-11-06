@@ -139,7 +139,13 @@ jobs:
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 2 && '-j1' || '' }}
+        run: |
+          if (${{ matrix.group }} -eq 2) {
+            node --test tools/chat-perf-reporting.test.js
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 2 && '-j1' || '' }}
+          exit $LASTEXITCODE
       - name: Save approved shared chat proof
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

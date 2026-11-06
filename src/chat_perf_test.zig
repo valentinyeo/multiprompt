@@ -11,6 +11,13 @@ fn ms(start: std.Io.Timestamp) i64 {
     return @intCast(start.durationTo(now()).toMilliseconds());
 }
 
+fn expectCpuBudget(phase: []const u8, actual_ms: i64, budget_ms: i64) !void {
+    if (actual_ms >= budget_ms) {
+        std.debug.print("CPU707 phase={s} actual_cpu_ms={d} strict_budget_ms={d} overage_ms={d} mode={s} clock=cpu_thread\n", .{ phase, actual_ms, budget_ms, actual_ms - budget_ms, @tagName(@import("builtin").mode) });
+        return error.TestUnexpectedResult;
+    }
+}
+
 test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     const report = struct {
         const Delta = struct { cpu_ms: i64, wall_ms: i64 };
@@ -66,7 +73,7 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     std.debug.print("CPU707 parse rows={d} blocks={d} messages={d} parse_cpu_ms={d} parse_wall_ms={d} peak_rss_kb={d}\n", .{ h.rows.items.len, h.blocks.items.len, messages, parse_ms, parse_wall_ms, parse_peak_kb });
     try std.testing.expectEqual(messages, h.blocks.items.len);
     try std.testing.expect(h.rows.items.len >= 50 * 1024 * 1024 - 256);
-    try std.testing.expect(parse_ms < 3000);
+    try expectCpuBudget("parse", parse_ms, 3000);
     try std.testing.expect(parse_peak_kb < 1024 * 1024);
 
     var delta_cpu_trials: [3]i64 = undefined;
@@ -88,7 +95,7 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     std.debug.print("CPU707 delta cpu_ms={d}/{d}/{d} wall_ms={d}/{d}/{d} best_cpu_ms={d} budget_ms=100 blocks={d} changed_from={d} peak_rss_kb={d}\n", .{ delta_cpu_trials[0], delta_cpu_trials[1], delta_cpu_trials[2], delta_wall_trials[0], delta_wall_trials[1], delta_wall_trials[2], delta_ms, h.blocks.items.len, h.changed_from, report.peakRssKb() orelse 0 });
     try std.testing.expectEqual(messages + 1, h.blocks.items.len);
     try std.testing.expectEqual(messages - 1, h.changed_from);
-    try std.testing.expect(delta_ms < 100);
+    try expectCpuBudget("append", delta_ms, 100);
 
     const users = try report.checked("allocate users", a.alloc(echo.UserBlock, h.blocks.items.len));
     defer a.free(users);
@@ -108,7 +115,7 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     try std.testing.expectEqual(@as(?usize, messages), picked[0]);
     for (picked[1..]) |p| try std.testing.expect(p == null);
     try std.testing.expectEqual(@as(?usize, messages), echo.represented(pending[0].text, users));
-    try std.testing.expect(reconcile_ms < 1000);
+    try expectCpuBudget("reconcile", reconcile_ms, 1000);
     std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d} clock=awake parse_cpu_ms={d} delta_cpu_ms={d} reconcile_cpu_ms={d} cpu_clock=cpu_thread peak_rss_kb={d} delta_cpu_trials={d}/{d}/{d}\n", .{ wire.items.len, messages, parse_wall_ms, delta_wall_trials[2], reconcile_wall_ms, parse_ms, delta_ms, reconcile_ms, report.peakRssKb() orelse 0, delta_cpu_trials[0], delta_cpu_trials[1], delta_cpu_trials[2] });
 }
 
