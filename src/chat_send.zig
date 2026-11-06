@@ -1953,7 +1953,7 @@ pub fn chatEchoSendAgain(id: u64) void {
 
 pub fn chatEchoRemove(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
-    if (!chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).remove) return;
+    if (!app_state.g_chat_outbox.items[ei].removable()) return;
     const pending = app_state.g_chat_outbox.items[ei];
     if (pending.message_v1 and pending.channel_pending) return;
     if (pending.message_v1 and (pending.message_phase[0] != 0 or pending.write_started)) {
