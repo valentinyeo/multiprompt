@@ -9,17 +9,33 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 public static class FixtureControls {
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr CreateWindowEx(int ex, string cls, string text, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
 }
-"@
-$form = [System.Windows.Forms.Form]::new()
+public class FixtureForm : Form {
+    protected override bool IsInputKey(Keys keyData) {
+        return (keyData & Keys.KeyCode) == Keys.Enter || base.IsInputKey(keyData);
+    }
+}
+"@ -ReferencedAssemblies System.Windows.Forms, System.Drawing
+$form = [FixtureForm]::new()
 $form.Text = 'Account journey foreground probe'
+$form.KeyPreview = $true
+$form.Add_KeyDown({
+    if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+        [void][FixtureControls]::SetFocus($script:enabledEdit)
+        $_.Handled = $true
+    }
+})
 $form.Add_Shown({
     foreach ($item in @(@('Edit', 0x50000000), @('Edit', 0x58000000), @('Edit', 0x40000000), @('Button', 0x50000000))) {
         $h = [FixtureControls]::CreateWindowEx(0, $item[0], 'private fixture text', [uint32]$item[1], 0, 0, 60, 20, $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
         if ($h -eq [IntPtr]::Zero) { throw 'Cannot create fixture control' }
+        if ($item[0] -eq 'Edit' -and $item[1] -eq 0x50000000) { $script:enabledEdit = $h }
     }
+    [void][FixtureControls]::SetFocus($form.Handle)
 })
 [System.Windows.Forms.Application]::Run($form)
 '@
@@ -67,6 +83,20 @@ try {
         $enabled = @($edits | ForEach-Object { [JourneyForeground]::Enabled($_) } | Sort-Object)
         if (($enabled -join ',') -cne 'False,True' -or [JourneyForeground]::ThreadFocus($thread) -notmatch '^\d+$' -or [JourneyForeground]::ThreadFocus(0) -cne 'unavailable' -or [JourneyForeground]::Enabled([IntPtr]::Zero) -cne 'unavailable') { throw 'Edit thread or enabled diagnostic mismatch' }
         if (@([JourneyForeground]::VisibleEdits($windows[$index], $processes[1 - $index].Id)).Count -ne 0) { throw 'Visible Edit enumeration accepted another PID' }
+        $target = @($edits | Where-Object { [JourneyForeground]::Enabled($_) -ceq 'True' })[0]
+        Set-JourneyForeground $windows[$index] $processes[$index].Id
+        Assert-Window $windows[$index] $processes[$index].Id
+        $focus = [ReconnectDesktop]::Focus($windows[$index])
+        if ($focus[0] -ne $windows[$index].ToInt64() -or $focus[1] -ne $windows[$index].ToInt64()) { throw "Enter probe initial focus mismatch: root=$($windows[$index].ToInt64()) target=$($target.ToInt64()) foreground=$($focus[0]) focus=$($focus[1]) active=$($focus[2])" }
+        [ReconnectDesktop]::Type(0x0D)
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $focus = [ReconnectDesktop]::Focus($windows[$index])
+            if ($focus[0] -eq $windows[$index].ToInt64() -and $focus[1] -eq $target.ToInt64()) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ($focus[0] -ne $windows[$index].ToInt64() -or $focus[1] -ne $target.ToInt64()) { throw "Enter probe focus mismatch: root=$($windows[$index].ToInt64()) target=$($target.ToInt64()) foreground=$($focus[0]) focus=$($focus[1]) active=$($focus[2])" }
+        Assert-Window $windows[$index] $processes[$index].Id
     }
     $rejected = $false
     try { Set-JourneyForeground $windows[0] $processes[1].Id } catch { $rejected = $_.Exception.Message -match 'expected hwnd=.*owner=.*foreground=' }
