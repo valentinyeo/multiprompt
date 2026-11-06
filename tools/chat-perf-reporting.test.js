@@ -8,11 +8,15 @@ const path = require('node:path');
 test('CPU707 strict budgets report failures through the native runner', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/chat_perf_test.zig'), 'utf8');
   const build = fs.readFileSync(path.join(__dirname, '../build.zig'), 'utf8');
-  const helper = source.slice(source.indexOf('fn expectCpuBudget('), source.indexOf('\ntest ', source.indexOf('fn expectCpuBudget(')));
-  assert.ok(helper.startsWith('fn expectCpuBudget('));
+  const startHelper = source.indexOf('    const report = struct {\n        fn expectCpuBudget(');
+  assert.ok(startHelper >= 0);
+  const helperStart = source.indexOf('fn expectCpuBudget(', startHelper);
+  const helperEnd = source.indexOf('\n        const Delta =', helperStart);
+  assert.ok(helperEnd > helperStart);
+  const helper = source.slice(helperStart, helperEnd);
   const stages = [['parse', 'parse_ms', 3000], ['append', 'delta_ms', 100], ['reconcile', 'reconcile_ms', 1000]];
   for (const [phase, variable, budget] of stages) {
-    assert.ok(source.includes(`try expectCpuBudget("${phase}", ${variable}, ${budget});`));
+    assert.ok(source.includes(`try report.expectCpuBudget("${phase}", ${variable}, ${budget});`));
   }
   const start = build.indexOf('    const run_chat_perf_tests =');
   const end = build.indexOf('    const chat_echo_budget_tests =', start);
