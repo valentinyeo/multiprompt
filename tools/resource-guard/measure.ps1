@@ -73,16 +73,12 @@ try {
     $result.loadedShellIds = @($seen.Keys)
     Start-Sleep -Seconds 15
     $before = $job.ReadAccounting(); $timer = [Diagnostics.Stopwatch]::StartNew()
+    Start-Sleep -Seconds 10
+    $after = $job.ReadAccounting(); $timer.Stop()
     $result.idleSnapshots = @()
     for ($sample = 1; $sample -le 4; $sample++) {
-        $waitMs = [int](2000 * $sample - $timer.Elapsed.TotalMilliseconds)
-        if ($waitMs -gt 0) { Start-Sleep -Milliseconds $waitMs }
-        if ($timer.Elapsed.TotalMilliseconds -ge 10000) { break }
         $result.idleSnapshots += Get-StableJobSnapshot -Job $job -AppId $app.Id
     }
-    $waitMs = [int](10000 - $timer.Elapsed.TotalMilliseconds)
-    if ($waitMs -gt 0) { Start-Sleep -Milliseconds $waitMs }
-    $after = $job.ReadAccounting(); $timer.Stop()
     if ($app.HasExited -or [ChatDeliveryDesktop]::Window($app.Id) -eq [IntPtr]::Zero) { throw 'App or main window exited' }
     $finalIds = Get-GuardSessionIds (Session) $sessionCount
     if ($null -eq $finalIds -or @($sessionIds.Keys | Where-Object { -not $finalIds.ContainsKey($_) }).Count -ne 0) { throw 'Chat tabs dropped or changed' }

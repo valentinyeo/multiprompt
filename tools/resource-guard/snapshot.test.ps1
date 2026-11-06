@@ -47,6 +47,19 @@ Check ($job.Reads -eq 4 -and $script:delays -eq 1) 'Birth and death with unchang
 Check ($snapshot.processes.Count -eq 2 -and $snapshot.accounting.TotalProcesses -eq 3) 'Stable snapshot must include job members only'
 Check ($app.Disposed -and $other.Disposed -and $outside.Disposed) 'Processes must be disposed'
 Check ($snapshot.processes[0].commandLine -eq 'fake' -and $snapshot.processes[0].executablePath -eq 'C:\fake.exe' -and $snapshot.processes[0].parentProcessId -eq 0 -and $snapshot.processes[0].creationTime -eq $app.StartTime.ToUniversalTime()) 'Joined provenance must be retained'
+$job = [FakeJob]::new(@($stable))
+$orderedCim = @(Cim @($app, $other))
+foreach ($detail in $orderedCim) {
+    $detail | Add-Member -Force ScriptProperty CommandLine { if ($job.Reads -ne 2) { throw 'CIM details read inside accounting bracket' }; 'fake' }
+}
+$snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate {
+    Check ($job.Reads -eq 1) 'Process enumeration must be inside accounting bracket'
+    @($app, $other)
+} -EnumerateCim {
+    Check ($job.Reads -eq 0) 'CIM capture must precede accounting bracket'
+    $orderedCim
+}
+Check ($snapshot.processes.Count -eq 2 -and $job.Reads -eq 2) 'Ordered capture must succeed'
 $script:cimReads = 0; $script:delays = 0
 $job = [FakeJob]::new(@($stable))
 $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other) } -EnumerateCim {
@@ -55,6 +68,8 @@ $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other
 }
 Check ($job.Reads -eq 4 -and $script:delays -eq 1 -and $snapshot.processes.Count -eq 2) 'Missing CIM member must retry'
 Expect-Failure ([FakeJob]::new(@($stable))) 1 @($app, $other) @(Cim @($app))
+Expect-Failure ([FakeJob]::new(@($stable))) 1 @($app, $other) @(Cim @($app, $other, $other))
+Expect-Failure ([FakeJob]::new(@($stable))) 1 @($app, $app) @(Cim @($app))
 $reused = @(Cim @($app, $other)); $reused[1].CreationDate = $reused[1].CreationDate.AddSeconds(1)
 Expect-Failure ([FakeJob]::new(@($stable))) 1 @($app, $other) $reused
 $incomplete = @(Cim @($app, $other)); $incomplete[1].CommandLine = ''

@@ -1,6 +1,11 @@
 function Get-StableJobSnapshot {
     param($Job, [int]$AppId, [scriptblock]$Enumerate = { [Diagnostics.Process]::GetProcesses() }, [scriptblock]$EnumerateCim = { Get-CimInstance Win32_Process })
     for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        $cim = @{}
+        foreach ($detail in (& $EnumerateCim)) {
+            $id = [int]$detail.ProcessId
+            if ($cim.ContainsKey($id)) { $cim[$id] = $null } else { $cim[$id] = $detail }
+        }
         $before = $Job.ReadAccounting()
         $raw = @()
         foreach ($p in (& $Enumerate)) {
@@ -9,12 +14,14 @@ function Get-StableJobSnapshot {
             } catch {
             } finally { $p.Dispose() }
         }
-        $cim = @(& $EnumerateCim)
+        $after = $Job.ReadAccounting()
         $complete = $true
+        $seen = @{}
         foreach ($process in $raw) {
-            $matches = @($cim | Where-Object { $_.ProcessId -eq $process.id })
-            if ($matches.Count -ne 1) { $complete = $false; continue }
-            $detail = $matches[0]
+            if ($seen.ContainsKey($process.id)) { $complete = $false; continue }
+            $seen[$process.id] = $true
+            $detail = $cim[$process.id]
+            if ($null -eq $detail) { $complete = $false; continue }
             if ([string]::IsNullOrWhiteSpace($detail.CommandLine) -or [string]::IsNullOrWhiteSpace($detail.ExecutablePath) -or
                 $null -eq $detail.ParentProcessId -or $null -eq $detail.CreationDate -or
                 [Math]::Abs(($process.startTime - $detail.CreationDate.ToUniversalTime()).TotalMilliseconds) -ge 1) {
@@ -26,7 +33,6 @@ function Get-StableJobSnapshot {
             $process.creationTime = $detail.CreationDate.ToUniversalTime()
             $process.Remove('startTime')
         }
-        $after = $Job.ReadAccounting()
         if ($before.TotalProcesses -eq $after.TotalProcesses -and
             $before.TerminatedProcesses -eq $after.TerminatedProcesses -and
             $before.ActiveProcesses -eq $after.ActiveProcesses -and
