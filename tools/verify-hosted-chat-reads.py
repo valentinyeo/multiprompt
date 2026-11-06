@@ -3,6 +3,7 @@ import importlib.util
 import itertools
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -146,8 +147,28 @@ def check_case(reader, case, base):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--reader', default=str(ROOT / 'src/chat_history_reader.py'))
+    parser.add_argument('--client-reader', help='Older client launcher that must select the installed reader')
     args = parser.parse_args()
     reader = load(args.reader)
+    if args.client_reader:
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, PYTHONDONTWRITEBYTECODE='1')
+            def info(source):
+                result = subprocess.run([sys.executable, str(source), '--serve'],
+                                        input=json.dumps(dict(id=1, op='engine_info')) + '\n',
+                                        text=True, capture_output=True, env=env, timeout=15)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr)
+                return json.loads(result.stdout)['engine_info']
+            installed = info(args.reader)
+            selected = info(args.client_reader)
+            if selected != installed:
+                raise RuntimeError('Older client did not select the installed runtime')
+            selected_path = Path(home) / '.multiprompt-runtime' / (selected['sha256'] + '.py')
+            selected_source = selected_path.read_text()
+            reader = load(selected_path)
+            reader.READER_SOURCE = selected_source
+            print('CLIENT_RUNTIME_SELECTION PASS generation=' + str(selected['generation']))
     names = list(DIMENSIONS)
     failures = 0
     total = 0
