@@ -77,6 +77,29 @@ Changing the chat configuration permits another startup attempt.
 Existing message requests and live events remain compatible.
 Ctrl+T, Alt+T, and the existing palette action remain unchanged.
 
+## Stalled messages
+
+Message requests run in separate, ordered lanes per chat.
+Each lane admits up to 64 requests.
+Up to 256 chat lanes may be active.
+Excess requests receive the existing error response.
+Idle lanes can be reclaimed for new chats.
+Session discovery and connector calls run outside shared write transactions.
+
+Each chat's message worker watches its oldest pending message.
+After 90 seconds without progress, it releases its work locks.
+The pending message becomes failed with `watchdog_timeout`.
+One `worker_watchdog` log entry records the recovery.
+Other chats and accepted messages remain untouched.
+Recovery never automatically resends an uncertain handoff.
+Explicit retry keeps the existing idempotent retry request.
+The worker deadline also interrupts a hung poll or dispatch.
+
+Protocol 1 and the stored schema remain unchanged.
+The existing retry action and shortcuts remain unchanged.
+A short test cannot prove a full healthy day.
+That acceptance check requires post-release observation.
+
 ## Limits
 
 - Older launchers still run their embedded reader.
