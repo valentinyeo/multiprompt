@@ -8,8 +8,9 @@ const normal = { workload: 'fixture', sessionCount: 30, readySessions: 30, clean
 test('resource workflows pass versions safely to PowerShell', () => {
   const pr = fs.readFileSync(new URL('../../.github/workflows/resource-observation.yml', import.meta.url), 'utf8');
   const release = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  assert.match(pr, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=0\.0\.0"/);
-  assert.match(pr, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion "0\.0\.0" -ExpectedHash \$hash/);
+  assert.match(pr, /\$tag = node tools\/release-version\.mjs\s+if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}\s+"CANDIDATE_VERSION=\$\(\$tag\.Substring\(1\)\)" \| Out-File -FilePath \$env:GITHUB_ENV -Encoding utf8 -Append/);
+  assert.match(pr, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=\$env:CANDIDATE_VERSION"/);
+  assert.match(pr, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion \$env:CANDIDATE_VERSION -ExpectedHash \$hash/);
   assert.match(release, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion \$version -ExpectedHash \$hash/);
 });
 test('comparison fails closed and blocks regressions', () => {
