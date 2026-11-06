@@ -1875,6 +1875,11 @@ pub fn shellConsoleShouldBeVisible(idx: u32) bool {
     );
 }
 
+pub fn overlayOpen() bool {
+    return app_state.g_search_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
+        app_state.g_snippet_create_active or app_state.g_inbox_active or app_state.g_all_sessions_active;
+}
+
 pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
     if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null) return 0;
     if (!shellConsoleShouldBeVisible(idx)) {

@@ -1726,7 +1726,7 @@ pub fn applyServerLayout(json: []const u8) !void {
     if (kept_active) {
         app_state.g_active_workspace = app_state.shells[app_state.active_shell].workspace;
         debugLog("pane guard: account sync kept user on active tab");
-        @import("chat_composer.zig").applySessionView();
+        if (!@import("chat_composer.zig").overlayOpen()) @import("chat_composer.zig").applySessionView();
     } else {
         if (app_state.active_shell >= app_state.shell_count) app_state.active_shell = 0;
         app_state.g_active_workspace = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].workspace else 0;
