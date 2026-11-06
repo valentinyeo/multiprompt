@@ -1693,6 +1693,7 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertFalse(sent['follow'])
 
     def test_IGSH_1822_hosted_chat_without_sid_is_found_by_its_tab(self):
+        self.assertTrue(callable(getattr(reader, 'host_sid_for_tmux', None)), 'hosted chat tab lookup is missing')
         sid = '783da795-e250-4189-bd8a-8947248eecae'
         self.query.update(follow=True, sid='', cwd='/home/secondary/project')
         with patch.object(reader, 'host_sid_for_tmux', return_value=sid) as lookup, \
@@ -1705,6 +1706,7 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(read_owner.call_args.args[0]['sid'], sid)
 
     def test_IGSH_1822_tab_lookup_reads_only_one_enabled_hosted_chat(self):
+        self.assertTrue(callable(getattr(reader, 'host_sid_for_tmux', None)), 'hosted chat tab lookup is missing')
         with tempfile.TemporaryDirectory() as home:
             root = Path(home) / '.local/state/multiprompt/agent-host'
             root.mkdir(parents=True)
