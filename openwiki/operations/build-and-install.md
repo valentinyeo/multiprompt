@@ -2,6 +2,8 @@
 
 Use Zig 0.16 on PATH. On Windows, `zig build` produces `zig-out/bin/multiprompt.exe` and `zigshell-bridge.exe`; `zig build dev` produces a separate development app. Telemetry runs in the main executable with `--usage-telemetry`.
 
+Before native builds, CI runs `zig ast-check` on `build.zig` and every Zig source under `src`, including the generated release changelog. This checks syntax, not formatting or semantic compilation.
+
 Linux contributors can cross-compile for either supported architecture:
 
 ```sh

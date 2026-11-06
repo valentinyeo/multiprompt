@@ -141,6 +141,8 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-notes-source
+      - name: Check Zig syntax
+        run: node tools/check-zig-syntax.mjs
       - name: Build
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
