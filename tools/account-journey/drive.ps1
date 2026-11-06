@@ -70,15 +70,36 @@ function Show-Workspace([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId 
     Set-JourneyForeground $Window $ProcessId
     Assert-Window $Window $ProcessId
     [ReconnectDesktop]::Key(0x12, $false)
-    [ReconnectDesktop]::Key([ushort](0x32 + $slot), $false)
-    [ReconnectDesktop]::Key([ushort](0x32 + $slot), $true)
-    [ReconnectDesktop]::Key(0x12, $true)
-    [void](Wait-For 'selected workspace session' {
-        try {
-            $current = Get-Content $SessionPath -Raw | ConvertFrom-Json
-            [int]$current.active_workspace -eq $slot -and !$current.starred_view -and $current.workspaces[$slot].name -ceq $Name
-        } catch { $false }
-    } 10)
+    try {
+        [ReconnectDesktop]::Key([ushort](0x32 + $slot), $false)
+        [ReconnectDesktop]::Key([ushort](0x32 + $slot), $true)
+    } finally { [ReconnectDesktop]::Key(0x12, $true) }
+    $selection = @{ readable = $false; active_slot = -1; starred = $false; name_match = $false }
+    try {
+        [void](Wait-For 'selected workspace session' {
+            $selection.readable = $false
+            $selection.active_slot = -1
+            $selection.starred = $false
+            $selection.name_match = $false
+            try {
+                $current = Get-Content $SessionPath -Raw | ConvertFrom-Json
+                $selection.readable = $true
+                if ($null -ne $current.active_workspace) { $selection.active_slot = [int]$current.active_workspace }
+                $selection.starred = [bool]$current.starred_view
+                $selection.name_match = $slot -lt @($current.workspaces).Count -and $current.workspaces[$slot].name -ceq $Name
+                $selection.active_slot -eq $slot -and !$selection.starred -and $selection.name_match
+            } catch { $false }
+        } 10)
+    } catch {
+        if ($_.Exception.Message -cne 'Timed out: selected workspace session') { throw }
+        $original = $_
+        $focus = @(-1L, -1L)
+        try { $focus = [ReconnectDesktop]::Focus($Window) } catch {}
+        $message = "Timed out: selected workspace session; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId expected_slot=$slot foreground=$($focus[0]) focus=$($focus[1]) session_readable=$($selection.readable) active_slot=$($selection.active_slot) starred=$($selection.starred) expected_name_match=$($selection.name_match)"
+        $exception = [System.Exception]::new($message, $original.Exception)
+        $exception.Data['original_script_stack'] = $original.ScriptStackTrace
+        throw $exception
+    }
 }
 function Assert-Focus([IntPtr]$Window, [int]$ProcessId, [IntPtr]$Expected) {
     Assert-Window $Window $ProcessId
