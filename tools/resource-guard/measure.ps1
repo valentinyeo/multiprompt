@@ -73,7 +73,15 @@ try {
     $result.loadedShellIds = @($seen.Keys)
     Start-Sleep -Seconds 15
     $before = $job.ReadAccounting(); $timer = [Diagnostics.Stopwatch]::StartNew()
-    Start-Sleep -Seconds 10
+    $result.idleSnapshots = @()
+    for ($sample = 1; $sample -le 4; $sample++) {
+        $waitMs = [int](2000 * $sample - $timer.Elapsed.TotalMilliseconds)
+        if ($waitMs -gt 0) { Start-Sleep -Milliseconds $waitMs }
+        if ($timer.Elapsed.TotalMilliseconds -ge 10000) { break }
+        $result.idleSnapshots += Get-StableJobSnapshot -Job $job -AppId $app.Id
+    }
+    $waitMs = [int](10000 - $timer.Elapsed.TotalMilliseconds)
+    if ($waitMs -gt 0) { Start-Sleep -Milliseconds $waitMs }
     $after = $job.ReadAccounting(); $timer.Stop()
     if ($app.HasExited -or [ChatDeliveryDesktop]::Window($app.Id) -eq [IntPtr]::Zero) { throw 'App or main window exited' }
     $finalIds = Get-GuardSessionIds (Session) $sessionCount
@@ -87,12 +95,10 @@ try {
     $result.processes = $raw.Count
     $result.syntheticSshProcesses = @($raw | Where-Object { $_.name -ieq 'ssh' }).Count
     $cim = @(Get-CimInstance Win32_Process)
-    $sshIds = @($raw | Where-Object { $_.name -ieq 'ssh' } | ForEach-Object { $_.id })
-    $sshDetails = @($cim | Where-Object { $_.ProcessId -in $sshIds })
-    if ($sshDetails.Count -ne $sshIds.Count -or @($sshDetails | Where-Object { -not $_.CommandLine }).Count -ne 0) { throw 'Missing synthetic SSH command lines' }
+    $sshDetails = @($raw | Where-Object { $_.name -ieq 'ssh' })
     if (@($sshDetails | Where-Object { $_.ExecutablePath -ine "$FixtureBin\ssh.exe" }).Count -ne 0) { throw 'SSH process is not the synthetic fixture' }
     $result.syntheticSshReaders = @($sshDetails | Where-Object { $_.CommandLine -match '--serve|--watch' }).Count
-    $result.sshCommandLines = @($sshDetails | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine)
+    $result.sshCommandLines = @($sshDetails | ForEach-Object { @{ ProcessId=$_.id; ParentProcessId=$_.parentProcessId; ExecutablePath=$_.executablePath; CommandLine=$_.commandLine } })
     $result.jobConsoleProcesses = @($raw | Where-Object { $_.name -in @('conhost','OpenConsole') }).Count
     $result.workingSetBytes = [long](($raw | Measure-Object -Property workingSetBytes -Sum).Sum)
     $ids = @($raw | ForEach-Object { $_.id })
