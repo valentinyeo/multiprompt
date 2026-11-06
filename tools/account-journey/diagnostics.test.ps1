@@ -14,4 +14,23 @@ try {
 } catch {
     if ($_.Exception.Message -cne $diagnostic.message -or $_.Exception.GetType().FullName -cne $diagnostic.type -or $_.ScriptStackTrace -notmatch 'diagnostics\.test\.ps1') { throw 'Journey rethrow lost the original exception' }
 }
+$lines = @(
+    'secret synthetic-secret [palette] confirm target=7000'
+    '2026-10-18 03:04:05.067 [palette] ready chars=16 count=1 target=7000'
+    '[palette] confirm target=7000'
+    '[palette] ready chars=0 count=9999 target=99999'
+    '[palette] confirm target=3'
+    '[palette] confirm target=7000 synthetic-secret'
+    '[palette] confirm target=123456'
+    '[palette] ready chars=1000 count=1 target=1'
+    '[palette] ready chars=1 count=10000 target=1'
+    '[palette] ready chars=1 count=1 target=100000'
+    'prefix [palette] ready chars=1 count=1 target=1'
+    "[palette] confirm target=7000`rsecret"
+    '[palette] confirm target=7 workspace=private-name'
+    '[palette] confirm target=１２'
+)
+$actual = @(Get-SafePaletteRecords ($lines -join "`r`n"))
+$expected = @('[palette] ready chars=16 count=1 target=7000', '[palette] confirm target=7000', '[palette] ready chars=0 count=9999 target=99999', '[palette] confirm target=3')
+if (($actual -join "`n") -cne ($expected -join "`n")) { throw 'Palette sanitizer accepted unsafe records or changed ordering' }
 Write-Host 'Account journey diagnostics assertions passed'

@@ -1,3 +1,7 @@
+function Get-SafePaletteRecords([string]$Text) {
+    [regex]::Matches($Text, '(?m)^(?:[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} )?(\[palette\] (?:ready chars=[0-9]{1,3} count=[0-9]{1,4} target=[0-9]{1,5}|confirm target=[0-9]{1,5}))\r?$') | ForEach-Object { $_.Groups[1].Value }
+}
+
 function Get-JourneyError([System.Management.Automation.ErrorRecord]$Record) {
     $message = $Record.Exception.Message
     $unsafe = $message -match '(?i)(bearer\s|refresh.token|access.token|admin.key|workspace.key|pfxpass|[\r\n{}])'

@@ -111,6 +111,8 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
         $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=16 count=\d+ target=7000(?:\r?\n|$)'
     } 10)
     Assert-Focus $Window $ProcessId $Window
+    $beforeEnter = Read-Log $paletteLog
+    $enterOffset = $beforeEnter.Length
     [ReconnectDesktop]::Type(0x0D)
     $state = @{ foreground = 0L; focus = 0L; owner = 0; root = 0L; edit_class = $false; expected_name_match = $false }
     try {
@@ -127,9 +129,19 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
         } 10
     } catch {
         if ($_.Exception.Message -cne 'Timed out: workspace rename edit') { throw }
-        $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match)"
-        $exception = [System.Exception]::new($message, $_.Exception)
-        $exception.Data['original_script_stack'] = $_.ScriptStackTrace
+        $original = $_
+        $confirmed = $false
+        try {
+            $trace = Read-Log $paletteLog
+            if ($trace.Length -ge $enterOffset) {
+                $fresh = $trace.Substring($enterOffset)
+                if ($enterOffset -gt 0 -and $beforeEnter[$enterOffset - 1] -ne "`n") { $fresh = 'partial' + $fresh }
+                $confirmed = @((Get-SafePaletteRecords $fresh) | Where-Object { $_ -ceq '[palette] confirm target=7000' }).Count -gt 0
+            }
+        } catch {}
+        $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match) confirm_target_7000=$confirmed"
+        $exception = [System.Exception]::new($message, $original.Exception)
+        $exception.Data['original_script_stack'] = $original.ScriptStackTrace
         throw $exception
     }
     Assert-Focus $Window $ProcessId $edit
@@ -370,9 +382,7 @@ try {
         if ($entry.path -and (Test-Path $entry.path)) {
             try {
                 $text = Read-Log $entry.path
-                $safe = @([regex]::Matches($text, '(?m)\[palette\] ready chars=([0-9]{1,3}) count=([0-9]{1,4}) target=([0-9]{1,5})\r?$') | ForEach-Object {
-                    '[palette] ready chars={0} count={1} target={2}' -f $_.Groups[1].Value, $_.Groups[2].Value, $_.Groups[3].Value
-                })
+                $safe = @(Get-SafePaletteRecords $text)
                 @('[other log lines suppressed]') + $safe | Set-Content (Join-Path $Output $entry.name)
             } catch {}
         }
