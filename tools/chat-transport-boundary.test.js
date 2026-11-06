@@ -8,9 +8,9 @@ const root = path.resolve(__dirname, '..');
 const script = String.raw`
 import ast, base64, json, pathlib, queue, signal, subprocess, sys, tempfile, threading, types
 root = pathlib.Path(sys.argv[1])
-source = (root / 'tools/verify-chat-delivery/boundary.py').read_text()
+source = (root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8')
 adapter = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'transport_reader')
-broker = (root / 'src/chat_transport.py').read_text()
+broker = (root / 'src/chat_transport.py').read_text(encoding='utf-8')
 main = next(node for node in ast.parse(broker).body if isinstance(node, ast.If) and isinstance(node.test, ast.Compare))
 registered = []
 minimal_signal = types.SimpleNamespace(SIGTERM=15, signal=lambda event, handler: registered.append(event))
