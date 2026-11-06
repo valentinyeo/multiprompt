@@ -119,7 +119,7 @@ def conversation_path(agent, sid, cwd, home=None):
                     continue
             for path in candidates:
                 try:
-                    if path.is_file() and path.resolve().is_relative_to(root.resolve()):
+                    if path.is_file() and transcript_inside(path, root):
                         with path.open("rb"):
                             return path
                 except PermissionError as error:
@@ -139,6 +139,12 @@ def conversation_path(agent, sid, cwd, home=None):
     if denied is not None:
         raise denied
     return None
+
+def transcript_inside(path, root):
+    if path.resolve().is_relative_to(root.resolve()):
+        return True
+    return (path.is_symlink() and path.parent.resolve().is_relative_to(root.resolve()) and
+            path.resolve().stat().st_uid == os.getuid())
 
 def owner_response(q, owner, source):
     user, _home = owner
@@ -6226,7 +6232,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 79
+RUNTIME_GENERATION = 80
 
 if __name__ == '__main__':
     import base64 as _base64
