@@ -5,14 +5,15 @@ using System.Collections.Generic;
 public static class ReconnectDesktop {
     public static List<string> Keys = new List<string>();
     public static bool FailKey;
+    public static long Foreground = 100;
     public static void Key(ushort key, bool up) {
         Keys.Add(key + ":" + up);
         if (FailKey && key != 0x12) throw new Exception("Synthetic input failure");
     }
-    public static long[] Focus(IntPtr window) { return new long[] { 100, 100 }; }
+    public static long[] Focus(IntPtr window) { return new long[] { Foreground, Foreground == 100 ? 100 : 0 }; }
 }
 '@
-function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) { Assert-Window $Window $ProcessId }
+function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) { Assert-Window $Window $ProcessId; [ReconnectDesktop]::Foreground = 100 }
 function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
     if ($Window -ne [IntPtr]100 -or $ProcessId -ne 42) { throw 'Wrong window' }
 }
@@ -37,6 +38,8 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds) {
                 if ($attempt -eq 0) { $state.active_workspace = 0 }
                 if ($attempt -eq 1) { $state.starred_view = $true }
             }
+            'lost-foreground' { if ($script:attempts -le 3) { $state.active_workspace = 0; [ReconnectDesktop]::Foreground = 200 } }
+            'lost-foreground-still-wrong' { $state.active_workspace = 0; [ReconnectDesktop]::Foreground = 200 }
             'wrong-slot' { $state.active_workspace = 0 }
             'starred' { $state.starred_view = $true }
             'wrong-name' { $state.workspaces[1].name = 'private-name' }
@@ -50,7 +53,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds) {
     throw "Timed out: $Description"
 }
 try {
-    foreach ($mode in @('delayed', 'wrong-slot', 'starred', 'wrong-name', 'missing-active', 'unreadable', 'input-failure')) {
+    foreach ($mode in @('delayed', 'lost-foreground', 'lost-foreground-still-wrong', 'wrong-slot', 'starred', 'wrong-name', 'missing-active', 'unreadable', 'input-failure')) {
         $script:mode = $mode
         $script:attempts = 0
         [ReconnectDesktop]::Keys.Clear()
@@ -65,14 +68,20 @@ try {
             if (!$caught -or $caught.Exception.InnerException.Message -cne 'Synthetic input failure' -or [ReconnectDesktop]::Keys[-1] -cne '18:True') { throw 'Input failure lost its cause or left Alt held' }
             continue
         }
-        if (([ReconnectDesktop]::Keys -join ',') -cne "18:False,${digit}:False,${digit}:True,18:True") { throw 'Wrong workspace shortcut or missing key release' }
+        $chord = "18:False,${digit}:False,${digit}:True,18:True"
+        $expectedKeys = if ($mode -like 'lost-foreground*') { "$chord,$chord" } else { $chord }
+        if (([ReconnectDesktop]::Keys -join ',') -cne $expectedKeys) { throw 'Wrong workspace shortcut or missing key release' }
+        if ($mode -eq 'lost-foreground') {
+            if ($caught -or $script:attempts -ne 4) { throw 'Foreground recovery did not verify selection' }
+            continue
+        }
         if ($mode -eq 'delayed') {
             if ($caught -or $script:attempts -ne 3) { throw 'Selection accepted stale workspace or Starred state' }
             continue
         }
         if (!$caught) { throw "Selection accepted $mode state" }
         $diagnostic = Get-JourneyError $caught
-        if ($diagnostic.redacted -or $diagnostic.message -notmatch '^Timed out: selected workspace session; expected_window=100 expected_pid=42 expected_slot=[01] foreground=100 focus=100 session_readable=(True|False) active_slot=-?[01] starred=(True|False) expected_name_match=(True|False)$' -or
+        if ($diagnostic.redacted -or $diagnostic.message -notmatch '^Timed out: selected workspace session; expected_window=100 expected_pid=42 expected_slot=[01] foreground=(100|200) focus=(100|0) session_readable=(True|False) active_slot=-?[01] starred=(True|False) expected_name_match=(True|False)$' -or
             $diagnostic.message -match 'synthetic-secret|private-name' -or !$caught.Exception.InnerException -or
             $caught.Exception.InnerException.Message -cne 'Timed out: selected workspace session' -or $diagnostic.original_script_stack -notmatch 'Wait-For') { throw 'Unsafe or incomplete workspace timeout diagnostic' }
         if ($mode -eq 'missing-active' -and $diagnostic.message -notmatch 'active_slot=-1 ') { throw 'Missing selection became slot zero' }
