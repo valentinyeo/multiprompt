@@ -50,6 +50,21 @@
 
 ## Hosted chats and other tools
 
+- New live chats have no parking terminal or idle sleep process.
+- Their saved `tmux` field is a routing name, not proof of a terminal.
+- Host config stores the provider, session id, name and working directory.
+- `python3 <reader> host list` lists those registered chats.
+- `host connect <name>` reconnects by that registry without creating tmux.
+- Desktop discovery combines the registry with existing terminal sessions.
+- Headless runners stay out of desktop discovery until made visible.
+- Explicit Claude terminal handoff creates a real terminal on demand.
+- Older config/state pairs and physical terminal chats remain readable.
+- Old and new clients keep the same request and layout fields. The selected
+  runtime supplies the name lookup; Android compatibility is tracked in
+  https://app.hypertask.ai/detail/project-2060/1768.
+
+The following pane markers remain for older physical sessions:
+
 - A hosted chat's tmux session carries `@mp_host_sid` while a host runs on it.
 - The host clears that option when it stops, and a move to the terminal clears
   it too, so a tool reading it never types into a hosted pane's shell.

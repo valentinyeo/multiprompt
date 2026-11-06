@@ -3,6 +3,7 @@ import importlib.util
 import itertools
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -16,7 +17,7 @@ TAB = 'live-b06323d'
 FIRST = 'first reply PROBE-A'
 LATER = 'later reply PROBE-B'
 DIMENSIONS = dict(
-    tab=('hosted', 'terminal'),
+    tab=('hosted', 'hosted-no-pane', 'terminal'),
     owner=('same-user', 'other-user'),
     query_sid=('sid', 'empty', 'stale'),
     follow=(True, False),
@@ -67,7 +68,7 @@ def check_case(reader, case, base):
     state = homes['valentin'] / '.local/state/multiprompt/agent-host'
     state.mkdir(parents=True)
     key = reader.host_key('claude', SID)
-    if case['tab'] == 'hosted':
+    if case['tab'].startswith('hosted'):
         (state / (key + '.config.json')).write_text(json.dumps(dict(enabled=True, tmux=TAB, cwd=cwd, permission_mode='bypassPermissions')))
         (state / (key + '.state.json')).write_text(json.dumps(dict(provider='claude', sid=SID, native_session=SID, tmux=TAB)))
     acting = dict(user='valentin')
@@ -109,7 +110,7 @@ def check_case(reader, case, base):
         return None
 
     asked = dict(sid=SID, empty='', stale=OLD_SID)[case['query_sid']]
-    query = dict(id=1234, provider='claude', codex=False, sid=asked, tmux=TAB, cwd=cwd,
+    query = dict(id=1234, provider='claude', codex=False, sid=asked, tmux='' if case['tab'] == 'hosted-no-pane' else TAB, cwd=cwd,
                  follow=case['follow'], cached_sid='', inode=0, offset=0, settlement=True, message_protocol=1,
                  source_offsets=True, live=True, start=0, before=0, mtime=0, probe='')
     if case['held']:
@@ -146,14 +147,36 @@ def check_case(reader, case, base):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--reader', default=str(ROOT / 'src/chat_history_reader.py'))
+    parser.add_argument('--client-reader', help='Older client launcher that must select the installed reader')
     args = parser.parse_args()
     reader = load(args.reader)
+    if args.client_reader:
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, PYTHONDONTWRITEBYTECODE='1')
+            def info(source):
+                result = subprocess.run([sys.executable, str(source), '--serve'],
+                                        input=json.dumps(dict(id=1, op='engine_info')) + '\n',
+                                        text=True, capture_output=True, env=env, timeout=15)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr)
+                return json.loads(result.stdout)['engine_info']
+            installed = info(args.reader)
+            selected = info(args.client_reader)
+            if selected != installed:
+                raise RuntimeError('Older client did not select the installed runtime')
+            selected_path = Path(home) / '.multiprompt-runtime' / (selected['sha256'] + '.py')
+            selected_source = selected_path.read_text()
+            reader = load(selected_path)
+            reader.READER_SOURCE = selected_source
+            print('CLIENT_RUNTIME_SELECTION PASS generation=' + str(selected['generation']))
     names = list(DIMENSIONS)
     failures = 0
     total = 0
     for values in itertools.product(*DIMENSIONS.values()):
         case = dict(zip(names, values))
-        if case['query_sid'] == 'stale' and (case['tab'] == 'hosted' or not case['follow']):
+        if case['query_sid'] == 'stale' and (case['tab'].startswith('hosted') or not case['follow']):
+            continue
+        if case['tab'] == 'hosted-no-pane' and case['query_sid'] != 'sid':
             continue
         total += 1
         with tempfile.TemporaryDirectory() as temp:
