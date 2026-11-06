@@ -168,7 +168,19 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
                 $confirmed = @((Get-SafePaletteRecords $fresh) | Where-Object { $_ -ceq '[palette] confirm target=7000' }).Count -gt 0
             }
         } catch {}
-        $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match) confirm_target_7000=$confirmed"
+        $ownedEdit = @{ exists = $false; focused = $false; expected_name_match = $false; hwnd = 0L; probe_failed = $false }
+        try {
+            $candidate = [ReconnectDesktop]::Composer($Window)
+            if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and [ReconnectDesktop]::Owner($candidate) -eq $ProcessId -and [ReconnectDesktop]::GetAncestor($candidate, 2) -eq $Window -and [ReconnectDesktop]::Class($candidate) -eq 'Edit') {
+                $nameMatch = [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName
+                $focus = [ReconnectDesktop]::Focus($Window)
+                $ownedEdit.exists = $true
+                $ownedEdit.focused = $focus[1] -eq $candidate.ToInt64()
+                $ownedEdit.expected_name_match = $nameMatch
+                $ownedEdit.hwnd = $candidate.ToInt64()
+            }
+        } catch { $ownedEdit.probe_failed = $true }
+        $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match) confirm_target_7000=$confirmed owned_edit_exists=$($ownedEdit.exists) owned_edit_focused=$($ownedEdit.focused) owned_edit_expected_name_match=$($ownedEdit.expected_name_match) owned_edit_hwnd=$($ownedEdit.hwnd) owned_edit_probe_failed=$($ownedEdit.probe_failed)"
         $exception = [System.Exception]::new($message, $original.Exception)
         $exception.Data['original_script_stack'] = $original.ScriptStackTrace
         throw $exception

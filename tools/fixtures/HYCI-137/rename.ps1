@@ -12,11 +12,15 @@ public static class ReconnectDesktop {
             Entered = true;
         }
     }
-    public static long[] Focus(IntPtr window) { return new long[] { 100, Entered ? (Mode.StartsWith("missing") ? 0 : 200) : 100 }; }
-    public static int Owner(IntPtr window) { return 42; }
-    public static IntPtr GetAncestor(IntPtr window, int flags) { return new IntPtr(100); }
+    public static long[] Focus(IntPtr window) { return new long[] { 100, Entered ? (Mode == "wrong" || Mode == "happy" ? 200 : 0) : 100 }; }
+    public static IntPtr Composer(IntPtr window) {
+        if (Mode == "probe-error") throw new Exception("synthetic-secret-probe-error");
+        return Mode.StartsWith("missing") ? IntPtr.Zero : new IntPtr(200);
+    }
+    public static int Owner(IntPtr window) { return Mode == "wrong-owner" ? 43 : 42; }
+    public static IntPtr GetAncestor(IntPtr window, int flags) { return new IntPtr(Mode == "wrong-root" ? 101 : 100); }
     public static string Class(IntPtr window) { return "Edit"; }
-    public static string Text(IntPtr window) { return Mode == "wrong" ? "synthetic-secret-wrong-name" : "Runners"; }
+    public static string Text(IntPtr window) { return Mode == "wrong" || Mode == "wrong-name" ? "synthetic-secret-wrong-name" : "Runners"; }
 }
 '@
 $script:trace = "[palette] ready chars=0 count=1 target=1`n[palette] ready chars=16 count=1 target=7000`n"
@@ -36,7 +40,7 @@ function Read-Log([string]$LogPath) {
             $script:trace += "[palette] ready chars=16 count=1 target=7000`n"
         }
     }
-    if ([ReconnectDesktop]::Entered -and [ReconnectDesktop]::Mode -eq 'missing-confirmed') {
+    if ([ReconnectDesktop]::Entered -and [ReconnectDesktop]::Mode -ne 'missing-unconfirmed') {
         $script:trace += "2026-10-18 03:04:05.067 [palette] confirm target=7000`n"
     }
     return $script:trace
@@ -74,7 +78,7 @@ $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
 . (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
 $secrets = @{ admin_key = 'synthetic-secret' }
-foreach ($mode in @('wrong', 'missing-confirmed', 'missing-unconfirmed')) {
+foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error')) {
     $script:trace = "[palette] confirm target=7000`n"
     [ReconnectDesktop]::Opened = $false
     [ReconnectDesktop]::Ready = $false
@@ -84,12 +88,18 @@ foreach ($mode in @('wrong', 'missing-confirmed', 'missing-unconfirmed')) {
     [ReconnectDesktop]::Mode = $mode
     $script:reads = 0
     $caught = $null
-    try { Open-Rename ([IntPtr]100) 42 'private-expected-name' | Out-Null } catch { $caught = $_ }
+    $expected = if ($mode -eq 'unfocused') { 'Runners' } else { 'private-expected-name' }
+    try { Open-Rename ([IntPtr]100) 42 $expected | Out-Null } catch { $caught = $_ }
     if (!$caught) { throw 'Expected rename timeout' }
     $diagnostic = Get-JourneyError $caught
     $message = $diagnostic.message
+    $exists = $mode -in @('wrong', 'unfocused', 'wrong-name')
+    $focused = $mode -eq 'wrong'
+    $nameMatch = $mode -eq 'unfocused'
+    $hwnd = if ($exists) { 200 } else { 0 }
+    $probeFailed = $mode -eq 'probe-error'
     if ($message -notmatch '^Timed out: workspace rename edit; expected_window=100 expected_pid=42 foreground=100 ' -or
-        $message -notmatch "expected_name_match=False confirm_target_7000=$($mode -eq 'missing-confirmed')$" -or
+        $message -notmatch "expected_name_match=False confirm_target_7000=$($mode -ne 'missing-unconfirmed') owned_edit_exists=$exists owned_edit_focused=$focused owned_edit_expected_name_match=$nameMatch owned_edit_hwnd=$hwnd owned_edit_probe_failed=$probeFailed`$" -or
         $message -match 'synthetic-secret|wrong-name|private-expected-name' -or
         !$caught.Exception.InnerException -or $caught.Exception.InnerException.Message -cne 'Timed out: workspace rename edit' -or
         $diagnostic.original_script_stack -notmatch 'Wait-For') { throw 'Unsafe or incomplete rename timeout diagnostic' }
