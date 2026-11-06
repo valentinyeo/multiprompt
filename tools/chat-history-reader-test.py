@@ -1677,6 +1677,21 @@ class HistoryReaderTest(unittest.TestCase):
                 patch.object(reader, 'owner_response', return_value=expected):
             self.assertEqual(reader.response(self.query, reader.READER_SOURCE), expected)
 
+    def test_IGSH_1822_hosted_other_user_chat_reads_its_pinned_transcript_while_following(self):
+        sid = '783da795-e250-4189-bd8a-8947248eecae'
+        self.query.update(follow=True, sid=sid, cwd='/home/secondary/project')
+        expected = '@mp\t7\thistory\tok\t' + sid + '\t0\n{"role":"assistant","text":"hosted reply"}\n@@MP_END@@\n'
+        owner = ('secondary', Path('/home/secondary'))
+        with patch.object(reader, 'conversation_owner', return_value=owner), \
+                patch.object(reader, 'host_dispatch_switch', return_value=True), \
+                patch.object(reader, 'conversation_path', side_effect=lambda agent, s, cwd, home=None: (_ for _ in ()).throw(PermissionError()) if home else None), \
+                patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('hosted chat must not follow tmux')), \
+                patch.object(reader, 'owner_response', return_value=expected) as read_owner:
+            self.assertEqual(reader.response(self.query, reader.READER_SOURCE), expected)
+        sent = read_owner.call_args.args[0]
+        self.assertEqual(sent['sid'], sid)
+        self.assertFalse(sent['follow'])
+
     def test_IGSH_1064_stale_owner_cwd_still_discovers_exact_live_process(self):
         self.write(self.event('current live reply'))
         self.query.update(follow=True, cwd='/home/secondary/old-project')

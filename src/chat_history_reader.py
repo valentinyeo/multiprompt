@@ -1585,6 +1585,8 @@ def resolve_response_path(q, source=None, as_owner=False):
             return agent, sid, None, missing_response(q, "permission denied")
         return (agent, sid, path, None) if path else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
+    if follow and agent == "claude" and isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
+        follow = q["follow"] = False
     denied = False
     delegated = None
     try:
@@ -6233,7 +6235,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 81
+RUNTIME_GENERATION = 82
 
 if __name__ == '__main__':
     import base64 as _base64
