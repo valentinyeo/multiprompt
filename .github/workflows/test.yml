@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Test release tag publication
+        run: node --test tools/release-version.test.mjs
       - name: Test the runtime generation guard
         run: node --test tools/check-runtime-generation.test.js
       - name: Guard the reader runtime generation
@@ -38,6 +40,8 @@ jobs:
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
+      - name: Check every hosted chat read shape returns its replies
+        run: python3 tools/verify-hosted-chat-reads.py
 
   test:
     name: test-windows (${{ matrix.group }})
@@ -133,6 +137,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Test chat performance reporting
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
+        run: node --test tools/chat-perf-reporting.test.js
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 2 && '-j1' || '' }}

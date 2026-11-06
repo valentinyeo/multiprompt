@@ -361,7 +361,10 @@ pub fn build(b: *std.Build) void {
         .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
         .optimize = .ReleaseFast,
     }) });
-    const run_chat_perf_tests = b.addRunArtifact(chat_perf_tests);
+    const run_chat_perf_tests = std.Build.Step.Run.create(b, "run chat performance budgets");
+    run_chat_perf_tests.addArtifactArg(chat_perf_tests);
+    run_chat_perf_tests.expectExitCode(0);
+    run_chat_perf_tests.has_side_effects = true;
     const chat_echo_budget_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/chat_perf_test.zig"),

@@ -91,18 +91,20 @@ if (process.env.GH_STATE) {
   fs.writeFileSync(process.env.GH_STATE, JSON.stringify(state));
 }
 const existing = require('node:child_process').spawnSync('git', ['--git-dir', process.env.TEST_REMOTE, 'show-ref', '--verify', '--quiet', 'refs/tags/' + args[2]]);
-if (existing.status === 1) execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
-else if (existing.status !== 0) process.exit(existing.status || 1);
+if (!args.includes('--verify-tag') || args.includes('--target') || existing.status !== 0) process.exit(1);
 `, { mode: 0o755 });
   return { dir, git, sha, remote, log,
     run: (name, env = {}, source = workflow) => {
       if (name === 'Publish release') {
+        if (!env.TEST_NO_RESERVE && spawnSync('git', ['--git-dir', remote, 'show-ref', '--verify', '--quiet', `refs/tags/${env.TAG || tag}`]).status === 1) {
+          git('--git-dir', remote, 'update-ref', `refs/tags/${env.TAG || tag}`, env.BUILT_SHA || sha);
+        }
         fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
         fs.writeFileSync(path.join(dir, 'dist/release-notes.json'), JSON.stringify({ version: (env.TAG || tag).slice(1), releases: [{ changes: ['IGSH-728 Update notes'], tickets: ['https://app.hypertask.ai/detail/project-2060/728'] }] }));
       }
       return spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: 'example/multiprompt',
-        TAG: tag, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', GH_STATE: path.join(dir, 'release-state.json'), REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } });
+        TAG: tag, SHA: sha, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', GH_STATE: path.join(dir, 'release-state.json'), REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } });
     },
     admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
@@ -162,7 +164,7 @@ test('master release builds both architectures, launches, scans and publishes th
   for (const step of ['test_step', 'vps_test_step']) assert(build.includes(`${step}.dependOn(&version_stamp_tests.step);`));
   assert(fs.readFileSync(path.join(root, 'tools/public_audit.py'), 'utf8').includes('tools/release-version.test.mjs'));
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
-  assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 2);
+  assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 3);
 });
 
 test('release downloads exclude verification evidence from published update assets', t => {
@@ -330,8 +332,31 @@ test('remote requested tag overrides a conflicting local tag and keeps its commi
   const published = f.run('Publish release', { BUILT_SHA: tagged });
   assert.equal(published.status, 0, published.stderr);
   const create = f.calls().find(args => args[1] === 'create');
-  assert.equal(create[create.indexOf('--target') + 1], tagged);
+  assert(create.includes('--verify-tag'));
+  assert(!create.includes('--target'));
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', `${tag}^{commit}`), tagged);
+});
+
+test('reservation creates a tag once and rejects a different commit', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  assert.equal(f.run('Reserve release tag').status, 0);
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', `refs/tags/${tag}^{commit}`), f.sha);
+  assert.equal(f.run('Reserve release tag').status, 0);
+  assert.notEqual(f.run('Reserve release tag', { SHA: f.git('rev-parse', 'v1.2.2^{commit}') }).status, 0);
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', `refs/tags/${tag}^{commit}`), f.sha);
+});
+
+test('annotated tags are peeled and publication rejects missing or moved tags', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  f.git('tag', '-a', tag, '-m', 'release', f.sha);
+  f.git('push', 'origin', `refs/tags/${tag}`);
+  assert.equal(f.run('Reserve release tag').status, 0);
+  assert.notEqual(f.run('Reserve release tag', { SHA: f.git('rev-parse', 'v1.2.2^{commit}') }).status, 0);
+  f.git('--git-dir', f.remote, 'update-ref', `refs/tags/${tag}`, f.git('rev-parse', 'v1.2.2^{commit}'));
+  assert.notEqual(f.run('Publish release', { TEST_NO_RESERVE: '1' }).status, 0);
+  f.git('--git-dir', f.remote, 'update-ref', '-d', `refs/tags/${tag}`);
+  assert.notEqual(f.run('Publish release', { TEST_NO_RESERVE: '1' }).status, 0);
+  assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
 });
 
 test('a missing requested tag uses HEAD, but a remote lookup failure fails closed', { skip: process.platform === 'win32' }, t => {
@@ -357,14 +382,15 @@ test('automatic version uses first-parent distance and rejects invalid history o
   assert.notEqual(f.run('Resolve release version and commit', { PUBLISHED_TAG: 'v1.2.4' }).status, 0);
 });
 
-test('master publication is latest, targets built SHA and refuses duplicate releases', { skip: process.platform === 'win32' }, t => {
+test('master publication is latest, verifies its tag and refuses duplicate releases', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   const first = f.run('Publish release');
   assert.equal(first.status, 0, first.stderr);
   const create = f.calls().find(args => args[1] === 'create');
   assert(create);
   assert.equal(create[2], tag);
-  assert.equal(create[create.indexOf('--target') + 1], f.sha);
+  assert(create.includes('--verify-tag'));
+  assert(!create.includes('--target'));
   assert.equal(create[create.indexOf('--title') + 1], `multiprompt ${tag}`);
   assert(create.includes('--latest=true'));
   assert(create.includes('--notes-file'));
@@ -590,7 +616,8 @@ test('manual release uses the same source-bound publisher', () => {
   const release = workflow.split('\n  release:\n')[1];
   assert.match(release, /ref: \$\{\{ needs.prepare.outputs.sha \}\}/);
   assert.match(release, /BUILT_SHA: \$\{\{ needs.prepare.outputs.sha \}\}/);
-  assert.match(release, /--target "\$BUILT_SHA"/);
+  assert.match(release, /--verify-tag/);
+  assert.doesNotMatch(release, /--target/);
 });
 
 async function releasePushFixture(t) {
