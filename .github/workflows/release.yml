@@ -145,6 +145,7 @@ jobs:
           mkdir dist
           cp zig-out/bin/multiprompt.exe dist/multiprompt-${{ matrix.arch }}.exe
           cp zig-out/bin/zigshell-bridge.exe dist/zigshell-bridge-${{ matrix.arch }}.exe
+          cp zig-out/bin/multiprompt-dev.exe dist/multiprompt-dev-${{ matrix.arch }}.exe
       - name: Build the symbolized twin
         continue-on-error: true
         env:
