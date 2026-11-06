@@ -1,6 +1,7 @@
 param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidence, [Parameter(Mandatory)][string]$FixtureBin)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/snapshot.ps1"
+. "$PSScriptRoot/session.ps1"
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
@@ -48,8 +49,8 @@ try {
     $main = [IntPtr]::Zero
     Wait-For 'owned main window' { $script:main = [ChatDeliveryDesktop]::Window($app.Id); $script:main -ne [IntPtr]::Zero }
     Wait-For "$sessionCount restored chat tabs" {
-        $s = Session
-        $null -ne $s -and (Read-Log) -match 'launch step=browser' -and @($s.tabs).Count -eq $sessionCount -and @($s.tabs | Where-Object { -not $_.cv }).Count -eq 0
+        $script:sessionIds = Get-GuardSessionIds (Session) $sessionCount
+        $null -ne $script:sessionIds -and (Read-Log) -match 'launch step=browser'
     }
     $seen = @{}
     for ($i = 0; $i -lt $sessionCount; $i++) {
@@ -57,14 +58,15 @@ try {
             $composer = [ChatDeliveryDesktop]::Composer($main)
             $composer -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
         }
-        $previous = (Session).active_tab
         $offset = (Read-Log).Length
         [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
-        $target = ($previous + 1) % $sessionCount
-        Wait-For 'tab selected' { (Session).active_tab -eq $target }
-        $id = (Session).tabs[$target].shell_id
-        Wait-For "chat $id loaded" { (Read-Log).Substring($offset) -match ('\[switch\] chat content shown shell=' + $id + ' blocks=[1-9]') }
-        $seen["$id"] = $true
+        Wait-For 'switched chat painted' {
+            $text = Read-Log
+            $script:paintedId = if ($text.Length -ge $offset) { Get-GuardPaintedId ($text.Substring($offset)) $sessionIds } else { $null }
+            $null -ne $script:paintedId
+        }
+        if ($seen.ContainsKey($paintedId)) { throw "Chat $paintedId visited twice" }
+        $seen[$paintedId] = $true
     }
     $result.readySessions = $seen.Count
     if ($seen.Count -ne $sessionCount) { throw 'Not all distinct chats loaded' }
@@ -74,8 +76,8 @@ try {
     Start-Sleep -Seconds 10
     $after = $job.ReadAccounting(); $timer.Stop()
     if ($app.HasExited -or [ChatDeliveryDesktop]::Window($app.Id) -eq [IntPtr]::Zero) { throw 'App or main window exited' }
-    $s = Session
-    if ($null -eq $s -or @($s.tabs).Count -ne $sessionCount -or @($s.tabs | Where-Object { -not $_.cv }).Count -ne 0) { throw 'Chat tabs dropped' }
+    $finalIds = Get-GuardSessionIds (Session) $sessionCount
+    if ($null -eq $finalIds -or @($sessionIds.Keys | Where-Object { -not $finalIds.ContainsKey($_) }).Count -ne 0) { throw 'Chat tabs dropped or changed' }
     $result.idleCpuPercent = (($after.UserTime + $after.KernelTime - $before.UserTime - $before.KernelTime) / 10000.0) / $timer.Elapsed.TotalMilliseconds * 100 / [Environment]::ProcessorCount
     $result.idleWallMs = $timer.Elapsed.TotalMilliseconds
     $result.jobBefore = $before; $result.jobAfter = $after

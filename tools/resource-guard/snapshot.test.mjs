@@ -10,3 +10,8 @@ test('stable job snapshot handles churn and incomplete enumeration', () => {
   const result = spawnSync('pwsh', ['-NoProfile', '-File', fileURLToPath(new URL('./snapshot.test.ps1', import.meta.url))], { encoding: 'utf8' });
   assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
 });
+
+test('session schema and switched chat readiness', () => {
+  const result = spawnSync('pwsh', ['-NoProfile', '-File', fileURLToPath(new URL('./session.test.ps1', import.meta.url))], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
+});
