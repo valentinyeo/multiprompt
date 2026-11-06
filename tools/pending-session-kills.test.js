@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,10 +16,10 @@ function between(source, start, end) {
 function native(source, files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-close-'));
   try {
-    for (const file of files) {
-      const source = read(`src/${file}`);
-      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
-      fs.writeFileSync(path.join(dir, file), file === 'json_reader.zig' ? source.replace(/^test "[^\n]+" \{[\s\S]*?^\}\n/gm, '') : source);
+    const copied = copyZig(files, dir);
+    if (copied.includes('json_reader.zig')) {
+      const file = path.join(dir, 'json_reader.zig');
+      fs.writeFileSync(file, read(file).replace(/^test "[^\n]+" \{[\s\S]*?^\}\n/gm, ''));
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '-j1'], { encoding: 'utf8', timeout: 120000 });
