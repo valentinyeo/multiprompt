@@ -823,7 +823,7 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
             const n = transport.read(stream.channel.shared orelse return, &chunk, true) orelse {
                 chatLiveLog("read-ended", stream.shell_id, frame.items.len, 0);
                 return;
-            }
+            };
             if (frame.items.len + n > @import("chat_live.zig").MAX_PAGE + 4096) {
                 chatLiveLog("page-too-big", stream.shell_id, frame.items.len + n, 0);
                 return;

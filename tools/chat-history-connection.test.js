@@ -229,6 +229,7 @@ test "shutdown during a fetch blocks new spawns and fallback and defers handle c
 `;
 
 test('persistent history production transport: reuse, framing, timeout, fallback, backoff and shutdown', () => {
+  assert.match(body('chatHistoryPersistent'), /transport\.read/);
   const start = source.indexOf('const ChatHistoryChannel = struct {');
   const end = source.indexOf('\nfn chatHistoryChannelClose(', start);
   assert.ok(start >= 0 && end > start);
@@ -243,6 +244,7 @@ test('persistent history production transport: reuse, framing, timeout, fallback
 });
 
 test('persistent reader bootstrap is stdin-only, noninteractive and job-owned before sending source', () => {
+  assert.ok(fs.existsSync('src/chat_transport.zig'), 'shared chat transport exists');
   const start = fs.readFileSync('src/chat_transport.zig', 'utf8');
   assert.match(body('chatHistoryChannelStart'), /transport.open/);
   assert.match(start, /BatchMode=yes.*ConnectTimeout=5/);
@@ -255,6 +257,7 @@ test('persistent reader bootstrap is stdin-only, noninteractive and job-owned be
 });
 
 test('push receiver blocks without polling, preserves coalesced frames, and releases cancelled ownership', () => {
+  assert.match(body('chatHistoryStreamThread'), /transport\.read/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-push-'));
   const state = fs.readFileSync('src/app_state.zig', 'utf8');
   const stream = state.slice(state.indexOf('pub const ChatHistoryStream = struct {'), state.indexOf('pub var g_chat_history_channels:'));

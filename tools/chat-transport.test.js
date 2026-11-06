@@ -16,6 +16,7 @@ for line in sys.stdin.buffer:
 `;
 
 async function broker(t) {
+  assert.ok(fs.existsSync(path.join(root, 'src/chat_transport.py')), 'shared SSH broker exists');
   const child = spawn('python3', ['-u', path.join(root, 'src/chat_transport.py')], { stdio: ['pipe', 'pipe', 'pipe'] });
   const messages = [];
   const waiters = [];
@@ -89,6 +90,7 @@ test('closing one channel preserves another and allows opening a new channel', r
 
 test('history and live streams use logical channels, never per-stream SSH processes', () => {
   const session = fs.readFileSync(path.join(root, 'src/chat_session.zig'), 'utf8');
+  assert.ok(fs.existsSync(path.join(root, 'src/chat_transport.zig')), 'shared SSH transport exists');
   const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
   assert.doesNotMatch(session, /CreateProcessW\(/);
   assert.match(session, /transport\.open\(host, ch\.watch\)/);
