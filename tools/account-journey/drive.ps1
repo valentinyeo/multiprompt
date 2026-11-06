@@ -143,8 +143,10 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
     Assert-Focus $Window $ProcessId $Window
     $beforeEnter = Read-Log $paletteLog
     $enterOffset = $beforeEnter.Length
+    $eventStart = $null
+    try { $eventStart = [ReconnectDesktop]::EventCount() } catch {}
     [ReconnectDesktop]::Type(0x0D)
-    $state = @{ foreground = 0L; focus = 0L; owner = 0; root = 0L; edit_class = $false; expected_name_match = $false }
+    $state = @{ foreground = 0L; focus = 0L; owner = 0; root = 0L; edit_class = $false; expected_name_match = $false; saw_focused_owned_edit = $false }
     try {
         $edit = Wait-For 'workspace rename edit' {
             $f = [ReconnectDesktop]::Focus($Window)
@@ -155,6 +157,7 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
             $state.root = if ($candidate -ne [IntPtr]::Zero) { [ReconnectDesktop]::GetAncestor($candidate, 2).ToInt64() } else { 0L }
             $state.edit_class = $candidate -ne [IntPtr]::Zero -and [ReconnectDesktop]::Class($candidate) -eq 'Edit'
             $state.expected_name_match = $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class -and [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName
+            if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class) { $state.saw_focused_owned_edit = $true }
             if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class -and $state.expected_name_match) { $candidate }
         } 10
     } catch {
@@ -182,6 +185,13 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
             }
         } catch { $ownedEdit.probe_failed = $true }
         $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match) confirm_target_7000=$confirmed owned_edit_exists=$($ownedEdit.exists) owned_edit_focused=$($ownedEdit.focused) owned_edit_expected_name_match=$($ownedEdit.expected_name_match) owned_edit_hwnd=$($ownedEdit.hwnd) owned_edit_probe_failed=$($ownedEdit.probe_failed)"
+        $events = 'unavailable'
+        if ($null -ne $eventStart) {
+            try {
+                $events = @([ReconnectDesktop]::EventsSince($eventStart) | Select-Object -Last 12 | ForEach-Object { '{0}:{1}:{2}:{3}' -f [uint32]$_.ev, [long]$_.hwnd, [uint32]$_.pid, [long]$_.root }) -join ','
+            } catch { $events = 'unavailable' }
+        }
+        $message += " saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
         $exception = [System.Exception]::new($message, $original.Exception)
         $exception.Data['original_script_stack'] = $original.ScriptStackTrace
         throw $exception

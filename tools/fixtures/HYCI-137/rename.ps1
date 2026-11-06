@@ -4,6 +4,19 @@ using System;
 public static class ReconnectDesktop {
     public static bool Opened, Ready, Typed, Selected, Entered;
     public static string Mode = "happy";
+    public static int FocusReads, Cursor = -1;
+    public class FocusEvent { public uint ev; public long hwnd; public uint pid; public long root; public string cls = "synthetic-secret-event"; }
+    public static int EventCount() {
+        if (Mode == "spy-count-error") throw new Exception("synthetic-secret-spy-count");
+        return Entered ? 99 : 3;
+    }
+    public static FocusEvent[] EventsSince(int start) {
+        Cursor = start;
+        if (Mode == "spy-events-error") throw new Exception("synthetic-secret-spy-events");
+        var events = new FocusEvent[15];
+        for (int i = 0; i < events.Length; i++) events[i] = new FocusEvent { ev = (uint)(i + 1), hwnd = 200 + i, pid = 42, root = 100 };
+        return events;
+    }
     public static void Key(ushort key, bool up) { }
     public static void Type(ushort key) {
         if (key == 0x4B) Opened = true;
@@ -12,7 +25,11 @@ public static class ReconnectDesktop {
             Entered = true;
         }
     }
-    public static long[] Focus(IntPtr window) { return new long[] { 100, Entered ? (Mode == "wrong" || Mode == "happy" ? 200 : 0) : 100 }; }
+    public static long[] Focus(IntPtr window) {
+        if (!Entered) return new long[] { 100, 100 };
+        FocusReads++;
+        return new long[] { 100, Mode == "wrong" || Mode == "happy" || (Mode == "transient" && FocusReads == 1) ? 200 : 0 };
+    }
     public static IntPtr Composer(IntPtr window) {
         if (Mode == "probe-error") throw new Exception("synthetic-secret-probe-error");
         return Mode.StartsWith("missing") ? IntPtr.Zero : new IntPtr(200);
@@ -78,7 +95,7 @@ $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
 . (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
 $secrets = @{ admin_key = 'synthetic-secret' }
-foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error')) {
+foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error')) {
     $script:trace = "[palette] confirm target=7000`n"
     [ReconnectDesktop]::Opened = $false
     [ReconnectDesktop]::Ready = $false
@@ -86,6 +103,8 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
     [ReconnectDesktop]::Selected = $false
     [ReconnectDesktop]::Entered = $false
     [ReconnectDesktop]::Mode = $mode
+    [ReconnectDesktop]::FocusReads = 0
+    [ReconnectDesktop]::Cursor = -1
     $script:reads = 0
     $caught = $null
     $expected = if ($mode -eq 'unfocused') { 'Runners' } else { 'private-expected-name' }
@@ -93,16 +112,20 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
     if (!$caught) { throw 'Expected rename timeout' }
     $diagnostic = Get-JourneyError $caught
     $message = $diagnostic.message
-    $exists = $mode -in @('wrong', 'unfocused', 'wrong-name')
+    $exists = $mode -in @('wrong', 'unfocused', 'wrong-name', 'transient', 'spy-count-error', 'spy-events-error')
     $focused = $mode -eq 'wrong'
     $nameMatch = $mode -eq 'unfocused'
     $hwnd = if ($exists) { 200 } else { 0 }
     $probeFailed = $mode -eq 'probe-error'
     if ($message -notmatch '^Timed out: workspace rename edit; expected_window=100 expected_pid=42 foreground=100 ' -or
-        $message -notmatch "expected_name_match=False confirm_target_7000=$($mode -ne 'missing-unconfirmed') owned_edit_exists=$exists owned_edit_focused=$focused owned_edit_expected_name_match=$nameMatch owned_edit_hwnd=$hwnd owned_edit_probe_failed=$probeFailed`$" -or
+        $message -notmatch "expected_name_match=False confirm_target_7000=$($mode -ne 'missing-unconfirmed') owned_edit_exists=$exists owned_edit_focused=$focused owned_edit_expected_name_match=$nameMatch owned_edit_hwnd=$hwnd owned_edit_probe_failed=$probeFailed " -or
         $message -match 'synthetic-secret|wrong-name|private-expected-name' -or
         !$caught.Exception.InnerException -or $caught.Exception.InnerException.Message -cne 'Timed out: workspace rename edit' -or
         $diagnostic.original_script_stack -notmatch 'Wait-For') { throw 'Unsafe or incomplete rename timeout diagnostic' }
+    $sawEdit = $mode -in @('wrong', 'transient')
+    $eventTrail = if ($mode -in @('spy-count-error', 'spy-events-error')) { 'unavailable' } else { ((3..14 | ForEach-Object { "$(1 + $_):$(200 + $_):42:100" }) -join ',') }
+    if (!$message.EndsWith("saw_focused_owned_edit=$sawEdit events=$eventTrail")) { throw 'Incorrect rename history diagnostic' }
+    if ([ReconnectDesktop]::Cursor -ne $(if ($mode -eq 'spy-count-error') { -1 } else { 3 })) { throw 'Incorrect pre-Enter event cursor' }
     if ($mode -eq 'wrong' -and $message -notmatch 'focus=200 owner=42 root=100 edit_class=True ') { throw 'Wrong-name edit not identified' }
     if ($mode -like 'missing-*' -and $message -notmatch 'focus=0 owner=0 root=0 edit_class=False ') { throw 'Missing edit not identified' }
 }
