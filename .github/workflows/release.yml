@@ -91,6 +91,19 @@ jobs:
           git merge-base --is-ancestor "$SHA" origin/master
           node tools/version-stamp.mjs build "$TAG"
           node tools/release-notes.mjs src/changelog.zig "$TAG" release-notes.json
+      - name: Reserve release tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          if remote=$(git ls-remote --exit-code origin "refs/tags/$TAG" "refs/tags/$TAG^{}"); then
+            resolved=$(printf '%s\n' "$remote" | awk 'NR == 1 { sha = $1 } /\^\{\}$/ { sha = $1 } END { print sha }')
+            [ "$resolved" = "$SHA" ] || { echo 'Release tag points to a different commit' >&2; exit 1; }
+          else
+            status=$?
+            [ "$status" -eq 2 ] || exit "$status"
+            git push origin "$SHA:refs/tags/$TAG"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-notes-source
@@ -279,7 +292,10 @@ jobs:
             console.log(`- [${line.slice(0, space)}](${release.tickets[index]}) ${title}`);
           }
           NODE
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
+          remote=$(git ls-remote --exit-code origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
+          resolved=$(printf '%s\n' "$remote" | awk 'NR == 1 { sha = $1 } /\^\{\}$/ { sha = $1 } END { print sha }')
+          [ "$resolved" = "$BUILT_SHA" ] || { echo 'Release tag does not point to the built commit' >&2; exit 1; }
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --latest="$latest" --title "multiprompt $TAG" --notes-file release-body.txt
       - name: Attach the symbolized twins for freeze reports
         continue-on-error: true

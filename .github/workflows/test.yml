@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Test release tag publication
+        run: node --test tools/release-version.test.mjs
       - name: Test the runtime generation guard
         run: node --test tools/check-runtime-generation.test.js
       - name: Guard the reader runtime generation
