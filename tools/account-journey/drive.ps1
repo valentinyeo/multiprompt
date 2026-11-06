@@ -452,7 +452,8 @@ try {
             try {
                 $text = Read-Log $entry.path
                 $safe = @(Get-SafePaletteRecords $text)
-                @('[other log lines suppressed]') + $safe | Set-Content (Join-Path $Output $entry.name)
+                $focus = @(Get-SafeFocusRecords $text | Select-Object -Last 80)
+                @('[other log lines suppressed]') + $safe + $focus | Set-Content (Join-Path $Output $entry.name)
             } catch {}
         }
     }
