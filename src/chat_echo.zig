@@ -231,6 +231,22 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
     return ISSUE_349_ORPHAN_SENDING_SETTLES and state == .sending and id != verify_id;
 }
 
+pub const V1_SENDING_DEADLINE_MS: i64 = 120_000;
+
+pub fn v1SendingAbandoned(state: OutboxState, channel_pending: bool, sent_tick_ms: i64, now_ms: i64) bool {
+    return state == .sending and !channel_pending and sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= V1_SENDING_DEADLINE_MS;
+}
+
+test "a host message left sending with no job settles after the deadline" {
+    try std.testing.expect(v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS - 1));
+    try std.testing.expect(!v1SendingAbandoned(.sending, true, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    try std.testing.expect(!v1SendingAbandoned(.sending, false, 0, V1_SENDING_DEADLINE_MS * 10));
+    for ([_]OutboxState{ .queued, .not_sent, .delivered, .cancelled }) |state| {
+        try std.testing.expect(!v1SendingAbandoned(state, false, 1_000, 1_000 + V1_SENDING_DEADLINE_MS));
+    }
+}
+
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
     return state == .queued and !write_started and !busy and !link_down;
 }
