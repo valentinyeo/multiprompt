@@ -803,6 +803,14 @@ fn chatOutboxFirstSendableIndexIn(list: *const std.ArrayList(ChatOutboxEntry), k
     return null;
 }
 
+fn chatOutboxSendBlockedIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8) bool {
+    for (list.items) |e| {
+        if (e.state != .sending) continue;
+        if (!e.message_v1 or std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) return true;
+    }
+    return false;
+}
+
 fn chatOutboxFindSending(list: *const std.ArrayList(ChatOutboxEntry)) ?usize {
     for (list.items, 0..) |e, i| {
         if (e.state == .sending) return i;
@@ -2311,7 +2319,7 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
         }
     }
     if (!chat_echo.mayType(app_state.g_chat_outbox.items[e].state, app_state.g_chat_outbox.items[e].write_started, false, false)) return false;
-    if (chatOutboxFindSending(&app_state.g_chat_outbox) != null or app_state.g_chat_tmux_send_job != null) return false;
+    if (chatOutboxSendBlockedIn(&app_state.g_chat_outbox, app_state.g_chat_outbox.items[e].key[0..@as(usize, app_state.g_chat_outbox.items[e].key_len)]) or app_state.g_chat_tmux_send_job != null) return false;
     const channel = chatTmuxSendEligible(shell_index);
     if (chatOutboxHeldByLink(chatLinkLooksDown(shell_index), app_state.g_chat_outbox.items[e].message_v1, channel)) return false;
     const direct = chatShouldUseDirectInput(shell_index);
@@ -2386,7 +2394,15 @@ pub fn chatOutboxTick() void {
     var changed = false;
     const now_ms: i64 = @intCast(GetTickCount64());
     for (app_state.g_chat_outbox.items) |*entry| {
-        if (entry.message_v1) continue;
+        if (entry.message_v1) {
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.channel_sent_ms, now_ms)) {
+                entry.state = .not_sent;
+                entry.retryable = true;
+                changed = true;
+                debugLog("[chat] outbox self-heal: a message stuck sending with no job is now not sent");
+            }
+            continue;
+        }
         if (!entry.channel_pending and chat_echo.orphanedSending(entry.state, entry.id, app_state.g_chat_verify_echo_id)) {
             entry.state = .delivered;
             entry.left_box_ms = GetTickCount64();
@@ -3144,6 +3160,23 @@ test "Chat View echo persistence retains a reserved send without retyping" {
     try std.testing.expectEqual(@as(i64, 1_760_170_353_456), parsed.items[0].anchor.after_ms);
     try std.testing.expectEqual(@as(i64, 1_760_170_354_000), parsed.items[0].anchor.sent_ms);
     try std.testing.expectEqual(@as(i64, 0), parsed.items[1].anchor.after_ms);
+}
+
+test "Chat View outbox: a host message stuck sending in one chat never blocks another chat" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        list.deinit(allocator);
+    }
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:term-18e5fecc", std.unicode.utf8ToUtf16LeStringLiteral(" "), .sending));
+    list.items[0].message_v1 = true;
+    try std.testing.expect(chatOutboxEnqueueInState(&list, allocator, "tmux:1:live-308b1fc", std.unicode.utf8ToUtf16LeStringLiteral("reply man"), .queued));
+    list.items[1].message_v1 = true;
+    try std.testing.expect(!chatOutboxSendBlockedIn(&list, "tmux:1:live-308b1fc"));
+    try std.testing.expect(chatOutboxSendBlockedIn(&list, "tmux:1:term-18e5fecc"));
+    list.items[0].message_v1 = false;
+    try std.testing.expect(chatOutboxSendBlockedIn(&list, "tmux:1:live-308b1fc"));
 }
 
 test "Chat View outbox never auto-sends an already-delivered message" {
