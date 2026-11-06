@@ -10,5 +10,7 @@ function Get-JourneyError([System.Management.Automation.ErrorRecord]$Record) {
         type = $Record.Exception.GetType().FullName
         stack = $Record.ScriptStackTrace
         exception_stack = $Record.Exception.StackTrace
+        original_script_stack = $Record.Exception.Data['original_script_stack']
+        inner_exception_stack = if ($Record.Exception.InnerException) { $Record.Exception.InnerException.StackTrace } else { $null }
     }
 }

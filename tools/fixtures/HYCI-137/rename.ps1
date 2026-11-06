@@ -3,6 +3,7 @@ Add-Type -TypeDefinition @'
 using System;
 public static class ReconnectDesktop {
     public static bool Opened, Ready, Typed, Selected, Entered;
+    public static string Mode = "happy";
     public static void Key(ushort key, bool up) { }
     public static void Type(ushort key) {
         if (key == 0x4B) Opened = true;
@@ -11,11 +12,11 @@ public static class ReconnectDesktop {
             Entered = true;
         }
     }
-    public static long[] Focus(IntPtr window) { return new long[] { 100, Entered ? 200 : 100 }; }
+    public static long[] Focus(IntPtr window) { return new long[] { 100, Entered ? (Mode == "missing" ? 0 : 200) : 100 }; }
     public static int Owner(IntPtr window) { return 42; }
     public static IntPtr GetAncestor(IntPtr window, int flags) { return new IntPtr(100); }
     public static string Class(IntPtr window) { return "Edit"; }
-    public static string Text(IntPtr window) { return "Runners"; }
+    public static string Text(IntPtr window) { return Mode == "wrong" ? "synthetic-secret-wrong-name" : "Runners"; }
 }
 '@
 $script:trace = "[palette] ready chars=0 count=1 target=1`n[palette] ready chars=16 count=1 target=7000`n"
@@ -68,4 +69,27 @@ if ($function.Count -ne 1) { throw 'Open-Rename not found' }
 . ([scriptblock]::Create($function[0].Extent.Text))
 $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
-Write-Output 'Delayed palette returned the owned rename edit'
+. (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
+$secrets = @{ admin_key = 'synthetic-secret' }
+foreach ($mode in @('wrong', 'missing')) {
+    [ReconnectDesktop]::Opened = $false
+    [ReconnectDesktop]::Ready = $false
+    [ReconnectDesktop]::Typed = $false
+    [ReconnectDesktop]::Selected = $false
+    [ReconnectDesktop]::Entered = $false
+    [ReconnectDesktop]::Mode = $mode
+    $script:reads = 0
+    $caught = $null
+    try { Open-Rename ([IntPtr]100) 42 'private-expected-name' | Out-Null } catch { $caught = $_ }
+    if (!$caught) { throw 'Expected rename timeout' }
+    $diagnostic = Get-JourneyError $caught
+    $message = $diagnostic.message
+    if ($message -notmatch '^Timed out: workspace rename edit; expected_window=100 expected_pid=42 foreground=100 ' -or
+        $message -notmatch 'expected_name_match=False$' -or
+        $message -match 'synthetic-secret|wrong-name|private-expected-name' -or
+        !$caught.Exception.InnerException -or $caught.Exception.InnerException.Message -cne 'Timed out: workspace rename edit' -or
+        $diagnostic.original_script_stack -notmatch 'Wait-For') { throw 'Unsafe or incomplete rename timeout diagnostic' }
+    if ($mode -eq 'wrong' -and $message -notmatch 'focus=200 owner=42 root=100 edit_class=True ') { throw 'Wrong-name edit not identified' }
+    if ($mode -eq 'missing' -and $message -notmatch 'focus=0 owner=0 root=0 edit_class=False ') { throw 'Missing edit not identified' }
+}
+Write-Output 'Delayed palette and rename timeout diagnostics passed'

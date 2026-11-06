@@ -112,11 +112,26 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
     } 10)
     Assert-Focus $Window $ProcessId $Window
     [ReconnectDesktop]::Type(0x0D)
-    $edit = Wait-For 'workspace rename edit' {
-        $f = [ReconnectDesktop]::Focus($Window)
-        $candidate = [IntPtr]$f[1]
-        if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and [ReconnectDesktop]::Owner($candidate) -eq $ProcessId -and [ReconnectDesktop]::GetAncestor($candidate, 2) -eq $Window -and [ReconnectDesktop]::Class($candidate) -eq 'Edit' -and [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName) { $candidate }
-    } 10
+    $state = @{ foreground = 0L; focus = 0L; owner = 0; root = 0L; edit_class = $false; expected_name_match = $false }
+    try {
+        $edit = Wait-For 'workspace rename edit' {
+            $f = [ReconnectDesktop]::Focus($Window)
+            $candidate = [IntPtr]$f[1]
+            $state.foreground = [long]$f[0]
+            $state.focus = [long]$f[1]
+            $state.owner = if ($candidate -ne [IntPtr]::Zero) { [ReconnectDesktop]::Owner($candidate) } else { 0 }
+            $state.root = if ($candidate -ne [IntPtr]::Zero) { [ReconnectDesktop]::GetAncestor($candidate, 2).ToInt64() } else { 0L }
+            $state.edit_class = $candidate -ne [IntPtr]::Zero -and [ReconnectDesktop]::Class($candidate) -eq 'Edit'
+            $state.expected_name_match = $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class -and [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName
+            if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class -and $state.expected_name_match) { $candidate }
+        } 10
+    } catch {
+        if ($_.Exception.Message -cne 'Timed out: workspace rename edit') { throw }
+        $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match)"
+        $exception = [System.Exception]::new($message, $_.Exception)
+        $exception.Data['original_script_stack'] = $_.ScriptStackTrace
+        throw $exception
+    }
     Assert-Focus $Window $ProcessId $edit
     return $edit
 }
