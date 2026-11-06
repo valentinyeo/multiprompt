@@ -6,16 +6,19 @@ public static class ReconnectDesktop {
     public static List<string> Keys = new List<string>();
     public static bool FailKey;
     public static long Foreground = 100;
+    public static int LoseOnAltDown;
+    public static IntPtr GetForegroundWindow() { return new IntPtr(Foreground); }
     public static void Key(ushort key, bool up) {
         Keys.Add(key + ":" + up);
+        if (key == 0x12 && !up && LoseOnAltDown > 0) { LoseOnAltDown--; Foreground = 200; }
         if (FailKey && key != 0x12) throw new Exception("Synthetic input failure");
     }
     public static long[] Focus(IntPtr window) { return new long[] { Foreground, Foreground == 100 ? 100 : 0 }; }
 }
 '@
-function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) { Assert-Window $Window $ProcessId; [ReconnectDesktop]::Foreground = 100 }
+function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) { $script:activations++; [ReconnectDesktop]::Foreground = 100 }
 function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
-    if ($Window -ne [IntPtr]100 -or $ProcessId -ne 42) { throw 'Wrong window' }
+    if ($Window -ne [IntPtr]100 -or $ProcessId -ne 42 -or [ReconnectDesktop]::Foreground -ne 100) { throw 'Wrong window' }
 }
 $tokens = $null
 $errors = $null
@@ -30,6 +33,7 @@ $session = Join-Path ([IO.Path]::GetTempPath()) ('workspace-' + [Guid]::NewGuid(
 $script:mode = 'delayed'
 $script:attempts = 0
 function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds) {
+    if ($Description -cne 'selected workspace session' -or $Seconds -ne 10) { throw 'Wrong selection wait' }
     for ($attempt = 0; $attempt -lt 3; $attempt++) {
         $script:attempts++
         $state = [ordered]@{ workspaces = @(@{ name = 'Work' }, @{ name = 'synthetic-secret' }); active_workspace = 1; starred_view = $false }
@@ -38,8 +42,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds) {
                 if ($attempt -eq 0) { $state.active_workspace = 0 }
                 if ($attempt -eq 1) { $state.starred_view = $true }
             }
-            'lost-foreground' { if ($script:attempts -le 3) { $state.active_workspace = 0; [ReconnectDesktop]::Foreground = 200 } }
-            'lost-foreground-still-wrong' { $state.active_workspace = 0; [ReconnectDesktop]::Foreground = 200 }
+            'post-digit-loss' { $state.active_workspace = 0; [ReconnectDesktop]::Foreground = 200 }
             'wrong-slot' { $state.active_workspace = 0 }
             'starred' { $state.starred_view = $true }
             'wrong-name' { $state.workspaces[1].name = 'private-name' }
@@ -53,9 +56,12 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds) {
     throw "Timed out: $Description"
 }
 try {
-    foreach ($mode in @('delayed', 'lost-foreground', 'lost-foreground-still-wrong', 'wrong-slot', 'starred', 'wrong-name', 'missing-active', 'unreadable', 'input-failure')) {
+    foreach ($mode in @('delayed', 'pre-digit-loss', 'persistent-pre-digit-loss', 'post-digit-loss', 'wrong-slot', 'starred', 'wrong-name', 'missing-active', 'unreadable', 'input-failure')) {
         $script:mode = $mode
         $script:attempts = 0
+        $script:activations = 0
+        [ReconnectDesktop]::Foreground = 100
+        [ReconnectDesktop]::LoseOnAltDown = if ($mode -eq 'pre-digit-loss') { 1 } elseif ($mode -eq 'persistent-pre-digit-loss') { 2 } else { 0 }
         [ReconnectDesktop]::Keys.Clear()
         [ReconnectDesktop]::FailKey = $mode -eq 'input-failure'
         $initial = @{ workspaces = @(@{ name = 'Work' }, @{ name = 'synthetic-secret' }); active_workspace = 0 }
@@ -69,12 +75,17 @@ try {
             continue
         }
         $chord = "18:False,${digit}:False,${digit}:True,18:True"
-        $expectedKeys = if ($mode -like 'lost-foreground*') { "$chord,$chord" } else { $chord }
+        $expectedKeys = if ($mode -eq 'pre-digit-loss') { "18:False,18:True,$chord" } elseif ($mode -eq 'persistent-pre-digit-loss') { '18:False,18:True,18:False,18:True' } else { $chord }
         if (([ReconnectDesktop]::Keys -join ',') -cne $expectedKeys) { throw 'Wrong workspace shortcut or missing key release' }
-        if ($mode -eq 'lost-foreground') {
-            if ($caught -or $script:attempts -ne 4) { throw 'Foreground recovery did not verify selection' }
+        if ($mode -eq 'pre-digit-loss') {
+            if ($caught -or $script:attempts -ne 1 -or $script:activations -ne 2) { throw 'Foreground recovery did not verify selection' }
             continue
         }
+        if ($mode -eq 'persistent-pre-digit-loss') {
+            if (!$caught -or $script:attempts -ne 0 -or $script:activations -ne 2) { throw 'Persistent foreground loss was not bounded' }
+            continue
+        }
+        if ($script:activations -ne 1) { throw 'Unexpected foreground reacquisition' }
         if ($mode -eq 'delayed') {
             if ($caught -or $script:attempts -ne 3) { throw 'Selection accepted stale workspace or Starred state' }
             continue
