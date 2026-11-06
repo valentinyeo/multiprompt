@@ -2,6 +2,7 @@ param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidenc
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/snapshot.ps1"
 . "$PSScriptRoot/session.ps1"
+. "$PSScriptRoot/stage.ps1"
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
@@ -42,10 +43,11 @@ function Session {
     try { return (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json) } catch { return $null }
 }
 try {
+    $result.staging = New-GuardStage $Exe $profile $root
     & $env:MP_VERIFY_PYTHON "$PSScriptRoot/fixture.py" $profile "$FixtureBin/ssh.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Fixture failed' }
     $job = [VerifyJob]::new()
-    $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--single-window --no-window-restore')
+    $app = $job.Start($result.staging.exe.stagedPath, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--single-window --no-window-restore')
     $main = [IntPtr]::Zero
     Wait-For 'owned main window' { $script:main = [ChatDeliveryDesktop]::Window($app.Id); $script:main -ne [IntPtr]::Zero }
     Wait-For "$sessionCount restored chat tabs" {
@@ -99,6 +101,10 @@ try {
     $result.workingSetBytes = [long](($raw | Measure-Object -Property workingSetBytes -Sum).Sum)
     $ids = @($raw | ForEach-Object { $_.id })
     $result.associatedExternalConsoles = @($cim | Where-Object { $_.Name -in @('conhost.exe','OpenConsole.exe') -and $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids } | Select-Object ProcessId,ParentProcessId,Name)
+    if (Test-Path "$profile/tools/usage-telemetry/config.local.json") { throw 'Unexpected local telemetry config' }
+    foreach ($name in @('config', 'helper')) {
+        if ((Get-FileHash -LiteralPath $result.staging[$name].stagedPath -Algorithm SHA256).Hash -ne $result.staging[$name].inputSha256) { throw "Telemetry $name changed during measurement" }
+    }
     $result.appAlive = $true
 } finally {
     if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$Evidence/session.json" }

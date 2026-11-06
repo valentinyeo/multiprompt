@@ -8,7 +8,12 @@ export function evaluateResources(limits, baseline, candidate) {
   for (const [label, run] of [['baseline', baseline], ['candidate', candidate]]) {
     if (run?.workload !== limits.workload || run?.sessionCount !== limits.sessionCount || run?.readySessions !== limits.sessionCount || run?.cleaned !== true || run?.appAlive !== true || !Array.isArray(run?.rawProcesses) || run.rawProcesses.length !== run.processes || run?.jobActiveProcesses !== run.processes || run?.syntheticSshProcesses < 1 || run?.syntheticSshReaders < 1) failures.push(`${label}: incomplete workload or process evidence`);
     for (const field of fields) if (!Number.isFinite(run?.[field]) || run[field] < 0) failures.push(`${label}: missing ${field}`);
+    for (const name of ['exe', 'bridge', 'config', 'helper']) {
+      const file = run?.staging?.[name];
+      if (!file?.inputPath || !file?.stagedPath || !/^[a-f0-9]{64}$/i.test(file?.inputSha256 || '') || file.inputSha256 !== file.stagedSha256) failures.push(`${label}: invalid ${name} staging evidence`);
+    }
   }
+  for (const name of ['config', 'helper']) if (!baseline?.staging?.[name]?.stagedSha256 || baseline.staging[name].stagedSha256 !== candidate?.staging?.[name]?.stagedSha256) failures.push(`telemetry ${name} differs between measurements`);
   for (const field of ['processes', 'syntheticSshProcesses', 'syntheticSshReaders', 'jobConsoleProcesses']) if (candidate?.[field] > baseline?.[field]) failures.push(`${field}: ${candidate[field]} exceeds baseline ${baseline[field]}`);
   if (candidate?.workingSetBytes > baseline?.workingSetBytes + limits.resources?.memoryToleranceBytes) failures.push(`workingSetBytes: ${candidate.workingSetBytes} exceeds baseline ${baseline.workingSetBytes} plus tolerance`);
   return failures;
