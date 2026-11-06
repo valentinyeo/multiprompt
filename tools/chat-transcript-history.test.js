@@ -672,10 +672,10 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.match(fn('chatFileRequestForDelivery'), /retryDue[\s\S]*std.Thread.spawn/);
   assert.match(fn('chatFileFetchThread'), /history.apply[\s\S]*writeFileAtomicW[\s\S]*transcript load shell=/);
   assert.match(fn('chatReaderBundle'), /@embedFile\("chat_history_reader.py"\)/);
-  assert.match(fn('chatHistoryChannelStart'), /chatReaderBundle/);
-  assert.match(fn('chatHistoryFetchOnce'), /chatReaderBundle/);
+  assert.match(fn('chatHistoryChannelStart'), /transport.open/);
+  assert.match(fs.readFileSync('src/chat_transport.zig', 'utf8'), /chatReaderBundle/);
   assert.match(fn('chatHistoryPersistent'), /chatHistoryChannelClose\(ch\);\s*ch\.retry_at = GetTickCount64\(\) \+ 250;/);
-  assert.match(fn('chatHistoryFetchOnce'), /60_000/);
+  assert.match(fn('chatHistoryFetchOnce'), /chatHistoryPersistent/);
   assert.doesNotMatch(fn('chatHistoryFetch'), /fetchAcPersistent|mp_complete/);
   assert.match(fn('chatPaintTranscriptContent'), /Could not load the conversation, retrying/);
   assert.match(fn('chatImageReady'), /chatRelayoutPreservingScroll/);

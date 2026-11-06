@@ -2981,9 +2981,7 @@ pub const ChatHistoryStream = struct {
 };
 pub const ChatHistoryChannel = struct {
     watch: bool = false,
-    process: HANDLE = null,
-    input: HANDLE = null,
-    output: HANDLE = null,
+    shared: ?*@import("chat_transport.zig").Channel = null,
     retry_at: u64 = 0,
 };
 pub var g_chat_history_channels: [3]ChatHistoryChannel = @splat(.{});

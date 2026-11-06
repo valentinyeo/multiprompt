@@ -111,6 +111,7 @@ const captureChatTranscript = @import("chat_capture.zig").captureChatTranscript;
 const pollChatStatus = @import("chat_capture.zig").pollChatStatus;
 const ChatHistoryEntry = @import("app_state.zig").ChatHistoryEntry;
 const ChatHistoryChannel = @import("app_state.zig").ChatHistoryChannel;
+const transport = @import("chat_transport.zig");
 const ChatHistoryStream = @import("app_state.zig").ChatHistoryStream;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
@@ -698,7 +699,7 @@ fn chatHistoryStreamStop(entry: *ChatHistoryEntry) void {
     entry.stream = null;
     stream.cancelled.store(true, .release);
     if (stream.mutex.tryLock()) {
-        if (stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+        if (stream.channel.shared) |channel| transport.cancel(channel);
         stream.mutex.unlock();
     }
     _ = @import("win32.zig").SetEvent(stream.ack);
@@ -752,7 +753,7 @@ fn chatLiveStreamStopLocked() void {
     g_chat_live_stream = null;
     stream.cancelled.store(true, .release);
     if (stream.mutex.tryLock()) {
-        if (stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+        if (stream.channel.shared) |channel| transport.cancel(channel);
         stream.mutex.unlock();
     }
     @import("chat_live.zig").release(stream.shell_id);
@@ -802,16 +803,15 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
     const after = @import("chat_live.zig").begin(stream.shell_id, stream.host, sid);
     while (!stream.mutex.tryLock()) Sleep(1);
     const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(key.host, &stream.channel);
-    if (stream.cancelled.load(.acquire) and stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+    if (stream.cancelled.load(.acquire)) {
+        if (stream.channel.shared) |channel| transport.cancel(channel);
+    }
     stream.mutex.unlock();
     chatLiveLog("start", stream.shell_id, after, @intFromBool(started));
     if (!started or stream.cancelled.load(.acquire)) return;
     const line = @import("chat_live.zig").subscribeLine(a, stream.shell_id, key.provider(), sid, after) catch return;
     defer a.free(line);
-    var written: DWORD = 0;
-    if (WriteFile(stream.channel.input, line.ptr, @intCast(line.len), &written, null) == 0 or written != line.len or
-        WriteFile(stream.channel.input, "\n", 1, &written, null) == 0 or written != 1)
-    {
+    if (!transport.write(stream.channel.shared orelse return, line)) {
         chatLiveLog("write-failed", stream.shell_id, after, 0);
         return;
     }
@@ -820,8 +820,7 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
     var chunk: [65536]u8 = undefined;
     while (!stream.cancelled.load(.acquire)) {
         while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
-            var n: DWORD = 0;
-            if (ReadFile(stream.channel.output, &chunk, chunk.len, &n, null) == 0 or n == 0) {
+            const n = transport.read(stream.channel.shared orelse return, &chunk, true) orelse {
                 chatLiveLog("read-ended", stream.shell_id, frame.items.len, 0);
                 return;
             }
@@ -870,19 +869,18 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
     defer a.free(query);
     while (!stream.mutex.tryLock()) Sleep(1);
     const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(key.host, &stream.channel);
-    if (stream.cancelled.load(.acquire) and stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+    if (stream.cancelled.load(.acquire)) {
+        if (stream.channel.shared) |channel| transport.cancel(channel);
+    }
     stream.mutex.unlock();
     if (!started or stream.cancelled.load(.acquire)) return;
-    var written: DWORD = 0;
-    if (WriteFile(stream.channel.input, query.ptr, @intCast(query.len), &written, null) == 0 or written != query.len or
-        WriteFile(stream.channel.input, "\n", 1, &written, null) == 0 or written != 1) return;
+    if (!transport.write(stream.channel.shared orelse return, query)) return;
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);
     var chunk: [65536]u8 = undefined;
     while (!stream.cancelled.load(.acquire)) {
         while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
-            var n: DWORD = 0;
-            if (ReadFile(stream.channel.output, &chunk, chunk.len, &n, null) == 0 or n == 0) return;
+            const n = transport.read(stream.channel.shared orelse return, &chunk, true) orelse return;
             if (frame.items.len + n > 48 * chat_history.TAIL_BYTES + 1024) return;
             frame.appendSlice(a, chunk[0..n]) catch return;
         }
@@ -907,12 +905,10 @@ pub fn chatLiveWrite(line: []const u8) bool {
     chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     const stream = g_chat_live_stream orelse return false;
-    if (stream.cancelled.load(.acquire) or stream.channel.input == null) return false;
+    if (stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
     while (!stream.mutex.tryLock()) Sleep(1);
     defer stream.mutex.unlock();
-    var written: DWORD = 0;
-    return WriteFile(stream.channel.input, line.ptr, @intCast(line.len), &written, null) != 0 and written == line.len and
-        WriteFile(stream.channel.input, "\n", 1, &written, null) != 0 and written == 1;
+    return transport.write(stream.channel.shared orelse return false, line);
 }
 
 fn chatLiveSyncQuestion() void {
@@ -989,66 +985,25 @@ fn chatLiveSyncCard() void {
 }
 
 fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
-    if (ch.input != null) _ = CloseHandle(ch.input);
-    if (ch.output != null) _ = CloseHandle(ch.output);
-    if (ch.process != null) {
-        _ = TerminateProcess(ch.process, 0);
-        _ = CloseHandle(ch.process);
-    }
+    if (ch.shared) |channel| transport.close(channel);
     ch.* = .{ .retry_at = ch.retry_at };
 }
 
 pub fn closeAllChatHistoryChannels() void {
     chatHistoryStreamsKeep(0);
     app_state.g_chat_history_channels_closing.store(true, .release);
+    transport.shutdown();
     if (!app_state.g_chat_history_channel_mutex.tryLock()) return;
     defer app_state.g_chat_history_channel_mutex.unlock();
     for (&app_state.g_chat_history_channels) |*ch| chatHistoryChannelClose(ch);
 }
 
 fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
-    var cmd: [2048]u16 = undefined;
-    var pos: usize = 0;
-    if (!appendSshExe(&cmd, &pos) or
-        !appendWideAscii(&cmd, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 ") or
-        !appendWideAscii(&cmd, &pos, tmuxSshTarget(host)) or
-        !appendWideAscii(&cmd, &pos, if (ch.watch) " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))' --watch" else " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))' --serve")) return false;
-    cmd[pos] = 0;
-    var sa = SECURITY_ATTRIBUTES{ .nLength = @sizeOf(SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
-    var child_input: HANDLE = null;
-    if (CreatePipe(&child_input, &ch.input, &sa, 1 << 20) == 0) return false;
-    defer _ = CloseHandle(child_input);
-    var child_output: HANDLE = null;
-    if (CreatePipe(&ch.output, &child_output, &sa, 1 << 20) == 0) return false;
-    defer _ = CloseHandle(child_output);
-    if (SetHandleInformation(ch.input, HANDLE_FLAG_INHERIT, 0) == 0 or
-        SetHandleInformation(ch.output, HANDLE_FLAG_INHERIT, 0) == 0) return false;
-    const stderr = CreateFileW(L("NUL"), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
-    if (stderr == INVALID_HANDLE_VALUE_PTR) return false;
-    defer _ = CloseHandle(stderr);
-    var si = std.mem.zeroes(STARTUPINFOW);
-    si.cb = @sizeOf(STARTUPINFOW);
-    si.dwFlags = 0x00000100;
-    si.hStdInput = child_input;
-    si.hStdOutput = child_output;
-    si.hStdError = stderr;
-    var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 1, 0x08000000, null, null, &si, &pi) == 0) return false;
-    _ = CloseHandle(pi.hThread);
-    ch.process = pi.hProcess;
-    if (app_state.g_tunnel_job == null or AssignProcessToJobObject(app_state.g_tunnel_job, ch.process) == 0) return false;
-    const a = std.heap.page_allocator;
-    const reader = chatReaderBundle(a) orelse return false;
-    defer a.free(reader);
-    const encoded = a.alloc(u8, std.base64.standard.Encoder.calcSize(reader.len) + 1) catch return false;
-    defer a.free(encoded);
-    _ = std.base64.standard.Encoder.encode(encoded[0 .. encoded.len - 1], reader);
-    encoded[encoded.len - 1] = '\n';
-    var written: DWORD = 0;
-    return WriteFile(ch.input, encoded.ptr, @intCast(encoded.len), &written, null) != 0 and written == encoded.len;
+    ch.shared = transport.open(host, ch.watch) orelse return false;
+    return true;
 }
 
-fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
+pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const claude = @embedFile("chat_connectors/claude.py");
     const codex = @embedFile("chat_connectors/codex.py");
     const mp_send = @embedFile("mp_send.py");
@@ -1082,16 +1037,14 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
     };
     if (app_state.g_chat_history_channels_closing.load(.acquire)) return false;
     const ch = &app_state.g_chat_history_channels[host];
-    if (ch.process == null and GetTickCount64() < ch.retry_at) return false;
+    if (ch.shared == null and GetTickCount64() < ch.retry_at) return false;
     var ok = false;
     defer if (!ok) {
         chatHistoryChannelClose(ch);
         ch.retry_at = GetTickCount64() + 250;
     };
-    if (ch.process == null and !chatHistoryChannelStart(host, ch)) return false;
-    var written: DWORD = 0;
-    if (WriteFile(ch.input, query.ptr, @intCast(query.len), &written, null) == 0 or written != query.len or
-        WriteFile(ch.input, "\n", 1, &written, null) == 0 or written != 1) return false;
+    if (ch.shared == null and !chatHistoryChannelStart(host, ch)) return false;
+    if (!transport.write(ch.shared orelse return false, query)) return false;
     if (request_written) |written_request| written_request.* = true;
     const a = std.heap.page_allocator;
     var frame: std.ArrayList(u8) = .empty;
@@ -1099,15 +1052,11 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
     const deadline = lock_deadline;
     var chunk: [65536]u8 = undefined;
     while (GetTickCount64() < deadline and !app_state.g_chat_history_channels_closing.load(.acquire)) {
-        var avail: DWORD = 0;
-        if (PeekNamedPipe(ch.output, null, 0, null, &avail, null) == 0) return false;
-        if (avail == 0) {
-            if (WaitForSingleObject(ch.process, 0) == 0) return false;
+        const n = transport.read(ch.shared orelse return false, &chunk, false) orelse return false;
+        if (n == 0) {
             Sleep(20);
             continue;
         }
-        var n: DWORD = 0;
-        if (ReadFile(ch.output, &chunk, @min(avail, chunk.len), &n, null) == 0 or n == 0) return false;
         if (frame.items.len + n > 6 * wire_limit + 1024) return false;
         frame.appendSlice(a, chunk[0..n]) catch return false;
         if (std.mem.indexOfScalar(u8, chunk[0..n], '\n') != null) {
@@ -1174,71 +1123,9 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
 }
 
 pub fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8)) bool {
-    const a = std.heap.page_allocator;
-    var encoded: [4096]u8 = undefined;
-    const size = std.base64.standard.Encoder.calcSize(query.len);
-    if (size > encoded.len) return false;
-    const b64 = std.base64.standard.Encoder.encode(&encoded, query);
-    var cmd: [2048]u16 = undefined;
-    var pos: usize = 0;
-    if (!appendSshExe(&cmd, &pos) or
-        !appendWideAscii(&cmd, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 ") or
-        !appendWideAscii(&cmd, &pos, tmuxSshTarget(host)) or
-        !appendWideAscii(&cmd, &pos, " python3 - ") or !appendWideAscii(&cmd, &pos, b64)) return false;
-    cmd[pos] = 0;
-    var sa = SECURITY_ATTRIBUTES{ .nLength = @sizeOf(SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
-    var input: HANDLE = null;
-    var child_input: HANDLE = null;
-    if (CreatePipe(&child_input, &input, &sa, 1 << 20) == 0) return false;
-    defer if (input != null) {
-        _ = CloseHandle(input);
-    };
-    defer _ = CloseHandle(child_input);
-    var output: HANDLE = null;
-    var child_output: HANDLE = null;
-    if (CreatePipe(&output, &child_output, &sa, 1 << 20) == 0) return false;
-    defer _ = CloseHandle(output);
-    defer if (child_output != null) {
-        _ = CloseHandle(child_output);
-    };
-    _ = SetHandleInformation(input, HANDLE_FLAG_INHERIT, 0);
-    _ = SetHandleInformation(output, HANDLE_FLAG_INHERIT, 0);
-    var si = std.mem.zeroes(STARTUPINFOW);
-    si.cb = @sizeOf(STARTUPINFOW);
-    si.dwFlags = 0x00000100;
-    si.hStdInput = child_input;
-    si.hStdOutput = child_output;
-    si.hStdError = child_output;
-    var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 1, 0x08000000, null, null, &si, &pi) == 0) return false;
-    _ = CloseHandle(pi.hThread);
-    defer _ = CloseHandle(pi.hProcess);
-    defer _ = TerminateProcess(pi.hProcess, 0);
-    if (app_state.g_tunnel_job == null or AssignProcessToJobObject(app_state.g_tunnel_job, pi.hProcess) == 0) return false;
-    _ = CloseHandle(child_output);
-    child_output = null;
-    const reader = chatReaderBundle(a) orelse return false;
-    defer a.free(reader);
-    var written: DWORD = 0;
-    if (WriteFile(input, reader.ptr, @intCast(reader.len), &written, null) == 0 or written != reader.len) return false;
-    _ = CloseHandle(input);
-    input = null;
-    const deadline = GetTickCount64() + 60_000;
-    var chunk: [65536]u8 = undefined;
-    while (GetTickCount64() < deadline and !app_state.g_chat_history_channels_closing.load(.acquire)) {
-        var avail: DWORD = 0;
-        if (PeekNamedPipe(output, null, 0, null, &avail, null) == 0) break;
-        if (avail == 0) {
-            if (WaitForSingleObject(pi.hProcess, 0) == 0) break;
-            Sleep(20);
-            continue;
-        }
-        var n: DWORD = 0;
-        if (ReadFile(output, &chunk, @min(avail, chunk.len), &n, null) == 0 or n == 0) break;
-        if (out.items.len + n > wire_limit) return false;
-        out.appendSlice(a, chunk[0..n]) catch return false;
-    }
-    return std.mem.endsWith(u8, out.items, "@@MP_END@@\n");
+    const parsed = std.json.parseFromSlice(struct { id: u32 }, std.heap.page_allocator, query, .{ .ignore_unknown_fields = true }) catch return false;
+    defer parsed.deinit();
+    return chatHistoryPersistent(host, parsed.value.id, query, wire_limit, out, null);
 }
 
 fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, id: u32, load_disk: bool, pushed: ?ChatHistoryPush) void {

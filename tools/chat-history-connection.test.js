@@ -11,6 +11,25 @@ function body(name) {
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }
 const prelude = String.raw`
+const transport = struct {
+    const Channel = opaque {};
+    fn shutdown() void {}
+    fn close(_: *Channel) void { terminations += 1; closes += 3; }
+    fn write(channel: *Channel, line: []const u8) bool {
+        var written: u32 = 0;
+        return WriteFile(@ptrFromInt(@intFromPtr(channel) + 9), line.ptr, @intCast(line.len), &written, null) != 0 and written == line.len;
+    }
+    fn read(channel: *Channel, bytes: []u8, _: bool) ?usize {
+        if (mode == .dead) return null;
+        const handle: HANDLE = @ptrFromInt(@intFromPtr(channel) + 19);
+        var available: u32 = 0;
+        _ = PeekNamedPipe(handle, null, 0, null, &available, null);
+        if (available == 0) return if (mode == .truncated) null else 0;
+        var count: u32 = 0;
+        _ = ReadFile(handle, bytes.ptr, @intCast(@min(available, bytes.len)), &count, null);
+        return count;
+    }
+};
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -63,9 +82,7 @@ fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
     std.debug.assert(g_chat_history_channel_mutex.held);
     starts += 1;
     if (fail_start) return false;
-    ch.process = @ptrFromInt(1 + @as(usize, host));
-    ch.input = @ptrFromInt(10 + @as(usize, host));
-    ch.output = @ptrFromInt(20 + @as(usize, host));
+    ch.shared = @ptrFromInt(1 + @as(usize, host));
     return true;
 }
 fn chatHistoryFetchOnce(_: u8, _: []const u8, _: usize, out: *std.ArrayList(u8)) bool {
@@ -144,18 +161,16 @@ test "transport failures restart after backoff but chat errors keep the shared c
         try std.testing.expect(fetch(0, &out));
         try std.testing.expectEqualStrings("fallback", out.items);
         if (failure == .reader_error) {
-            try std.testing.expect(g_chat_history_channels[0].process != null);
+            try std.testing.expect(g_chat_history_channels[0].shared != null);
             try std.testing.expectEqual(@as(usize, 0), terminations);
             mode = .good;
             try std.testing.expect(fetch(0, &out));
             try std.testing.expectEqual(@as(usize, 1), starts);
             continue;
         }
-        try std.testing.expect(g_chat_history_channels[0].process == null);
+        try std.testing.expect(g_chat_history_channels[0].shared == null);
         try std.testing.expectEqual(@as(usize, 1), terminations);
         try std.testing.expectEqual(now + 250, g_chat_history_channels[0].retry_at);
-        try std.testing.expect(g_chat_history_channels[0].input == null);
-        try std.testing.expect(g_chat_history_channels[0].output == null);
         try std.testing.expectEqual(@as(usize, 3), closes);
         if (failure == .hang) try std.testing.expectEqual(@as(u64, 15_000), now);
         mode = .good;
@@ -180,7 +195,7 @@ test "unreachable host and short writes fall back; oversized chat reply keeps th
     reset();
     try std.testing.expect(!chatHistoryPersistent(0, 7, "{\"id\":7}", 1, &out, null));
     try std.testing.expectEqual(@as(usize, 0), terminations);
-    try std.testing.expect(g_chat_history_channels[0].process != null);
+    try std.testing.expect(g_chat_history_channels[0].shared != null);
 }
 test "send write reservation distinguishes prewrite failure from lost acknowledgement" {
     var out: std.ArrayList(u8) = .empty;
@@ -220,7 +235,7 @@ test('persistent history production transport: reuse, framing, timeout, fallback
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-connection-'));
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryQuery', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryQuery', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("chat_transport.zig").Channel', 'transport.Channel'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 5 tests passed/);
@@ -228,14 +243,14 @@ test('persistent history production transport: reuse, framing, timeout, fallback
 });
 
 test('persistent reader bootstrap is stdin-only, noninteractive and job-owned before sending source', () => {
-  const start = body('chatHistoryChannelStart');
-  assert.ok(start.includes("python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))' --serve"));
+  const start = fs.readFileSync('src/chat_transport.zig', 'utf8');
+  assert.match(body('chatHistoryChannelStart'), /transport.open/);
   assert.match(start, /BatchMode=yes.*ConnectTimeout=5/);
-  assert.match(start, /SetHandleInformation\(ch.input, HANDLE_FLAG_INHERIT, 0\)/);
-  assert.match(start, /SetHandleInformation\(ch.output, HANDLE_FLAG_INHERIT, 0\)/);
-  assert.match(start, /g_tunnel_job == null or AssignProcessToJobObject\(g_tunnel_job, ch.process\) == 0\) return false/);
-  assert.ok(start.indexOf('AssignProcessToJobObject') < start.indexOf('WriteFile'));
-  assert.match(body('chatHistoryFetchOnce'), /g_tunnel_job == null or AssignProcessToJobObject\(g_tunnel_job, pi.hProcess\) == 0\) return false/);
+  assert.match(start, /SetHandleInformation\(input, state.HANDLE_FLAG_INHERIT, 0\)/);
+  assert.match(start, /SetHandleInformation\(output, state.HANDLE_FLAG_INHERIT, 0\)/);
+  assert.ok(start.indexOf('AssignProcessToJobObject') < start.indexOf('const reader ='));
+  assert.match(body('chatHistoryFetchOnce'), /chatHistoryPersistent/);
+  assert.doesNotMatch(body('chatHistoryFetchOnce'), /CreateProcessW/);
   assert.match(source, /closeAllAcChannels\(\);\s*closeAllChatHistoryChannels\(\);/);
 });
 
@@ -244,6 +259,20 @@ test('push receiver blocks without polling, preserves coalesced frames, and rele
   const state = fs.readFileSync('src/app_state.zig', 'utf8');
   const stream = state.slice(state.indexOf('pub const ChatHistoryStream = struct {'), state.indexOf('pub var g_chat_history_channels:'));
   const harness = String.raw`
+const transport = struct {
+    const Channel = opaque {};
+    fn cancel(_: *Channel) void { terminations += 1; }
+    fn close(_: *Channel) void { terminations += 1; closes += 3; }
+    fn write(_: *Channel, _: []const u8) bool { writes += 1; return true; }
+    fn read(_: *Channel, bytes: []u8, _: bool) ?usize {
+        reads += 1;
+        const n = @min(bytes.len, input.items.len - at);
+        if (n == 0) return null;
+        @memcpy(bytes[0..n], input.items[at..][0..n]);
+        at += n;
+        return n;
+    }
+};
 const std = @import("std");
 const HANDLE = ?*anyopaque;
 const DWORD = u32;
@@ -279,7 +308,7 @@ fn chatHistoryQuery(_: chat_transcript.Identity, _: u32, _: chat_history.History
 fn chatHistoryChannelStart(_: u8, ch: *ChatHistoryChannel) bool {
     std.debug.assert(current.mutex.held);
     starts += 1;
-    ch.process = @ptrFromInt(2); ch.input = @ptrFromInt(3); ch.output = @ptrFromInt(4);
+    ch.shared = @ptrFromInt(2);
     if (cancel_during_start) {
         var entry: ChatHistoryEntry = .{ .stream = current };
         chatHistoryStreamStop(&entry);
@@ -326,7 +355,7 @@ test "multiple pushed frames in one pipe read require no next request and preser
     try addFrame(7, "first", 12); try addFrame(7, "second", 13);
     chatHistoryStreamThread(current, .{}, .{});
     try std.testing.expect(current.ended.load(.acquire));
-    try std.testing.expectEqual(@as(usize, 2), writes);
+    try std.testing.expectEqual(@as(usize, 1), writes);
     try std.testing.expectEqual(@as(usize, 2), reads);
     try std.testing.expectEqual(@as(usize, 2), acknowledgements);
     try std.testing.expectEqual(@as(u32, 1), current.refs.load(.acquire));
@@ -358,7 +387,7 @@ test "wrong stream identity closes without publishing rows" {
   try {
     const file = path.join(dir, 'push.zig');
     const code = harness + stream + ['chatHistoryChannelClose', 'chatHistoryStreamRelease', 'chatHistoryStreamStop', 'chatHistoryStreamThread'].map(body).join('\n');
-    fs.writeFileSync(file, code.replaceAll('app_state.', '').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
+    fs.writeFileSync(file, code.replaceAll('app_state.', '').replaceAll('@import("chat_transport.zig").Channel', 'transport.Channel').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
