@@ -10,12 +10,15 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SID = '783da795-e250-4189-bd8a-8947248eecae'
+OLD_SID = '40ecd082-7850-4128-a4ad-52736deb4d82'
+OLD = 'old reply from before a restart'
 TAB = 'live-b06323d'
 FIRST = 'first reply PROBE-A'
 LATER = 'later reply PROBE-B'
 DIMENSIONS = dict(
+    tab=('hosted', 'terminal'),
     owner=('same-user', 'other-user'),
-    query_sid=('sid', 'empty'),
+    query_sid=('sid', 'empty', 'stale'),
     follow=(True, False),
     held=(False, True),
     transcript=('file', 'symlink'),
@@ -60,11 +63,13 @@ def check_case(reader, case, base):
     else:
         transcript.write_text(line('user', 'question one') + line('assistant', FIRST))
         written = transcript
+    (folder / (OLD_SID + '.jsonl')).write_text(line('user', 'old question') + line('assistant', OLD))
     state = homes['valentin'] / '.local/state/multiprompt/agent-host'
     state.mkdir(parents=True)
     key = reader.host_key('claude', SID)
-    (state / (key + '.config.json')).write_text(json.dumps(dict(enabled=True, tmux=TAB, cwd=cwd, permission_mode='bypassPermissions')))
-    (state / (key + '.state.json')).write_text(json.dumps(dict(provider='claude', sid=SID, native_session=SID, tmux=TAB)))
+    if case['tab'] == 'hosted':
+        (state / (key + '.config.json')).write_text(json.dumps(dict(enabled=True, tmux=TAB, cwd=cwd, permission_mode='bypassPermissions')))
+        (state / (key + '.state.json')).write_text(json.dumps(dict(provider='claude', sid=SID, native_session=SID, tmux=TAB)))
     acting = dict(user='valentin')
     real_path = reader.conversation_path
 
@@ -91,7 +96,20 @@ def check_case(reader, case, base):
             acting['user'], _ = previous
         return wire if wire.endswith(reader.END + '\n') else reader.missing_response(q, 'permission denied; could not read as ' + user)
 
-    query = dict(id=1234, provider='claude', codex=False, sid=SID if case['query_sid'] == 'sid' else '', tmux=TAB, cwd=cwd,
+    def pane_agent(agent, tmux_, discovery_pid=None):
+        if case['tab'] != 'terminal' or tmux_ != TAB:
+            return None
+        if acting['user'] != owner_user:
+            raise PermissionError(tmux_)
+        return SID, transcript
+
+    def pane_owner(agent, tmux_, source):
+        if case['tab'] == 'terminal' and tmux_ == TAB and owner_user != acting['user']:
+            return 4242, (owner_user, homes[owner_user])
+        return None
+
+    asked = dict(sid=SID, empty='', stale=OLD_SID)[case['query_sid']]
+    query = dict(id=1234, provider='claude', codex=False, sid=asked, tmux=TAB, cwd=cwd,
                  follow=case['follow'], cached_sid='', inode=0, offset=0, settlement=True, message_protocol=1,
                  source_offsets=True, live=True, start=0, before=0, mtime=0, probe='')
     if case['held']:
@@ -101,8 +119,8 @@ def check_case(reader, case, base):
         patch.object(reader, 'conversation_path', guarded_path),
         patch.object(reader, 'conversation_owner', owner_of),
         patch.object(reader, 'owner_response', as_owner),
-        patch.object(reader, 'resolve_tmux_agent', return_value=None),
-        patch.object(reader, 'tmux_owner_process', return_value=None),
+        patch.object(reader, 'resolve_tmux_agent', pane_agent),
+        patch.object(reader, 'tmux_owner_process', pane_owner),
         patch.object(reader, 'start_message_worker', return_value=None),
     ]
     for p in patches:
@@ -110,8 +128,8 @@ def check_case(reader, case, base):
     try:
         head, texts = rows(reader.response(dict(query), reader.READER_SOURCE))
         problems = []
-        if head[3:4] != ['ok'] or not any(FIRST in t for t in texts):
-            problems.append(f"open: status={head[3:4]} reason={head[6:7] if head[3:4] != ['ok'] else '-'} first_reply_shown={any(FIRST in t for t in texts)}")
+        if head[3:4] != ['ok'] or not any(FIRST in t for t in texts) or any(OLD in t for t in texts):
+            problems.append(f"open: status={head[3:4]} reason={head[6:7] if head[3:4] != ['ok'] else '-'} first_reply_shown={any(FIRST in t for t in texts)} old_chat_shown={any(OLD in t for t in texts)}")
         if head[3:4] == ['ok'] and len(head) > 12:
             with written.open('a') as stream:
                 stream.write(line('user', 'question two') + line('assistant', LATER))
@@ -135,6 +153,8 @@ def main():
     total = 0
     for values in itertools.product(*DIMENSIONS.values()):
         case = dict(zip(names, values))
+        if case['query_sid'] == 'stale' and (case['tab'] == 'hosted' or not case['follow']):
+            continue
         total += 1
         with tempfile.TemporaryDirectory() as temp:
             problems = check_case(reader, case, Path(temp))
