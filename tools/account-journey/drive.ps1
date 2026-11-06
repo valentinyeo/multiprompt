@@ -200,6 +200,7 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
             } catch { $events = 'unavailable' }
         }
         $timeoutSnapshot = 'unavailable'
+        $timeoutEdits = $null
         try {
             $timeoutEdits = @([JourneyForeground]::VisibleEdits($Window, $ProcessId))
             $entries = @($timeoutEdits | Select-Object -First 12 | ForEach-Object {
@@ -208,7 +209,29 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
             }) -join ','
             $timeoutSnapshot = "count=$($timeoutEdits.Count),truncated=$($timeoutEdits.Count -gt 12),entries=$entries"
         } catch {}
-        $message += " before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
+        $threadSnapshot = 'unavailable'
+        try {
+            if ($null -eq $timeoutEdits) { throw 'unavailable' }
+            $mainThread = 0
+            $foregroundThread = 0
+            try { $mainThread = [JourneyForeground]::ThreadId($Window) } catch {}
+            try { $foregroundThread = [JourneyForeground]::ForegroundThreadId() } catch {}
+            $mainThreadValue = if ($mainThread) { [string]$mainThread } else { 'unavailable' }
+            $foregroundThreadValue = if ($foregroundThread) { [string]$foregroundThread } else { 'unavailable' }
+            $foregroundFocus = try { [JourneyForeground]::ThreadFocus($foregroundThread) } catch { 'unavailable' }
+            $threadEntries = @($timeoutEdits | Select-Object -First 12 | ForEach-Object {
+                $thread = 0
+                $threadValue = 'unavailable'
+                $enabled = 'unavailable'
+                $candidateFocus = 'unavailable'
+                try { $thread = [JourneyForeground]::ThreadId($_); if ($thread) { $threadValue = [string]$thread } } catch {}
+                try { $enabled = [JourneyForeground]::Enabled($_) } catch {}
+                try { $candidateFocus = [JourneyForeground]::ThreadFocus($thread) } catch {}
+                '{0}:{1}:{2}:{3}' -f $_.ToInt64(), $threadValue, $enabled, $candidateFocus
+            }) -join ','
+            $threadSnapshot = "main_thread=$mainThreadValue,foreground_thread=$foregroundThreadValue,foreground_focus=$foregroundFocus,entries=$threadEntries"
+        } catch {}
+        $message += " before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] thread_edits=[$threadSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
         $exception = [System.Exception]::new($message, $original.Exception)
         $exception.Data['original_script_stack'] = $original.ScriptStackTrace
         throw $exception

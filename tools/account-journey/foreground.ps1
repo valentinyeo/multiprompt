@@ -7,6 +7,20 @@ public static class JourneyForeground {
     delegate bool EnumProc(IntPtr h, IntPtr parameter);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr parameter);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct GUITHREADINFO { public uint size, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public RECT caretRect; }
+    [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+    public static uint ThreadId(IntPtr h) { uint pid; return GetWindowThreadProcessId(h, out pid); }
+    public static uint ForegroundThreadId() { return ThreadId(GetForegroundWindow()); }
+    public static string Enabled(IntPtr h) { return IsWindow(h) ? IsWindowEnabled(h).ToString() : "unavailable"; }
+    public static string ThreadFocus(uint thread) {
+        if (thread == 0) return "unavailable";
+        var info = new GUITHREADINFO();
+        info.size = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+        return GetGUIThreadInfo(thread, ref info) ? info.focus.ToInt64().ToString() : "unavailable";
+    }
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder name, int max);
     public static IntPtr[] VisibleEdits(IntPtr root, int processId) {

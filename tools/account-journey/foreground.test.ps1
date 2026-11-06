@@ -16,7 +16,7 @@ public static class FixtureControls {
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = 'Account journey foreground probe'
 $form.Add_Shown({
-    foreach ($item in @(@('Edit', 0x50000000), @('Edit', 0x50000000), @('Edit', 0x40000000), @('Button', 0x50000000))) {
+    foreach ($item in @(@('Edit', 0x50000000), @('Edit', 0x58000000), @('Edit', 0x40000000), @('Button', 0x50000000))) {
         $h = [FixtureControls]::CreateWindowEx(0, $item[0], 'private fixture text', [uint32]$item[1], 0, 0, 60, 20, $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
         if ($h -eq [IntPtr]::Zero) { throw 'Cannot create fixture control' }
     }
@@ -62,6 +62,10 @@ try {
         foreach ($edit in $edits) {
             if ([ReconnectDesktop]::Owner($edit) -ne $processes[$index].Id -or [ReconnectDesktop]::GetAncestor($edit, 2) -ne $windows[$index] -or [ReconnectDesktop]::Class($edit) -cne 'Edit') { throw 'Visible Edit enumeration returned a foreign control' }
         }
+        $thread = [JourneyForeground]::ThreadId($windows[$index])
+        if (!$thread -or @($edits | Where-Object { [JourneyForeground]::ThreadId($_) -ne $thread }).Count -ne 0) { throw 'Edit thread identity mismatch' }
+        $enabled = @($edits | ForEach-Object { [JourneyForeground]::Enabled($_) } | Sort-Object)
+        if (($enabled -join ',') -cne 'False,True' -or [JourneyForeground]::ThreadFocus($thread) -notmatch '^\d+$' -or [JourneyForeground]::ThreadFocus(0) -cne 'unavailable' -or [JourneyForeground]::Enabled([IntPtr]::Zero) -cne 'unavailable') { throw 'Edit thread or enabled diagnostic mismatch' }
         if (@([JourneyForeground]::VisibleEdits($windows[$index], $processes[1 - $index].Id)).Count -ne 0) { throw 'Visible Edit enumeration accepted another PID' }
     }
     $rejected = $false

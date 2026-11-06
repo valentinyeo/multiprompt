@@ -40,6 +40,22 @@ public static class ReconnectDesktop {
     public static string Text(IntPtr window) { return Mode == "snapshot-new" && window == new IntPtr(201) ? "private-expected-name" : Mode == "wrong" || Mode == "wrong-name" ? "synthetic-secret-wrong-name" : "Runners"; }
 }
 public static class JourneyForeground {
+    public static uint ThreadId(IntPtr window) {
+        if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-thread");
+        return window == new IntPtr(100) ? 10u : 20u;
+    }
+    public static uint ForegroundThreadId() {
+        if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-foreground");
+        return 30;
+    }
+    public static string Enabled(IntPtr window) {
+        if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-enabled");
+        return window == new IntPtr(201) ? "False" : "True";
+    }
+    public static string ThreadFocus(uint thread) {
+        if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-focus");
+        return thread == 20 ? "201" : thread == 30 ? "100" : "unavailable";
+    }
     public static IntPtr[] VisibleEdits(IntPtr window, int pid) {
         string mode = ReconnectDesktop.Mode;
         if (mode == "snapshot-error" || (mode == "baseline-error" && !ReconnectDesktop.Entered) || (mode == "timeout-error" && ReconnectDesktop.Entered)) throw new Exception("synthetic-secret-snapshot");
@@ -109,7 +125,7 @@ $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
 . (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
 $secrets = @{ admin_key = 'synthetic-secret' }
-foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error')) {
+foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error', 'thread-error')) {
     $script:trace = "[palette] confirm target=7000`n"
     [ReconnectDesktop]::Opened = $false
     [ReconnectDesktop]::Ready = $false
@@ -151,6 +167,17 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
         default { $null }
     }
     if ($snapshot -and !$message.Contains($snapshot)) { throw "Incorrect sanitized snapshot for $mode" }
+    $threads = switch ($mode) {
+        'snapshot-error' { 'unavailable' }
+        'timeout-error' { 'unavailable' }
+        'snapshot-missing' { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=' }
+        'snapshot-new' { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=200:20:True:201,201:20:False:201' }
+        'baseline-error' { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=200:20:True:201,201:20:False:201' }
+        'snapshot-many' { $entries = (200..211 | ForEach-Object { if ($_ -eq 201) { "${_}:20:False:201" } else { "${_}:20:True:201" } }) -join ','; "main_thread=10,foreground_thread=30,foreground_focus=100,entries=$entries" }
+        'thread-error' { 'main_thread=unavailable,foreground_thread=unavailable,foreground_focus=unavailable,entries=200:unavailable:unavailable:unavailable' }
+        default { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=200:20:True:201' }
+    }
+    if (!$message.Contains("thread_edits=[$threads]")) { throw "Incorrect thread diagnostic for $mode" }
     if ($mode -eq 'wrong' -and $message -notmatch 'focus=200 owner=42 root=100 edit_class=True ') { throw 'Wrong-name edit not identified' }
     if ($mode -like 'missing-*' -and $message -notmatch 'focus=0 owner=0 root=0 edit_class=False ') { throw 'Missing edit not identified' }
 }
