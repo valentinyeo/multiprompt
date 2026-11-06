@@ -63,21 +63,22 @@ function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id)
     @{ capture = $Name; pid = $ProcessId; hwnd = $Window.ToInt64() } | ConvertTo-Json | Set-Content "$Output/$Name.json"
 }
 function Show-Workspace([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id, [string]$SessionPath = "$settings/session-journey-a.json") {
-    for ($n = 2; $n -le 9; $n++) {
-        Set-JourneyForeground $Window $ProcessId
-        Assert-Window $Window $ProcessId
-        [ReconnectDesktop]::Key(0x12, $false)
-        [ReconnectDesktop]::Key([ushort](0x30 + $n), $false)
-        [ReconnectDesktop]::Key([ushort](0x30 + $n), $true)
-        [ReconnectDesktop]::Key(0x12, $true)
-        Start-Sleep -Milliseconds 500
+    $state = Get-Content $SessionPath -Raw | ConvertFrom-Json
+    $matches = @(for ($i = 0; $i -lt @($state.workspaces).Count; $i++) { if ($state.workspaces[$i].name -ceq $Name) { $i } })
+    if ($matches.Count -ne 1 -or $matches[0] -gt 7) { throw "Could not switch to workspace $Name in saved session" }
+    $slot = [int]$matches[0]
+    Set-JourneyForeground $Window $ProcessId
+    Assert-Window $Window $ProcessId
+    [ReconnectDesktop]::Key(0x12, $false)
+    [ReconnectDesktop]::Key([ushort](0x32 + $slot), $false)
+    [ReconnectDesktop]::Key([ushort](0x32 + $slot), $true)
+    [ReconnectDesktop]::Key(0x12, $true)
+    [void](Wait-For 'selected workspace session' {
         try {
-            $state = Get-Content $SessionPath -Raw | ConvertFrom-Json
-            $slot = [int]$state.active_workspace
-            if ($slot -ge 0 -and $slot -lt @($state.workspaces).Count -and $state.workspaces[$slot].name -ceq $Name) { return }
-        } catch {}
-    }
-    throw "Could not switch to workspace $Name in saved session"
+            $current = Get-Content $SessionPath -Raw | ConvertFrom-Json
+            [int]$current.active_workspace -eq $slot -and !$current.starred_view -and $current.workspaces[$slot].name -ceq $Name
+        } catch { $false }
+    } 10)
 }
 function Assert-Focus([IntPtr]$Window, [int]$ProcessId, [IntPtr]$Expected) {
     Assert-Window $Window $ProcessId
@@ -94,11 +95,21 @@ function Type-Ascii([string]$Value, [IntPtr]$Window, [int]$ProcessId, [IntPtr]$E
 function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
     Set-JourneyForeground $Window $ProcessId
     Assert-Window $Window $ProcessId
+    $paletteLog = if ($ProcessId -eq $app.Id) { $log } elseif ($appB -and $ProcessId -eq $appB.Id) { $logB } else { throw 'Unknown app process' }
+    $offset = (Read-Log $paletteLog).Length
     [ReconnectDesktop]::Key(0x11, $false)
     [ReconnectDesktop]::Type(0x4B)
     [ReconnectDesktop]::Key(0x11, $true)
-    [void](Wait-For 'palette focus' { $f = [ReconnectDesktop]::Focus($Window); $f[0] -eq $Window.ToInt64() -and $f[1] -eq $Window.ToInt64() } 10)
+    [void](Wait-For 'palette ready and focused' {
+        $trace = Read-Log $paletteLog
+        $f = [ReconnectDesktop]::Focus($Window)
+        $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and $f[0] -eq $Window.ToInt64() -and $f[1] -eq $Window.ToInt64()
+    } 10)
     Type-Ascii 'rename workspace' $Window $ProcessId $Window
+    [void](Wait-For 'rename workspace palette selection' {
+        $trace = Read-Log $paletteLog
+        $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=16 count=\d+ target=7000(?:\r?\n|$)'
+    } 10)
     Assert-Focus $Window $ProcessId $Window
     [ReconnectDesktop]::Type(0x0D)
     $edit = Wait-For 'workspace rename edit' {
@@ -344,11 +355,10 @@ try {
         if ($entry.path -and (Test-Path $entry.path)) {
             try {
                 $text = Read-Log $entry.path
-                foreach ($property in $secrets.PSObject.Properties) {
-                    if ($property.Value -is [string] -and $property.Value.Length -gt 20) { $text = $text.Replace($property.Value, '<redacted>') }
-                }
-                $text = $text -replace 'Bearer [A-Za-z0-9._-]+', 'Bearer <redacted>'
-                $text | Set-Content (Join-Path $Output $entry.name)
+                $safe = @([regex]::Matches($text, '(?m)\[palette\] ready chars=([0-9]{1,3}) count=([0-9]{1,4}) target=([0-9]{1,5})\r?$') | ForEach-Object {
+                    '[palette] ready chars={0} count={1} target={2}' -f $_.Groups[1].Value, $_.Groups[2].Value, $_.Groups[3].Value
+                })
+                @('[other log lines suppressed]') + $safe | Set-Content (Join-Path $Output $entry.name)
             } catch {}
         }
     }
