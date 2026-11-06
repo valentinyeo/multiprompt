@@ -1692,6 +1692,32 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(sent['sid'], sid)
         self.assertFalse(sent['follow'])
 
+    def test_IGSH_1822_hosted_chat_without_sid_is_found_by_its_tab(self):
+        sid = '783da795-e250-4189-bd8a-8947248eecae'
+        self.query.update(follow=True, sid='', cwd='/home/secondary/project')
+        with patch.object(reader, 'host_sid_for_tmux', return_value=sid) as lookup, \
+                patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'host_dispatch_switch', return_value=True), \
+                patch.object(reader, 'conversation_path', side_effect=lambda agent, s, cwd, home=None: (_ for _ in ()).throw(PermissionError()) if home else None), \
+                patch.object(reader, 'owner_response', return_value='@mp\t7\thistory\tok\n@@MP_END@@\n') as read_owner:
+            reader.response(self.query, reader.READER_SOURCE)
+        lookup.assert_called_once_with('claude', 'term-1')
+        self.assertEqual(read_owner.call_args.args[0]['sid'], sid)
+
+    def test_IGSH_1822_tab_lookup_reads_only_one_enabled_hosted_chat(self):
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home) / '.local/state/multiprompt/agent-host'
+            root.mkdir(parents=True)
+            sid = '783da795-e250-4189-bd8a-8947248eecae'
+            key = reader.host_key('claude', sid)
+            (root / (key + '.config.json')).write_text(json.dumps(dict(enabled=True, tmux='live-b06323d')))
+            (root / (key + '.state.json')).write_text(json.dumps(dict(provider='claude', sid=sid)))
+            with patch.object(reader, 'HOME', Path(home)):
+                self.assertEqual(reader.host_sid_for_tmux('claude', 'live-b06323d'), sid)
+                self.assertIsNone(reader.host_sid_for_tmux('claude', 'live-other'))
+                (root / (key + '.config.json')).write_text(json.dumps(dict(enabled=False, tmux='live-b06323d')))
+                self.assertIsNone(reader.host_sid_for_tmux('claude', 'live-b06323d'))
+
     def test_IGSH_1064_stale_owner_cwd_still_discovers_exact_live_process(self):
         self.write(self.event('current live reply'))
         self.query.update(follow=True, cwd='/home/secondary/old-project')
