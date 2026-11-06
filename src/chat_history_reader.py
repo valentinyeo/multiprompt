@@ -1585,7 +1585,11 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             return agent, sid, None, missing_response(q, "permission denied")
         return (agent, sid, path, None) if path else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
+    if not sid and tmux and agent == "claude" and not as_owner:
+        sid = q["sid"] = host_sid_for_tmux(agent, tmux) or ""
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
+    if follow and agent == "claude" and isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
+        follow = q["follow"] = False
     denied = False
     delegated = None
     try:
@@ -2739,6 +2743,23 @@ def host_pane_claimed(tmux):
         if isinstance(config, dict) and config.get("enabled") is True and config.get("tmux") == tmux:
             return True
     return False
+
+
+def host_sid_for_tmux(provider, tmux):
+    try:
+        configs = list((HOME / ".local/state/multiprompt/agent-host").glob("*.config.json"))
+    except OSError:
+        return None
+    found = set()
+    for path in configs:
+        config = host_read(path)
+        if not isinstance(config, dict) or config.get("enabled") is not True or config.get("tmux") != tmux:
+            continue
+        state = host_read(path.with_name(path.name[:-len(".config.json")] + ".state.json")) or {}
+        sid = state.get("sid")
+        if state.get("provider") == provider and host_identity(provider, sid) and host_key(provider, sid) + ".config.json" == path.name:
+            found.add(sid)
+    return found.pop() if len(found) == 1 else None
 
 
 def host_handed_over(provider, sid):
@@ -6312,7 +6333,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 82
+RUNTIME_GENERATION = 84
 
 if __name__ == '__main__':
     import base64 as _base64
