@@ -68,4 +68,29 @@ $focusLines = @(
 $focusActual = @(Get-SafeFocusRecords ($focusLines -join "`r`n"))
 $focusExpected = @($focusBase, $focusTimed, $focusRefocus, $focusNullReturn, $focusReturned)
 if (($focusActual -join "`n") -cne ($focusExpected -join "`n")) { throw 'Focus sanitizer accepted unsafe records or changed ordering' }
+$nativeBase = '[focus-native] result_null=1 last_error=0 caller_thread=42 target_thread=42 target=0x456 focus=0x789'
+$nativeTimed = '2026-10-18 03:04:05.067 [focus-native] result_null=0 last_error=4294967295 caller_thread=0 target_thread=4294967295 target=0xFFFFFFFFFFFFFFFF focus=0x0'
+$nativeLines = @(
+    $nativeBase
+    $nativeTimed
+    "private $nativeBase"
+    "$nativeBase private"
+    "$nativeBase`rprivate"
+    "$nativeBase`r"
+    $nativeBase.Replace('result_null=1', 'result_null=2')
+    $nativeBase.Replace('last_error=0', 'last_error=4294967296')
+    $nativeBase.Replace('caller_thread=42', 'caller_thread=4294967296')
+    $nativeBase.Replace('target_thread=42', 'target_thread=4294967296')
+    $nativeBase.Replace('last_error=0', 'last_error=-1')
+    $nativeBase.Replace('caller_thread=42', 'caller_thread=+42')
+    $nativeBase.Replace('target_thread=42', 'target_thread=４２')
+    $nativeBase.Replace('target=0x456', 'target=0x10000000000000000')
+    $nativeBase.Replace('focus=0x789', 'focus=0x10000000000000000')
+    $nativeBase.Replace('focus=0x789', 'focus=0xabc')
+    $nativeBase.Replace('target=0x456', "target=0x4`n56")
+    $nativeBase.Replace('target_thread=42', 'target_thread=42 label=private')
+    $nativeTimed.Replace('2026-10-18', '2026-13-18')
+)
+$nativeActual = @(Get-SafeNativeFocusRecords ($nativeLines -join "`r`n"))
+if (($nativeActual -join "`n") -cne (@($nativeBase, $nativeTimed) -join "`n")) { throw 'Native focus sanitizer accepted unsafe records or changed ordering' }
 Write-Host 'Account journey diagnostics assertions passed'

@@ -476,7 +476,8 @@ try {
                 $text = Read-Log $entry.path
                 $safe = @(Get-SafePaletteRecords $text)
                 $focus = @(Get-SafeFocusRecords $text | Select-Object -Last 80)
-                @('[other log lines suppressed]') + $safe + $focus | Set-Content (Join-Path $Output $entry.name)
+                $nativeFocus = @(Get-SafeNativeFocusRecords $text | Select-Object -Last 80)
+                @('[other log lines suppressed]') + $safe + $focus + $nativeFocus | Set-Content (Join-Path $Output $entry.name)
             } catch {}
         }
     }

@@ -14,6 +14,24 @@ function Get-SafeFocusRecords([string]$Text) {
     }
 }
 
+function Get-SafeNativeFocusRecords([string]$Text) {
+    $pattern = '\A(?:(?<timestamp>[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}) )?\[focus-native\] result_null=[01] last_error=(?<last_error>[0-9]{1,10}) caller_thread=(?<caller_thread>[0-9]{1,10}) target_thread=(?<target_thread>[0-9]{1,10}) target=0x[0-9A-F]{1,16} focus=0x[0-9A-F]{1,16}\z'
+    foreach ($line in ($Text -split "`n")) {
+        if ($line.EndsWith("`r")) { $line = $line.Substring(0, $line.Length - 1) }
+        $match = [regex]::Match($line, $pattern)
+        if (!$match.Success) { continue }
+        $number = [uint32]0
+        $valid = $true
+        foreach ($field in @('last_error', 'caller_thread', 'target_thread')) {
+            if (![uint32]::TryParse($match.Groups[$field].Value, [ref]$number)) { $valid = $false; break }
+        }
+        if (!$valid) { continue }
+        $date = [datetime]::MinValue
+        if ($match.Groups['timestamp'].Success -and ![datetime]::TryParseExact($match.Groups['timestamp'].Value, 'yyyy-MM-dd HH:mm:ss.fff', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$date)) { continue }
+        $match.Value
+    }
+}
+
 function Get-JourneyError([System.Management.Automation.ErrorRecord]$Record) {
     $message = $Record.Exception.Message
     $unsafe = $message -match '(?i)(bearer\s|refresh.token|access.token|admin.key|workspace.key|pfxpass|[\r\n{}])'
