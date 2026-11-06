@@ -1,5 +1,6 @@
 param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidence, [Parameter(Mandatory)][string]$FixtureBin)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/snapshot.ps1"
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
@@ -78,16 +79,8 @@ try {
     $result.idleCpuPercent = (($after.UserTime + $after.KernelTime - $before.UserTime - $before.KernelTime) / 10000.0) / $timer.Elapsed.TotalMilliseconds * 100 / [Environment]::ProcessorCount
     $result.idleWallMs = $timer.Elapsed.TotalMilliseconds
     $result.jobBefore = $before; $result.jobAfter = $after
-    $raw = @()
-    foreach ($p in [Diagnostics.Process]::GetProcesses()) {
-        try {
-            if ($job.Contains($p)) { $raw += @{ id=$p.Id; name=$p.ProcessName; workingSetBytes=$p.WorkingSet64 } }
-        } catch {
-        } finally { $p.Dispose() }
-    }
-    $accounting = $job.ReadAccounting()
-    if (@($raw | Where-Object { $_.id -eq $app.Id }).Count -ne 1) { throw 'App absent from job snapshot' }
-    if ($raw.Count -ne $accounting.ActiveProcesses) { throw "Incomplete process snapshot: $($raw.Count) vs $($accounting.ActiveProcesses)" }
+    $snapshot = Get-StableJobSnapshot -Job $job -AppId $app.Id
+    $raw = $snapshot.processes; $accounting = $snapshot.accounting
     $result.rawProcesses = $raw; $result.jobActiveProcesses = $accounting.ActiveProcesses
     $result.processes = $raw.Count
     $result.syntheticSshProcesses = @($raw | Where-Object { $_.name -ieq 'ssh' }).Count

@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 22
       - name: Test guard
-        run: node --test tools/resource-guard/evaluate.test.mjs tools/resource-guard/verify-baseline.test.mjs tools/resource-warning-ticket.test.mjs tools/release-version.test.mjs
+        run: node --test tools/resource-guard/snapshot.test.mjs tools/resource-guard/evaluate.test.mjs tools/resource-guard/verify-baseline.test.mjs tools/resource-warning-ticket.test.mjs tools/release-version.test.mjs
       - name: Prepare synthetic SSH and pinned baseline
         shell: pwsh
         env:
