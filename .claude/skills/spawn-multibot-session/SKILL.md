@@ -15,7 +15,7 @@ Use the account layout command, not terminal typing.
 - Use the server's configured host slot. `MULTIPROMPT_HOST` or `--host` must identify this server in the account, not another machine.
 - An approved account service key must already be available as `MULTIPROMPT_KEY`. Never print it, put it in command arguments, or add it to agent instructions. Never create or broaden a key to finish this task.
 - Use the canonical Multiprompt checkout containing this skill and `tools/mp-layout.mjs`. The reader must already be installed for the server user. `MULTIPROMPT_READER` can select its installed location.
-- This command uses the existing Claude live host and its `bypassPermissions` mode. Use only trusted project folders. It is not a general launcher for arbitrary executables or in-session subagents.
+- This command uses the existing Claude live host and its `bypassPermissions` mode by default. `--provider hax` starts a hax (Codex) live host instead. Use only trusted project folders. It is not a general launcher for arbitrary executables or in-session subagents.
 
 ## Visible chat
 
@@ -46,6 +46,7 @@ node tools/mp-layout.mjs spawn \
   --workspace "$WORKSPACE" \
   --group "$RUNNER_GROUP" \
   --mode headless \
+  --provider "$PROVIDER" \
   --task "$RUNNER_TASK"
 ```
 
