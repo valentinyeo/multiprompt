@@ -245,6 +245,9 @@ jobs:
         run: |
           ./tools/resource-guard/setup.ps1
           Copy-Item release-bin/zigshell-bridge-x64.exe release-bin/zigshell-bridge.exe
+      - name: Test fixture process lifetime
+        shell: pwsh
+        run: ./tools/resource-guard/launcher-lifetime.test.ps1
       - name: Measure baseline
         shell: pwsh
         run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin

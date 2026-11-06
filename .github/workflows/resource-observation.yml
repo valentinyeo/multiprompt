@@ -22,6 +22,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./tools/resource-guard/setup.ps1
+      - name: Test fixture process lifetime
+        shell: pwsh
+        run: ./tools/resource-guard/launcher-lifetime.test.ps1
       - name: Resolve candidate version
         shell: pwsh
         run: |

@@ -24,13 +24,27 @@ static int run(void) {
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    if (!CreateProcessW(python, command, NULL, NULL, TRUE, GetConsoleWindow() == NULL ? CREATE_NO_WINDOW : 0, NULL, NULL, &si, &pi)) { free(command); return 93; }
+    HANDLE job = CreateJobObjectW(NULL, NULL);
+    if (!job) { free(command); return 95; }
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {0};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) { CloseHandle(job); free(command); return 95; }
+    DWORD flags = CREATE_SUSPENDED | (GetConsoleWindow() == NULL ? CREATE_NO_WINDOW : 0);
+    if (!CreateProcessW(python, command, NULL, NULL, TRUE, flags, NULL, NULL, &si, &pi)) { CloseHandle(job); free(command); return 93; }
     free(command);
+    if (!AssignProcessToJobObject(job, pi.hProcess) || ResumeThread(pi.hThread) == (DWORD)-1) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(job);
+        return 95;
+    }
     CloseHandle(pi.hThread);
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD result = 94;
     GetExitCodeProcess(pi.hProcess, &result);
     CloseHandle(pi.hProcess);
+    CloseHandle(job);
     return (int)result;
 }
 
