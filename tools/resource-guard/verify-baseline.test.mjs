@@ -11,6 +11,7 @@ const script = fileURLToPath(new URL('./verify-baseline.mjs', import.meta.url));
 const files = ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe'];
 
 test('baseline CLI verifies the signed checksums and both executables', async t => {
+  assert.ok(fs.existsSync(script), 'Baseline verifier must ship');
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-baseline-'));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
   fs.mkdirSync(path.join(cwd, 'baseline-bin'));

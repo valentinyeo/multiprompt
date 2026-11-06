@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateResources, evaluateLatency } from './evaluate.mjs';
+import fs from 'node:fs';
+assert.ok(fs.existsSync(new URL('./evaluate.mjs', import.meta.url)), 'Resource evaluator must ship');
+const { evaluateResources, evaluateLatency } = await import('./evaluate.mjs');
 const limits = { workload: 'fixture', sessionCount: 30, resources: { memoryToleranceBytes: 16, cardinalityGrowth: 0 }, latency: { sendPaintMs: 300, typingMs: 50 } };
 const normal = { workload: 'fixture', sessionCount: 30, readySessions: 30, cleaned: true, appAlive: true, processes: 2, jobActiveProcesses: 2, rawProcesses: [{}, {}], syntheticSshProcesses: 1, syntheticSshReaders: 1, jobConsoleProcesses: 0, workingSetBytes: 100, idleCpuPercent: 1 };
 test('comparison fails closed and blocks regressions', () => {
