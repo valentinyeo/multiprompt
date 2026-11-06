@@ -36,10 +36,19 @@ if (($actual -join "`n") -cne ($expected -join "`n")) { throw 'Palette sanitizer
 $focusBase = '[focus-trace] event=allowed caller=exe+0x123 target=0x456 class="Edit" pid=42 ours=true focus=0x789 foreground=0x456 foreground_class="ZigShell"'
 $focusTimed = '[focus-trace] 2026-10-18 03:04:05.067 event=blocked caller=exe+0x0 target=0xFFFFFFFFFFFFFFFF class="ConsoleWindowClass" pid=4294967295 ours=false focus=0x0 foreground=0x1 foreground_class="Edit" repeats=4294967295'
 $focusRefocus = $focusBase.Replace('event=allowed', 'event=activation_refocus') + ' repeats=0'
+$focusNullReturn = $focusBase.Replace('event=allowed', 'event=setfocus_null_return')
+$focusReturned = $focusBase.Replace('event=allowed', 'event=setfocus_returned')
 $focusLines = @(
     $focusBase
     $focusTimed
     $focusRefocus
+    $focusNullReturn
+    $focusReturned
+    $focusNullReturn.Replace('event=setfocus_null_return', 'event=prefix_setfocus_null_return')
+    $focusNullReturn.Replace('event=setfocus_null_return', 'event=setfocus_null_return_suffix')
+    $focusReturned.Replace('event=setfocus_returned', 'event=prefix_setfocus_returned')
+    $focusReturned.Replace('event=setfocus_returned', 'event=setfocus_returned_suffix')
+    $focusBase.Replace('event=allowed', 'event=setfocus_unknown')
     "synthetic-secret $focusBase"
     "$focusBase synthetic-secret"
     "$focusBase`rsynthetic-secret"
@@ -57,6 +66,6 @@ $focusLines = @(
     $focusBase.Replace('pid=42', 'pid=１２')
 )
 $focusActual = @(Get-SafeFocusRecords ($focusLines -join "`r`n"))
-$focusExpected = @($focusBase, $focusTimed, $focusRefocus)
+$focusExpected = @($focusBase, $focusTimed, $focusRefocus, $focusNullReturn, $focusReturned)
 if (($focusActual -join "`n") -cne ($focusExpected -join "`n")) { throw 'Focus sanitizer accepted unsafe records or changed ordering' }
 Write-Host 'Account journey diagnostics assertions passed'

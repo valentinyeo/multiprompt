@@ -257,6 +257,7 @@ pub noinline fn SetForegroundWindow(hwnd: HANDLE) BOOL {
 pub noinline fn SetFocus(hwnd: HANDLE) HANDLE {
     if (!focusGuardAt(hwnd, @returnAddress(), false)) return null;
     const result = FocusNative.SetFocus(hwnd);
+    focusTrace(if (result == null) .setfocus_null_return else .setfocus_returned, hwnd, @returnAddress());
     if (GetFocus() == hwnd) focusGuardLanded(hwnd);
     return result;
 }

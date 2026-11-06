@@ -3,7 +3,7 @@ function Get-SafePaletteRecords([string]$Text) {
 }
 
 function Get-SafeFocusRecords([string]$Text) {
-    $pattern = '(?m)^\[focus-trace\] (?:(?<timestamp>[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}) )?event=(?:allowed|blocked|activation_refocus) caller=exe\+0x[0-9A-F]{1,16} target=0x[0-9A-F]{1,16} class="(?:Edit|ZigShell|ConsoleWindowClass)" pid=(?<pid>[0-9]{1,10}) ours=(?:true|false) focus=0x[0-9A-F]{1,16} foreground=0x[0-9A-F]{1,16} foreground_class="(?:Edit|ZigShell|ConsoleWindowClass)"(?: repeats=(?<repeats>[0-9]{1,10}))?\r?$'
+    $pattern = '(?m)^\[focus-trace\] (?:(?<timestamp>[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}) )?event=(?:allowed|blocked|activation_refocus|setfocus_null_return|setfocus_returned) caller=exe\+0x[0-9A-F]{1,16} target=0x[0-9A-F]{1,16} class="(?:Edit|ZigShell|ConsoleWindowClass)" pid=(?<pid>[0-9]{1,10}) ours=(?:true|false) focus=0x[0-9A-F]{1,16} foreground=0x[0-9A-F]{1,16} foreground_class="(?:Edit|ZigShell|ConsoleWindowClass)"(?: repeats=(?<repeats>[0-9]{1,10}))?\r?$'
     foreach ($match in [regex]::Matches($Text, $pattern)) {
         $number = [uint32]0
         $date = [datetime]::MinValue
