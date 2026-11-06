@@ -33,9 +33,22 @@ function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
     $foreground = [ReconnectDesktop]::GetForegroundWindow()
     $owner = [ReconnectDesktop]::Owner($Window)
     $foregroundOwner = [ReconnectDesktop]::Owner($foreground)
-    if ($Window -eq [IntPtr]::Zero -or $owner -ne $ProcessId -or $foreground -ne $Window) { throw "App window is not owned and foreground: expected hwnd=$($Window.ToInt64()) owner=$ProcessId; actual owner=$owner foreground=$($foreground.ToInt64()) foreground owner=$foregroundOwner" }
+    if ($Window -eq [IntPtr]::Zero -or $owner -ne $ProcessId -or $foreground -ne $Window) {
+        $detail = 'diagnostics=unavailable'
+        try {
+            $class = [ReconnectDesktop]::Class($foreground)
+            if ($class -cnotin @('ZigShell', 'ConsoleWindowClass', 'Edit')) { $class = 'other' }
+            $root = [ReconnectDesktop]::GetAncestor($foreground, 2).ToInt64()
+            $count = [ReconnectDesktop]::EventCount()
+            $start = [Math]::Max([int]$script:journeyEventStart, $count - 12)
+            $events = @([ReconnectDesktop]::EventsSince($start) | Select-Object -Last 12 | ForEach-Object { "$( $_.ev ):$( $_.hwnd ):$( $_.pid ):$( $_.root )" }) -join ','
+            $detail = "foreground_class=$class foreground_root=$root events=$events"
+        } catch {}
+        throw "App window is not owned and foreground: expected hwnd=$($Window.ToInt64()) owner=$ProcessId; actual owner=$owner foreground=$($foreground.ToInt64()) foreground owner=$foregroundOwner; $detail"
+    }
 }
 function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) {
+    try { $script:journeyEventStart = [ReconnectDesktop]::EventCount() } catch { $script:journeyEventStart = 0 }
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
         if ($Window -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId) { Assert-Window $Window $ProcessId }

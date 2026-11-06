@@ -7,6 +7,7 @@ $repo = (Resolve-Path "$PSScriptRoot/../..").Path
 Add-Type -AssemblyName System.Drawing
 try { Add-Type -AssemblyName System.Security } catch {}
 Add-Type -Path "$repo/tools/verify-reconnect/desktop.cs"
+[ReconnectDesktop]::StartSpy()
 [void][ReconnectDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $work = Join-Path $env:RUNNER_TEMP ('account-journey-' + [guid]::NewGuid().ToString('N'))
 $settings = "$work/roaming/ZigShell"

@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -Path "$PSScriptRoot/../verify-reconnect/desktop.cs"
+[ReconnectDesktop]::StartSpy()
 . "$PSScriptRoot/foreground.ps1"
+. "$PSScriptRoot/diagnostics.ps1"
 $source = @'
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
@@ -42,6 +44,23 @@ try {
     $rejected = $false
     try { Set-JourneyForeground $windows[0] $processes[1].Id } catch { $rejected = $_.Exception.Message -match 'expected hwnd=.*owner=.*foreground=' }
     if (!$rejected) { throw 'Foreground probe accepted a window owned by another process' }
+
+    Set-JourneyForeground $windows[0] $processes[0].Id
+    [JourneyForeground]::Activate($windows[1])
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $seen = @([ReconnectDesktop]::EventsSince($script:journeyEventStart) | Where-Object { $_.ev -eq 3 -and $_.hwnd -eq $windows[1].ToInt64() }).Count -gt 0
+        if ([ReconnectDesktop]::GetForegroundWindow() -eq $windows[1] -and $seen) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $caught = $null
+    try { Assert-Window $windows[0] $processes[0].Id } catch { $caught = $_ }
+    if (!$caught -or !$seen) { throw 'Foreground failure or event was not exercised' }
+    $diagnostic = Get-JourneyError $caught
+    $message = $diagnostic.message
+    if ($message -notmatch 'expected hwnd=\d+ owner=\d+; actual owner=\d+ foreground=\d+ foreground owner=\d+; foreground_class=other foreground_root=\d+ events=(\d+:\d+:\d+:\d+)(,\d+:\d+:\d+:\d+){0,11}$' -or $diagnostic.redacted -or $diagnostic.stack -notmatch 'Assert-Window' -or $diagnostic.stack -notmatch 'foreground\.test\.ps1') { throw 'Foreground diagnostic lost failure, stack, or safe event trail' }
+    $serialized = $diagnostic | ConvertTo-Json -Depth 4
+    if ($serialized -notmatch 'foreground_class=other' -or $serialized -match 'Account journey foreground probe') { throw 'Foreground diagnostic serialization is unsafe' }
 
     Add-Type -AssemblyName System.Drawing
     $tokens = $null
