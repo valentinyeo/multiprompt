@@ -37,7 +37,21 @@ public static class ReconnectDesktop {
     public static int Owner(IntPtr window) { return Mode == "wrong-owner" ? 43 : 42; }
     public static IntPtr GetAncestor(IntPtr window, int flags) { return new IntPtr(Mode == "wrong-root" ? 101 : 100); }
     public static string Class(IntPtr window) { return "Edit"; }
-    public static string Text(IntPtr window) { return Mode == "wrong" || Mode == "wrong-name" ? "synthetic-secret-wrong-name" : "Runners"; }
+    public static string Text(IntPtr window) { return Mode == "snapshot-new" && window == new IntPtr(201) ? "private-expected-name" : Mode == "wrong" || Mode == "wrong-name" ? "synthetic-secret-wrong-name" : "Runners"; }
+}
+public static class JourneyForeground {
+    public static IntPtr[] VisibleEdits(IntPtr window, int pid) {
+        string mode = ReconnectDesktop.Mode;
+        if (mode == "snapshot-error" || (mode == "baseline-error" && !ReconnectDesktop.Entered) || (mode == "timeout-error" && ReconnectDesktop.Entered)) throw new Exception("synthetic-secret-snapshot");
+        if (mode == "snapshot-missing") return new IntPtr[0];
+        if (mode == "snapshot-many") {
+            var result = new IntPtr[14];
+            for (int i = 0; i < result.Length; i++) result[i] = new IntPtr(200 + i);
+            return result;
+        }
+        if (mode == "snapshot-new" || mode == "baseline-error") return ReconnectDesktop.Entered ? new IntPtr[] { new IntPtr(200), new IntPtr(201) } : new IntPtr[] { new IntPtr(200) };
+        return new IntPtr[] { new IntPtr(200) };
+    }
 }
 '@
 $script:trace = "[palette] ready chars=0 count=1 target=1`n[palette] ready chars=16 count=1 target=7000`n"
@@ -95,7 +109,7 @@ $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
 . (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
 $secrets = @{ admin_key = 'synthetic-secret' }
-foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error')) {
+foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error')) {
     $script:trace = "[palette] confirm target=7000`n"
     [ReconnectDesktop]::Opened = $false
     [ReconnectDesktop]::Ready = $false
@@ -112,7 +126,7 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
     if (!$caught) { throw 'Expected rename timeout' }
     $diagnostic = Get-JourneyError $caught
     $message = $diagnostic.message
-    $exists = $mode -in @('wrong', 'unfocused', 'wrong-name', 'transient', 'spy-count-error', 'spy-events-error')
+    $exists = $mode -notin @('missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error')
     $focused = $mode -eq 'wrong'
     $nameMatch = $mode -eq 'unfocused'
     $hwnd = if ($exists) { 200 } else { 0 }
@@ -126,6 +140,17 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
     $eventTrail = if ($mode -in @('spy-count-error', 'spy-events-error')) { 'unavailable' } else { ((3..14 | ForEach-Object { "$(1 + $_):$(200 + $_):42:100" }) -join ',') }
     if (!$message.EndsWith("saw_focused_owned_edit=$sawEdit events=$eventTrail")) { throw 'Incorrect rename history diagnostic' }
     if ([ReconnectDesktop]::Cursor -ne $(if ($mode -eq 'spy-count-error') { -1 } else { 3 })) { throw 'Incorrect pre-Enter event cursor' }
+    $snapshot = switch ($mode) {
+        'snapshot-new' { 'before_edits=[count=1,truncated=False,entries=200:False] timeout_edits=[count=2,truncated=False,entries=200:True:False,201:False:True]' }
+        'snapshot-missing' { 'before_edits=[count=0,truncated=False,entries=] timeout_edits=[count=0,truncated=False,entries=]' }
+        'snapshot-many' { $before = (200..211 | ForEach-Object { "${_}:False" }) -join ','; $after = (200..211 | ForEach-Object { "${_}:True:False" }) -join ','; "before_edits=[count=14,truncated=True,entries=$before] timeout_edits=[count=14,truncated=True,entries=$after]" }
+        'snapshot-error' { 'before_edits=[unavailable] timeout_edits=[unavailable]' }
+        'baseline-error' { 'before_edits=[unavailable] timeout_edits=[count=2,truncated=False,entries=200:unavailable:False,201:unavailable:False]' }
+        'timeout-error' { 'before_edits=[count=1,truncated=False,entries=200:False] timeout_edits=[unavailable]' }
+        'unfocused' { 'before_edits=[count=1,truncated=False,entries=200:True] timeout_edits=[count=1,truncated=False,entries=200:True:True]' }
+        default { $null }
+    }
+    if ($snapshot -and !$message.Contains($snapshot)) { throw "Incorrect sanitized snapshot for $mode" }
     if ($mode -eq 'wrong' -and $message -notmatch 'focus=200 owner=42 root=100 edit_class=True ') { throw 'Wrong-name edit not identified' }
     if ($mode -like 'missing-*' -and $message -notmatch 'focus=0 owner=0 root=0 edit_class=False ') { throw 'Missing edit not identified' }
 }

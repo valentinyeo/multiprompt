@@ -141,10 +141,18 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
         $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=16 count=\d+ target=7000(?:\r?\n|$)'
     } 10)
     Assert-Focus $Window $ProcessId $Window
+    $baselineEdits = $null
+    $baselineSnapshot = 'unavailable'
+    try {
+        $baselineEdits = @([JourneyForeground]::VisibleEdits($Window, $ProcessId))
+        $entries = @($baselineEdits | Select-Object -First 12 | ForEach-Object { '{0}:{1}' -f $_.ToInt64(), ([ReconnectDesktop]::Text($_) -ceq $ExpectedName) }) -join ','
+        $baselineSnapshot = "count=$($baselineEdits.Count),truncated=$($baselineEdits.Count -gt 12),entries=$entries"
+    } catch { $baselineEdits = $null }
     $beforeEnter = Read-Log $paletteLog
     $enterOffset = $beforeEnter.Length
     $eventStart = $null
     try { $eventStart = [ReconnectDesktop]::EventCount() } catch {}
+    Assert-Focus $Window $ProcessId $Window
     [ReconnectDesktop]::Type(0x0D)
     $state = @{ foreground = 0L; focus = 0L; owner = 0; root = 0L; edit_class = $false; expected_name_match = $false; saw_focused_owned_edit = $false }
     try {
@@ -191,7 +199,16 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
                 $events = @([ReconnectDesktop]::EventsSince($eventStart) | Select-Object -Last 12 | ForEach-Object { '{0}:{1}:{2}:{3}' -f [uint32]$_.ev, [long]$_.hwnd, [uint32]$_.pid, [long]$_.root }) -join ','
             } catch { $events = 'unavailable' }
         }
-        $message += " saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
+        $timeoutSnapshot = 'unavailable'
+        try {
+            $timeoutEdits = @([JourneyForeground]::VisibleEdits($Window, $ProcessId))
+            $entries = @($timeoutEdits | Select-Object -First 12 | ForEach-Object {
+                $existed = if ($null -eq $baselineEdits) { 'unavailable' } else { [string]($baselineEdits -contains $_) }
+                '{0}:{1}:{2}' -f $_.ToInt64(), $existed, ([ReconnectDesktop]::Text($_) -ceq $ExpectedName)
+            }) -join ','
+            $timeoutSnapshot = "count=$($timeoutEdits.Count),truncated=$($timeoutEdits.Count -gt 12),entries=$entries"
+        } catch {}
+        $message += " before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
         $exception = [System.Exception]::new($message, $original.Exception)
         $exception.Data['original_script_stack'] = $original.ScriptStackTrace
         throw $exception

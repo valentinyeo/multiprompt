@@ -1,7 +1,29 @@
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Text;
 public static class JourneyForeground {
+    delegate bool EnumProc(IntPtr h, IntPtr parameter);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder name, int max);
+    public static IntPtr[] VisibleEdits(IntPtr root, int processId) {
+        if (root == IntPtr.Zero) throw new ArgumentException("Missing root");
+        uint rootPid;
+        if (GetWindowThreadProcessId(root, out rootPid) == 0 || rootPid != (uint)processId) return new IntPtr[0];
+        var edits = new List<IntPtr>();
+        EnumProc callback = (h, parameter) => {
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            var name = new StringBuilder(16);
+            if (pid == (uint)processId && GetAncestor(h, 2) == root && IsWindowVisible(h) && GetClassName(h, name, name.Capacity) != 0 && name.ToString() == "Edit") edits.Add(h);
+            return true;
+        };
+        EnumChildWindows(root, callback, IntPtr.Zero);
+        return edits.ToArray();
+    }
     [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public UIntPtr wParam; public IntPtr lParam; public uint time; public int x, y; public uint lPrivate; }
     [DllImport("user32.dll")] static extern bool PeekMessage(out MSG message, IntPtr hwnd, uint min, uint max, uint remove);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();

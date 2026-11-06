@@ -6,8 +6,21 @@ Add-Type -Path "$PSScriptRoot/../verify-reconnect/desktop.cs"
 $source = @'
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class FixtureControls {
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr CreateWindowEx(int ex, string cls, string text, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+}
+"@
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = 'Account journey foreground probe'
+$form.Add_Shown({
+    foreach ($item in @(@('Edit', 0x50000000), @('Edit', 0x50000000), @('Edit', 0x40000000), @('Button', 0x50000000))) {
+        $h = [FixtureControls]::CreateWindowEx(0, $item[0], 'private fixture text', [uint32]$item[1], 0, 0, 60, 20, $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
+        if ($h -eq [IntPtr]::Zero) { throw 'Cannot create fixture control' }
+    }
+})
 [System.Windows.Forms.Application]::Run($form)
 '@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))
@@ -40,6 +53,15 @@ try {
         Set-JourneyForeground $windows[$index] $processes[$index].Id
         Assert-Window $windows[$index] $processes[$index].Id
         if ([ReconnectDesktop]::Focus($windows[$index])[0] -ne $windows[$index].ToInt64()) { throw 'Foreground probe focus mismatch' }
+    }
+    foreach ($index in 0, 1) {
+        $edits = @([JourneyForeground]::VisibleEdits($windows[$index], $processes[$index].Id))
+        if ($edits.Count -ne 2 -or $edits[0] -eq $edits[1]) { throw 'Visible Edit enumeration included hidden or non-Edit controls, or missed controls' }
+        if (@([JourneyForeground]::VisibleEdits($edits[0], $processes[$index].Id)).Count -ne 0) { throw 'Visible Edit enumeration found children of an Edit control' }
+        foreach ($edit in $edits) {
+            if ([ReconnectDesktop]::Owner($edit) -ne $processes[$index].Id -or [ReconnectDesktop]::GetAncestor($edit, 2) -ne $windows[$index] -or [ReconnectDesktop]::Class($edit) -cne 'Edit') { throw 'Visible Edit enumeration returned a foreign control' }
+        }
+        if (@([JourneyForeground]::VisibleEdits($windows[$index], $processes[1 - $index].Id)).Count -ne 0) { throw 'Visible Edit enumeration accepted another PID' }
     }
     $rejected = $false
     try { Set-JourneyForeground $windows[0] $processes[1].Id } catch { $rejected = $_.Exception.Message -match 'expected hwnd=.*owner=.*foreground=' }
