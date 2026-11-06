@@ -41,6 +41,12 @@ $app = [FakeProcess]::new(1)
 $other = [FakeProcess]::new(2)
 $outside = [FakeProcess]::new(3); $outside.Member = $false
 $stable = Account 2 2 0
+function Check-CallerCim($job, $processes) {
+    $cim = @(Cim $processes)
+    $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { $processes } -EnumerateCim { $cim }
+    Check ($snapshot.processes.Count -eq 2 -and $job.Reads -eq 2) 'Caller CIM fixture must be visible to injected scriptblock'
+}
+Check-CallerCim ([FakeJob]::new(@($stable))) @($app, $other)
 $job = [FakeJob]::new(@($stable, (Account 3 2 1), (Account 3 2 1), (Account 3 2 1)))
 $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other, $outside) } -EnumerateCim { Cim @($app, $other, $outside) }
 Check ($job.Reads -eq 4 -and $script:delays -eq 1) 'Birth and death with unchanged count must retry'

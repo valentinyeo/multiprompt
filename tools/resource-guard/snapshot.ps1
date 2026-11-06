@@ -1,10 +1,10 @@
 function Get-StableJobSnapshot {
     param($Job, [int]$AppId, [scriptblock]$Enumerate = { [Diagnostics.Process]::GetProcesses() }, [scriptblock]$EnumerateCim = { Get-CimInstance Win32_Process })
     for ($attempt = 0; $attempt -lt 10; $attempt++) {
-        $cim = @{}
+        $cimById = @{}
         foreach ($detail in (& $EnumerateCim)) {
             $id = [int]$detail.ProcessId
-            if ($cim.ContainsKey($id)) { $cim[$id] = $null } else { $cim[$id] = $detail }
+            if ($cimById.ContainsKey($id)) { $cimById[$id] = $null } else { $cimById[$id] = $detail }
         }
         $before = $Job.ReadAccounting()
         $raw = @()
@@ -20,7 +20,7 @@ function Get-StableJobSnapshot {
         foreach ($process in $raw) {
             if ($seen.ContainsKey($process.id)) { $complete = $false; continue }
             $seen[$process.id] = $true
-            $detail = $cim[$process.id]
+            $detail = $cimById[$process.id]
             if ($null -eq $detail) { $complete = $false; continue }
             if ([string]::IsNullOrWhiteSpace($detail.CommandLine) -or [string]::IsNullOrWhiteSpace($detail.ExecutablePath) -or
                 $null -eq $detail.ParentProcessId -or $null -eq $detail.CreationDate -or
