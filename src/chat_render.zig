@@ -3914,6 +3914,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const start = if (display.reply_ref) |r| r.body_start else 0;
     const body_display = display.slice(start);
     _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
+    if (e.waiting()) chatDimQueuedBubble(hdc, rc);
 }
 
 fn chatStatusRowRect(bubble: RECT) RECT {
@@ -5242,6 +5243,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
             const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
             chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
+            if (nav_index != null and nav_index.? == app_state.g_chat_block_count + i) chatPaintNavRing(mem_dc, rc);
             send_latency.noteDrawn(app_state.g_chat_outbox.items[ei].id);
         }
         for (0..g_shell_rect_count) |i| {
@@ -5327,9 +5329,10 @@ pub fn chatSelectionMenu() void {
     _ = chatMessageMenu(hwnd, WM_KEYDOWN, 0, @intCast(pos), null, true);
 }
 
-fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_block: ?usize, selection_offer: bool) LRESULT {
+fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_index: ?usize, selection_offer: bool) LRESULT {
     if (!chatMenuEligible(hwnd)) return 0;
-    const link_text: ?[]u16 = if (keyboard_block != null) null else if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
+    const keyboard_block = if (keyboard_index) |index| (if (index < app_state.g_chat_block_count) keyboard_index else null) else null;
+    const link_text: ?[]u16 = if (keyboard_index != null) null else if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
         std.heap.page_allocator.dupe(u16, text) catch {
             showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
             return 0;
@@ -5337,10 +5340,10 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     else
         null;
     defer if (link_text) |text| std.heap.page_allocator.free(text);
-    const echo_id = if (keyboard_block != null) null else chatEchoAt(GET_X(lp), GET_Y(lp));
+    const echo_id = if (keyboard_index) |index| (if (index >= app_state.g_chat_block_count and index - app_state.g_chat_block_count < app_state.g_chat_echo_layout_count) app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count] else null) else chatEchoAt(GET_X(lp), GET_Y(lp));
     const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
     const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
-    const block_at = keyboard_block orelse chatTranscriptBlockAtPoint(GET_Y(lp));
+    const block_at = if (keyboard_index != null or echo_id != null) keyboard_block else chatTranscriptBlockAtPoint(GET_Y(lp));
     const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
         return 0;
@@ -5371,8 +5374,8 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
     const request_id: ?[]u16 = if (block_at) |index| (if (chatHistoryEntry(reaction_identity)) |entry| entry.history.requestIdAlloc(std.heap.page_allocator, app_state.g_chat_blocks[index]) catch null else null) else null;
     defer if (request_id) |id| std.heap.page_allocator.free(id);
-    const waiting = if (echo_index) |ei| !app_state.g_chat_outbox.items[ei].host_confirmed and chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms) else false;
-    var items = chatContextMenuItems(keyboard_block == null and selection_text.len > 0, selection_offer, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
+    const waiting = if (echo_index) |ei| (if (app_state.g_chat_outbox.items[ei].message_v1) app_state.g_chat_outbox.items[ei].removable() and !unsent_actions else !app_state.g_chat_outbox.items[ei].host_confirmed and chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms)) else false;
+    var items = chatContextMenuItems(keyboard_index == null and selection_text.len > 0, selection_offer, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
     if (block_at) |index| {
         const role = app_state.g_chat_blocks[index].role;
         if ((role == .prose or role == .code) and reply_text != null and @import("chat_composer.zig").chatAcAgent() == .claude) {
@@ -5547,6 +5550,7 @@ pub fn chatReplyResolve() void {
 }
 
 fn chatNavEligible(index: usize) bool {
+    if (index >= app_state.g_chat_block_count) return chatSelectionDisplay(index) != null;
     const block = app_state.g_chat_blocks[index];
     return block.role != .tool and block.len > 0 and !g_reaction_view.hides(index);
 }
@@ -5561,6 +5565,12 @@ fn chatNavIndex() ?usize {
     if (!app_state.g_chat_nav_active) return null;
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != app_state.g_chat_nav_shell_id) {
         app_state.g_chat_nav_active = false;
+        return null;
+    }
+    if (app_state.g_chat_nav_echo_id != 0) {
+        for (app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count], 0..) |id, i| {
+            if (id == app_state.g_chat_nav_echo_id and chatOutboxIndexById(id) != null) return app_state.g_chat_block_count + i;
+        }
         return null;
     }
     const count = app_state.g_chat_block_count;
@@ -5583,14 +5593,18 @@ fn chatNavIndex() ?usize {
 }
 
 fn chatNavFocus(index: usize) void {
-    const block = app_state.g_chat_blocks[index];
+    if (!chatNavEligible(index)) return;
     if (app_state.active_shell >= app_state.shell_count) return;
     app_state.g_chat_nav_active = true;
     app_state.g_chat_nav_shell_id = app_state.shells[app_state.active_shell].shell_id;
     app_state.g_chat_nav_index = index;
-    app_state.g_chat_nav_source = block.source_offset;
-    app_state.g_chat_nav_segment = block.segment;
-    app_state.g_chat_nav_stamp = block.stamp_ms;
+    app_state.g_chat_nav_echo_id = if (index >= app_state.g_chat_block_count) app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count] else 0;
+    if (app_state.g_chat_nav_echo_id == 0) {
+        const block = app_state.g_chat_blocks[index];
+        app_state.g_chat_nav_source = block.source_offset;
+        app_state.g_chat_nav_segment = block.segment;
+        app_state.g_chat_nav_stamp = block.stamp_ms;
+    }
     chatNavReveal(index);
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
@@ -5598,7 +5612,7 @@ fn chatNavFocus(index: usize) void {
 fn chatNavReveal(index: usize) void {
     var client: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client);
-    const rect = app_state.g_chat_layout_rects[index];
+    const rect = chatSelectionRect(index);
     const top = rect.top - app_state.g_chat_scroll_y;
     const bottom = rect.bottom - app_state.g_chat_scroll_y;
     const margin = uiScaled(8);
@@ -5614,7 +5628,7 @@ fn chatNavReveal(index: usize) void {
 
 pub fn chatNavStart() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
-    const count = app_state.g_chat_block_count;
+    const count = app_state.g_chat_block_count + app_state.g_chat_echo_layout_count;
     if (count == 0) return;
     var last: ?usize = null;
     var i = count;
@@ -5644,7 +5658,7 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
                 chatNavClear();
                 return true;
             };
-            const count = app_state.g_chat_block_count;
+            const count = app_state.g_chat_block_count + app_state.g_chat_echo_layout_count;
             const allocator = std.heap.page_allocator;
             const eligible = allocator.alloc(bool, count) catch return true;
             defer allocator.free(eligible);
@@ -5653,6 +5667,19 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
                 .focus => |index| chatNavFocus(index),
                 .leave => chatNavClear(),
                 .stay => {},
+            }
+            return true;
+        },
+        .remove => {
+            const index = chatNavIndex() orelse {
+                chatNavClear();
+                return true;
+            };
+            if (index >= app_state.g_chat_block_count) {
+                const id = app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count];
+                const ei = chatOutboxIndexById(id) orelse return true;
+                if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
+                if (chatOutboxIndexById(id) == null) chatNavClear();
             }
             return true;
         },
@@ -5665,8 +5692,8 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
             chatNavReveal(index);
             var client: RECT = std.mem.zeroes(RECT);
             chatViewClientRect(&client);
-            const rect = app_state.g_chat_layout_rects[index];
-            const x = std.math.clamp(app_state.g_chat_content_left + rect.left + uiScaled(24), client.left, client.right - 1);
+            const rect = chatSelectionRect(index);
+            const x = std.math.clamp(rect.left + uiScaled(24), client.left, client.right - 1);
             const y = std.math.clamp(rect.top - app_state.g_chat_scroll_y + uiScaled(12), client.top, client.bottom - 1);
             const packed_pos: u32 = ((@as(u32, @intCast(y)) & 0xffff) << 16) | (@as(u32, @intCast(x)) & 0xffff);
             const lp: LPARAM = @intCast(packed_pos);
@@ -6237,6 +6264,10 @@ test "IGSH-1010 a message waiting in Claude's queue gets Cancel after Reply and 
 fn chatCancelQueuedFromMenu(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     const entry = app_state.g_chat_outbox.items[ei];
+    if (entry.message_v1) {
+        chatEchoRemove(id);
+        return;
+    }
     if (entry.host_confirmed or !chat_echo.cancellable(entry.state, entry.delivery_watch.removed_ms)) return;
     if (!@import("chat_send.zig").chatCancelQueued(app_state.active_shell, id, entry.text, entry.anchor.sent_ms, entry.queue_id)) {
         showHeaderNoticeAscii("Could not cancel the message; try again", 3500, true);
@@ -6891,7 +6922,7 @@ fn expectCleanChatRowHidden(scene: CleanChatScene) !void {
     try std.testing.expectEqualSlices(u32, blank, on);
 }
 
-test "IGSH-1624 all outbox states paint identical plain bubbles in Light AMOLED and Edge Grey" {
+test "IGSH-1810 live waiting fades and receipt restores plain bubbles in Light AMOLED and Edge Grey" {
     const w = @import("win32.zig");
     const Flush = struct { extern "gdi32" fn GdiFlush() callconv(WINAPI) w.BOOL; };
     try std.testing.expect(@import("fonts.zig").register());
@@ -6958,6 +6989,33 @@ test "IGSH-1624 all outbox states paint identical plain bubbles in Light AMOLED 
                 try std.testing.expectEqualSlices(u32, reference, pixels);
                 if (clean and state == .not_sent)
                     try scrollProofSave(names[theme], std.mem.sliceAsBytes(pixels), info.header);
+            }
+            for ([_][]const u8{ "", "queued", "sent", "accepted", "started" }) |phase| {
+                var entry = ChatOutboxEntry{ .text = @constCast(text), .state = .queued, .message_v1 = true, .write_started = true };
+                @memcpy(entry.message_phase[0..phase.len], phase);
+                _ = FillRect(dc, &area, brush);
+                chatPaintEcho(dc, entry, rc, 0);
+                _ = Flush.GdiFlush();
+                const waiting = phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "sent");
+                try std.testing.expectEqual(!waiting, std.mem.eql(u32, reference, pixels));
+                if (waiting) {
+                    var before: u64 = 0;
+                    var after: u64 = 0;
+                    const bg = reference[reference.len - 1];
+                    for (reference, pixels) |full, faded| {
+                        for ([_]u5{ 0, 8, 16 }) |shift| {
+                            const background = @as(i32, @intCast((bg >> shift) & 255));
+                            before += @abs(@as(i32, @intCast((full >> shift) & 255)) - background);
+                            after += @abs(@as(i32, @intCast((faded >> shift) & 255)) - background);
+                        }
+                    }
+                    try std.testing.expect(after > 0 and after < before);
+                }
+                if (clean and (std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "accepted"))) {
+                    const waiting_names = [_]LPCWSTR{ L("chat-shared-waiting-light.bmp"), L("chat-shared-waiting-amoled.bmp"), L("chat-shared-waiting-edge-grey.bmp") };
+                    const read_names = [_]LPCWSTR{ L("chat-shared-read-light.bmp"), L("chat-shared-read-amoled.bmp"), L("chat-shared-read-edge-grey.bmp") };
+                    try scrollProofSave(if (waiting) waiting_names[theme] else read_names[theme], std.mem.sliceAsBytes(pixels), info.header);
+                }
             }
         }
     }
@@ -8247,4 +8305,82 @@ test "IGSH-1030 disclosure clicks expose body links and fold them away" {
     _ = chatTranscriptWndProc(null, WM_LBUTTONDOWN, 0, (10 << 16) | 10);
     try std.testing.expect(!app_state.g_chat_blocks[0].note_open);
     try std.testing.expect(chatTranscriptLinkAt(null, 10, 10) == null);
+}
+
+
+test "IGSH-1810 live messages stay faded until their own receipt and failures stay actionable" {
+    var entry: ChatOutboxEntry = .{ .message_v1 = true };
+    for ([_][]const u8{ "", "queued", "sent" }) |phase| {
+        entry.message_phase = @splat(0);
+        @memcpy(entry.message_phase[0..phase.len], phase);
+        entry.write_started = true;
+        entry.channel_sent = true;
+        entry.host_confirmed = true;
+        entry.delivery_watch.removed_ms = 9000;
+        try std.testing.expect(entry.waiting());
+        entry.channel_pending = true;
+        try std.testing.expect(!entry.removable());
+        entry.channel_pending = false;
+        try std.testing.expectEqual(!std.mem.eql(u8, phase, "sent"), entry.removable());
+    }
+    for ([_][]const u8{ "accepted", "started" }) |phase| {
+        entry.message_phase = @splat(0);
+        @memcpy(entry.message_phase[0..phase.len], phase);
+        try std.testing.expect(!entry.waiting());
+        try std.testing.expect(!entry.removable());
+    }
+    entry.message_phase = @splat(0);
+    for ([_]app_state.ChatEchoState{ .not_sent, .cancelled }) |state| {
+        entry.state = state;
+        try std.testing.expect(!entry.waiting());
+        try std.testing.expectEqual(state == .not_sent, entry.removable());
+    }
+    entry = .{};
+    try std.testing.expect(!entry.waiting());
+}
+
+
+test "IGSH-1810 keyboard focus follows a pending message by ID through history and outbox changes" {
+    const saved = .{ app_state.g_chat_active, app_state.active_shell, app_state.shell_count, app_state.shells[0].shell_id,
+        app_state.g_chat_nav_active, app_state.g_chat_nav_shell_id, app_state.g_chat_nav_echo_id,
+        app_state.g_chat_echo_layout_count, app_state.g_chat_echo_layout_ids[0], app_state.g_chat_echo_layout_ids[1],
+        app_state.g_chat_block_count, app_state.g_chat_outbox };
+    defer {
+        app_state.g_chat_outbox.deinit(std.testing.allocator);
+        app_state.g_chat_active = saved[0];
+        app_state.active_shell = saved[1];
+        app_state.shell_count = saved[2];
+        app_state.shells[0].shell_id = saved[3];
+        app_state.g_chat_nav_active = saved[4];
+        app_state.g_chat_nav_shell_id = saved[5];
+        app_state.g_chat_nav_echo_id = saved[6];
+        app_state.g_chat_echo_layout_count = saved[7];
+        app_state.g_chat_echo_layout_ids[0] = saved[8];
+        app_state.g_chat_echo_layout_ids[1] = saved[9];
+        app_state.g_chat_block_count = saved[10];
+        app_state.g_chat_outbox = saved[11];
+    }
+    app_state.g_chat_active = true;
+    app_state.active_shell = 0;
+    app_state.shell_count = 1;
+    app_state.shells[0].shell_id = 444;
+    app_state.g_chat_nav_active = true;
+    app_state.g_chat_nav_shell_id = 444;
+    app_state.g_chat_nav_echo_id = 222;
+    app_state.g_chat_block_count = 2;
+    app_state.g_chat_echo_layout_count = 2;
+    app_state.g_chat_echo_layout_ids[0] = 111;
+    app_state.g_chat_echo_layout_ids[1] = 222;
+    app_state.g_chat_outbox = .empty;
+    try app_state.g_chat_outbox.append(std.testing.allocator, .{ .id = 222 });
+    try std.testing.expectEqual(@as(?usize, 3), chatNavIndex());
+    app_state.g_chat_block_count = 7;
+    app_state.g_chat_echo_layout_count = 1;
+    app_state.g_chat_echo_layout_ids[0] = 222;
+    try std.testing.expectEqual(@as(?usize, 7), chatNavIndex());
+    app_state.g_chat_outbox.clearRetainingCapacity();
+    try std.testing.expectEqual(@as(?usize, null), chatNavIndex());
+    app_state.g_chat_nav_shell_id = 445;
+    try std.testing.expectEqual(@as(?usize, null), chatNavIndex());
+    try std.testing.expect(!app_state.g_chat_nav_active);
 }

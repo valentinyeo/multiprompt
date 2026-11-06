@@ -61,14 +61,15 @@ test('refusal control targets legacy delivery evidence, not Claude queue evidenc
   assert.match(mutated, /const facts: chat_echo\.DeliveryEvidence = \.\{\};\s+refused = facts\.refused;/);
 });
 
-test('waiting and started echoes always use the normal bubble', () => {
+test('live waiting echoes reuse the existing fade without adding status text', () => {
   const source = fs.readFileSync(path.join(root, 'src/chat_render.zig'), 'utf8');
   const start = source.indexOf('fn chatPaintEcho(');
   const end = source.indexOf('\n}', start);
   assert.ok(start >= 0 && end > start);
   const paint = source.slice(start, end);
   assert.match(paint, /fillBubbleStyled\(hdc, bubble, uiScaled\(CHAT_BUBBLE_RADIUS\), chatUserBubbleColor\(\), true, true\)/);
-  assert.doesNotMatch(paint, /chatDimQueuedBubble|message_phase|host_confirmed|removed_ms|e\.state/);
+  assert.match(paint, /if \(e\.waiting\(\)\) chatDimQueuedBubble\(hdc, rc\)/);
+  assert.doesNotMatch(paint, /Waiting|Sending|chatDrawText|chatPaintTime/);
 });
 
 test('gradient oracle requires normal matching text without duplicates', async () => {
