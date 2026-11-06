@@ -124,6 +124,8 @@ def serve(source):
 
 
 if __name__ == "__main__":
-    for event in (signal.SIGHUP, signal.SIGTERM):
-        signal.signal(event, lambda *_: sys.exit(0))
+    for name in ("SIGHUP", "SIGTERM"):
+        event = getattr(signal, name, None)
+        if event is not None:
+            signal.signal(event, lambda *_: sys.exit(0))
     serve(base64.b64decode(sys.stdin.buffer.readline()).decode())

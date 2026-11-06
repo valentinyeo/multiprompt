@@ -1279,6 +1279,141 @@ def run_message_worker():
     record("message-worker.jsonl", event="adapter-stop", tmux=tmux, provider=provider, sid=sid)
 
 
+
+def transport_reader():
+    import base64
+    import queue
+    import threading
+
+    broker = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    transport = dict(__name__="verified_transport")
+    exec(compile(broker, "<app-supplied-transport>", "exec"), transport)
+    source = sys.stdin.buffer.readline(transport["MAX_INPUT"] + 1)
+    if not source.endswith(b"\n"):
+        raise ValueError("incomplete transport reader source")
+    events = queue.Queue(128)
+    channels = {}
+
+    def receive():
+        try:
+            while True:
+                line = sys.stdin.buffer.readline(transport["MAX_INPUT"] + 1)
+                if not line:
+                    break
+                if len(line) > transport["MAX_INPUT"] or not line.endswith(b"\n"):
+                    raise ValueError("oversized transport input")
+                events.put((None, json.loads(line)))
+        finally:
+            events.put((None, None))
+
+    def emit(value):
+        print(json.dumps(value, separators=(",", ":")), flush=True)
+
+    def close(cid):
+        item = channels.pop(cid, None)
+        if item is None:
+            return
+        item["stop"].set()
+        try:
+            item["pending"].put_nowait(None)
+        except queue.Full:
+            pass
+        child = item["child"]
+        child.terminate()
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+        child.stdin.close()
+        child.stdout.close()
+
+    def read_output(cid, item):
+        try:
+            while not item["stop"].is_set():
+                line = item["child"].stdout.readline(transport["MAX_FRAME"] + 1)
+                if not line or len(line) > transport["MAX_FRAME"]:
+                    break
+                events.put((cid, line.rstrip(b"\n").decode("utf-8")))
+        finally:
+            events.put((cid, None))
+
+    def write_input(cid, item):
+        try:
+            item["child"].stdin.write(source)
+            item["child"].stdin.flush()
+            while not item["stop"].is_set():
+                line = item["pending"].get()
+                if line is None:
+                    break
+                item["child"].stdin.write(line)
+                item["child"].stdin.flush()
+                with item["lock"]:
+                    item["bytes"] -= len(line)
+        except (OSError, ValueError):
+            events.put((cid, None))
+
+    threading.Thread(target=receive, daemon=True).start()
+    emit(dict(ready=True))
+    try:
+        while True:
+            cid, value = events.get()
+            if cid is not None:
+                if cid not in channels:
+                    continue
+                if value is None:
+                    close(cid)
+                    emit(dict(channel=cid, closed=True))
+                else:
+                    emit(dict(channel=cid, data=value))
+                continue
+            if value is None:
+                return
+            cid = value["channel"]
+            if type(cid) is not int or cid < 1:
+                raise ValueError("invalid transport channel")
+            if value.get("close"):
+                close(cid)
+                continue
+            data = value.get("data")
+            if not isinstance(data, str):
+                close(cid)
+                emit(dict(channel=cid, closed=True))
+                continue
+            if cid not in channels:
+                if len(channels) >= transport["MAX_CHANNELS"]:
+                    emit(dict(channel=cid, closed=True))
+                    continue
+                mode = "--watch" if value.get("watch") else "--serve"
+                entry = "watch_reader" if value.get("watch") else "serve_reader"
+                record("invocations.jsonl", kind="reader", argv=[mode], channel=cid)
+                bootstrap = ("import importlib.util;"
+                             f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
+                             "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                             f"m.{entry}()")
+                child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, mode], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                item = dict(child=child, pending=queue.Queue(64), stop=threading.Event(), lock=threading.Lock(), bytes=0)
+                channels[cid] = item
+                threading.Thread(target=read_output, args=(cid, item), daemon=True).start()
+                threading.Thread(target=write_input, args=(cid, item), daemon=True).start()
+            item = channels[cid]
+            line = (data + "\n").encode("utf-8")
+            with item["lock"]:
+                item["bytes"] += len(line)
+                overflow = item["bytes"] > transport["MAX_INPUT"]
+            try:
+                if overflow:
+                    raise queue.Full
+                item["pending"].put_nowait(line)
+            except queue.Full:
+                close(cid)
+                emit(dict(channel=cid, closed=True))
+    finally:
+        for cid in list(channels):
+            close(cid)
+
+
 def serve_reader():
     namespace = reader_namespace()
     namespace["serve"](namespace["READER_SOURCE"])
@@ -1385,10 +1520,13 @@ def ssh():
             env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         if state().get("remoteHome"):
             env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
-        if remote[-1:] == ["--serve"]:
+        entry = "serve_reader" if remote[-1:] == ["--serve"] else None
+        if os.name == "nt" and remote[1:] == ["-u", "-c", "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"]:
+            entry = "transport_reader"
+        if entry:
             remote[3] = ("import importlib.util;"
                          f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
-                         "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.serve_reader()")
+                         f"m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.{entry}()")
         with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
             return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
     if "tmux list-clients" in command:
