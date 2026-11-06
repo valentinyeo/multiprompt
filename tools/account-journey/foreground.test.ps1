@@ -27,6 +27,7 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))
 $processes = @()
 $logs = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $logs | Out-Null
+$failed = $false
 try {
     foreach ($index in 0, 1) {
         $processes += Start-Process powershell.exe -ArgumentList '-NoProfile', '-STA', '-EncodedCommand', $encoded -PassThru -RedirectStandardError (Join-Path $logs "$index.err")
@@ -44,7 +45,7 @@ try {
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
         if ($window -eq [IntPtr]::Zero) {
-            $detail = Get-Content -Raw (Join-Path $logs "$index.err")
+            $detail = try { Get-Content -Raw (Join-Path $logs "$index.err") } catch { "stderr unavailable: $($_.Exception.Message)" }
             throw "Foreground probe window did not appear (pid=$($process.Id), exited=$($process.HasExited)): $detail"
         }
         $windows += $window
@@ -110,9 +111,37 @@ try {
     $capture = Get-Content "$logs/settle-race.json" -Raw | ConvertFrom-Json
     if ($capture.pid -ne $processes[0].Id -or $capture.hwnd -ne $windows[0].ToInt64()) { throw 'Screenshot identity mismatch' }
     Write-Host 'Account journey foreground assertions passed'
+} catch {
+    $failed = $true
+    throw
 } finally {
+    $cleanupErrors = @()
     foreach ($process in $processes) {
-        if (!$process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
+        try {
+            if (!$process.HasExited) {
+                try { $process.Kill() } catch { if (!$process.HasExited) { throw } }
+            }
+            if (!$process.WaitForExit(5000)) { throw "Owned foreground probe did not exit (pid=$($process.Id))" }
+        } catch {
+            $cleanupErrors += $_
+        } finally {
+            try { $process.Dispose() } catch { $cleanupErrors += $_ }
+        }
     }
-    Remove-Item -Recurse -Force $logs
+    $removeError = $null
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            Remove-Item -Recurse -Force $logs
+            $removeError = $null
+            break
+        } catch {
+            $removeError = $_
+            Microsoft.PowerShell.Utility\Start-Sleep -Milliseconds 100
+        }
+    }
+    if ($removeError) { $cleanupErrors += $removeError }
+    if ($cleanupErrors.Count) {
+        foreach ($cleanupError in $cleanupErrors) { Write-Host "Foreground cleanup failure: $cleanupError" }
+        if (!$failed) { throw $cleanupErrors[0] }
+    }
 }
