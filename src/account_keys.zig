@@ -56,7 +56,7 @@ pub fn applyOnHosts(aliases: []const []const u8, runner: anytype) HostRollout {
 }
 
 pub const Status = enum { pending, approved, denied, revoked };
-pub const Device = struct { device_id: []const u8, name: []const u8, public_key: []const u8, status: Status };
+pub const Device = struct { device_id: []const u8, name: []const u8, public_key: []const u8, status: Status, passkey: bool = false };
 pub const Listing = struct { device_id: []const u8, keys: []const Device };
 pub const Decision = struct { device_id: []const u8, public_key: []const u8, approve: bool };
 
@@ -66,7 +66,7 @@ pub fn syncPolicy(job_kind: anytype, now_ms: u64, last_check_ms: ?u64, last_publ
     const explicit = job_kind == .device_keys;
     const decision = job_kind == .decide_keys;
     return .{
-        .check = explicit or decision or last_check_ms == null or now_ms -| last_check_ms.? >= 5 * 60 * 1000,
+        .check = explicit or decision or last_check_ms == null or now_ms -| last_check_ms.? >= 15 * 1000,
         .publish = if (current_key) |key| explicit or last_published_key == null or !std.mem.eql(u8, last_published_key.?, key) else false,
         .show_error = explicit or decision,
     };

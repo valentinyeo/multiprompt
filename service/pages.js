@@ -170,7 +170,20 @@ export function confirmPage(email, name, redirect) {
   const body = `<header><b>multiprompt</b><span class="sp"></span><span class="who">${esc(email)}</span></header>
 <main data-page="authorize"><div class="tile narrow"><h1>Sign in this device?</h1>
 <p><b>${esc(name)}</b> wants to sign in to multiprompt as <b>${esc(email)}</b>. Only continue if you just started this from the app.</p>
-<form method="post"><div class="row"><button type="submit">Allow <span aria-hidden="true">&#8594;</span></button></div></form>
+<div class="stack"><button id="allow-passkey" type="button">Allow with a passkey <span aria-hidden="true">&#8594;</span></button>
+<form method="post"><button class="secondary" type="submit">Allow with device approval</button></form></div>
+<p id="passkey-msg" class="note" role="status"></p>
 <p class="note">The app receives a one-time code at ${esc(redirect.split('?')[0])}.</p></div></main>`;
-  return shell('multiprompt: approve device', body);
+  const script = common + `
+$('#allow-passkey').onclick = async () => {
+  const button = $('#allow-passkey'), msg = $('#passkey-msg'); button.disabled = true;
+  try {
+    note(msg, 'Confirm your passkey to approve this device.');
+    const options = await call('/api/auth/passkey/generate-authenticate-options');
+    const response = await passkeyGet({ ...options, userVerification: 'required' });
+    const result = await call(location.pathname + location.search, { method: 'POST', body: JSON.stringify({ response }) });
+    location.assign(result.redirect);
+  } catch (err) { note(msg, 'Passkey approval failed. Try again or use device approval.', true); button.disabled = false; }
+};`;
+  return shell('multiprompt: approve device', body, script);
 }
