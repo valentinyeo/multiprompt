@@ -73,6 +73,10 @@ node tools/mp-layout.mjs open \
 
 `--star` marks that tab as a favorite. Repeat the same session, workspace, group, and host to keep one tab. Pass `--move` only when that session should leave a different workspace. Omit `--group` when no group was requested. `node tools/multibot.mjs open` accepts the same arguments.
 
+## mb
+
+`node tools/mb.mjs` is the one command for a lead's roster. `list` shows sessions. `open --kind shell|chat` places a runner. `close`, `rename`, and `move` change one session. `workspace create|rename|delete|list` and `workspace color` manage workspaces. `group create|rename|delete|list` manages sidebar groups. `style` sets a session face, color, and PNG photo. `roster apply <file> --dry-run` prints the plan and changes nothing; without `--dry-run` it creates missing workspaces and groups, opens missing runners, fixes titles, groups, faces, colors, and photos, and closes only runners this command created. Delete and host shutdown use the same owner mark. A second identical run leaves the layout revision unchanged. An empty group is recorded locally and appears in Multibot when a session uses that group name.
+
 ## Repeat and verify
 
 - Keep the same name, folder, workspace, group, and host when retrying. The same normalized name on one host has one stable identity.

@@ -1,11 +1,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { hash } from '../worker.js';
 import { run } from '../../tools/mp-layout.mjs';
+import { run as mbRun } from '../../tools/mb.mjs';
 
 let mf, db;
 const base = 'http://localhost';
@@ -215,4 +216,64 @@ test('the key never appears in output and a missing key is reported', async () =
   assert.equal(unknown.errors[0], 'mp-layout: the key was not accepted');
   const none = await run(['list'], { env: {}, out() {}, err: () => {} });
   assert.equal(none, 1);
+});
+
+test('roster apply sets group, face, color, photo, and workspace color once', async () => {
+  await reset();
+  await db.prepare('DELETE FROM bot_photos').run();
+  const dir = mkdtempSync(join(tmpdir(), 'mb-service-'));
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==', 'base64');
+  writeFileSync(join(dir, 'runner.png'), png);
+  const file = join(dir, 'roster.json');
+  writeFileSync(file, JSON.stringify({
+    workspaces: [{ name: 'Multiprompt', color: 3 }],
+    groups: ['MP Runners'],
+    runners: [1, 2, 3].map(n => ({ name: 'mp-runner-' + n, kind: 'shell', title: 'Runner ' + n, workspace: 'Multiprompt', group: 'MP Runners', command: 'sleep infinity', model: 'cursor', host: 1, ...(n === 1 ? { face: 6, color: 7, photo: 'runner.png' } : {}) }))
+  }));
+  const sessions = new Set();
+  const lines = [], errors = [];
+  const invoke = args => mbRun(args, {
+    env: { MULTIPROMPT_KEY: adminKey, MULTIPROMPT_URL: base, HOME: dir, MULTIPROMPT_HOST: '1' },
+    out: line => lines.push(line), err: line => errors.push(line),
+    fetch: (url, init) => mf.dispatchFetch(url, init),
+    ownerPath: join(dir, 'owners.json'),
+    tmux: argv => {
+      const marked = argv.find(arg => String(arg).startsWith('='));
+      const name = marked ? marked.slice(1) : argv[argv.indexOf('-s') + 1];
+      if (argv[0] === 'has-session') return { status: sessions.has(name) ? 0 : 1, stdout: '' };
+      if (argv[0] === 'new-session') { sessions.add(name); return { status: 0, stdout: '' }; }
+      if (argv[0] === 'list-panes') return { status: 0, stdout: 'sleep\n' };
+      return { status: 0, stdout: '' };
+    }
+  });
+  const first = await invoke(['roster', 'apply', file]);
+  assert.equal(first, 0, errors.join('\n'));
+  const after = await stored();
+  const runners = after.layout.tabs.filter(tab => tab.group === 'MP Runners');
+  assert.deepEqual(runners.map(tab => tab.tmux_session), ['mp-runner-1', 'mp-runner-2', 'mp-runner-3']);
+  assert.equal(runners[0].face, 6);
+  assert.equal(runners[0].color, 7);
+  assert.equal(typeof runners[0].photo, 'number');
+  assert.equal(after.layout.workspaces.find(workspace => workspace.name === 'Multiprompt').color, 3);
+  lines.length = 0; errors.length = 0;
+  const second = await invoke(['roster', 'apply', file]);
+  assert.equal(second, 0, errors.join('\n'));
+  assert.ok(lines.includes('unchanged mp-runner-1'));
+  assert.equal((await stored()).revision, after.revision);
+  lines.length = 0; errors.length = 0;
+  const colored = await invoke(['workspace', 'color', 'Multiprompt', '1']);
+  assert.equal(colored, 0, errors.join('\n'));
+  assert.equal((await stored()).layout.workspaces.find(workspace => workspace.name === 'Multiprompt').color, 1);
+  const coloredRevision = (await stored()).revision;
+  const coloredAgain = await invoke(['workspace', 'color', 'Multiprompt', '1']);
+  assert.equal(coloredAgain, 0, errors.join('\n'));
+  assert.equal((await stored()).revision, coloredRevision);
+  const styled = await invoke(['style', 'mp-runner-2', '--face', '1', '--color', '2', '--host', '1']);
+  assert.equal(styled, 0, errors.join('\n'));
+  assert.equal((await stored()).layout.tabs.find(tab => tab.tmux_session === 'mp-runner-2').face, 1);
+  const styledRevision = (await stored()).revision;
+  const styledAgain = await invoke(['style', 'mp-runner-2', '--face', '1', '--color', '2', '--host', '1']);
+  assert.equal(styledAgain, 0, errors.join('\n'));
+  assert.equal((await stored()).revision, styledRevision);
+  rmSync(dir, { recursive: true, force: true });
 });

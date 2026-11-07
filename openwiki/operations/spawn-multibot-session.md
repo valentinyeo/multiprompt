@@ -75,6 +75,12 @@ node tools/mp-layout.mjs open \
 
 Run the command once per shell runner. Three runners can share one workspace and one group. Signed-in desktop clients show the group within about ten seconds.
 
+## One roster command
+
+`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb workspace color <workspace> <color>` sets a workspace color from 0 to 7. `mb style <session> --face <0-19> --color <0-7> --photo <png>` sets the face, color, and photo the layout service already stores. A photo is a PNG file; the service keeps the image and a revision on the session.
+
+`mb roster apply <file>` makes the account match the file. The file names workspaces (with an optional color), groups, and runners. Runner fields are name, kind, title, group, workspace, command, model, face, color, and photo. `--dry-run` prints the plan and changes nothing. A second apply of the same file does not publish again. Close, delete, and stopping a host apply only to workspaces, groups, and sessions this command created. There is no separate session registry. An empty group is remembered on this machine and shows up in Multibot once a session carries that group name.
+
 ## Retry without duplicates
 
 Keep the same name, folder, workspace, group, and host. Names use NFC normalization, outer-space trimming, and case-insensitive identity on one host. A deterministic UUIDv8 identifies the chat; its hex digits form the eventual parking-session name. Conflicting placement and terminal ownership are refused.
