@@ -138,7 +138,7 @@ int mp_terminal_cell(MPTerminal *t, int row, int col, int scroll, MPTerminalCell
     if (scroll < 0) scroll = 0;
     if (scroll > t->count) scroll = t->count;
     row -= scroll;
-    VTermScreenCell cell;
+    VTermScreenCell cell = {0};
     if (row < 0) {
         int i = (t->first + t->count + row) % HISTORY_LINES;
         if (col >= t->lengths[i]) {
