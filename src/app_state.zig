@@ -432,6 +432,7 @@ pub const Shell = struct {
     eta_first_est_s: u32 = 0,
     eta_active_start_tick: u64 = 0,
     ssh_reconnect: @import("ssh_reconnect.zig").State = .{},
+    native_terminal: bool = false,
 };
 
 pub const BrowserNavigationIntent = enum { background, select_preserve_focus, select_and_focus };

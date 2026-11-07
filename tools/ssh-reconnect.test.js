@@ -8,6 +8,9 @@ const { spawn, spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
+function nativeStubs(text) {
+  return text.replaceAll('@import("native_session.zig").alive', 'nativeChannelAlive').replaceAll('@import("native_session.zig").dropChannel', 'nativeDropChannel');
+}
 function body(name, text = source) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -50,7 +53,7 @@ const Shell = struct {
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
     tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
-    spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
+    spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0, native_terminal: bool = false,
     ssh_reconnect: State = .{ .healthy_attach = true }, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
 };
 var shells = [_]Shell{.{}};
@@ -130,6 +133,8 @@ var header_notices: usize = 0;
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { header_notices += 1; }
 fn invalidateSidebar() void {}
 fn saveSession() void {}
+fn nativeChannelAlive(_: u32) bool { return true; }
+fn nativeDropChannel(_: u32) void {}
 fn repositionActive() void {}
 fn fetchTmuxSessions() void {}
 ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 = 60000; ' + body('hostProbeBusy', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + body('reconnectAllowed', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + ' };'}
@@ -138,7 +143,7 @@ function runtime(tests, input = source) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
   if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name, name === 'sshSessionEnded' ? source : input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
+  return prelude + functions.map(name => nativeStubs(body(name, name === 'sshSessionEnded' ? source : input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE'))).join('\n') + tests;
 }
 describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
   const loadingChecks = `
@@ -258,7 +263,7 @@ test "ISSUE-501 live ssh silent detach" {
   const code = runtime('').replace('var ssh_probe_job: ?*anyopaque = null;', '').replace('fn sshProbeFinish() void {}', '') + job + `
 var ssh_probe_job: ?*SshProbeJob = null;
 fn findShellById(id: u32) ?u32 { return if (id == shells[0].shell_id and shell_count > 0) 0 else null; }
-` + body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + `
+` + nativeStubs(body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById')) + `
 test "ISSUE-501 live ssh silent detach" {
     const probe = try std.heap.page_allocator.create(SshProbeJob);
     probe.* = .{};
@@ -302,7 +307,7 @@ const FakeThread = struct { fn detach(_: FakeThread) void {} };
 fn spawnProbe(_: anytype, _: anytype, args: anytype) !FakeThread { _ = args; probe_starts += 1; return .{}; }
 fn sshProbeThread(_: *SshProbeJob) void {}
 ` + body('sshProbeStart').replace('std.Thread.spawn', 'spawnProbe') + '\n' +
-    body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + tests;
+    nativeStubs(body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById')) + tests;
 }
 
 function startupRuntime(tests) {

@@ -12,6 +12,7 @@ pub const Channel = struct {
     started: bool = false,
     notify_hwnd: w.HANDLE = null,
     notify_message: u32 = 0,
+    user: usize = 0,
     ended: bool = false,
     bytes: std.ArrayList(u8) = .empty,
     offset: usize = 0,
@@ -229,18 +230,19 @@ pub fn open(index: u8, watch: bool) ?*Channel {
     return channel;
 }
 
-pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32) ?*Channel {
+pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32, user: usize) ?*Channel {
     const channel = open(index, false) orelse return null;
     lock(channel.host);
     channel.terminal = true;
     channel.notify_hwnd = hwnd;
     channel.notify_message = message;
+    channel.user = user;
     channel.host.mutex.unlock();
     return channel;
 }
 
 fn notify(channel: *const Channel) void {
-    if (channel.notify_hwnd != null and channel.notify_message != 0) _ = w.PostMessageW(channel.notify_hwnd, channel.notify_message, 0, 0);
+    if (channel.notify_hwnd != null and channel.notify_message != 0) _ = w.PostMessageW(channel.notify_hwnd, channel.notify_message, channel.user, 0);
 }
 
 pub fn write(channel: *Channel, line: []const u8) bool {
