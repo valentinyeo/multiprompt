@@ -179,7 +179,7 @@ with tempfile.TemporaryDirectory() as directory:
     config = r['host_config'](provider, sid)
     config['permission_mode'] = 'acceptEdits'
     r['host_write'](r['host_paths'](provider, sid)['config'], config)
-    r['conversation_owner'] = lambda cwd: ('synthetic-owner', Path(directory) / 'other')
+    r['conversation_owner'] = lambda cwd, include_home=False: ('synthetic-owner', Path(directory) / 'other')
     r['READER_SOURCE'] = 'synthetic source'
     class Probe:
         returncode = 74
@@ -230,7 +230,7 @@ with tempfile.TemporaryDirectory() as directory:
             session['stop'] = True
     r['host_accept_client'] = client
     r['host_agent_stop'] = lambda agent: None
-    r['conversation_owner'] = lambda cwd: None
+    r['conversation_owner'] = lambda cwd, include_home=False: None
     def replacement_spawn(command, **kwargs):
         calls.append(command)
         return replacement
@@ -321,7 +321,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert [reply['status'] for reply in replies] == ['ok', 'busy']
     assert not failed.stdin.lines
     assert r['host_settings'](provider, sid)['effort'] == 'low'
-    for other in ('codex', 'pi'):
+    for other in ('codex', 'pi', 'hax'):
         other_sid = 'synthetic-' + other
         other_config = dict(enabled=True, tmux=tmux, cwd=directory, command=['synthetic-agent'],
                             args=['--model', 'native-model'], model='haiku', effort='low')
