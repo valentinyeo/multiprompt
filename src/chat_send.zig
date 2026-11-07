@@ -1050,7 +1050,13 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         entry.expires_ms = if (saved_deadline > 0) @intCast(saved_deadline) else (if (saved_ms > 0) saved_ms else now_ms) +| 600_000;
                         const remaining_ms = std.math.clamp(entry.expires_ms -| now_ms, 0, 600_000);
                         entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - (600_000 - remaining_ms);
-                        if (entry.state == .delivered and entry.anchor.sent_ms == 0) {
+                        if (entry.message_v1 and !entry.reset_pending and entry.state != .cancelled and chat_echo.phaseTaken(std.mem.sliceTo(&entry.message_phase, 0))) {
+                            entry.state = .delivered;
+                            if (chat_echo.takenSettled(&entry.delivery_watch, entry.state, std.mem.sliceTo(&entry.message_phase, 0), saved_ms == 0, @intCast(GetTickCount64()), entry.sent_tick_ms)) {
+                                if (list == &app_state.g_chat_outbox) chatConfirmedAddReceipt(entry.*);
+                                chatOutboxRemoveAtIn(list, allocator, list.items.len - 1);
+                            }
+                        } else if (entry.state == .delivered and entry.anchor.sent_ms == 0) {
                             entry.state = .not_sent;
                             entry.retryable = true;
                         }
@@ -1420,6 +1426,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
+            .confirmed = e.message_v1 and chat_echo.phaseTaken(std.mem.sliceTo(&e.message_phase, 0)),
             .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
                 e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
         };
@@ -1495,6 +1502,21 @@ fn chatConfirmedDropKey(key: []const u8) void {
             i += 1;
         }
     }
+}
+
+fn chatConfirmedAddReceipt(e: ChatOutboxEntry) void {
+    const key = e.key[0..e.key_len];
+    while (chatConfirmedCountIn(key) >= CHAT_CONFIRMED_MAX_PER_KEY) {
+        const victim = chatConfirmedFirstIndexIn(key) orelse break;
+        _ = app_state.g_chat_confirmed.orderedRemove(victim);
+    }
+    const receipt = ChatConfirmedEcho{
+        .key = e.key,
+        .key_len = e.key_len,
+        .message_sid = e.message_sid,
+        .message_wire_id = e.message_wire_id,
+    };
+    app_state.g_chat_confirmed.append(std.heap.page_allocator, receipt) catch {};
 }
 
 fn chatConfirmedAdd(key: []const u8, text: []const u16, block: ChatBlock, e: ChatOutboxEntry) void {
@@ -1696,13 +1718,22 @@ fn chatEchoDeliveryEvidence(entry: ChatOutboxEntry) chat_echo.DeliveryEvidence {
     return .{};
 }
 
-fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8, busy: bool, now_ms: i64, loaded_ms: i64, remove: bool) bool {
+fn chatEchoLatestReplyMs(blocks: []const ChatBlock) i64 {
+    var latest: i64 = 0;
+    for (blocks) |block| {
+        if (block.role == .prose or block.role == .code) latest = @max(latest, block.stamp_ms);
+    }
+    return latest;
+}
+
+fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8, reply_ms: i64, now_ms: i64, force: bool, remove: bool) bool {
     var any = false;
     var i: usize = 0;
     while (i < list.items.len) {
         const e = &list.items[i];
-        if (!e.message_v1 or !std.mem.eql(u8, e.key[0..e.key_len], key) or
-            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0), busy, now_ms, loaded_ms))
+        if (!e.message_v1 or e.reset_pending or (key.len > 0 and !std.mem.eql(u8, e.key[0..e.key_len], key)) or
+            !chat_echo.takenSettled(&e.delivery_watch, e.state, std.mem.sliceTo(&e.message_phase, 0),
+                force or (e.anchor.sent_ms > 0 and reply_ms > e.anchor.sent_ms), now_ms, e.sent_tick_ms))
         {
             i += 1;
             continue;
@@ -1710,9 +1741,20 @@ fn chatEchoTakenSettledIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.
         any = true;
         if (!remove) return true;
         if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
+        if (list == &app_state.g_chat_outbox) chatConfirmedAddReceipt(e.*);
         chatOutboxRemoveAtIn(list, allocator, i);
     }
     return any;
+}
+
+pub fn chatEchoClearConfirmedForShell(idx: u32) void {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return;
+    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, 0, @intCast(GetTickCount64()), true, true)) {
+        _ = saveChatOutbox();
+        chatOutboxChanged();
+    }
 }
 
 pub fn chatEchoMatchActive() void {
@@ -1725,7 +1767,8 @@ pub fn chatEchoMatchActive() void {
     const loaded_ms = chatEchoLoadedMs();
     const now_ms: i64 = @intCast(GetTickCount64());
     const busy = app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working;
-    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, busy, now_ms, loaded_ms, false)) expired = true;
+    const reply_ms = chatEchoLatestReplyMs(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
+    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, reply_ms, now_ms, false, false)) expired = true;
     for (app_state.g_chat_outbox.items) |*e| {
         if (e.message_v1 or e.state != .delivered or !std.mem.eql(u8, e.key[0..e.key_len], key)) continue;
         if (e.channel_sent or e.channel_pending) continue;
@@ -1798,7 +1841,7 @@ pub fn chatEchoMatchActive() void {
         }
         i += 1;
     }
-    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, busy, now_ms, loaded_ms, true)) changed = true;
+    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, reply_ms, now_ms, false, true)) changed = true;
     if (changed) {
         _ = saveChatOutbox();
         chatOutboxChanged();
@@ -2393,6 +2436,15 @@ pub fn chatOutboxTick() void {
     chatTmuxSettle();
     var changed = false;
     const now_ms: i64 = @intCast(GetTickCount64());
+    for (app_state.g_chat_histories.items) |history| {
+        if (history.retired) continue;
+        const idx = @import("inbox.zig").findShellById(history.key.shell_id) orelse continue;
+        var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        const key = chatOutboxKeyForShell(idx, &key_buf);
+        const reply_ms = chatEchoLatestReplyMs(history.history.blocks.items);
+        if (key.len > 0 and reply_ms > 0 and chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, key, reply_ms, now_ms, false, true)) changed = true;
+    }
+    if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, "", 0, now_ms, false, true)) changed = true;
     for (app_state.g_chat_outbox.items) |*entry| {
         if (entry.message_v1) {
             if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms)) {
@@ -3057,11 +3109,15 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
 test "IGSH-1766 a message the host accepted stops floating even when its transcript row is out of view" {
     const allocator = std.testing.allocator;
     const saved = app_state.g_chat_outbox;
+    const saved_confirmed = app_state.g_chat_confirmed;
+    app_state.g_chat_confirmed = .empty;
     app_state.g_chat_outbox = .empty;
     defer {
         for (app_state.g_chat_outbox.items) |e| if (e.text.len > 0) allocator.free(e.text);
         app_state.g_chat_outbox.deinit(allocator);
         app_state.g_chat_outbox = saved;
+        app_state.g_chat_confirmed.deinit(std.heap.page_allocator);
+        app_state.g_chat_confirmed = saved_confirmed;
     }
     const key = "tmux:7:floating-test";
     const phases = [_][]const u8{ "accepted", "started", "sent", "queued" };
@@ -3080,17 +3136,19 @@ test "IGSH-1766 a message the host accepted stops floating even when its transcr
     app_state.g_chat_outbox.items[4].message_v1 = true;
     @memcpy(app_state.g_chat_outbox.items[4].message_phase[0..8], "accepted");
 
-    const grace = chat_echo.SETTLE_GRACE_MS;
-    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, false, 1000, 1000, true));
+    for (app_state.g_chat_outbox.items[0..2]) |*entry| {
+        entry.anchor.sent_ms = 1000;
+        entry.sent_tick_ms = 1000;
+    }
+    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 1000, 2000, false, true));
     try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
-    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, true, 1000 + 3 * grace, 1000 + 3 * grace, true));
-    try std.testing.expectEqual(@as(usize, 5), app_state.g_chat_outbox.items.len);
-    try std.testing.expect(!chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, false, 1000 + 4 * grace, 1000 + 4 * grace, true));
-    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, false, 1000 + 5 * grace, 1000 + 5 * grace, true));
+    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, key, 2000, 2000, false, true));
     try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_outbox.items.len);
     try std.testing.expectEqualStrings("sent", std.mem.sliceTo(&app_state.g_chat_outbox.items[0].message_phase, 0));
     try std.testing.expectEqualStrings("queued", std.mem.sliceTo(&app_state.g_chat_outbox.items[1].message_phase, 0));
     try std.testing.expectEqualStrings("tmux:8:other", app_state.g_chat_outbox.items[2].key[0..app_state.g_chat_outbox.items[2].key_len]);
+    try std.testing.expect(chatEchoTakenSettledIn(&app_state.g_chat_outbox, allocator, "tmux:8:other", 0, 2000, true, true));
+    try std.testing.expectEqual(@as(usize, 2), app_state.g_chat_outbox.items.len);
 }
 
 test "IGSH-1266 the first message of a new chat stops its bubble once the transcript has it" {
@@ -3364,6 +3422,14 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     }
 }
 
+fn chatMessageSentMs(message: std.json.Value, fallback: i64) i64 {
+    return switch (json_reader.field(message, "created")) {
+        .integer => |seconds| if (seconds > 0 and seconds <= @divTrunc(std.math.maxInt(i64), 1000)) seconds * 1000 else fallback,
+        .float => |seconds| if (std.math.isFinite(seconds) and seconds > 0 and seconds < @as(f64, @floatFromInt(std.math.maxInt(i64))) / 1000) @intFromFloat(seconds * 1000) else fallback,
+        else => fallback,
+    };
+}
+
 fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const wrapped = json_reader.field(value, "message");
     const message = if (wrapped == .null) value else wrapped;
@@ -3402,6 +3468,12 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     if (std.mem.eql(u8, phase, "accepted") and std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")) return true;
     _ = json_reader.copyString(message, "state", &entry.message_phase);
     entry.state = if (std.mem.eql(u8, phase, "failed")) .not_sent else if (std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started")) .delivered else .queued;
+    if (entry.anchor.sent_ms == 0) {
+        const wall_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
+        entry.anchor.sent_ms = chatMessageSentMs(message, wall_ms);
+        entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - std.math.clamp(wall_ms -| entry.anchor.sent_ms, 0, 600_000);
+        entry.expires_ms = entry.anchor.sent_ms +| 600_000;
+    }
     entry.write_started = true;
     entry.channel_sent = true;
     return true;
@@ -3482,6 +3554,13 @@ fn chatMessageSyncFinish() void {
     for (items) |item| {
         const event = if (job.synced) json_reader.field(item, "event") else item;
         if (!chatMessageReduce(idx, event)) { history.message_next_tick = 0; return; }
+        const kind = json_reader.string(json_reader.field(event, "kind")) orelse "";
+        if (std.mem.eql(u8, kind, "text.done") or std.mem.eql(u8, kind, "turn.ended")) {
+            var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            const outbox_key = chatOutboxKeyForShell(idx, &key_buf);
+            const reply_ms: i64 = @intCast(@min(json_reader.uintDefault(event, "at", 0), std.math.maxInt(i64)));
+            if (outbox_key.len > 0) _ = chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, outbox_key, reply_ms, @intCast(GetTickCount64()), false, true);
+        }
         const native = json_reader.field(event, "native_message");
         if (native != .null) {
             const row = json_reader.field(native, "row");
@@ -4442,4 +4521,25 @@ test "IGSH-895 typed prefix plus native paste preserves the draft and sends one 
     var mixed = [_]u16{ 'a', '\r', '\n', '\r', '\n', 'b', '\n', 'c', '\r' };
     try std.testing.expectEqualSlices(u16, std.mem.span(L("a\n\nb\nc\n")), chatPromptNormalizeLineEndings(&mixed));
     std.debug.print("IGSH-895 exact draft paste and canonical outgoing line endings PASS\n", .{});
+}
+
+
+test "IGSH-1831 load drops old confirmed echoes across chats but keeps unconfirmed messages" {
+    const a = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| a.free(entry.text);
+        list.deinit(a);
+    }
+    chatOutboxParseJson(&list, a,
+        "{\"version\":2,\"queues\":[{\"key\":\"tmux:0:one\",\"messages\":[" ++
+        "{\"t\":\"old normal\",\"s\":3,\"x\":1,\"v1\":1,\"phase\":\"accepted\",\"w\":1}," ++
+        "{\"t\":\"/old-command\",\"s\":3,\"x\":1,\"v1\":1,\"phase\":\"started\"}," ++
+        "{\"t\":\"unconfirmed\",\"s\":0,\"v1\":1,\"phase\":\"queued\"}]}," ++
+        "{\"key\":\"tmux:0:two\",\"messages\":[" ++
+        "{\"t\":\"old mid-turn\",\"s\":3,\"x\":1,\"v1\":1,\"phase\":\"accepted\",\"w\":1}," ++
+        "{\"t\":\"unconfirmed sent\",\"s\":3,\"x\":1,\"v1\":1,\"phase\":\"sent\",\"w\":1}]}]}");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("unconfirmed"), list.items[0].text);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("unconfirmed sent"), list.items[1].text);
 }

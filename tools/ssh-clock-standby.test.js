@@ -304,6 +304,12 @@ const Entry = struct {
 };
 var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
+const CHAT_OUTBOX_KEY_CAP = 64;
+const g_chat_histories = struct { items: []const struct { retired: bool, key: struct { shell_id: u32 }, history: struct { blocks: struct { items: []const u8 } } } }{ .items = &.{} };
+fn findShellById(_: u32) ?u32 { return null; }
+fn chatOutboxKeyForShell(_: u32, _: *[CHAT_OUTBOX_KEY_CAP]u8) []const u8 { return ""; }
+fn chatEchoLatestReplyMs(_: []const u8) i64 { return 0; }
+fn chatEchoTakenSettledIn(_: anytype, _: std.mem.Allocator, _: []const u8, _: i64, _: i64, _: bool, _: bool) bool { return false; }
 var fake_tick: u64 = 100_000;
 var fake_wall: i64 = 8_000_000;
 const g_chat_verify_echo_id: u64 = 0;
@@ -342,7 +348,7 @@ fn sshOutboxFlushed(_: u32) void {}
 fn chatFullSettleStart() void {}
 fn armChatOutboxTimerIfNeeded() void {}
 ${body('chatOutboxHeldByLink')}
-${body('chatOutboxTick')}
+${body('chatOutboxTick').replaceAll('@import("inbox.zig").findShellById', 'findShellById')}
 test "ISSUE-501 injected clock jump" {
     fake_wall += ${jump};
     fake_tick += 599999;
@@ -370,6 +376,7 @@ test "ISSUE-501 injected clock jump" {
       assert.match(body(name), /GetTickCount64\(\)/, name);
       assert.doesNotMatch(body(name), /nowFileTime\(\)/, name);
     }
+    assert.match(body('chatOutboxTick'), /chatEchoTakenSettledIn\(&g_chat_outbox, std\.heap\.page_allocator, "", 0, now_ms, false, true\)/);
     assert.match(history, /entry.loaded_ms = @intCast\(GetTickCount64\(\)\)/);
     assert.doesNotMatch(body('chatSendVerifyTick'), /nowFileTime\(\)/);
     assert.doesNotMatch(body('chatEchoSendAgain'), /nowFileTime\(\)/);

@@ -179,6 +179,7 @@ pub const Pending = struct {
     text: []const u16 = &.{},
     anchor: Anchor,
     unanchored_delivery: bool = false,
+    confirmed: bool = false,
 };
 
 const Normalized = struct {
@@ -344,6 +345,7 @@ pub const DeliveryWatch = struct {
     idle_since_ms: i64 = 0,
     removed_ms: i64 = 0,
     removed_since_ms: i64 = 0,
+    taken_since_ms: i64 = 0,
 
     pub fn observe(self: *DeliveryWatch, busy: bool, now_ms: i64) void {
         if (busy) {
@@ -373,42 +375,42 @@ pub fn phaseTaken(phase: []const u8) bool {
     return std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started");
 }
 
-pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, busy: bool, now_ms: i64, loaded_ms: i64) bool {
+pub const TAKEN_MAX_AGE_MS: i64 = 60_000;
+
+pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, replied: bool, now_ms: i64, sent_tick_ms: i64) bool {
     if (state != .delivered or !phaseTaken(phase)) return false;
-    watch.observe(busy, now_ms);
-    if (busy) return false;
-    if (watch.idle_since_ms == 0) watch.idle_since_ms = now_ms;
-    return watch.due(now_ms, loaded_ms);
+    if (replied) return true;
+    if (watch.taken_since_ms == 0) watch.taken_since_ms = if (sent_tick_ms != 0) sent_tick_ms else now_ms;
+    return now_ms >= watch.taken_since_ms and now_ms - watch.taken_since_ms >= TAKEN_MAX_AGE_MS;
 }
 
-test "IGSH-1766 a message the agent took settles once the chat idles past the grace and history reloads" {
-    var watch = DeliveryWatch{};
-    try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, 1000, 1000));
-    try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, 1000 + SETTLE_GRACE_MS - 1, 1000 + SETTLE_GRACE_MS - 1));
-    try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, 1000 + SETTLE_GRACE_MS, 1000 + SETTLE_GRACE_MS - 1));
-    try std.testing.expect(takenSettled(&watch, .delivered, "accepted", false, 1000 + SETTLE_GRACE_MS, 1000 + SETTLE_GRACE_MS));
+test "IGSH-1831 normal slash and mid-turn receipts settle after a reply without idle" {
+    for ([_][]const u8{ "accepted", "started" }) |phase| {
+        var watch = DeliveryWatch{};
+        watch.observe(true, 2000);
+        try std.testing.expect(takenSettled(&watch, .delivered, phase, true, 2000, 1000));
+    }
 }
 
-test "IGSH-1766 a busy chat keeps the taken message waiting and restarts the idle clock" {
-    var watch = DeliveryWatch{};
-    try std.testing.expect(!takenSettled(&watch, .delivered, "started", false, 1000, 1000));
-    try std.testing.expect(!takenSettled(&watch, .delivered, "started", true, 50_000, 50_000));
-    try std.testing.expectEqual(@as(i64, 0), watch.idle_since_ms);
-    try std.testing.expect(!takenSettled(&watch, .delivered, "started", true, 500_000, 500_000));
-    try std.testing.expect(!takenSettled(&watch, .delivered, "started", false, 500_001, 500_001));
-    try std.testing.expect(takenSettled(&watch, .delivered, "started", false, 500_001 + SETTLE_GRACE_MS, 500_001 + SETTLE_GRACE_MS));
+test "IGSH-1831 confirmed messages age out without history and across a fresh boot" {
+    for ([_]i64{ 1000, 1000 - TAKEN_MAX_AGE_MS }) |sent| {
+        var watch = DeliveryWatch{};
+        try std.testing.expect(!takenSettled(&watch, .delivered, "accepted", false, sent + TAKEN_MAX_AGE_MS - 1, sent));
+        try std.testing.expect(takenSettled(&watch, .delivered, "accepted", false, sent + TAKEN_MAX_AGE_MS, sent));
+    }
+    var unknown = DeliveryWatch{};
+    try std.testing.expect(!takenSettled(&unknown, .delivered, "started", false, 5000, 0));
+    try std.testing.expect(takenSettled(&unknown, .delivered, "started", false, 5000 + TAKEN_MAX_AGE_MS, 0));
 }
 
-test "IGSH-1766 only delivered entries in a taken phase can settle without a transcript row" {
+test "IGSH-1831 unconfirmed phases and unsent states never settle by reply or age" {
     for ([_][]const u8{ "", "queued", "sent", "failed", "cancelled" }) |phase| {
         var watch = DeliveryWatch{};
-        _ = takenSettled(&watch, .delivered, phase, false, 1000, 1000);
-        try std.testing.expect(!takenSettled(&watch, .delivered, phase, false, 1_000_000, 1_000_000));
+        try std.testing.expect(!takenSettled(&watch, .delivered, phase, true, TAKEN_MAX_AGE_MS * 10, 1));
     }
     for ([_]OutboxState{ .queued, .sending, .not_sent, .cancelled }) |state| {
         var watch = DeliveryWatch{};
-        _ = takenSettled(&watch, state, "accepted", false, 1000, 1000);
-        try std.testing.expect(!takenSettled(&watch, state, "accepted", false, 1_000_000, 1_000_000));
+        try std.testing.expect(!takenSettled(&watch, state, "accepted", true, TAKEN_MAX_AGE_MS * 10, 1));
     }
 }
 
@@ -439,11 +441,61 @@ test "reserved uncertain sends stay unconfirmed across restart" {
     try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(@intFromEnum(OutboxState.delivered), true));
 }
 
+fn skillToken(token: []const u16) bool {
+    if (token.len < 2 or token[0] != '/') return false;
+    for (token[1..]) |c| {
+        if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == ':' or c == '_' or c == '-')) return false;
+    }
+    return true;
+}
+
+fn sameSkillText(left: []const u16, right: []const u16) bool {
+    const spaces = &[_]u16{ ' ', '\t', '\r', '\n', 0xA0 };
+    var l = std.mem.tokenizeAny(u16, left, spaces);
+    var r = std.mem.tokenizeAny(u16, right, spaces);
+    var left_skills: usize = 0;
+    var right_skills: usize = 0;
+    while (l.next()) |word| {
+        if (skillToken(word)) {
+            left_skills += 1;
+            if (left_skills > 64) return false;
+            continue;
+        }
+        var other = r.next();
+        while (other != null and skillToken(other.?)) {
+            right_skills += 1;
+            other = r.next();
+        }
+        if (other == null or !std.mem.eql(u16, word, other.?)) return false;
+    }
+    while (r.next()) |word| {
+        if (!skillToken(word)) return false;
+        right_skills += 1;
+    }
+    if (left_skills == 0 or left_skills != right_skills) return false;
+    l = std.mem.tokenizeAny(u16, left, spaces);
+    while (l.next()) |skill| {
+        if (!skillToken(skill)) continue;
+        var lc = std.mem.tokenizeAny(u16, left, spaces);
+        var rc = std.mem.tokenizeAny(u16, right, spaces);
+        var balance: isize = 0;
+        while (lc.next()) |word| {
+            if (std.mem.eql(u16, word, skill)) balance += 1;
+        }
+        while (rc.next()) |word| {
+            if (std.mem.eql(u16, word, skill)) balance -= 1;
+        }
+        if (balance != 0) return false;
+    }
+    return true;
+}
+
 fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (p.text.len == 0) return newBlockMatches(block, p.prefix);
     if (sameText(block, p.text)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
+    if (p.confirmed and sameSkillText(body, norm)) return true;
     if (pastePlaceholderMatches(body, norm)) return true;
     const cut = stripTrailingEllipsis(body);
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
@@ -501,7 +553,7 @@ fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: 
             if (before.message_id == p.anchor.after_id) break true;
         } else false);
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !after_anchor and !p.unanchored_delivery) continue;
-        if (p.unanchored_delivery and (p.text.len == 0 or !sameText(b.text, p.text))) continue;
+        if (p.unanchored_delivery and (p.text.len == 0 or (!sameText(b.text, p.text) and !(p.confirmed and sameSkillText(b.text, norm))))) continue;
         const already_claimed = for (claimed) |claim| {
             if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
             if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) break true;
@@ -1100,4 +1152,22 @@ test "IGSH-1605 a send that failed when the link dropped is requeued by its clie
     try std.testing.expect(requeueOnReconnect(.not_sent, false, false, false, false));
     try std.testing.expect(!requeueOnReconnect(.not_sent, false, true, false, false));
     try std.testing.expect(!requeueOnReconnect(.not_sent, true, true, true, false));
+}
+
+
+test "IGSH-1831 reordered skills match only confirmed messages and preserve words and multiplicity" {
+    const original = w("guess why /deeper /pstack:poteto-mode");
+    const reordered = w("/pstack:poteto-mode guess why /deeper");
+    var pending = [_]Pending{.{ .prefix = &original, .text = &original, .anchor = .{ .sent_ms = 1000 }, .confirmed = true }};
+    const blocks = [_]UserBlock{.{ .text = &reordered, .stamp_ms = 2000 }};
+    var chosen: [1]?usize = undefined;
+    assign(&pending, &blocks, false, &.{}, &chosen);
+    try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
+    pending[0].confirmed = false;
+    assign(&pending, &blocks, false, &.{}, &chosen);
+    try std.testing.expect(chosen[0] == null);
+    try std.testing.expect(!sameSkillText(&original, &w("/deeper why guess /pstack:poteto-mode")));
+    try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /deeper")));
+    try std.testing.expect(!sameSkillText(&original, &w("guess why /deeper /pstack:poteto-mode /extra")));
+    try std.testing.expect(!sameSkillText(&w("ordinary words"), &w("words ordinary")));
 }

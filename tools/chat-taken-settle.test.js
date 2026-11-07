@@ -11,13 +11,13 @@ function body(name, text = source) {
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
 
-test('IGSH-1766 a host message the agent took settles by receipt and idle time, not by transcript row alone', () => {
+test('IGSH-1831 a confirmed receipt settles after a reply or bounded age, not idle', () => {
   const settle = body('takenSettled', echoSource);
   assert.match(settle, /state != \.delivered/);
   assert.match(settle, /phaseTaken\(phase\)/);
-  assert.match(settle, /if \(busy\) return false;/);
-  assert.match(settle, /idle_since_ms == 0\) watch\.idle_since_ms = now_ms/);
-  assert.match(settle, /watch\.due\(now_ms, loaded_ms\)/);
+  assert.doesNotMatch(settle, /if \(busy\) return false;/);
+  assert.match(settle, /if \(replied\) return true;/);
+  assert.match(settle, /TAKEN_MAX_AGE_MS/);
   const taken = body('phaseTaken', echoSource);
   assert.match(taken, /"accepted"/);
   assert.match(taken, /"started"/);
@@ -32,6 +32,8 @@ test('IGSH-1766 chatEchoMatchActive forces a pass and retires settled host messa
   assert.match(match, /chatEchoTakenSettledIn\([^)]*true\)\) changed = true/);
   const helper = body('chatEchoTakenSettledIn');
   assert.match(helper, /!e\.message_v1/);
-  assert.match(helper, /chat_echo\.takenSettled\(&e\.delivery_watch, e\.state, std\.mem\.sliceTo\(&e\.message_phase, 0\), busy, now_ms, loaded_ms\)/);
+  assert.match(helper, /chat_echo\.takenSettled\(&e\.delivery_watch, e\.state, std\.mem\.sliceTo\(&e\.message_phase, 0\)/);
+  assert.match(helper, /reply_ms > e\.anchor\.sent_ms/);
+  assert.match(helper, /now_ms, e\.sent_tick_ms/);
   assert.match(helper, /chatOutboxRemoveAtIn\(list, allocator, i\)/);
 });

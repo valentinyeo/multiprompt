@@ -11,8 +11,9 @@ test('Resync retires cached generation without touching draft or delivery, and e
   const source = read('src/chat_session.zig');
   const match = source.match(/pub fn chatResync\(\) void \{[^]*?\n\}/);
   assert.ok(match, 'Existing chat menu needs a non-destructive Resync action');
-  const body = match[0].replace('pub fn', 'fn').replaceAll('app_state.', '');
+  const body = match[0].replace('pub fn', 'fn').replaceAll('app_state.', '').replace('@import("chat_send.zig").chatEchoClearConfirmedForShell', 'chatEchoClearConfirmedForShell');
   assert.doesNotMatch(body, /chatResetForShell|sendChat|chatOutbox|SetWindowText|DeleteFile/);
+  assert.match(body, /chatEchoClearConfirmedForShell\(active_shell\)/);
   assert.match(source, /entry\.resync and !disk and !history\.more/);
   assert.match(source, /else if \(!has_messages\) entry.history.start else 0/);
   assert.doesNotMatch(source, /showHeaderNoticeAscii\("Chat resynced"/);
@@ -35,6 +36,8 @@ var allocate = true;
 var requests: usize = 0;
 var forgotten: usize = 0;
 var notices: usize = 0;
+var confirmed_clears: usize = 0;
+fn chatEchoClearConfirmedForShell(idx: u32) void { std.debug.assert(idx == 0); confirmed_clears += 1; }
 var draft: [5]u8 = "draft".*;
 var outbox: [4]u8 = "sent".*;
 var g_chat_cache_write_mutex = struct {
@@ -59,6 +62,7 @@ fn debugLog(_: []const u8) void { notices += 1; }
 test "fresh source without stale disk, unchanged draft and outbox, guarded invalid states" {
     chatResync();
     try std.testing.expectEqual(@as(usize, 1), requests);
+    try std.testing.expectEqual(@as(usize, 1), confirmed_clears);
     try std.testing.expectEqual(@as(usize, 1), forgotten);
     try std.testing.expectEqualStrings("draft", &draft);
     try std.testing.expectEqualStrings("sent", &outbox);

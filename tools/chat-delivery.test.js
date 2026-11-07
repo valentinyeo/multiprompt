@@ -1915,6 +1915,28 @@ test "delivery: IGSH-1640 cancelled reducer retires only matching identity and l
     try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
     try std.testing.expect(chatOutboxIndexById(id) == null);
 }
+test "delivery: IGSH-1831 a receipt stamps an unknown send once" {
+    clear();
+    defer clear();
+    const agent = shells[0].ai_agent;
+    defer shells[0].ai_agent = agent;
+    shells[0].ai_agent = 1;
+    admissionSetup(9);
+    try admissionEntry();
+    const entry = &g_chat_outbox.items[0];
+    entry.anchor.sent_ms = 0;
+    const json = try std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, "{\"id\":\"id-01\",\"state\":\"accepted\"}", .{});
+    defer json.deinit();
+    try std.testing.expect(chatMessageReduce(0, json.value));
+    try std.testing.expect(entry.anchor.sent_ms > 0);
+    const first = entry.anchor.sent_ms;
+    const server = try std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, "{\"created\":1.25}", .{});
+    defer server.deinit();
+    try std.testing.expectEqual(@as(i64, 1250), chatMessageSentMs(server.value, 9999));
+    fake_now_ms += 1000;
+    try std.testing.expect(chatMessageReduce(0, json.value));
+    try std.testing.expectEqual(first, entry.anchor.sent_ms);
+}
 `;
 const parity1633 = String.raw`
 test "delivery: IGSH-1633 old sent messages cannot bury a live reply" {
@@ -1977,8 +1999,8 @@ test "delivery: IGSH-1633 old sent messages cannot bury a live reply" {
     try std.testing.expectEqual(@as(usize, 0), writes + channel_starts + enters);
 }
 `;
-const names = ['chatMessageReduce', 'chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatMessageSyncRetryDelayMs', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatOutboxHeldByLink', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxSendBlockedIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoTakenSettledIn', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatOutboxWorkingForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
-const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
+const names = ['chatMessageSentMs', 'chatConfirmedAddReceipt', 'chatEchoLatestReplyMs', 'chatMessageReduce', 'chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatMessageSyncRetryDelayMs', 'chatTmuxSendFinish', 'chatResetConfirmed', 'chatResetGiveUp', 'chatOutboxHeldByLink', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxSendBlockedIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoTakenSettledIn', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatOutboxWorkingForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
+const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across chats but keeps unconfirmed messages', 'Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf('\n}', start) + 2);
