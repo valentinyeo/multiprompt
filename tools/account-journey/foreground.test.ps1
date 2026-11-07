@@ -5,7 +5,14 @@ Add-Type -Path "$PSScriptRoot/../verify-reconnect/desktop.cs"
 . "$PSScriptRoot/diagnostics.ps1"
 $source = @'
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+trap {
+    [Console]::Error.WriteLine($_.Exception.ToString())
+    [Console]::Error.WriteLine($_.ScriptStackTrace)
+    exit 1
+}
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+[Console]::Out.WriteLine('probe: assemblies loaded')
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -20,7 +27,9 @@ public class FixtureForm : Form {
     }
 }
 "@ -ReferencedAssemblies System.Windows.Forms, System.Drawing
+[Console]::Out.WriteLine('probe: types compiled')
 $form = [FixtureForm]::new()
+[Console]::Out.WriteLine('probe: form created')
 $form.Text = 'Account journey foreground probe'
 $form.KeyPreview = $true
 $form.Add_KeyDown({
@@ -30,6 +39,7 @@ $form.Add_KeyDown({
     }
 })
 $form.Add_Shown({
+    [Console]::Out.WriteLine('probe: form shown')
     foreach ($item in @(@('Edit', 0x50000000), @('Edit', 0x58000000), @('Edit', 0x40000000), @('Button', 0x50000000))) {
         $h = [FixtureControls]::CreateWindowEx(0, $item[0], 'private fixture text', [uint32]$item[1], 0, 0, 60, 20, $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
         if ($h -eq [IntPtr]::Zero) { throw 'Cannot create fixture control' }
@@ -46,7 +56,7 @@ New-Item -ItemType Directory -Path $logs | Out-Null
 $failed = $false
 try {
     foreach ($index in 0, 1) {
-        $processes += Start-Process powershell.exe -ArgumentList '-NoProfile', '-STA', '-EncodedCommand', $encoded -PassThru -RedirectStandardError (Join-Path $logs "$index.err")
+        $processes += Start-Process powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', $encoded -PassThru -RedirectStandardError (Join-Path $logs "$index.err") -RedirectStandardOutput (Join-Path $logs "$index.out")
     }
     $windows = @()
     foreach ($index in 0, 1) {
@@ -67,8 +77,11 @@ try {
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
         if ($window -eq [IntPtr]::Zero) {
-            $detail = try { Get-Content -Raw (Join-Path $logs "$index.err") } catch { "stderr unavailable: $($_.Exception.Message)" }
-            throw "Foreground probe window did not appear (pid=$($process.Id), exited=$($process.HasExited)): $detail"
+            foreach ($stream in 'out', 'err') {
+                $detail = try { Get-Content -Raw (Join-Path $logs "$index.$stream") } catch { "unavailable: $($_.Exception.Message)" }
+                Write-Host "Foreground probe $index $stream`n$detail"
+            }
+            throw "Foreground probe window did not appear (pid=$($process.Id), exited=$($process.HasExited)); see probe stdout and stderr above"
         }
         $windows += $window
     }

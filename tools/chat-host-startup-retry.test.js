@@ -26,7 +26,6 @@ def reader(home):
     return runtime
 
 with tempfile.TemporaryDirectory() as directory:
-    tempfile.tempdir = directory
     r = reader(directory)
     provider, sid, tmux = 'claude', 'synthetic-session', 'synthetic-chat'
     assert not r['message_store_path']().exists()
