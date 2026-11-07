@@ -66,6 +66,34 @@
             if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Inbox button geometry unavailable' }
             $dx = $origin.X - $frame.Left
             $dy = $origin.Y - $frame.Top
+            Press @(0x12, 0x43) 'Alt+C: open chat before Inbox navigation'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                $thread = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+                if ($null -eq $thread -or $thread.Current.ProcessId -ne $process.Id) { return $false }
+                $script:inboxChat = [IntPtr]$thread.Current.NativeWindowHandle
+                [VerifyNative]::IsWindowVisible($script:inboxChat)
+            } 'owned chat visible before Inbox navigation'
+            foreach ($theme in @('light', 'amoled')) {
+                Select-Theme $theme ("inbox-chat-$theme-theme")
+                Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: cover chat with Inbox'
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'Inbox covers chat'
+                Press @(0x12, 0x49) 'Alt+I: select all sessions for chat overlap proof'
+                foreach ($key in @(0x28, 0x26, 0x28, 0x26, 0x28, 0x26)) {
+                    Press @($key) 'Arrow: move through Inbox while chat remains hidden'
+                    if ([VerifyNative]::IsWindowVisible($script:inboxChat)) { throw 'Chat reopened over Inbox during row navigation' }
+                    if ((Read-Inbox).inbox_active -ne $true) { throw 'Arrow navigation left Inbox' }
+                }
+                Snapshot "inbox-chat-$theme-navigation"
+                if ([VerifyNative]::IsWindowVisible($script:inboxChat)) { throw 'Chat overlays the Inbox screenshot' }
+                Press @(0x1B) 'Esc: restore chat after Inbox navigation'
+                Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $false -and [VerifyNative]::IsWindowVisible($script:inboxChat) } 'chat restored after Inbox navigation'
+                Snapshot "inbox-chat-$theme-returned"
+                $result.checks += @{ name = "inbox-chat-$theme-navigation"; arrows = 6; chatHidden = $true; chatRestored = $true }
+            }
+            Press @(0x12, 0x43) 'Alt+C: return to console after Inbox chat proof'
+            Wait-Until { -not [VerifyNative]::IsWindowVisible($script:inboxChat) } 'console restored after Inbox chat proof'
             foreach ($theme in @('light', 'amoled')) {
                 Select-Theme $theme ("inbox-button-$theme-theme")
                 Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $false } 'Inbox closed before button check'

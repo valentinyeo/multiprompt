@@ -1905,6 +1905,7 @@ test "console visibility rejects chat, saved chat before restore, inactive tabs 
 }
 
 pub fn openChatView() void {
+    if (overlayOpen()) return;
     if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) {
         debugLog("[view] open skipped: no frame or no active tab");
         return;
