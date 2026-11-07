@@ -1596,7 +1596,8 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertNotIn('QUESTION-358', reader.response(dict(self.query)))
 
     def test_igsh1855_reopen_shows_newest_without_rereading_the_log(self):
-        reader.TAIL_CACHE.clear()
+        if hasattr(reader, 'TAIL_CACHE'):
+            reader.TAIL_CACHE.clear()
         row = json.dumps(self.event('y' * 200)) + '\n'
         with self.path.open('w') as output:
             while output.tell() < reader.TAIL_BYTES * 2:
