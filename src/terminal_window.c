@@ -339,7 +339,7 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
             } else if (t->selecting) {
                 t->end = index;
                 if (message == WM_LBUTTONUP) { t->selecting = 0; ReleaseCapture(); }
-            }
+            } else return 0;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
