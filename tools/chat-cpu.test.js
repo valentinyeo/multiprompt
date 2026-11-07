@@ -337,6 +337,10 @@ test('production layout measures only changed suffixes and caches unchanged geom
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+test('IGSH-1754 layout keeps the last batch boundary', () => {
+  assert.match(body(source, 'chatRelayout'), /g_chat_batch_boundary/);
+  assert.match(body(source, 'chatRelayout'), /chat_history\.lastBatchStart/);
+});
 test('IGSH-1415 a local copy the transcript already carries is not laid out', () => {
   assert.match(body(source, 'chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
 });
