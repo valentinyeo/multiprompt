@@ -748,6 +748,14 @@ function assertsOpenPaneHopSync(driver) {
   assert.ok(palette >= 0 && palette < offset && offset < press && press < wait && wait < foreground && foreground < space);
 }
 
+test('HYCI-158 original pre-fix open-pane sequence fails the completion-sync regression', () => {
+  const snapshot = fs.readFileSync(path.join(__dirname, 'fixtures', 'HYCI-158', 'open-pane-before.ps1'), 'utf8');
+  assert.ok(snapshot.includes("if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Opening the pane did not focus its browser' }"));
+  assert.ok(snapshot.includes("if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 opening a pane sent Space to browser chrome' }"));
+  assert.throws(() => assertsOpenPaneHopSync(snapshot), assert.AssertionError);
+  assertsOpenPaneHopSync(journey);
+});
+
 test('IGSH-998 open-pane foreground check waits for the app pane_hop result and stays strict', () => {
   assertsOpenPaneHopSync(journey);
   for (const before of [
