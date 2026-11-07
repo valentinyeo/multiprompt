@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -54,9 +54,11 @@ with tempfile.TemporaryDirectory() as folder:
         value = replies.get(timeout=15)
         assert value is not None, child.stderr.read().decode() + ''.join(file.read_text(encoding='utf-8') for file in pathlib.Path(folder).glob('reader-*.stderr.log'))
         return value
+    opened = set()
     def send(channel, value, watch=False):
-        child.stdin.write((json.dumps(dict(channel=channel, data=json.dumps(value), watch=watch)) + '\n').encode())
+        child.stdin.write((json.dumps(dict(channel=channel, data=json.dumps(value), watch=watch, open=channel not in opened)) + '\n').encode())
         child.stdin.flush()
+        opened.add(channel)
     def page(channel):
         value = next_reply()
         assert value['channel'] == channel, value
@@ -78,6 +80,8 @@ with tempfile.TemporaryDirectory() as folder:
         assert page(2) == dict(id=8, value=text, watch=False)
         send(3, dict(id=9, exit=True))
         assert next_reply() == dict(channel=3, closed=True)
+        send(3, dict(id=10, value='must not reopen'))
+        assert next_reply() == dict(channel=3, closed=True)
         send(2, dict(id=10, value='survived'))
         assert page(2)['value'] == 'survived'
         child.stdin.close()
@@ -95,6 +99,11 @@ test('Windows-safe fake host preserves real logical channel routing and reader b
   assert.match(source, /def transport_reader\(/);
   assert.match(source, /entry = "transport_reader"/);
   assert.match(source, /entry = "watch_reader" if value\.get\("watch"\) else "serve_reader"/);
-  const result = execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 45000 });
-  assert.match(result, /TRANSPORT_BOUNDARY_PASS/);
+  const result = spawnSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 45000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && !result.stderr.includes('AssertionError')) {
+    throw new Error(`transport boundary execution failed: ${result.stderr}`);
+  }
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /TRANSPORT_BOUNDARY_PASS/);
 });

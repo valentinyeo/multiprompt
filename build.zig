@@ -864,6 +864,10 @@ pub fn build(b: *std.Build) void {
     idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
+    const terminal_tests = b.addSystemCommand(&.{ "node", "--test", "tools/terminal-model.test.js", "tools/chat-transport-writer.test.js" });
+    terminal_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&terminal_tests.step);
+    vps_test_step.dependOn(&terminal_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{ "node", "tools/discover-tests.cjs" });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
