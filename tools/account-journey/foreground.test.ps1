@@ -17,7 +17,7 @@ Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-public static class FixtureControls {
+public class FixtureControls : IMessageFilter {
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr CreateWindowEx(int ex, string cls, string text, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
     delegate IntPtr WindowProc(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
@@ -30,11 +30,18 @@ public static class FixtureControls {
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     static WindowProc proc = HandleMessage;
     static IntPtr owner;
+    static IntPtr modal;
+    public bool PreFilterMessage(ref Message message) {
+        if (message.HWnd != modal || modal == IntPtr.Zero || message.Msg != 0x100) return false;
+        HandleMessage(message.HWnd, (uint)message.Msg, message.WParam, message.LParam);
+        return true;
+    }
     static IntPtr HandleMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp) {
         if (msg == 0x100 && (wp.ToInt64() == 0x1b || wp.ToInt64() == 0x0d)) {
             Console.Out.WriteLine(wp.ToInt64() == 0x1b ? "modal-cancel" : "modal-approve");
             Control.FromHandle(owner).Enabled = true;
             DestroyWindow(h);
+            modal = IntPtr.Zero;
             SetForegroundWindow(owner);
             return IntPtr.Zero;
         }
@@ -48,6 +55,7 @@ public static class FixtureControls {
         RegisterClass(ref wc);
         IntPtr h = CreateWindowEx(0, cls, title, 0x80000000, 20, 20, 200, 100, root, IntPtr.Zero, instance, IntPtr.Zero);
         if (h == IntPtr.Zero) throw new Exception("Fixture modal creation failed");
+        modal = h;
         Control.FromHandle(root).Enabled = false;
         ShowWindow(h, 5);
         SetForegroundWindow(h);
@@ -96,6 +104,7 @@ $form.Add_Shown({
     if ($dialog -eq [IntPtr]::Zero) { throw 'Cannot create owned fixture dialog' }
     [void][FixtureControls]::SetFocus($form.Handle)
 })
+[System.Windows.Forms.Application]::AddMessageFilter([FixtureControls]::new())
 [System.Windows.Forms.Application]::Run($form)
 '@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))

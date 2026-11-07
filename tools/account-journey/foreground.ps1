@@ -154,7 +154,12 @@ function Clear-JourneyApproval([IntPtr]$Window, [int]$ProcessId) {
         }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'Timed out: approval cancellation and main window enablement'
+    $exists = try { [JourneyForeground]::Exists($dialog) } catch { 'unavailable' }
+    $enabled = try { [JourneyForeground]::Enabled($Window) } catch { 'unavailable' }
+    $foreground = try { [ReconnectDesktop]::GetForegroundWindow().ToInt64() } catch { 'unavailable' }
+    $focus = try { [JourneyForeground]::ThreadFocus([JourneyForeground]::ForegroundThreadId()) } catch { 'unavailable' }
+    $owned = try { [JourneyForeground]::OwnedWindows($Window, $ProcessId) } catch { 'unavailable' }
+    throw "Timed out: approval cancellation and main window enablement; pid=$ProcessId main=$($Window.ToInt64()) dialog=$($dialog.ToInt64()) dialog_exists=$exists main_enabled=$enabled foreground=$foreground focus=$focus owned=[$owned]"
 }
 function Test-JourneyForeground([IntPtr]$Window, [int]$ProcessId, [IntPtr]$Foreground) {
     if ($Window -eq [IntPtr]::Zero -or $ProcessId -le 0 -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId -or $Foreground -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Foreground) -eq 0) { return $false }
