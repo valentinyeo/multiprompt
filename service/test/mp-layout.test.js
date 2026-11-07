@@ -183,6 +183,30 @@ test('spawn publishes once through the real service and refuses a workspace esca
   assert.equal((await stored()).layout.tabs.at(-1).group, 'Runners');
 });
 
+test('open places shell runners in one group, stars one, and repeats as the same tabs', async () => {
+  await reset();
+  const open = name => ['open', '--kind', 'shell', '--tmux', name, '--name', name + ' shell', '--workspace', 'Work', '--group', 'MP Runners', '--host', '1', '--no-tmux'];
+  for (const name of ['mp-runner-1', 'mp-runner-2', 'mp-runner-3']) {
+    const opened = await cli(open(name), adminKey);
+    assert.equal(opened.code, 0, opened.errors.join('\n'));
+  }
+  const starred = await cli([...open('mp-runner-1'), '--star'], adminKey);
+  assert.equal(starred.code, 0, starred.errors.join('\n'));
+  const after = await stored();
+  const runners = after.layout.tabs.filter(tab => tab.group === 'MP Runners');
+  assert.deepEqual(runners.map(tab => tab.tmux_session), ['mp-runner-1', 'mp-runner-2', 'mp-runner-3']);
+  assert.equal(runners[0].favorite, true);
+  const again = await cli([...open('mp-runner-1'), '--star'], adminKey);
+  assert.match(again.lines[0], /already open/);
+  assert.equal((await stored()).revision, after.revision);
+  const other = await cli(['open', 'mp-runner-2', '--host', '1', '--workspace', 'inne', '--no-tmux'], adminKey);
+  assert.equal(other.code, 1);
+  assert.match(other.errors[0], /already open in Work/);
+  const regrouped = await cli(['open', 'mp-runner-2', '--host', '1', '--workspace', 'Work', '--group', 'Lead runners', '--no-tmux'], adminKey);
+  assert.equal(regrouped.code, 0, regrouped.errors.join('\n'));
+  assert.equal((await stored()).layout.tabs.find(tab => tab.tmux_session === 'mp-runner-2').group, 'Lead runners');
+});
+
 test('the key never appears in output and a missing key is reported', async () => {
   await reset();
   const result = await cli(['move', '--to', 'Work', 'ghost'], adminKey);

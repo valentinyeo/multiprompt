@@ -56,6 +56,23 @@ To make that runner visible, repeat the command with the same name, folder, work
 
 Subagents inside an existing session remain outside this command's scope. This skill starts independent live-host chats, not a different provider or an internal subagent.
 
+## Shell tab
+
+A lead opens a plain shell runner with the same command family. Chat uses `--kind chat`, which runs the live-host command above. Shell uses `--kind shell` and publishes one tmux tab:
+
+```sh
+node tools/mp-layout.mjs open \
+  --kind shell \
+  --tmux "$TMUX_SESSION" \
+  --name "$RUNNER_NAME" \
+  --workspace "$WORKSPACE" \
+  --group "$RUNNER_GROUP" \
+  --host "$MULTIPROMPT_HOST" \
+  --star
+```
+
+`--star` marks that tab as a favorite. Repeat the same session, workspace, group, and host to keep one tab. Pass `--move` only when that session should leave a different workspace. Omit `--group` when no group was requested. `node tools/multibot.mjs open` accepts the same arguments.
+
 ## Repeat and verify
 
 - Keep the same name, folder, workspace, group, and host when retrying. The same normalized name on one host has one stable identity.
@@ -65,7 +82,7 @@ Subagents inside an existing session remain outside this command's scope. This s
 - A successful visible JSON result proves account publication, not screen rendering. Check the named chat and its group on signed-in, online desktop and phone within ten seconds. Record which devices were actually checked. Older phone clients retain the chat but lack group presentation.
 - A successful headless result proves host setup, not task completion or visibility. Check the assigned work's actual output. Promote it when the user wants to inspect the chat.
 - Never claim live visibility from a layout readback alone.
-- Do not use `tmux send-keys`, attach to someone else's pane, or use `mp-layout open` as a substitute.
+- Do not use `tmux send-keys` or attach to someone else's pane. A shell tab uses `mp-layout open --kind shell`. A live chat uses `mp-layout open --kind chat` or `spawn`.
 
 ## Fleet installation
 

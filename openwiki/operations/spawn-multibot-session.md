@@ -56,6 +56,25 @@ This uses the Claude live host, not an arbitrary executable or provider. Subagen
 
 To make a headless session visible, repeat its inputs with `--mode visible`. Omit the task or repeat its exact original text. Promotion creates the parking pane, binds its existing SID, and publishes one grouped account tab. The existing host and message history remain intact. Visible-to-headless requests are refused rather than silently hiding an existing chat.
 
+## Shell tab
+
+One command opens either kind of runner. `--kind chat` runs the live-host command above. `--kind shell` publishes a tmux tab in a named workspace and group:
+
+```sh
+node tools/mp-layout.mjs open \
+  --kind shell \
+  --tmux "$TMUX_SESSION" \
+  --name "$RUNNER_NAME" \
+  --workspace "$WORKSPACE" \
+  --group "$RUNNER_GROUP" \
+  --host "$MULTIPROMPT_HOST" \
+  --star
+```
+
+`--star` marks the tab as a favorite. The same session, host, workspace, and group opens one tab; a second run leaves the layout revision unchanged. An existing tab in that workspace moves into `--group` when the group differs. A tab that already belongs to another workspace is refused unless `--move` is passed. Group names use the same NFC trim, 1 to 64 units, and no control characters as a live chat. The command sends `X-Layout-Features: groups` and refuses, before starting tmux, when the service does not advertise groups. `node tools/multibot.mjs open` accepts the same shell and chat arguments.
+
+Run the command once per shell runner. Three runners can share one workspace and one group. Signed-in desktop clients show the group within about ten seconds.
+
 ## Retry without duplicates
 
 Keep the same name, folder, workspace, group, and host. Names use NFC normalization, outer-space trimming, and case-insensitive identity on one host. A deterministic UUIDv8 identifies the chat; its hex digits form the eventual parking-session name. Conflicting placement and terminal ownership are refused.

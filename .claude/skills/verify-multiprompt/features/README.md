@@ -76,6 +76,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
 - [Favorites groups](favorites-groups.md): group a starred session independently in Favorites and its home workspace using the existing palette.
+- [Server runner group](server-open-group.md): import one account shell tab into a group named Runners, then import that same tab again without adding a tab or a group.
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
 - [Session tabs](session-tabs.md): `zsb session-rename`, `session-rebind`, `session-move` and `session-close` repair four background tabs without changing the active tab or foreground window, and the saved layout survives a restart exactly.
