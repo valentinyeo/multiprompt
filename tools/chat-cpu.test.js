@@ -294,7 +294,7 @@ test "prefix rectangles survive repeated layout and suffix updates; resize and f
     try std.testing.expectEqual(@as(usize, 4005), measured);
 }
 `;
-test('working dots follow stop, reply and queued state', () => {
+test('IGSH-1770 working dots follow Stop through reply and queued state', () => {
   const helper = source.includes('fn chatWorkingDotsVisible(')
     ? body(source, 'chatWorkingDotsVisible')
       .replaceAll('@import("chat_send.zig").chatOutboxWorkingForShell', 'chatOutboxWorkingForShell')
@@ -317,7 +317,7 @@ test "working dots visibility" {
     stop = true; queued = false; reply = false;
     try std.testing.expect(chatWorkingDotsVisible());
     reply = true;
-    try std.testing.expect(!chatWorkingDotsVisible());
+    try std.testing.expect(chatWorkingDotsVisible());
     queued = true;
     try std.testing.expect(chatWorkingDotsVisible());
 }

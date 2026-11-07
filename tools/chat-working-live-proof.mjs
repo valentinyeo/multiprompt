@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { readBmp } from './chat-code-font-proof.mjs';
 import { dots } from './chat-working-proof.mjs';
 
-export function checkFrames(frames, pushedMs, sendMs, replyPushedMs) {
+export function checkFrames(frames, pushedMs, sendMs, replyPushedMs, queuedMs) {
   assert.ok(frames.every(frame => frame.startWallMs >= sendMs && frame.endMs >= frame.startMs), 'Invalid send-relative capture timing');
   const busy = frames.filter(frame => frame.phase === 'busy' && frame.dots?.length === 3);
   assert.ok(busy.some(frame => frame.endMs <= 1000), 'No dots captured within 1000 ms of SendInput');
@@ -15,7 +15,12 @@ export function checkFrames(frames, pushedMs, sendMs, replyPushedMs) {
   assert.ok(live.some((frame, i) => live.slice(i + 1).some(other =>
     frame.dots.every((dot, index) => dot.left === other.dots[index].left && dot.right === other.dots[index].right && Math.abs(dot.top - other.dots[index].top) <= 4) &&
     JSON.stringify(shape(frame)) !== JSON.stringify(shape(other)))), 'Dots did not animate in place');
-  assert.ok(frames.some(frame => frame.phase === 'reply' && frame.startWallMs >= replyPushedMs && !frame.dots && frame.replyPixels >= 60), 'Reply pixels missing or dots still visible after delta push');
+  assert.ok(frames.some(frame => frame.phase === 'reply' && frame.startWallMs >= replyPushedMs && frame.dots?.length === 3 && frame.replyPixels >= 60), 'Reply pixels or working dots missing after delta push');
+  const queued = frames.filter(frame => frame.phase === 'queued' && frame.startWallMs >= queuedMs && frame.dots?.length === 3);
+  assert.ok(queued.length >= 2, 'Working dots missing with two messages queued');
+  assert.ok(queued.some((frame, i) => queued.slice(i + 1).some(other =>
+    frame.dots.every((dot, index) => dot.left === other.dots[index].left && dot.right === other.dots[index].right && Math.abs(dot.top - other.dots[index].top) <= 4) &&
+    JSON.stringify(shape(frame)) !== JSON.stringify(shape(other)))), 'Queued dots did not animate in place');
 }
 
 function verify(root) {
@@ -41,7 +46,10 @@ function verify(root) {
   assert.ok(rows.some(row => row.stage === 'pushed' && row.events.some(({event}) => event.id === delivered.id && event.state === 'accepted')), 'Provider acceptance did not reach the subscription');
   const replyPush = rows.find(row => row.stage === 'pushed' && row.events.some(({event}) => event.kind === 'text.delta' && event.payload.text === reply));
   assert.ok(replyPush, 'Reply delta was not pushed');
-  assert.ok(!rows.some(row => row.stage === 'pushed' && row.events.some(({event}) => event.kind === 'turn.ended')), 'Turn ended before reply proof');
+  assert.ok(!rows.some(row => row.stage === 'pushed' && row.events.some(({event}) => event.kind === 'turn.ended')), 'Turn ended before working and queued proof');
+  assert.equal(observation.followups.length, 2, 'Two follow-up messages must be sent while busy');
+  const queuedFollowups = rows.filter(row => row.stage === 'queued-followup');
+  assert.ok(queuedFollowups.some(row => observation.followups.every(text => row.events.some(({event}) => event.state === 'queued' && event.text === text))), 'Real message store did not retain both follow-up messages');
   assert.ok(!rows.some(row => row.stage === 'dispatch-error' || row.stage === 'reply-timeout'), 'Stand-in dispatch failed');
   const area = json('area.json');
   const frames = observation.frames.map(frame => {
@@ -49,7 +57,7 @@ function verify(root) {
     return {...frame, image, dots: dots(image, area)};
   });
   const reference = frames.find(frame => frame.phase === 'busy' && frame.dots && frame.startWallMs >= push.ms);
-  if (reference) for (const frame of frames.filter(frame => frame.phase === 'reply' && !frame.dots)) {
+  if (reference) for (const frame of frames.filter(frame => frame.phase === 'reply')) {
     const image = frame.image;
     const bg = (area.top * image.width + area.left) * 4;
     let count = 0;
@@ -59,7 +67,7 @@ function verify(root) {
     }
     frame.replyPixels = count;
   }
-  checkFrames(frames, push.ms, observation.sendMs, replyPush.ms);
+  checkFrames(frames, push.ms, observation.sendMs, replyPush.ms, observation.queuedMs);
   const cleanup = JSON.parse(fs.readFileSync(path.join(root, 'cleanup.json'), 'utf8').replace(/^\uFEFF/, ''));
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);

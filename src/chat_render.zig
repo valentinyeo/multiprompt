@@ -1946,9 +1946,7 @@ var g_working_rect: ?RECT = null;
 var g_note_logged = false;
 
 fn chatWorkingDotsVisible() bool {
-    if (!@import("window_layout.zig").chatStopVisible()) return false;
-    if (@import("chat_send.zig").chatOutboxWorkingForShell(app_state.active_shell)) return true;
-    return !@import("chat_live.zig").replyPresent(app_state.shells[app_state.active_shell].shell_id);
+    return @import("window_layout.zig").chatStopVisible();
 }
 
 pub fn chatWorkingSync() void {
@@ -7600,9 +7598,9 @@ test "IGSH-1668 hosted live events reach the native working painter" {
     app_state.shells[0].kind = .tmux;
     @memcpy(app_state.shells[0].tmux_session[0..6], "term-1");
     app_state.shells[0].tmux_session_len = 6;
-    const cases = [_]struct { name: []const u8, history: bool, files: [6]LPCWSTR }{
-        .{ .name = "empty", .history = false, .files = .{ L("live-working-empty-queued.bmp"), L("live-working-empty-accepted.bmp"), L("live-working-empty-busy-0.bmp"), L("live-working-empty-busy-1.bmp"), L("live-working-empty-reply-delta.bmp"), L("live-working-empty-answered.bmp") } },
-        .{ .name = "history", .history = true, .files = .{ L("live-working-history-queued.bmp"), L("live-working-history-accepted.bmp"), L("live-working-history-busy-0.bmp"), L("live-working-history-busy-1.bmp"), L("live-working-history-reply-delta.bmp"), L("live-working-history-answered.bmp") } },
+    const cases = [_]struct { name: []const u8, history: bool, files: [7]LPCWSTR }{
+        .{ .name = "empty", .history = false, .files = .{ L("live-working-empty-queued.bmp"), L("live-working-empty-accepted.bmp"), L("live-working-empty-busy-0.bmp"), L("live-working-empty-busy-1.bmp"), L("live-working-empty-reply-delta.bmp"), L("live-working-empty-answered.bmp"), L("live-working-empty-idle.bmp") } },
+        .{ .name = "history", .history = true, .files = .{ L("live-working-history-queued.bmp"), L("live-working-history-accepted.bmp"), L("live-working-history-busy-0.bmp"), L("live-working-history-busy-1.bmp"), L("live-working-history-reply-delta.bmp"), L("live-working-history-answered.bmp"), L("live-working-history-idle.bmp") } },
     };
     for (cases) |case| {
         session.chatHistoryForget(shell_id);
@@ -7657,19 +7655,28 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try liveWorkingProofFrame(dc, case.files[4], bytes, info.header, started, case.name, "reply-delta");
         try std.testing.expect(live.running(shell_id));
         try std.testing.expect(layout.chatStopVisible());
-        try std.testing.expect(g_working_rect == null);
+        try std.testing.expect(g_working_rect != null);
         const end = "{\"result\":{\"events\":[{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t1\",\"payload\":{\"status\":\"completed\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, end));
         app_state.shells[0].activity = .active;
         session.chatFileOnReady();
         layout.chatWorkingIndicatorSync();
         try liveWorkingProofFrame(dc, case.files[5], bytes, info.header, started, case.name, "turn-ended");
-        try std.testing.expect(g_working_rect == null);
+        try std.testing.expect(g_working_rect != null);
         try std.testing.expect(layout.chatStopVisible());
         app_state.g_chat_outbox.items[0].state = .queued;
         layout.chatWorkingIndicatorSync();
         try std.testing.expect(g_working_rect != null);
         app_state.shells[0].activity = .idle;
+        layout.chatWorkingIndicatorSync();
+        try std.testing.expect(g_working_rect != null);
+        try std.testing.expect(layout.chatStopVisible());
+        app_state.g_chat_outbox.items[0].state = .delivered;
+        layout.chatWorkingIndicatorSync();
+        try liveWorkingProofFrame(dc, case.files[6], bytes, info.header, started, case.name, "idle");
+        try std.testing.expect(g_working_rect == null);
+        try std.testing.expect(!layout.chatStopVisible());
+        try std.testing.expect(!app_state.g_chat_working_timer_running);
         std.heap.page_allocator.free(app_state.g_chat_outbox.items[0].text);
         app_state.g_chat_outbox.clearRetainingCapacity();
     }
