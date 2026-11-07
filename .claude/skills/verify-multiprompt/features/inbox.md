@@ -7,6 +7,7 @@ Open the session list across workspaces, change a session's read/unread state, a
 - `inbox-open`: show the Inbox for the owned app instance.
 - `inbox-unread`: toggle the selected session's blue-dot state through the list.
 - `inbox-return`: close the Inbox without closing the session.
+- `inbox-chat-navigation` (IGSH-1771): open Chat View before Inbox, move up and down six times in Light and AMOLED, require the owned transcript window to stay hidden, and restore that same chat when Inbox closes. Retain `inbox-chat-<theme>-navigation.png` and `inbox-chat-<theme>-returned.png`. This offline journey verifies window layering, not live account sync.
 - `inbox-button`: hide the sidebar button while Inbox is open and restore it on return.
 - `inbox-mute`: mute a tab through Ctrl+K, prove it leaves Inbox but stays in the workspace, then unmute it and prove it is listed again.
 

@@ -77,6 +77,12 @@ test('every console reveal is guarded; a new HWND alias bypass are rejected', ()
 
 });
 
+test('Inbox blocks chat opening before any window or view mutation', () => {
+  const open = fn(source, 'openChatView');
+  assert.match(open, /^fn openChatView\(\) void \{\s*if \(overlayOpen\(\)\) return;/);
+  assert.match(fn(source, 'overlayOpen'), /g_inbox_active/);
+});
+
 function harness(text) {
   const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
@@ -346,6 +352,7 @@ fn isCtrlDown() bool { return false; }
 fn keybd_event(_: u8, _: u8, flags: u32, _: usize) void { if (flags == 0) { alt_unlocked = true; } }
 fn foregroundIsOurs() bool { return foregroundHwndIsOurs(foreground); }
 fn chatViewOwnsInput() bool { return g_chat_active; }
+fn overlayOpen() bool { return g_inbox_active or g_all_sessions_active; }
 fn activeBrowserHasForegroundFocus() bool { return foreground == 20; }
 fn activeShellHwndForFocusGuard() HANDLE { return shells[0].hwnd; }
 fn requestShellRefocus(_: u32, _: u32) void {}
@@ -388,6 +395,22 @@ ${fn(text, 'parkMainWindowBeforeActiveShellRemoval')}
 ${fn(text, 'focusActiveShell')}
 ${fn(text, 'focusActiveShellInner')}
 ${open}
+test "IGSH-1771 background chat opening leaves Inbox in front and preserves the saved view" {
+    g_inbox_active = true;
+    defer g_inbox_active = false;
+    shells[0].chat_view_on = true;
+    for ([_]bool{ false, true }) |active| {
+        g_chat_active = active;
+        foreground = g_main_hwnd;
+        focused = g_main_hwnd;
+        hide_requested = false;
+        openChatView();
+        try std.testing.expectEqual(active, g_chat_active);
+        try std.testing.expect(shells[0].chat_view_on);
+        try std.testing.expect(!hide_requested);
+        try std.testing.expectEqual(g_main_hwnd, focused);
+    }
+}
 test "IGSH-955 chat takes foreground before asynchronously hiding the console" {
     for ([_]HANDLE{ 10, 20, 100 }) |initial| {
         foreground = initial;
@@ -476,7 +499,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     fs.writeFileSync(file, chatHandoffHarness(source));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
-    assert.match(result.stderr, /All 6 tests passed/);
+    assert.match(result.stderr, /All 7 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
