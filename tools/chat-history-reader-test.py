@@ -4873,7 +4873,12 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
                 self.assertEqual(reply['mode'], 'headless')
                 self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
             self.assertEqual(self.user_lines(), [self.text])
-            started = reader.host_start(self.provider, self.sid)
+            started = None
+            for _ in range(10):
+                started = reader.host_start(self.provider, self.sid)
+                if started.get('status') == 'already' or started.get('reason') != 'owner_busy':
+                    break
+                time.sleep(0.2)
             self.assertEqual(started.get('status'), 'already', started)
             self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
 
