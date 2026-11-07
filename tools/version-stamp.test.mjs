@@ -615,7 +615,10 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
 test('HYCI-168 attributes only the reviewed Windows resources merge', () => {
   const commit = { sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1', subject: 'Merge pull request #831' };
   const ticketTitles = { ...titles, 'HYCI-168': '[INFRA] Stop releases with growing Windows resources' };
-  const generated = buildChangelog(base(), 'v0.28.1600', [], [commit], ticketTitles);
+  let generated;
+  assert.doesNotThrow(() => {
+    generated = buildChangelog(base(), 'v0.28.1600', [], [commit], ticketTitles);
+  });
   assert.match(generated, /\.ticket = "HYCI-168"/);
   assert.throws(() => buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e2' }], ticketTitles), /lacks a leading ticket ID/);
 });
