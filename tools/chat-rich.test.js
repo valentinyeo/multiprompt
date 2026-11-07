@@ -157,7 +157,7 @@ test('IGSH-404 every Chat View copy path owns selection-sized storage and report
   }
   const menu = body('chatMessageMenu');
   assert.match(menu, /const selection_text = chatCopyTextAlloc/);
-  assert.match(menu, /const message_text: \[\]u16 = if \(block_at\) \|idx\| chatCopyTextAlloc/);
+  assert.match(menu, /const message_text: \[\]u16 = if \(block_at\) \|idx\| chatMessageTextAlloc/);
   assert.match(menu, /defer std\.heap\.page_allocator\.free\(selection_text\)/);
   assert.match(menu, /defer std\.heap\.page_allocator\.free\(message_text\)/);
   assert.match(body('chatCopyTextToClipboard'), /else if \(setUnicodeClipboardTextWithRetry\(text\)\) \{\s*showHeaderNoticeAscii\("Copied"/);
