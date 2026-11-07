@@ -8,6 +8,9 @@ pub const Channel = struct {
     host: *Host,
     id: u32,
     watch: bool,
+    terminal: bool = false,
+    notify_hwnd: w.HANDLE = null,
+    notify_message: u32 = 0,
     ended: bool = false,
     bytes: std.ArrayList(u8) = .empty,
     offset: usize = 0,
@@ -94,7 +97,13 @@ fn start(host: *Host, index: u8) bool {
     if (state.g_tunnel_job == null or w.AssignProcessToJobObject(state.g_tunnel_job, process) == 0) return false;
     const reader = @import("chat_session.zig").chatReaderBundle(a) orelse return false;
     defer a.free(reader);
-    for ([_][]const u8{ @embedFile("chat_transport.py"), reader }) |source| {
+    const terminal_source = @embedFile("terminal_channel.py");
+    const terminal64 = a.alloc(u8, std.base64.standard.Encoder.calcSize(terminal_source.len)) catch return false;
+    defer a.free(terminal64);
+    _ = std.base64.standard.Encoder.encode(terminal64, terminal_source);
+    const broker = std.fmt.allocPrint(a, "TERMINAL_SOURCE = '{s}'\n{s}", .{ terminal64, @embedFile("chat_transport.py") }) catch return false;
+    defer a.free(broker);
+    for ([_][]const u8{ broker, reader }) |source| {
         const encoded = a.alloc(u8, std.base64.standard.Encoder.calcSize(source.len)) catch return false;
         defer a.free(encoded);
         _ = std.base64.standard.Encoder.encode(encoded, source);
@@ -156,12 +165,26 @@ pub fn open(index: u8, watch: bool) ?*Channel {
     return channel;
 }
 
+pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32) ?*Channel {
+    const channel = open(index, false) orelse return null;
+    lock(channel.host);
+    channel.terminal = true;
+    channel.notify_hwnd = hwnd;
+    channel.notify_message = message;
+    channel.host.mutex.unlock();
+    return channel;
+}
+
+fn notify(channel: *const Channel) void {
+    if (channel.notify_hwnd != null and channel.notify_message != 0) _ = w.PostMessageW(channel.notify_hwnd, channel.notify_message, 0, 0);
+}
+
 pub fn write(channel: *Channel, line: []const u8) bool {
     const host = channel.host;
     lock(host);
     defer host.mutex.unlock();
     if (channel.ended or !host.running) return false;
-    if (!packet(host, .{ .channel = channel.id, .watch = channel.watch, .data = line })) {
+    if (!packet(host, .{ .channel = channel.id, .watch = channel.watch, .terminal = channel.terminal, .data = line })) {
         _ = w.TerminateProcess(host.process, 0);
         return false;
     }
@@ -219,7 +242,10 @@ pub fn shutdown() void {
     for (&hosts) |*host| {
         lock(host);
         if (host.running) _ = w.TerminateProcess(host.process, 0);
-        for (host.channels.items) |channel| channel.ended = true;
+        for (host.channels.items) |channel| {
+            channel.ended = true;
+            notify(channel);
+        }
         host.mutex.unlock();
     }
 }
@@ -234,16 +260,27 @@ fn dispatch(host: *Host, line: []const u8) bool {
         if (channel.id != parsed.value.channel or channel.ended) continue;
         if (parsed.value.closed) {
             channel.ended = true;
+            notify(channel);
             return true;
         }
-        const bytes = parsed.value.data orelse return false;
+        const encoded = parsed.value.data orelse return false;
+        var decoded: ?[]u8 = null;
+        defer if (decoded) |bytes| a.free(bytes);
+        if (channel.terminal) {
+            const size = std.base64.standard.Decoder.calcSizeForSlice(encoded) catch return false;
+            const buffer = a.alloc(u8, size) catch return false;
+            decoded = buffer;
+            std.base64.standard.Decoder.decode(buffer, encoded) catch return false;
+        }
+        const bytes: []const u8 = if (decoded) |value| value else encoded;
         if (channel.bytes.items.len + bytes.len + 1 > MAX_BUFFER) {
             channel.ended = true;
             _ = packet(host, .{ .channel = channel.id, .close = true });
             return true;
         }
         channel.bytes.appendSlice(a, bytes) catch return false;
-        channel.bytes.append(a, '\n') catch return false;
+        if (!channel.terminal) channel.bytes.append(a, '\n') catch return false;
+        notify(channel);
         return true;
     }
     return true;
@@ -259,7 +296,10 @@ fn receive(host: *Host) void {
         host.process = null;
         host.input = null;
         host.output = null;
-        for (host.channels.items) |channel| channel.ended = true;
+        for (host.channels.items) |channel| {
+            channel.ended = true;
+            notify(channel);
+        }
         host.running = false;
         host.retry_at = w.GetTickCount64() + 250;
         host.mutex.unlock();
