@@ -15,6 +15,10 @@ function between(source, start, end) {
   return source.slice(a, b);
 }
 
+test('IGSH-1754 opening a chat clears the last batch time', () => {
+  assert.match(between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_hold)'), /g_chat_batch_boundary = \.\{}/);
+});
+
 test('IGSH-871 unread divider stays above the first unread reply until leaving the tab', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-unread-visit-'));
   try {
@@ -25,7 +29,7 @@ const switch_timing = struct {
   fn start() i64 { return 0; }
   fn record(_: Step, _: i64) void {}
 };
-const Block = struct { role: enum { prose, user, tool } = .prose, first: bool = true, message_id: u64, start: usize = 0, len: usize = 1 };
+const Block = struct { role: enum { prose, user, tool } = .prose, first: bool = true, message_id: u64 = 0, start: usize = 0, len: usize = 1, stamp_ms: i64 = 0 };
 const md = struct { const Block = ThisBlock; };
 const ThisBlock = Block;
 const chat_history = struct {
@@ -51,6 +55,8 @@ const app_state = struct {
   var g_chat_read_open_ready = true;
   var g_chat_read_boundary: chat_history.ReadBoundary = .{};
   var g_chat_read_divider_y: i32 = 0;
+  var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+  var g_chat_batch_divider_y: i32 = 0;
   var g_chat_transcript_hwnd: ?usize = 1;
   var g_chat_scroll_y: i32 = 0;
   var g_chat_top_pad: i32 = 0;
