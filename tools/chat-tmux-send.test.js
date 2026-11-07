@@ -320,6 +320,7 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.match(body('chatEchoMatchActive'), /e\.state == \.delivered and !enqueued/);
   assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect/);
   assert.match(body('chatPaintEcho'), /if \(e\.waiting\(\)\) chatDimQueuedBubble\(hdc, rc\)/);
+  assert.match(body('chatTmuxSendFinish'), /message_replaces/);
 });
 
 test('IGSH-1063 question worker sends numeric key arrays through the reader protocol', () => {
