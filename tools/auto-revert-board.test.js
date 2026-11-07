@@ -20,6 +20,7 @@ async function fakeBoard(t, initial = {}) {
       state.calls.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body, auth: req.headers.authorization });
       const reply = (status, json) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(json)); };
       if (req.headers.authorization !== `Bearer ${secret}`) return reply(401, { success: false });
+      if (state.failure) return reply(403, state.failure);
       if (req.method === 'GET' && url.pathname === '/tasks') return reply(200, { success: true, tasks: [{ ticketNumber: url.searchParams.get('ticket_number'), section: state.section, boardId: 2060 }] });
       if (req.method === 'GET' && url.pathname === '/projects/2060/sections') return reply(200, { success: true, sections });
       if (req.method === 'POST' && url.pathname === '/tasks/update') { state.section = sections.find(section => section.id === body.sectionId).section_title; return reply(200, { success: true }); }
@@ -91,6 +92,23 @@ test('a wrong credential fails without changing the board and never prints it', 
   });
   assert.equal(board.state.section, 'Done');
   assert.equal(board.state.comments.length, 0);
+});
+
+test('permission failures report only fixed classifications', async t => {
+  const board = await fakeBoard(t);
+  const cases = [
+    [{ success: false, message: `This agent is not a member of this board. ${secret}` }, ' (missing board membership)'],
+    [{ success: false, code: 'insufficient_scope', error: "This agent's role ('read') does not permit this action; requires 'write' or higher.", detail: secret }, ' (missing write role)'],
+    [{ success: false, message: `unknown response ${secret}`, error: secret }, ''],
+  ];
+  for (const [failure, classification] of cases) {
+    board.state.failure = failure;
+    await assert.rejects(board.run(), error => {
+      assert.equal(error.stderr.trim(), `Board GET /tasks failed with status 403${classification}`);
+      assert.ok(!error.stderr.includes(secret));
+      return true;
+    });
+  }
 });
 
 test('a missing credential or bad arguments fail before any board call', async t => {

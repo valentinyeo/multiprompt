@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: '22'
       - name: Unit tests
-        run: node --test tools/resource-warning-ticket.test.mjs
+        run: node --test tools/auto-revert-board.test.js tools/resource-warning-ticket.test.mjs
       - name: Live integration proof
         env:
           HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}

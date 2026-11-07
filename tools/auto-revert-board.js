@@ -12,7 +12,12 @@ function boardApi(credential, base = boardBase) {
       signal: AbortSignal.timeout(30000),
     });
     const result = await response.json().catch(() => null);
-    if (!response.ok || result?.success !== true) throw new Error(`Board ${method} ${path.split('?')[0]} failed with status ${response.status}`);
+    if (!response.ok || result?.success !== true) {
+      let reason = '';
+      if (response.status === 403 && typeof result?.message === 'string' && result.message.includes('This agent is not a member of this board.')) reason = ' (missing board membership)';
+      else if (response.status === 403 && result?.code === 'insufficient_scope' && result?.error === "This agent's role ('read') does not permit this action; requires 'write' or higher.") reason = ' (missing write role)';
+      throw new Error(`Board ${method} ${path.split('?')[0]} failed with status ${response.status}${reason}`);
+    }
     return result;
   };
 }
