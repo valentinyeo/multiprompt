@@ -6270,9 +6270,9 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         self.assertEqual(self.writes(), [], 'a parked request must not answer itself')
         self.assertEqual(list(self.session['parked']), [request_id])
 
-    def test_bypass_mode_auto_accepts_approval_without_parking(self):
+    def test_bypass_mode_auto_accepts_safety_approvals_without_parking(self):
         self.session['state']['mode'] = 'bypassPermissions'
-        request_id = self.approval()
+        request_id = self.approval(decision_reason='Dangerous rm operation not ruled out.')
         self.assertEqual(self.events('approval.request'), [])
         self.assertEqual(self.session['parked'], {})
         self.assertEqual(self.writes(), [dict(type='control_response', response=dict(

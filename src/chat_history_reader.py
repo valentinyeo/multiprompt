@@ -3699,6 +3699,12 @@ def host_bypass_approvals(session):
     return mode in HOST_BYPASS_APPROVAL_MODES
 
 
+def host_auto_approve_safety(session, request, kind):
+    if kind != "approval" or not host_bypass_approvals(session):
+        return False
+    return bool(request.get("decision_reason"))
+
+
 def host_auto_approval_response(request):
     edited = request.get("input") if isinstance(request.get("input"), dict) else {}
     return dict(behavior="allow", updatedInput=edited, toolUseID=request.get("tool_use_id"),
@@ -3738,7 +3744,7 @@ def host_control_request_event(provider, sid, tmux, session, event):
         return
     tool = request.get("tool_name")
     kind = "plan" if tool == "ExitPlanMode" else "question" if tool == "AskUserQuestion" else "approval"
-    if kind == "approval" and host_bypass_approvals(session):
+    if host_auto_approve_safety(session, request, kind):
         host_control_response(session, request_id, host_auto_approval_response(request))
         host_event(provider, sid, tmux, session, "approval.resolved",
                    dict(request_id=request_id, decision="accept", by="host"))
@@ -4359,13 +4365,6 @@ def host_codex_request(provider, sid, tmux, session, message):
                                        grant_root=params.get("grantRoot"))
     request = dict(tool_name=tool, tool_use_id=params.get("itemId") or params.get("callId"), input=arguments,
                    title=tool, description=params.get("reason"))
-    if host_bypass_approvals(session):
-        legacy = method in ("execCommandApproval", "applyPatchApproval")
-        host_codex_reply(session, ident, dict(decision=HOST_CODEX_LEGACY["accept"] if legacy else "accept"))
-        host_event(provider, sid, tmux, session, "approval.resolved",
-                   dict(request_id=key, decision="accept", by="host"))
-        host_log(provider, sid, "control_request", dict(request_id=key, tool=tool, kind="approval", auto="bypass"))
-        return
     session["parked"][key] = dict(kind="approval", request=request, signal=threading.Event(), at=time.time(),
                                   rpc=ident, method=method)
     host_event(provider, sid, tmux, session, "approval.request", host_approval(request, key))
@@ -6599,7 +6598,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 90
+RUNTIME_GENERATION = 91
 
 if __name__ == '__main__':
     import base64 as _base64

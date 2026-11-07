@@ -125,7 +125,7 @@ test('IGSH-1852 bypass console status auto allows safety approvals', () => {
 test('IGSH-1852 bypass host auto accepts approval requests', () => {
   const reader = fs.readFileSync(path.join(__dirname, '../src/chat_history_reader.py'), 'utf8');
   assert.match(reader, /HOST_BYPASS_APPROVAL_MODES/);
-  assert.match(reader, /host_bypass_approvals\(session\)/);
+  assert.match(reader, /host_auto_approve_safety\(session, request, kind\)/);
   assert.match(reader, /auto="bypass"/);
 });
 
