@@ -2081,7 +2081,7 @@ test('IGSH-1640 admission is captured and recovered on production send paths', (
   assert.match(body('chatTmuxSendStart'), /message_admission_epoch/);
   assert.match(body('chatTmuxSendThread'), /admission_epoch/);
 });
-test('working dots hide for a reply unless another send is queued', () => {
+test('IGSH-1770 working dots remain for a reply while Stop is visible', () => {
   const helper = source.includes('fn chatWorkingDotsVisible(')
     ? body('chatWorkingDotsVisible')
       .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible')
@@ -2108,7 +2108,7 @@ test "working dots visibility" {
     stop = true; queued = false; reply = false;
     try std.testing.expect(chatWorkingDotsVisible());
     reply = true;
-    try std.testing.expect(!chatWorkingDotsVisible());
+    try std.testing.expect(chatWorkingDotsVisible());
     queued = true;
     try std.testing.expect(chatWorkingDotsVisible());
 }
