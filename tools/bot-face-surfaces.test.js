@@ -17,9 +17,19 @@ test('Inbox uses the owning local shell photo and chosen appearance before termi
   assert.match(inbox, /if \(local_shell\) \|shell\| appearance = avatar\.forShell\(shell\);/);
 });
 
+test('IGSH-1773 palette session rows carry stable photo keys and prefer pictures before generated faces', () => {
+  const sidebar = read('src/sidebar.zig');
+  assert.match(sidebar, /photo_key: \?\[32\]u8 = null/);
+  assert.match(read('src/bot_photo.zig'), /return drawKey\(key\(shell\) orelse return false, hdc, rc\);/);
+  assert.match(sidebar, /if \(row\.session_len == 0\) return paletteNamedSession\(name, ws, row\.snapshot_favorite\);/);
+  assert.match(sidebar, /\.photo_key = @import\("bot_photo\.zig"\)\.key\(shell\)/);
+  assert.match(sidebar, /view\.photo_key = \(@import\("bot_photo_key\.zig"\)\.Key\{ \.remote = \.\{ \.host = host, \.session = name \} \}\)\.digest\(\)/);
+  assert.match(sidebar, /const photo_drawn = if \(view\.photo_key\) \|key\| @import\("bot_photo\.zig"\)\.drawKey\(key, hdc, avatar_rc\) else false;\s*if \(!photo_drawn\) @import\("bot_avatar\.zig"\)\.draw\(hdc, avatar_rc, view\.appearance\);/);
+});
+
 test('hosted photo journey measures Starred, header and Inbox again after replacement', () => {
   const driver = read('tools/verify-bot-photo/drive.ps1');
-  for (const surface of ['pinned', 'header', 'inbox']) assert.ok(driver.includes(`Assert-Avatar '${surface}'`));
+  for (const surface of ['pinned', 'header', 'inbox', 'palette']) assert.ok(driver.includes(`Assert-Avatar '${surface}'`));
   assert.ok(driver.includes("Assert-AllFaces $firstId 'matching-wide'"));
   assert.ok(driver.includes("Assert-AllFaces $firstId 'matching-replacement' $true"));
   for (const theme of ['light', 'amoled', 'edge-grey']) assert.ok(driver.includes(`name='${theme}'`));
