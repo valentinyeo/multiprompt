@@ -319,6 +319,12 @@ pub fn shutdown() void {
     }
 }
 
+fn rejectTerminal(channel: *Channel) bool {
+    channel.ended = true;
+    notify(channel);
+    return true;
+}
+
 fn dispatch(host: *Host, line: []const u8) bool {
     const Reply = struct { channel: u32, data: ?[]const u8 = null, closed: bool = false };
     const parsed = std.json.parseFromSlice(Reply, a, line, .{}) catch return false;
@@ -336,10 +342,10 @@ fn dispatch(host: *Host, line: []const u8) bool {
         var decoded: ?[]u8 = null;
         defer if (decoded) |bytes| a.free(bytes);
         if (channel.terminal) {
-            const size = std.base64.standard.Decoder.calcSizeForSlice(encoded) catch return false;
+            const size = std.base64.standard.Decoder.calcSizeForSlice(encoded) catch return rejectTerminal(channel);
             const buffer = a.alloc(u8, size) catch return false;
             decoded = buffer;
-            std.base64.standard.Decoder.decode(buffer, encoded) catch return false;
+            std.base64.standard.Decoder.decode(buffer, encoded) catch return rejectTerminal(channel);
         }
         const bytes: []const u8 = if (decoded) |value| value else encoded;
         if (channel.bytes.items.len + bytes.len + 1 > MAX_BUFFER) {
