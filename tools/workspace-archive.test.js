@@ -63,6 +63,15 @@ test('IGSH-1664 archive and restore are reachable while deletion requires an arc
   }
 });
 
+test('IGSH-1664 journey treats an omitted workspace field as workspace 0', () => {
+  const journey = read('.claude/skills/verify-multiprompt/workspace-switcher.ps1');
+  assert.match(journey, /function Get-SavedTabWorkspace/);
+  assert.match(journey, /PSObject\.Properties\['workspace'\]/);
+  assert.match(journey, /return 0/);
+  assert.doesNotMatch(journey, /\$_\.workspace -eq/);
+  assert.match(read('src/session.zig'), /if \(app_state\.shells\[i\]\.workspace != 0\)/);
+});
+
 test('IGSH-1664 native registry reload distinguishes archived, active and legacy rows', { skip: process.env.GITHUB_ACTIONS !== 'true' }, () => {
   assert.match(state, /archived: bool = false/);
   const type = state.slice(state.indexOf('pub const WorkspaceEntry = struct {'), state.indexOf('pub var g_workspaces:'));

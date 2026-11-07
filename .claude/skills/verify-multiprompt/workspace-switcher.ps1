@@ -24,6 +24,11 @@ function Open-WorkspaceCard([string]$Shot) {
     return Get-WorkspaceCard
 }
 
+function Get-SavedTabWorkspace($Tab) {
+    if ($Tab.PSObject.Properties['workspace']) { return [int]$Tab.workspace }
+    return 0
+}
+
 function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     $card = Open-WorkspaceCard ($Shot + '-open')
     $state = Read-Session
@@ -131,7 +136,7 @@ $archiveBefore = Read-Session
 $archiveId = [string]$archiveBefore.workspaces[$created].wid
 $archiveRegistry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
 $archiveName = [string](@($archiveRegistry.windows | Where-Object { $_.id -ceq $archiveId })[0].name)
-$archiveTabs = @($archiveBefore.tabs | Where-Object { $_.workspace -eq $created })
+$archiveTabs = @($archiveBefore.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $created })
 if ($archiveId.Length -eq 0 -or $archiveName.Length -eq 0 -or $archiveTabs.Count -eq 0) { throw 'Archive fixture needs a named workspace and a real session' }
 $archiveCount = $archiveBefore.workspace_count
 Focus-Palette 'archive workspace' 6205
@@ -180,7 +185,7 @@ Wait-Until {
     $saved.workspace_count -eq $archiveCount -and $saved.workspaces[$saved.active_workspace].wid -ceq $archiveId -and $entry.Count -eq 1 -and -not ($entry[0].PSObject.Properties['archived'] -and $entry[0].archived)
 } 'restored workspace active with original identity'
 $restored = Read-Session
-$restoredTabs = @($restored.tabs | Where-Object { $_.workspace -eq $restored.active_workspace })
+$restoredTabs = @($restored.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $restored.active_workspace })
 if ($restoredTabs.Count -ne $archiveTabs.Count) { throw 'Restore changed the session count' }
 for ($i = 0; $i -lt $archiveTabs.Count; $i++) {
     if ($restoredTabs[$i].name -cne $archiveTabs[$i].name -or $restoredTabs[$i].kind -cne $archiveTabs[$i].kind) { throw 'Restore changed saved session names or kinds' }
