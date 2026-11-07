@@ -129,7 +129,9 @@ function Rename-DeleteFixture([string]$Name) {
     Focus-Palette 'rename workspace' 7000
     Press @(0x0D) 'Enter: rename the current synthetic workspace'
     Wait-Until { [VerifyNative]::Class([VerifyNative]::GetFocusedWindow($script:window)) -eq 'Edit' } 'workspace rename input focused'
+    Press @(0x11, 0x41) 'Ctrl+A: select the whole workspace rename text'
     Type-Text $Name
+    Wait-Until { [VerifyNative]::EditText([VerifyNative]::GetFocusedWindow($script:window)) -ceq $Name } 'complete synthetic workspace name visible before commit'
     Press @(0x0D) 'Enter: save synthetic workspace name'
     Wait-Until { $saved = Read-Session; $saved.workspaces[$saved.active_workspace].name -ceq $Name } 'workspace rename saved'
 }
@@ -167,9 +169,11 @@ function Delete-WorkspaceFixture([string]$Name, [bool]$Mouse) {
         $rect = New-Object VerifyNative+Rect
         if (-not [VerifyNative]::GetClientRect($script:window, [ref]$rect)) { throw 'Delete palette client rectangle unavailable' }
         $top = [Math]::Max(8, [Math]::Min(120, $rect.Bottom - (72 + 2 * 39 + 44) - 8))
+        $confirmLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+        $confirmStart = ((Get-Content $confirmLog -Raw) -join '').Length
         Record 'Mouse: select the sole matching workspace delete row'
         [VerifyNative]::ClickClient($script:window, [int]($rect.Right / 2), ($top + 72 + 39 + 19))
-        Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match '\[confirm\].*target=64\d\d' } 'delete confirmation armed by mouse'
+        Wait-Until { ((Get-Content $confirmLog -Raw) -join '').Substring($confirmStart) -match '\[palette\] confirm target=64\d\d' } 'delete confirmation armed by mouse'
         Snapshot 'workspace-delete-mouse-confirm'
         Record 'Mouse: confirm deletion on the same workspace row'
         [VerifyNative]::ClickClient($script:window, [int]($rect.Right / 2), ($top + 72 + 39 + 19))
