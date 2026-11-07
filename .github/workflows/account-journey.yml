@@ -118,6 +118,8 @@ jobs:
           . ./tools/account-journey/diagnostics.ps1
           & ./tools/account-journey/diagnostics.test.ps1
           & ./tools/account-journey/foreground.test.ps1
+          pwsh -NoProfile -NonInteractive -File tools/account-journey/foreground-predicate.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Foreground predicate regression failed' }
           pwsh -NoProfile -NonInteractive -File tools/fixtures/HYCI-137/workspace.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Workspace selection regression failed' }
           node --test tools/account-journey/rename.test.js

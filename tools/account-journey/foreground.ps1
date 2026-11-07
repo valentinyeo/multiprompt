@@ -65,11 +65,15 @@ public static class JourneyForeground {
     }
 }
 '@
+function Test-JourneyForeground([IntPtr]$Window, [int]$ProcessId, [IntPtr]$Foreground) {
+    if ($Window -eq [IntPtr]::Zero -or $ProcessId -le 0 -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId -or $Foreground -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Foreground) -eq 0) { return $false }
+    return $Foreground -eq $Window -or ([ReconnectDesktop]::Class($Foreground) -ceq 'ConsoleWindowClass' -and [ReconnectDesktop]::GetAncestor($Foreground, 2) -eq $Window)
+}
 function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
     $foreground = [ReconnectDesktop]::GetForegroundWindow()
     $owner = [ReconnectDesktop]::Owner($Window)
     $foregroundOwner = [ReconnectDesktop]::Owner($foreground)
-    if ($Window -eq [IntPtr]::Zero -or $owner -ne $ProcessId -or $foreground -ne $Window) {
+    if (-not (Test-JourneyForeground $Window $ProcessId $foreground)) {
         $detail = 'diagnostics=unavailable'
         try {
             $class = [ReconnectDesktop]::Class($foreground)
@@ -88,7 +92,7 @@ function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) {
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
         if ($Window -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId) { Assert-Window $Window $ProcessId }
-        if ([ReconnectDesktop]::GetForegroundWindow() -eq $Window) { return }
+        if (Test-JourneyForeground $Window $ProcessId ([ReconnectDesktop]::GetForegroundWindow())) { return }
         [ReconnectDesktop]::Key(0x12, $false)
         try { [JourneyForeground]::Activate($Window) } finally { [ReconnectDesktop]::Key(0x12, $true) }
         Start-Sleep -Milliseconds 100
