@@ -6,6 +6,8 @@ using System.Text;
 public static class JourneyForeground {
     delegate bool EnumProc(IntPtr h, IntPtr parameter);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr parameter);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint command);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
@@ -23,6 +25,29 @@ public static class JourneyForeground {
     }
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder name, int max);
+    public static string OwnedWindows(IntPtr root, int processId) {
+        uint rootPid;
+        if (root == IntPtr.Zero || processId <= 0 || GetWindowThreadProcessId(root, out rootPid) == 0 || rootPid != (uint)processId) throw new ArgumentException("Invalid root");
+        var entries = new List<string>();
+        int count = 0;
+        bool failed = false;
+        EnumProc callback = (h, parameter) => {
+            uint pid;
+            IntPtr owner = GetWindow(h, 4);
+            if (owner != root || GetWindowThreadProcessId(h, out pid) == 0 || pid != (uint)processId) return true;
+            count++;
+            if (entries.Count < 12) {
+                var name = new StringBuilder(256);
+                if (GetClassName(h, name, name.Capacity) == 0) { failed = true; return false; }
+                string cls = name.ToString();
+                if (cls != "MultiPromptDialog" && cls != "MultipromptSettingsKey" && cls != "#32770") cls = "other";
+                entries.Add(string.Format("{0}:{1}:{2}:{3}:{4}", h.ToInt64(), owner.ToInt64(), IsWindowVisible(h), IsWindowEnabled(h), cls));
+            }
+            return true;
+        };
+        if (!EnumWindows(callback, IntPtr.Zero) || failed) throw new InvalidOperationException("Enumeration unavailable");
+        return string.Format("count={0},truncated={1},entries={2}", count, count > 12, string.Join(",", entries.ToArray()));
+    }
     public static IntPtr[] VisibleEdits(IntPtr root, int processId) {
         if (root == IntPtr.Zero) throw new ArgumentException("Missing root");
         uint rootPid;

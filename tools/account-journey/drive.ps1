@@ -122,8 +122,15 @@ function Type-Ascii([string]$Value, [IntPtr]$Window, [int]$ProcessId, [IntPtr]$E
         [ReconnectDesktop]::Type([ushort]$vk)
     }
 }
+function Get-RenameWindowSnapshot([IntPtr]$Window, [int]$ProcessId) {
+    $enabled = try { [JourneyForeground]::Enabled($Window) } catch { 'unavailable' }
+    $owned = try { [JourneyForeground]::OwnedWindows($Window, $ProcessId) } catch { 'unavailable' }
+    return "main_enabled=$enabled,owned=[$owned]"
+}
 function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
+    $beforeActivation = Get-RenameWindowSnapshot $Window $ProcessId
     Set-JourneyForeground $Window $ProcessId
+    $afterActivation = Get-RenameWindowSnapshot $Window $ProcessId
     Assert-Window $Window $ProcessId
     $paletteLog = if ($ProcessId -eq $app.Id) { $log } elseif ($appB -and $ProcessId -eq $appB.Id) { $logB } else { throw 'Unknown app process' }
     $offset = (Read-Log $paletteLog).Length
@@ -232,7 +239,8 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
             }) -join ','
             $threadSnapshot = "main_thread=$mainThreadValue,main_window_enabled=$mainWindowEnabled,foreground_thread=$foregroundThreadValue,foreground_focus=$foregroundFocus,entries=$threadEntries"
         } catch {}
-        $message += " before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] thread_edits=[$threadSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
+        $timeoutWindows = Get-RenameWindowSnapshot $Window $ProcessId
+        $message += " before_activation=[$beforeActivation] after_activation=[$afterActivation] timeout_windows=[$timeoutWindows] before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] thread_edits=[$threadSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
         $exception = [System.Exception]::new($message, $original.Exception)
         $exception.Data['original_script_stack'] = $original.ScriptStackTrace
         throw $exception

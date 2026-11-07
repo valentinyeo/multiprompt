@@ -45,6 +45,12 @@ $form.Add_Shown({
         if ($h -eq [IntPtr]::Zero) { throw 'Cannot create fixture control' }
         if ($item[0] -eq 'Edit' -and $item[1] -eq 0x50000000) { $script:enabledEdit = $h }
     }
+    foreach ($index in 1..14) {
+        $h = [FixtureControls]::CreateWindowEx(0, 'STATIC', 'synthetic-secret-owned-title', [uint32]2147483648, 0, 0, 60, 20, $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
+        if ($h -eq [IntPtr]::Zero) { throw 'Cannot create owned fixture window' }
+    }
+    $dialog = [FixtureControls]::CreateWindowEx(0, '#32770', 'synthetic-secret-dialog-title', [uint32]2147483648, 0, 0, 60, 20, $form.Handle, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
+    if ($dialog -eq [IntPtr]::Zero) { throw 'Cannot create owned fixture dialog' }
     [void][FixtureControls]::SetFocus($form.Handle)
 })
 [System.Windows.Forms.Application]::Run($form)
@@ -84,6 +90,24 @@ try {
             throw "Foreground probe window did not appear (pid=$($process.Id), exited=$($process.HasExited)); see probe stdout and stderr above"
         }
         $windows += $window
+    }
+    foreach ($index in 0, 1) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $snapshot = [JourneyForeground]::OwnedWindows($windows[$index], $processes[$index].Id)
+            if ($snapshot -match '^count=(\d+),truncated=True,entries=(.*)$' -and [int]$Matches[1] -ge 15) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ($snapshot -notmatch '^count=(\d+),truncated=True,entries=(.*)$' -or [int]$Matches[1] -lt 15) { throw 'Owned-window count or truncation mismatch' }
+        $entries = @($Matches[2] -split ',')
+        if ($entries.Count -ne 12) { throw 'Owned-window output was not bounded' }
+        foreach ($entry in $entries) {
+            if ($entry -notmatch '^(\d+):(\d+):(True|False):(True|False):(MultiPromptDialog|MultipromptSettingsKey|#32770|other)$') { throw 'Unsafe owned-window entry' }
+            if ([long]$Matches[2] -ne $windows[$index].ToInt64() -or [ReconnectDesktop]::Owner([IntPtr][long]$Matches[1]) -ne $processes[$index].Id) { throw 'Owned-window snapshot included a foreign owner or PID' }
+        }
+        $rejected = $false
+        try { [void][JourneyForeground]::OwnedWindows($windows[$index], $processes[1 - $index].Id) } catch { $rejected = $true }
+        if (!$rejected -or $snapshot -match 'synthetic-secret|STATIC') { throw 'Owned-window PID or redaction failure' }
     }
     foreach ($index in @(0, 1, 0, 1)) {
         Set-JourneyForeground $windows[$index] $processes[$index].Id

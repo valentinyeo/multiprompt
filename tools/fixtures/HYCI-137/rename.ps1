@@ -41,6 +41,11 @@ public static class ReconnectDesktop {
     public static string Text(IntPtr window) { return Mode == "snapshot-new" && window == new IntPtr(201) ? "private-expected-name" : Mode == "wrong" || Mode == "wrong-name" ? "synthetic-secret-wrong-name" : "Runners"; }
 }
 public static class JourneyForeground {
+    public static int Phase;
+    public static string OwnedWindows(IntPtr window, int pid) {
+        if (ReconnectDesktop.Mode == "owned-error") throw new Exception("synthetic-secret-owned");
+        return Phase == 0 ? "count=1,truncated=False,entries=300:100:True:True:MultiPromptDialog" : "count=1,truncated=False,entries=301:100:True:True:other";
+    }
     public static uint ThreadId(IntPtr window) {
         if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-thread");
         return window == new IntPtr(100) ? 10u : 20u;
@@ -100,7 +105,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds) {
     }
     throw "Timed out: $Description"
 }
-function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) { }
+function Set-JourneyForeground([IntPtr]$Window, [int]$ProcessId) { [JourneyForeground]::Phase = 1 }
 function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
     if ($Window -ne [IntPtr]100 -or $ProcessId -ne 42) { throw 'Wrong window' }
 }
@@ -119,6 +124,9 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) 'tools/account-journey/drive.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Could not parse drive.ps1' }
+$snapshotFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-RenameWindowSnapshot' }, $true)
+if (!$snapshotFunction) { throw 'Get-RenameWindowSnapshot not found' }
+. ([scriptblock]::Create($snapshotFunction.Extent.Text))
 $function = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Open-Rename' }, $true)
 if ($function.Count -ne 1) { throw 'Open-Rename not found' }
 . ([scriptblock]::Create($function[0].Extent.Text))
@@ -126,7 +134,8 @@ $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
 . (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
 $secrets = @{ admin_key = 'synthetic-secret' }
-foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error', 'thread-error', 'main-disabled', 'main-enabled-error')) {
+foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error', 'thread-error', 'main-disabled', 'main-enabled-error', 'owned-error')) {
+    [JourneyForeground]::Phase = 0
     $script:trace = "[palette] confirm target=7000`n"
     [ReconnectDesktop]::Opened = $false
     [ReconnectDesktop]::Ready = $false
@@ -153,6 +162,10 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
         $message -match 'synthetic-secret|wrong-name|private-expected-name' -or
         !$caught.Exception.InnerException -or $caught.Exception.InnerException.Message -cne 'Timed out: workspace rename edit' -or
         $diagnostic.original_script_stack -notmatch 'Wait-For') { throw 'Unsafe or incomplete rename timeout diagnostic' }
+    $enabled = if ($mode -in @('thread-error', 'main-enabled-error')) { 'unavailable' } elseif ($mode -eq 'main-disabled') { 'False' } else { 'True' }
+    $beforeOwned = if ($mode -eq 'owned-error') { 'unavailable' } else { 'count=1,truncated=False,entries=300:100:True:True:MultiPromptDialog' }
+    $afterOwned = if ($mode -eq 'owned-error') { 'unavailable' } else { 'count=1,truncated=False,entries=301:100:True:True:other' }
+    if (!$message.Contains("before_activation=[main_enabled=$enabled,owned=[$beforeOwned]] after_activation=[main_enabled=$enabled,owned=[$afterOwned]] timeout_windows=[main_enabled=$enabled,owned=[$afterOwned]]")) { throw 'Incorrect owned-window phases' }
     $sawEdit = $mode -in @('wrong', 'transient')
     $eventTrail = if ($mode -in @('spy-count-error', 'spy-events-error')) { 'unavailable' } else { ((3..14 | ForEach-Object { "$(1 + $_):$(200 + $_):42:100" }) -join ',') }
     if (!$message.EndsWith("saw_focused_owned_edit=$sawEdit events=$eventTrail")) { throw 'Incorrect rename history diagnostic' }
