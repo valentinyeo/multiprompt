@@ -6,6 +6,7 @@ const GetMessageTime = @import("win32.zig").GetMessageTime;
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const browser_own_profile = @import("browser_own_profile.zig");
+const browser_pane_name = @import("browser_pane_name.zig");
 const browser_signin = @import("browser_signin.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
 const BROWSER_EDGE_MASKS = @import("main.zig").BROWSER_EDGE_MASKS;
@@ -2269,6 +2270,26 @@ pub fn shellZsbSessionKey(shell_id: u32, out: *[64]u8) []const u8 {
     return out[0..pos];
 }
 
+test "IGSH-1199 shell pane keys match the per-session browser pane name" {
+    var shell_key: [64]u8 = undefined;
+    var pane_key: [64]u8 = undefined;
+    try std.testing.expectEqualStrings(shellZsbSessionKey(12, &shell_key), browser_pane_name.shellKey(12, &pane_key));
+    try std.testing.expectEqualStrings(shellZsbSessionKey(0, &shell_key), browser_pane_name.shellKey(0, &pane_key));
+}
+
+pub fn browserPaneSessions(out: *[app_state.MAX_SHELLS]browser_pane_name.Session) []browser_pane_name.Session {
+    const count = app_state.shell_count;
+    for (0..count) |i| {
+        const sh = &app_state.shells[i];
+        out[i] = .{
+            .id = sh.shell_id,
+            .tmux = if (sh.tmux_session_len > 0) sh.tmux_session[0..sh.tmux_session_len] else "",
+            .front = i == app_state.active_shell,
+        };
+    }
+    return out[0..count];
+}
+
 pub fn zsbPrimarySessionToken(session_raw: []const u8) []const u8 {
     const session = std.mem.trim(u8, session_raw, &[_]u8{ ' ', '\t', '\r', '\n' });
     for (session, 0..) |c, i| {
@@ -2366,13 +2387,20 @@ fn removePaneShellKeyFileForShell(idx: u32) void {
 
 pub fn writePaneSessionFileForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
-    if (app_state.shells[idx].browser_window_id == 0) return;
-    if (app_state.shells[idx].tmux_session_len > 0) {
-        writePaneSessionFile(
-            app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len],
-            app_state.shells[idx].browser_window_id,
-        );
+    var listed: [app_state.MAX_SHELLS]browser_pane_name.Session = undefined;
+    const sessions = browserPaneSessions(&listed);
+    if (idx >= sessions.len) return;
+    const tmux = sessions[idx].tmux;
+    const hit = if (tmux.len > 0) browser_pane_name.target(sessions, tmux) else null;
+    const owns = hit != null and hit.? == @as(usize, idx);
+    const wid = app_state.shells[idx].browser_window_id;
+    if (owns) {
+        if (wid != 0) writePaneSessionFile(tmux, wid) else removePaneSessionFile(tmux);
     }
+    if (wid == 0) return;
+    var pane_buf: [80]u8 = undefined;
+    const pane = browser_pane_name.name(sessions, idx, &pane_buf);
+    if (pane.len > 0 and (tmux.len == 0 or !std.ascii.eqlIgnoreCase(pane, tmux))) writePaneSessionFile(pane, wid);
     writePaneShellKeyFileForShell(idx);
 }
 
