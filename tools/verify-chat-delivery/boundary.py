@@ -1523,6 +1523,7 @@ def ssh():
         entry = "serve_reader" if remote[-1:] == ["--serve"] else None
         if os.name == "nt" and remote[1:] == ["-u", "-c", "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"]:
             entry = "transport_reader"
+            remote.append("--transport")
         if entry:
             remote[3] = ("import importlib.util;"
                          f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"

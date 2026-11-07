@@ -10,14 +10,22 @@ import ast, base64, json, pathlib, queue, signal, subprocess, sys, tempfile, thr
 root = pathlib.Path(sys.argv[1])
 source = (root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8')
 adapter = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'transport_reader')
+ssh = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'ssh')
 broker = (root / 'src/chat_transport.py').read_text(encoding='utf-8')
 main = next(node for node in ast.parse(broker).body if isinstance(node, ast.If) and isinstance(node.test, ast.Compare))
 registered = []
 minimal_signal = types.SimpleNamespace(SIGTERM=15, signal=lambda event, handler: registered.append(event))
 exec(compile(ast.Module(body=[main.body[0]], type_ignores=[]), '<signal-registration>', 'exec'), dict(signal=minimal_signal, sys=sys))
 assert registered == [15], registered
-prefix = '''import base64,json,os,subprocess,sys,time
+prefix = '''import base64,importlib.util,json,os as real_os,re,shlex,subprocess,sys,time,types
 from pathlib import Path
+os = types.SimpleNamespace(name='nt',environ=real_os.environ,getpid=real_os.getpid,pathsep=real_os.pathsep)
+if not hasattr(subprocess,'CREATE_NO_WINDOW'): subprocess.CREATE_NO_WINDOW=0
+ROOT = Path(__file__).parent
+MODE = sys.argv[1]
+ARGS = ['python3','-u','-c',"'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'"]
+def state(): return {}
+def declined_remote(args): return None
 def record(*args, **kwargs): pass
 def serve_reader():
     assert base64.b64decode(sys.stdin.buffer.readline()) == b'fixture-reader'
@@ -31,8 +39,8 @@ def watch_reader(): serve_reader()
 '''
 with tempfile.TemporaryDirectory() as folder:
     fixture = pathlib.Path(folder) / 'fixture_boundary.py'
-    fixture.write_text(prefix + '\n' + ast.unparse(adapter) + "\nif __name__ == '__main__': transport_reader()\n")
-    child = subprocess.Popen([sys.executable, '-u', str(fixture)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    fixture.write_text(prefix + '\n' + ast.unparse(adapter) + '\n' + ast.unparse(ssh) + "\nif __name__ == '__main__': sys.exit(ssh())\n")
+    child = subprocess.Popen([sys.executable, '-u', str(fixture), 'ssh'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     replies = queue.Queue()
     def receive():
         for line in child.stdout: replies.put(json.loads(line))
@@ -40,7 +48,7 @@ with tempfile.TemporaryDirectory() as folder:
     threading.Thread(target=receive, daemon=True).start()
     def next_reply():
         value = replies.get(timeout=15)
-        assert value is not None, child.stderr.read().decode()
+        assert value is not None, child.stderr.read().decode() + ''.join(file.read_text(encoding='utf-8') for file in pathlib.Path(folder).glob('reader-*.stderr.log'))
         return value
     def send(channel, value, watch=False):
         child.stdin.write((json.dumps(dict(channel=channel, data=json.dumps(value), watch=watch)) + '\n').encode())
