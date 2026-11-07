@@ -116,9 +116,10 @@ test "audit failed permission send can be retried" {
 });
 
 test('IGSH-1852 bypass console status auto allows safety approvals', () => {
+  const helper = fileBody('chat_capture.zig', 'chatConsoleBypassPermissionsActive');
+  assert.match(helper, /bypass permissions on/);
   const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows');
   assert.match(capture, /chatConsoleBypassPermissionsActive/);
-  assert.match(capture, /bypass permissions on/);
   assert.match(capture, /chatPermissionAnswer\(shell_index, \.allow\)/);
 });
 
