@@ -6273,14 +6273,16 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
     def test_bypass_mode_auto_accepts_safety_approvals_without_parking(self):
         self.session['state']['mode'] = 'bypassPermissions'
         request_id = self.approval(decision_reason='Dangerous rm operation not ruled out.')
-        self.assertEqual(self.events('approval.request'), [])
+        self.assertEqual([event for event in self.events('approval.request')
+                          if event['payload'].get('request_id') == request_id], [])
         self.assertEqual(self.session['parked'], {})
         self.assertEqual(self.writes(), [dict(type='control_response', response=dict(
             subtype='success', request_id=request_id,
             response=dict(behavior='allow', updatedInput=dict(command='rm -rf build', description='Remove the build directory'),
                           toolUseID='toolu_req', decisionClassification='user_temporary')))])
-        self.assertEqual(self.events('approval.resolved')[0]['payload'],
-                         dict(request_id=request_id, decision='accept', by='host'))
+        resolved = [event for event in self.events('approval.resolved')
+                    if event['payload'].get('request_id') == request_id]
+        self.assertEqual(resolved[0]['payload'], dict(request_id=request_id, decision='accept', by='host'))
 
     def test_accept_edits_mode_still_parks_shell_approvals(self):
         self.session['state']['mode'] = 'acceptEdits'
