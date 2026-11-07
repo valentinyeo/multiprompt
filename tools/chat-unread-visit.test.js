@@ -23,6 +23,12 @@ test('IGSH-871 unread divider stays above the first unread reply until leaving t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-unread-visit-'));
   try {
     copyZig(['switch_timing.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'win32.zig'), `pub const FILETIME = extern struct { dwLowDateTime: u32 = 0, dwHighDateTime: u32 = 0 };
+pub const SYSTEMTIME = extern struct { year: u16 = 0, month: u16 = 0, day_of_week: u16 = 0, day: u16 = 0, hour: u16 = 0, minute: u16 = 0, second: u16 = 0, milliseconds: u16 = 0 };
+pub fn FileTimeToLocalFileTime(_: *const FILETIME, _: *FILETIME) i32 { return 0; }
+pub fn FileTimeToSystemTime(_: *const FILETIME, _: *SYSTEMTIME) i32 { return 0; }
+pub fn GetLocalTime(_: *SYSTEMTIME) void {}
+`);
     const source = `const std = @import("std");
 const switch_timing = struct {
   const Step = @import("switch_timing.zig").Step;
@@ -128,7 +134,7 @@ test "count tracks arrivals above bottom, not repaint or reaching bottom" {
 }
 `;
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
-    const result = spawnSync(process.env.ZIG_EXE || (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig')), ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
+    const result = spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, JSON.stringify(result));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
