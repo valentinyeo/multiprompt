@@ -78,7 +78,11 @@ def install(namespace, root, record):
     def worker(query, source, only_if_work=False):
         if not matches(query.get('provider'), query.get('sid')):
             return previous_worker(query, source, only_if_work=only_if_work)
-        if query.get('op') != 'message_submit' or started.is_set():
+        if query.get('op') != 'message_submit':
+            return
+        if started.is_set():
+            page = namespace['message_events_page']('claude', SID, 0)
+            record('working-host.jsonl', stage='queued-followup', sid=SID, events=page['events'])
             return
         started.set()
         request = dict(query, op='message_dispatch')

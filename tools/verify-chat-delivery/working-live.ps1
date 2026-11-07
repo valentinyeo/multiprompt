@@ -92,6 +92,25 @@ try {
         Capture-Working 'reply' $i
         Start-Sleep -Milliseconds 100
     }
+    $observation.followups = @('First queued follow-up', 'Second queued follow-up')
+    foreach ($followup in $observation.followups) {
+        Type-Composer $followup
+        Press @(0x0D) 'Enter: queue follow-up while the reply is still working' $true
+    }
+    [void](Wait-For 'both follow-up messages retained by the real message store' {
+        $rows = @((Read-Shared "$state/working-host.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+        foreach ($row in $rows) {
+            if ($row.stage -ne 'queued-followup') { continue }
+            $texts = @($row.events | Where-Object { $_.event.PSObject.Properties['state'] -and $_.event.state -eq 'queued' } | ForEach-Object { $_.event.text })
+            if ($observation.followups[0] -in $texts -and $observation.followups[1] -in $texts) { return $true }
+        }
+    } 20)
+    $observation.queuedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $queuedClock = [Diagnostics.Stopwatch]::StartNew()
+    for ($i = 0; $queuedClock.ElapsedMilliseconds -lt 1600; $i++) {
+        Capture-Working 'queued' $i
+        Start-Sleep -Milliseconds 100
+    }
 } finally {
     $observation.sendMs = $sendMs
     $observation.frames = $frames.ToArray()
