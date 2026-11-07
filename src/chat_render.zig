@@ -474,6 +474,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     var x: i32 = 0;
     var y: i32 = 0;
     var pos: usize = 0;
+    const mentions: []const @import("chat_mention.zig").Chat = if (skill_pills) @import("chat_mention.zig").currentLive(null) else &.{};
     var search: usize = 0;
     var link: ?link_detect.Range = null;
     var syntax = chat_code.Iterator{ .text = text };
@@ -492,6 +493,65 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             x = 0;
             y += line_h;
             continue;
+        }
+        if (skill_pills and text[pos] == '@') {
+            if (@import("chat_mention.zig").spanAt(text, pos, mentions)) |span| {
+                const visible = text[span.start..span.visible_end];
+                const w = chatTextWidth(hdc, visible);
+                if (x > 0 and w > max_w - x) {
+                    x = indent;
+                    y += line_h;
+                }
+                const rect = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
+                if (hit) |pt| {
+                    if (pt.find) |find| {
+                        for (visible, 0..) |_, i| {
+                            const source = offset + if (source_map) |map| map[span.start + i] else span.start + i;
+                            if (find.position == source) find.y.* = rect.top;
+                        }
+                    }
+                    if (pt.char != null) {
+                        const at = span.start + (if (pt.y >= rect.top and pt.y < rect.bottom) chatCharAtX(hdc, visible, pt.x - rect.left) else if (pt.y < rect.top or pt.x <= rect.left) @as(usize, 0) else visible.len);
+                        const source = if (source_map) |map| (if (map.len == 0) @as(usize, 0) else if (at > span.start and at == span.visible_end) map[at - 1] + 1 else if (at < map.len) map[at] else map[map.len - 1] + 1) else at;
+                        nearest.consider(pt.x, pt.y, rect.left, rect.top, rect.right, rect.bottom, offset + source);
+                    }
+                }
+                if (paint) {
+                    _ = SetTextColor(hdc, @import("chat_skill.zig").paint(hdc, rect, chatUserBubbleColor()));
+                    if (app_state.g_chat_find_open) {
+                        if (source_map) |map| {
+                            var left = rect.left;
+                            var i: usize = 0;
+                            while (i < visible.len) {
+                                var end = i + 1;
+                                while (end < visible.len and map[span.start + end] == map[span.start + end - 1] + 1) : (end += 1) {}
+                                @import("chat_find_ui.zig").paintRun(hdc, visible[i..end], offset + map[span.start + i], left, rect.top, line_h);
+                                left += chatTextWidth(hdc, visible[i..end]);
+                                i = end;
+                            }
+                        } else @import("chat_find_ui.zig").paintRun(hdc, visible, offset + span.start, rect.left, rect.top, line_h);
+                    }
+                    if (app_state.g_chat_sel_active) {
+                        if (source_map) |map| {
+                            var left = rect.left;
+                            var i: usize = 0;
+                            while (i < visible.len) {
+                                var end = i + 1;
+                                while (end < visible.len and map[span.start + end] == map[span.start + end - 1] + 1) : (end += 1) {}
+                                chatPaintSelectionRun(hdc, visible[i..end], offset + map[span.start + i], left, rect.top, line_h);
+                                left += chatTextWidth(hdc, visible[i..end]);
+                                i = end;
+                            }
+                        } else chatPaintSelectionRun(hdc, visible, offset + span.start, rect.left, rect.top, line_h);
+                    }
+                    var draw = rect;
+                    _ = chatDrawText(hdc, visible.ptr, @intCast(visible.len), &draw, DT_SINGLELINE | DT_NOPREFIX);
+                    _ = SelectObject(hdc, base);
+                }
+                x += w;
+                pos = span.end;
+                continue;
+            }
         }
         const word_start = pos;
         var word_end = pos;
@@ -1036,8 +1096,27 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
             const old_font = SelectObject(hdc, ensureChatFont());
             const ref = display.reply_ref;
             const body = text[if (ref) |r| r.body_start else 0..];
-            _ = DrawTextW(hdc, body.ptr, @intCast(body.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            var measure_text = body;
+            var stripped: []u16 = &.{};
+            defer if (stripped.len != 0) std.heap.page_allocator.free(stripped);
+            if (@import("chat_mention.zig").hasMarker(body)) {
+                stripped = std.heap.page_allocator.alloc(u16, body.len) catch &.{};
+                if (stripped.len == body.len) measure_text = @import("chat_mention.zig").copyVisible(body, &.{}, stripped);
+            }
+            _ = DrawTextW(hdc, measure_text.ptr, @intCast(measure_text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             var natural_w = calc.right;
+            if (std.mem.indexOfScalar(u16, body, '@') != null) {
+                const live = @import("chat_mention.zig").currentLive(null);
+                var scan: usize = 0;
+                while (scan < body.len) {
+                    const span = @import("chat_mention.zig").spanAt(body, scan, live) orelse {
+                        scan += 1;
+                        continue;
+                    };
+                    natural_w = @max(natural_w, @min(max_text_w, chatTextWidth(hdc, body[span.start..span.visible_end])));
+                    scan = if (span.end > scan) span.end else scan + 1;
+                }
+            }
             if (ref) |r| {
                 _ = SelectObject(hdc, chatMetadataFont());
                 var preview: RECT = .{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };

@@ -2006,10 +2006,14 @@ const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across cha
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }).join('\n');
+test('IGSH-1811 a sent mention keeps the live session for the bot', () => {
+  assert.match(body('sendChatPrompt'), /chat_mention\.zig"\)\.apply/);
+});
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
   try {
     copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'chat_complete.zig', 'skills.zig', 'chat_reply.zig'], dir);
+    require('./fixtures/inline-stubs').writeChatMention(dir);
     if (control === true) {
       const file = path.join(dir, 'chat_history.zig');
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
