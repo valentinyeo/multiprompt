@@ -32,6 +32,7 @@ Preconditions:
 - **Keyboard.** Exercise Up/Down and Enter to select the first workspace, then return by mouse. Inspect `workspace-keyboard-selected.png`. Escape is checked in every theme. Scrolling and divider hit boundaries retain executable Zig coverage.
 - **Theme limitation.** Graphite 2 is not shipped. Record it unavailable; Edge Grey screenshots are separately labelled, never substitutes.
 - **New workspace.** Click the card's New workspace row. Require exactly one additional workspace and a closed card.
+- **Archive and restore.** Select a created workspace through Ctrl+K Archive workspace, require its saved snapshot and archived registry flag, and require its removal from the stored strip, compact card, normal Open workspace list and published Inbox. Restore it through Archived workspaces and require the original workspace identity, session names and kinds. This uses real local CMD sessions, not a remote provider. Inspect `archive-*.png`, `archive-snapshot.json` and `archive-restored.session.json`.
 - **Proof.** Inspect `workspace-first.png`, `workspace-created.png`, `workspace-<theme>-header.png`, `workspace-<theme>-card.png`, `after.png`, saved session files, actions and `result.json`. These are real native windows on GitHub, never the user's desktop.
 
 ### Keyboard focus regression journey

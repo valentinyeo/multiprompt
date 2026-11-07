@@ -248,8 +248,12 @@ pub fn headerClick(x: i32, y: i32) bool {
     app_state.g_shell_focused = false;
     workspaces.syncInProcessWorkspacesToRegistry();
     workspaces.mergeWorkspaceRegistryFromDisk();
-    entry_count = app_state.g_workspace_count;
-    @memcpy(entries[0..entry_count], app_state.g_workspaces[0..entry_count]);
+    entry_count = 0;
+    for (app_state.g_workspaces[0..app_state.g_workspace_count]) |entry| {
+        if (entry.archived) continue;
+        entries[entry_count] = entry;
+        entry_count += 1;
+    }
     selected = 0;
     for (0..entry_count) |i| {
         if (current(i + 1)) selected = i + 1;

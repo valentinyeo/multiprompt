@@ -87,7 +87,7 @@
     .palette_restart = "Restart multi bot",
     .palette_keyboard_shortcuts = "Keyboard shortcuts",
     .palette_changelog = "Changelog",
-    .palette_close_workspace = "Close workspace",
+    .palette_close_workspace = "Archive workspace",
     .palette_reconnect = "Reconnect",
     .palette_install_hook = "Install blue dot hook",
     .palette_inbox_frequent = "Inbox: frequent",
