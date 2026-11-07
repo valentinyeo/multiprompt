@@ -41,6 +41,7 @@ QUEUE_CACHE = {}
 QUEUE_SCAN_BYTES = 4 * 1024 * 1024
 QUEUE_SHOWN = 8
 QUEUE_TEXT = 500
+_TRACKED_ID = re.compile(r"\n\[mp:([0-9a-f]{16})\]\s*\Z")
 DRAFT_TEXT = 4000
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b(?:\[[0-9;:?]*[ -/]*[@-~]|[@-Z\\-_])")
@@ -168,6 +169,9 @@ def missing_response(q, reason):
     if q.get("op") == "settle":
         return f"@mp\t{q['id']}\tsettle\terror\t{reason}\t0\n{END}\n"
     return f"@mp\t{q['id']}\thistory\tmissing\t-\t0\t{reason}\n{END}\n"
+
+def visible_prompt(text):
+    return _TRACKED_ID.sub("", text) if isinstance(text, str) else text
 
 def clean_command_markup(text):
     if re.search(r"</?pasted_content\b", text, re.I):
@@ -765,7 +769,7 @@ def conversation_event(event, agent):
     if role == "user":
         if text.lstrip().startswith("<task-notification>") or text.strip() in _INTERRUPT_MARKERS:
             return None
-        text = clean_command_markup(text)
+        text = visible_prompt(clean_command_markup(text))
     if not text.strip():
         return None
     identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
@@ -1285,6 +1289,8 @@ def queue_apply(state, event):
     queue, sent = state
     operation = event.get("operation")
     content = event.get("content")
+    if isinstance(content, str):
+        content = visible_prompt(content)
     if operation == "enqueue" and isinstance(content, str):
         if content.lstrip().startswith("<task-notification>"):
             return
@@ -2221,8 +2227,8 @@ def message_expire(db, provider, sid):
             return [row for row in rows if row[0] not in current]
         return rows
     now = time.time()
-    for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='sent' AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
-        db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state='sent'", (row[0],))
+    for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND deadline IS NOT NULL AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
+        db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state IN ('queued','sent')", (row[0],))
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
     for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND created<=? ORDER BY position", (provider, sid, now - 600)).fetchall()):
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt='waiting_too_long' WHERE id=? AND state IN ('queued','sent')", (row[0],))
@@ -4947,7 +4953,8 @@ def message_store_transaction(q):
                 raise ValueError('future admission epoch')
             position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
             state = 'cancelled' if admission_epoch is not None and admission_epoch < epoch else 'queued'
-            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,NULL,NULL,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, epoch, time.time()))
+            deadline = None if state == 'cancelled' else time.time() + 15
+            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,NULL,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, deadline, epoch, time.time()))
             if scope_body is not None:
                 db.execute('INSERT INTO message_room_scopes VALUES (?,?)', (token, scope_body))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
@@ -4995,7 +5002,7 @@ def message_store_transaction(q):
                 host_state_write(provider, sid, state)
             attempt = uuid.uuid4().hex
             db.execute('INSERT INTO message_retries VALUES (?,?,?)', (token, request, attempt))
-            db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=NULL,receipt=NULL,created=? WHERE id=? AND state='failed' AND epoch=?", (attempt, time.time(), token, epoch))
+            db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=?,receipt=NULL,created=? WHERE id=? AND state='failed' AND epoch=?", (attempt, time.time() + 15, time.time(), token, epoch))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
             seq = message_event(db, provider, sid, row)
             return dict(message=row, epoch=epoch, seq=seq)
@@ -5057,7 +5064,7 @@ def message_store_transaction(q):
                     if changed:
                         message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
                     return dict(epoch=epoch, seq=seq, message=None)
-                changed = db.execute("UPDATE shared_messages SET state='queued',deadline=NULL WHERE id=? AND attempt=? AND epoch=? AND state='sent'", (row['id'], row['attempt'], epoch)).rowcount
+                changed = db.execute("UPDATE shared_messages SET state='queued',deadline=? WHERE id=? AND attempt=? AND epoch=? AND state='sent'", (time.time() + 15, row['id'], row['attempt'], epoch)).rowcount
                 if changed:
                     message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
                 if status != 'busy':
@@ -5106,6 +5113,7 @@ def message_store_transaction(q):
             for (token,) in rows:
                 db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=?", (token,))
                 message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()))
+            db.execute("UPDATE legacy.messages SET state='cancelled', receipt='@mp-shared-v1:reset:' || key WHERE sid=? AND state IN ('queued','submitted')", (sid,))
             seq = message_event(db, provider, sid, dict(reset_epoch=epoch))
             db.execute('INSERT INTO message_resets VALUES (?,?,?,?,?)', (provider, sid, request, epoch, seq))
             return dict(epoch=epoch, seq=seq)
@@ -5764,10 +5772,12 @@ def send_response_preserve_draft(q):
         return dict(status='not_sent', reason='invalid_tmux_name')
     if not isinstance(sid, str) or not SESSION_ID.fullmatch(sid) or not isinstance(text, str) or not text.strip() or '\x00' in text:
         return dict(status='not_sent', reason='invalid_identity_or_text')
+    token = q.get('token')
+    payload = text + '\n[mp:' + token + ']' if isinstance(token, str) and re.fullmatch(r'[0-9a-f]{16}', token) else text
     target = '=' + name + ':'
     buffer = 'mp-send-' + uuid.uuid4().hex
     try:
-        subprocess.run(['tmux', 'load-buffer', '-b', buffer, '-'], input=text.encode('utf-8'), check=True, capture_output=True, timeout=5)
+        subprocess.run(['tmux', 'load-buffer', '-b', buffer, '-'], input=payload.encode('utf-8'), check=True, capture_output=True, timeout=5)
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return dict(status='not_sent', reason='buffer_unavailable')
     try:
@@ -5788,7 +5798,7 @@ def send_response_preserve_draft(q):
             draft_note(name, displaced=displaced, displaced_at=time.time())
 
         def known(box):
-            return own_draft(box, text, typed, sent) or bool(displaced) and squashed(box) in squashed(displaced)
+            return own_draft(box, payload, typed, sent) or own_draft(box, text, typed, sent) or bool(displaced) and squashed(box) in squashed(displaced)
         for wait in (0, 0.3, 0.7):
             time.sleep(wait)
             box = prompt_box_text(target)
@@ -6365,7 +6375,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 87
+RUNTIME_GENERATION = 88
 
 if __name__ == '__main__':
     import base64 as _base64
