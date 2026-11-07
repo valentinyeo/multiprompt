@@ -3,6 +3,7 @@ import io
 import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -33,6 +34,21 @@ class NestedAgent(unittest.TestCase):
         nested = getattr(notify, "nested_agent", lambda pid, parent=None: True)
         self.assertFalse(nested(40, top.get))
         self.assertFalse(nested(40, wrapped.get))
+
+    def test_agent_launched_outside_the_tab_owner_never_rebinds_the_tab(self):
+        with tempfile.TemporaryDirectory() as root:
+            host = Path(root) / "agent-host"
+            host.mkdir()
+            (host / "a.config.json").write_text('{"tmux": "live-1"}')
+            (host / "a.state.json").write_text('{"pid": 20}')
+            tree = {50: ("sh", 40), 40: ("cursor-agent", 30), 30: ("python3", 1)}
+            own = {50: ("sh", 40), 40: ("claude", 20), 20: ("python3", 1)}
+            foreign = getattr(notify, "foreign_to_tab", lambda name, env, pid, parent=None: False)
+            env = {"MULTIPROMPT_STATE_DIR": root, "TMUX_PANE": "%1"}
+            with patch.object(notify.subprocess, "run", side_effect=OSError):
+                self.assertTrue(foreign("live-1", env, 50, tree.get))
+                self.assertFalse(foreign("live-1", env, 50, own.get))
+                self.assertFalse(foreign("term-1", env, 50, tree.get))
 
 
 if __name__ == "__main__":
