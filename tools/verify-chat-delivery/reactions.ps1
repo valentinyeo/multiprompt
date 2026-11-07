@@ -49,6 +49,53 @@ $hover = Wait-For 'all three message hover controls are painted' {
     $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --hover 2> "$caseDir/oracle-hover-stderr.log"
     if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
 }
+foreach ($entry in @('emoji', 'more')) {
+    $menuStart = (Read-Shared "$settings/debug.log").Length
+    $x = if ($entry -eq 'emoji') { $hover.emojiX } else { $hover.moreX }
+    [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, ($x - [int]$bounds.Left), ($hover.y - [int]$bounds.Top))
+    [void](Wait-For 'hover opens the same combined message menu' {
+        $tail = (Read-Shared "$settings/debug.log").Substring($menuStart)
+        $tail.Contains('[chat] message menu items=' + $menu)
+    })
+    $popup = Wait-For 'owned combined hover menu visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    Shot ('reactions-menu-' + $entry)
+    if ($entry -eq 'emoji') {
+        Press @(0x1B) 'Esc: dismiss the emoji entry menu'
+        [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)
+    }
+}
+$observation.hoverMenusMatch = $true
+$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id)
+Save @{count=6; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
+$actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
+[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup)
+[void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })
+$observation.composerText = [ChatDeliveryDesktop]::Text($composer)
+if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }
+[void](Wait-For 'pending badge without another bubble' {
+    Shot 'reactions-pending'
+    $ErrorActionPreference = 'Continue'
+    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame pending 2> "$caseDir/oracle-pending-stderr.log"
+    $LASTEXITCODE -eq 0
+})
+Shell-Run @('idle')
+[void](Wait-For 'delivered badge without another bubble' {
+    Shot 'reactions-delivered'
+    $ErrorActionPreference = 'Continue'
+    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame delivered 2> "$caseDir/oracle-delivered-stderr.log"
+    $LASTEXITCODE -eq 0
+})
+[void](Wait-For 'reaction handoff restored the untouched remote draft' { (Fake-State).box -ceq $plan.text })
+$located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --locate delivered
+if ($LASTEXITCODE -ne 0) { throw 'Delivered source bubble could not be located' }
+$point = ($located -join "`n") | ConvertFrom-Json
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $point.x, $point.y)
+$hover = Wait-For 'whole-bubble actions before grouped-message checks' {
+    Shot 'reactions-hover'
+    $ErrorActionPreference = 'Continue'
+    $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --hover 2> "$caseDir/oracle-group-hover-stderr.log"
+    if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
+}
 Copy-Item "$Evidence/reactions-hover.bmp" "$Evidence/message-block-hover-first.bmp"
 [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)
 $lastHover = Wait-For 'same action row while hovering the final paragraph' {
@@ -103,43 +150,6 @@ $actions.Add(@{case=$plan.name; input='click existing quote cancel button withou
     $frames.Count -gt 1 -and [int]$frames[$frames.Count - 1].Groups[2].Value -gt [int]$replyCard.Groups[2].Value -and [ChatDeliveryDesktop]::Text($composer) -ceq $plan.text
 })
 [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, $view, $point.x, $point.y)
-foreach ($entry in @('emoji', 'more')) {
-    $menuStart = (Read-Shared "$settings/debug.log").Length
-    $x = if ($entry -eq 'emoji') { $hover.emojiX } else { $hover.moreX }
-    [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, ($x - [int]$bounds.Left), ($hover.y - [int]$bounds.Top))
-    [void](Wait-For 'hover opens the same combined message menu' {
-        $tail = (Read-Shared "$settings/debug.log").Substring($menuStart)
-        $tail.Contains('[chat] message menu items=' + $menu)
-    })
-    $popup = Wait-For 'owned combined hover menu visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    Shot ('reactions-menu-' + $entry)
-    if ($entry -eq 'emoji') {
-        Press @(0x1B) 'Esc: dismiss the emoji entry menu'
-        [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)
-    }
-}
-$observation.hoverMenusMatch = $true
-$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id)
-Save @{count=6; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
-$actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
-[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup)
-[void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })
-$observation.composerText = [ChatDeliveryDesktop]::Text($composer)
-if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }
-[void](Wait-For 'pending badge without another bubble' {
-    Shot 'reactions-pending'
-    $ErrorActionPreference = 'Continue'
-    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame pending 2> "$caseDir/oracle-pending-stderr.log"
-    $LASTEXITCODE -eq 0
-})
-Shell-Run @('idle')
-[void](Wait-For 'delivered badge without another bubble' {
-    Shot 'reactions-delivered'
-    $ErrorActionPreference = 'Continue'
-    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame delivered 2> "$caseDir/oracle-delivered-stderr.log"
-    $LASTEXITCODE -eq 0
-})
-[void](Wait-For 'reaction handoff restored the untouched remote draft' { (Fake-State).box -ceq $plan.text })
 Restart-OwnedApp
 $restoredComposer = [ChatDeliveryDesktop]::Composer($main)
 if ($restoredComposer -eq [IntPtr]::Zero) {

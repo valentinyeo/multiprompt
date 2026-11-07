@@ -97,7 +97,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const first = frame.agent[0];
     console.log(JSON.stringify(assertHoverActions(image, first)));
   } else if (process.argv[3] === '--locate') {
-    const frame = inspect(readBmp(path.join(root, 'reactions-before.bmp')), json('reactions/area.json'));
+    const stage = process.argv[4] || 'before';
+    assert.ok(['before', 'delivered'].includes(stage));
+    const frame = inspect(readBmp(path.join(root, `reactions-${stage}.bmp`)), json('reactions/area.json'));
     assert.ok(frame.agent.length >= 2, 'fixture replies not painted');
     const first = frame.agent[0];
     console.log(JSON.stringify({ x: first.left + 30, y: first.top + 20 }));
