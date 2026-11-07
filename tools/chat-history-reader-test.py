@@ -4747,6 +4747,7 @@ for raw in sys.stdin:
             token = request.get('message_uuid')
             cancelled = any(item.get('uuid') == token for item in queue)
             queue[:] = [item for item in queue if item.get('uuid') != token]
+            record(dict(kind='remaining', texts=[item.get('text') for item in queue]))
         sys.stdout.write(json.dumps(dict(type='control_response', response=dict(subtype='success', request_id=line.get('request_id'), response=dict(cancelled=cancelled)))) + '\n')
         sys.stdout.flush()
         continue
@@ -5392,7 +5393,7 @@ class IGSH_1828_RecallTest(AgentHostFixture, unittest.TestCase):
         self.assertEqual(recalled['message']['state'], 'cancelled')
         self.assertEqual(self.message()['state'], 'accepted')
         self.assertEqual(self.message('host_fixture_message_03')['state'], 'sent')
-        self.wait_for(lambda: [row['text'] for row in self.agent_rows('queued')] == ['KEEP_THREE'])
+        self.assertEqual([row.get('texts') for row in self.agent_rows('remaining')], [['KEEP_THREE']])
         self.assertEqual([row['text'] for row in self.agent_rows('answered')], ['KEEP_ONE'])
         cancels = [row for row in self.agent_rows('control') if row.get('subtype') == 'cancel_async_message']
         self.assertEqual([row.get('uuid') for row in cancels], ['mp-host_fixture_message_02'])
