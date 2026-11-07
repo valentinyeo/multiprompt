@@ -14,7 +14,11 @@ pub const Channel = struct {
     ended: bool = false,
     bytes: std.ArrayList(u8) = .empty,
     offset: usize = 0,
+    pending_bytes: usize = 0,
+    pending_packets: usize = 0,
 };
+
+const Packet = struct { id: u32, bytes: []u8 };
 
 const Host = struct {
     mutex: state.SpinMutex = .{},
@@ -22,6 +26,9 @@ const Host = struct {
     input: w.HANDLE = null,
     output: w.HANDLE = null,
     running: bool = false,
+    stopping: bool = false,
+    outgoing: std.ArrayList(Packet) = .empty,
+    outgoing_bytes: usize = 0,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -44,9 +51,65 @@ fn writeAll(handle: w.HANDLE, bytes: []const u8) bool {
 }
 
 fn packet(host: *Host, value: anytype) bool {
-    const bytes = std.json.Stringify.valueAlloc(a, value, .{}) catch return false;
-    defer a.free(bytes);
-    return writeAll(host.input, bytes) and writeAll(host.input, "\n");
+    const closing = @hasField(@TypeOf(value), "close");
+    if (!host.running or host.outgoing.items.len >= 4096 + @as(usize, if (closing) 128 else 0)) return false;
+    const json = std.json.Stringify.valueAlloc(a, value, .{}) catch return false;
+    defer a.free(json);
+    if (json.len + 1 > 2 * 1024 * 1024 or host.outgoing_bytes + json.len + 1 > MAX_BUFFER + @as(usize, if (closing) 8192 else 0)) return false;
+    var owner: ?*Channel = null;
+    for (host.channels.items) |channel| {
+        if (channel.id == value.channel) {
+            if (!closing and (channel.pending_packets >= 256 or channel.pending_bytes + json.len + 1 > 2 * 1024 * 1024)) return false;
+            owner = channel;
+            break;
+        }
+    }
+    const bytes = a.alloc(u8, json.len + 1) catch return false;
+    @memcpy(bytes[0..json.len], json);
+    bytes[json.len] = '\n';
+    host.outgoing.append(a, .{ .id = value.channel, .bytes = bytes }) catch {
+        a.free(bytes);
+        return false;
+    };
+    host.outgoing_bytes += bytes.len;
+    if (owner) |channel| {
+        channel.pending_bytes += bytes.len;
+        channel.pending_packets += 1;
+    }
+    return true;
+}
+
+fn transmit(host: *Host) void {
+    while (true) {
+        lock(host);
+        if (!host.running) {
+            host.mutex.unlock();
+            return;
+        }
+        if (host.outgoing.items.len == 0) {
+            host.mutex.unlock();
+            w.Sleep(1);
+            continue;
+        }
+        const item = host.outgoing.orderedRemove(0);
+        host.outgoing_bytes -= item.bytes.len;
+        for (host.channels.items) |channel| {
+            if (channel.id == item.id) {
+                channel.pending_bytes -= item.bytes.len;
+                channel.pending_packets -= 1;
+                break;
+            }
+        }
+        const input = host.input;
+        const process = host.process;
+        host.mutex.unlock();
+        const sent = writeAll(input, item.bytes);
+        a.free(item.bytes);
+        if (!sent) {
+            _ = w.TerminateProcess(process, 0);
+            return;
+        }
+    }
 }
 
 fn start(host: *Host, index: u8) bool {
@@ -148,7 +211,7 @@ pub fn open(index: u8, watch: bool) ?*Channel {
     defer host.mutex.unlock();
     if (host.channels.items.len >= 128) return null;
     if (!host.running) {
-        if (w.GetTickCount64() < host.retry_at) return null;
+        if (host.stopping or w.GetTickCount64() < host.retry_at) return null;
         if (!start(host, index)) {
             host.retry_at = w.GetTickCount64() + 250;
             return null;
@@ -185,7 +248,9 @@ pub fn write(channel: *Channel, line: []const u8) bool {
     defer host.mutex.unlock();
     if (channel.ended or !host.running) return false;
     if (!packet(host, .{ .channel = channel.id, .watch = channel.watch, .terminal = channel.terminal, .data = line })) {
-        _ = w.TerminateProcess(host.process, 0);
+        channel.ended = true;
+        _ = packet(host, .{ .channel = channel.id, .close = true });
+        notify(channel);
         return false;
     }
     return true;
@@ -276,6 +341,7 @@ fn dispatch(host: *Host, line: []const u8) bool {
         if (channel.bytes.items.len + bytes.len + 1 > MAX_BUFFER) {
             channel.ended = true;
             _ = packet(host, .{ .channel = channel.id, .close = true });
+            notify(channel);
             return true;
         }
         channel.bytes.appendSlice(a, bytes) catch return false;
@@ -287,23 +353,35 @@ fn dispatch(host: *Host, line: []const u8) bool {
 }
 
 fn receive(host: *Host) void {
+    var writer: ?std.Thread = null;
     defer {
         lock(host);
+        host.running = false;
+        host.stopping = true;
         _ = w.TerminateProcess(host.process, 0);
+        for (host.channels.items) |channel| {
+            channel.ended = true;
+            channel.pending_bytes = 0;
+            channel.pending_packets = 0;
+            notify(channel);
+        }
+        for (host.outgoing.items) |item| a.free(item.bytes);
+        host.outgoing.clearAndFree(a);
+        host.outgoing_bytes = 0;
+        host.mutex.unlock();
+        if (writer) |thread| thread.join();
+        lock(host);
         _ = w.CloseHandle(host.process);
         _ = w.CloseHandle(host.input);
         _ = w.CloseHandle(host.output);
         host.process = null;
         host.input = null;
         host.output = null;
-        for (host.channels.items) |channel| {
-            channel.ended = true;
-            notify(channel);
-        }
-        host.running = false;
+        host.stopping = false;
         host.retry_at = w.GetTickCount64() + 250;
         host.mutex.unlock();
     }
+    writer = std.Thread.spawn(.{}, transmit, .{host}) catch return;
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);
     var chunk: [65536]u8 = undefined;
