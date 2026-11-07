@@ -1072,6 +1072,7 @@ const chatRefreshAfterFontChange = @import("chat_session.zig").chatRefreshAfterF
 const chatSwitchBrowserTick = @import("chat_session.zig").chatSwitchBrowserTick;
 const chatSwitchLogBrowserShown = @import("chat_session.zig").chatSwitchLogBrowserShown;
 const refreshChatTranscript = @import("chat_session.zig").refreshChatTranscript;
+const chatWarmOftenUsed = @import("chat_session.zig").chatWarmOftenUsed;
 const chatScrollBy = @import("chat_render.zig").chatScrollBy;
 const WM_APP_CHAT_IMAGE_READY = @import("app_state.zig").WM_APP_CHAT_IMAGE_READY;
 const WM_APP_CHAT_ATTACH = @import("app_state.zig").WM_APP_CHAT_ATTACH;
@@ -7985,6 +7986,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     chatFileOnReady();
                     if (app_state.g_chat_active) {
                         refreshChatTranscript(false);
+                        chatWarmOftenUsed();
                         @import("voice.zig").voiceManualRetry();
                         @import("voice.zig").voiceManualHighlight();
                         if (browserSlotReserved() != app_state.g_chat_layout_browser_reserved) {

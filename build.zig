@@ -643,6 +643,10 @@ pub fn build(b: *std.Build) void {
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
+    const instant_chat_tests = b.addSystemCommand(&.{ "node", "--test", "tools/igsh-1815-open-instant.test.js" });
+    instant_chat_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&instant_chat_tests.step);
+    vps_test_step.dependOn(&instant_chat_tests.step);
     const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js", "tools/font-probe.test.js", "tools/chat-font-weight.test.js", "tools/file-picker-font-hook.test.js" });
     test_step.dependOn(&one_font_tests.step);
     vps_test_step.dependOn(&one_font_tests.step);

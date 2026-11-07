@@ -75,6 +75,9 @@ test('IGSH-1266 every tab switch logs the view mode and window state', () => {
 
 test('IGSH-1447 an empty chat paints no note', () => {
   const render = read('src/chat_render.zig');
-  assert.match(render, /e\.pending or app_state\.g_chat_switch_loading\) L\("Loading conversation\.\.\."\) else null\)\s*else\s*null;/, 'an empty chat has no message');
+  const live = render.slice(render.indexOf('const missing_note = if (entry)'), render.indexOf('} else g_note_logged = false;'));
+  assert.doesNotMatch(live, /Loading conversation/, 'an empty chat has no message');
+  assert.match(live, /Could not load the conversation, retrying/);
+  assert.match(live, /else\s*null/);
   assert.match(render, /if \(message\) \|text\| chatPaintEmpty\(mem_dc, w, text, extra_top\);/, 'only a real note is painted');
 });
