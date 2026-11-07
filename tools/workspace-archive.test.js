@@ -69,6 +69,8 @@ test('IGSH-1664 journey treats an omitted workspace field as workspace 0', () =>
   assert.match(journey, /PSObject\.Properties\['workspace'\]/);
   assert.match(journey, /return 0/);
   assert.doesNotMatch(journey, /\$_\.workspace -eq/);
+  assert.match(journey, /6500 \+ \$index/);
+  assert.doesNotMatch(journey, /count=1 target=6300/);
   assert.match(read('src/session.zig'), /if \(app_state\.shells\[i\]\.workspace != 0\)/);
 });
 

@@ -29,6 +29,12 @@ function Get-SavedTabWorkspace($Tab) {
     return 0
 }
 
+function Get-PaletteRowIds([string]$Trace, [int]$Chars) {
+    $found = [regex]::Matches($Trace, ('\[palette\] rows chars=' + $Chars + ' count=\d+ ids=([0-9 ]+)'))
+    if ($found.Count -eq 0) { return $null }
+    return $found[$found.Count - 1].Groups[1].Value.Trim()
+}
+
 function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     $card = Open-WorkspaceCard ($Shot + '-open')
     $state = Read-Session
@@ -167,7 +173,20 @@ Focus-Palette 'open workspace' 6200
 Press @(0x0D) 'Enter: open workspace list'
 $archiveLogStart = (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Length
 Type-Text $archiveName
-Wait-Until { (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Substring($archiveLogStart) -match ('\[palette\] ready chars=' + $archiveName.Length + ' count=1 target=6300(?:\r?\n|$)') } 'archived workspace absent from normal Ctrl+K open list'
+Wait-Until {
+    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+    $windows = @($registry.windows)
+    $index = -1
+    for ($i = 0; $i -lt $windows.Count; $i++) {
+        if ($windows[$i].id -ceq $archiveId) { $index = $i }
+    }
+    if ($index -lt 0 -or -not ($windows[$index].PSObject.Properties['archived'] -and $windows[$index].archived)) { return $false }
+    $trace = (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Substring($archiveLogStart)
+    $ids = Get-PaletteRowIds $trace $archiveName.Length
+    if ($null -eq $ids) { return $false }
+    $banned = [string](6500 + $index)
+    return -not ((@($ids -split ' +')) -contains $banned)
+} 'archived workspace absent from normal Ctrl+K open list'
 Snapshot 'archive-open-list-hidden'
 Press @(0x1B) 'Escape: leave workspace list'
 Press @(0x1B) 'Escape: close palette'

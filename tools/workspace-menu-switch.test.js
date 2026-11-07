@@ -61,6 +61,13 @@ test "home slot wins over window id while standalone self remains a no-op" {
     try std.testing.expect(switched == null and !opened);
     openWorkspaceByIndex(2);
     try std.testing.expect(switched == null and !opened);
+    app_state.g_single_window = true;
+    local_home = true;
+    opened = false;
+    switched = null;
+    app_state.g_workspaces[0].archived = true;
+    openWorkspaceByIndex(0);
+    try std.testing.expect(switched == null and !opened);
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '-j1'], { encoding: 'utf8', timeout: 120000 });
