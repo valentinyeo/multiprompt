@@ -68,7 +68,7 @@ Real bug or modelling error? Open `resolve_response_path` and follow the case by
 Covered code in `src/chat_history_reader.py`: `response`, `watch` (its owner hand-off and first frames), `pin_hosted_claude`, `resolve_response_path`, `host_sid_for_tmux`, `host_dispatch_switch`, `host_config`, `conversation_path`, `owner_response` and `resolve_tmux_agent` and `tmux_owner_process` (as replaced above), `read_tail`, `read_window`.
 Covered caller: `chatHistoryQuery` in `src/chat_session.zig` (the query fields).
 
-Last confirmed against the code at commit `f0fe9276`.
+Last confirmed against the IGSH-1822 live-stream change, on top of commit `f0fe9276`.
 
 When a change touches any covered function or the query fields:
 
@@ -78,9 +78,9 @@ When a change touches any covered function or the query fields:
 
 ## Proof that it can fail
 
-At commit `f0fe9276`, with the `path` dimension, the check fails on each of these broken variants:
+With the `path` dimension, on the IGSH-1822 live-stream change, the check fails on each of these broken variants:
 
-- `origin/master` before the live-stream fix: 132 of 144 pass. Every failure is `path=watch tab=hosted owner=other-user`: the stream hands the chat to its owner still in follow mode, or with an empty id, and the owner answers `session transcript not found`.
+- Commit `f0fe9276`, before the live-stream fix: 132 of 144 pass. Every failure is `path=watch tab=hosted owner=other-user`: the stream hands the chat to its owner still in follow mode, or with an empty id, and the owner answers `session transcript not found`.
 - Remove the `pin_hosted_claude` call in `watch`: 132 of 144 pass.
 - Remove `q["follow"] = False` in `pin_hosted_claude`: 128 of 144 pass.
 
@@ -94,8 +94,8 @@ Earlier, at commit `259fac8e` and before the `path` dimension, it failed on each
 
 ## Not covered
 
-- Codex, hax and pi chats.
-- The live stream's change detection (inotify, tmux control mode) and its later re-resolution of a terminal tab's chat. The check replaces that loop. Codex has its own hosted branch in `resolve_response_path`.
+- Codex, hax and pi chats. Codex has its own hosted branch in `resolve_response_path`.
+- The live stream's change detection (inotify, tmux control mode) and its later re-resolution of a tab's chat when another transcript in the folder changes. The check replaces that loop. The reader suite covers the owner side keeping a hosted chat in `test_IGSH_1822_watch_owner_keeps_hosted_chat_when_another_chat_in_the_folder_writes`.
 - The desktop side: whether the app retries after a failed read, and how it draws rows.
 - Message sending and delivery. This checks only reads.
 - A live end-to-end run against a real server. Do that on a real host before you call a chat fix done.

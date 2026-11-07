@@ -1571,8 +1571,9 @@ def pin_hosted_claude(q, agent, as_owner=False):
     if not q.get("sid") and not as_owner:
         q["sid"] = host_sid_for_tmux(agent, q["tmux"]) or ""
     sid = q.get("sid")
-    if q.get("follow") and isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
+    if isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
         q["follow"] = False
+        q["host_pinned"] = True
     return q
 
 
@@ -6055,7 +6056,7 @@ def watch_changes(q, resolved, source, as_owner):
                             at += 16 + length
                             if mask & 0x4000 or name == path.name:
                                 changed = True
-                            elif q.get("tmux") and mask & 0x18A and (name.endswith(".jsonl") or _wd == metadata_watch and name.endswith(".json")):
+                            elif q.get("tmux") and not (as_owner and q.get("host_pinned")) and mask & 0x18A and (name.endswith(".jsonl") or _wd == metadata_watch and name.endswith(".json")):
                                 latest = resolve_response_path(dict(q, follow=True), source, as_owner)
                                 if latest[2] is None and as_owner:
                                     return

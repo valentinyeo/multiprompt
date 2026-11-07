@@ -2496,6 +2496,28 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(forwarded['sid'], sid)
         self.assertFalse(forwarded['follow'])
 
+    def test_IGSH_1822_watch_owner_keeps_hosted_chat_when_another_chat_in_the_folder_writes(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        self.write(self.event('hosted reply'))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        query = dict(self.query, follow=False, host_pinned=True)
+        resolved = ('claude', 'sid', self.path, None)
+        with patch.object(reader.sys, 'stdin', types.SimpleNamespace(fileno=lambda: incoming)), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            events = reader.watch_changes(query, resolved, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), resolved)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events, None)
+                (self.path.parent / 'other-chat.jsonl').write_text(json.dumps(self.event('other chat reply')) + '\n')
+                with self.path.open('a') as output:
+                    output.write(json.dumps(self.event('next hosted reply')) + '\n')
+                current = following.result(timeout=5)
+            events.close()
+        self.assertEqual(current, resolved, 'the owner stream ended when another chat in the same folder wrote')
+
     def test_IGSH_1822_watch_keeps_following_terminal_other_user_chat(self):
         forwarded = self.watch_forwarded_to_owner(dict(self.query, sid='stale', cwd='/home/secondary/project', follow=True))
         self.assertEqual(forwarded['sid'], 'stale')
