@@ -1918,6 +1918,9 @@ test "delivery: IGSH-1640 cancelled reducer retires only matching identity and l
 test "delivery: IGSH-1831 a receipt stamps an unknown send once" {
     clear();
     defer clear();
+    const agent = shells[0].ai_agent;
+    defer shells[0].ai_agent = agent;
+    shells[0].ai_agent = 1;
     admissionSetup(9);
     try admissionEntry();
     const entry = &g_chat_outbox.items[0];
