@@ -19,6 +19,10 @@ function fn(text, name) {
 }
 const names = ['fullWidthShouldResizeConsole', 'shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView'];
 
+test('remote tab connects its shared terminal when Chat View shows the console', () => {
+  assert.match(fn(source, 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);
+});
+
 function toggle(text) {
   const start = text.indexOf('        WM_APP_TOGGLE_FULLWIDTH => {');
   const end = text.indexOf('\n        WM_APP_RECONNECT =>', start);
@@ -29,6 +33,7 @@ function toggle(text) {
 
 function harness(source) {
   const production = names.map(name => fn(source, name)).join('\n\n')
+    .replaceAll('@import("native_session.zig")', 'NativeSession')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
     .replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
@@ -52,7 +57,14 @@ const TIMER_CHAT_BROWSER_SWAP = 1;
 const TIMER_CHAT_REFRESH = 2;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_view_on: bool = true, pinned_top: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false };
+const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_view_on: bool = true, pinned_top: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false, native_terminal: bool = false, console_inflight: bool = false };
+const NativeSession = struct {
+    fn alive(_: u32) bool { return true; }
+    fn connect(_: u32) bool { return true; }
+    fn ready(_: u32, _: bool) void {}
+    fn ensureWindow(_: u32) bool { return false; }
+};
+comptime { _ = NativeSession.alive(0); }
 var shells = [_]Shell{ .{}, .{} };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;

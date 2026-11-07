@@ -1890,7 +1890,9 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
-    if (!native.connect(shell_id)) native.ready(shell_id, false);
+    if (app_state.shells[idx].chat_view_on or app_state.g_chat_active) {
+        app_state.shells[idx].console_inflight = false;
+    } else if (!native.connect(shell_id)) native.ready(shell_id, false);
     registerShellExitWait(idx);
     if (!app_state.g_restoring and background_workspace == null) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
@@ -2810,7 +2812,7 @@ pub fn switchToShell(idx: u32) void {
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }
     chatAcClose();
-    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind)) {
+    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and !app_state.shells[idx].native_terminal and isRemoteShellKind(app_state.shells[idx].kind)) {
         if (!app_state.shells[idx].disconnected) markSshTabDisconnected(idx);
         armSshReconnectTimerIfNeeded();
     }

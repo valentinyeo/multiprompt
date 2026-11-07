@@ -31,5 +31,7 @@ test('native session spawn keeps remote tabs off per-tab ssh', () => {
   assert.match(build, /terminal_model\.c/);
   assert.match(build, /libvterm/);
   assert.match(body(consoleSource, 'respawnShellInPlace'), /native_terminal\) return @import\("native_session\.zig"\)\.reconnect/);
+  assert.match(body(consoleSource, 'spawnNativeShell'), /chat_view_on or app_state\.g_chat_active/);
+  assert.match(body(read('src/chat_composer.zig'), 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);
   console.log('native session spawn keeps remote tabs off per-tab ssh');
 });

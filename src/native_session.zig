@@ -184,7 +184,7 @@ fn createWindow(slot: *Slot, parent: w.HANDLE) w.HANDLE {
 }
 
 pub fn open(kind: app_state.ShellKind, tmux_session: ?[]const u8, shell_id: u32, new_session: bool) ?Opened {
-    const parent = app_state.g_main_hwnd orelse return null;
+    if (app_state.g_main_hwnd == null) return null;
     const slot = alloc(shell_id) orelse return null;
     const command = remoteShellCommand(&slot.command, kind, tmux_session, shell_id, new_session) orelse {
         slot.live = false;
@@ -194,21 +194,36 @@ pub fn open(kind: app_state.ShellKind, tmux_session: ?[]const u8, shell_id: u32,
     slot.host = hostFor(kind);
     slot.rows = 24;
     slot.cols = 80;
-    if (onGui()) {
-        slot.hwnd = createWindow(slot, parent);
-        if (slot.hwnd == null) {
-            slot.live = false;
-            return null;
-        }
+    return .{ .hwnd = null, .pending = true, .host = slot.host };
+}
+
+fn attachWindow(slot: *Slot) bool {
+    if (slot.hwnd != null) return true;
+    const parent = app_state.g_main_hwnd orelse return false;
+    slot.hwnd = createWindow(slot, parent);
+    if (slot.hwnd == null) return false;
+    if (@import("inbox.zig").findShellById(slot.shell_id)) |idx| app_state.shells[idx].hwnd = slot.hwnd;
+    return true;
+}
+
+pub fn ensureWindow(shell_id: u32) bool {
+    const slot = find(shell_id) orelse return false;
+    if (!onGui()) {
+        const main = app_state.g_main_hwnd orelse return false;
+        return w.PostMessageW(main, w.WM_APP_NATIVE_SPAWN, shell_id, 0) != 0;
     }
-    return .{ .hwnd = slot.hwnd, .pending = true, .host = slot.host };
+    return attachWindow(slot);
 }
 
 pub fn connect(shell_id: u32) bool {
     const slot = find(shell_id) orelse return false;
+    if (slot.channel != null) return true;
     if (slot.hwnd == null) {
-        const main = app_state.g_main_hwnd orelse return false;
-        return w.PostMessageW(main, w.WM_APP_NATIVE_SPAWN, shell_id, 0) != 0;
+        if (!onGui()) {
+            const main = app_state.g_main_hwnd orelse return false;
+            return w.PostMessageW(main, w.WM_APP_NATIVE_SPAWN, shell_id, 0) != 0;
+        }
+        if (!attachWindow(slot)) return false;
     }
     const thread = std.Thread.spawn(.{}, connectWorker, .{shell_id}) catch return false;
     thread.detach();
@@ -217,15 +232,10 @@ pub fn connect(shell_id: u32) bool {
 
 pub fn finish(shell_id: u32) void {
     const slot = find(shell_id) orelse return;
-    if (slot.hwnd == null) {
-        const parent = app_state.g_main_hwnd orelse return;
-        slot.hwnd = createWindow(slot, parent);
-        if (slot.hwnd == null) {
-            ready(shell_id, false);
-            return;
-        }
+    if (!attachWindow(slot)) {
+        ready(shell_id, false);
+        return;
     }
-    if (@import("inbox.zig").findShellById(shell_id)) |idx| app_state.shells[idx].hwnd = slot.hwnd;
     if (!connect(shell_id)) ready(shell_id, false);
 }
 
