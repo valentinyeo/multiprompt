@@ -181,6 +181,13 @@ fn chatShellReactionId(text: []const u16) u64 { return std.hash.Wyhash.hash(0, s
 const chat_echo = @import("chat_echo.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");
+const chat_history = struct {
+    pub const BatchBoundary = struct { index: ?usize = null, stamp_ms: i64 = 0 };
+    pub fn lastBatchStart(message_blocks: []const chat_markdown.Block) BatchBoundary {
+        _ = message_blocks;
+        return .{};
+    }
+};
 const HANDLE = ?*anyopaque;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 const ChatBlock = chat_markdown.Block;
@@ -210,6 +217,8 @@ var g_chat_layout_reuse: usize = 0;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
+var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+var g_chat_batch_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }

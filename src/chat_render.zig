@@ -5255,7 +5255,7 @@ fn chatPaintBatchDivider(hdc: HANDLE, width: i32) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
     var rc = RECT{ .left = uiScaled(16), .top = top, .right = width - uiScaled(16), .bottom = top + uiScaled(28) };
-    _ = chatDrawText(hdc, label[0..label_len], -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = chatDrawText(hdc, &label, @intCast(label_len), &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 fn chatPaintNavRing(hdc: HANDLE, rc: RECT) void {
