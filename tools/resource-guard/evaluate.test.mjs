@@ -9,7 +9,7 @@ before(async () => {
 const limits = { workload: 'fixture', sessionCount: 30, resources: { memoryToleranceBytes: 16, cardinalityGrowth: 0 }, latency: { sendPaintMs: 300, typingMs: 50 } };
 const file = { inputPath: 'input', stagedPath: 'staged', inputSha256: 'a'.repeat(64), stagedSha256: 'a'.repeat(64) };
 const staging = { exe: file, bridge: file, config: file, helper: file };
-const normal = { staging, workload: 'fixture', sessionCount: 30, readySessions: 30, cleaned: true, appAlive: true, processes: 2, jobActiveProcesses: 2, rawProcesses: [{ id: 10 }, { id: 20 }], associatedExternalConsoles: [], syntheticSshProcesses: 1, syntheticSshReaders: 1, jobConsoleProcesses: 0, workingSetBytes: 100, idleCpuPercent: 1 };
+const normal = { establishedTcpConnections: 0, rawTcpConnections: [], staging, workload: 'fixture', sessionCount: 30, readySessions: 30, cleaned: true, appAlive: true, processes: 2, jobActiveProcesses: 2, rawProcesses: [{ id: 10 }, { id: 20 }], associatedExternalConsoles: [], syntheticSshProcesses: 1, syntheticSshReaders: 1, jobConsoleProcesses: 0, workingSetBytes: 100, idleCpuPercent: 1 };
 test('resource workflows pass versions safely to PowerShell', () => {
   const pr = fs.readFileSync(new URL('../../.github/workflows/resource-observation.yml', import.meta.url), 'utf8');
   const release = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
@@ -52,4 +52,16 @@ test('latency uses all distinct loaded sessions and warns independently', () => 
   incomplete.latency.send[0].shellId = incomplete.latency.send[1].shellId;
   assert.equal(evaluateLatency(limits, incomplete, 'send').status, 'unmeasured');
   assert.equal(evaluateLatency(limits, proof(NaN, 1), 'typing').status, 'unmeasured');
+});
+
+test('established TCP evidence is owned, complete and cannot grow', () => {
+  const row = { state: 5, owningProcess: 10, localAddress: '127.0.0.1', localPort: 1000, remoteAddress: '127.0.0.1', remotePort: 2000 };
+  const other = { ...row, localPort: 1001 };
+  const one = { ...normal, establishedTcpConnections: 1, rawTcpConnections: [row] };
+  assert.deepEqual(evaluateResources(limits, one, one), []);
+  assert.match(evaluateResources(limits, one, { ...normal, establishedTcpConnections: 2, rawTcpConnections: [row, other] }).join(), /establishedTcpConnections: 2 exceeds baseline 1/);
+  for (const evidence of [undefined, null, [null], [{ ...row, owningProcess: 99 }], [{ ...row, state: 2 }], [{ ...row, localAddress: 'bad' }], [{ ...row, remotePort: 0 }], [row, row]]) {
+    assert.match(evaluateResources(limits, normal, { ...normal, establishedTcpConnections: Array.isArray(evidence) ? evidence.length : 0, rawTcpConnections: evidence }).join(), /invalid TCP connection evidence/);
+  }
+  assert.match(evaluateResources(limits, normal, { ...one, establishedTcpConnections: 0 }).join(), /invalid TCP connection evidence/);
 });

@@ -41,7 +41,7 @@ function Expect-Failure($job, $appId, $processes, $cim = $null) {
     if ($null -eq $cim) { $cim = @(Cim $processes) }
     $script:delays = 0
     $failed = $false
-    try { Get-StableJobSnapshot -Job $job -AppId $appId -Enumerate { $processes } -EnumerateCim { $cim } | Out-Null } catch { $failed = $_.Exception.Message -match 'complete stable job snapshot' }
+    try { Get-StableJobSnapshot -Job $job -AppId $appId -Enumerate { $processes } -EnumerateTcp { @() } -EnumerateCim { $cim } | Out-Null } catch { $failed = $_.Exception.Message -match 'complete stable job snapshot' }
     Check $failed 'Expected snapshot failure'
     Check ($job.Reads -eq 20 -and $script:delays -eq 9) 'Retries must be bounded'
 }
@@ -52,12 +52,12 @@ $outside = [FakeProcess]::new(3); $outside.Member = $false
 $stable = Account 2 2 0
 function Check-CallerCim($job, $processes) {
     $cim = @(Cim $processes)
-    $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { $processes } -EnumerateCim { $cim }
+    $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { $processes } -EnumerateTcp { @() } -EnumerateCim { $cim }
     Check ($snapshot.processes.Count -eq 2 -and $job.Reads -eq 2) 'Caller CIM fixture must be visible to injected scriptblock'
 }
 Check-CallerCim ([FakeJob]::new(@($stable))) @($app, $other)
 $job = [FakeJob]::new(@($stable, (Account 3 2 1), (Account 3 2 1), (Account 3 2 1)))
-$snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other, $outside) } -EnumerateCim { Cim @($app, $other, $outside) }
+$snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other, $outside) } -EnumerateTcp { @() } -EnumerateCim { Cim @($app, $other, $outside) }
 Check ($job.Reads -eq 4 -and $script:delays -eq 1) 'Birth and death with unchanged count must retry'
 Check ($snapshot.processes.Count -eq 2 -and $snapshot.accounting.TotalProcesses -eq 3) 'Stable snapshot must include job members only'
 Check ($app.Disposed -and $other.Disposed -and $outside.Disposed) 'Processes must be disposed'
@@ -70,14 +70,14 @@ foreach ($detail in $orderedCim) {
 $snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate {
     Check ($job.Reads -eq 1) 'Process enumeration must be inside accounting bracket'
     @($app, $other)
-} -EnumerateCim {
+} -EnumerateTcp { @() } -EnumerateCim {
     Check ($job.Reads -eq 0) 'CIM capture must precede accounting bracket'
     $orderedCim
 }
 Check ($snapshot.processes.Count -eq 2 -and $job.Reads -eq 2) 'Ordered capture must succeed'
 $script:cimReads = 0; $script:delays = 0
 $job = [FakeJob]::new(@($stable))
-$snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other) } -EnumerateCim {
+$snapshot = Get-StableJobSnapshot -Job $job -AppId 1 -Enumerate { @($app, $other) } -EnumerateTcp { @() } -EnumerateCim {
     $script:cimReads++
     if ($script:cimReads -eq 1) { Cim @($app) } else { Cim @($app, $other) }
 }

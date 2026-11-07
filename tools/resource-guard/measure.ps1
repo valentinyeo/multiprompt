@@ -92,6 +92,7 @@ try {
     $snapshot = Get-StableJobSnapshot -Job $job -AppId $app.Id
     $raw = $snapshot.processes; $accounting = $snapshot.accounting
     $result.rawProcesses = $raw; $result.jobActiveProcesses = $accounting.ActiveProcesses
+    $result.rawTcpConnections = @($snapshot.connections); $result.establishedTcpConnections = $result.rawTcpConnections.Count
     $result.processes = $raw.Count
     $result.syntheticSshProcesses = @($raw | Where-Object { $_.name -ieq 'ssh' }).Count
     $cim = @(Get-CimInstance Win32_Process)

@@ -27,6 +27,9 @@ jobs:
         run: |
           ./tools/resource-guard/stage.test.ps1
           ./tools/resource-guard/session.test.ps1
+      - name: Test owned TCP connections
+        shell: pwsh
+        run: ./tools/resource-guard/tcp.test.ps1
       - name: Test fixture process lifetime
         shell: pwsh
         run: ./tools/resource-guard/launcher-lifetime.test.ps1

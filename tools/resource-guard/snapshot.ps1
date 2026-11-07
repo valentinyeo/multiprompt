@@ -4,7 +4,7 @@ function Test-GuardReaderCommand([string]$CommandLine) {
 }
 
 function Get-StableJobSnapshot {
-    param($Job, [int]$AppId, [scriptblock]$Enumerate = { [Diagnostics.Process]::GetProcesses() }, [scriptblock]$EnumerateCim = { Get-CimInstance Win32_Process })
+    param($Job, [int]$AppId, [scriptblock]$Enumerate = { [Diagnostics.Process]::GetProcesses() }, [scriptblock]$EnumerateCim = { Get-CimInstance Win32_Process }, [scriptblock]$EnumerateTcp = { Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection -Filter "State = 5" -ErrorAction Stop })
     for ($attempt = 0; $attempt -lt 10; $attempt++) {
         $cimById = @{}
         foreach ($detail in (& $EnumerateCim)) {
@@ -19,6 +19,11 @@ function Get-StableJobSnapshot {
             } catch {
             } finally { $p.Dispose() }
         }
+        $owned = @{}
+        foreach ($process in $raw) { $owned[$process.id] = $true }
+        $connections = @(& $EnumerateTcp | Where-Object { $owned.ContainsKey([int]$_.OwningProcess) } | ForEach-Object {
+            @{ state=$_.State; owningProcess=$_.OwningProcess; localAddress=$_.LocalAddress; localPort=$_.LocalPort; remoteAddress=$_.RemoteAddress; remotePort=$_.RemotePort }
+        })
         $after = $Job.ReadAccounting()
         $complete = $true
         $seen = @{}
@@ -43,7 +48,7 @@ function Get-StableJobSnapshot {
             $before.ActiveProcesses -eq $after.ActiveProcesses -and
             $raw.Count -eq $after.ActiveProcesses -and $complete -and
             @($raw | Where-Object { $_.id -eq $AppId }).Count -eq 1) {
-            return @{ processes=$raw; accounting=$after; capturedAt=[DateTime]::UtcNow }
+            return @{ processes=$raw; connections=$connections; accounting=$after; capturedAt=[DateTime]::UtcNow }
         }
         if ($attempt -lt 9) { Start-Sleep -Milliseconds 100 }
     }
