@@ -1856,10 +1856,15 @@ def search_response(q, path, agent, sid):
     return "\n".join((header, *(wire_row(row) for row in hits), END, ""))
 
 
-def recall_tail(path, source, info, agent, fill):
-    hit = TAIL_CACHE.get((str(Path(path).resolve()), info.st_ino, bool(fill)))
-    flags = (ISSUE_358_TAIL_STARTS_AT_QUESTION, ISSUE_631_TAIL_FILLS_SHOWN_BUDGET)
-    if not hit or hit["agent"] != agent or hit["flags"] != flags or hit["end"] > info.st_size or info.st_size - hit["end"] > TAIL_BYTES:
+def tail_view(q, agent, fill):
+    return (agent, bool(fill), bool(q.get("settlement")), q.get("message_protocol"), bool(q.get("source_offsets")),
+            bool(ISSUE_263_TOOL_STEPS), bool(ISSUE_349_QUEUED_STAMP_FROM_QUEUE),
+            bool(ISSUE_358_TAIL_STARTS_AT_QUESTION), bool(ISSUE_631_TAIL_FILLS_SHOWN_BUDGET))
+
+
+def recall_tail(path, source, info, q, agent, fill):
+    hit = TAIL_CACHE.get((str(Path(path).resolve()), info.st_ino, tail_view(q, agent, fill)))
+    if not hit or hit["end"] > info.st_size or info.st_size - hit["end"] > TAIL_BYTES:
         return None
     source.seek(max(0, hit["end"] - 64))
     if hashlib.sha256(source.read(min(hit["end"], 64))).hexdigest() != hit["probe"]:
@@ -1874,13 +1879,12 @@ def recall_tail(path, source, info, agent, fill):
     return hit["base"], hit["end"] + len(extra), extra, hit["oldest"], rows, "append", hit["end"]
 
 
-def remember_tail(path, info, agent, fill, base, end, oldest, rows, probe):
+def remember_tail(path, info, q, agent, fill, base, end, oldest, rows, probe):
     if end <= 0:
         return
-    TAIL_CACHE[(str(Path(path).resolve()), info.st_ino, bool(fill))] = dict(
-        agent=agent, size=info.st_size, mtime=info.st_mtime_ns, base=base, end=end,
-        oldest=oldest, probe=probe, flags=(ISSUE_358_TAIL_STARTS_AT_QUESTION, ISSUE_631_TAIL_FILLS_SHOWN_BUDGET),
-        wires=[wire_row(row) for row in rows])
+    TAIL_CACHE[(str(Path(path).resolve()), info.st_ino, tail_view(q, agent, fill))] = dict(
+        size=info.st_size, mtime=info.st_mtime_ns, base=base, end=end,
+        oldest=oldest, probe=probe, wires=[wire_row(row) for row in rows])
     while len(TAIL_CACHE) > 8:
         del TAIL_CACHE[next(iter(TAIL_CACHE))]
 
@@ -1949,7 +1953,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         elif not valid:
             mode = "tail"
             tail_fill = True
-            recalled = recall_tail(path, source, info, agent, True)
+            recalled = recall_tail(path, source, info, q, agent, True)
             if recalled:
                 base, end, data, oldest, rows, tail_reuse, append_at = recalled
                 budget = sum(len(wire_row(row)) + 1 for row in rows)
@@ -1960,7 +1964,7 @@ def response(q, source=None, as_owner=False, resolved=None):
             mode = "delta"
             if ISSUE_345_STALE_JUMPS_TO_TAIL and not q.get("no_jump") and info.st_size - offset > 2 * SCAN_BYTES:
                 tail_fill = False
-                recalled = recall_tail(path, source, info, agent, False)
+                recalled = recall_tail(path, source, info, q, agent, False)
                 if recalled and (recalled[2] or recalled[4]):
                     base, end, data, oldest, rows, tail_reuse, append_at = recalled
                     budget = sum(len(wire_row(row)) + 1 for row in rows)
@@ -2059,7 +2063,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
         paired = pair_tool_rows(rows)
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
-            remember_tail(path, info, agent, tail_fill, base, end, oldest, paired, probe)
+            remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     header = f"@mp\t{rid}\thistory\tok\t{sid}\t{base}\t{end}\t{info.st_ino}\t{int(more)}\t{agent}\t{tmux or '-'}\t{info.st_mtime_ns}\t{probe}\t{mode}\t{oldest}"
     return "\n".join((header, *(wire_row(row) for row in paired), *((wire_row(status),) if status else ()), END, ""))
 
