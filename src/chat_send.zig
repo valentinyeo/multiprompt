@@ -2649,6 +2649,8 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         if (affected != null) {
             shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
+        } else if (shell.native_terminal) {
+            if (!@import("native_session.zig").alive(shell.shell_id)) sshDisconnect(@intCast(i), reason);
         } else if (shell.process == null or !shellProcessAliveForRead(i)) {
             sshDisconnect(@intCast(i), reason);
         }
@@ -2712,7 +2714,9 @@ pub fn sshAutoReconnectTick() void {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
-        if (shell.process == null and !shell.disconnected) {
+        if (shell.native_terminal and !@import("native_session.zig").alive(shell.shell_id) and !shell.disconnected) {
+            sshDisconnect(@intCast(i), "channel-missing-poll");
+        } else if (!shell.native_terminal and shell.process == null and !shell.disconnected) {
             sshDisconnect(@intCast(i), "process-missing-poll");
         } else if (shell.process != null and !shellProcessAliveForRead(i)) {
             sshDisconnect(@intCast(i), "process-exit-poll");
@@ -2777,6 +2781,21 @@ pub fn sshRequestSessionProbe() void {
 fn sshSessionEnded(idx: u32) void {
     if (chatBenchEnabled()) return;
     const shell = &app_state.shells[idx];
+    if (shell.native_terminal) {
+        if (shell.ssh_reconnect.phase == .closed or @import("native_session.zig").alive(shell.shell_id)) return;
+        @import("native_session.zig").dropChannel(shell.shell_id);
+        shell.disconnected = true;
+        shell.activity = .idle;
+        shell.needs_attention = false;
+        shell.tmux_identity_len = 0;
+        const now = GetTickCount64();
+        shell.ssh_reconnect.recreate(now, now ^ shell.shell_id);
+        var native_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&native_buf, "ssh-reconnect recreate id={d} reason=session-gone", .{shell.shell_id}) catch "ssh-reconnect recreate reason=session-gone");
+        @import("drawing.zig").invalidateReconnectContent(idx);
+        saveSession();
+        return;
+    }
     if (shell.ssh_reconnect.phase == .closed or (shell.process != null and shellProcessAliveForRead(idx))) return;
     @import("workspaces.zig").unregisterShellExitWait(idx);
     if (shell.hwnd != null) _ = @import("focus.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
@@ -2926,7 +2945,7 @@ fn sshProbeFinish() void {
         debugLog(std.fmt.bufPrint(&tab_log, "ssh-probe tab id={d} phase={s} disconnected={} live={} attached={} gone={} incarnation={}", .{ shell.shell_id, @tagName(shell.ssh_reconnect.phase), shell.disconnected, shell.process != null and shellProcessAliveForRead(idx), item.attached, item.session_gone, shell.spawn_tick == item.spawn_tick }) catch "ssh-probe tab log-overflow");
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
             !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
-        const process_alive = shell.process != null and shellProcessAliveForRead(idx);
+        const process_alive = if (shell.native_terminal) @import("native_session.zig").alive(shell.shell_id) else shell.process != null and shellProcessAliveForRead(idx);
         if (job.healthy[item.host] and item.identity_len > 0) {
             const identity = item.identity[0..item.identity_len];
             if (shell.tmux_identity_len == 0 and item.attached and process_alive) {
@@ -2948,7 +2967,9 @@ fn sshProbeFinish() void {
         }
         shell.ssh_reconnect.awaiting_probe = false;
         if (item.session_gone and process_alive) continue;
-        if (app_state.shells[idx].process == null) {
+        if (shell.native_terminal) {
+            if (!process_alive) sshDisconnect(idx, "probe-channel-missing");
+        } else if (app_state.shells[idx].process == null) {
             sshDisconnect(idx, "probe-process-missing");
         } else if (!job.healthy[item.host]) {
             if (@import("ssh_reconnect.zig").probeUnreachable(ssh_probe_misses[item.host], shellProcessAliveForRead(idx))) {

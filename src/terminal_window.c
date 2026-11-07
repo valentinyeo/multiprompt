@@ -56,6 +56,7 @@ static void resize(TerminalWindow *t) {
     if (!t->fonts[0]) return;
     RECT rect;
     GetClientRect(t->hwnd, &rect);
+    if (rect.right <= 0 || rect.bottom <= 0) return;
     int rows = clamp(rect.bottom / t->height, 1, 512);
     int cols = clamp(rect.right / t->width, 1, 1024);
     if (rows != t->rows || cols != t->cols) {
@@ -179,16 +180,16 @@ static void character(TerminalWindow *t, WCHAR value, int mod) {
     else input(t, value, mod);
 }
 
-void mp_terminal_window_copy(HWND hwnd) {
+int mp_terminal_window_copy(HWND hwnd) {
     TerminalWindow *t = get(hwnd);
-    if (!t || !t->selected) return;
+    if (!t || !t->selected) return 0;
     int lo = t->anchor < t->end ? t->anchor : t->end;
     int hi = t->anchor > t->end ? t->anchor : t->end;
     size_t capacity = ((size_t)(hi - lo + 1) * 12 + (size_t)t->rows * 2 + 1) * sizeof(WCHAR);
     HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, capacity);
-    if (!memory) return;
+    if (!memory) return 0;
     WCHAR *text = GlobalLock(memory);
-    if (!text) { GlobalFree(memory); return; }
+    if (!text) { GlobalFree(memory); return 0; }
     size_t used = 0, row_start = 0;
     for (int i = lo; i <= hi; i++) {
         MPTerminalCell cell;
@@ -204,11 +205,16 @@ void mp_terminal_window_copy(HWND hwnd) {
     }
     text[used] = 0;
     GlobalUnlock(memory);
+    int copied = 0;
     if (OpenClipboard(hwnd)) {
-        if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory)) memory = NULL;
+        if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory)) {
+            memory = NULL;
+            copied = 1;
+        }
         CloseClipboard();
     }
     if (memory) GlobalFree(memory);
+    return copied;
 }
 
 void mp_terminal_window_paste(HWND hwnd) {

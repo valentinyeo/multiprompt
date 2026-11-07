@@ -12,6 +12,19 @@ fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.linkSystemLibrary("gdiplus", .{});
 }
 
+fn linkTerminal(b: *std.Build, module: *std.Build.Module) void {
+    const flags = &.{"-std=c99"};
+    module.addIncludePath(b.path("src"));
+    module.addIncludePath(b.path("src/terminal/vendor/libvterm/include"));
+    module.addIncludePath(b.path("src/terminal/vendor/libvterm/src"));
+    module.addCSourceFile(.{ .file = b.path("src/terminal_model.c"), .flags = flags });
+    module.addCSourceFile(.{ .file = b.path("src/terminal_window.c"), .flags = flags });
+    const sources = [_][]const u8{ "encoding.c", "keyboard.c", "mouse.c", "parser.c", "pen.c", "screen.c", "state.c", "unicode.c", "vterm.c" };
+    for (sources) |name| module.addCSourceFile(.{ .file = b.path(b.fmt("src/terminal/vendor/libvterm/src/{s}", .{name})), .flags = flags });
+    module.linkSystemLibrary("gdi32", .{});
+    module.linkSystemLibrary("user32", .{});
+}
+
 fn linkComputer(b: *std.Build, module: *std.Build.Module) void {
     module.addCSourceFile(.{ .file = b.path("src/computer_view.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti", "-fms-extensions" } });
     module.addIncludePath(b.path("src/computer/vendor/webview2/include"));
@@ -68,6 +81,7 @@ pub fn build(b: *std.Build) void {
 
     linkColorEmoji(b, exe.root_module);
     linkComputer(b, exe.root_module);
+    linkTerminal(b, exe.root_module);
     if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
@@ -119,6 +133,7 @@ pub fn build(b: *std.Build) void {
     });
     linkColorEmoji(b, dev_exe.root_module);
     linkComputer(b, dev_exe.root_module);
+    linkTerminal(b, dev_exe.root_module);
     dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
@@ -776,6 +791,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&blue_dot_persistence_tests.step);
     const hibernate_hook_recovery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/hibernate-hook-recovery.test.js" });
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
+    const native_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/native-session.test.js" });
+    test_step.dependOn(&native_session_tests.step);
+    vps_test_step.dependOn(&native_session_tests.step);
     const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js", "tools/verify-reconnect.test.js" });
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
