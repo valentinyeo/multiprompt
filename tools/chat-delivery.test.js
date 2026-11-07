@@ -1125,7 +1125,7 @@ test "delivery: IGSH-1859 Remove clears a Not sent message tied to an older sess
 test "delivery: IGSH-1859 a message the agent merged into a later turn stops showing Not sent" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/b.png  too much text everywhere ");
-    const merged = std.unicode.utf8ToUtf16LeStringLiteral("/reduce-first https://example.com/a.png fix this page\n\nhttps://example.com/b.png  too much text everywhere \n\nhttps://example.com/c.png one more note");
+    const merged = std.unicode.utf8ToUtf16LeStringLiteral("/reduce-first https://example.com/a.png fix this page\\n\\nhttps://example.com/b.png  too much text everywhere \\n\\nhttps://example.com/c.png one more note");
     try enqueue(text, .not_sent);
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/c.png one more note"), .not_sent);
     for (g_chat_outbox.items) |*entry| {
