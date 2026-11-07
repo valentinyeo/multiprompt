@@ -2211,16 +2211,21 @@ def message_row(row):
 
 
 def message_expire(db, provider, sid):
-    rows = db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='sent' AND deadline<=? ORDER BY position", (provider, sid, time.time())).fetchall()
-    if rows and provider in HOST_PROVIDERS and host_owned(provider, sid):
-        state = host_session_state(provider, sid)
-        inflight = state.get('inflight')
-        current = {token for token in state.get('sends') or [] if isinstance(token, str)}
-        if isinstance(inflight, dict):
-            current.add(inflight.get('id'))
-        rows = [row for row in rows if row[0] not in current]
-    for row in rows:
+    def idle(rows):
+        if rows and provider in HOST_PROVIDERS and host_owned(provider, sid):
+            state = host_session_state(provider, sid)
+            inflight = state.get('inflight')
+            current = {token for token in state.get('sends') or [] if isinstance(token, str)}
+            if isinstance(inflight, dict):
+                current.add(inflight.get('id'))
+            return [row for row in rows if row[0] not in current]
+        return rows
+    now = time.time()
+    for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='sent' AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state='sent'", (row[0],))
+        message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
+    for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND created<=? ORDER BY position", (provider, sid, now - 600)).fetchall()):
+        db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt='waiting_too_long' WHERE id=? AND state IN ('queued','sent')", (row[0],))
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
 
 
@@ -3810,7 +3815,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return host_refuse("unsupported_room_provider")
     written = host_written(session["state"])
     seen = written.get(token)
-    if isinstance(seen, dict) and seen.get("epoch") == epoch:
+    if isinstance(seen, dict) and seen.get("epoch") == epoch and seen.get("attempt") == attempt:
         if seen.get("room_scope") != room_scope:
             return host_refuse("room_scope_conflict")
         return dict(status="duplicate", reason="already_written", attempt=seen.get("attempt"))
@@ -4895,6 +4900,20 @@ def message_store_transaction(q):
             token, text = q.get('message_id'), q.get('text')
             if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or not text.strip() or '\x00' in text:
                 raise ValueError('invalid message')
+            replaces = q.get('replaces')
+            if isinstance(replaces, str) and replaces:
+                if not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', replaces) or replaces == token:
+                    raise ValueError('invalid replacement')
+                old = db.execute('SELECT * FROM shared_messages WHERE id=?', (replaces,)).fetchone()
+                if old:
+                    if old[1:3] != (provider, sid):
+                        raise ValueError('invalid replacement')
+                    aged = old[6] in ('queued', 'sent') and time.time() - float(old[10]) >= 600
+                    if old[6] not in ('failed', 'cancelled') and not aged:
+                        raise ValueError('message is not retryable')
+                    if old[6] != 'cancelled':
+                        db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND state=?", (replaces, old[6]))
+                        message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (replaces,)).fetchone()))
             admission_epoch = q.get('admission_epoch')
             if admission_epoch is not None and (type(admission_epoch) is not int or admission_epoch < 0):
                 raise ValueError('invalid admission epoch')
@@ -4948,8 +4967,9 @@ def message_store_transaction(q):
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
             if row[9] != epoch:
                 return dict(message=dict(message_row(row), state='cancelled'), epoch=epoch, seq=seq)
-            if row[6] in ('queued', 'failed'):
-                db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND state IN ('queued','failed')", (token, epoch))
+            aged = row[6] == 'sent' and time.time() - float(row[10]) >= 600
+            if row[6] in ('queued', 'failed') or aged:
+                db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND state=?", (token, epoch, row[6]))
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
             elif row[6] != 'cancelled':
@@ -4975,7 +4995,7 @@ def message_store_transaction(q):
                 host_state_write(provider, sid, state)
             attempt = uuid.uuid4().hex
             db.execute('INSERT INTO message_retries VALUES (?,?,?)', (token, request, attempt))
-            db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=NULL,receipt=NULL WHERE id=? AND state='failed' AND epoch=?", (attempt, token, epoch))
+            db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=NULL,receipt=NULL,created=? WHERE id=? AND state='failed' AND epoch=?", (attempt, time.time(), token, epoch))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
             seq = message_event(db, provider, sid, row)
             return dict(message=row, epoch=epoch, seq=seq)

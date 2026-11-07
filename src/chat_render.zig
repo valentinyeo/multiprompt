@@ -2496,6 +2496,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (chatEchoRowLanded(e)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, g_reaction_view.projectedPending(e.id));
+                if (chatEchoNotSent(e)) rc.bottom += uiScaled(CHAT_STATUS_H);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -3899,11 +3900,17 @@ fn chatPaintProjectedBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos:
     }
 }
 
+fn chatEchoNotSent(e: app_state.ChatOutboxEntry) bool {
+    return chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, @as(i64, @intCast(GetTickCount64())));
+}
+
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
+    const not_sent = chatEchoNotSent(e);
+    const extra: i32 = if (not_sent) uiScaled(CHAT_STATUS_H) else 0;
     var display = chatDisplayForBlock(e.text, .{ .start = 0, .len = e.text.len, .role = .user, .markdown = true }, g_reaction_view.projectedPending(e.id));
     display.offset += offset;
-    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom };
+    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom - extra };
     chatPaintReplyLine(hdc, display.text, display.reply_ref, rc);
     fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
@@ -3912,7 +3919,14 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const start = if (display.reply_ref) |r| r.body_start else 0;
     const body_display = display.slice(start);
     _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
-    if (e.waiting()) chatDimQueuedBubble(hdc, rc);
+    if (not_sent or e.waiting()) chatDimQueuedBubble(hdc, bubble);
+    if (not_sent) {
+        const old_font = SelectObject(hdc, chatMetadataFont());
+        defer _ = SelectObject(hdc, old_font);
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(176, 78, 58) else RGB(232, 146, 122));
+        var label = RECT{ .left = bubble.left, .top = bubble.bottom, .right = bubble.right - uiScaled(6), .bottom = bubble.bottom + extra };
+        _ = chatDrawText(hdc, L("Not sent"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+    }
 }
 
 fn chatStatusRowRect(bubble: RECT) RECT {
@@ -5396,7 +5410,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
     defer if (link_text) |text| std.heap.page_allocator.free(text);
     const echo_id = if (keyboard_index) |index| (if (index >= app_state.g_chat_block_count and index - app_state.g_chat_block_count < app_state.g_chat_echo_layout_count) app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count] else null) else chatEchoAt(GET_X(lp), GET_Y(lp));
     const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
-    const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
+    const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again or chatEchoNotSent(app_state.g_chat_outbox.items[ei]) else false;
     const block_at = if (keyboard_index != null or echo_id != null) keyboard_block else chatTranscriptBlockAtPoint(GET_Y(lp));
     const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);

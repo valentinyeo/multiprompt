@@ -331,6 +331,28 @@ pub fn pendingExpired(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
     return state != .not_sent and now_ms >= sent_ms and now_ms - sent_ms >= 600_000;
 }
 
+pub const NOT_SENT_WAIT_MS: i64 = 10 * 60 * 1000;
+
+pub fn showsNotSent(message_v1: bool, state: OutboxState, phase: []const u8, sent_tick_ms: i64, now_ms: i64) bool {
+    if (!message_v1 or state == .cancelled) return false;
+    if (state == .not_sent or std.mem.eql(u8, phase, "failed")) return true;
+    if (state == .delivered or std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started")) return false;
+    return sent_tick_ms > 0 and now_ms >= sent_tick_ms and now_ms - sent_tick_ms >= NOT_SENT_WAIT_MS;
+}
+
+test "IGSH-1847 a failed send and a ten-minute wait show Not sent" {
+    try std.testing.expect(showsNotSent(true, .not_sent, "failed", 1, 2));
+    try std.testing.expect(showsNotSent(true, .queued, "failed", 1, 2));
+    try std.testing.expect(showsNotSent(true, .sending, "sent", 1_000, 1_000 + NOT_SENT_WAIT_MS));
+    try std.testing.expect(showsNotSent(true, .queued, "queued", 1_000, 1_000 + NOT_SENT_WAIT_MS));
+    try std.testing.expect(!showsNotSent(true, .queued, "sent", 1_000, 1_000 + NOT_SENT_WAIT_MS - 1));
+    try std.testing.expect(!showsNotSent(true, .queued, "queued", 0, NOT_SENT_WAIT_MS));
+    try std.testing.expect(!showsNotSent(true, .delivered, "accepted", 1, 1 + NOT_SENT_WAIT_MS));
+    try std.testing.expect(!showsNotSent(true, .delivered, "started", 1, 1 + NOT_SENT_WAIT_MS * 2));
+    try std.testing.expect(!showsNotSent(true, .cancelled, "failed", 1, 2));
+    try std.testing.expect(!showsNotSent(false, .not_sent, "failed", 1, 2));
+}
+
 pub const SETTLE_GRACE_MS: i64 = 20_000;
 
 pub const DeliveryEvidence = struct {
