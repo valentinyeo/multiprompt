@@ -9,6 +9,7 @@ import sys
 MAX_CHANNELS = 128
 MAX_FRAME = 32 * 1024 * 1024
 MAX_INPUT = 2 * 1024 * 1024
+TERMINAL_SOURCE = globals().get("TERMINAL_SOURCE", "")
 
 
 def serve(source):
@@ -68,12 +69,13 @@ def serve(source):
                             if len(channels) >= MAX_CHANNELS:
                                 emit(dict(channel=cid, closed=True))
                                 continue
-                            mode = "--watch" if packet.get("watch") else "--serve"
+                            mode = "--terminal" if packet.get("terminal") else "--watch" if packet.get("watch") else "--serve"
+                            worker_source = base64.b64decode(TERMINAL_SOURCE) if packet.get("terminal") else source.encode()
                             bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<reader>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
                             child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, mode], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
                             os.set_blocking(child.stdin.fileno(), False)
                             os.set_blocking(child.stdout.fileno(), False)
-                            channels[cid] = dict(child=child, incoming=bytearray(), outgoing=bytearray(base64.b64encode(source.encode()) + b"\n"))
+                            channels[cid] = dict(child=child, incoming=bytearray(), outgoing=bytearray(base64.b64encode(worker_source) + b"\n"))
                             selector.register(child.stdout, selectors.EVENT_READ, (cid, "output"))
                             selector.register(child.stdin, selectors.EVENT_WRITE, (cid, "write"))
                         item = channels[cid]
