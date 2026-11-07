@@ -1,8 +1,11 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-assert.ok(fs.existsSync(new URL('./resource-warning-ticket.mjs', import.meta.url)), 'Resource warning ticket handler must ship');
-const { fileLatencyWarning } = await import('./resource-warning-ticket.mjs');
+let fileLatencyWarning;
+before(async () => {
+  assert.ok(fs.existsSync(new URL('./resource-warning-ticket.mjs', import.meta.url)), 'Resource warning ticket handler must ship');
+  ({ fileLatencyWarning } = await import('./resource-warning-ticket.mjs'));
+});
 
 const runUrl = 'https://github.com/valentinyeo/multiprompt/actions/runs/123';
 const sha = 'a'.repeat(40);

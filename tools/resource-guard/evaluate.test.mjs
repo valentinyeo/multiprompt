@@ -1,8 +1,11 @@
-import { test } from 'node:test';
+import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-assert.ok(fs.existsSync(new URL('./evaluate.mjs', import.meta.url)), 'Resource evaluator must ship');
-const { evaluateResources, evaluateLatency } = await import('./evaluate.mjs');
+let evaluateResources, evaluateLatency;
+before(async () => {
+  assert.ok(fs.existsSync(new URL('./evaluate.mjs', import.meta.url)), 'Resource evaluator must ship');
+  ({ evaluateResources, evaluateLatency } = await import('./evaluate.mjs'));
+});
 const limits = { workload: 'fixture', sessionCount: 30, resources: { memoryToleranceBytes: 16, cardinalityGrowth: 0 }, latency: { sendPaintMs: 300, typingMs: 50 } };
 const file = { inputPath: 'input', stagedPath: 'staged', inputSha256: 'a'.repeat(64), stagedSha256: 'a'.repeat(64) };
 const staging = { exe: file, bridge: file, config: file, helper: file };
