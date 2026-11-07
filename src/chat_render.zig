@@ -4080,10 +4080,63 @@ fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     }
 }
 
+fn chatMessageBounds(index: usize) chat_style.RunBounds {
+    if (index >= app_state.g_chat_block_count) return .{ .first = index, .last = index };
+    return chat_style.runBounds(app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count], index);
+}
+
+fn chatSelectMessage(index: usize) void {
+    const run = chatMessageBounds(index);
+    const first = chatSelectionDisplay(run.first) orelse return;
+    const last = chatSelectionDisplay(run.last) orelse return;
+    app_state.g_chat_sel_anchor = first.mapped().sourceRange(0, first.text.len).start;
+    app_state.g_chat_sel_caret = last.mapped().sourceRange(0, last.text.len).end;
+    app_state.g_chat_sel_active = app_state.g_chat_sel_caret > app_state.g_chat_sel_anchor;
+}
+
+fn chatMessageRect(index: usize) RECT {
+    const run = chatMessageBounds(index);
+    var rect = chatSelectionRect(run.first);
+    rect.bottom = chatSelectionRect(run.last).bottom;
+    return rect;
+}
+
+fn chatMessageTextAlloc(allocator: std.mem.Allocator, index: usize, preserve_markdown: bool) ![]u16 {
+    const run = chatMessageBounds(index);
+    var length: usize = 0;
+    for (run.first..run.last + 1) |i| {
+        const display = chatSelectionDisplay(i) orelse continue;
+        length = try std.math.add(usize, length, display.text.len);
+    }
+    const out = try allocator.alloc(u16, try chatCopyCapacity(length, run.last - run.first + 1));
+    errdefer allocator.free(out);
+    var used: usize = 0;
+    for (run.first..run.last + 1) |i| {
+        const display = chatSelectionDisplay(i) orelse continue;
+        if (display.text.len == 0) continue;
+        if (used > 0) {
+            const separator: []const u16 = if (preserve_markdown) &.{ '\n', '\n' } else &.{ '\r', '\n', '\r', '\n' };
+            @memcpy(out[used..][0..separator.len], separator);
+            used += separator.len;
+        }
+        if (preserve_markdown) {
+            @memcpy(out[used..][0..display.text.len], display.text);
+            used += display.text.len;
+        } else {
+            used += if (i >= app_state.g_chat_block_count or display.source_map != null)
+                try chatCopyPlainText(out[used..], display.text)
+            else
+                try chatCopyBlockText(out[used..], display.block, display.block.start, display.block.start + display.block.len);
+        }
+    }
+    return allocator.realloc(out, used);
+}
+
 pub fn chatReplyToBlock(index: usize) void {
     if (index >= app_state.g_chat_block_count or app_state.g_chat_blocks[index].role == .tool) return;
-    const display = chatDisplayForIndex(index) orelse return;
-    if (display.text.len > 0) _ = @import("chat_composer.zig").selectChatReply(display.text);
+    const text = chatMessageTextAlloc(std.heap.page_allocator, index, true) catch return;
+    defer std.heap.page_allocator.free(text);
+    if (text.len > 0) _ = @import("chat_composer.zig").selectChatReply(text);
 }
 
 pub fn chatReplyLatestAgent() void {
@@ -4909,11 +4962,7 @@ fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
     };
     if (app_state.g_chat_sel_click_count >= 3) {
         if (chatTranscriptSelectionBlockAt(y)) |idx| {
-            const display = chatSelectionDisplay(idx) orelse return;
-            const range = display.mapped().sourceRange(0, display.text.len);
-            app_state.g_chat_sel_anchor = range.start;
-            app_state.g_chat_sel_caret = range.end;
-            app_state.g_chat_sel_active = app_state.g_chat_sel_caret > app_state.g_chat_sel_anchor;
+            chatSelectMessage(idx);
         }
         app_state.g_chat_sel_dragging = false;
         _ = ReleaseCapture();
@@ -5220,7 +5269,6 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
             chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
-            if (nav_index != null and nav_index.? == i) chatPaintNavRing(mem_dc, body_rc);
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
                 i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)
@@ -5229,6 +5277,14 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
                 var stripe = RECT{ .left = rc.right - uiScaled(4), .top = rc.top, .right = rc.right - uiScaled(2), .bottom = rc.bottom };
                 _ = FillRect(mem_dc, &stripe, mark);
                 _ = DeleteObject(mark);
+            }
+        }
+        if (nav_index) |index| {
+            if (index < app_state.g_chat_block_count) {
+                var message_rect = chatMessageRect(index);
+                message_rect.top -= app_state.g_chat_scroll_y;
+                message_rect.bottom -= app_state.g_chat_scroll_y;
+                chatPaintNavRing(mem_dc, message_rect);
             }
         }
         chatPaintMessageActions(mem_dc);
@@ -5284,10 +5340,10 @@ fn chatMessageActionRect(index: usize) ?RECT {
     if (index >= app_state.g_chat_block_count) return null;
     const block = app_state.g_chat_blocks[index];
     if ((block.role != .prose and block.role != .code) or block.reaction_reference == 0) return null;
-    const rc = app_state.g_chat_layout_rects[index];
+    const rc = chatMessageRect(index);
     var client: RECT = undefined;
     chatViewClientRect(&client);
-    const left = rc.right + app_state.g_chat_content_left + uiScaled(6);
+    const left = rc.right + uiScaled(6);
     if (left + uiScaled(84) > client.right) return null;
     const bottom = rc.bottom - app_state.g_chat_scroll_y;
     return .{ .left = left, .top = bottom - uiScaled(28), .right = left + uiScaled(84), .bottom = bottom };
@@ -5350,7 +5406,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
     };
     defer std.heap.page_allocator.free(selection_text);
     if (selection_offer and selection_text.len == 0) return 0;
-    const message_text: []u16 = if (block_at) |idx| chatCopyTextAlloc(std.heap.page_allocator, idx) catch {
+    const message_text: []u16 = if (block_at) |idx| chatMessageTextAlloc(std.heap.page_allocator, idx, false) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
         return 0;
     } else if (echo_index) |ei| std.heap.page_allocator.dupe(u16, if (g_reaction_view.projectedPending(app_state.g_chat_outbox.items[ei].id)) |p| p.text else app_state.g_chat_outbox.items[ei].text) catch {
@@ -5362,7 +5418,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
     if (block_at) |idx| {
         const block = app_state.g_chat_blocks[idx];
         if (block.role != .tool and block.len > 0) {
-            if (chatDisplayForIndex(idx)) |display| reply_text = std.heap.page_allocator.dupe(u16, display.text) catch null;
+            reply_text = chatMessageTextAlloc(std.heap.page_allocator, idx, true) catch null;
         }
     }
     if (block_at == null and echo_index != null and message_text.len > 0) reply_text = std.heap.page_allocator.dupe(u16, message_text) catch null;
@@ -5525,7 +5581,11 @@ pub fn chatReplyResolve() void {
         const block = app_state.g_chat_blocks[i];
         if (block.role == .tool or block.role == .injected or (jump.before > 0 and block.source_offset >= jump.before)) continue;
         const display = chatDisplayForIndex(i) orelse continue;
-        if (!chatReplyMatches(app_state.g_chat_capture[0..app_state.g_chat_last_len], block, display, jump.quoted)) continue;
+        if (!chatReplyMatches(app_state.g_chat_capture[0..app_state.g_chat_last_len], block, display, jump.quoted)) {
+            const message = chatMessageTextAlloc(std.heap.page_allocator, i, true) catch continue;
+            defer std.heap.page_allocator.free(message);
+            if (!chat_reply.sourceMatches(message, jump.quoted)) continue;
+        }
         chatSelectionClear();
         chatReplyJumpClear();
         chatNavFocus(i);
@@ -5552,7 +5612,7 @@ pub fn chatReplyResolve() void {
 fn chatNavEligible(index: usize) bool {
     if (index >= app_state.g_chat_block_count) return chatSelectionDisplay(index) != null;
     const block = app_state.g_chat_blocks[index];
-    return block.role != .tool and block.len > 0 and !g_reaction_view.hides(index);
+    return block.role != .tool and block.len > 0 and !g_reaction_view.hides(index) and chatMessageBounds(index).first == index;
 }
 
 pub fn chatNavClear() void {
@@ -5588,11 +5648,13 @@ fn chatNavIndex() ?usize {
     }
     const anchor = chat_keynav.Anchor{ .source = app_state.g_chat_nav_source, .segment = app_state.g_chat_nav_segment, .stamp = app_state.g_chat_nav_stamp };
     const found = chat_keynav.resolve(anchor, app_state.g_chat_nav_index, sources, segments, stamps) orelse return null;
-    app_state.g_chat_nav_index = found;
-    return found;
+    const index = chatMessageBounds(found).first;
+    app_state.g_chat_nav_index = index;
+    return index;
 }
 
-fn chatNavFocus(index: usize) void {
+fn chatNavFocus(block_index: usize) void {
+    const index = chatMessageBounds(block_index).first;
     if (!chatNavEligible(index)) return;
     if (app_state.active_shell >= app_state.shell_count) return;
     app_state.g_chat_nav_active = true;
@@ -5612,7 +5674,7 @@ fn chatNavFocus(index: usize) void {
 fn chatNavReveal(index: usize) void {
     var client: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client);
-    const rect = chatSelectionRect(index);
+    const rect = chatMessageRect(index);
     const top = rect.top - app_state.g_chat_scroll_y;
     const bottom = rect.bottom - app_state.g_chat_scroll_y;
     const margin = uiScaled(8);
@@ -5692,7 +5754,7 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
             chatNavReveal(index);
             var client: RECT = std.mem.zeroes(RECT);
             chatViewClientRect(&client);
-            const rect = chatSelectionRect(index);
+            const rect = chatMessageRect(index);
             const x = std.math.clamp(rect.left + uiScaled(24), client.left, client.right - 1);
             const y = std.math.clamp(rect.top - app_state.g_chat_scroll_y + uiScaled(12), client.top, client.bottom - 1);
             const packed_pos: u32 = ((@as(u32, @intCast(y)) & 0xffff) << 16) | (@as(u32, @intCast(x)) & 0xffff);
@@ -5812,6 +5874,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 }
             }
             var message_hover = chatTranscriptBlockAtPoint(GET_Y(lp));
+            if (message_hover) |index| message_hover = chatMessageBounds(index).first;
             if (message_hover) |index| {
                 if (chatMessageActionRect(index)) |actions| {
                     const bubble = app_state.g_chat_layout_rects[index];
@@ -8383,4 +8446,58 @@ test "IGSH-1810 keyboard focus follows a pending message by ID through history a
     app_state.g_chat_nav_shell_id = 445;
     try std.testing.expectEqual(@as(?usize, null), chatNavIndex());
     try std.testing.expect(!app_state.g_chat_nav_active);
+}
+
+test "IGSH-1813 selection copy and reply follow the whole existing visual bubble" {
+    const saved = .{ app_state.g_chat_capture, app_state.g_chat_last_len, app_state.g_chat_blocks, app_state.g_chat_block_count,
+        app_state.g_chat_bubble_pos, app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret, app_state.g_chat_sel_active, g_reaction_view };
+    defer {
+        app_state.g_chat_capture = saved[0];
+        app_state.g_chat_last_len = saved[1];
+        app_state.g_chat_blocks = saved[2];
+        app_state.g_chat_block_count = saved[3];
+        app_state.g_chat_bubble_pos = saved[4];
+        app_state.g_chat_sel_anchor = saved[5];
+        app_state.g_chat_sel_caret = saved[6];
+        app_state.g_chat_sel_active = saved[7];
+        g_reaction_view = saved[8];
+    }
+    var text = std.unicode.utf8ToUtf16LeStringLiteral("ownFirstSecondThirdnext").*;
+    var blocks = [_]ChatBlock{
+        .{ .start = 0, .len = 3, .role = .user, .first = true },
+        .{ .start = 3, .len = 5, .role = .prose, .first = true },
+        .{ .start = 8, .len = 6, .role = .prose },
+        .{ .start = 14, .len = 5, .role = .prose },
+        .{ .start = 19, .len = 4, .role = .user, .first = true },
+    };
+    var positions: [blocks.len]chat_style.BubblePos = undefined;
+    chat_style.bubblePositions(&blocks, &positions);
+    app_state.g_chat_capture = &text;
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_blocks = &blocks;
+    app_state.g_chat_block_count = blocks.len;
+    app_state.g_chat_bubble_pos = &positions;
+    g_reaction_view = .{};
+    const a = std.testing.allocator;
+    for (1..4) |index| {
+        chatSelectMessage(index);
+        try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_sel_anchor);
+        try std.testing.expectEqual(@as(usize, 19), app_state.g_chat_sel_caret);
+        const selected = try chatCopyTextAlloc(a, null);
+        defer a.free(selected);
+        const copied = try chatMessageTextAlloc(a, index, false);
+        defer a.free(copied);
+        try std.testing.expectEqualSlices(u16, selected, copied);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("First\r\n\r\nSecond\r\n\r\nThird"), copied);
+        const reply = try chatMessageTextAlloc(a, index, true);
+        defer a.free(reply);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("First\n\nSecond\n\nThird"), reply);
+        try std.testing.expectEqual(index == 1, chatNavEligible(index));
+    }
+    chatSelectMessage(0);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_sel_anchor);
+    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_sel_caret);
+    chatSelectMessage(4);
+    try std.testing.expectEqual(@as(usize, 19), app_state.g_chat_sel_anchor);
+    try std.testing.expectEqual(@as(usize, 23), app_state.g_chat_sel_caret);
 }

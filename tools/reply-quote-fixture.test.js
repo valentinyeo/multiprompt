@@ -49,7 +49,8 @@ test('context Reply handles user and agent blocks but not tool-only blocks', () 
   const body = render.slice(render.indexOf('pub fn chatReplyToBlock('), render.indexOf('pub fn chatReplyLatestAgent('));
   assert.match(body, /role == \.tool\) return/);
   assert.doesNotMatch(body, /role == \.user\) return/);
-  assert.match(body, /selectChatReply\(display\.text\)/);
+  assert.match(body, /chatMessageTextAlloc\(std.heap.page_allocator, index, true\)/);
+  assert.match(body, /selectChatReply\(text\)/);
 });
 
 
@@ -105,7 +106,15 @@ fn chatDisplayForIndex(index: usize) ?ChatDisplay {
     const range = chatBlockDisplayRange(g_chat_capture[0..g_chat_last_len], g_chat_blocks[index]);
     return .{ .text = g_chat_capture[0..g_chat_last_len][range.start..][0..range.len], .offset = range.start };
 }
-fn selectChatReply(text: []const u16) void { selected = text; }
+var selected_storage: [1024]u16 = undefined;
+fn selectChatReply(text: []const u16) void {
+    @memcpy(selected_storage[0..text.len], text);
+    selected = selected_storage[0..text.len];
+}
+fn chatMessageTextAlloc(allocator: std.mem.Allocator, index: usize, _: bool) ![]u16 {
+    const display = chatDisplayForIndex(index) orelse return allocator.alloc(u16, 0);
+    return allocator.dupe(u16, display.text);
+}
 fn refreshChatTranscript(_: bool) void {}
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 `;
@@ -174,6 +183,10 @@ fn chatDisplayForIndex(index: usize) ?ChatDisplay {
     const block = app_state.g_chat_blocks[index];
     const range = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
     return .{ .text = app_state.g_chat_capture[0..app_state.g_chat_last_len][range.start..][0..range.len], .offset = range.start };
+}
+fn chatMessageTextAlloc(allocator: std.mem.Allocator, index: usize, _: bool) ![]u16 {
+    const display = chatDisplayForIndex(index) orelse return allocator.alloc(u16, 0);
+    return allocator.dupe(u16, display.text);
 }
 fn debugLog(_: []const u8) void {}
 fn chatSelectionClear() void {}

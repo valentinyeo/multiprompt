@@ -57,7 +57,7 @@ test('IGSH-992 focus skips tool rows, scrolls into view and draws a ring with no
   const ring = fn(render, 'chatPaintNavRing');
   assert.match(ring, /customColorOr\("accent"/);
   assert.doesNotMatch(ring, /DrawText|chatDrawText/);
-  assert.match(render, /nav_index != null and nav_index\.\? == i\) chatPaintNavRing\(/);
+  assert.match(render, /if \(nav_index\) \|index\| \{[^]*?chatMessageRect\(index\)[^]*?chatPaintNavRing\(mem_dc, message_rect\)/);
   assert.match(fn(render, 'chatNavIndex'), /g_chat_nav_shell_id/, 'focus is dropped lazily when the conversation changes');
 });
 
