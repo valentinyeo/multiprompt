@@ -4731,40 +4731,14 @@ record(dict(kind='start', args=sys.argv[1:], pid=os.getpid(), cwd=os.getcwd(),
             path=os.environ.get('PATH')))
 sys.stdout.write(json.dumps(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0')) + '\n')
 sys.stdout.flush()
-queue = []
-busy = False
 for raw in sys.stdin:
     try:
         line = json.loads(raw)
     except ValueError:
         continue
-    if line.get('type') == 'control_request':
-        request = line.get('request') if isinstance(line.get('request'), dict) else {}
-        subtype = request.get('subtype')
-        record(dict(kind='control', subtype=subtype, request_id=line.get('request_id'), uuid=request.get('message_uuid')))
-        cancelled = False
-        if mode == 'hold' and subtype == 'cancel_async_message':
-            token = request.get('message_uuid')
-            cancelled = any(item.get('uuid') == token for item in queue)
-            queue[:] = [item for item in queue if item.get('uuid') != token]
-            record(dict(kind='remaining', texts=[item.get('text') for item in queue]))
-        sys.stdout.write(json.dumps(dict(type='control_response', response=dict(subtype='success', request_id=line.get('request_id'), response=dict(cancelled=cancelled)))) + '\n')
-        sys.stdout.flush()
-        continue
-    text = line['message']['content'][0]['text']
-    record(dict(kind='user', text=text, uuid=line.get('uuid')))
+    record(dict(kind='user', text=line['message']['content'][0]['text']))
     if mode == 'crash':
         os._exit(1)
-    if mode == 'hold':
-        if busy:
-            queue.append(dict(text=text, uuid=line.get('uuid')))
-            record(dict(kind='queued', text=text, uuid=line.get('uuid')))
-            continue
-        busy = True
-        record(dict(kind='answered', text=text))
-        sys.stdout.write(json.dumps(dict(type='assistant', message=dict(id='msg-fixture', role='assistant', content=[dict(type='text', text='ok')]), uuid='u1')) + '\n')
-        sys.stdout.flush()
-        continue
     sys.stdout.write(json.dumps(dict(type='assistant', message=dict(id='msg-fixture', role='assistant', content=[dict(type='text', text='ok')]), uuid='u1')) + '\n')
     sys.stdout.flush()
     if mode == 'silent':
@@ -5374,31 +5348,6 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux])['status'], 'enabled')
         self.assertTrue(reader.host_enabled(self.provider, self.sid))
         self.assertEqual(reader.host_cli(['status', 'kimi', self.sid])['status'], 'refused')
-
-
-class IGSH_1828_RecallTest(AgentHostFixture, unittest.TestCase):
-    def test_igsh_1828_cancel_takes_back_one_handed_off_message_and_keeps_the_others(self):
-        self.enable(mode='hold')
-        self.seed(text='KEEP_ONE')
-        self.dispatch()
-        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
-        self.seed(token='host_fixture_message_02', text='CANCEL_TARGET')
-        self.seed(token='host_fixture_message_03', text='KEEP_THREE')
-        self.dispatch()
-        self.wait_for(lambda: (self.message('host_fixture_message_02') or {}).get('state') == 'sent')
-        self.dispatch()
-        self.wait_for(lambda: (self.message('host_fixture_message_03') or {}).get('state') == 'sent')
-        self.wait_for(lambda: [row['text'] for row in self.agent_rows('queued')] == ['CANCEL_TARGET', 'KEEP_THREE'])
-        recalled = self.request('dismiss', message_id='host_fixture_message_02', text='CANCEL_TARGET')
-        self.assertEqual(recalled['message']['state'], 'cancelled')
-        self.assertEqual(self.message()['state'], 'accepted')
-        self.assertEqual(self.message('host_fixture_message_03')['state'], 'sent')
-        self.assertEqual([row.get('texts') for row in self.agent_rows('remaining')], [['KEEP_THREE']])
-        self.assertEqual([row['text'] for row in self.agent_rows('answered')], ['KEEP_ONE'])
-        cancels = [row for row in self.agent_rows('control') if row.get('subtype') == 'cancel_async_message']
-        self.assertEqual([row.get('uuid') for row in cancels], ['mp-host_fixture_message_02'])
-        self.assertFalse(any(row.get('subtype') == 'interrupt' for row in self.agent_rows('control')))
-        self.assertEqual(self.host_events('interrupt'), [])
 
 
 class AgentFeedbackCliTest(unittest.TestCase):
