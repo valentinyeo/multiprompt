@@ -3297,6 +3297,27 @@ pub fn updateSearchResults() void {
                 app_state.g_search_result_count += 1;
             }
         }
+        if (app_state.g_search_workspace_delete_mode) {
+            var visible: [768]u8 = undefined;
+            const head = "[palette] delete-visible ";
+            @memcpy(visible[0..head.len], head);
+            var pos: usize = head.len;
+            for (app_state.g_search_results[0..app_state.g_search_result_count]) |target| {
+                if (target < SEARCH_WORKSPACE_DELETE_OFFSET or target >= SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES) continue;
+                const wi = target - SEARCH_WORKSPACE_DELETE_OFFSET;
+                if (wi >= @as(usize, app_state.g_workspace_count) or pos >= visible.len) continue;
+                const name = app_state.g_workspaces[wi].name[0..app_state.g_workspaces[wi].name_len];
+                if (pos != head.len and pos < visible.len) {
+                    visible[pos] = '|';
+                    pos += 1;
+                }
+                const room = visible.len - pos;
+                const n = @min(name.len, room);
+                @memcpy(visible[pos..][0..n], name[0..n]);
+                pos += n;
+            }
+            @import("diagnostics.zig").debugLog(visible[0..pos]);
+        }
 
         preferFirstFilteredResultAfterBack();
         if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();

@@ -201,6 +201,13 @@ function Delete-WorkspaceFixture([string]$Name, [bool]$Mouse) {
         $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
         @($registry.windows | Where-Object { $_.id -ceq $identity }).Count -eq 0 -and @($ownedPids | Where-Object { $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) }).Count -eq 0
     } 'deleted registry identity gone and owned session processes closed'
+    $paintedLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $paintedLine = @(Select-String -Path $paintedLog -Pattern '\[palette\] delete-visible ' | Select-Object -Last 1)
+    if ($paintedLine.Count -lt 1) { throw 'Delete list did not record its painted rows' }
+    $paintedText = [string]$paintedLine[0].Line
+    $marker = 'delete-visible '
+    $paintedNames = @(($paintedText.Substring($paintedText.LastIndexOf($marker) + $marker.Length).Trim()) -split '\|' | ForEach-Object { $_.Trim() })
+    if ($paintedNames -contains $Name) { throw "Deleted workspace is still painted in the delete list: $Name" }
     Snapshot ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '-after')
     Save-Json (Read-Session) ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '.session.json')
     Press @(0x1B) 'Escape: close delete list'

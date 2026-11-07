@@ -413,17 +413,21 @@ fn parseWorkspaceRegistryJson(json: []const u8) void {
     }
 }
 
+fn readWorkspaceRegistryBytes(path: []const u8, buf: []u8) ?usize {
+    if (@import("file_io.zig").copyQueuedWrite(path, buf)) |n| return n;
+    const h = win32OpenRead(path) orelse return null;
+    defer _ = CloseHandle(h);
+    return win32ReadAll(h, buf);
+}
+
 pub fn loadWorkspaceRegistry() bool {
     const registry_lock = lockWorkspaceRegistry() orelse return false;
     defer unlockWorkspaceRegistry(registry_lock);
     app_state.g_workspace_count = 0;
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return false;
-    const h = win32OpenRead(path) orelse return false;
-    defer _ = CloseHandle(h);
-
     var buf: [8192]u8 = undefined;
-    const n = win32ReadAll(h, &buf);
+    const n = readWorkspaceRegistryBytes(path, &buf) orelse return false;
     if (n == 0) return true;
     parseWorkspaceRegistryJson(buf[0..n]);
     return true;
@@ -434,10 +438,8 @@ pub fn mergeWorkspaceRegistryFromDisk() void {
     defer unlockWorkspaceRegistry(registry_lock);
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return;
-    const h = win32OpenRead(path) orelse return;
-    defer _ = CloseHandle(h);
     var buf: [8192]u8 = undefined;
-    const n = win32ReadAll(h, &buf);
+    const n = readWorkspaceRegistryBytes(path, &buf) orelse return;
     if (n == 0) return;
     app_state.g_workspace_count = 0;
     parseWorkspaceRegistryJson(buf[0..n]);

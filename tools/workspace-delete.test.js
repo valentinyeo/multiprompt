@@ -29,6 +29,14 @@ test('IGSH-1832 Main and refused rows stay reachable for a persistent explanatio
   assert.match(body('deleteWorkspaceByIndex'), /workspace-delete result=deleted/);
 });
 
+test('IGSH-1832 registry reload prefers the queued write over the stale file', () => {
+  const read = body('readWorkspaceRegistryBytes');
+  const queued = read.indexOf('copyQueuedWrite');
+  const disk = read.indexOf('win32OpenRead');
+  assert.ok(queued >= 0 && disk > queued);
+  assert.match(body('mergeWorkspaceRegistryFromDisk'), /readWorkspaceRegistryBytes/);
+});
+
 test('IGSH-1832 Windows double-click delivery still confirms the selected delete row', () => {
   const main = fs.readFileSync(path.join(__dirname, '../src/main.zig'), 'utf8');
   const start = main.indexOf('        WM_LBUTTONDBLCLK => {');
