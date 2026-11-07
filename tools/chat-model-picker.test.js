@@ -49,11 +49,11 @@ test('settings requests report refusal and show confirmed next values', () => {
   assert.match(session, /settingReplyFailed/);
   assert.match(session, /WM_APP_CHAT_ATTACH_FAILED/);
   assert.match(main, /chatSetLiveSetting\(setting\).*showHeaderNoticeAscii/);
-  const layout = read('src/window_layout.zig');
-  assert.match(layout, /chat_live\.zig"\)\.settings\(/);
-  assert.match(layout, /\.unknown => "Default"/);
-  assert.match(layout, /selected\.applied/);
-  assert.match(layout, /Next/);
+  assert.ok(fs.existsSync(path.join(root, 'src/plus_menu.zig')), 'plus menu source exists');
+  const plus = read('src/plus_menu.zig');
+  assert.match(plus, /chat_live\.zig"\)\.settings\(/);
+  assert.match(plus, /state\.checked\[@intFromEnum\(Item\.model_opus\)\] = selected\.model == \.opus/);
+  assert.match(plus, /state\.checked\[@intFromEnum\(Item\.effort_high\)\] = selected\.effort == \.high/);
 });
 
 test('F1 and keyboard docs list both palette actions', () => {
@@ -126,6 +126,7 @@ test('settings notice literals occur only at the named call sites', () => {
   }
   assert.deepEqual(calls.sort(), [
     'chat_send.zig:sendChatPrompt:Wait for chat settings to update',
+    'main.zig:wndProc:Could not change chat settings',
     'main.zig:wndProc:Could not change chat settings',
   ]);
 });

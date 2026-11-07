@@ -156,6 +156,7 @@ const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OP
 const WM_APP_ARCHIVE_ARM = @import("win32.zig").WM_APP_ARCHIVE_ARM;
 const WM_APP_MORE_MENU_ACTION = @import("win32.zig").WM_APP_MORE_MENU_ACTION;
 const more_menu = @import("more_menu.zig");
+const plus_menu = @import("plus_menu.zig");
 const WM_APP_SHOT_PASTE = @import("win32.zig").WM_APP_SHOT_PASTE;
 const WM_APP_BROWSER_SHOTURL = @import("win32.zig").WM_APP_BROWSER_SHOTURL;
 const WM_APP_CHAT_TAB_URL = @import("win32.zig").WM_APP_CHAT_TAB_URL;
@@ -1285,6 +1286,7 @@ comptime {
         _ = @import("chat_session.zig");
         _ = @import("chat_render.zig");
         _ = @import("more_menu.zig");
+        _ = @import("plus_menu.zig");
         _ = @import("chat_find_ui.zig");
         _ = @import("chat_send.zig");
         _ = @import("window_layout.zig");
@@ -1747,6 +1749,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             debugLog("[usage-hover] close requested by main resize");
             @import("usage_card.zig").close();
             more_menu.close();
+            plus_menu.close();
             @import("workspace_switcher.zig").close();
             @import("settings_panel.zig").reposition();
             const SIZE_MINIMIZED: WPARAM = 1;
@@ -1880,7 +1883,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 switch (chatButtonAt(mx, my)) {
                     3 => _ = PostMessageW(hwnd, WM_APP_CHAT_SEND, 0, 0),
-                    4 => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
+                    4 => plus_menu.open(),
                     5 => _ = @import("chat_send.zig").chatStopAgent(app_state.active_shell),
                     9 => @import("chat_composer.zig").clearChatReply(),
                     10 => @import("chat_render.zig").chatJumpToNewest(),
@@ -3838,6 +3841,40 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
+        @import("win32.zig").WM_APP_PLUS_MENU_ACTION => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
+            const item: plus_menu.Item = blk: {
+                inline for (std.meta.fields(plus_menu.Item)) |field| {
+                    if (wp == field.value) break :blk @enumFromInt(field.value);
+                }
+                return 0;
+            };
+            switch (item) {
+                .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
+                .model_opus, .model_sonnet, .model_haiku, .effort_low, .effort_medium, .effort_high => {
+                    const setting: @import("chat_live.zig").Setting = switch (item) {
+                        .model_opus => .{ .model = .opus },
+                        .model_sonnet => .{ .model = .sonnet },
+                        .model_haiku => .{ .model = .haiku },
+                        .effort_low => .{ .effort = .low },
+                        .effort_medium => .{ .effort = .medium },
+                        else => .{ .effort = .high },
+                    };
+                    if (!@import("chat_send.zig").chatSetLiveSetting(setting)) showHeaderNoticeAscii("Could not change chat settings", 4000, true);
+                },
+                .mode_ask, .mode_edits, .mode_plan, .mode_bypass => {
+                    const mode: @import("chat_slash.zig").PermissionMode = switch (item) {
+                        .mode_ask => .manual,
+                        .mode_edits => .acceptEdits,
+                        .mode_plan => .plan,
+                        else => .bypassPermissions,
+                    };
+                    if (!@import("chat_send.zig").chatModeSelect(mode)) showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
+                },
+            }
+            _ = InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
         WM_APP_CHAT_TOGGLE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             toggleChatView();
@@ -5322,6 +5359,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     more_menu.open();
                     return 0;
                 }
+                if (target == app_state.SEARCH_CHAT_PLUS_MENU_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = @import("win32.zig").UpdateWindow(hwnd);
+                    if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+                    plus_menu.open();
+                    return 0;
+                }
                 if (target == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
@@ -5342,8 +5391,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET or target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET or target == app_state.SEARCH_CHAT_MODE_EDITS_OFFSET) {
-                    const mode: @import("chat_slash.zig").PermissionMode = if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET) .plan else if (target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET) .manual else .acceptEdits;
+                if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET or target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET or target == app_state.SEARCH_CHAT_MODE_EDITS_OFFSET or target == app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET) {
+                    const mode: @import("chat_slash.zig").PermissionMode = if (target == app_state.SEARCH_CHAT_MODE_PLAN_OFFSET) .plan else if (target == app_state.SEARCH_CHAT_MODE_MANUAL_OFFSET) .manual else if (target == app_state.SEARCH_CHAT_MODE_BYPASS_OFFSET) .bypassPermissions else .acceptEdits;
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
