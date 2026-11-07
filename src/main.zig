@@ -3027,6 +3027,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (physical_shortcut) browserTraceN("shortcutToggle enabled=", @intFromBool(app_state.shells[target_idx].browser_enabled));
                 if (app_state.shells[target_idx].browser_enabled) {
                     ensureBrowserDefaultUrl(target_idx);
+                    if (target_idx == app_state.active_shell and app_state.shells[target_idx].browser_hwnd == null) launchBrowserForShell(target_idx);
                     updateBrowserVisibility();
                 } else {
                     discardBrowserUrlBarEdit();
