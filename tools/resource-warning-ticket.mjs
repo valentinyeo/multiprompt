@@ -5,8 +5,8 @@ import board from './auto-revert-board.js';
 const titles = { send: 'Multi Bot messages are slow to send', typing: 'Multi Bot typing is slow' };
 const requiredLabels = ['CI', 'Hypertask CI', 'Multiprompt', 'brain-medium'];
 
-export async function fileLatencyWarning({ api, result, runUrl, sha, metric = 'send' }) {
-  const title = titles[metric];
+export async function fileLatencyWarning({ api, result, runUrl, sha, metric = 'send', verification = false }) {
+  const title = titles[metric] && (verification === true ? `HYCI-168 verification: ${metric} latency` : titles[metric]);
   if (!title) throw new Error('Invalid latency metric');
   if (result?.status !== 'warning' || !Number.isFinite(result.worstMs) || !Number.isFinite(result.limitMs) || result.worstMs <= result.limitMs || result.limitMs < 0) return { outcome: 'skipped' };
   if (!/^https:\/\/github\.com\/valentinyeo\/multiprompt\/actions\/runs\/[1-9]\d*$/.test(runUrl || '') || !/^[a-fA-F0-9]{40}$/.test(sha || '')) throw new Error('Invalid run URL or commit SHA');
@@ -46,7 +46,9 @@ export async function fileLatencyWarning({ api, result, runUrl, sha, metric = 's
   const problem = metric === 'typing' ? 'Typed text takes too long to reach the composer.' : 'Multi Bot messages take too long to send.';
   const done = metric === 'typing' ? 'Typed text reaches the composer within the limit.' : 'Messages send within the limit.';
   const risk = metric === 'typing' ? 'Typing may still feel slow.' : 'Messages may still feel slow.';
-  const description = `<h2>Problem</h2><p>${problem}</p><p>Slowest: ${result.worstMs} ms. Limit: ${result.limitMs} ms.</p><h2>Fix</h2><p>Find and fix the delay.</p><h2>Done when</h2><p>${done}</p><h2>Risk</h2><p>${risk}</p><h2>Decision</h2><p>None.</p><p>Run: <a href="${runUrl}">${runUrl}</a></p>`;
+  const description = verification === true
+    ? `<h2>Problem</h2><p>Synthetic verification only; this is not real slowness.</p><h2>Fix</h2><p>Verify warning ticket creation and deduplication.</p><h2>Done when</h2><p>The proof completes.</p><h2>Risk</h2><p>None; measurements are synthetic.</p><h2>Decision</h2><p>None.</p><p>Run: <a href="${runUrl}">${runUrl}</a></p>`
+    : `<h2>Problem</h2><p>${problem}</p><p>Slowest: ${result.worstMs} ms. Limit: ${result.limitMs} ms.</p><h2>Fix</h2><p>Find and fix the delay.</p><h2>Done when</h2><p>${done}</p><h2>Risk</h2><p>${risk}</p><h2>Decision</h2><p>None.</p><p>Run: <a href="${runUrl}">${runUrl}</a></p>`;
   const created = await api('POST', '/tasks/create', { project_id: 11514, title, description, section_id: backlog[0].id, labels: ids });
   return { outcome: 'created', task: created.task ?? created.tasks?.[0] };
 }

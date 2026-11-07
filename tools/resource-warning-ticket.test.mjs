@@ -53,6 +53,25 @@ test('warning creates a backlog ticket with existing labels and evidence', async
   assert.deepEqual(post.body.labels, labels.map(label => label.id));
   assert.ok(post.body.description.includes(runUrl));
   assert.ok(post.body.description.includes('1200 ms'));
+  assert.doesNotMatch(post.body.description, /synthetic verification/i);
+});
+
+test('verification mode isolates both metrics without changing board or labels', async () => {
+  for (const metric of ['send', 'typing']) {
+    const { api, calls } = fakeApi();
+    assert.equal((await run(api, warning, { metric, verification: true })).outcome, 'created');
+    const search = new URL(calls[0].path, 'https://example.test');
+    const post = calls.find(call => call.method === 'POST').body;
+    assert.equal(post.title, `HYCI-168 verification: ${metric} latency`);
+    assert.equal(search.searchParams.get('q'), post.title);
+    assert.equal(post.project_id, 11514);
+    assert.deepEqual(post.labels, labels.map(label => label.id));
+    assert.match(post.description, /Synthetic verification only; this is not real slowness/);
+    assert.ok(post.description.includes(runUrl));
+    const existing = fakeApi([[{ title: post.title, section: 'Backlog', ticketNumber: 'HYCI-1' }]]);
+    assert.equal((await run(existing.api, warning, { metric, verification: true })).outcome, 'existing');
+    assert.equal(existing.calls.some(call => call.method === 'POST'), false);
+  }
 });
 
 test('open warning is reused without writes', async () => {
