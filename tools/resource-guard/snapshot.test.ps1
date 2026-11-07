@@ -23,6 +23,15 @@ class FakeJob {
 }
 function Account($total, $active, $terminated) { return @{ TotalProcesses=$total; ActiveProcesses=$active; TerminatedProcesses=$terminated } }
 function Check($condition, $message) { if (-not $condition) { throw $message } }
+$bootstrap = "ssh.exe -T -o BatchMode=yes host python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'"
+Check (Test-GuardReaderCommand 'ssh.exe host python3 reader.py --serve') 'Legacy serve is a reader'
+Check (Test-GuardReaderCommand 'ssh.exe host python3 reader.py --watch') 'Legacy watch is a reader'
+Check (Test-GuardReaderCommand $bootstrap) 'Shared bootstrap is a reader'
+Check (-not (Test-GuardReaderCommand 'ssh.exe host tmux list-sessions')) 'Unrelated SSH is not a reader'
+Check (-not (Test-GuardReaderCommand 'ssh.exe host reader.py --watching')) 'Partial legacy flag is not a reader'
+Check (-not (Test-GuardReaderCommand ($bootstrap + ' extra'))) 'Bootstrap with extra arguments is not a reader'
+Check (-not (Test-GuardReaderCommand $bootstrap.Replace('base64.b64decode', 'base64Xb64decode'))) 'Malformed bootstrap is not a reader'
+Check (-not (Test-GuardReaderCommand $bootstrap.Replace('python3 -u -c', 'python3 -c'))) 'Incomplete bootstrap is not a reader'
 function Cim($processes) {
     foreach ($process in $processes) {
         [pscustomobject]@{ ProcessId=$process.Id; ParentProcessId=0; ExecutablePath='C:\fake.exe'; CommandLine='fake'; CreationDate=$process.StartTime }

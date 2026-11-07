@@ -95,7 +95,7 @@ try {
     $cim = @(Get-CimInstance Win32_Process)
     $sshDetails = @($raw | Where-Object { $_.name -ieq 'ssh' })
     if (@($sshDetails | Where-Object { $_.ExecutablePath -ine "$FixtureBin\ssh.exe" }).Count -ne 0) { throw 'SSH process is not the synthetic fixture' }
-    $result.syntheticSshReaders = @($sshDetails | Where-Object { $_.CommandLine -match '--serve|--watch' }).Count
+    $result.syntheticSshReaders = @($sshDetails | Where-Object { Test-GuardReaderCommand $_.CommandLine }).Count
     $result.sshCommandLines = @($sshDetails | ForEach-Object { @{ ProcessId=$_.id; ParentProcessId=$_.parentProcessId; ExecutablePath=$_.executablePath; CommandLine=$_.commandLine } })
     $result.jobConsoleProcesses = @($raw | Where-Object { $_.name -in @('conhost','OpenConsole') }).Count
     $result.workingSetBytes = [long](($raw | Measure-Object -Property workingSetBytes -Sum).Sum)

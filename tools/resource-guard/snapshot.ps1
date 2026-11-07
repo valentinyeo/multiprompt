@@ -1,3 +1,8 @@
+function Test-GuardReaderCommand([string]$CommandLine) {
+    return $CommandLine -cmatch '(?:^|\s)--(?:serve|watch)(?:\s|$)' -or
+        $CommandLine -cmatch "(?:^|\s)python3 -u -c 'import base64,sys;exec\(base64\.b64decode\(sys\.stdin\.buffer\.readline\(\)\)\)'\s*$"
+}
+
 function Get-StableJobSnapshot {
     param($Job, [int]$AppId, [scriptblock]$Enumerate = { [Diagnostics.Process]::GetProcesses() }, [scriptblock]$EnumerateCim = { Get-CimInstance Win32_Process })
     for ($attempt = 0; $attempt -lt 10; $attempt++) {
