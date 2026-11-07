@@ -19,7 +19,7 @@ test('IGSH-1774 real workspace activation switches a same-name local slot and pr
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-menu-'));
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
-const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, name: [64]u8 = @splat(0), name_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0 };
+const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, name: [64]u8 = @splat(0), name_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0, archived: bool = false };
 const app_state = struct {
     var g_workspace_count: u32 = 2;
     var g_workspaces: [2]Entry = @splat(.{});
