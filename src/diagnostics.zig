@@ -166,6 +166,8 @@ pub const FocusTraceEvent = enum {
     blocked,
     activation_refocus,
     allowed,
+    setfocus_null_return,
+    setfocus_returned,
 };
 
 const FocusTraceLimiter = struct {
@@ -249,6 +251,8 @@ test "ISSUE-451 trace formatting identifies the taker and keeps the prefix first
     try std.testing.expectEqualStrings("[focus-trace] event=composer_killfocus caller=exe+0x123 target=0x456 class=\"Chrome_WidgetWin_1\" pid=42 ours=false focus=0x789 foreground=0x456 foreground_class=\"Chrome_WidgetWin_1\"", line);
     var output: [1024]u8 = undefined;
     try std.testing.expectEqualStrings("[focus-trace] 2026-10-18 03:04:05.067 event=composer_killfocus caller=exe+0x123 target=0x456 class=\"Chrome_WidgetWin_1\" pid=42 ours=false focus=0x789 foreground=0x456 foreground_class=\"Chrome_WidgetWin_1\"\n", buildDebugLine(&output, "2026-10-18 03:04:05.067", line).?);
+    try std.testing.expectEqualStrings("[focus-trace] event=setfocus_null_return caller=exe+0x0 target=0x1 class=\"Edit\" pid=42 ours=true focus=0x2 foreground=0x3 foreground_class=\"ZigShell\"", formatFocusTrace(&buf, .setfocus_null_return, 0, 1, "Edit", 42, true, 2, 3, "ZigShell").?);
+    try std.testing.expectEqualStrings("[focus-trace] event=setfocus_returned caller=exe+0x0 target=0x1 class=\"Edit\" pid=42 ours=true focus=0x2 foreground=0x3 foreground_class=\"ZigShell\"", formatFocusTrace(&buf, .setfocus_returned, 0, 1, "Edit", 42, true, 2, 3, "ZigShell").?);
     try std.testing.expect(formatFocusTrace(buf[0..8], .blocked, 0, 0, "?", 0, false, 0, 0, "?") == null);
 }
 

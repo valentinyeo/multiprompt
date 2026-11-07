@@ -64,6 +64,31 @@ function fixture(t) {
 }
 
 if (fs.existsSync(checker)) {
+  test('head and merge-base regressions receive independent temporary storage', t => {
+    const f = fixture(t);
+    const shared = path.join(f.repo, 'shared-temp');
+    fs.mkdirSync(shared);
+    f.write('src/value.txt', 'fixed');
+    f.write('tools/value.test.cjs', `
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+test('fixed value with isolated state', () => {
+  const state = path.join(os.tmpdir(), 'regression-state');
+  if (fs.existsSync(state)) process.exit(2);
+  fs.writeFileSync(state, 'owned by this invocation');
+  assert.equal(fs.readFileSync('src/value.txt', 'utf8'), 'fixed');
+});
+`);
+    f.commit();
+    const result = f.run(f.base, { TMPDIR: shared, TMP: shared, TEMP: shared });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /RED PROVEN tools\/value.test.cjs/);
+    assert.deepEqual(fs.readdirSync(shared), []);
+  });
+
   test('service admission installs and builds each source snapshot before proving assertions', t => {
     const f = fixture(t);
     const bin = path.join(f.repo, 'fixture-bin');

@@ -7,6 +7,7 @@ $repo = (Resolve-Path "$PSScriptRoot/../..").Path
 Add-Type -AssemblyName System.Drawing
 try { Add-Type -AssemblyName System.Security } catch {}
 Add-Type -Path "$repo/tools/verify-reconnect/desktop.cs"
+[ReconnectDesktop]::StartSpy()
 [void][ReconnectDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $work = Join-Path $env:RUNNER_TEMP ('account-journey-' + [guid]::NewGuid().ToString('N'))
 $settings = "$work/roaming/ZigShell"
@@ -21,6 +22,8 @@ $cert = $null
 $rootCertAdded = $false
 $failure = $null
 $stage = 'setup'
+. "$PSScriptRoot/diagnostics.ps1"
+. "$PSScriptRoot/foreground.ps1"
 $results = [ordered]@{ native_roundtrip = @{ verdict = 'fail' } }
 $hostsFile = "$env:SystemRoot/System32/drivers/etc/hosts"
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
@@ -50,12 +53,9 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90)
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 100 } while ([DateTime]::UtcNow -lt $deadline)
     throw "Timed out: $Description"
 }
-function Assert-Window([IntPtr]$Window, [int]$ProcessId) {
-    if ($Window -eq [IntPtr]::Zero -or [ReconnectDesktop]::Owner($Window) -ne $ProcessId -or [ReconnectDesktop]::GetForegroundWindow() -ne $Window) { throw 'App window is not owned and foreground' }
-}
 function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id) {
-    if ([ReconnectDesktop]::GetForegroundWindow() -ne $Window) { [ReconnectDesktop]::Activate($Window) }
     Start-Sleep -Milliseconds 2000
+    Set-JourneyForeground $Window $ProcessId
     Assert-Window $Window $ProcessId
     $bitmap = [Drawing.Bitmap]::new([ReconnectDesktop]::GetSystemMetrics(0), [ReconnectDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -64,21 +64,51 @@ function Shot([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id)
     @{ capture = $Name; pid = $ProcessId; hwnd = $Window.ToInt64() } | ConvertTo-Json | Set-Content "$Output/$Name.json"
 }
 function Show-Workspace([string]$Name, [IntPtr]$Window = $main, [int]$ProcessId = $app.Id, [string]$SessionPath = "$settings/session-journey-a.json") {
-    for ($n = 2; $n -le 9; $n++) {
-        [ReconnectDesktop]::Activate($Window)
-        Assert-Window $Window $ProcessId
+    $state = Get-Content $SessionPath -Raw | ConvertFrom-Json
+    $matches = @(for ($i = 0; $i -lt @($state.workspaces).Count; $i++) { if ($state.workspaces[$i].name -ceq $Name) { $i } })
+    if ($matches.Count -ne 1 -or $matches[0] -gt 7) { throw "Could not switch to workspace $Name in saved session" }
+    $slot = [int]$matches[0]
+    Set-JourneyForeground $Window $ProcessId
+    Assert-Window $Window $ProcessId
+    for ($attempt = 0; $attempt -lt 2; $attempt++) {
         [ReconnectDesktop]::Key(0x12, $false)
-        [ReconnectDesktop]::Key([ushort](0x30 + $n), $false)
-        [ReconnectDesktop]::Key([ushort](0x30 + $n), $true)
-        [ReconnectDesktop]::Key(0x12, $true)
-        Start-Sleep -Milliseconds 500
         try {
-            $state = Get-Content $SessionPath -Raw | ConvertFrom-Json
-            $slot = [int]$state.active_workspace
-            if ($slot -ge 0 -and $slot -lt @($state.workspaces).Count -and $state.workspaces[$slot].name -ceq $Name) { return }
-        } catch {}
+            if ([ReconnectDesktop]::GetForegroundWindow() -eq $Window -or $attempt -eq 1) {
+                Assert-Window $Window $ProcessId
+                [ReconnectDesktop]::Key([ushort](0x32 + $slot), $false)
+                [ReconnectDesktop]::Key([ushort](0x32 + $slot), $true)
+                break
+            }
+        } finally { [ReconnectDesktop]::Key(0x12, $true) }
+        Set-JourneyForeground $Window $ProcessId
+        Assert-Window $Window $ProcessId
     }
-    throw "Could not switch to workspace $Name in saved session"
+    $selection = @{ readable = $false; active_slot = -1; starred = $false; name_match = $false }
+    try {
+        [void](Wait-For 'selected workspace session' {
+            $selection.readable = $false
+            $selection.active_slot = -1
+            $selection.starred = $false
+            $selection.name_match = $false
+            try {
+                $current = Get-Content $SessionPath -Raw | ConvertFrom-Json
+                $selection.readable = $true
+                if ($null -ne $current.active_workspace) { $selection.active_slot = [int]$current.active_workspace }
+                $selection.starred = [bool]$current.starred_view
+                $selection.name_match = $slot -lt @($current.workspaces).Count -and $current.workspaces[$slot].name -ceq $Name
+                $selection.active_slot -eq $slot -and !$selection.starred -and $selection.name_match
+            } catch { $false }
+        } 10)
+    } catch {
+        if ($_.Exception.Message -cne 'Timed out: selected workspace session') { throw }
+        $original = $_
+        $focus = @(-1L, -1L)
+        try { $focus = [ReconnectDesktop]::Focus($Window) } catch {}
+        $message = "Timed out: selected workspace session; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId expected_slot=$slot foreground=$($focus[0]) focus=$($focus[1]) session_readable=$($selection.readable) active_slot=$($selection.active_slot) starred=$($selection.starred) expected_name_match=$($selection.name_match)"
+        $exception = [System.Exception]::new($message, $original.Exception)
+        $exception.Data['original_script_stack'] = $original.ScriptStackTrace
+        throw $exception
+    }
 }
 function Assert-Focus([IntPtr]$Window, [int]$ProcessId, [IntPtr]$Expected) {
     Assert-Window $Window $ProcessId
@@ -92,21 +122,129 @@ function Type-Ascii([string]$Value, [IntPtr]$Window, [int]$ProcessId, [IntPtr]$E
         [ReconnectDesktop]::Type([ushort]$vk)
     }
 }
+function Get-RenameWindowSnapshot([IntPtr]$Window, [int]$ProcessId) {
+    $enabled = try { [JourneyForeground]::Enabled($Window) } catch { 'unavailable' }
+    $owned = try { [JourneyForeground]::OwnedWindows($Window, $ProcessId) } catch { 'unavailable' }
+    return "main_enabled=$enabled,owned=[$owned]"
+}
 function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
-    [ReconnectDesktop]::Activate($Window)
+    $beforeActivation = Get-RenameWindowSnapshot $Window $ProcessId
+    Set-JourneyForeground $Window $ProcessId
+    $afterActivation = Get-RenameWindowSnapshot $Window $ProcessId
     Assert-Window $Window $ProcessId
+    $paletteLog = if ($ProcessId -eq $app.Id) { $log } elseif ($appB -and $ProcessId -eq $appB.Id) { $logB } else { throw 'Unknown app process' }
+    $offset = (Read-Log $paletteLog).Length
     [ReconnectDesktop]::Key(0x11, $false)
     [ReconnectDesktop]::Type(0x4B)
     [ReconnectDesktop]::Key(0x11, $true)
-    [void](Wait-For 'palette focus' { $f = [ReconnectDesktop]::Focus($Window); $f[0] -eq $Window.ToInt64() -and $f[1] -eq $Window.ToInt64() } 10)
+    [void](Wait-For 'palette ready and focused' {
+        $trace = Read-Log $paletteLog
+        $f = [ReconnectDesktop]::Focus($Window)
+        $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and $f[0] -eq $Window.ToInt64() -and $f[1] -eq $Window.ToInt64()
+    } 10)
     Type-Ascii 'rename workspace' $Window $ProcessId $Window
+    [void](Wait-For 'rename workspace palette selection' {
+        $trace = Read-Log $paletteLog
+        $trace.Length -ge $offset -and $trace.Substring($offset) -match '\[palette\] ready chars=16 count=\d+ target=7000(?:\r?\n|$)'
+    } 10)
+    Assert-Focus $Window $ProcessId $Window
+    $baselineEdits = $null
+    $baselineSnapshot = 'unavailable'
+    try {
+        $baselineEdits = @([JourneyForeground]::VisibleEdits($Window, $ProcessId))
+        $entries = @($baselineEdits | Select-Object -First 12 | ForEach-Object { '{0}:{1}' -f $_.ToInt64(), ([ReconnectDesktop]::Text($_) -ceq $ExpectedName) }) -join ','
+        $baselineSnapshot = "count=$($baselineEdits.Count),truncated=$($baselineEdits.Count -gt 12),entries=$entries"
+    } catch { $baselineEdits = $null }
+    $beforeEnter = Read-Log $paletteLog
+    $enterOffset = $beforeEnter.Length
+    $eventStart = $null
+    try { $eventStart = [ReconnectDesktop]::EventCount() } catch {}
     Assert-Focus $Window $ProcessId $Window
     [ReconnectDesktop]::Type(0x0D)
-    $edit = Wait-For 'workspace rename edit' {
-        $f = [ReconnectDesktop]::Focus($Window)
-        $candidate = [IntPtr]$f[1]
-        if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and [ReconnectDesktop]::Owner($candidate) -eq $ProcessId -and [ReconnectDesktop]::GetAncestor($candidate, 2) -eq $Window -and [ReconnectDesktop]::Class($candidate) -eq 'Edit' -and [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName) { $candidate }
-    } 10
+    $state = @{ foreground = 0L; focus = 0L; owner = 0; root = 0L; edit_class = $false; expected_name_match = $false; saw_focused_owned_edit = $false }
+    try {
+        $edit = Wait-For 'workspace rename edit' {
+            $f = [ReconnectDesktop]::Focus($Window)
+            $candidate = [IntPtr]$f[1]
+            $state.foreground = [long]$f[0]
+            $state.focus = [long]$f[1]
+            $state.owner = if ($candidate -ne [IntPtr]::Zero) { [ReconnectDesktop]::Owner($candidate) } else { 0 }
+            $state.root = if ($candidate -ne [IntPtr]::Zero) { [ReconnectDesktop]::GetAncestor($candidate, 2).ToInt64() } else { 0L }
+            $state.edit_class = $candidate -ne [IntPtr]::Zero -and [ReconnectDesktop]::Class($candidate) -eq 'Edit'
+            $state.expected_name_match = $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class -and [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName
+            if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class) { $state.saw_focused_owned_edit = $true }
+            if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and $state.owner -eq $ProcessId -and $state.root -eq $Window.ToInt64() -and $state.edit_class -and $state.expected_name_match) { $candidate }
+        } 10
+    } catch {
+        if ($_.Exception.Message -cne 'Timed out: workspace rename edit') { throw }
+        $original = $_
+        $confirmed = $false
+        try {
+            $trace = Read-Log $paletteLog
+            if ($trace.Length -ge $enterOffset) {
+                $fresh = $trace.Substring($enterOffset)
+                if ($enterOffset -gt 0 -and $beforeEnter[$enterOffset - 1] -ne "`n") { $fresh = 'partial' + $fresh }
+                $confirmed = @((Get-SafePaletteRecords $fresh) | Where-Object { $_ -ceq '[palette] confirm target=7000' }).Count -gt 0
+            }
+        } catch {}
+        $ownedEdit = @{ exists = $false; focused = $false; expected_name_match = $false; hwnd = 0L; probe_failed = $false }
+        try {
+            $candidate = [ReconnectDesktop]::Composer($Window)
+            if ($candidate -ne [IntPtr]::Zero -and $candidate -ne $Window -and [ReconnectDesktop]::Owner($candidate) -eq $ProcessId -and [ReconnectDesktop]::GetAncestor($candidate, 2) -eq $Window -and [ReconnectDesktop]::Class($candidate) -eq 'Edit') {
+                $nameMatch = [ReconnectDesktop]::Text($candidate) -ceq $ExpectedName
+                $focus = [ReconnectDesktop]::Focus($Window)
+                $ownedEdit.exists = $true
+                $ownedEdit.focused = $focus[1] -eq $candidate.ToInt64()
+                $ownedEdit.expected_name_match = $nameMatch
+                $ownedEdit.hwnd = $candidate.ToInt64()
+            }
+        } catch { $ownedEdit.probe_failed = $true }
+        $message = "Timed out: workspace rename edit; expected_window=$($Window.ToInt64()) expected_pid=$ProcessId foreground=$($state.foreground) focus=$($state.focus) owner=$($state.owner) root=$($state.root) edit_class=$($state.edit_class) expected_name_match=$($state.expected_name_match) confirm_target_7000=$confirmed owned_edit_exists=$($ownedEdit.exists) owned_edit_focused=$($ownedEdit.focused) owned_edit_expected_name_match=$($ownedEdit.expected_name_match) owned_edit_hwnd=$($ownedEdit.hwnd) owned_edit_probe_failed=$($ownedEdit.probe_failed)"
+        $events = 'unavailable'
+        if ($null -ne $eventStart) {
+            try {
+                $events = @([ReconnectDesktop]::EventsSince($eventStart) | Select-Object -Last 12 | ForEach-Object { '{0}:{1}:{2}:{3}' -f [uint32]$_.ev, [long]$_.hwnd, [uint32]$_.pid, [long]$_.root }) -join ','
+            } catch { $events = 'unavailable' }
+        }
+        $timeoutSnapshot = 'unavailable'
+        $timeoutEdits = $null
+        try {
+            $timeoutEdits = @([JourneyForeground]::VisibleEdits($Window, $ProcessId))
+            $entries = @($timeoutEdits | Select-Object -First 12 | ForEach-Object {
+                $existed = if ($null -eq $baselineEdits) { 'unavailable' } else { [string]($baselineEdits -contains $_) }
+                '{0}:{1}:{2}' -f $_.ToInt64(), $existed, ([ReconnectDesktop]::Text($_) -ceq $ExpectedName)
+            }) -join ','
+            $timeoutSnapshot = "count=$($timeoutEdits.Count),truncated=$($timeoutEdits.Count -gt 12),entries=$entries"
+        } catch {}
+        $threadSnapshot = 'unavailable'
+        try {
+            if ($null -eq $timeoutEdits) { throw 'unavailable' }
+            $mainThread = 0
+            $foregroundThread = 0
+            try { $mainThread = [JourneyForeground]::ThreadId($Window) } catch {}
+            try { $foregroundThread = [JourneyForeground]::ForegroundThreadId() } catch {}
+            $mainWindowEnabled = try { [JourneyForeground]::Enabled($Window) } catch { 'unavailable' }
+            $mainThreadValue = if ($mainThread) { [string]$mainThread } else { 'unavailable' }
+            $foregroundThreadValue = if ($foregroundThread) { [string]$foregroundThread } else { 'unavailable' }
+            $foregroundFocus = try { [JourneyForeground]::ThreadFocus($foregroundThread) } catch { 'unavailable' }
+            $threadEntries = @($timeoutEdits | Select-Object -First 12 | ForEach-Object {
+                $thread = 0
+                $threadValue = 'unavailable'
+                $enabled = 'unavailable'
+                $candidateFocus = 'unavailable'
+                try { $thread = [JourneyForeground]::ThreadId($_); if ($thread) { $threadValue = [string]$thread } } catch {}
+                try { $enabled = [JourneyForeground]::Enabled($_) } catch {}
+                try { $candidateFocus = [JourneyForeground]::ThreadFocus($thread) } catch {}
+                '{0}:{1}:{2}:{3}' -f $_.ToInt64(), $threadValue, $enabled, $candidateFocus
+            }) -join ','
+            $threadSnapshot = "main_thread=$mainThreadValue,main_window_enabled=$mainWindowEnabled,foreground_thread=$foregroundThreadValue,foreground_focus=$foregroundFocus,entries=$threadEntries"
+        } catch {}
+        $timeoutWindows = Get-RenameWindowSnapshot $Window $ProcessId
+        $message += " before_activation=[$beforeActivation] after_activation=[$afterActivation] timeout_windows=[$timeoutWindows] before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] thread_edits=[$threadSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
+        $exception = [System.Exception]::new($message, $original.Exception)
+        $exception.Data['original_script_stack'] = $original.ScriptStackTrace
+        throw $exception
+    }
     Assert-Focus $Window $ProcessId $edit
     return $edit
 }
@@ -152,7 +290,7 @@ try {
     [void](Wait-For 'test account service' { Test-Path $state } 60)
     $secrets = Get-Content $state -Raw | ConvertFrom-Json
     $probe = & curl.exe -s "https://$hostName/v1/layout"
-    if ($probe -notmatch 'device_required') { throw "Service not reachable under the real hostname: $probe" }
+    if ($probe -notmatch 'device_required') { throw 'Service not reachable under the real hostname' }
     $results.service_probe = 'device_required over https with the real hostname'
 
     $credential = [Text.Encoding]::UTF8.GetBytes((@{refresh_token=$secrets.refresh_token} | ConvertTo-Json -Compress))
@@ -166,7 +304,7 @@ try {
     $app = Start-Process $Exe -ArgumentList '--single-window', '--name', 'journey-a', '--no-window-restore' -PassThru
     $results.app_a_pid = $app.Id
     $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    [void][ReconnectDesktop]::SetForegroundWindow($main)
+    Set-JourneyForeground $main $app.Id
     [void](Wait-For 'first layout from the account service' { (Read-Log) -match 'account-sync: applied workspaces=Work\|Notes' } 60)
     Start-Sleep -Seconds 3
     $baseTabs = Tab-Count (Read-Log)
@@ -265,18 +403,26 @@ try {
     $mainB = Wait-For 'second app window' { $h = [ReconnectDesktop]::Window($appB.Id); if ($h -ne [IntPtr]::Zero) { $h } } 60
     [void](Wait-For 'second app baseline apply' { (Read-Log $logB) -match 'account-sync: applied workspaces=\S*Runners' } 60)
     $newName = 'saved' + [guid]::NewGuid().ToString('N').Substring(0, 16)
-    $stage = 'native baselines'
+    $stage = 'native baseline A session'
     [void](Wait-For 'A baseline session' { Session-Has $sessionA 'Runners' $newName } 30)
+    $stage = 'native baseline B session'
     [void](Wait-For 'B baseline session' { Session-Has $sessionB 'Runners' $newName } 30)
+    $stage = 'native baseline B workspace'
+    Clear-JourneyApproval $mainB $appB.Id
     Show-Workspace 'Runners' $mainB $appB.Id $sessionB
+    $stage = 'native baseline B rename'
     $editB = Open-Rename $mainB $appB.Id 'Runners'
     Shot 'native-b-before' $mainB $appB.Id
     Assert-Focus $mainB $appB.Id $editB
     [ReconnectDesktop]::Type(0x1B)
+    $stage = 'native baseline A workspace'
+    Clear-JourneyApproval $main $app.Id
     Show-Workspace 'Runners' $main $app.Id $sessionA
+    $stage = 'native baseline A rename'
     $editA = Open-Rename $main $app.Id 'Runners'
     Shot 'native-a-before' $main $app.Id
     Assert-Focus $main $app.Id $editA
+    $stage = 'native baseline service'
     $baseline = Invoke-RestMethod -Uri "https://$hostName/v1/layout" -Headers $headersB
     $baselineNames = @($baseline.layout.workspaces | ForEach-Object { $_.name })
     if (@($baselineNames | Where-Object { $_ -ceq 'Runners' }).Count -ne 1 -or @($baselineNames | Where-Object { $_ -ceq $newName }).Count -ne 0) { throw 'Service baseline mismatch' }
@@ -287,6 +433,7 @@ try {
     $offsetB = (Read-Log $logB).Length
     $nativeStart = [DateTime]::UtcNow
     $stage = 'native rename'
+    Set-JourneyForeground $main $app.Id
     Assert-Focus $main $app.Id $editA
     if ([ReconnectDesktop]::Text($editA) -cne 'Runners') { throw 'Rename edit changed unexpectedly' }
     [ReconnectDesktop]::Key(0x11, $false)
@@ -327,21 +474,21 @@ try {
     $results.native_roundtrip = [ordered]@{ verdict = 'pass'; device_ids = @('journey-device', 'journey-device-b'); instances = @('journey-a', 'journey-b'); pids = @($app.Id, $appB.Id); hwnds = @($main.ToInt64(), $mainB.ToInt64()); workspace = $newName; baseline_revision = $baselineRevision; published_revision = [long]$published.revision; seconds = [Math]::Round(([DateTime]::UtcNow - $nativeStart).TotalSeconds, 2) }
     $results.verdict = 'pass'
 } catch {
-    $failure = $true
+    $failure = $_
     $results.verdict = 'fail'
     $results.failed_stage = $stage
     $message = $_.Exception.Message
     $results.failure_message = if ($message.StartsWith('Timed out:') -or $message.StartsWith('Could not switch to workspace')) { $message } else { $_.Exception.GetType().FullName }
+    $results.error = Get-JourneyError $_
 } finally {
     foreach ($entry in @(@{ path = $log; name = 'desktop-a.log' }, @{ path = $logB; name = 'desktop-b.log' })) {
         if ($entry.path -and (Test-Path $entry.path)) {
             try {
                 $text = Read-Log $entry.path
-                foreach ($property in $secrets.PSObject.Properties) {
-                    if ($property.Value -is [string] -and $property.Value.Length -gt 20) { $text = $text.Replace($property.Value, '<redacted>') }
-                }
-                $text = $text -replace 'Bearer [A-Za-z0-9._-]+', 'Bearer <redacted>'
-                $text | Set-Content (Join-Path $Output $entry.name)
+                $safe = @(Get-SafePaletteRecords $text)
+                $focus = @(Get-SafeFocusRecords $text | Select-Object -Last 80)
+                $nativeFocus = @(Get-SafeNativeFocusRecords $text | Select-Object -Last 80)
+                @('[other log lines suppressed]') + $safe + $focus + $nativeFocus | Set-Content (Join-Path $Output $entry.name)
             } catch {}
         }
     }
@@ -353,19 +500,22 @@ try {
                     & taskkill.exe /PID $ownedProcess.Id /T /F 2>&1 | Out-Null
                     if (!$ownedProcess.WaitForExit(10000)) { throw 'Owned process did not exit' }
                 }
-            } catch { $failure = $true; $results.cleanup = 'failed' }
+            } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
         }
     }
-    try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { $failure = $true; $results.cleanup = 'failed' }
+    try { [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal) } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
     foreach ($envName in $originalEnv.Keys) { [Environment]::SetEnvironmentVariable($envName, $originalEnv[$envName], 'Process') }
     if ($cert) {
         try {
             if ($rootCertAdded -and (Test-Path "Cert:\LocalMachine\Root\$($cert.Thumbprint)")) { Remove-Item "Cert:\LocalMachine\Root\$($cert.Thumbprint)" -ErrorAction Stop }
             if (Test-Path "Cert:\LocalMachine\My\$($cert.Thumbprint)") { Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -ErrorAction Stop }
-        } catch { $failure = $true; $results.cleanup = 'failed' }
+        } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
     }
-    try { if (Test-Path $work) { Remove-Item $work -Recurse -Force -ErrorAction Stop } } catch { $failure = $true; $results.cleanup = 'failed' }
+    try { if (Test-Path $work) { Remove-Item $work -Recurse -Force -ErrorAction Stop } } catch { if (!$failure) { $failure = $_; $results.failed_stage = 'cleanup'; $results.error = Get-JourneyError $_ }; $results.cleanup = 'failed' }
     if ($failure) { $results.verdict = 'fail'; $results.native_roundtrip.verdict = 'fail' }
     $results | ConvertTo-Json -Depth 8 | Set-Content "$Output/result.json"
 }
-if ($failure) { throw "Account journey failed at $stage" }
+if ($failure) {
+    if ($results.error.redacted) { throw 'Account journey failed; sensitive exception details were redacted' }
+    throw $failure
+}

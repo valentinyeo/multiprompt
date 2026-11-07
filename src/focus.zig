@@ -257,7 +257,18 @@ pub noinline fn SetForegroundWindow(hwnd: HANDLE) BOOL {
 pub noinline fn SetFocus(hwnd: HANDLE) HANDLE {
     if (!focusGuardAt(hwnd, @returnAddress(), false)) return null;
     const result = FocusNative.SetFocus(hwnd);
-    if (GetFocus() == hwnd) focusGuardLanded(hwnd);
+    const last_error = GetLastError();
+    focusTrace(if (result == null) .setfocus_null_return else .setfocus_returned, hwnd, @returnAddress());
+    const actual_focus = GetFocus();
+    if (actual_focus == hwnd) {
+        focusGuardLanded(hwnd);
+    } else if (verboseLoggingEnabled()) {
+        var buf: [256]u8 = undefined;
+        const line = std.fmt.bufPrint(&buf, "[focus-native] result_null={d} last_error={d} caller_thread={d} target_thread={d} target=0x{X} focus=0x{X}", .{
+            @intFromBool(result == null), last_error, GetCurrentThreadId(), GetWindowThreadProcessId(hwnd, null), altqPtr(hwnd), altqPtr(actual_focus),
+        }) catch return result;
+        debugLog(line);
+    }
     return result;
 }
 
