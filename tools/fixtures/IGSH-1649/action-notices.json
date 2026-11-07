@@ -287,8 +287,6 @@
     "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Create another workspace before archiving this one\",4500,true)",
     "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Other is the permanent catch-all\",3500,true)",
     "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Wake workspace before archiving it\",3500,true)",
-    "deleteMyWorkspaceSlot: showHeaderNoticeAscii(\"Other is the permanent catch-all\",3500,true)",
-    "deleteMyWorkspaceSlot: showHeaderNoticeAscii(\"Wake workspace before deleting it\",3500,true)",
     "detachTabToExistingWindow: if(has_pinandsent!=0andcopy_result==0)showHeaderNoticeAscii(\"Could not move this pinned chat\",4000,true)",
     "detachTabToExistingWindow: showHeaderNoticeAscii(\"Cannot move this pinned page\",4000,true)",
     "detachTabToNewWindow: showHeaderNoticeAscii(\"Cannot move this pinned page\",4000,true)",
