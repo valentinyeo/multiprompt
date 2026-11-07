@@ -8,6 +8,7 @@ const remoteOnly = { skip: process.platform === 'win32' ? 'The PTY lives on the 
 
 async function terminal(t, command, size = [24, 80], multiplex = false) {
   const worker = path.join(__dirname, '../src/terminal_channel.py');
+  assert.ok(fs.existsSync(worker), 'server-side terminal channel exists');
   const args = multiplex ? ['-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'] : ['-u', worker];
   const child = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] });
   let output = '';
