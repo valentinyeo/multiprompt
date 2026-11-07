@@ -2579,6 +2579,42 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertFalse(any(call[:1] == ['capture-pane'] for call in calls), calls)
 
     @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+    def test_IGSH_1851_stopped_host_with_missing_tmux_answers_saved_history(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
+        sid = 'live1517b1'
+        tmux_name = 'live-1517b1'
+        self.query.update(sid=sid, tmux=tmux_name, cwd='/work/demo', follow=True, live=True)
+        self.path = self.home / '.claude/projects' / reader.claude_project_folder('/work/demo') / (sid + '.jsonl')
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.write(self.event('saved hosted reply'))
+        reader.host_write(reader.host_paths('claude', sid)['config'],
+                          dict(enabled=True, tmux=tmux_name, cwd='/work/demo'))
+        reader.host_write(reader.host_paths('claude', sid)['state'], dict(stopped=1, inflight=None))
+        self.assertFalse(reader.host_alive('claude', sid), 'the hosted chat must be stopped')
+        real_tmux = shutil.which('tmux')
+        socket = 'igsh1851' + uuid.uuid4().hex[:8]
+        tools = self.home / 'bin'
+        tools.mkdir()
+        wrapper = tools / 'tmux'
+        wrapper.write_text('#!' + sys.executable + '\nimport os,sys\n' +
+                           'os.execv(' + repr(real_tmux) + ', [' + repr(real_tmux) + ', "-L", ' + repr(socket) + '] + sys.argv[1:])\n')
+        wrapper.chmod(0o755)
+        self.addCleanup(lambda: subprocess.run([real_tmux, '-L', socket, 'kill-server'], capture_output=True))
+        with patch.dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH']):
+            server = self.start_server('--watch')
+        reply = self.server_request(server, self.query)
+        self.assertIn('saved hosted reply', reply['wire'])
+        self.assertIn('\thistory\tok\t', reply['wire'])
+        self.assertNotIn('tmux control closed', reply['wire'])
+        self.assertIsNone(server.poll(), 'missing terminal session ended the reader')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertFalse(selector.select(timeout=0.4), 'missing terminal session made the reader loop')
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0)
+        self.assertNotIn(b'tmux control closed', server.stderr.read())
+
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
     def test_watch_appends_do_not_recapture_screen(self):
         self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
         tmux = shutil.which('tmux')
