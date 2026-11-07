@@ -94,3 +94,17 @@ The parent must target that active member. Its matching intent must remain pendi
 Commands use atomic SQLite write transactions. Events and intents commit together. Revision checks reject stale membership changes. Command IDs are globally unique per store. Identical command retries return their original receipts. Changed bodies cause `command_conflict`. Failed commands leave no receipt or event. Retry an uncertain command using identical JSON values. Object key order does not matter.
 
 Expected errors include `invalid_fields`, `invalid_id`, `invalid_text`, `invalid_number`, `invalid_json`, `request_too_large`, `unknown_op`, `room_not_found`, `invalid_members`, `invalid_alias`, `invalid_provider`, `invalid_cursor`, `duplicate_member`, `binding_immutable`, `revision_conflict`, `invalid_recipients`, `invalid_mentions`, `invalid_scope`, `response_conflict`, and `command_conflict`. Unexpected storage errors are not delivery evidence. There is no native history merging. No inference or provider calls occur here.
+
+## Room safety checks
+
+On an isolated POSIX machine, run the checks with Python 3.12:
+
+```sh
+python tools/room_service_test.py -v
+python tools/room_bridge_test.py -v
+python tools/room-checks/protocol.test.py -v
+```
+
+These checks cover store and bridge protocol behavior, not native UI, paid-provider replies, or end-to-end room delivery.
+
+The [Room safety workflow](https://github.com/valentinyeo/multiprompt/actions/workflows/room-checks.yml) runs daily and manually. These runs are report-only, not a required release gate. Each run links its logs and revision in the job summary and the `room-safety-results` artifact.
