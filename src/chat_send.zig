@@ -472,7 +472,13 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
                 chatDraftFlush();
             }
         }
-        showHeaderNoticeAscii("Permission mode changed", 3000, false);
+        const text: []const u8 = switch (job.mode) {
+            .manual => "Ask on",
+            .acceptEdits => "Accept edits on",
+            .plan => "Plan on",
+            .bypassPermissions => "Bypass on",
+        };
+        showHeaderNoticeAscii(text, 3000, false);
     }
 }
 
@@ -4077,6 +4083,24 @@ fn chatLiveReply(line: []u8) bool {
     if (@import("chat_session.zig").chatLiveWrite(line)) return true;
     debugLog("[chat] live reply failed");
     return false;
+}
+
+pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
+    const text: []const u8 = switch (setting) {
+        .model => |model| switch (model) {
+            .opus => "Model: Opus",
+            .sonnet => "Model: Sonnet",
+            .haiku => "Model: Haiku",
+            .unknown => return,
+        },
+        .effort => |effort| switch (effort) {
+            .low => "Effort: Low",
+            .medium => "Effort: Medium",
+            .high => "Effort: High",
+            .unknown => return,
+        },
+    };
+    showHeaderNoticeAscii(text, 3000, false);
 }
 
 pub fn chatSetLiveSetting(setting: @import("chat_live.zig").Setting) bool {
