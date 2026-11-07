@@ -29,6 +29,13 @@ test('IGSH-1832 Main and refused rows stay reachable for a persistent explanatio
   assert.match(body('deleteWorkspaceByIndex'), /workspace-delete result=deleted/);
 });
 
+test('IGSH-1832 Windows double-click delivery still confirms the selected delete row', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../src/main.zig'), 'utf8');
+  const start = main.indexOf('        WM_LBUTTONDBLCLK => {');
+  const handler = main.slice(start, main.indexOf('\n        WM_', start + 10));
+  assert.match(handler, /if \(app_state\.g_search_active and app_state\.g_search_workspace_delete_mode\) return wndProc\(hwnd, WM_LBUTTONDOWN, wp, lp\);/);
+});
+
 test('IGSH-1832 local deletion reports refusal rather than pretending success', () => {
   const remove = body('deleteMyWorkspaceSlot');
   assert.match(remove, /fn deleteMyWorkspaceSlot\(slot: u8\) bool/);
