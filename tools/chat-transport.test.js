@@ -61,7 +61,11 @@ async function broker(t) {
       opened.add(channel);
     },
     close(channel) { child.stdin.write(JSON.stringify({ channel, close: true }) + '\n'); },
-    closed(channel) { return next((value) => value.channel === channel && value.closed); },
+    async closed(channel) {
+      const value = await next((value) => value.channel === channel);
+      assert.equal(value.closed, true, 'ended channel must close, not execute queued input');
+      return value;
+    },
     async reply(channel) { return JSON.parse((await next((value) => value.channel === channel)).data); },
   };
 }
