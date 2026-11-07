@@ -22,6 +22,10 @@ function reducerFrom(zig) {
   code = code.replace(messageLine, 'const message = wrapped === null ? value : wrapped;');
   code = code.replace(/const (token|phase) = (.*) orelse return true;/g, 'const $1 = $2 ?? null; if ($1 === null) return true;');
   code = code
+    .replace('const wall_ms = chat_echo.fileTimeToUnixMs(nowFileTime());', 'const wall_ms = 123000;')
+    .replace('entry.anchor.sent_ms = chatMessageSentMs(message, wall_ms);', 'entry.anchor.sent_ms = Number.isFinite(message.created) && message.created > 0 ? message.created * 1000 : wall_ms;')
+    .replace('entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - std.math.clamp(wall_ms -| entry.anchor.sent_ms, 0, 600_000);', 'entry.sent_tick_ms = 1234 - Math.max(0, Math.min(600000, wall_ms - entry.anchor.sent_ms));')
+    .replace('entry.expires_ms = entry.anchor.sent_ms +| 600_000;', 'entry.expires_ms = entry.anchor.sent_ms + 600000;')
     .replace('var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;', 'const key_buf = null;')
     .replace('chatOutboxKeyForShell(idx, &key_buf)', 'chatOutboxKeyForShell(idx, key_buf)')
     .replace('var found: ?usize = null;', 'let found = null;')
@@ -62,7 +66,7 @@ function harness(zig = body('chatMessageReduce')) {
       field: (object, field) => object && object[field] !== undefined ? object[field] : null,
       string: value => typeof value === 'string' ? value : null,
       copyString: (object, field, entry, target) => { entry[target] = object[field]; },
-    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text }); return true; }, (a, b) => a === b),
+    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text, anchor: {sent_ms: 0} }); return true; }, (a, b) => a === b),
   };
 }
 
@@ -171,4 +175,24 @@ test('production reducer ignores confirmed replays but accepts distinct messages
   assert.equal(h.app.g_chat_outbox.items.length, 4);
   assert.equal(h.app.g_chat_outbox.items[0].message_phase, 'accepted');
   assert.equal(h.send(shell, { id: 'unknown', state: 'unexpected' }), false);
+});
+
+
+test('receipt timestamps are initialized once rather than renewed on every replay', () => {
+  const h = harness();
+  const shell = {key: 'tab-a', sid: 'session-a'};
+  const message = {id: 'wire-stamp', text: 'message', state: 'queued'};
+  assert.equal(h.send(shell, message), true);
+  assert.ok(h.app.g_chat_outbox.items[0].anchor.sent_ms > 0);
+  const sent = h.app.g_chat_outbox.items[0].anchor.sent_ms;
+  assert.equal(h.send(shell, {...message, state: 'accepted'}), true);
+  assert.equal(h.app.g_chat_outbox.items[0].anchor.sent_ms, sent);
+});
+
+
+test('missing send timestamp uses the original server creation rather than snapshot time', () => {
+  const h = harness();
+  const shell = {key: 'tab-a', sid: 'session-a'};
+  assert.equal(h.send(shell, {id: 'old-wire', text: 'older request', state: 'queued', created: 1.25}), true);
+  assert.equal(h.app.g_chat_outbox.items[0].anchor.sent_ms, 1250);
 });

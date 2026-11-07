@@ -2,8 +2,28 @@
 
 New Claude sessions are delivered by the app-owned host: the runtime owns the session and speaks the
 Claude CLI's stream-json protocol, so nothing is typed into a terminal ([agent
-host](../architecture/agent-host.md)). Everything below describes the terminal connector path, which
-still serves chats started before this change and every Codex and Pi chat.
+host](../architecture/agent-host.md)). The terminal delivery section describes the connector path
+still used by older terminal-backed chats.
+
+## Confirmed host echoes
+
+Claude protocol-1 echoes remain pending until the server reports `accepted` or
+`started`. A later assistant reply retires that confirmed echo even while the
+chat stays busy. Reply events and cached history apply this to background chats
+too. Confirmed echoes have a one-minute fallback independent of history loading;
+unconfirmed messages never expire through this path.
+
+The persisted send time survives restart. Missing times are recovered from the
+server's message creation time. Startup removes old confirmed echoes, including
+legacy confirmed entries without a usable send time. Resync clears only confirmed
+echoes for its chat; it does not reset the server or erase drafts. Receipt
+identities prevent stale message snapshots from recreating retired echoes.
+
+Skill-token reordering can match a receipt-confirmed transcript row. Ordinary
+words must remain in order, and skill multiplicity must match. Without a receipt,
+the original strict text matching remains unchanged. No new controls are added.
+
+## Terminal delivery
 
 VPS tmux tabs use the existing persistent SSH reader with a JSON `send` request.
 `ISSUE_349_TMUX_SEND` in `src/chat_send.zig` controls this path. Sending runs on a
