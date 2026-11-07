@@ -57,7 +57,7 @@ test('IGSH-1832 production delete routing closes legacy and stale-host local slo
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
 const HANDLE = ?*anyopaque;
-const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0 };
+const Entry = struct { id: [64]u8 = @splat(0), id_len: u32 = 0, host: [64]u8 = @splat(0), host_len: u32 = 0, archived: bool = false };
 const app_state = struct {
     var g_workspace_count: u32 = 1;
     var g_workspaces: [1]Entry = @splat(.{});
