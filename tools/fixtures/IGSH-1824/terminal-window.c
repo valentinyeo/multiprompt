@@ -24,9 +24,17 @@ static void window_feed(HWND hwnd, const char *bytes) {
     mp_terminal_window_feed(hwnd, bytes, strlen(bytes));
 }
 
-static void terminal_window_cycle(int check_resources) {
-    HWND parent = CreateWindowExW(0, L"STATIC", L"Terminal fixture", WS_POPUP, 0, 0, 800, 600, NULL, NULL, GetModuleHandleW(NULL), NULL);
-    assert(parent);
+static void pump_windows(void) {
+    MSG message;
+    int count = 0;
+    while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
+        assert(++count < 1000);
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+
+static void terminal_window_cycle(HWND parent, int check_resources) {
     LOGFONTW font = {0};
     font.lfHeight = -16;
     font.lfWeight = FW_NORMAL;
@@ -35,6 +43,7 @@ static void terminal_window_cycle(int check_resources) {
     HWND warm = mp_terminal_window_new(parent, &font, 0xffffff, 0, NULL, window_output, window_resize, &f);
     assert(warm);
     assert(DestroyWindow(warm));
+    pump_windows();
     DWORD gdi_before = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
     DWORD user_before = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
     HWND windows[30];
@@ -106,7 +115,11 @@ static void terminal_window_cycle(int check_resources) {
     window_feed(hwnd, "\033[?2004h");
     mp_terminal_window_paste(hwnd);
     assert(!strcmp(active->bytes, "\033[200~copy\033[201~"));
-    for (int i = 0; i < 30; i++) assert(DestroyWindow(windows[i]));
+    for (int i = 0; i < 30; i++) {
+        assert(DestroyWindow(windows[i]));
+        assert(!IsWindow(windows[i]));
+    }
+    pump_windows();
     GdiFlush();
     DWORD gdi_after = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
     DWORD user_after = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
@@ -116,11 +129,14 @@ static void terminal_window_cycle(int check_resources) {
         assert(gdi_after == gdi_before);
         assert(user_after == user_before);
     }
-    assert(DestroyWindow(parent));
 }
 
 static void terminal_window_fixture(void) {
-    terminal_window_cycle(0);
-    terminal_window_cycle(1);
+    HWND parent = CreateWindowExW(0, L"STATIC", L"Terminal fixture", WS_POPUP, 0, 0, 800, 600, NULL, NULL, GetModuleHandleW(NULL), NULL);
+    assert(parent);
+    terminal_window_cycle(parent, 0);
+    terminal_window_cycle(parent, 1);
+    assert(DestroyWindow(parent));
+    pump_windows();
     puts("TERMINAL_WINDOW_PASS 30 owned child windows; Unicode; application keys; resize; pixels; clipboard; zero warmed GDI/USER growth");
 }
