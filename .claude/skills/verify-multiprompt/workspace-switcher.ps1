@@ -169,7 +169,7 @@ function Delete-WorkspaceFixture([string]$Name, [bool]$Mouse) {
     $saved = Read-Session
     $slot = $saved.active_workspace
     $identity = $saved.workspaces[$slot].wid
-    $ownedTabs = @($saved.tabs | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq $slot })
+    $ownedTabs = @($saved.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $slot })
     if ($ownedTabs.Count -lt 1) { throw 'Delete fixture must contain a real session' }
     $ownedPids = @($ownedTabs | ForEach-Object { if ($_.PSObject.Properties['pid']) { [int]$_.pid } })
     if ($ownedPids.Count -lt 1 -or @($ownedPids | Where-Object { $_ -le 0 -or $null -eq (Get-Process -Id $_ -ErrorAction SilentlyContinue) }).Count -ne 0) { throw 'Delete fixture sessions must be running' }
