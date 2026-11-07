@@ -1062,6 +1062,7 @@ pub var g_search_active: bool = false;
 pub var g_search_from_inbox: bool = false;
 pub var g_search_spawn_ws: u8 = 0xFF;
 pub var g_search_workspace_mode: bool = false;
+pub var g_search_workspace_action: enum { open, archive, restore } = .open;
 pub var g_search_workspace_delete_mode: bool = false;
 pub var g_search_ws_sort_mode: bool = false;
 pub var g_search_ws_move_mode: bool = false;
@@ -1461,6 +1462,7 @@ pub const SEARCH_NEWWIN_OFFSET: usize = 6000;
 pub const SEARCH_CREATEWS_OFFSET: usize = 6001;
 pub const SEARCH_WORKSPACES_MENU_OFFSET: usize = 6200;
 pub const SEARCH_WORKSPACE_DELETE_MENU_OFFSET: usize = 6201;
+pub const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET: usize = 6387;
 pub const SEARCH_QUIT_OFFSET: usize = 6202;
 pub const SEARCH_FULLWIDTH_OFFSET: usize = 6203;
 pub const SEARCH_SHORTCUTS_OFFSET: usize = 6204;
@@ -1960,6 +1962,7 @@ pub const WorkspaceEntry = struct {
     name: [64]u8,
     name_len: u32,
     restore: bool,
+    archived: bool = false,
     host: [64]u8,
     host_len: u32,
 };
@@ -2009,6 +2012,7 @@ pub const CloseReason = enum(usize) {
     workspace_delete,
     workspace_collapse,
     bench_exit,
+    workspace_archive,
 };
 
 pub fn requestAppClose(target: HANDLE, reason: CloseReason) void {

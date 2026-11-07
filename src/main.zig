@@ -561,6 +561,7 @@ const SEARCH_NEWWIN_OFFSET = @import("app_state.zig").SEARCH_NEWWIN_OFFSET;
 const SEARCH_CREATEWS_OFFSET = @import("app_state.zig").SEARCH_CREATEWS_OFFSET;
 const SEARCH_WORKSPACES_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACES_MENU_OFFSET;
 const SEARCH_WORKSPACE_DELETE_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
 const SEARCH_QUIT_OFFSET = @import("app_state.zig").SEARCH_QUIT_OFFSET;
 const SEARCH_FULLWIDTH_OFFSET = @import("app_state.zig").SEARCH_FULLWIDTH_OFFSET;
 const SEARCH_SHORTCUTS_OFFSET = @import("app_state.zig").SEARCH_SHORTCUTS_OFFSET;
@@ -4340,10 +4341,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (wp == 0 and app_state.g_starred_workspace) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
-            if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
-                showHeaderNoticeAscii("Can't snooze your only open workspace", 3500, true);
-                return 0;
-            }
             ensureWorkspaceSlotId(ws);
             if (app_state.g_inbox_active) closeInbox(hwnd);
             _ = SendMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
@@ -5616,6 +5613,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_WORKSPACES_MENU_OFFSET) {
                     _ = reconcileWorkspaceRegistry(true);
                     app_state.g_search_workspace_mode = true;
+                    app_state.g_search_workspace_action = .open;
                     app_state.g_search_workspace_delete_mode = false;
                     app_state.g_search_workspace_delete_confirm = null;
                     app_state.g_search_theme_mode = false;
@@ -5629,6 +5627,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_WORKSPACE_DELETE_MENU_OFFSET) {
                     _ = reconcileWorkspaceRegistry(true);
                     app_state.g_search_workspace_mode = true;
+                    app_state.g_search_workspace_action = .open;
                     app_state.g_search_workspace_delete_mode = true;
                     app_state.g_search_workspace_delete_confirm = null;
                     app_state.g_search_theme_mode = false;
@@ -6665,23 +6664,29 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_CLOSEWIN_OFFSET) {
-                    app_state.g_search_active = false;
-                    clearSearchBackdrop();
-                    if (app_state.g_starred_workspace) {
-                        showActiveShellAfterOverlay();
-                        return 0;
-                    }
-                    if (app_state.g_single_window and app_state.g_lws_count > 1) {
+                if (target == SEARCH_CLOSEWIN_OFFSET or target == SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET) {
+                    if (target == SEARCH_CLOSEWIN_OFFSET and app_state.g_search_remind_preset_mode and app_state.g_remind_ws_id_len > 0) {
+                        const wi = @import("workspaces.zig").findWorkspace(app_state.g_remind_ws_id[0..app_state.g_remind_ws_id_len]);
+                        app_state.g_search_active = false;
+                        app_state.g_search_remind_preset_mode = false;
                         app_state.g_shell_focused = true;
+                        clearSearchBackdrop();
                         showActiveShellAfterOverlay();
-                        closeMyWorkspaceSlot(app_state.g_active_workspace);
-                        _ = InvalidateRect(hwnd, null, 0);
-                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                        if (wi) |index| {
+                            if (!@import("workspaces.zig").archiveWorkspaceByIndex(index)) showHeaderNoticeAscii("Could not archive workspace", 4500, true);
+                        }
                     } else {
-                        app_state.g_shell_focused = false;
-                        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
+                        _ = reconcileWorkspaceRegistry(true);
+                        app_state.g_search_workspace_mode = true;
+                        app_state.g_search_workspace_action = if (target == SEARCH_CLOSEWIN_OFFSET) .archive else .restore;
+                        app_state.g_search_workspace_delete_mode = false;
+                        app_state.g_search_workspace_delete_confirm = null;
+                        app_state.g_search_len = 0;
+                        app_state.g_search_sel = 0;
+                        app_state.g_search_scroll = 0;
+                        updateSearchResults();
                     }
+                    _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
                 if (target == SEARCH_RECONNECT_OFFSET) {
@@ -7329,7 +7334,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_pending_new_tab_group = 0;
                     @import("room_frontend.zig").leaveForOtherFront();
                     showActiveShellAfterOverlay();
-                    @import("workspaces.zig").openWorkspaceByIndex(workspace_idx);
+                    if (app_state.g_search_workspace_mode and app_state.g_search_workspace_action == .archive) {
+                        if (!@import("workspaces.zig").archiveWorkspaceByIndex(@intCast(workspace_idx))) showHeaderNoticeAscii("Could not archive workspace", 4500, true);
+                    } else if (app_state.g_search_workspace_mode and app_state.g_search_workspace_action == .restore) {
+                        if (!@import("workspaces.zig").restoreArchivedWorkspaceByIndex(@intCast(workspace_idx))) showHeaderNoticeAscii("Could not restore workspace - archive kept", 4500, true);
+                    } else {
+                        @import("workspaces.zig").openWorkspaceByIndex(workspace_idx);
+                    }
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -8836,7 +8847,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             saveSession();
             launch_cache.finish();
             saveWorkspaceRegistry();
-            gcDefaultNamedWindowOnClose();
+            if (wp == @intFromEnum(app_state.CloseReason.workspace_archive)) {
+                @import("workspaces.zig").archiveCurrentWorkspaceOnClose();
+            } else {
+                gcDefaultNamedWindowOnClose();
+            }
             removeMyHostedEntriesAndSave();
             deleteInboxStateFile();
             debugLog("WM_CLOSE: session saved, destroying window");
