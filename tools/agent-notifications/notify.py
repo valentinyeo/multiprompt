@@ -15,6 +15,36 @@ ETA_LOG_MAX = 5000
 ETA_LOG_KEEP = 2000
 NOTIFY_PORT_FIRST = 19548
 NOTIFY_PORT_LAST = 19571
+NESTED_PROGRAMS = {"claude", "codex", "grok", "cursor-agent", "pi"}
+
+
+def proc_parent(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            argv = [part.decode("utf-8", "replace") for part in handle.read().split(b"\0") if part]
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+            ppid = int(handle.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return (os.path.basename(argv[0]) if argv else ""), ppid
+
+
+def nested_agent(pid, parent=proc_parent):
+    found = 0
+    previous = None
+    seen = set()
+    while pid and pid > 1 and pid not in seen:
+        seen.add(pid)
+        row = parent(pid)
+        if row is None:
+            return False
+        name, pid = row
+        if name in NESTED_PROGRAMS and name != previous:
+            found += 1
+            if found > 1:
+                return True
+        previous = name
+    return False
 
 
 def target(env):
@@ -372,6 +402,8 @@ def main():
         return
     resolved = target(os.environ)
     if not resolved:
+        return
+    if resolved[2] and nested_agent(os.getppid()):
         return
     agent, event = sys.argv[1:3]
     raw = sys.argv[3] if len(sys.argv) > 3 else sys.stdin.read(1024 * 1024)
