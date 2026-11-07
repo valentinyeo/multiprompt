@@ -2995,6 +2995,8 @@ def host_start(provider, sid, source=None):
             return dict(status="started", pid=reply.get("pid"))
         exited = child.poll()
         if exited is not None:
+            if exited == 1 and host_alive(provider, sid):
+                return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
             host_clear_stale(provider, sid)
             failure = host_session_state(provider, sid).get("startup_failure")
             if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
@@ -6408,7 +6410,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 87
+RUNTIME_GENERATION = 88
 
 if __name__ == '__main__':
     import base64 as _base64
