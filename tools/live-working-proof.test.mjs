@@ -6,7 +6,7 @@ const { observe, parseStages, validate } = await import('./live-working-proof.mj
 
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/IGSH-1668/observations.json', import.meta.url), 'utf8'));
 const log = Object.entries(fixture.cases).flatMap(([name, value]) => fixture.stages.map((stage, i) =>
-  `IGSH1668 case=${name} stage=${stage} elapsed_ms=${value.elapsed[i]} live=${i >= 2 && i < 5} screen=false visible=${i !== 1 && i !== 5} slot=${i !== 1 && i !== 5} timer=${i !== 1 && i !== 5} blocks=${value.blocks}`)).join('\n');
+  `IGSH1668 case=${name} stage=${stage} elapsed_ms=${value.elapsed[i]} live=${i >= 2 && i < 5} screen=false visible=${i !== 1 && i !== 6} slot=${i !== 1 && i !== 6} timer=${i !== 1 && i !== 6} blocks=${value.blocks}`)).join('\n');
 
 function imageFor(name, file) {
   const index = fixture.files.indexOf(file);
@@ -24,11 +24,11 @@ test('parses independent native stages and measures synthetic pixels', () => {
   const result = observe(log, imageFor);
   assert.deepEqual(result.cases.empty.observations, {
     queuedDots: true, acceptedGapDots: false, startedDotsWithinOneSecondOfSyntheticEnqueue: true,
-    animated: true, dotsOnReplyDelta: true, dotsAfterTurnEnded: false,
+    animated: true, dotsOnReplyDelta: true, dotsAfterTurnEnded: false, idleDots: false,
   });
   assert.deepEqual(result.cases.history.observations, {
     queuedDots: true, acceptedGapDots: false, startedDotsWithinOneSecondOfSyntheticEnqueue: false,
-    animated: false, dotsOnReplyDelta: false, dotsAfterTurnEnded: false,
+    animated: false, dotsOnReplyDelta: false, dotsAfterTurnEnded: false, idleDots: false,
   });
   assert.equal(result.cases.history.stages['turn-started'].blocks, 2);
   assert.equal(result.cases.empty.stages['turn-started'].live, true);
@@ -41,21 +41,26 @@ test('rejects incomplete and duplicate evidence', () => {
   assert.throws(() => parseStages(`${log}\n${log.split('\n')[0]}`), /Duplicate native stage empty\/queued/);
 });
 
-test('requires a running timer, a painted reply and no remaining dots', () => {
+test('requires dots with a reply and active telemetry, then no dots or timer at idle', () => {
   const result = observe(log, imageFor);
   for (const value of Object.values(result.cases)) value.stages['reply-delta'].blocks = value.stages['turn-started'].blocks + 1;
-  assert.throws(() => validate(result), /dots remain with reply text/);
+  assert.throws(() => validate(result), /active telemetry hides dots|reply hides dots/);
   for (const value of Object.values(result.cases)) {
     value.observations.startedDotsWithinOneSecondOfSyntheticEnqueue = true;
     value.observations.animated = true;
-    value.observations.dotsOnReplyDelta = false;
-    value.stages['reply-delta'].slot = false;
+    value.observations.dotsOnReplyDelta = true;
+    value.observations.dotsAfterTurnEnded = true;
+    value.stages['reply-delta'].slot = true;
+    value.stages['turn-ended'].slot = true;
     value.stages['reply-delta'].blocks = value.stages['turn-started'].blocks + 1;
   }
   assert.doesNotThrow(() => validate(result));
   result.cases.empty.stages['turn-started'].timer = false;
   assert.throws(() => validate(result), /did not start animation timer/);
   result.cases.empty.stages['turn-started'].timer = true;
+  result.cases.empty.observations.idleDots = true;
+  assert.throws(() => validate(result), /remain after idle/);
+  result.cases.empty.observations.idleDots = false;
   result.cases.empty.stages['reply-delta'].blocks = 0;
   assert.throws(() => validate(result), /reply did not reach transcript/);
 });
