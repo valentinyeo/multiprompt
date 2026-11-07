@@ -47,4 +47,14 @@ test("the Windows resolver ignores every token after the primary session identit
     assert.doesNotMatch(body, /tokenizeAny\(u8, session, "\|,;"\)/,
       `${name} must not fall through to a stale secondary identity`);
   }
+
+  const pane = functionBody("findZsbPaneTarget", "trimLeftTitleWhitespaceU8");
+  assert.doesNotMatch(pane, /return findLocalTmuxTab\(/,
+    "a shared browser name must stay on the matched session instead of moving into another tab");
+  const match = functionBody("shellMatchesZsbPaneTarget", "shellMatchesNotification");
+  assert.doesNotMatch(match, /shellNameHasSessionPrefix\(/,
+    "a title prefix must not join a second session onto the first session's pane");
+  const stored = functionBody("writePaneSessionFileForShell", "rebindPaneSessionFileForShell");
+  assert.match(stored, /browser_pane_name\.target\(/,
+    "a repeated session name is stored only for the session that owns that pane");
 });
