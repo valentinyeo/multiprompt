@@ -1893,6 +1893,10 @@ pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
         }
         return ShowWindowAsync(app_state.shells[idx].hwnd, SW_HIDE);
     }
+    if (app_state.shells[idx].native_terminal and !@import("native_session.zig").alive(app_state.shells[idx].shell_id)) {
+        app_state.shells[idx].console_inflight = true;
+        if (!@import("native_session.zig").connect(app_state.shells[idx].shell_id)) @import("native_session.zig").ready(app_state.shells[idx].shell_id, false);
+    }
     return ShowWindow(app_state.shells[idx].hwnd, cmd);
 }
 

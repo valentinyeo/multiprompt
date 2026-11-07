@@ -1890,7 +1890,9 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
-    if (!native.connect(shell_id)) native.ready(shell_id, false);
+    if (app_state.shells[idx].chat_view_on or app_state.g_chat_active) {
+        app_state.shells[idx].console_inflight = false;
+    } else if (!native.connect(shell_id)) native.ready(shell_id, false);
     registerShellExitWait(idx);
     if (!app_state.g_restoring and background_workspace == null) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);

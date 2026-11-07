@@ -2511,7 +2511,7 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
         if (affected != null) {
             shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
         } else if (shell.native_terminal) {
-            if (!@import("native_session.zig").alive(shell.shell_id)) sshDisconnect(@intCast(i), reason);
+            if (!app_state.g_chat_active and i == app_state.active_shell and !@import("native_session.zig").alive(shell.shell_id)) sshDisconnect(@intCast(i), reason);
         } else if (shell.process == null or !shellProcessAliveForRead(i)) {
             sshDisconnect(@intCast(i), reason);
         }
@@ -2575,7 +2575,7 @@ pub fn sshAutoReconnectTick() void {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
-        if (shell.native_terminal and !@import("native_session.zig").alive(shell.shell_id) and !shell.disconnected) {
+        if (shell.native_terminal and !@import("native_session.zig").alive(shell.shell_id) and !shell.disconnected and !app_state.g_chat_active and i == app_state.active_shell) {
             sshDisconnect(@intCast(i), "channel-missing-poll");
         } else if (!shell.native_terminal and shell.process == null and !shell.disconnected) {
             sshDisconnect(@intCast(i), "process-missing-poll");
@@ -2829,7 +2829,7 @@ fn sshProbeFinish() void {
         shell.ssh_reconnect.awaiting_probe = false;
         if (item.session_gone and process_alive) continue;
         if (shell.native_terminal) {
-            if (!process_alive) sshDisconnect(idx, "probe-channel-missing");
+            if (!process_alive and !app_state.g_chat_active and idx == app_state.active_shell) sshDisconnect(idx, "probe-channel-missing");
         } else if (app_state.shells[idx].process == null) {
             sshDisconnect(idx, "probe-process-missing");
         } else if (!job.healthy[item.host]) {
