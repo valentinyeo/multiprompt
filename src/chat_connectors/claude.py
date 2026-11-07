@@ -243,6 +243,24 @@ def submit(context, intent, state, services):
     return result
 
 
+def recall(context, intent, state, services):
+    context = context if isinstance(context, dict) else {}
+    intent = intent if isinstance(intent, dict) else {}
+    services = services if isinstance(services, dict) else {}
+    withdraw = services.get("withdraw_queued_message")
+    text = intent.get("text")
+    tmux = context.get("tmux")
+    if not callable(withdraw) or not isinstance(text, str) or not isinstance(tmux, str):
+        return dict(status="refused", reason="recall_unavailable")
+    try:
+        cleared = withdraw(tmux, text) is True
+    except Exception:
+        return dict(status="refused", reason="recall_failed")
+    if not cleared:
+        return dict(status="refused", reason="not_waiting")
+    return dict(status="ok")
+
+
 def _transcript(context, services):
     sid = context.get("sid")
     if not isinstance(sid, str) or SESSION_ID.match(sid) is None:

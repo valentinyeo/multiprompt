@@ -1145,6 +1145,24 @@ test "delivery: IGSH-1859 a message the agent merged into a later turn stops sho
     try std.testing.expectEqual(@as(usize, 2), g_chat_confirmed.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
+test "delivery: IGSH-1828 Cancel and Delete take back a handed-off waiting message" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("take this one back");
+    try enqueue(text, .queued);
+    const id = g_chat_outbox.items[0].id;
+    g_chat_outbox.items[0].message_v1 = true;
+    g_chat_outbox.items[0].write_started = true;
+    @memcpy(g_chat_outbox.items[0].message_phase[0..4], "sent");
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expect(g_chat_outbox.items[0].channel_pending);
+    g_chat_outbox.items[0].channel_pending = false;
+    @memcpy(g_chat_outbox.items[0].message_phase[0..8], "accepted");
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+}
 test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("already arrived");
