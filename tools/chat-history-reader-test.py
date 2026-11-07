@@ -1595,6 +1595,69 @@ class HistoryReaderTest(unittest.TestCase):
             self.write(question, hidden, self.event('ANSWER-358'))
             self.assertNotIn('QUESTION-358', reader.response(dict(self.query)))
 
+    def test_igsh1855_reopen_shows_newest_without_rereading_the_log(self):
+        reader.TAIL_CACHE.clear()
+        row = json.dumps(self.event('y' * 200)) + '\n'
+        with self.path.open('w') as output:
+            while output.tell() < reader.TAIL_BYTES * 2:
+                output.write(row)
+            output.write(json.dumps(self.event('NEWEST-1855')) + '\n')
+        original_open = Path.open
+        started = time.monotonic()
+        first = reader.response(dict(self.query))
+        self.assertIn('NEWEST-1855', first)
+        self.assertLess(time.monotonic() - started, 1.0)
+
+        def measured(query):
+            read_bytes = 0
+
+            class Counted:
+                def __init__(self, source):
+                    self.source = source
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return self.source.__exit__(*args)
+
+                def __getattr__(self, name):
+                    return getattr(self.source, name)
+
+                def read(self, *args):
+                    nonlocal read_bytes
+                    data = self.source.read(*args)
+                    read_bytes += len(data)
+                    return data
+
+                def readline(self, *args):
+                    nonlocal read_bytes
+                    data = self.source.readline(*args)
+                    read_bytes += len(data)
+                    return data
+
+            def counted_open(path, *args, **kwargs):
+                source = original_open(path, *args, **kwargs)
+                return Counted(source) if path == self.path and args == ('rb',) else source
+
+            started = time.monotonic()
+            with patch.object(Path, 'open', counted_open):
+                wire = reader.response(query)
+            return read_bytes, time.monotonic() - started, wire
+
+        again = dict(self.query, cached_sid='', inode=0, offset=0)
+        read_bytes, elapsed, wire = measured(again)
+        self.assertIn('NEWEST-1855', wire)
+        self.assertLess(read_bytes, 8192)
+        self.assertLess(elapsed, 1.0)
+        with self.path.open('a') as output:
+            output.write(json.dumps(self.event('NEWER-1855')) + '\n')
+        read_bytes, elapsed, wire = measured(dict(again))
+        self.assertIn('NEWER-1855', wire)
+        self.assertIn('NEWEST-1855', wire)
+        self.assertLess(read_bytes, reader.TAIL_BYTES)
+        self.assertLess(elapsed, 1.0)
+
     def test_igsh631_first_page_keeps_replies_before_a_record_bigger_than_the_tail(self):
         question = dict(type='user', message=dict(role='user', content='QUESTION-631 far back'))
         talk = [self.event('t' * 4000) for _ in range(reader.TAIL_BYTES // 4000 + 10)]
