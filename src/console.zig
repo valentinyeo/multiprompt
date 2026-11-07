@@ -2738,10 +2738,6 @@ pub fn switchToShell(idx: u32) void {
     }
     if (idx != prev) app_state.g_chat_read_visit_shell_id = 0;
     app_state.active_shell = idx;
-    if (idx != prev) {
-        if (prev < app_state.shell_count) writePaneSessionFileForShell(prev);
-        if (idx < app_state.shell_count) writePaneSessionFileForShell(idx);
-    }
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
     if (defer_browser and defer_native_browser) @import("browser_pane.zig").revealPaintedChatBrowser();
     {
@@ -2753,6 +2749,10 @@ pub fn switchToShell(idx: u32) void {
         if (app_state.g_ws_last_shell[app_state.shells[idx].workspace] != app_state.shells[idx].shell_id)
             app_state.g_ws_focus[app_state.shells[idx].workspace] = .none;
         app_state.g_ws_last_shell[app_state.shells[idx].workspace] = app_state.shells[idx].shell_id;
+    }
+    if (idx != prev) {
+        if (prev < app_state.shell_count) writePaneSessionFileForShell(prev);
+        if (idx < app_state.shell_count) writePaneSessionFileForShell(idx);
     }
     @import("main.zig").sessionFrontChanged();
 
