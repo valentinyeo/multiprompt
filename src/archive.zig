@@ -770,7 +770,7 @@ fn syncRemoteDisplayNameForShell(idx: u32, name: []const u8, send_agent_rename: 
     if (!appendAsciiBuf(&cmd, &cp, session)) return;
     if (!appendAsciiBuf(&cmd, &cp, ": ")) return;
     if (!appendRemoteSingleQuoted(&cmd, &cp, name)) return;
-    if (send_agent_rename) {
+    if (send_agent_rename and !@import("chat_view.zig").isLive(session)) {
         if (!appendAsciiBuf(&cmd, &cp, "; tmux send-keys -t ")) return;
         if (!appendAsciiBuf(&cmd, &cp, session)) return;
         if (!appendAsciiBuf(&cmd, &cp, " ")) return;
