@@ -94,7 +94,7 @@ test('terminal model preserves ANSI, true color, Unicode, alternate screen, inpu
     const vendor = path.join(root, 'src/terminal/vendor/libvterm');
     const sources = fs.readdirSync(path.join(vendor, 'src')).filter((name) => name.endsWith('.c')).map((name) => path.join(vendor, 'src', name));
     const native = process.platform === 'win32' ? [path.join(root, 'src/terminal_window.c'), '-luser32', '-lgdi32'] : [];
-    const built = spawnSync(process.env.ZIG || 'zig', ['cc', '-std=c99', '-I' + path.join(root, 'src'), '-I' + path.join(root, 'tools/fixtures/IGSH-1824'), '-I' + path.join(vendor, 'include'), path.join(root, 'src/terminal_model.c'), ...sources, ...native, file, '-o', exe], { encoding: 'utf8', timeout: 60000 });
+    const built = spawnSync(process.env.ZIG || 'zig', ['cc', '-std=c99', '-I' + path.join(root, 'src'), '-I' + path.join(root, 'tools/fixtures/IGSH-1824'), '-I' + path.join(vendor, 'include'), path.join(root, 'src/terminal_model.c'), ...sources, ...native, file, '-o', exe], { encoding: 'utf8', timeout: process.platform === 'win32' ? 180000 : 60000 });
     assert.equal(built.status, 0, JSON.stringify({ signal: built.signal, error: built.error?.message, stdout: built.stdout, stderr: built.stderr }));
     const ran = spawnSync(exe, [], { encoding: 'utf8', timeout: 15000 });
     assert.equal(ran.status, 0, ran.stdout + ran.stderr);
