@@ -33,6 +33,7 @@ const reviewedReleases = {
 };
 
 const reviewedCommits = {
+  'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83a': 'HYCI-158',
   'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1': 'HYCI-168',
   '31797d916a1d68082901de71966c2e4a02036e80': 'HYCI-147',
   '03c8a7198930c20e5c4a57bd9799cd2e73b5312c': 'IGSH-1528',

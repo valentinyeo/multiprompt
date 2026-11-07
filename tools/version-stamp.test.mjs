@@ -612,6 +612,15 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
   assert.match(deleted.stderr, /App code changed/);
 });
 
+test('HYCI-158 attributes only the reviewed browser focus merge', () => {
+  const commit = { sha: 'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83a', subject: 'Merge pull request #845 from valentinyeo/ci-runner-1/hyci-158' };
+  const ticketTitles = { ...titles, 'HYCI-158': '[INFRA] Prove the original browser focus regression' };
+  let generated;
+  assert.doesNotThrow(() => { generated = buildChangelog(base(), 'v0.28.1600', [], [commit], ticketTitles); });
+  assert.match(generated, /\.ticket = "HYCI-158"/);
+  assert.throws(() => buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'a0a4f4e0b177c3a413976bd4e40f7334b5f7f83b' }], ticketTitles), /lacks a leading ticket ID/);
+});
+
 test('HYCI-168 attributes only the reviewed Windows resources merge', () => {
   const commit = { sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1', subject: 'Merge pull request #831' };
   const ticketTitles = { ...titles, 'HYCI-168': '[INFRA] Stop releases with growing Windows resources' };
