@@ -3,13 +3,13 @@ Add-Type -TypeDefinition @'
 using System;
 public static class ReconnectDesktop {
     public static IntPtr foreground;
-    public static long focus;
+    public static long focusedWindow;
     public static int mainOwner = 5516;
     public static int foregroundOwner = 7984;
     public static string foregroundClass = "ConsoleWindowClass";
     public static IntPtr root = new IntPtr(196956);
     public static IntPtr GetForegroundWindow() { return foreground; }
-    public static long[] Focus(IntPtr h) { return new long[] { foreground.ToInt64(), focus }; }
+    public static long[] Focus(IntPtr h) { return new long[] { foreground.ToInt64(), focusedWindow }; }
     public static int Owner(IntPtr h) {
         if (h == IntPtr.Zero) return 0;
         if (h == new IntPtr(196956) || h == new IntPtr(196957)) return mainOwner;
@@ -70,9 +70,9 @@ Check-Case 'foreign second window' $main 5516 $second $false
 [ReconnectDesktop]::foregroundClass = 'ConsoleWindowClass'
 [ReconnectDesktop]::root = $main
 [ReconnectDesktop]::foreground = $main
-[ReconnectDesktop]::focus = $main.ToInt64()
+[ReconnectDesktop]::focusedWindow = $main.ToInt64()
 Assert-Focus $main 5516 $main
-[ReconnectDesktop]::focus = $owned.ToInt64()
+[ReconnectDesktop]::focusedWindow = $owned.ToInt64()
 Assert-Focus $main 5516 $owned
 
 function Check-FocusRejected([string]$Name, [IntPtr]$Expected) {
@@ -86,13 +86,13 @@ function Check-FocusRejected([string]$Name, [IntPtr]$Expected) {
 }
 
 [ReconnectDesktop]::foreground = $console
-[ReconnectDesktop]::focus = $main.ToInt64()
+[ReconnectDesktop]::focusedWindow = $main.ToInt64()
 Assert-Window $main 5516
 Check-FocusRejected 'cross-process foreground' $main
 [ReconnectDesktop]::foreground = $main
-[ReconnectDesktop]::focus = $console.ToInt64()
+[ReconnectDesktop]::focusedWindow = $console.ToInt64()
 Check-FocusRejected 'foreign focus owner' $console
-[ReconnectDesktop]::focus = $owned.ToInt64()
+[ReconnectDesktop]::focusedWindow = $owned.ToInt64()
 [ReconnectDesktop]::root = $second
 Check-FocusRejected 'foreign focus root' $owned
 Write-Host 'Account journey foreground predicate assertions passed'
