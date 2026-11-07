@@ -1307,7 +1307,8 @@ def transport_reader():
             events.put((None, None))
 
     def emit(value):
-        print(json.dumps(value, separators=(",", ":")), flush=True)
+        sys.stdout.buffer.write((json.dumps(value, separators=(",", ":")) + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
 
     def close(cid):
         item = channels.pop(cid, None)
@@ -1334,7 +1335,7 @@ def transport_reader():
                 line = item["child"].stdout.readline(transport["MAX_FRAME"] + 1)
                 if not line or len(line) > transport["MAX_FRAME"]:
                     break
-                events.put((cid, line.rstrip(b"\n").decode("utf-8")))
+                events.put((cid, line.rstrip(b"\r\n").decode("utf-8")))
         finally:
             events.put((cid, None))
 

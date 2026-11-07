@@ -43,7 +43,11 @@ with tempfile.TemporaryDirectory() as folder:
     child = subprocess.Popen([sys.executable, '-u', str(fixture), 'ssh'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     replies = queue.Queue()
     def receive():
-        for line in child.stdout: replies.put(json.loads(line))
+        for line in child.stdout:
+            if line.endswith(b'\r\n'):
+                replies.put(dict(framing_error='CRLF instead of LF'))
+                break
+            replies.put(json.loads(line))
         replies.put(None)
     threading.Thread(target=receive, daemon=True).start()
     def next_reply():
@@ -60,7 +64,8 @@ with tempfile.TemporaryDirectory() as folder:
     try:
         child.stdin.write(base64.b64encode(broker.encode()) + b'\n' + base64.b64encode(b'fixture-reader') + b'\n')
         child.stdin.flush()
-        assert next_reply() == dict(ready=True)
+        ready = next_reply()
+        assert ready == dict(ready=True), ready
         send(1, dict(id=7, value='history', hold=True), watch=True)
         send(2, dict(id=7, value='message'))
         assert page(2) == dict(id=7, value='message', watch=False)
