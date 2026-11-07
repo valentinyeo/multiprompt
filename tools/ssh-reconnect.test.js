@@ -145,6 +145,12 @@ function runtime(tests, input = source) {
   else functions.push('chatReconnectBackoffMs');
   return prelude + functions.map(name => nativeStubs(body(name, name === 'sshSessionEnded' ? source : input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE'))).join('\n') + tests;
 }
+test('native remote tabs stay connected without a per-tab process', () => {
+  assert.match(body('sshAutoReconnectTick'), /shell\.native_terminal and !@import\("native_session\.zig"\)\.alive\(shell\.shell_id\)/);
+  assert.match(body('sshReconnectArm'), /shell\.native_terminal/);
+  assert.match(body('sshSessionEnded'), /shell\.native_terminal/);
+});
+
 describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
   const loadingChecks = `
 test "ISSUE-543 loading remote tabs" {

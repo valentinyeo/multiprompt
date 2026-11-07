@@ -1883,14 +1883,14 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     } else if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
-    if (!native.connect(shell_id)) native.ready(shell_id, false);
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
-            @import("archive.zig").cancelPendingSessionKill(opened.host, session);
-            app_state.g_tmux_closed.reopen(opened.host, session);
+            @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
+    if (!native.connect(shell_id)) native.ready(shell_id, false);
     registerShellExitWait(idx);
     if (!app_state.g_restoring and background_workspace == null) {
         if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);

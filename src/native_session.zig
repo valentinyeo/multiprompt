@@ -180,10 +180,6 @@ fn palette() ?[*]const u32 {
 fn createWindow(slot: *Slot, parent: w.HANDLE) w.HANDLE {
     var font: LogFont = .{};
     shellFont(&font);
-    const hwnd = mp_terminal_window_new(parent, &font, @import("themes.zig").themeConsoleFg(), @import("themes.zig").themeConsoleBg(), palette(), onOutput, onResize, slot);
-    if (hwnd != null) return hwnd;
-    const written = std.unicode.utf8ToUtf16Le(font.face[0 .. font.face.len - 1], "Consolas") catch return null;
-    font.face[written] = 0;
     return mp_terminal_window_new(parent, &font, @import("themes.zig").themeConsoleFg(), @import("themes.zig").themeConsoleBg(), palette(), onOutput, onResize, slot);
 }
 

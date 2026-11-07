@@ -656,6 +656,10 @@ test "registration failure cannot masquerade as the shell font and mintty bypass
 }
 `;
 
+test('native terminal font sync does not attach a console', () => {
+  assert.match(fn(consoleSource, 'fontSyncShell'), /if \(app_state\.shells\[i\]\.native_terminal\)/);
+});
+
 test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
   assert.match(fn(chat, 'closeChatView'), /chatHistoryStreamsKeep\(0\)/);
   const source = harness();

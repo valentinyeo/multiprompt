@@ -1280,6 +1280,16 @@ def run_message_worker():
 
 
 
+def terminal_reader():
+    try:
+        for line in sys.stdin.buffer:
+            if not line:
+                break
+    except (OSError, ValueError):
+        return 1
+    return 0
+
+
 def transport_reader():
     import base64
     import queue
@@ -1388,8 +1398,8 @@ def transport_reader():
                 if len(channels) >= transport["MAX_CHANNELS"]:
                     emit(dict(channel=cid, closed=True))
                     continue
-                mode = "--watch" if value.get("watch") else "--serve"
-                entry = "watch_reader" if value.get("watch") else "serve_reader"
+                mode = "--terminal" if value.get("terminal") else "--watch" if value.get("watch") else "--serve"
+                entry = "terminal_reader" if value.get("terminal") else "watch_reader" if value.get("watch") else "serve_reader"
                 record("invocations.jsonl", kind="reader", argv=[mode], channel=cid)
                 bootstrap = ("import importlib.util;"
                              f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
