@@ -21,8 +21,9 @@ test('unattributed close requests cannot destroy an active or locked workspace',
 test('deliberate window, restart and workspace closes carry explicit reasons', () => {
   const main = read('src/main.zig');
   assert.match(main, /msg == WM_SYSCOMMAND and \(wp & 0xFFF0\) == 0xF060[\s\S]*?requestAppClose\(hwnd, \.window_control\);/);
-  for (const reason of ['quit_all', 'restart', 'workspace_close']) {
-    assert.ok(main.includes(`, .${reason});`), `${reason} remains available`);
+  const lifecycle = main + read('src/workspaces.zig');
+  for (const reason of ['quit_all', 'restart', 'workspace_archive']) {
+    assert.ok(lifecycle.includes(`, .${reason});`), `${reason} remains available`);
   }
   for (const file of ['src/main.zig', 'src/workspaces.zig', 'src/chat_session.zig']) {
     assert.doesNotMatch(read(file), /PostMessageW\((?:app_state\.g_main_hwnd|hwnd)[^;]*WM_CLOSE, 0, 0\)/, `${file} has no unexplained app close`);

@@ -28,7 +28,7 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     $card = Open-WorkspaceCard ($Shot + '-open')
     $state = Read-Session
     $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-    $windows = @($registry.windows | Where-Object { -not $_.archived })
+    $windows = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
     $target = -1
     for ($index = 0; $index -lt $windows.Count; $index++) {
         if ($windows[$index].id -ceq $state.workspaces[$Workspace].wid) { $target = $index + 1 }
@@ -63,7 +63,7 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
     $expected = if ($theme -eq 'light') { 'F9F9F9' } elseif ($theme -eq 'system') { $null } elseif ($theme -eq 'multiprompt') { '0F1011' } else { '262626' }
     if ($null -ne $expected -and $look.fill -cne $expected) { throw "Workspace card unreadable fill in ${theme}: $($look.fill)" }
     $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-    $expectedHeight = 19 + (@($registry.windows | Where-Object { -not $_.archived }).Count + 2) * 28
+    $expectedHeight = 19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28
     if ($look.height -ne $expectedHeight) { throw "Workspace card must hug compact rows: $($look.height), expected $expectedHeight" }
     Save-Json $look ("workspace-$theme-card-look.json")
     Record 'Escape closes workspace card without switching'
@@ -76,7 +76,7 @@ foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray'
 $card = Open-WorkspaceCard 'workspace-keyboard-open'
 $state = Read-Session
 $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-$windows = @($registry.windows | Where-Object { -not $_.archived })
+$windows = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) })
 $currentRow = -1
 $targetRow = -1
 for ($index = 0; $index -lt $windows.Count; $index++) {
@@ -98,7 +98,7 @@ $result.checks += @{ name = 'workspace-card-theme-unavailable'; theme = 'Graphit
 
 $card = Open-WorkspaceCard 'workspace-new-open'
 $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-$newRow = @($registry.windows | Where-Object { -not $_.archived }).Count + 1
+$newRow = @($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 1
 $count = (Read-Session).workspace_count
 Record 'Click New workspace in workspace card'
 [VerifyNative]::ClickClient($card, 50, (6 + $newRow * 28 + 7 + 14))
@@ -136,7 +136,7 @@ Snapshot 'archive-hidden'
 $card = Open-WorkspaceCard 'archive-card-hidden'
 $look = [VerifyNative]::MenuLook($card)
 $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
-if ($look.height -ne (19 + (@($registry.windows | Where-Object { -not $_.archived }).Count + 2) * 28)) { throw 'Archived workspace still occupies a card row' }
+if ($look.height -ne (19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28)) { throw 'Archived workspace still occupies a card row' }
 Press @(0x1B) 'Escape: close workspace card'
 Focus-Palette 'open workspace' 6200
 Press @(0x0D) 'Enter: open workspace list'
@@ -157,7 +157,7 @@ Wait-Until {
     $saved = Read-Session
     $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
     $entry = @($registry.windows | Where-Object { $_.id -ceq $archiveId })
-    $saved.workspace_count -eq $archiveCount -and $saved.workspaces[$saved.active_workspace].wid -ceq $archiveId -and $entry.Count -eq 1 -and -not $entry[0].archived
+    $saved.workspace_count -eq $archiveCount -and $saved.workspaces[$saved.active_workspace].wid -ceq $archiveId -and $entry.Count -eq 1 -and -not ($entry[0].PSObject.Properties['archived'] -and $entry[0].archived)
 } 'restored workspace active with original identity'
 $restored = Read-Session
 $restoredTabs = @($restored.tabs | Where-Object { $_.workspace -eq $restored.active_workspace })

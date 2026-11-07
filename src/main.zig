@@ -4341,6 +4341,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (wp == 0 and app_state.g_starred_workspace) return 0;
             const ws: u8 = if (wp == 0) app_state.g_active_workspace else @intCast(wp - 1);
             if (ws >= app_state.g_lws_count or app_state.g_ws_snoozed[ws]) return 0;
+            if (workspace_snooze.nextVisible(ws, app_state.g_ws_snoozed[0..app_state.g_lws_count]) == null) {
+                showHeaderNoticeAscii("Can't snooze your only open workspace", 3500, true);
+                return 0;
+            }
             ensureWorkspaceSlotId(ws);
             if (app_state.g_inbox_active) closeInbox(hwnd);
             _ = SendMessageW(hwnd, WM_APP_SEARCH_OPEN, 0, 0);
