@@ -133,6 +133,8 @@ var g_chat_read_hold = false;
 var g_chat_read_open_ready = false;
 var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
+var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+var g_chat_batch_divider_y: i32 = 0;
 fn chatReadMark(_: bool) bool { return false; }
 fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }
 fn foregroundIsOurs() bool { return true; }
@@ -516,6 +518,9 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+test('IGSH-1754 a chat switch clears the last batch time', () => {
+  assert.match(fn('chatDeferTranscriptLoad'), /g_chat_batch_boundary = \.\{}/);
+});
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
   assert.equal(run.status, 0, run.stdout + run.stderr);

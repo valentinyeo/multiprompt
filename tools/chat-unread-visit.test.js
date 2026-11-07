@@ -15,17 +15,27 @@ function between(source, start, end) {
   return source.slice(a, b);
 }
 
+test('IGSH-1754 opening a chat clears the last batch time', () => {
+  assert.match(between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_hold)'), /g_chat_batch_boundary = \.\{}/);
+});
+
 test('IGSH-871 unread divider stays above the first unread reply until leaving the tab', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-unread-visit-'));
   try {
     copyZig(['switch_timing.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'win32.zig'), `pub const FILETIME = extern struct { dwLowDateTime: u32 = 0, dwHighDateTime: u32 = 0 };
+pub const SYSTEMTIME = extern struct { year: u16 = 0, month: u16 = 0, day_of_week: u16 = 0, day: u16 = 0, hour: u16 = 0, minute: u16 = 0, second: u16 = 0, milliseconds: u16 = 0 };
+pub fn FileTimeToLocalFileTime(_: *const FILETIME, _: *FILETIME) i32 { return 0; }
+pub fn FileTimeToSystemTime(_: *const FILETIME, _: *SYSTEMTIME) i32 { return 0; }
+pub fn GetLocalTime(_: *SYSTEMTIME) void {}
+`);
     const source = `const std = @import("std");
 const switch_timing = struct {
   const Step = @import("switch_timing.zig").Step;
   fn start() i64 { return 0; }
   fn record(_: Step, _: i64) void {}
 };
-const Block = struct { role: enum { prose, user, tool } = .prose, first: bool = true, message_id: u64, start: usize = 0, len: usize = 1 };
+const Block = struct { role: enum { prose, user, tool } = .prose, first: bool = true, message_id: u64 = 0, start: usize = 0, len: usize = 1, stamp_ms: i64 = 0 };
 const md = struct { const Block = ThisBlock; };
 const ThisBlock = Block;
 const chat_history = struct {
@@ -51,6 +61,8 @@ const app_state = struct {
   var g_chat_read_open_ready = true;
   var g_chat_read_boundary: chat_history.ReadBoundary = .{};
   var g_chat_read_divider_y: i32 = 0;
+  var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+  var g_chat_batch_divider_y: i32 = 0;
   var g_chat_transcript_hwnd: ?usize = 1;
   var g_chat_scroll_y: i32 = 0;
   var g_chat_top_pad: i32 = 0;
@@ -122,7 +134,7 @@ test "count tracks arrivals above bottom, not repaint or reaching bottom" {
 }
 `;
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
-    const result = spawnSync(process.env.ZIG_EXE || (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig')), ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
+    const result = spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, JSON.stringify(result));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

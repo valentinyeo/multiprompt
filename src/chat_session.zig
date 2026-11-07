@@ -1772,6 +1772,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_scrolled_up = false;
     app_state.g_chat_new_messages = .{};
     app_state.g_chat_read_boundary = .{};
+    app_state.g_chat_batch_boundary = .{};
     if (app_state.g_chat_read_visit_shell_id != app_state.g_chat_cache_shell_id) {
         app_state.g_chat_read_visit_shell_id = app_state.g_chat_cache_shell_id;
         app_state.g_chat_read_visit_marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;

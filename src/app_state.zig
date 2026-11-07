@@ -1304,6 +1304,8 @@ pub var g_chat_read_open_ready = false;
 pub var g_chat_read_hold = false;
 pub var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 pub var g_chat_read_divider_y: i32 = 0;
+pub var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+pub var g_chat_batch_divider_y: i32 = 0;
 pub var g_chat_new_messages: chat_history.NewMessages = .{};
 pub var g_chat_content_left: i32 = 0;
 pub var g_chat_sel_anchor: usize = 0;
@@ -2902,9 +2904,11 @@ pub const ChatLayoutSnapshot = struct {
     font_pt: i32,
     clean: bool,
     boundary: chat_history.ReadBoundary,
+    batch_boundary: chat_history.BatchBoundary,
     img_first_block: usize,
     first_image: usize,
     read_divider_y: i32,
+    batch_divider_y: i32,
     rects: []RECT,
 };
 pub const ChatHistoryEntry = struct {

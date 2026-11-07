@@ -62,9 +62,11 @@ pub fn save() void {
         .font_pt = app_state.g_chat_layout_font_pt,
         .clean = app_state.clean_chat,
         .boundary = app_state.g_chat_read_boundary,
+        .batch_boundary = app_state.g_chat_batch_boundary,
         .img_first_block = app_state.g_chat_img_first_block,
         .first_image = first_image,
         .read_divider_y = app_state.g_chat_read_divider_y,
+        .batch_divider_y = app_state.g_chat_batch_divider_y,
         .rects = rects,
     };
 }
@@ -87,6 +89,8 @@ pub fn restore(entry: ?*Entry) usize {
     app_state.g_chat_find_layout_open = false;
     app_state.g_chat_read_boundary = snapshot.boundary;
     app_state.g_chat_read_divider_y = snapshot.read_divider_y;
+    app_state.g_chat_batch_boundary = snapshot.batch_boundary;
+    app_state.g_chat_batch_divider_y = snapshot.batch_divider_y;
     app_state.g_chat_img_first_block = snapshot.img_first_block;
     app_state.g_chat_layout_reuse = keep;
     return keep;
