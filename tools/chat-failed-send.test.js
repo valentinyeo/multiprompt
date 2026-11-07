@@ -10,7 +10,9 @@ test('IGSH-1847 a failed send and a ten-minute wait can be sent again under a ne
   const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'utf8');
   const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
   const render = fs.readFileSync(path.join(root, 'src/chat_render.zig'), 'utf8');
-  assert.match(send, /fn chatEchoMintWireId/);
+  const again = send.slice(send.indexOf('pub fn chatEchoSendAgain('), send.indexOf('\n}', send.indexOf('pub fn chatEchoSendAgain(')));
+  assert.match(again, /desktop-\{x:0>16\}\{x:0>16\}/);
+  assert.match(again, /showsNotSent/);
   assert.match(send, /message_replaces/);
   assert.match(send, /replaces = std\.mem\.sliceTo\(&job\.message_replaces, 0\)/);
   assert.match(render, /L\("Not sent"\)/);

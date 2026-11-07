@@ -1886,29 +1886,10 @@ fn chatSteerAfterDelivery(idx: u32, ei: usize) void {
     chatEchoPushQueuedForShell(idx);
 }
 
-fn chatEchoNotSentNow(entry: app_state.ChatOutboxEntry) bool {
-    return chat_echo.showsNotSent(entry.message_v1, entry.state, std.mem.sliceTo(&entry.message_phase, 0), entry.sent_tick_ms, @intCast(GetTickCount64()));
-}
-
-fn chatEchoMintWireId(entry: *app_state.ChatOutboxEntry) bool {
-    var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
-    defer random_io.deinit();
-    const previous = entry.message_nonce;
-    var spins: u8 = 0;
-    while (entry.message_nonce == 0 or entry.message_nonce == previous) {
-        random_io.io().random(std.mem.asBytes(&entry.message_nonce));
-        spins +%= 1;
-        if (spins == 0) return false;
-    }
-    entry.message_wire_id = @splat(0);
-    _ = std.fmt.bufPrint(&entry.message_wire_id, "desktop-{x:0>16}{x:0>16}", .{ entry.message_nonce, entry.queue_id }) catch return false;
-    return std.mem.sliceTo(&entry.message_wire_id, 0).len >= 16;
-}
-
 pub fn chatEchoSendAgain(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     const entry = &app_state.g_chat_outbox.items[ei];
-    const not_sent = chatEchoNotSentNow(entry.*);
+    const not_sent = chat_echo.showsNotSent(entry.message_v1, entry.state, std.mem.sliceTo(&entry.message_phase, 0), entry.sent_tick_ms, @as(i64, @intCast(GetTickCount64())));
     if ((!chat_echo.pendingActions(entry.state).send_again and !not_sent) or entry.channel_pending) return;
     if (!entry.message_v1) {
         const origin = chatOutboxShellForKey(entry.key[0..entry.key_len]);
@@ -1958,18 +1939,35 @@ pub fn chatEchoSendAgain(id: u64) void {
         }
     }
     if (entry.message_v1) {
-        const failed_send = chatEchoNotSentNow(entry.*);
+        const failed_send = chat_echo.showsNotSent(entry.message_v1, entry.state, std.mem.sliceTo(&entry.message_phase, 0), entry.sent_tick_ms, @as(i64, @intCast(GetTickCount64())));
         if (!failed_send and @import("fonts.zig").messageBox(app_state.g_main_hwnd, L("Your agent may already have this message. Sending again may duplicate it. Send again?"), L("Send again"), 0x24) != 6) return;
         const confirmed_index = chatOutboxIndexById(id) orelse return;
         const confirmed_entry = &app_state.g_chat_outbox.items[confirmed_index];
-        if (!confirmed_entry.message_v1 or confirmed_entry.channel_pending or (!chat_echo.pendingActions(confirmed_entry.state).send_again and !chatEchoNotSentNow(confirmed_entry.*))) return;
+        if (!confirmed_entry.message_v1 or confirmed_entry.channel_pending or (!chat_echo.pendingActions(confirmed_entry.state).send_again and !chat_echo.showsNotSent(confirmed_entry.message_v1, confirmed_entry.state, std.mem.sliceTo(&confirmed_entry.message_phase, 0), confirmed_entry.sent_tick_ms, @as(i64, @intCast(GetTickCount64()))))) return;
         const si = chatOutboxShellForKey(confirmed_entry.key[0..confirmed_entry.key_len]) orelse return;
-        if (failed_send or chatEchoNotSentNow(confirmed_entry.*)) {
+        if (failed_send or chat_echo.showsNotSent(confirmed_entry.message_v1, confirmed_entry.state, std.mem.sliceTo(&confirmed_entry.message_phase, 0), confirmed_entry.sent_tick_ms, @as(i64, @intCast(GetTickCount64())))) {
             const previous_wire = confirmed_entry.message_wire_id;
             const previous_nonce = confirmed_entry.message_nonce;
             const previous_state = confirmed_entry.state;
             if (std.mem.sliceTo(&previous_wire, 0).len > 0) confirmed_entry.message_replaces = previous_wire;
-            if (!chatEchoMintWireId(confirmed_entry)) {
+            var minted = false;
+            {
+                var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+                defer random_io.deinit();
+                var spins: u8 = 0;
+                while (confirmed_entry.message_nonce == 0 or confirmed_entry.message_nonce == previous_nonce) {
+                    random_io.io().random(std.mem.asBytes(&confirmed_entry.message_nonce));
+                    spins +%= 1;
+                    if (spins == 0) break;
+                }
+                if (spins != 0) {
+                    confirmed_entry.message_wire_id = @splat(0);
+                    if (std.fmt.bufPrint(&confirmed_entry.message_wire_id, "desktop-{x:0>16}{x:0>16}", .{ confirmed_entry.message_nonce, confirmed_entry.queue_id })) |_| {
+                        minted = std.mem.sliceTo(&confirmed_entry.message_wire_id, 0).len >= 16;
+                    } else |_| {}
+                }
+            }
+            if (!minted) {
                 confirmed_entry.message_wire_id = previous_wire;
                 confirmed_entry.message_nonce = previous_nonce;
                 confirmed_entry.message_replaces = @splat(0);
@@ -2487,7 +2485,7 @@ pub fn chatOutboxTick() void {
     if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, "", 0, now_ms, false, true)) changed = true;
     for (app_state.g_chat_outbox.items) |*entry| {
         if (entry.message_v1) {
-            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms)) {
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and chat_echo.showsNotSent(true, entry.state, std.mem.sliceTo(&entry.message_phase, 0), entry.sent_tick_ms, now_ms))) {
                 entry.state = .not_sent;
                 entry.retryable = true;
                 changed = true;

@@ -3231,10 +3231,10 @@ pub const ChatOutboxEntry = struct {
 
     pub fn removable(self: ChatOutboxEntry) bool {
         if (!self.message_v1) return chat_echo.pendingActions(self.state).remove;
+        if (self.channel_pending) return false;
+        if (self.state == .not_sent) return true;
         const phase = std.mem.sliceTo(&self.message_phase, 0);
-        if (chat_echo.showsNotSent(true, self.state, phase, self.sent_tick_ms, @as(i64, @intCast(@import("win32.zig").GetTickCount64())))) return !self.channel_pending;
-        return !self.channel_pending and (self.state == .not_sent or self.state == .queued) and
-            (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
+        return self.state == .queued and (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
     }
 };
 

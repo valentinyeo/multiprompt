@@ -2496,7 +2496,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (chatEchoRowLanded(e)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, g_reaction_view.projectedPending(e.id));
-                if (chatEchoNotSent(e)) rc.bottom += uiScaled(CHAT_STATUS_H);
+                if (chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, @as(i64, @intCast(GetTickCount64())))) rc.bottom += uiScaled(CHAT_STATUS_H);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -3906,8 +3906,7 @@ fn chatEchoNotSent(e: app_state.ChatOutboxEntry) bool {
 
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
-    const not_sent = chatEchoNotSent(e);
-    const extra: i32 = if (not_sent) uiScaled(CHAT_STATUS_H) else 0;
+    const extra: i32 = if (chatEchoNotSent(e)) uiScaled(CHAT_STATUS_H) else 0;
     var display = chatDisplayForBlock(e.text, .{ .start = 0, .len = e.text.len, .role = .user, .markdown = true }, g_reaction_view.projectedPending(e.id));
     display.offset += offset;
     const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom - extra };
@@ -3919,14 +3918,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const start = if (display.reply_ref) |r| r.body_start else 0;
     const body_display = display.slice(start);
     _ = chatFlowText(hdc, body_display.text, text_rc, false, true, null, body_display.offset, null, body_display.source_map, true);
-    if (not_sent or e.waiting()) chatDimQueuedBubble(hdc, bubble);
-    if (not_sent) {
-        const old_font = SelectObject(hdc, chatMetadataFont());
-        defer _ = SelectObject(hdc, old_font);
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(176, 78, 58) else RGB(232, 146, 122));
-        var label = RECT{ .left = bubble.left, .top = bubble.bottom, .right = bubble.right - uiScaled(6), .bottom = bubble.bottom + extra };
-        _ = chatDrawText(hdc, L("Not sent"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-    }
+    if (e.waiting()) chatDimQueuedBubble(hdc, rc);
 }
 
 fn chatStatusRowRect(bubble: RECT) RECT {
@@ -5311,6 +5303,13 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
             const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
             chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
+            if (chatEchoNotSent(app_state.g_chat_outbox.items[ei])) {
+                const old_font = SelectObject(mem_dc, chatMetadataFont());
+                defer _ = SelectObject(mem_dc, old_font);
+                _ = SetTextColor(mem_dc, if (app_state.g_light_theme) RGB(176, 78, 58) else RGB(232, 146, 122));
+                var label = RECT{ .left = rc.left, .top = rc.bottom - uiScaled(CHAT_STATUS_H), .right = rc.right - uiScaled(6), .bottom = rc.bottom };
+                _ = chatDrawText(mem_dc, L("Not sent"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+            }
             if (nav_index != null and nav_index.? == app_state.g_chat_block_count + i) chatPaintNavRing(mem_dc, rc);
             send_latency.noteDrawn(app_state.g_chat_outbox.items[ei].id);
         }

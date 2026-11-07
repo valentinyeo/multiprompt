@@ -142,6 +142,7 @@ const ChatTmuxSendJob = struct {
     reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = true,
     rejected: bool = false,
