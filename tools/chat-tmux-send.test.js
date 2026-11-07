@@ -34,6 +34,7 @@ const Entry = struct {
     retryable: bool = false,
     message_v1: bool = false,
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     message_phase: [16]u8 = @splat(0),
     message_sid: [40]u8 = @splat(0),
     retry_nonce: u64 = 0,
@@ -71,7 +72,7 @@ const ChatTmuxSendJob = struct {
     queued_at: i64 = 0, queue_id: u64 = 0, message_nonce: u64 = 0, request_nonce: u64 = 0,
     message_v1: bool = false, message_status: bool = false, message_reset: bool = false, message_dismiss: bool = false,
     reset_cutoff: u64 = 0, history_instance: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, reset_result_epoch: u64 = 0,
-    message_state: [16]u8 = @splat(0), message_wire_id: [81]u8 = @splat(0),
+    message_state: [16]u8 = @splat(0), message_wire_id: [81]u8 = @splat(0), message_replaces: [81]u8 = @splat(0),
     finished: std.atomic.Value(bool) = .init(true),
 };
 const ChatPendingReset = struct { key: Key = .{}, nonce: u64 = 0, request_nonce: u64 = 0, unconfirmed: u8 = 0 };
@@ -319,6 +320,7 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.match(body('chatEchoMatchActive'), /e\.state == \.delivered and !enqueued/);
   assert.doesNotMatch(body('chatPaintEcho'), /chatPaintEchoStatus|chatEchoActionRect/);
   assert.match(body('chatPaintEcho'), /if \(e\.waiting\(\)\) chatDimQueuedBubble\(hdc, rc\)/);
+  assert.match(body('chatTmuxSendFinish'), /message_replaces/);
 });
 
 test('IGSH-1063 question worker sends numeric key arrays through the reader protocol', () => {

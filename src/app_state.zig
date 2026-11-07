@@ -3208,6 +3208,7 @@ pub const ChatOutboxEntry = struct {
     message_sid: [40]u8 = @splat(0),
     message_phase: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     retry_nonce: u64 = 0,
     reset_pending: bool = false,
     channel_pending: bool = false,
@@ -3230,9 +3231,10 @@ pub const ChatOutboxEntry = struct {
 
     pub fn removable(self: ChatOutboxEntry) bool {
         if (!self.message_v1) return chat_echo.pendingActions(self.state).remove;
+        if (self.channel_pending) return false;
+        if (self.state == .not_sent) return true;
         const phase = std.mem.sliceTo(&self.message_phase, 0);
-        return !self.channel_pending and (self.state == .not_sent or self.state == .queued) and
-            (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
+        return self.state == .queued and (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
     }
 };
 
@@ -3999,6 +4001,7 @@ pub const ChatTmuxSendJob = struct {
     reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = false,
     rejected: bool = false,

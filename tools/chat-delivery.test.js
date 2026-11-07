@@ -142,6 +142,7 @@ const ChatTmuxSendJob = struct {
     reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = true,
     rejected: bool = false,
@@ -2142,6 +2143,13 @@ test('composer always persists through the same outbox before delivery', () => {
   assert.match(send, /chatOutboxTick\(\)/);
   assert.match(send, /UpdateWindow\(g_chat_transcript_hwnd\)[\s\S]*SetWindowTextW\(g_chat_composer_hwnd[\s\S]*RedrawWindow\(g_main_hwnd[\s\S]*chatOutboxTick\(\)/);
   assert.doesNotMatch(send, /sendTextToActiveShellVerified|chatEchoConfirm/);
+});
+
+test('IGSH-1847 a message that was not sent is sent again under a new wire id', () => {
+  assert.match(body('chatEchoSendAgain'), /message_replaces/);
+  assert.match(body('chatEchoSendAgain'), /desktop-\{x:0>16\}\{x:0>16\}/);
+  assert.match(body('chatOutboxTick'), /NOT_SENT_WAIT_MS/);
+  assert.match(body('chatRelayout'), /e\.state == \.not_sent/);
 });
 
 test('deliberate recovery remains evidence-safe without automatic retry controls', () => {
