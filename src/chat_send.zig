@@ -2485,7 +2485,8 @@ pub fn chatOutboxTick() void {
     if (chatEchoTakenSettledIn(&app_state.g_chat_outbox, std.heap.page_allocator, "", 0, now_ms, false, true)) changed = true;
     for (app_state.g_chat_outbox.items) |*entry| {
         if (entry.message_v1) {
-            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms) or (entry.state != .not_sent and chat_echo.showsNotSent(true, entry.state, std.mem.sliceTo(&entry.message_phase, 0), entry.sent_tick_ms, now_ms))) {
+            const waited = entry.state != .not_sent and entry.state != .delivered and entry.state != .cancelled and entry.sent_tick_ms > 0 and now_ms >= entry.sent_tick_ms and now_ms - entry.sent_tick_ms >= chat_echo.NOT_SENT_WAIT_MS;
+            if (chat_echo.v1SendingAbandoned(entry.state, entry.channel_pending, entry.sent_tick_ms, now_ms) or waited) {
                 entry.state = .not_sent;
                 entry.retryable = true;
                 changed = true;
@@ -3763,23 +3764,21 @@ fn chatTmuxSendFinish() void {
             entry.channel_pending = false;
             if (job.retry and job.message_state[0] != 0) entry.retry_nonce = 0;
             if (entry.message_phase[0] == 0 and entry.state == .sending) entry.state = if (job.message_state[0] != 0) .queued else .not_sent;
-            if (job.message_state[0] == 0) {
-                if (job.message_replaces[0] != 0) {
-                    entry.message_wire_id = job.message_replaces;
-                    entry.message_replaces = @splat(0);
-                    entry.state = .not_sent;
-                    entry.retryable = true;
-                    entry.write_started = true;
-                    @import("diagnostics.zig").debugLog("[chat] resend did not land; the old message stays Not sent");
-                } else {
-                    history.send_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.send_retry_step);
-                    history.send_retry_step +|= 1;
-                    const patch = chatSubmitRetryPatch();
-                    entry.write_started = patch.write_started;
-                    entry.state = patch.state;
-                    entry.retryable = patch.retryable;
-                    @import("diagnostics.zig").debugLog("[chat] submit retry armed: the message is queued again");
-                }
+            if (job.message_state[0] == 0 and job.message_replaces[0] != 0) {
+                entry.message_wire_id = job.message_replaces;
+                entry.message_replaces = @splat(0);
+                entry.state = .not_sent;
+                entry.retryable = true;
+                entry.write_started = true;
+                @import("diagnostics.zig").debugLog("[chat] resend did not land; the old message stays Not sent");
+            } else if (job.message_state[0] == 0) {
+                history.send_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.send_retry_step);
+                history.send_retry_step +|= 1;
+                const patch = chatSubmitRetryPatch();
+                entry.write_started = patch.write_started;
+                entry.state = patch.state;
+                entry.retryable = patch.retryable;
+                @import("diagnostics.zig").debugLog("[chat] submit retry armed: the message is queued again");
             } else {
                 entry.message_replaces = @splat(0);
                 history.send_next_tick = 0;

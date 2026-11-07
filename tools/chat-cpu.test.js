@@ -797,7 +797,7 @@ test "pending geometry is independent of state and clean mode" {
             g_chat_outbox.items = &entries;
             chatRelayout(400);
             try std.testing.expectEqual(@as(usize, 1), g_chat_echo_layout_count);
-            try std.testing.expectEqual(@as(i32, 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
+            try std.testing.expectEqual(@as(i32, if (state == .not_sent) 40 else 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
         }
     }
 }

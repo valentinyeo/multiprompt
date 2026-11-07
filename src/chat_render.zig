@@ -2496,7 +2496,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (chatEchoRowLanded(e)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, g_reaction_view.projectedPending(e.id));
-                if (chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, @as(i64, @intCast(GetTickCount64())))) rc.bottom += uiScaled(CHAT_STATUS_H);
+                if (e.state == .not_sent) rc.bottom += uiScaled(CHAT_STATUS_H);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
