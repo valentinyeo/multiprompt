@@ -100,6 +100,7 @@ test('terminal model preserves ANSI, true color, Unicode, alternate screen, inpu
     assert.equal(ran.status, 0, ran.stdout + ran.stderr);
     assert.match(ran.stdout, /TERMINAL_MODEL_PASS/);
     if (process.platform === 'win32') assert.match(ran.stdout, /TERMINAL_WINDOW_PASS 30 owned child windows/);
+    console.log(ran.stdout.trim());
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
   }
