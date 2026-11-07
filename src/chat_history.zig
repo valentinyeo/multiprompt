@@ -1795,6 +1795,139 @@ test "IGSH-815 tail reconciliation retains prepended rows through cache restart 
 
 pub const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 
+pub const BatchBoundary = struct { index: ?usize = null, stamp_ms: i64 = 0 };
+
+pub const BatchDay = struct { year: u16 = 0, month: u16 = 0, day: u16 = 0, hour: u16 = 0, minute: u16 = 0 };
+
+const FILETIME = @import("win32.zig").FILETIME;
+const FileTimeToLocalFileTime = @import("win32.zig").FileTimeToLocalFileTime;
+const FileTimeToSystemTime = @import("win32.zig").FileTimeToSystemTime;
+
+fn batchMonthDays(year: u16, month: u16) u16 {
+    return switch (month) {
+        1, 3, 5, 7, 8, 10, 12 => 31,
+        4, 6, 9, 11 => 30,
+        2 => if ((@mod(@as(u32, year), 4) == 0 and @mod(@as(u32, year), 100) != 0) or @mod(@as(u32, year), 400) == 0) 29 else 28,
+        else => 0,
+    };
+}
+
+fn batchYesterday(now: BatchDay) BatchDay {
+    if (now.day > 1) return .{ .year = now.year, .month = now.month, .day = now.day - 1, .hour = now.hour, .minute = now.minute };
+    if (now.month > 1) {
+        const month = now.month - 1;
+        return .{ .year = now.year, .month = month, .day = batchMonthDays(now.year, month), .hour = now.hour, .minute = now.minute };
+    }
+    const year = now.year - 1;
+    return .{ .year = year, .month = 12, .day = 31, .hour = now.hour, .minute = now.minute };
+}
+
+pub fn batchDayFromUnixMs(stamp_ms: i64) ?BatchDay {
+    if (stamp_ms <= 0) return null;
+    const epoch_diff: u64 = 116444736000000000;
+    const whole = @divFloor(stamp_ms, 1000);
+    const frac = @rem(stamp_ms, 1000);
+    const ft100ns = @as(u64, @intCast(whole)) * 10_000_000 + @as(u64, @intCast(frac)) * 10_000 + epoch_diff;
+    const ft = FILETIME{ .dwLowDateTime = @truncate(ft100ns), .dwHighDateTime = @truncate(ft100ns >> 32) };
+    var local_ft: FILETIME = undefined;
+    var local = @import("win32.zig").SYSTEMTIME{
+        .year = 0,
+        .month = 0,
+        .day_of_week = 0,
+        .day = 0,
+        .hour = 0,
+        .minute = 0,
+        .second = 0,
+        .milliseconds = 0,
+    };
+    if (FileTimeToLocalFileTime(&ft, &local_ft) == 0 or FileTimeToSystemTime(&local_ft, &local) == 0) return null;
+    return .{ .year = local.year, .month = local.month, .day = local.day, .hour = local.hour, .minute = local.minute };
+}
+
+pub fn batchDayNow() ?BatchDay {
+    var local = @import("win32.zig").SYSTEMTIME{
+        .year = 0,
+        .month = 0,
+        .day_of_week = 0,
+        .day = 0,
+        .hour = 0,
+        .minute = 0,
+        .second = 0,
+        .milliseconds = 0,
+    };
+    @import("win32.zig").GetLocalTime(&local);
+    return .{ .year = local.year, .month = local.month, .day = local.day, .hour = local.hour, .minute = local.minute };
+}
+
+pub fn formatBatchTimeLabel(stamp: BatchDay, now: BatchDay, out: []u16) usize {
+    const months = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    var utf8: [32]u8 = undefined;
+    const same = stamp.year == now.year and stamp.month == now.month and stamp.day == now.day;
+    const yday = batchYesterday(now);
+    const yester = stamp.year == yday.year and stamp.month == yday.month and stamp.day == yday.day;
+    const label = if (same)
+        std.fmt.bufPrint(&utf8, "Today {d:0>2}:{d:0>2}", .{ stamp.hour, stamp.minute }) catch return 0
+    else if (yester)
+        std.fmt.bufPrint(&utf8, "Yesterday {d:0>2}:{d:0>2}", .{ stamp.hour, stamp.minute }) catch return 0
+    else blk: {
+        if (stamp.month == 0 or stamp.month > months.len) break :blk null;
+        break :blk std.fmt.bufPrint(&utf8, "{d} {s} {d:0>2}:{d:0>2}", .{ stamp.day, months[stamp.month - 1], stamp.hour, stamp.minute }) catch null;
+    } orelse return 0;
+    var n: usize = 0;
+    for (label) |c| {
+        if (n >= out.len) break;
+        out[n] = c;
+        n += 1;
+    }
+    return n;
+}
+
+fn batchMessageStart(blocks: []const md.Block, from: usize) ?usize {
+    var i = from;
+    while (i < blocks.len) : (i += 1) {
+        const block = blocks[i];
+        if (block.role == .tool) continue;
+        if (!block.first) continue;
+        return i;
+    }
+    return null;
+}
+
+pub fn lastBatchStart(blocks: []const md.Block) BatchBoundary {
+    if (blocks.len == 0) return .{};
+    var last_idx: ?usize = null;
+    var last_user = false;
+    var i = blocks.len;
+    while (i > 0) {
+        i -= 1;
+        const block = blocks[i];
+        if (block.role == .tool) continue;
+        if (!block.first) continue;
+        last_idx = i;
+        last_user = block.role == .user;
+        break;
+    }
+    const index = if (last_idx) |idx| if (last_user) idx else blk: {
+            var last_user_idx: ?usize = null;
+            var j = blocks.len;
+            while (j > 0) {
+                j -= 1;
+                const block = blocks[j];
+                if (block.role == .tool) continue;
+                if (!block.first) continue;
+                if (block.role == .user) {
+                    last_user_idx = j;
+                    break;
+                }
+            }
+            break :blk if (last_user_idx) |user| batchMessageStart(blocks, user + 1) else batchMessageStart(blocks, 0);
+        } else null;
+    const at = index orelse return .{};
+    const stamp_ms = blocks[at].stamp_ms;
+    if (stamp_ms == 0) return .{};
+    return .{ .index = at, .stamp_ms = stamp_ms };
+}
+
 pub fn unreadBoundary(blocks: []const md.Block, marker: u64) ReadBoundary {
     if (marker == 0 or blocks.len == 0) return .{};
     var last: ?usize = null;
@@ -1811,6 +1944,36 @@ pub fn unreadBoundary(blocks: []const md.Block, marker: u64) ReadBoundary {
         if (block.role != .tool) return .{ .index = i, .unknown = true };
     }
     return .{};
+}
+
+test "IGSH-1754 last batch starts on the latest reply run after the last user message" {
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = 1, .role = .user, .first = true, .stamp_ms = 1 },
+        .{ .start = 1, .len = 1, .role = .prose, .first = true, .stamp_ms = 2 },
+        .{ .start = 2, .len = 1, .role = .prose, .first = false, .stamp_ms = 2 },
+    };
+    const batch = lastBatchStart(&blocks);
+    try std.testing.expectEqual(@as(?usize, 1), batch.index);
+    try std.testing.expectEqual(@as(i64, 2), batch.stamp_ms);
+}
+
+test "IGSH-1754 a user message at the bottom is its own batch" {
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = 1, .role = .prose, .first = true, .stamp_ms = 1 },
+        .{ .start = 1, .len = 1, .role = .user, .first = true, .stamp_ms = 4 },
+    };
+    try std.testing.expectEqual(@as(?usize, 1), lastBatchStart(&blocks).index);
+}
+
+test "IGSH-1754 batch label uses Today Yesterday and older day formats" {
+    var out: [48]u16 = undefined;
+    const now: BatchDay = .{ .year = 2026, .month = 11, .day = 7, .hour = 9, .minute = 15 };
+    const n = formatBatchTimeLabel(.{ .year = 2026, .month = 11, .day = 7, .hour = 7, .minute = 33 }, now, &out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Today 07:33"), out[0..n]);
+    const n2 = formatBatchTimeLabel(.{ .year = 2026, .month = 11, .day = 6, .hour = 7, .minute = 33 }, now, &out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Yesterday 07:33"), out[0..n2]);
+    const n3 = formatBatchTimeLabel(.{ .year = 2026, .month = 11, .day = 3, .hour = 7, .minute = 33 }, now, &out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("3 Nov 07:33"), out[0..n3]);
 }
 
 test "IGSH-814 history gap never guesses from offsets and resync keeps the message anchor" {

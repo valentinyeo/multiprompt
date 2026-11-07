@@ -2433,6 +2433,12 @@ pub fn chatRelayout(client_width: i32) void {
         app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, boundary.index orelse count, app_state.g_chat_read_boundary.index orelse count);
     }
     app_state.g_chat_read_boundary = boundary;
+    var batch = chat_history.lastBatchStart(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
+    if (!std.meta.eql(batch, app_state.g_chat_batch_boundary)) {
+        const count = app_state.g_chat_block_count;
+        app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, batch.index orelse count, app_state.g_chat_batch_boundary.index orelse count);
+    }
+    app_state.g_chat_batch_boundary = batch;
     var reuse = @min(app_state.g_chat_layout_reuse, app_state.g_chat_block_count);
     const old_choice_sig = g_choice_sig;
     chatChoicesRefresh(buf);
@@ -2463,6 +2469,10 @@ pub fn chatRelayout(client_width: i32) void {
     for (reuse..app_state.g_chat_block_count) |i| {
         if (boundary.index == i) {
             app_state.g_chat_read_divider_y = y;
+            y += uiScaled(28);
+        }
+        if (app_state.g_chat_batch_boundary.index == i) {
+            app_state.g_chat_batch_divider_y = y;
             y += uiScaled(28);
         }
         if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) {
@@ -2545,6 +2555,7 @@ pub fn chatSetTopPad(new_pad: i32) void {
         rect.bottom += delta;
     }
     if (app_state.g_chat_read_boundary.index != null) app_state.g_chat_read_divider_y += delta;
+    if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
     app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
@@ -5230,6 +5241,23 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     _ = chatDrawText(hdc, L("New"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
+fn chatPaintBatchDivider(hdc: HANDLE, width: i32) void {
+    const boundary = app_state.g_chat_batch_boundary;
+    if (boundary.index == null or boundary.stamp_ms == 0) return;
+    const stamp = chat_history.batchDayFromUnixMs(boundary.stamp_ms) orelse return;
+    const now = chat_history.batchDayNow() orelse return;
+    var label: [48]u16 = undefined;
+    const label_len = chat_history.formatBatchTimeLabel(stamp, now, &label);
+    if (label_len == 0) return;
+    const top = app_state.g_chat_batch_divider_y - app_state.g_chat_scroll_y;
+    const old = SelectObject(hdc, chatMetadataFont());
+    defer _ = SelectObject(hdc, old);
+    _ = SetBkMode(hdc, TRANSPARENT);
+    _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
+    var rc = RECT{ .left = uiScaled(16), .top = top, .right = width - uiScaled(16), .bottom = top + uiScaled(28) };
+    _ = chatDrawText(hdc, label[0..label_len], -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+}
+
 fn chatPaintNavRing(hdc: HANDLE, rc: RECT) void {
     const brush = CreateSolidBrush(customColorOr("accent", RGB(110, 175, 245)));
     defer _ = DeleteObject(brush);
@@ -5293,6 +5321,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
         }
         chatPaintMessageActions(mem_dc);
         chatPaintReadDivider(mem_dc, w);
+        chatPaintBatchDivider(mem_dc, w);
         chatPaintChoices(mem_dc, h, paint);
         for (0..app_state.g_chat_echo_layout_count) |i| {
             var rc = app_state.g_chat_echo_layout[i];
