@@ -50,8 +50,8 @@ public static class JourneyForeground {
         return 30;
     }
     public static string Enabled(IntPtr window) {
-        if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-enabled");
-        return window == new IntPtr(201) ? "False" : "True";
+        if (ReconnectDesktop.Mode == "thread-error" || (window == new IntPtr(100) && ReconnectDesktop.Mode == "main-enabled-error")) throw new Exception("synthetic-secret-enabled");
+        return window == new IntPtr(201) || (window == new IntPtr(100) && ReconnectDesktop.Mode == "main-disabled") ? "False" : "True";
     }
     public static string ThreadFocus(uint thread) {
         if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-focus");
@@ -126,7 +126,7 @@ $edit = Open-Rename ([IntPtr]100) 42 'Runners'
 if ($edit -ne [IntPtr]200 -or ![ReconnectDesktop]::Entered -or ![ReconnectDesktop]::Selected) { throw 'Rename did not return the owned edit' }
 . (Join-Path (Get-Location) 'tools/account-journey/diagnostics.ps1')
 $secrets = @{ admin_key = 'synthetic-secret' }
-foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error', 'thread-error')) {
+foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'missing-unconfirmed', 'wrong-owner', 'wrong-root', 'probe-error', 'transient', 'spy-count-error', 'spy-events-error', 'snapshot-new', 'snapshot-missing', 'snapshot-many', 'snapshot-error', 'baseline-error', 'timeout-error', 'thread-error', 'main-disabled', 'main-enabled-error')) {
     $script:trace = "[palette] confirm target=7000`n"
     [ReconnectDesktop]::Opened = $false
     [ReconnectDesktop]::Ready = $false
@@ -171,12 +171,14 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
     $threads = switch ($mode) {
         'snapshot-error' { 'unavailable' }
         'timeout-error' { 'unavailable' }
-        'snapshot-missing' { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=' }
-        'snapshot-new' { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=200:20:True:201,201:20:False:201' }
-        'baseline-error' { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=200:20:True:201,201:20:False:201' }
-        'snapshot-many' { $entries = (200..211 | ForEach-Object { if ($_ -eq 201) { "${_}:20:False:201" } else { "${_}:20:True:201" } }) -join ','; "main_thread=10,foreground_thread=30,foreground_focus=100,entries=$entries" }
-        'thread-error' { 'main_thread=unavailable,foreground_thread=unavailable,foreground_focus=unavailable,entries=200:unavailable:unavailable:unavailable' }
-        default { 'main_thread=10,foreground_thread=30,foreground_focus=100,entries=200:20:True:201' }
+        'snapshot-missing' { 'main_thread=10,main_window_enabled=True,foreground_thread=30,foreground_focus=100,entries=' }
+        'snapshot-new' { 'main_thread=10,main_window_enabled=True,foreground_thread=30,foreground_focus=100,entries=200:20:True:201,201:20:False:201' }
+        'baseline-error' { 'main_thread=10,main_window_enabled=True,foreground_thread=30,foreground_focus=100,entries=200:20:True:201,201:20:False:201' }
+        'snapshot-many' { $entries = (200..211 | ForEach-Object { if ($_ -eq 201) { "${_}:20:False:201" } else { "${_}:20:True:201" } }) -join ','; "main_thread=10,main_window_enabled=True,foreground_thread=30,foreground_focus=100,entries=$entries" }
+        'thread-error' { 'main_thread=unavailable,main_window_enabled=unavailable,foreground_thread=unavailable,foreground_focus=unavailable,entries=200:unavailable:unavailable:unavailable' }
+        'main-disabled' { 'main_thread=10,main_window_enabled=False,foreground_thread=30,foreground_focus=100,entries=200:20:True:201' }
+        'main-enabled-error' { 'main_thread=10,main_window_enabled=unavailable,foreground_thread=30,foreground_focus=100,entries=200:20:True:201' }
+        default { 'main_thread=10,main_window_enabled=True,foreground_thread=30,foreground_focus=100,entries=200:20:True:201' }
     }
     if (!$message.Contains("thread_edits=[$threads]")) { throw "Incorrect thread diagnostic for $mode" }
     if ($mode -eq 'wrong' -and $message -notmatch 'focus=200 owner=42 root=100 edit_class=True ') { throw 'Wrong-name edit not identified' }

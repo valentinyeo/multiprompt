@@ -216,6 +216,7 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
             $foregroundThread = 0
             try { $mainThread = [JourneyForeground]::ThreadId($Window) } catch {}
             try { $foregroundThread = [JourneyForeground]::ForegroundThreadId() } catch {}
+            $mainWindowEnabled = try { [JourneyForeground]::Enabled($Window) } catch { 'unavailable' }
             $mainThreadValue = if ($mainThread) { [string]$mainThread } else { 'unavailable' }
             $foregroundThreadValue = if ($foregroundThread) { [string]$foregroundThread } else { 'unavailable' }
             $foregroundFocus = try { [JourneyForeground]::ThreadFocus($foregroundThread) } catch { 'unavailable' }
@@ -229,7 +230,7 @@ function Open-Rename([IntPtr]$Window, [int]$ProcessId, [string]$ExpectedName) {
                 try { $candidateFocus = [JourneyForeground]::ThreadFocus($thread) } catch {}
                 '{0}:{1}:{2}:{3}' -f $_.ToInt64(), $threadValue, $enabled, $candidateFocus
             }) -join ','
-            $threadSnapshot = "main_thread=$mainThreadValue,foreground_thread=$foregroundThreadValue,foreground_focus=$foregroundFocus,entries=$threadEntries"
+            $threadSnapshot = "main_thread=$mainThreadValue,main_window_enabled=$mainWindowEnabled,foreground_thread=$foregroundThreadValue,foreground_focus=$foregroundFocus,entries=$threadEntries"
         } catch {}
         $message += " before_edits=[$baselineSnapshot] timeout_edits=[$timeoutSnapshot] thread_edits=[$threadSnapshot] saw_focused_owned_edit=$($state.saw_focused_owned_edit) events=$events"
         $exception = [System.Exception]::new($message, $original.Exception)
