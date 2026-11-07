@@ -12,6 +12,7 @@ const files = {
   tick: 'busy-1',
   'reply-delta': 'reply-delta',
   'turn-ended': 'answered',
+  idle: 'idle',
 };
 
 export function parseStages(log) {
@@ -46,6 +47,7 @@ export function observe(log, imageFor) {
         animated: !!first.dots && !!next.dots && JSON.stringify(first.dots) !== JSON.stringify(next.dots),
         dotsOnReplyDelta: !!stages['reply-delta'].dots,
         dotsAfterTurnEnded: !!stages['turn-ended'].dots,
+        idleDots: !!stages.idle.dots,
       },
     };
   }
@@ -63,8 +65,9 @@ export function validate(result) {
     assert.ok(stages['turn-started'].timer, `${name}: live event did not start animation timer`);
     assert.ok(observations.animated, `${name}: dots did not animate`);
     assert.ok(stages['reply-delta'].blocks > stages['turn-started'].blocks, `${name}: reply did not reach transcript`);
-    assert.ok(!stages['reply-delta'].slot && !observations.dotsOnReplyDelta, `${name}: dots remain with reply text`);
-    assert.ok(!stages['turn-ended'].slot && !observations.dotsAfterTurnEnded, `${name}: dots remain after turn ended`);
+    assert.ok(stages['reply-delta'].visible && stages['reply-delta'].slot && observations.dotsOnReplyDelta, `${name}: reply hides dots while Stop remains visible`);
+    assert.ok(stages['turn-ended'].visible && stages['turn-ended'].slot && observations.dotsAfterTurnEnded, `${name}: active telemetry hides dots after turn ended`);
+    assert.ok(!stages.idle.visible && !stages.idle.slot && !stages.idle.timer && !observations.idleDots, `${name}: dots or timer remain after idle`);
   }
 }
 
