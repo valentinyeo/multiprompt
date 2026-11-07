@@ -66,6 +66,9 @@ def serve(source):
                             close(cid)
                             continue
                         if cid not in channels:
+                            if not packet.get("open", True):
+                                emit(dict(channel=cid, closed=True))
+                                continue
                             if len(channels) >= MAX_CHANNELS:
                                 emit(dict(channel=cid, closed=True))
                                 continue

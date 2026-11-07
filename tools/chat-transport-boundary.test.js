@@ -54,9 +54,11 @@ with tempfile.TemporaryDirectory() as folder:
         value = replies.get(timeout=15)
         assert value is not None, child.stderr.read().decode() + ''.join(file.read_text(encoding='utf-8') for file in pathlib.Path(folder).glob('reader-*.stderr.log'))
         return value
+    opened = set()
     def send(channel, value, watch=False):
-        child.stdin.write((json.dumps(dict(channel=channel, data=json.dumps(value), watch=watch)) + '\n').encode())
+        child.stdin.write((json.dumps(dict(channel=channel, data=json.dumps(value), watch=watch, open=channel not in opened)) + '\n').encode())
         child.stdin.flush()
+        opened.add(channel)
     def page(channel):
         value = next_reply()
         assert value['channel'] == channel, value
@@ -77,6 +79,8 @@ with tempfile.TemporaryDirectory() as folder:
         send(2, dict(id=8, value=text))
         assert page(2) == dict(id=8, value=text, watch=False)
         send(3, dict(id=9, exit=True))
+        assert next_reply() == dict(channel=3, closed=True)
+        send(3, dict(id=10, value='must not reopen'))
         assert next_reply() == dict(channel=3, closed=True)
         send(2, dict(id=10, value='survived'))
         assert page(2)['value'] == 'survived'

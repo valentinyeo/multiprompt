@@ -49,7 +49,7 @@ test "blocked SSH writes leave incoming data and other channels usable with boun
     try host.channels.append(a, &noisy);
     try host.channels.append(a, &healthy);
     try std.testing.expect(write(&noisy, "first"));
-    try std.testing.expect(std.mem.eql(u8, host.outgoing.items[0].bytes, "{\"channel\":1,\"watch\":false,\"terminal\":false,\"data\":\"first\"}\n"));
+    try std.testing.expect(std.mem.eql(u8, host.outgoing.items[0].bytes, "{\"channel\":1,\"watch\":false,\"terminal\":false,\"open\":true,\"data\":\"first\"}\n"));
     const writer = try std.Thread.spawn(.{}, transmit, .{&host});
     defer {
         lock(&host);
@@ -60,6 +60,7 @@ test "blocked SSH writes leave incoming data and other channels usable with boun
     }
     while (!entered.load(.acquire)) w.Sleep(1);
     for (0..256) |_| try std.testing.expect(write(&noisy, "x"));
+    try std.testing.expect(std.mem.indexOf(u8, host.outgoing.items[0].bytes, "\"open\":false") != null);
     try std.testing.expect(!write(&noisy, "overflow"));
     try std.testing.expect(noisy.ended);
     try std.testing.expect(host.running);

@@ -9,6 +9,7 @@ pub const Channel = struct {
     id: u32,
     watch: bool,
     terminal: bool = false,
+    started: bool = false,
     notify_hwnd: w.HANDLE = null,
     notify_message: u32 = 0,
     ended: bool = false,
@@ -247,12 +248,13 @@ pub fn write(channel: *Channel, line: []const u8) bool {
     lock(host);
     defer host.mutex.unlock();
     if (channel.ended or !host.running) return false;
-    if (!packet(host, .{ .channel = channel.id, .watch = channel.watch, .terminal = channel.terminal, .data = line })) {
+    if (!packet(host, .{ .channel = channel.id, .watch = channel.watch, .terminal = channel.terminal, .open = !channel.started, .data = line })) {
         channel.ended = true;
         _ = packet(host, .{ .channel = channel.id, .close = true });
         notify(channel);
         return false;
     }
+    channel.started = true;
     return true;
 }
 

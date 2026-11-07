@@ -1384,6 +1384,9 @@ def transport_reader():
                 emit(dict(channel=cid, closed=True))
                 continue
             if cid not in channels:
+                if not value.get("open", True):
+                    emit(dict(channel=cid, closed=True))
+                    continue
                 if len(channels) >= transport["MAX_CHANNELS"]:
                     emit(dict(channel=cid, closed=True))
                     continue
