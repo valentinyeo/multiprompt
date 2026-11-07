@@ -1127,19 +1127,22 @@ test "delivery: IGSH-1859 a message the agent merged into a later turn stops sho
     const text = std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/b.png  too much text everywhere ");
     const merged = std.unicode.utf8ToUtf16LeStringLiteral("/reduce-first https://example.com/a.png fix this page\n\nhttps://example.com/b.png  too much text everywhere \n\nhttps://example.com/c.png one more note");
     try enqueue(text, .not_sent);
-    g_chat_outbox.items[0].anchor = .{ .sent_ms = 100_000 };
-    g_chat_outbox.items[0].message_v1 = true;
-    g_chat_outbox.items[0].write_started = true;
-    g_chat_outbox.items[0].channel_sent = true;
-    g_chat_outbox.items[0].retryable = true;
-    @memcpy(g_chat_outbox.items[0].message_phase[0..6], "queued");
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/c.png one more note"), .not_sent);
+    for (g_chat_outbox.items) |*entry| {
+        entry.anchor = .{ .sent_ms = 100_000 };
+        entry.message_v1 = true;
+        entry.write_started = true;
+        entry.channel_sent = true;
+        entry.retryable = true;
+        @memcpy(entry.message_phase[0..6], "queued");
+    }
     transcript(merged, 1000);
     chatEchoMatchActive();
-    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
     transcript(merged, 160_000);
     chatEchoMatchActive();
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
-    try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
+    try std.testing.expectEqual(@as(usize, 2), g_chat_confirmed.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
 test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
