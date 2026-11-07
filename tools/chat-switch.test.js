@@ -46,12 +46,14 @@ test('chat paints before the coalesced browser exchange, including stale refresh
   assert.throws(() => paintFirst(baseline), assert.AssertionError);
 });
 
-test('switch restores the unified parsed cache and defers disk/remote IO', () => {
+test('switch restores the unified parsed cache and defers remote IO', () => {
   const restore = body('chatDeferTranscriptLoad');
   assert.match(restore, /chatHistoryEntry\(chatCacheIdentity\(\)\)/);
+  assert.match(restore, /chatLoadSaved\(entry\)/);
   assert.match(restore, /history.text.items/);
+  assert.match(restore, /g_chat_switch_loading = false/);
   assert.doesNotMatch(source, /g_chat_tab_cache|g_chat_file_token/);
-  assert.doesNotMatch(restore, /chat_transcript\.parse|captureChatTranscript|readFile|fetchAcPersistent/);
+  assert.doesNotMatch(restore, /chat_transcript\.parse|captureChatTranscript|readFile|fetchAcPersistent|chatHistoryFetch/);
   assert.match(body('chatFileFetchThread'), /history.apply/);
   assert.match(body('chatFileFetchThread'), /chatHistoryRead[\s\S]*History.decode/);
   assert.doesNotMatch(body('chatHistoryEntry'), /chatHistoryRead|History.decode/);

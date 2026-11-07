@@ -1425,7 +1425,7 @@ pub fn chatFileOnReady() void {
             if (belongs_to_active) {
                 active_changed = active_changed or !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
-                app_state.g_chat_switch_loading = history.more;
+                app_state.g_chat_switch_loading = history.more and entry.history.blocks.items.len == 0;
                 const idx = findShellById(key.shell_id) orelse continue;
                 const sid = std.mem.sliceTo(&history.sid, 0);
                 var changed = false;
@@ -1752,6 +1752,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_cache_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     if (cached) |entry| {
+        chatLoadSaved(entry);
         const history = &entry.history;
         if (chatEnsureTranscriptCapacity(history.text.items.len, history.blocks.items.len)) {
             app_state.g_chat_last_hash = history.revision;
@@ -1765,7 +1766,7 @@ pub fn chatDeferTranscriptLoad() void {
         }
     }
     chatEchoMatchActive();
-    app_state.g_chat_switch_loading = app_state.g_chat_block_count == 0;
+    app_state.g_chat_switch_loading = false;
     app_state.g_chat_content_h = 0;
     app_state.g_chat_scroll_y = 0;
     app_state.g_chat_scrolled_up = false;
@@ -1793,6 +1794,64 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_layout_dirty = true;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     if (app_state.g_chat_block_count == 0) chatFileRequest(chatFileIdentity());
+}
+
+fn chatLoadSaved(entry: *ChatHistoryEntry) void {
+    if (entry.disk_loaded or entry.pending or entry.loading_disk or entry.history.blocks.items.len != 0 or entry.history.rows.items.len != 0) return;
+    var path_buf: [560]u8 = undefined;
+    const path = chatHistoryPath(entry.key, &path_buf) orelse return;
+    const bytes = chatHistoryRead(path) orelse {
+        entry.disk_loaded = true;
+        return;
+    };
+    defer std.heap.page_allocator.free(bytes);
+    const decoded = chat_history.History.decode(std.heap.page_allocator, bytes, entry.key) catch {
+        entry.disk_loaded = true;
+        return;
+    };
+    entry.history.deinit(std.heap.page_allocator);
+    entry.history = decoded;
+    entry.disk_loaded = true;
+    if (entry.key.sid[0] == 0) entry.key.sid = entry.history.sid;
+}
+
+pub fn chatWarmOftenUsed() void {
+    if (app_state.g_main_hwnd == null or IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0) return;
+    const now = GetTickCount64();
+    const active_busy = if (app_state.g_chat_active) blk: {
+        const entry = chatHistoryEntry(chatFileIdentity());
+        break :blk entry != null and (entry.?.pending or chat_history.retryDue(false, now, entry.?.next));
+    } else false;
+    const Ranked = struct { idx: u32, viewed: u64 };
+    var ranked: [5]Ranked = undefined;
+    var count: usize = 0;
+    var i: u32 = 0;
+    while (i < app_state.shell_count) : (i += 1) {
+        if (i == app_state.active_shell) continue;
+        const shell = &app_state.shells[i];
+        if (shell.last_viewed == 0 or shell.kind != .tmux) continue;
+        const key = chatFileIdentityForShell(i);
+        if (key.shell_id == 0 or key.tmux[0] == 0) continue;
+        var place: usize = count;
+        while (place > 0 and ranked[place - 1].viewed < shell.last_viewed) : (place -= 1) {}
+        if (place == ranked.len) continue;
+        var shift = if (count < ranked.len) count else ranked.len - 1;
+        while (shift > place) : (shift -= 1) ranked[shift] = ranked[shift - 1];
+        ranked[place] = .{ .idx = i, .viewed = shell.last_viewed };
+        if (count < ranked.len) count += 1;
+    }
+    var remote = false;
+    var n: usize = 0;
+    while (n < count) : (n += 1) {
+        const key = chatFileIdentityForShell(ranked[n].idx);
+        const entry = chatHistoryEntry(key) orelse continue;
+        if (entry.retired) continue;
+        if (!entry.disk_loaded and !entry.pending and !entry.loading_disk) chatFileRequestForDelivery(key, true);
+        if (remote or active_busy or entry.pending or entry.history.blocks.items.len == 0) continue;
+        if (!chat_history.retryDue(false, now, entry.next)) continue;
+        chatFileRequestForDelivery(key, true);
+        remote = true;
+    }
 }
 
 pub fn chatSwitchDidPaint() void {

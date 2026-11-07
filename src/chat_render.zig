@@ -5320,7 +5320,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             if (paint_note) {
                 const extra_top = if (g_working_rect) |working| working.bottom - app_state.g_chat_scroll_y else 0;
                 const message: ?LPCWSTR = if (entry) |e|
-                    (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else null)
+                    (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else null)
                 else
                     null;
                 if (message) |text| chatPaintEmpty(mem_dc, w, text, extra_top);
