@@ -77,8 +77,13 @@ test('every console reveal is guarded; a new HWND alias bypass are rejected', ()
 
 });
 
+test('remote tab connects its shared terminal when Chat View shows the console', () => {
+  assert.match(fn(source, 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);
+});
+
 function harness(text) {
-  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n');
+  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n')
+    .replaceAll('@import("native_session.zig")', 'NativeSession');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -94,7 +99,14 @@ const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { workspace: u32 = 0, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false };
+const Shell = struct { workspace: u32 = 0, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false, native_terminal: bool = false, console_inflight: bool = false };
+const NativeSession = struct {
+    fn alive(_: u32) bool { return true; }
+    fn connect(_: u32) bool { return true; }
+    fn ready(_: u32, _: bool) void {}
+    fn ensureWindow(_: u32) bool { return false; }
+};
+comptime { _ = NativeSession.alive(0); }
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
@@ -273,6 +285,7 @@ test('executed production Zig decision, show, picker-close and input paths pass;
     assert.notEqual(broken, source);
     fs.writeFileSync(file, (harness(broken)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const negative = spawnSync(zig, ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
+    if (negative.signal) fs.cpSync(dir, '/tmp/chat-neg', { recursive: true });
     assert.notEqual(negative.status, 0, 'an unconditional show must fail real execution');
     assert.match(negative.stderr, /URL picker close[^]*FAIL/, JSON.stringify({ status: negative.status, signal: negative.signal, error: negative.error?.message, stdout: negative.stdout }));
     const oldPicker = source.replace(fn(source, 'closeUrlPickerInternal'), fn(source, 'closeUrlPickerInternal').replace('showShellConsole(active_shell, SW_SHOW, "closeUrlPickerInternal")', 'ShowWindow(shells[active_shell].hwnd, SW_SHOW)'));

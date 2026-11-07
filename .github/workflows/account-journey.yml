@@ -112,6 +112,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
           npx wrangler deploy --dry-run --outdir .build
           if ($LASTEXITCODE -ne 0) { throw 'Worker build failed' }
+      - name: Check account journey diagnostics
+        shell: pwsh
+        run: |
+          . ./tools/account-journey/diagnostics.ps1
+          & ./tools/account-journey/diagnostics.test.ps1
+          & ./tools/account-journey/foreground.test.ps1
+          pwsh -NoProfile -NonInteractive -File tools/account-journey/foreground-predicate.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Foreground predicate regression failed' }
+          pwsh -NoProfile -NonInteractive -File tools/fixtures/HYCI-137/workspace.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Workspace selection regression failed' }
+          node --test tools/account-journey/rename.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Rename regression failed' }
       - name: Drive the real desktop against the account service
         shell: pwsh
         run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
@@ -132,6 +144,8 @@ jobs:
             evidence/native-*.json
             evidence/desktop-*.png
             evidence/desktop-*.json
+            evidence/desktop-a.log
+            evidence/desktop-b.log
           if-no-files-found: error
 
   picture-desktop:

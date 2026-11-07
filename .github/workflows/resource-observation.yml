@@ -1,0 +1,59 @@
+name: Resource guard
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test guard
+        run: node --test tools/resource-guard/snapshot.test.mjs tools/resource-guard/evaluate.test.mjs tools/resource-guard/verify-baseline.test.mjs tools/resource-warning-ticket.test.mjs tools/release-version.test.mjs
+      - name: Prepare synthetic SSH and pinned baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/resource-guard/setup.ps1
+      - name: Test Windows resource staging and sessions
+        shell: pwsh
+        run: |
+          ./tools/resource-guard/stage.test.ps1
+          ./tools/resource-guard/session.test.ps1
+      - name: Test owned TCP connections
+        shell: pwsh
+        run: ./tools/resource-guard/tcp.test.ps1
+      - name: Test fixture process lifetime
+        shell: pwsh
+        run: ./tools/resource-guard/launcher-lifetime.test.ps1
+      - name: Resolve candidate version
+        shell: pwsh
+        run: |
+          $tag = node tools/release-version.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "CANDIDATE_VERSION=$($tag.Substring(1))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build candidate
+        shell: pwsh
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=$env:CANDIDATE_VERSION"
+      - name: Measure baseline
+        shell: pwsh
+        run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin
+      - name: Measure candidate
+        shell: pwsh
+        run: ./tools/resource-guard/measure.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
+      - name: Evaluate resource gate
+        if: always()
+        run: node tools/resource-guard/evaluate.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr-resource-observation
+          path: resource-evidence/
+          if-no-files-found: warn

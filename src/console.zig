@@ -2812,7 +2812,7 @@ pub fn switchToShell(idx: u32) void {
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }
     chatAcClose();
-    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind)) {
+    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and !app_state.shells[idx].native_terminal and isRemoteShellKind(app_state.shells[idx].kind)) {
         if (!app_state.shells[idx].disconnected) markSshTabDisconnected(idx);
         armSshReconnectTimerIfNeeded();
     }
