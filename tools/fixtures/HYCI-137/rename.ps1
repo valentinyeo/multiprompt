@@ -44,7 +44,7 @@ public static class JourneyForeground {
     public static int Phase;
     public static string OwnedWindows(IntPtr window, int pid) {
         if (ReconnectDesktop.Mode == "owned-error") throw new Exception("synthetic-secret-owned");
-        return Phase == 0 ? "count=1,truncated=False,entries=300:100:True:True:MultiPromptDialog" : "count=1,truncated=False,entries=301:100:True:True:other";
+        return Phase == 0 ? "count=1,truncated=False,entries=300:100:True:True:MultiPromptDialog:unknown" : "count=1,truncated=False,entries=301:100:True:True:other:unknown";
     }
     public static uint ThreadId(IntPtr window) {
         if (ReconnectDesktop.Mode == "thread-error") throw new Exception("synthetic-secret-thread");
@@ -163,8 +163,8 @@ foreach ($mode in @('wrong', 'unfocused', 'wrong-name', 'missing-confirmed', 'mi
         !$caught.Exception.InnerException -or $caught.Exception.InnerException.Message -cne 'Timed out: workspace rename edit' -or
         $diagnostic.original_script_stack -notmatch 'Wait-For') { throw 'Unsafe or incomplete rename timeout diagnostic' }
     $enabled = if ($mode -in @('thread-error', 'main-enabled-error')) { 'unavailable' } elseif ($mode -eq 'main-disabled') { 'False' } else { 'True' }
-    $beforeOwned = if ($mode -eq 'owned-error') { 'unavailable' } else { 'count=1,truncated=False,entries=300:100:True:True:MultiPromptDialog' }
-    $afterOwned = if ($mode -eq 'owned-error') { 'unavailable' } else { 'count=1,truncated=False,entries=301:100:True:True:other' }
+    $beforeOwned = if ($mode -eq 'owned-error') { 'unavailable' } else { 'count=1,truncated=False,entries=300:100:True:True:MultiPromptDialog:unknown' }
+    $afterOwned = if ($mode -eq 'owned-error') { 'unavailable' } else { 'count=1,truncated=False,entries=301:100:True:True:other:unknown' }
     if (!$message.Contains("before_activation=[main_enabled=$enabled,owned=[$beforeOwned]] after_activation=[main_enabled=$enabled,owned=[$afterOwned]] timeout_windows=[main_enabled=$enabled,owned=[$afterOwned]]")) { throw 'Incorrect owned-window phases' }
     $sawEdit = $mode -in @('wrong', 'transient')
     $eventTrail = if ($mode -in @('spy-count-error', 'spy-events-error')) { 'unavailable' } else { ((3..14 | ForEach-Object { "$(1 + $_):$(200 + $_):42:100" }) -join ',') }

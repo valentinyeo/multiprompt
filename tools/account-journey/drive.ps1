@@ -408,6 +408,7 @@ try {
     $stage = 'native baseline B session'
     [void](Wait-For 'B baseline session' { Session-Has $sessionB 'Runners' $newName } 30)
     $stage = 'native baseline B workspace'
+    Clear-JourneyApproval $mainB $appB.Id
     Show-Workspace 'Runners' $mainB $appB.Id $sessionB
     $stage = 'native baseline B rename'
     $editB = Open-Rename $mainB $appB.Id 'Runners'
@@ -415,6 +416,7 @@ try {
     Assert-Focus $mainB $appB.Id $editB
     [ReconnectDesktop]::Type(0x1B)
     $stage = 'native baseline A workspace'
+    Clear-JourneyApproval $main $app.Id
     Show-Workspace 'Runners' $main $app.Id $sessionA
     $stage = 'native baseline A rename'
     $editA = Open-Rename $main $app.Id 'Runners'
