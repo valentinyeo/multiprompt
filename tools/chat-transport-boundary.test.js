@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -99,6 +99,11 @@ test('Windows-safe fake host preserves real logical channel routing and reader b
   assert.match(source, /def transport_reader\(/);
   assert.match(source, /entry = "transport_reader"/);
   assert.match(source, /entry = "watch_reader" if value\.get\("watch"\) else "serve_reader"/);
-  const result = execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 45000 });
-  assert.match(result, /TRANSPORT_BOUNDARY_PASS/);
+  const result = spawnSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 45000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && !result.stderr.includes('AssertionError')) {
+    throw new Error(`transport boundary execution failed: ${result.stderr}`);
+  }
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /TRANSPORT_BOUNDARY_PASS/);
 });
