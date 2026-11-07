@@ -612,6 +612,14 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
   assert.match(deleted.stderr, /App code changed/);
 });
 
+test('HYCI-168 attributes only the reviewed Windows resources merge', () => {
+  const commit = { sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e1', subject: 'Merge pull request #831' };
+  const ticketTitles = { ...titles, 'HYCI-168': '[INFRA] Stop releases with growing Windows resources' };
+  const generated = buildChangelog(base(), 'v0.28.1600', [], [commit], ticketTitles);
+  assert.match(generated, /\.ticket = "HYCI-168"/);
+  assert.throws(() => buildChangelog(base(), 'v0.28.1600', [], [{ ...commit, sha: 'ed1a8bb96c8c2d57abacf4b62912a7c95f54c8e2' }], ticketTitles), /lacks a leading ticket ID/);
+});
+
 test('IGSH-1732 attributes the reviewed repository picker merge before publishing', () => {
   const files = { ...base(), 'changelog.d/IGSH-1528-repositories.md': 'Choose project folders across every server.\n' };
   const commits = [{ sha: '03c8a7198930c20e5c4a57bd9799cd2e73b5312c', subject: "Merge remote-tracking branch 'origin/master' into HEAD" }];
