@@ -102,7 +102,7 @@ On an isolated POSIX machine, run the checks with Python 3.12:
 ```sh
 python tools/room_service_test.py -v
 python tools/room_bridge_test.py -v
-python tools/room-checks/test_protocol.py -v
+python tools/room-checks/protocol.test.py -v
 ```
 
 These checks cover store and bridge protocol behavior, not native UI, paid-provider replies, or end-to-end room delivery.
