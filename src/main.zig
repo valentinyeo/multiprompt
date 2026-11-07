@@ -3842,7 +3842,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         @import("win32.zig").WM_APP_PLUS_MENU_ACTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            const item: plus_menu.Item = std.meta.intToEnum(plus_menu.Item, wp) catch return 0;
+            const item: plus_menu.Item = blk: {
+                inline for (std.meta.fields(plus_menu.Item)) |field| {
+                    if (wp == field.value) break :blk @enumFromInt(field.value);
+                }
+                return 0;
+            };
             switch (item) {
                 .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
                 .model_opus, .model_sonnet, .model_haiku, .effort_low, .effort_medium, .effort_high => {
