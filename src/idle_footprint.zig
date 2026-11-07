@@ -42,8 +42,8 @@ test "startup and chat view block passive browser launch until intent" {
     g_startup_settled = false;
     app_state.g_chat_active = true;
     app_state.shell_count = 1;
-    app_state.shells[0] = .{};
     app_state.shells[0].browser_enabled = true;
+    app_state.shells[0].browser_pin_entry_pending = false;
     try std.testing.expect(!passiveBrowserLaunchAllowed(0));
     g_startup_settled = true;
     try std.testing.expect(!passiveBrowserLaunchAllowed(0));
