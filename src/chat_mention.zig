@@ -6,7 +6,7 @@ pub const Chat = struct { name: []const u8, session: []const u8, index: u32 };
 pub const Span = struct { start: usize, visible_end: usize, end: usize };
 
 const Pick = struct { name: [192]u8 = undefined, name_len: usize = 0, session: [64]u8 = undefined, session_len: usize = 0 };
-var picks: [16]Pick = .{.{}} ** 16;
+var picks: [16]Pick = @splat(.{});
 var pick_count: usize = 0;
 var pick_view: [16]Chat = undefined;
 var live_names: [app.MAX_SHELLS][192]u8 = undefined;
@@ -240,7 +240,9 @@ pub fn shownRows() []const Chat {
     return shown[0..shown_count];
 }
 
-const W = std.unicode.utf8ToUtf16LeStringLiteral;
+fn utf16(text: []const u8, buf: []u16) []const u16 {
+    return buf[0 .. std.unicode.utf8ToUtf16Le(buf, text) catch unreachable];
+}
 
 test "IGSH-1811 @ names another live chat and the sent text keeps its session" {
     const chats = [_]Chat{
@@ -249,27 +251,45 @@ test "IGSH-1811 @ names another live chat and the sent text keeps its session" {
         .{ .name = "Notes", .session = "live-notes-a", .index = 3 },
         .{ .name = "Notes", .session = "live-notes-b", .index = 4 },
     };
-    try std.testing.expect(spanAt(W("@SF"), 0, &chats) == null);
-    try std.testing.expect(spanAt(W("@Mini"), 0, &chats) == null);
-    const sentence = W("ask @SF Design Lead is the reply card built?");
+    var storage: [16][160]u16 = undefined;
+    var slot: usize = 0;
+    const w = struct {
+        fn next(store: [][160]u16, used: *usize, text: []const u8) []const u16 {
+            const buf = &store[used.*];
+            used.* += 1;
+            return utf16(text, buf);
+        }
+    }.next;
+    const partial = w(&storage, &slot, "@SF");
+    const mini = w(&storage, &slot, "@Mini");
+    const sentence = w(&storage, &slot, "ask @SF Design Lead is the reply card built?");
+    const name = w(&storage, &slot, "@SF Design Lead");
+    const mail = w(&storage, &slot, "mail user@example.com");
+    const boss_text = w(&storage, &slot, "@Mini Boss CEO");
+    const typed = w(&storage, &slot, "@SF Design Lead is the reply card built? @Notes too");
+    const marked = w(&storage, &slot, "@SF Design Lead{live-design} is the reply card built? @Notes{live-notes-b} too");
+    const marker = w(&storage, &slot, "{live-design}");
+    const plain_name = w(&storage, &slot, "@SF Design Lead is the reply card built?");
+    const plain = w(&storage, &slot, "@unknown stays");
+    try std.testing.expect(spanAt(partial, 0, &chats) == null);
+    try std.testing.expect(spanAt(mini, 0, &chats) == null);
     const range = spanAt(sentence, 4, &chats).?;
-    try std.testing.expectEqualSlices(u16, W("@SF Design Lead"), sentence[range.start..range.visible_end]);
+    try std.testing.expectEqualSlices(u16, name, sentence[range.start..range.visible_end]);
     try std.testing.expect(spanAt(sentence, 5, &chats) == null);
-    try std.testing.expect(spanAt(W("mail user@example.com"), 10, &chats) == null);
-    const boss = spanAt(W("@Mini Boss CEO"), 0, &chats).?;
-    try std.testing.expectEqualSlices(u16, W("@Mini Boss CEO"), W("@Mini Boss CEO")[boss.start..boss.visible_end]);
+    try std.testing.expect(spanAt(mail, 10, &chats) == null);
+    const boss = spanAt(boss_text, 0, &chats).?;
+    try std.testing.expectEqualSlices(u16, boss_text, boss_text[boss.start..boss.visible_end]);
     var out: [256]u16 = undefined;
     const chosen = [_]Chat{.{ .name = "Notes", .session = "live-notes-b", .index = 4 }};
-    const wired = annotate(W("@SF Design Lead is the reply card built? @Notes too"), &chosen, &chats, &out);
-    try std.testing.expectEqualSlices(u16, W("@SF Design Lead{live-design} is the reply card built? @Notes{live-notes-b} too"), wired);
+    const wired = annotate(typed, &chosen, &chats, &out);
+    try std.testing.expectEqualSlices(u16, marked, wired);
     var visible: [256]u16 = undefined;
-    try std.testing.expectEqualSlices(u16, W("@SF Design Lead is the reply card built? @Notes too"), copyVisible(wired, &.{}, &visible));
+    try std.testing.expectEqualSlices(u16, typed, copyVisible(wired, &.{}, &visible));
     const kept = spanAt(wired, 0, &.{}).?;
-    try std.testing.expectEqualSlices(u16, W("@SF Design Lead"), wired[kept.start..kept.visible_end]);
-    try std.testing.expectEqualSlices(u16, W("{live-design}"), wired[kept.visible_end..kept.end]);
+    try std.testing.expectEqualSlices(u16, name, wired[kept.start..kept.visible_end]);
+    try std.testing.expectEqualSlices(u16, marker, wired[kept.visible_end..kept.end]);
     try std.testing.expect(hasMarker(wired));
-    try std.testing.expect(!hasMarker(W("@SF Design Lead is the reply card built?")));
-    const plain = W("@unknown stays");
+    try std.testing.expect(!hasMarker(plain_name));
     var same: [128]u16 = undefined;
     try std.testing.expect(annotate(plain, &.{}, &chats, &same).ptr == plain.ptr);
 }

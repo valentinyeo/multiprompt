@@ -26,6 +26,7 @@ function run(code) {
   require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
+    require('./fixtures/inline-stubs').writeChatMention(dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
@@ -429,6 +430,9 @@ test "table paint without selection makes no per-character GDI calls; real selec
     }
 }
 `;
+test('IGSH-1811 a named live chat is one pill inside the sent message', () => {
+  assert.match(body(source, 'chatFlowText'), /spanAt\(text, pos, mentions\)/);
+});
 test('production table paint avoids per-character selection measurement when nothing is selected', () => {
   const result = run(flow + body(source, 'chatFlowText') + flowChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
