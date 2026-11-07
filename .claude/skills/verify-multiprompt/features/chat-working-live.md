@@ -17,6 +17,10 @@ Dispatch `verify.yml` with `feature=chat-working-live`, optionally with a releas
 
 The remote shell and provider are stand-ins. The provider stand-in runs production message dispatch in a thread, substitutes host ownership and delivery, and writes production host events through the app-supplied reader's event store. The existing Windows notification polling fallback delivers the real subscription pages. It sends a text delta but deliberately no turn-ended event, so the reply must retain dots while the turn remains active. The journey then submits two real follow-up messages, requires both queued records from the production message store, and checks that the dots still animate. No credentials or paid provider are used. The app, composer, outbox, message store, subscription, window loop and painter are real.
 
+## Recorded hosted proof
+
+Run https://github.com/valentinyeo/multiprompt/actions/runs/42368960296 passed on `f6fefa003`. Downloaded `verify-chat-delivery/result.json` reports `passed`; both cleanup records report zero remaining owned processes and removed scratch directories. This is the simulated-provider boundary above, not a real provider acceptance claim.
+
 ## Gotchas
 
 This is not proof of a real provider, real SSH, provider startup or the normal external message-worker process. Timing includes the actual hosted runner and stand-in transport, not production network or provider latency. A passing portable checker test is not a hosted desktop result. Require the Windows artifact and inspect the screenshots; no pass is claimed until that run succeeds.
