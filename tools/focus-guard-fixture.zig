@@ -71,6 +71,12 @@ fn GetFocus() HANDLE {
 fn GetCurrentThreadId() DWORD {
     return 11;
 }
+fn GetLastError() DWORD {
+    return 0;
+}
+fn verboseLoggingEnabled() bool {
+    return false;
+}
 fn GetWindowThreadProcessId(hwnd: HANDLE, _: ?*DWORD) DWORD {
     return @intCast(@intFromPtr(hwnd) + 10);
 }
@@ -89,7 +95,7 @@ fn browserPaneOwnsForegroundHwnd(fg: HANDLE, _: HANDLE) bool {
 fn foregroundIsOurs() bool {
     return foreground != null and foreground != win(9);
 }
-fn focusTrace(event: enum { allowed, activation_refocus, blocked }, _: HANDLE, _: usize) void {
+fn focusTrace(event: enum { allowed, activation_refocus, blocked, setfocus_null_return, setfocus_returned }, _: HANDLE, _: usize) void {
     if (event == .blocked) blocked_logs += 1;
 }
 fn debugLog(text: []const u8) void {

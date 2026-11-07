@@ -164,7 +164,13 @@ function auditFocusTrace(focus, composer, main, diagnostics) {
   const wrappers = focus.slice(focus.indexOf('fn SetForegroundWindow('), focus.indexOf('pub fn SetWindowPos('));
   assert.doesNotMatch(wrappers, /\bfocusGuard\(/);
   assert.equal((focus.match(/pub noinline fn (?:focusGuard|SetForegroundWindow|SetFocus|AttachThreadInput|SwitchToThisWindow|AllowSetForegroundWindow|ShowWindow|ShowWindowAsync)\(/g) || []).length, 8);
-  assert.equal((wrappers.match(/@returnAddress\(\)/g) || []).length, 7);
+  assert.equal((wrappers.match(/@returnAddress\(\)/g) || []).length, 8);
+  for (const name of ['SetForegroundWindow', 'SetFocus', 'AttachThreadInput', 'SwitchToThisWindow', 'AllowSetForegroundWindow', 'ShowWindow', 'ShowWindowAsync']) {
+    const start = wrappers.indexOf(`fn ${name}(`);
+    const end = wrappers.indexOf('\npub noinline fn ', start + 1);
+    assert.match(wrappers.slice(start, end < 0 ? undefined : end), /focusGuardAt\([^;]*?@returnAddress\(\)/, `${name} must pass its caller to the guard`);
+  }
+  assert.match(wrappers, /focusTrace\(if \(result == null\) \.setfocus_null_return else \.setfocus_returned, hwnd, @returnAddress\(\)\)/);
   assert.match(diagnostics, /if \(!owns_input or focus_trace_busy.swap/);
   assert.match(diagnostics, /and !std.mem.startsWith\(u8, msg, "\[focus-trace\] "\)/);
   assert.match(diagnostics, /GetClassNameW\(hwnd, &wide, wide.len\)/);
