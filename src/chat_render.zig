@@ -2433,7 +2433,7 @@ pub fn chatRelayout(client_width: i32) void {
         app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, boundary.index orelse count, app_state.g_chat_read_boundary.index orelse count);
     }
     app_state.g_chat_read_boundary = boundary;
-    var batch = chat_history.lastBatchStart(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
+    const batch = chat_history.lastBatchStart(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
     if (!std.meta.eql(batch, app_state.g_chat_batch_boundary)) {
         const count = app_state.g_chat_block_count;
         app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, batch.index orelse count, app_state.g_chat_batch_boundary.index orelse count);

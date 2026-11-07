@@ -66,12 +66,13 @@ fn chatRelayout() void {
 }
 test "same index stacks batch under New" {
     g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .stamp_ms = 1 };
-    g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .prose, .first = true, .stamp_ms = 2 };
+    g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .user, .first = true, .stamp_ms = 2 };
     g_chat_blocks[2] = .{ .start = 2, .len = 1, .role = .prose, .first = true, .stamp_ms = 3 };
     g_chat_block_count = 3;
+    g_chat_read_boundary = .{ .index = 2 };
     chatRelayout();
     try std.testing.expectEqual(@as(?usize, 2), g_chat_batch_boundary.index);
-    try std.testing.expectEqual(g_chat_layout_rects[0].bottom, g_chat_read_divider_y);
+    try std.testing.expectEqual(@as(i32, 88), g_chat_read_divider_y);
     try std.testing.expectEqual(g_chat_read_divider_y + 28, g_chat_batch_divider_y);
     try std.testing.expectEqual(g_chat_batch_divider_y + 28, g_chat_layout_rects[2].top);
 }
