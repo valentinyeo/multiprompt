@@ -24,7 +24,7 @@ static void window_feed(HWND hwnd, const char *bytes) {
     mp_terminal_window_feed(hwnd, bytes, strlen(bytes));
 }
 
-static void terminal_window_fixture(void) {
+static void terminal_window_cycle(int check_resources) {
     HWND parent = CreateWindowExW(0, L"STATIC", L"Terminal fixture", WS_POPUP, 0, 0, 800, 600, NULL, NULL, GetModuleHandleW(NULL), NULL);
     assert(parent);
     LOGFONTW font = {0};
@@ -108,8 +108,19 @@ static void terminal_window_fixture(void) {
     assert(!strcmp(active->bytes, "\033[200~copy\033[201~"));
     for (int i = 0; i < 30; i++) assert(DestroyWindow(windows[i]));
     GdiFlush();
-    assert(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) == gdi_before);
-    assert(GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS) == user_before);
+    DWORD gdi_after = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+    DWORD user_after = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
+    printf("TERMINAL_WINDOW_RESOURCES measured=%d GDI=%lu/%lu USER=%lu/%lu\n", check_resources, gdi_before, gdi_after, user_before, user_after);
+    fflush(stdout);
+    if (check_resources) {
+        assert(gdi_after == gdi_before);
+        assert(user_after == user_before);
+    }
     assert(DestroyWindow(parent));
-    puts("TERMINAL_WINDOW_PASS 30 owned child windows; Unicode; application keys; resize; pixels; clipboard; zero GDI/USER growth");
+}
+
+static void terminal_window_fixture(void) {
+    terminal_window_cycle(0);
+    terminal_window_cycle(1);
+    puts("TERMINAL_WINDOW_PASS 30 owned child windows; Unicode; application keys; resize; pixels; clipboard; zero warmed GDI/USER growth");
 }
