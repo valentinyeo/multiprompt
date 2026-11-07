@@ -44,6 +44,19 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     Save-Json (Read-Session) ($Shot + '.session.json')
 }
 
+if ((Read-Session).workspace_count -ne 1) { throw 'Identity round-trip requires one initial workspace' }
+Focus-Palette 'single window' 6207
+Press @(0x0D) 'Enter: leave single-window mode with one workspace'
+Wait-Until { $state = Read-Session; $null -ne $state -and -not ($state.PSObject.Properties['single_window'] -and $state.single_window) } 'standalone mode saved'
+Focus-Palette 'single window' 6207
+Press @(0x0D) 'Enter: return to single-window mode'
+Wait-Until {
+    $state = Read-Session
+    $null -ne $state -and $state.PSObject.Properties['single_window'] -and $state.single_window -and $state.workspace_count -eq 1 -and $state.workspaces[0].wid -ceq 'default'
+} 'home workspace keeps the containing window identity'
+Save-Json (Read-Session) 'workspace-window-identity.session.json'
+$result.checks += @{ name = 'workspace-window-identity'; id = 'default'; setup = 'real single-window mode round trip' }
+
 $before = (Read-Session).workspace_count
 Snapshot 'action'
 Press @(0x11, 0x4E) 'Ctrl+N: create workspace'
@@ -53,6 +66,13 @@ Snapshot 'created'
 Select-WorkspaceCard 0 'workspace-first'
 Select-WorkspaceCard $created 'workspace-created'
 $result.checks += @{ name = 'workspace-card-mouse-switch'; first = 0; created = $created; hiddenNumberedPills = (Read-Session).hide_pills }
+
+Press @(0x12, 0x32) 'Alt+2: return to the home workspace'
+Wait-Until { (Read-Session).active_workspace -eq 0 -and -not (Read-Session).starred_view } 'home keyboard shortcut still works'
+Press @(0x12, 0x33) 'Alt+3: return to the created workspace'
+Wait-Until { (Read-Session).active_workspace -eq $created -and -not (Read-Session).starred_view } 'created workspace keyboard shortcut still works'
+Snapshot 'workspace-shortcut-return'
+$result.checks += @{ name = 'workspace-number-shortcuts'; home = 0; created = $created }
 
 foreach ($theme in @('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray', 'system')) {
     $query = if ($theme -eq 'edgegray') { 'edge grey' } else { $theme }

@@ -25,6 +25,7 @@ Preconditions:
 - The fresh instance has room for another workspace; no browser pane owns Alt+Right.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=workspaces`; Windows runs `control.ps1 -Feature workspaces`.
+- **Identity regression.** Before creating another workspace, toggle Single-window mode off and back on through real Ctrl+K commands. Require the home workspace identity to equal the current window identity (`default`). This reproduces IGSH-1774 without writing settings or forging clicks. After creating another workspace, the existing first-workspace click must return to this same-ID home slot and close the menu; Alt+2 and Alt+3 must still switch between both slots.
 - **Create.** Press Ctrl+N and require exactly one new saved workspace and CMD session.
 - **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first workspace row, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
 - **Themes.** Capture the header and open card in dark, Multiprompt, light, AMOLED, mid, edge grey and system themes. Check native card fill and dismiss with Escape without switching.
