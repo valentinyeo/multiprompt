@@ -17,6 +17,7 @@ public static class ReconnectDesktop {
         for (int i = 0; i < events.Length; i++) events[i] = new FocusEvent { ev = (uint)(i + 1), hwnd = 200 + i, pid = 42, root = 100 };
         return events;
     }
+    public static void Activate(IntPtr window) { }
     public static void Key(ushort key, bool up) { }
     public static void Type(ushort key) {
         if (key == 0x4B) Opened = true;
