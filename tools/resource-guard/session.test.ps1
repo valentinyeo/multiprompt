@@ -17,16 +17,25 @@ Check ($null -eq (Get-GuardSessionIds $writer 30)) 'Duplicate IDs must fail clos
 $writer.tabs[1].shell_id = '2'
 Check ($null -eq (Get-GuardSessionIds $writer 30)) 'String IDs must fail closed'
 Check ($null -eq (Get-GuardSessionIds (ConvertFrom-Json '{}') 30)) 'Missing tabs must fail closed'
+$ordered = @(1..30 | ForEach-Object { "$_" })
 $seen = @{}
 foreach ($id in 1..30) {
-    $trace = "hook: Ctrl+Tab shift=0 -> NEXT_TAB`nswitchToShell: 0 -> 1 restoring=false`n[switch] chat content shown shell=$id blocks=3 ms=1"
-    $painted = Get-GuardPaintedId $trace $ids
+    $index = $id - 1
+    $previous = ($index + 29) % 30
+    $trace = "hook: Ctrl+Tab shift=0 -> NEXT_TAB`nswitchToShell: $previous -> $index restoring=false`n[switch] chat content shown shell=$id blocks=3 ms=1`nswitch-timing: to=$index total_us=100"
+    $painted = Get-GuardPaintedId $trace $ids $ordered
     Check ($painted -eq "$id" -and -not $seen.ContainsKey($painted)) 'Each switch must prove a distinct painted shell'
     $seen[$painted] = $true
 }
 Check ($seen.Count -eq 30) 'All thirty shells must be visited'
-Check ($null -eq (Get-GuardPaintedId '[switch] chat content shown shell=1 blocks=3' $ids)) 'Paint alone is not a switch'
-Check ($null -eq (Get-GuardPaintedId "hook: Ctrl+Tab shift=0 -> NEXT_TAB`nswitchToShell: 0 -> 1 restoring=false`n[switch] chat content shown shell=1 blocks=0" $ids)) 'Empty paint is not ready'
+$prefix = "hook: Ctrl+Tab shift=0 -> NEXT_TAB`nswitchToShell: 0 -> 1 restoring=false`n"
+Check ($null -eq (Get-GuardPaintedId ($prefix + '[switch] chat content shown shell=2 blocks=3') $ids $ordered)) 'Paint before switch completion is not ready'
+Check ($null -eq (Get-GuardPaintedId ($prefix + 'switch-timing: to=1 total_us=100') $ids $ordered)) 'Switch completion without paint is not ready'
+Check ($null -eq (Get-GuardPaintedId ($prefix + "switch-timing: to=1 total_us=100`n[switch] chat content shown shell=2 blocks=0") $ids $ordered)) 'Empty paint is not ready'
+Check ((Get-GuardPaintedId ($prefix + "switch-timing: to=1 total_us=100`n[switch] chat content shown shell=2 blocks=3") $ids $ordered) -eq '2') 'Completion before paint must be accepted'
 $failed = $false
-try { Get-GuardPaintedId "hook: Ctrl+Tab shift=0 -> NEXT_TAB`nswitchToShell: 0 -> 1 restoring=false`n[switch] chat content shown shell=31 blocks=1" $ids } catch { $failed = $true }
+try { Get-GuardPaintedId ($prefix + "switch-timing: to=1 total_us=100`n[switch] chat content shown shell=31 blocks=1") $ids $ordered } catch { $failed = $true }
 Check $failed 'Unknown painted shell must fail closed'
+$failed = $false
+try { Get-GuardPaintedId ($prefix + "switch-timing: to=1 total_us=100`n[switch] chat content shown shell=3 blocks=1") $ids $ordered } catch { $failed = $true }
+Check $failed 'Paint from another session must fail closed'

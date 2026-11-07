@@ -51,7 +51,9 @@ try {
     $main = [IntPtr]::Zero
     Wait-For 'owned main window' { $script:main = [ChatDeliveryDesktop]::Window($app.Id); $script:main -ne [IntPtr]::Zero }
     Wait-For "$sessionCount restored chat tabs" {
-        $script:sessionIds = Get-GuardSessionIds (Session) $sessionCount
+        $saved = Session
+        $script:sessionIds = Get-GuardSessionIds $saved $sessionCount
+        if ($null -ne $script:sessionIds) { $script:orderedIds = @($saved.tabs | ForEach-Object { "$($_.shell_id)" }) }
         $null -ne $script:sessionIds -and (Read-Log) -match 'launch step=browser'
     }
     $seen = @{}
@@ -64,7 +66,7 @@ try {
         [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
         Wait-For 'switched chat painted' {
             $text = Read-Log
-            $script:paintedId = if ($text.Length -ge $offset) { Get-GuardPaintedId ($text.Substring($offset)) $sessionIds } else { $null }
+            $script:paintedId = if ($text.Length -ge $offset) { Get-GuardPaintedId ($text.Substring($offset)) $sessionIds $orderedIds } else { $null }
             $null -ne $script:paintedId
         }
         if ($seen.ContainsKey($paintedId)) { throw "Chat $paintedId visited twice" }
@@ -110,16 +112,21 @@ try {
     for ($i = 0; $i -lt $sessionCount; $i++) {
         try {
             $composer = [ChatDeliveryDesktop]::Composer($main)
-            if ($composer -eq [IntPtr]::Zero -or -not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)) { throw 'Cannot focus composer before switching' }
+            $focus = [ChatDeliveryDesktop]::Focus($main)
+            if ($composer -eq [IntPtr]::Zero -or $focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Composer not focused before switching' }
             $offset = (Read-Log).Length
             [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
             Wait-For 'latency session switched' {
                 $text = Read-Log
-                $script:paintedId = if ($text.Length -ge $offset) { Get-GuardPaintedId ($text.Substring($offset)) $sessionIds } else { $null }
+                $script:paintedId = if ($text.Length -ge $offset) { Get-GuardPaintedId ($text.Substring($offset)) $sessionIds $orderedIds } else { $null }
                 $null -ne $script:paintedId
             } 15
-            $composer = [ChatDeliveryDesktop]::Composer($main)
-            if ($composer -eq [IntPtr]::Zero -or -not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) -or [ChatDeliveryDesktop]::Text($composer) -ne '') { throw 'Expected empty focused composer' }
+            Wait-For 'switched composer focus' {
+                $script:composer = [ChatDeliveryDesktop]::Composer($main)
+                $focus = [ChatDeliveryDesktop]::Focus($main)
+                $script:composer -ne [IntPtr]::Zero -and $focus[0] -eq $main.ToInt64() -and $focus[1] -eq $script:composer.ToInt64()
+            } 15
+            if ([ChatDeliveryDesktop]::Text($composer) -ne '') { throw 'Expected empty focused composer' }
             $clock = [Diagnostics.Stopwatch]::StartNew()
             [ChatDeliveryDesktop]::Character('x')
             do {

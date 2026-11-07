@@ -10,10 +10,14 @@ function Get-GuardSessionIds($Session, [int]$Count) {
     return $ids
 }
 
-function Get-GuardPaintedId([string]$Text, $Ids) {
-    $match = [regex]::Match($Text, '(?s)hook: Ctrl\+Tab shift=0 -> NEXT_TAB.*?switchToShell: (\d+) -> (\d+) .*?\[switch\] chat content shown shell=(\d+) blocks=([1-9]\d*)\b')
-    if (-not $match.Success -or $match.Groups[1].Value -eq $match.Groups[2].Value) { return $null }
-    $id = $match.Groups[3].Value
+function Get-GuardPaintedId([string]$Text, $Ids, [array]$OrderedIds) {
+    $match = [regex]::Match($Text, '(?s)hook: Ctrl\+Tab shift=0 -> NEXT_TAB.*?switchToShell: (\d+) -> (\d+) ')
+    $paint = [regex]::Match($Text, '\[switch\] chat content shown shell=(\d+) blocks=([1-9]\d*)\b')
+    $timing = [regex]::Match($Text, 'switch-timing: to=(\d+)\b')
+    if (-not $match.Success -or -not $paint.Success -or -not $timing.Success -or $match.Groups[1].Value -eq $match.Groups[2].Value) { return $null }
+    $id = $paint.Groups[1].Value
+    $index = [int]$match.Groups[2].Value
     if (-not $Ids.ContainsKey($id)) { throw "Painted unexpected shell $id" }
+    if ($index -ge $OrderedIds.Count -or $timing.Groups[1].Value -ne "$index" -or "$($OrderedIds[$index])" -ne $id) { throw 'Painted shell does not match completed switch' }
     return $id
 }
