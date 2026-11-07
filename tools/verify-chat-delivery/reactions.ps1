@@ -1,4 +1,8 @@
 [void](Wait-For 'reaction transcript loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
+[void](Wait-For 'app detected Claude before requesting Claude-only reactions' {
+    $published = (Read-Shared "$settings/inbox-default.json" | ConvertFrom-Json).shells
+    @($published | Where-Object { $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
+})
 Press @(0x11, 0x4B) 'Ctrl+K: open theme picker'
 foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
 Press @(0x0D) 'Enter: Themes'
@@ -8,6 +12,7 @@ Press @(0x0D) 'Enter: AMOLED'
 Press @(0x1B) 'Esc: close Themes'
 Bind-Transcript
 Type-Composer $plan.text
+[void](Wait-For 'typed draft reached the remote session before testing preservation' { (Fake-State).box -ceq $plan.text })
 $bounds = $views[0].Current.BoundingRectangle
 $frame = Wait-For 'painted transcript geometry' {
     $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (-?\d+),(-?\d+),(-?\d+),(-?\d+) edit ')
