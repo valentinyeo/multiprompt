@@ -218,8 +218,70 @@ jobs:
           path: release-proof/
           if-no-files-found: error
 
+  resource-observation:
+    needs: [prepare, build]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test guard
+        run: node --test tools/resource-guard/snapshot.test.mjs tools/resource-guard/evaluate.test.mjs tools/resource-guard/verify-baseline.test.mjs tools/resource-warning-ticket.test.mjs
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: multiprompt-x64
+          path: release-bin
+      - name: Prepare synthetic SSH and pinned baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./tools/resource-guard/setup.ps1
+          Copy-Item release-bin/zigshell-bridge-x64.exe release-bin/zigshell-bridge.exe
+      - name: Test Windows resource staging and sessions
+        shell: pwsh
+        run: |
+          ./tools/resource-guard/stage.test.ps1
+          ./tools/resource-guard/session.test.ps1
+      - name: Test owned TCP connections
+        shell: pwsh
+        run: ./tools/resource-guard/tcp.test.ps1
+      - name: Test fixture process lifetime
+        shell: pwsh
+        run: ./tools/resource-guard/launcher-lifetime.test.ps1
+      - name: Measure baseline
+        shell: pwsh
+        run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin
+      - name: Measure candidate
+        shell: pwsh
+        run: ./tools/resource-guard/measure.ps1 -Exe release-bin/multiprompt-x64.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
+      - name: Evaluate resource gate
+        if: always()
+        run: node tools/resource-guard/evaluate.mjs
+      - name: File measured latency warnings
+        if: always()
+        continue-on-error: true
+        env:
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: node tools/resource-warning-ticket.mjs resource-evidence/verdict.json "$env:RUN_URL" "$env:SOURCE_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: release-resource-observation
+          path: resource-evidence/
+          if-no-files-found: warn
+
   release:
-    needs: [prepare, build, launch, gitleaks]
+    needs: [prepare, build, launch, gitleaks, resource-observation]
     permissions:
       contents: write
     runs-on: ubuntu-latest

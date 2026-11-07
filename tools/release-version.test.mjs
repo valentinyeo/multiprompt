@@ -8,7 +8,8 @@ import test from 'node:test';
 import { releaseVersion, nextReleaseTag } from './release-version.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const workflow = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
+const readWorkflow = name => fs.readFileSync(path.join(root, '.github/workflows', name), 'utf8').replace(/\r\n/g, '\n');
+const workflow = readWorkflow('release.yml');
 const tag = 'v1.2.3';
 const changelog = '.{ .ver = "1.2.3" },\n.{ .ver = "1.2.2" },\n';
 const script = (name, source = workflow) => {
@@ -137,7 +138,7 @@ test('CLI reads files and fails closed', t => {
 });
 
 test('master release builds both architectures, launches, scans and publishes the exact source', () => {
-  const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
+  const auto = readWorkflow('auto-release.yml');
   assert.match(auto, /push:\n    branches: \[master\]/);
   assert.match(auto, /workflow_dispatch:/);
   assert.match(auto, /if: github.ref == 'refs\/heads\/master'/);
@@ -148,22 +149,22 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
   assert.match(workflow, /permissions:\n  contents: write/);
   assert.doesNotMatch(workflow, /--draft/);
-  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['HYPERTASK_AGENT_TOKEN', 'MULTIPROMPT_RELEASE_SIGNING_KEY']);
+  assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['HYPERTASK_AGENT_TOKEN', 'HYPERTASK_AGENT_TOKEN', 'MULTIPROMPT_RELEASE_SIGNING_KEY']);
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
-  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 3);
+  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 4);
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
-  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks\]/);
+  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: false$/m);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /"tools\/version-stamp.test.mjs", "tools\/release-version.test.mjs"/);
   for (const step of ['test_step', 'vps_test_step']) assert(build.includes(`${step}.dependOn(&version_stamp_tests.step);`));
   assert(fs.readFileSync(path.join(root, 'tools/public_audit.py'), 'utf8').includes('tools/release-version.test.mjs'));
-  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const tests = readWorkflow('test.yml');
   assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 3);
 });
 
@@ -207,9 +208,9 @@ test('release builds both architectures independently of the report-only Tests w
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.build, /needs: prepare/);
-  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks\]/);
+  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
   assert.doesNotMatch(jobs.release, /journeys|update-test|test-result/);
-  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const tests = readWorkflow('test.yml');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
   assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance\]/);
@@ -217,7 +218,7 @@ test('release builds both architectures independently of the report-only Tests w
 });
 
 test('aggregate routing requires every test job and rejects every unsuccessful dependency', () => {
-  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const tests = readWorkflow('test.yml');
   const aggregate = tests.split('\n  test-result:\n')[1];
   assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance\]/);
   for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run', SPEED: 'switch-performance' })) {
@@ -239,7 +240,7 @@ test('aggregate routing requires every test job and rejects every unsuccessful d
 });
 
 test('five Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
-  const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const tests = readWorkflow('test.yml');
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
   assert.deepEqual(matrices, [[1, 2, 3, 4, 5], [1, 2, 3]]);
@@ -273,13 +274,13 @@ test('five Windows and three VPS jobs retain the upstream test graph with indepe
 });
 
 test('gitleaks scans every push while other checks run manually or nightly', () => {
-  const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
+  const scan = readWorkflow('gitleaks.yml');
   assert.match(scan, /^  push:\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
   assert.match(scan, /^  workflow_dispatch:/m);
   assert.match(scan, /^  workflow_call:/m);
   for (const file of ['no-comments', 'docs-site', 'verify']) {
-    const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
+    const text = readWorkflow(`${file}.yml`);
     const events = text.split('\non:\n')[1].split(/\n(?:permissions|concurrency|jobs):/)[0];
     assert.match(events, /^  workflow_dispatch:/m, file);
     assert.match(events, /^  schedule:/m, file);
@@ -288,7 +289,7 @@ test('gitleaks scans every push while other checks run manually or nightly', () 
 });
 
 test('one lightweight workflow preserves both check names and checker suites', () => {
-  const checks = fs.readFileSync(path.join(root, '.github/workflows/no-comments.yml'), 'utf8');
+  const checks = readWorkflow('no-comments.yml');
   assert.match(checks, /^  workflow_dispatch:/m);
   assert.match(checks, /^  schedule:/m);
   for (const name of ['no-comments', 'extension-version']) assert.match(checks, new RegExp(`^    name: ${name}$`, 'm'));
@@ -451,7 +452,7 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
 });
 
 test('automatic release invokes the signed release workflow for master without test admission', () => {
-  const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
+  const auto = readWorkflow('auto-release.yml');
   assert.match(auto, /push:\n    branches: \[master\]/);
   assert.match(auto, /if: github.ref == 'refs\/heads\/master'/);
   assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
