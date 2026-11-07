@@ -3278,9 +3278,8 @@ pub fn updateSearchResults() void {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
             const e = &app_state.g_workspaces[wi];
             if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
-                if (app_state.g_ws_snoozed[slot]) continue;
+                if (app_state.g_ws_snoozed[slot] and !app_state.g_search_workspace_delete_mode) continue;
             }
-            if (app_state.g_search_workspace_delete_mode and !workspaceCanDelete(@intCast(wi))) continue;
             if (app_state.g_search_len == 0 or workspaceMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = if (app_state.g_search_workspace_delete_mode)
                     SEARCH_WORKSPACE_DELETE_OFFSET + wi

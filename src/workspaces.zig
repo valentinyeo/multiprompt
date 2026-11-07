@@ -544,12 +544,9 @@ pub fn workspaceCanDelete(wi: u32) bool {
     const e = &app_state.g_workspaces[wi];
     const id = e.id[0..e.id_len];
     if (id.len == 0) return false;
-    if (std.mem.eql(u8, id, getInstanceName())) return false;
-    if (e.host_len > 0) {
-        return entryHostedBy(e, getInstanceName()) and app_state.g_single_window and
-            app_state.g_lws_count > 1 and findMyWorkspaceSlot(id) != null;
-    }
-    return true;
+    if (std.mem.eql(u8, id, "default") or std.mem.eql(u8, id, getInstanceName())) return false;
+    if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) return app_state.g_lws_count > 1;
+    return e.host_len == 0;
 }
 
 fn workspaceCanOpen(wi: u32) bool {
@@ -835,30 +832,55 @@ fn archiveWorkspaceFile(path: []const u8, stamp: []const u8) void {
     _ = win32MovePath(path, dst[0..pos]);
 }
 
+fn workspaceDeleteFailed(reason: []const u8) bool {
+    debugLog2("workspace-delete result=refused reason=", reason);
+    var text: [256:0]u16 = @splat(0);
+    const len = @min(reason.len, text.len);
+    for (reason[0..len], 0..) |c, i| text[i] = c;
+    _ = @import("dialog.zig").messageBox(app_state.g_main_hwnd, &text, L("Cannot delete workspace"), 0);
+    return false;
+}
+
 pub fn deleteWorkspaceByIndex(wi: u32) bool {
-    if (!workspaceCanDelete(wi)) return false;
+    var log: [192]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "workspace-delete attempt index={d}", .{wi}) catch "workspace-delete attempt");
+    if (wi >= app_state.g_workspace_count) return workspaceDeleteFailed("This workspace is no longer in the list. Open Delete workspace again.");
+    if (!workspaceCanDelete(wi)) {
+        const entry = &app_state.g_workspaces[wi];
+        const identity = entry.id[0..entry.id_len];
+        if (std.mem.eql(u8, identity, "default")) return workspaceDeleteFailed("Main cannot be deleted");
+        if (std.mem.eql(u8, identity, getInstanceName())) return workspaceDeleteFailed("This workspace owns the current window. Close its window before deleting it.");
+        if (identity.len == 0) return workspaceDeleteFailed("This workspace has no saved identity. Close and reopen the workspace list.");
+        if (app_state.g_single_window and findMyWorkspaceSlot(identity) != null and app_state.g_lws_count <= 1) return workspaceDeleteFailed("At least one workspace must stay open.");
+        return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
+    }
     const e = &app_state.g_workspaces[wi];
     var id_copy: [64]u8 = std.mem.zeroes([64]u8);
     const id_len = @min(e.id_len, id_copy.len - 1);
-    if (id_len == 0) return false;
+    if (id_len == 0) return workspaceDeleteFailed("This workspace has no saved identity.");
     @memcpy(id_copy[0..id_len], e.id[0..id_len]);
     const id = id_copy[0..id_len];
+    debugLog2("workspace-delete target=", id);
 
-    if (entryHostedBy(e, getInstanceName())) {
-        const slot = findMyWorkspaceSlot(id) orelse return false;
-        deleteMyWorkspaceSlot(slot);
-        return true;
+    var local = false;
+    if (app_state.g_single_window) {
+        if (findMyWorkspaceSlot(id)) |slot| {
+            if (!deleteMyWorkspaceSlot(slot)) return false;
+            local = true;
+        }
     }
 
     scanLiveWorkspaceWindows(true);
-    if (findLiveWorkspaceTarget(id)) |t| {
-        if (t.slot >= 0) return false;
-        const target: HANDLE = @ptrFromInt(t.hwnd);
-        app_state.requestAppClose(target, .workspace_delete);
-        var waited: u32 = 0;
-        while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
-        if (IsWindow(target) != 0) return false;
-        Sleep(150);
+    if (!local) {
+        if (findLiveWorkspaceTarget(id)) |t| {
+            if (t.slot >= 0) return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
+            const target: HANDLE = @ptrFromInt(t.hwnd);
+            app_state.requestAppClose(target, .workspace_delete);
+            var waited: u32 = 0;
+            while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
+            if (IsWindow(target) != 0) return workspaceDeleteFailed("The other workspace window did not close. Close it and try again.");
+            Sleep(150);
+        }
     }
 
     var stamp_buf: [32]u8 = undefined;
@@ -868,12 +890,12 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     var audit_path_buf: [512]u8 = undefined;
     if (getSessionAuditPathForWorkspace(&audit_path_buf, id)) |path| archiveWorkspaceFile(path, stamp);
 
-    const registry_lock = lockWorkspaceRegistry() orelse return false;
+    const registry_lock = lockWorkspaceRegistry() orelse return workspaceDeleteFailed("The workspace list is busy. Please try again.");
     defer unlockWorkspaceRegistry(registry_lock);
     mergeWorkspaceRegistryFromDisk();
-    const cur = findWorkspace(id) orelse return true;
-    removeWorkspaceEntryAt(cur);
+    if (findWorkspace(id)) |cur| removeWorkspaceEntryAt(cur);
     writeWorkspaceRegistryFile();
+    debugLog2("workspace-delete result=deleted id=", id);
     return true;
 }
 
@@ -4188,17 +4210,15 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
-fn deleteMyWorkspaceSlot(slot: u8) void {
-    if (slot >= app_state.g_lws_count) return;
+fn deleteMyWorkspaceSlot(slot: u8) bool {
+    if (slot >= app_state.g_lws_count) return workspaceDeleteFailed("This workspace is no longer open.");
     if (app_state.g_ws_snoozed[slot]) {
-        showHeaderNoticeAscii("Wake workspace before deleting it", 3500, true);
-        return;
+        return workspaceDeleteFailed("Wake workspace before deleting it");
     }
     if (isOtherWorkspaceSlot(slot)) {
-        showHeaderNoticeAscii("Other is the permanent catch-all", 3500, true);
-        return;
+        return workspaceDeleteFailed("Other is the permanent catch-all and cannot be deleted.");
     }
-    if (rejectPinnedWorkspaceClose(slot)) return;
+    if (rejectPinnedWorkspaceClose(slot)) return workspaceDeleteFailed("Unpin the sessions in this workspace before deleting it.");
     var i: u32 = app_state.shell_count;
     while (i > 0) {
         i -= 1;
@@ -4219,6 +4239,7 @@ fn deleteMyWorkspaceSlot(slot: u8) void {
     updateMainWindowTitle();
     repositionActive();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
 }
 
 fn importWorkspaceGroups(json: []const u8, tabs: []SavedTab) bool {
