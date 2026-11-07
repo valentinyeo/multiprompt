@@ -113,6 +113,7 @@ const SEARCH_NEWWIN_OFFSET = @import("app_state.zig").SEARCH_NEWWIN_OFFSET;
 const SEARCH_CREATEWS_OFFSET = @import("app_state.zig").SEARCH_CREATEWS_OFFSET;
 const SEARCH_WORKSPACES_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACES_MENU_OFFSET;
 const SEARCH_WORKSPACE_DELETE_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
 const SEARCH_QUIT_OFFSET = @import("app_state.zig").SEARCH_QUIT_OFFSET;
 const SEARCH_FULLWIDTH_OFFSET = @import("app_state.zig").SEARCH_FULLWIDTH_OFFSET;
 const SEARCH_SHORTCUTS_OFFSET = @import("app_state.zig").SEARCH_SHORTCUTS_OFFSET;
@@ -2618,7 +2619,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_workspace_delete_mode)
                 L("Search workspaces to delete...")
             else if (app_state.g_search_workspace_mode)
-                L("Search workspaces to open...")
+                switch (app_state.g_search_workspace_action) {
+                    .open => L("Search workspaces to open..."),
+                    .archive => L("Search workspaces to archive..."),
+                    .restore => L("Search archived workspaces to restore..."),
+                }
             else
                 L("Search sessions and commands");
             _ = DrawTextW(hdc, placeholder, -1, &input_text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
@@ -3028,6 +3033,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var wm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Archived workspaces"), -1, &wm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_workspaces_menu) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4262,7 +4272,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (is_current) RGB(120, 120, 130) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                             var ws_buf: [96]u16 = undefined;
                             var wsl: usize = 0;
-                            const prefix = if (is_live) "Switch to Workspace: " else "Open Workspace: ";
+                            const prefix = if (app_state.g_search_workspace_mode and app_state.g_search_workspace_action == .archive) "Archive Workspace: " else if (e.archived) "Restore Workspace: " else if (is_live) "Switch to Workspace: " else "Open Workspace: ";
                             for (prefix) |c| {
                                 ws_buf[wsl] = c;
                                 wsl += 1;

@@ -2579,6 +2579,42 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertFalse(any(call[:1] == ['capture-pane'] for call in calls), calls)
 
     @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+    def test_IGSH_1851_stopped_host_with_missing_tmux_answers_saved_history(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
+        sid = 'live1517b1'
+        tmux_name = 'live-1517b1'
+        self.query.update(sid=sid, tmux=tmux_name, cwd='/work/demo', follow=True, live=True)
+        self.path = self.home / '.claude/projects' / reader.claude_project_folder('/work/demo') / (sid + '.jsonl')
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.write(self.event('saved hosted reply'))
+        reader.host_write(reader.host_paths('claude', sid)['config'],
+                          dict(enabled=True, tmux=tmux_name, cwd='/work/demo'))
+        reader.host_write(reader.host_paths('claude', sid)['state'], dict(stopped=1, inflight=None))
+        self.assertFalse(reader.host_alive('claude', sid), 'the hosted chat must be stopped')
+        real_tmux = shutil.which('tmux')
+        socket = 'igsh1851' + uuid.uuid4().hex[:8]
+        tools = self.home / 'bin'
+        tools.mkdir()
+        wrapper = tools / 'tmux'
+        wrapper.write_text('#!' + sys.executable + '\nimport os,sys\n' +
+                           'os.execv(' + repr(real_tmux) + ', [' + repr(real_tmux) + ', "-L", ' + repr(socket) + '] + sys.argv[1:])\n')
+        wrapper.chmod(0o755)
+        self.addCleanup(lambda: subprocess.run([real_tmux, '-L', socket, 'kill-server'], capture_output=True))
+        with patch.dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH']):
+            server = self.start_server('--watch')
+        reply = self.server_request(server, self.query)
+        self.assertIn('saved hosted reply', reply['wire'])
+        self.assertIn('\thistory\tok\t', reply['wire'])
+        self.assertNotIn('tmux control closed', reply['wire'])
+        self.assertIsNone(server.poll(), 'missing terminal session ended the reader')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertFalse(selector.select(timeout=0.4), 'missing terminal session made the reader loop')
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0)
+        self.assertNotIn(b'tmux control closed', server.stderr.read())
+
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
     def test_watch_appends_do_not_recapture_screen(self):
         self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
         tmux = shutil.which('tmux')
@@ -4854,9 +4890,14 @@ class AgentHostTest(AgentHostFixture, unittest.TestCase):
         self.enable(spawn_name='headless fixture', spawn_workspace='Work', spawn_group=None,
                     spawn_mode='headless', permission_mode='bypassPermissions')
         script = '''
+const {spawnSync} = await import('node:child_process');
 const {run} = await import(process.argv[1]);
+const temp = {};
+for (const key of ['TMPDIR', 'TMP', 'TEMP']) if (process.env[key]) temp[key] = process.env[key];
+const runtimeEnv = {HOME: process.argv[2], PATH: process.env.PATH, LANG: 'C.UTF-8', ...temp};
 process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder', process.argv[2], '--workspace', 'Work', '--mode', 'headless', '--task', process.argv[4]], {
-  env: {HOME: process.argv[2], PATH: process.env.PATH, MULTIPROMPT_KEY: 'fixture-key', MULTIPROMPT_READER: process.argv[3]},
+  env: {...runtimeEnv, MULTIPROMPT_KEY: 'fixture-key', MULTIPROMPT_READER: process.argv[3]},
+  runtime: (args, input) => spawnSync('python3', [process.argv[3], ...args], {input, encoding: 'utf8', timeout: 30000, env: runtimeEnv, maxBuffer: 1048576}),
   fetch: async () => ({status: 200, json: async () => ({revision: 0, layout: {workspaces: [{name: 'Work'}], tabs: []}})}),
   tmux: args => { if (args[0] !== 'has-session') throw new Error('headless created a pane'); return {status: 1}; }
 });

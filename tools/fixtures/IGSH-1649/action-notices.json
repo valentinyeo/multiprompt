@@ -170,6 +170,9 @@
     "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
     "wndProc: if(!@import(\"clipboard.zig\").setUnicodeClipboardTextWithRetry(wide_id[0..len]))showHeaderNoticeAscii(\"Could not copy chat ID\",3000,true)",
     "wndProc: if(!@import(\"command_palette.zig\").startAdoptHost(ti))showHeaderNoticeAscii(\"Move chat: this session cannot move yet\",4000,true)",
+    "wndProc: if(!@import(\"workspaces.zig\").archiveWorkspaceByIndex(@intCast(workspace_idx)))showHeaderNoticeAscii(\"Could not archive workspace\",4500,true)",
+    "wndProc: if(!@import(\"workspaces.zig\").archiveWorkspaceByIndex(index))showHeaderNoticeAscii(\"Could not archive workspace\",4500,true)",
+    "wndProc: if(!@import(\"workspaces.zig\").restoreArchivedWorkspaceByIndex(@intCast(workspace_idx)))showHeaderNoticeAscii(\"Could not restore workspace - archive kept\",4500,true)",
     "wndProc: if(!capacityBlockNoticeActive())showHeaderNoticeAscii(\"Archived session restore failed\",4000,true)",
     "wndProc: if(!photo.reset(digest))showHeaderNoticeAscii(\"Could not reset image\",4000,true)",
     "wndProc: if(lp!=0)@import(\"chat_render.zig\").chatFileNotice(lp)elseshowHeaderNoticeAscii(chatAttachErrorText(wp),4000,true)",
@@ -280,9 +283,10 @@
     "voiceReadReply: showHeaderNoticeAscii(\"No reply to read yet\",3000,true)"
   ],
   "workspaces.zig": [
-    "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Could not hibernate workspace - tabs left open\",4500,true)",
+    "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Could not archive workspace - tabs left open\",4500,true)",
+    "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Create another workspace before archiving this one\",4500,true)",
     "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Other is the permanent catch-all\",3500,true)",
-    "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Wake workspace before closing it\",3500,true)",
+    "closeMyWorkspaceSlot: showHeaderNoticeAscii(\"Wake workspace before archiving it\",3500,true)",
     "deleteMyWorkspaceSlot: showHeaderNoticeAscii(\"Other is the permanent catch-all\",3500,true)",
     "deleteMyWorkspaceSlot: showHeaderNoticeAscii(\"Wake workspace before deleting it\",3500,true)",
     "detachTabToExistingWindow: if(has_pinandsent!=0andcopy_result==0)showHeaderNoticeAscii(\"Could not move this pinned chat\",4000,true)",

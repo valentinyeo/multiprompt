@@ -5984,6 +5984,28 @@ def watch_changes(q, resolved, source, as_owner):
     control = None
     control_buffer = b""
     attached = False
+    selector = None
+
+    def detach_control():
+        nonlocal control, control_buffer, attached, selector
+        if control is None:
+            return
+        proc = control
+        control = None
+        control_buffer = b""
+        attached = False
+        q["watch_screen"] = ""
+        if selector is not None and proc.stdout is not None:
+            try:
+                selector.unregister(proc.stdout)
+            except (KeyError, ValueError, OSError):
+                pass
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.communicate()
+        except OSError:
+            pass
 
     def capture():
         nonlocal control_buffer, attached
@@ -6012,10 +6034,14 @@ def watch_changes(q, resolved, source, as_owner):
                 rows.append(line)
 
     def refresh_screen():
-        if control is not None:
+        if control is None:
+            return
+        try:
             started = time.perf_counter_ns()
             q["watch_screen"] = capture()
             q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
+        except OSError:
+            detach_control()
 
     def refresh_codex_binding():
         nonlocal resolved, agent, sid, path, delegated
@@ -6039,7 +6065,8 @@ def watch_changes(q, resolved, source, as_owner):
         metadata = HOME / ".claude/sessions"
         metadata_watch = (libc.inotify_add_watch(fd, os.fsencode(metadata), 0x00000FCE)
                           if agent == "claude" and q.get("tmux") and metadata.is_dir() else -1)
-        with selectors.DefaultSelector() as selector:
+        with selectors.DefaultSelector() as opened:
+            selector = opened
             selector.register(fd, selectors.EVENT_READ, "file")
             selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "input")
             if as_owner:
@@ -6069,9 +6096,15 @@ def watch_changes(q, resolved, source, as_owner):
                         if not os.read(key.fd, 4096):
                             return
                     elif key.data == "tmux":
-                        output = os.read(key.fd, 65536)
+                        if control is None:
+                            continue
+                        try:
+                            output = os.read(key.fd, 65536)
+                        except OSError:
+                            output = b""
                         if not output:
-                            return
+                            detach_control()
+                            continue
                         control_buffer += output
                         lines = control_buffer.split(b"\n")
                         control_buffer = lines.pop()
@@ -6375,7 +6408,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 88
+RUNTIME_GENERATION = 89
 
 if __name__ == '__main__':
     import base64 as _base64

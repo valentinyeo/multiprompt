@@ -51,6 +51,7 @@ const SEARCH_NEWWIN_OFFSET = @import("app_state.zig").SEARCH_NEWWIN_OFFSET;
 const SEARCH_CREATEWS_OFFSET = @import("app_state.zig").SEARCH_CREATEWS_OFFSET;
 const SEARCH_WORKSPACES_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACES_MENU_OFFSET;
 const SEARCH_WORKSPACE_DELETE_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
 const SEARCH_QUIT_OFFSET = @import("app_state.zig").SEARCH_QUIT_OFFSET;
 const SEARCH_FULLWIDTH_OFFSET = @import("app_state.zig").SEARCH_FULLWIDTH_OFFSET;
 const SEARCH_SHORTCUTS_OFFSET = @import("app_state.zig").SEARCH_SHORTCUTS_OFFSET;
@@ -820,7 +821,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_QUIT_OFFSET => "quit multi bot",
         SEARCH_FULLWIDTH_OFFSET => "full-width",
         SEARCH_SHORTCUTS_OFFSET => "keyboard shortcuts",
-        SEARCH_CLOSEWIN_OFFSET => "close workspace",
+        SEARCH_CLOSEWIN_OFFSET => "archive workspace",
+        SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET => "archived workspaces",
         SEARCH_RECONNECT_OFFSET => "reattach tab",
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
@@ -1344,7 +1346,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CHAT_MODE_PLAN_OFFSET or target == SEARCH_CHAT_MODE_MANUAL_OFFSET or target == SEARCH_CHAT_MODE_EDITS_OFFSET) return 7;
     return switch (target) {
         SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
-        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
         SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
         SEARCH_SETTINGS_OFFSET, SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
@@ -2909,6 +2911,10 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_remind_preset_mode) {
+        if (app_state.g_remind_ws_id_len > 0 and labelsMatchQuery(&.{"Archive workspace"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSEWIN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
         var now_st: SYSTEMTIME = undefined;
         GetLocalTime(&now_st);
         var pi: usize = 0;
@@ -3277,6 +3283,9 @@ pub fn updateSearchResults() void {
         for (0..app_state.g_workspace_count) |wi| {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
             const e = &app_state.g_workspaces[wi];
+            const archived = app_state.g_search_workspace_delete_mode or app_state.g_search_workspace_action == .restore;
+            if (e.archived != archived) continue;
+            if (app_state.g_search_workspace_action == .archive and !@import("workspaces.zig").workspaceCanArchive(@intCast(wi))) continue;
             if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
                 if (app_state.g_ws_snoozed[slot]) continue;
             }
@@ -3506,6 +3515,7 @@ pub fn updateSearchResults() void {
         for (0..app_state.g_workspace_count) |wi| {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
             const e = &app_state.g_workspaces[wi];
+            if (e.archived) continue;
             if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
                 if (app_state.g_ws_snoozed[slot]) continue;
             }
@@ -3514,6 +3524,13 @@ pub fn updateSearchResults() void {
                 app_state.g_search_result_count += 1;
             }
         }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&.{"Archived workspaces", "restore workspace"}, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
@@ -3914,7 +3931,7 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_closewin = (app_state.g_search_len == 0);
         if (!show_closewin) {
-            const closewin_labels = [_][]const u8{ "close", "close window", "close workspace", "close this window", "close this workspace" };
+            const closewin_labels = [_][]const u8{ "archive workspace", "archive old workspace", "hide workspace" };
             for (closewin_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                     show_closewin = true;
