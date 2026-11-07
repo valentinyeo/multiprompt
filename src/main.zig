@@ -9499,7 +9499,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
     return false;
 }
 
-fn expectPinnedActionRefused(action: enum { archive, end_session, group_close, workspace_close, inbox_archive }) !void {
+fn expectPinnedActionRefused(action: enum { archive, end_session, group_close, workspace_close }) !void {
     const old_shells = app_state.shells[0..2].*;
     const old_count = app_state.shell_count;
     const old_active = app_state.active_shell;
@@ -9556,7 +9556,6 @@ fn expectPinnedActionRefused(action: enum { archive, end_session, group_close, w
     const before = app_state.shells[0..2].*;
     switch (action) {
         .archive => archiveTabAt(1),
-        .inbox_archive => try std.testing.expect(!recordInboxArchive(1)),
         .end_session => endTmuxSessionAt(1),
         .group_close => @import("rename.zig").runGroupPaletteAction(null, 0, 4),
         .workspace_close => closeMyWorkspaceSlot(0),
@@ -9588,8 +9587,29 @@ test "IGSH-820 pinned tab refuses workspace close atomically" {
     try expectPinnedActionRefused(.workspace_close);
 }
 
-test "IGSH-820 pinned tab refuses Inbox archive" {
-    try expectPinnedActionRefused(.inbox_archive);
+test "IGSH-1820 pinned tab archives from the Inbox" {
+    const old_shells = app_state.shells[0..2].*;
+    const old_count = app_state.shell_count;
+    const old_notice = app_state.g_cap_msg_text;
+    const old_notice_len = app_state.g_cap_msg_len;
+    defer {
+        app_state.shells[0..2].* = old_shells;
+        app_state.shell_count = old_count;
+        app_state.g_cap_msg_text = old_notice;
+        app_state.g_cap_msg_len = old_notice_len;
+    }
+    app_state.shell_count = 2;
+    app_state.g_cap_msg_len = 0;
+    for (0..2) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(1820 + i);
+    }
+    app_state.shells[1].pinned_top = true;
+    try std.testing.expect(recordInboxArchive(1));
+    try std.testing.expect(app_state.shells[1].inbox_archived);
+    try std.testing.expect(app_state.shells[1].pinned_top);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_cap_msg_len);
+    try std.testing.expect(!app_state.shells[0].inbox_archived);
 }
 
 test "IGSH-836 palette keyboard survives stationary hover and real movement or click takes over" {

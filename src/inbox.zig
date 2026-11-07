@@ -990,6 +990,79 @@ test "muted sessions never show in the inbox" {
     try std.testing.expect(inboxRowVisible(&row));
 }
 
+test "IGSH-1820 E archives a pinned Inbox session and a blue dot brings a live session back" {
+    const prior_hwnd = app_state.g_main_hwnd;
+    const prior_locked = app_state.g_account_locked;
+    const prior_count = app_state.shell_count;
+    const prior_shell = app_state.shells[0];
+    const prior_ws_count = app_state.g_inbox_ws_count;
+    const prior_ws = app_state.g_inbox_ws[0];
+    const prior_unread = app_state.g_unread_only;
+    const prior_tab = app_state.g_inbox_tab;
+    const prior_filter = app_state.g_inbox_filter_active;
+    const prior_rows = app_state.g_inbox_rows[0];
+    const prior_row_count = app_state.g_inbox_row_count;
+    const prior_sel = app_state.g_inbox_sel;
+    const prior_notice = app_state.g_cap_msg_text;
+    const prior_notice_len = app_state.g_cap_msg_len;
+    defer {
+        app_state.g_main_hwnd = prior_hwnd;
+        app_state.g_account_locked = prior_locked;
+        app_state.shell_count = prior_count;
+        app_state.shells[0] = prior_shell;
+        app_state.g_inbox_ws_count = prior_ws_count;
+        app_state.g_inbox_ws[0] = prior_ws;
+        app_state.g_unread_only = prior_unread;
+        app_state.g_inbox_tab = prior_tab;
+        app_state.g_inbox_filter_active = prior_filter;
+        app_state.g_inbox_rows[0] = prior_rows;
+        app_state.g_inbox_row_count = prior_row_count;
+        app_state.g_inbox_sel = prior_sel;
+        app_state.g_cap_msg_text = prior_notice;
+        app_state.g_cap_msg_len = prior_notice_len;
+    }
+    app_state.g_main_hwnd = null;
+    app_state.g_account_locked = true;
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].shell_id = 1820;
+    app_state.shells[0].pinned_top = true;
+    app_state.shells[0].disconnected = false;
+    app_state.g_inbox_ws_count = 1;
+    app_state.g_inbox_ws[0] = .{ .hwnd = 0 };
+    app_state.g_unread_only = false;
+    app_state.g_inbox_tab = frequent.all_split;
+    app_state.g_inbox_filter_active = false;
+    app_state.g_inbox_rows[0] = .{ .ws = 0, .sid = 1820 };
+    app_state.g_inbox_row_count = 1;
+    app_state.g_inbox_sel = 0;
+    app_state.g_cap_msg_len = 0;
+
+    handleInboxKey(null, 24);
+    try std.testing.expect(app_state.shells[0].inbox_archived);
+    try std.testing.expect(app_state.shells[0].pinned_top);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_cap_msg_len);
+    try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_row_count);
+
+    app_state.shells[0].pid = 1820;
+    app_state.shells[0].activity = .active;
+    app_state.shells[0].console_working = true;
+    app_state.shells[0].needs_attention = false;
+    try std.testing.expect(!app_state.shells[0].disconnected);
+    try std.testing.expect(!inboxPublishesShell(&app_state.shells[0]));
+    try std.testing.expect(!setBlueDot(0, .manual, false));
+    try std.testing.expect(!inboxPublishesShell(&app_state.shells[0]));
+
+    app_state.shells[0].activity = .idle;
+    app_state.shells[0].console_working = false;
+    try std.testing.expect(setBlueDot(0, .manual, false));
+    try std.testing.expect(app_state.shells[0].needs_attention);
+    try std.testing.expect(app_state.shells[0].inbox_archived);
+    try std.testing.expect(inboxPublishesShell(&app_state.shells[0]));
+    const returned = InboxRow{ .ws = 0, .sid = 1820, .att = true };
+    try std.testing.expect(inboxRowVisible(&returned));
+}
+
 const InboxLayout = struct {
     left: i32,
     right: i32,

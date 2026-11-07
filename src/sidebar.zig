@@ -570,7 +570,7 @@ pub fn readArchiveContent(i: usize) ?archive_rules.Content {
 }
 
 pub fn recordInboxArchive(i: usize) bool {
-    if (i >= app_state.shell_count or @import("archive.zig").rejectPinnedSessionClose(i)) return false;
+    if (i >= app_state.shell_count) return false;
     const content = readArchiveContent(i);
     app_state.shells[i].archive_content = content orelse .{};
     app_state.shells[i].archive_content_valid = content != null;
@@ -653,7 +653,6 @@ pub fn restoreArchiveMarkers(shell: *Shell, tab: *const SavedTab) void {
 pub fn hideActiveTabUntilAttention() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const idx = app_state.active_shell;
-    if (@import("archive.zig").rejectPinnedSessionClose(idx)) return;
     if (app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention) {
         if (findNextVisibleTab(idx, 1) orelse findNextVisibleTab(idx, -1)) |nxt| {
             @import("console.zig").switchToShellByUser(nxt);

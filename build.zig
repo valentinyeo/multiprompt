@@ -750,6 +750,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&sidebar_drag_pin_tests.step);
     const session_lock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-lock.test.js" });
     test_step.dependOn(&session_lock_tests.step);
+    const inbox_pinned_archive_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-pinned-archive.test.js" });
+    test_step.dependOn(&inbox_pinned_archive_tests.step);
     const agent_recognition_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-recognition.test.js" });
     test_step.dependOn(&agent_recognition_tests.step);
     const capacity_guardian_tests = b.addSystemCommand(&.{ "node", "--test", "tools/capacity-guardian.test.js" });
