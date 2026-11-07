@@ -106,6 +106,46 @@ try {
         if ((Get-FileHash -LiteralPath $result.staging[$name].stagedPath -Algorithm SHA256).Hash -ne $result.staging[$name].inputSha256) { throw "Telemetry $name changed during measurement" }
     }
     $result.appAlive = $true
+    $result.latency = @{ method=@{ typing='Stopwatch before SendInput character to observed owned Edit text via WM_GETTEXT; 5 ms polling'; send='app debug send-latency painted_us after SendInput Enter; input-to-transcript paint instrumentation' }; typing=@(); send=@(); errors=@() }
+    for ($i = 0; $i -lt $sessionCount; $i++) {
+        try {
+            $composer = [ChatDeliveryDesktop]::Composer($main)
+            if ($composer -eq [IntPtr]::Zero -or -not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)) { throw 'Cannot focus composer before switching' }
+            $offset = (Read-Log).Length
+            [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
+            Wait-For 'latency session switched' {
+                $text = Read-Log
+                $script:paintedId = if ($text.Length -ge $offset) { Get-GuardPaintedId ($text.Substring($offset)) $sessionIds } else { $null }
+                $null -ne $script:paintedId
+            } 15
+            $composer = [ChatDeliveryDesktop]::Composer($main)
+            if ($composer -eq [IntPtr]::Zero -or -not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) -or [ChatDeliveryDesktop]::Text($composer) -ne '') { throw 'Expected empty focused composer' }
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            [ChatDeliveryDesktop]::Character('x')
+            do {
+                $typed = [ChatDeliveryDesktop]::Text($composer)
+                if ($typed -ceq 'x') { break }
+                Start-Sleep -Milliseconds 5
+            } while ($clock.Elapsed.TotalSeconds -lt 5)
+            if ($typed -cne 'x') { throw 'Typed character not observed in composer' }
+            $result.latency.typing += @{ shellId=$paintedId; elapsedMs=$clock.Elapsed.TotalMilliseconds }
+            $offset = (Read-Log).Length
+            [ChatDeliveryDesktop]::Chord(@(0x0D))
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            $match = $null
+            do {
+                $text = Read-Log
+                if ($text.Length -ge $offset) { $match = [regex]::Match($text.Substring($offset), 'send-latency id=(\d+) enqueue_us=(\d+) painted_us=(\d+)') }
+                if ($null -ne $match -and $match.Success) { break }
+                Start-Sleep -Milliseconds 10
+            } while ($clock.Elapsed.TotalSeconds -lt 10)
+            if ($null -eq $match -or -not $match.Success) { throw 'Send paint instrumentation not observed' }
+            $result.latency.send += @{ shellId=$paintedId; id=$match.Groups[1].Value; enqueueUs=[long]$match.Groups[2].Value; paintedUs=[long]$match.Groups[3].Value; elapsedMs=([long]$match.Groups[3].Value / 1000.0) }
+        } catch {
+            $result.latency.errors += @{ iteration=$i; error=$_.Exception.Message }
+            break
+        }
+    }
 } finally {
     if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$Evidence/session.json" }
     if (Test-Path $log) { Copy-Item $log "$Evidence/debug.log" }

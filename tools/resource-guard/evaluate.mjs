@@ -18,10 +18,11 @@ export function evaluateResources(limits, baseline, candidate) {
   if (candidate?.workingSetBytes > baseline?.workingSetBytes + limits.resources?.memoryToleranceBytes) failures.push(`workingSetBytes: ${candidate.workingSetBytes} exceeds baseline ${baseline.workingSetBytes} plus tolerance`);
   return failures;
 }
-export function evaluateLatency(limits, proof) {
-  const maximum = limits.latency.sendPaintMs;
-  if (!Number.isFinite(maximum) || maximum < 0 || !Array.isArray(proof?.samples) || proof.samples.length !== 20 || proof.samples.some(s => !Number.isFinite(s.paintedMs) || s.paintedMs < 0)) return { status: 'unmeasured', reason: '20 valid paint samples required' };
-  const worst = Math.max(...proof.samples.map(s => s.paintedMs));
+export function evaluateLatency(limits, proof, metric) {
+  const maximum = metric === 'typing' ? limits.latency.typingMs : limits.latency.sendPaintMs;
+  const samples = proof?.latency?.[metric];
+  if (!Number.isFinite(maximum) || maximum < 0 || proof?.cleaned !== true || proof?.appAlive !== true || !proof?.latency?.method?.[metric] || !Array.isArray(samples) || samples.length !== limits.sessionCount || new Set(samples.map(s => String(s.shellId))).size !== limits.sessionCount || samples.some(s => !Number.isFinite(s.elapsedMs) || s.elapsedMs < 0 || !proof.loadedShellIds?.map(String).includes(String(s.shellId)))) return { status: 'unmeasured', reason: 'valid samples from all loaded sessions required' };
+  const worst = Math.max(...samples.map(s => s.elapsedMs));
   return { status: worst > maximum ? 'warning' : 'pass', worstMs: worst, limitMs: maximum };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -30,17 +31,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const baseline = read('resource-evidence/baseline/measurement.json');
   const candidate = read('resource-evidence/candidate/measurement.json');
   const failures = evaluateResources(limits, baseline, candidate);
-  const journey = read('resource-evidence/latency/result.json');
-  const latency = journey?.scratchRemoved === true && journey.cleanup === 'owned process tree stopped; scratch copied to evidence/data then removed' && (journey.status === 'passed' || /^chat-send-latency: \d+ of 20 sends took longer/.test(journey.error || '')) ? evaluateLatency(limits, read('resource-evidence/latency/chat-send-latency.json')) : { status: 'unmeasured', reason: 'journey or cleanup evidence unavailable' };
+  const latency = { typing: evaluateLatency(limits, candidate, 'typing'), send: evaluateLatency(limits, candidate, 'send') };
   const fields = ['processes', 'syntheticSshProcesses', 'syntheticSshReaders', 'jobConsoleProcesses', 'workingSetBytes', 'idleCpuPercent'];
   let text = `## 30-session synthetic SSH resource guard: ${failures.length ? 'FAIL' : 'PASS'}\n\nBaseline: ${limits.baselineTag}; candidate and baseline on same host.\n\n| Metric | Baseline | Candidate |\n|---|---:|---:|\n`;
   for (const field of fields) text += `| ${field} | ${baseline?.[field] ?? 'MISSING'} | ${candidate?.[field] ?? 'MISSING'} |\n`;
-  text += `\n${failures.map(x => `- ${x}`).join('\n')}\n\nCPU is informational. SSH processes are a synthetic proxy, not TCP connections. External console attribution is incomplete.\n\nSingle-session synthetic send paint: ${latency.status}${latency.worstMs === undefined ? ` (${latency.reason})` : ` (${latency.worstMs} ms; target ${latency.limitMs} ms)`}. Typing target ${limits.latency.typingMs} ms: unmeasured. Not hosted delivery or a 30-session latency measurement.\n`;
+  text += `\n${failures.map(x => `- ${x}`).join('\n')}\n\nCPU is informational. SSH processes are a synthetic proxy, not TCP connections. External console attribution is incomplete.\n`;
+  for (const [metric, result] of Object.entries(latency)) text += `\n30-session ${metric}: ${result.status}${result.worstMs === undefined ? ` (${result.reason})` : ` (${result.worstMs} ms; target ${result.limitMs} ms)`}.\n`;
   fs.mkdirSync('resource-evidence', { recursive: true });
   fs.writeFileSync('resource-evidence/summary.md', text);
   fs.writeFileSync('resource-evidence/verdict.json', JSON.stringify({ failures, latency, baseline, candidate }, null, 2));
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
   console.log(text);
-  if (latency.status !== 'pass') console.log(`::warning::Send latency ${latency.status}`);
+  for (const [metric, result] of Object.entries(latency)) if (result.status !== 'pass') console.log(`::warning::${metric} latency ${result.status}`);
   if (failures.length) process.exitCode = 1;
 }

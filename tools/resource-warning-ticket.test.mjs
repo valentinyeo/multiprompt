@@ -91,3 +91,17 @@ test('fails instead of creating missing labels', async () => {
   await assert.rejects(run(api), /Required label unavailable/);
   assert.equal(fake.calls.some(call => call.method === 'POST'), false);
 });
+
+test('typing warnings create or reuse their own ticket', async () => {
+  const typingTitle = 'Multi Bot typing is slow';
+  const created = fakeApi();
+  assert.equal((await run(created.api, { status: 'warning', worstMs: 51, limitMs: 50 }, { metric: 'typing' })).outcome, 'created');
+  const ticket = created.calls.find(call => call.method === 'POST').body;
+  assert.equal(ticket.title, typingTitle);
+  assert.match(ticket.description, /<h2>Done when<\/h2><p>Typed text reaches the composer within the limit\.<\/p>/);
+  assert.match(ticket.description, /<h2>Risk<\/h2><p>Typing may still feel slow\.<\/p>/);
+  assert.doesNotMatch(ticket.description, /Messages send|Messages may still feel slow/);
+  const existing = fakeApi([[{ title: typingTitle, section: 'Backlog' }]]);
+  assert.equal((await run(existing.api, warning, { metric: 'typing' })).outcome, 'existing');
+  assert.equal(existing.calls.some(call => call.method === 'POST'), false);
+});

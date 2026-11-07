@@ -259,21 +259,10 @@ jobs:
       - name: Measure candidate
         shell: pwsh
         run: ./tools/resource-guard/measure.ps1 -Exe release-bin/multiprompt-x64.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
-      - name: Observe single-session synthetic send latency
-        timeout-minutes: 8
-        continue-on-error: true
-        shell: pwsh
-        env:
-          VERSION: ${{ needs.prepare.outputs.tag }}
-        run: |
-          $exe = "$pwd/release-bin/multiprompt-x64.exe"
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          $version = $env:VERSION.Substring(1)
-          powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/verify-multiprompt/control.ps1 -Feature chat-send-latency -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/resource-evidence/latency"
       - name: Evaluate resource gate
         if: always()
         run: node tools/resource-guard/evaluate.mjs
-      - name: File measured slow-send warning
+      - name: File measured latency warnings
         if: always()
         continue-on-error: true
         env:

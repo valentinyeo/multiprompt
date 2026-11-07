@@ -15,8 +15,7 @@ test('resource workflows pass versions safely to PowerShell', () => {
   const release = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
   assert.match(pr, /\$tag = node tools\/release-version\.mjs\s+if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}\s+"CANDIDATE_VERSION=\$\(\$tag\.Substring\(1\)\)" \| Out-File -FilePath \$env:GITHUB_ENV -Encoding utf8 -Append/);
   assert.match(pr, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=\$env:CANDIDATE_VERSION"/);
-  assert.match(pr, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion \$env:CANDIDATE_VERSION -ExpectedHash \$hash/);
-  assert.match(release, /-Feature chat-send-latency -Exe \$exe -ExpectedVersion \$version -ExpectedHash \$hash/);
+  assert.match(release, /node tools\/resource-warning-ticket\.mjs/);
 });
 test('comparison fails closed and blocks regressions', () => {
   assert.deepEqual(evaluateResources(limits, normal, normal), []);
@@ -31,9 +30,14 @@ test('comparison fails closed and blocks regressions', () => {
   assert.match(evaluateResources(limits, null, normal).join(), /missing/);
   assert.match(evaluateResources(limits, normal, { ...normal, jobActiveProcesses: 3 }).join(), /incomplete/);
 });
-test('latency warns and missing samples remain unmeasured', () => {
-  const samples = ms => ({ samples: Array.from({ length: 20 }, () => ({ paintedMs: ms })) });
-  assert.equal(evaluateLatency(limits, samples(300)).status, 'pass');
-  assert.equal(evaluateLatency(limits, samples(301)).status, 'warning');
-  assert.equal(evaluateLatency(limits, samples(NaN)).status, 'unmeasured');
+test('latency uses all distinct loaded sessions and warns independently', () => {
+  const ids = Array.from({ length: 30 }, (_, i) => String(i + 1));
+  const proof = (typing, send) => ({ cleaned: true, appAlive: true, loadedShellIds: ids, latency: { method: { typing: 'native edit', send: 'paint' }, typing: ids.map(shellId => ({ shellId, elapsedMs: typing })), send: ids.map(shellId => ({ shellId, elapsedMs: send })) } });
+  assert.equal(evaluateLatency(limits, proof(50, 300), 'typing').status, 'pass');
+  assert.equal(evaluateLatency(limits, proof(51, 300), 'typing').status, 'warning');
+  assert.equal(evaluateLatency(limits, proof(50, 301), 'send').status, 'warning');
+  const incomplete = proof(1, 1);
+  incomplete.latency.send[0].shellId = incomplete.latency.send[1].shellId;
+  assert.equal(evaluateLatency(limits, incomplete, 'send').status, 'unmeasured');
+  assert.equal(evaluateLatency(limits, proof(NaN, 1), 'typing').status, 'unmeasured');
 });

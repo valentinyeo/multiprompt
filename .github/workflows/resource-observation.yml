@@ -45,14 +45,6 @@ jobs:
       - name: Measure candidate
         shell: pwsh
         run: ./tools/resource-guard/measure.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
-      - name: Observe single-session synthetic send latency
-        timeout-minutes: 8
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $exe = "$pwd/zig-out/bin/multiprompt.exe"
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/verify-multiprompt/control.ps1 -Feature chat-send-latency -Exe $exe -ExpectedVersion $env:CANDIDATE_VERSION -ExpectedHash $hash -Evidence "$pwd/resource-evidence/latency"
       - name: Evaluate resource gate
         if: always()
         run: node tools/resource-guard/evaluate.mjs
