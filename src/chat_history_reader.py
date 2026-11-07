@@ -2873,10 +2873,36 @@ def host_reply(query):
     provider, sid = query.get("provider"), query.get("sid")
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
+    if query.get("op") in ("set_model", "set_effort") and provider != "claude":
+        return dict(status="refused", reason="unsupported_provider")
     if not host_owned(provider, sid):
-        return dict(status="unavailable", reason="host_not_running")
+        operation = query.get("op")
+        if operation not in ("set_model", "set_effort"):
+            return dict(status="unavailable", reason="host_not_running")
+        key = "model" if operation == "set_model" else "effort"
+        allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
+        value = query.get(key)
+        if value not in allowed:
+            return dict(status="refused", reason="invalid_" + key)
+        lock = host_lock(provider, sid)
+        if lock is None:
+            return dict(status="unavailable", reason="host_starting")
+        try:
+            if host_handed_over(provider, sid):
+                return dict(status="refused", reason="host_handed_over")
+            config = host_config(provider, sid)
+            if config is None:
+                return dict(status="refused", reason="host_disabled")
+            config[key] = value
+            host_write(host_paths(provider, sid)["config"], config)
+            settings = host_settings(provider, sid)
+            host_event(provider, sid, host_chat_name(provider, sid), dict(state={}),
+                       "host.settings", dict(settings, applied=False))
+            return dict(status="ok")
+        finally:
+            host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -3195,6 +3221,9 @@ def host_agent_env(provider, sid):
     if provider == 'codex':
         for key in HOST_CODEX_SECRETS:
             env.pop(key, None)
+    if provider == 'claude' and config.get('model') in ('opus', 'sonnet', 'haiku'):
+        for key in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+            env.pop(key, None)
     tmux = config.get('tmux')
     if isinstance(tmux, str) and tmux:
         env['MULTIBOT_SESSION'] = tmux
@@ -3206,8 +3235,8 @@ def host_agent_env(provider, sid):
     return env
 
 
-def host_claude_argv(provider, sid, base):
-    mode = (host_config(provider, sid) or {}).get("permission_mode")
+def host_claude_argv(provider, sid, base, mode=None):
+    mode = mode if mode in HOST_PERMISSION_MODES else (host_config(provider, sid) or {}).get("permission_mode")
     command = base + (["--permission-mode", mode] if mode in HOST_PERMISSION_MODES else [])
     command += ["--print", "--input-format", "stream-json",
                 "--output-format", "stream-json", "--verbose",
@@ -3231,7 +3260,41 @@ def host_hax_argv(provider, sid, base):
     return ["python3", "-u", "-c", HOST_HAX_BRIDGE] + base + ([] if chosen else list(HOST_HAX_MODEL)) + resume
 
 
-def host_agent_start(provider, sid):
+def host_model_name(value):
+    if not isinstance(value, str):
+        return ""
+    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku)(?:-[a-zA-Z0-9._-]+)?", value)
+    return match.group(1) if match else ""
+
+
+def host_settings(provider, sid):
+    config = host_config(provider, sid) or {}
+    args = config.get("args") if isinstance(config.get("args"), list) else []
+    command = config.get("command") if isinstance(config.get("command"), list) else []
+    parts = command + args
+    values = {}
+    for index, part in enumerate(parts):
+        if part in ("--model", "--effort") and index + 1 < len(parts):
+            values[part[2:]] = parts[index + 1]
+        elif isinstance(part, str) and (part.startswith("--model=") or part.startswith("--effort=")):
+            key, value = part[2:].split("=", 1)
+            values[key] = value
+    model = config.get("model", values.get("model"))
+    effort = config.get("effort", values.get("effort"))
+    return dict(model=host_model_name(model),
+                effort=effort if effort in ("low", "medium", "high") else "")
+
+
+def host_settings_event(provider, sid, tmux, session):
+    settings = session["settings"]
+    applied = session.get("ready", False) and session.get("applied_settings") == settings
+    shown = dict(settings)
+    if not shown["model"] and applied:
+        shown["model"] = session.get("init_model", "")
+    host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied))
+
+
+def host_agent_start(provider, sid, mode=None):
     cwd = host_cwd(provider, sid)
     owner = conversation_owner(cwd, include_home=True)
     cross_owner = owner is not None and owner[1] != HOME
@@ -3245,7 +3308,28 @@ def host_agent_start(provider, sid):
         base = host_command(provider, sid)
     if base is None:
         return None
-    command = HOST_ADAPTERS[provider]["argv"](provider, sid, base)
+    if provider == "claude":
+        config = host_config(provider, sid) or {}
+        overrides = {key: config[key] for key, values in
+                     (("model", ("opus", "sonnet", "haiku")), ("effort", ("low", "medium", "high")))
+                     if config.get(key) in values}
+        if overrides:
+            filtered = base[:1]
+            index = 1
+            while index < len(base):
+                part = base[index]
+                key = next((key for key in overrides if part == "--" + key or part.startswith("--" + key + "=")), None)
+                if key is None:
+                    filtered.append(part)
+                elif part == "--" + key and index + 1 < len(base) and not base[index + 1].startswith("--"):
+                    index += 1
+                index += 1
+            base = filtered
+        for key, value in overrides.items():
+            base += ["--" + key, value]
+        command = host_claude_argv(provider, sid, base, mode)
+    else:
+        command = HOST_ADAPTERS[provider]["argv"](provider, sid, base)
     if cross_owner:
         user, home = owner
         env = {"PATH": "/usr/bin:/bin"}
@@ -3258,6 +3342,8 @@ def host_agent_start(provider, sid):
         shell = ["/bin/sh", "-l", "-c"]
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
+        if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku"):
+            setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL; '
         source = host_reader_source()
         if not source:
             raise RuntimeError("owner_unavailable")
@@ -3800,12 +3886,33 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["answer"](provider, sid, tmux, session, request)
     if operation == "interrupt":
         return adapter["interrupt"](provider, sid, session)
+    if operation in ("set_model", "set_effort"):
+        if provider != "claude":
+            return host_refuse("unsupported_provider")
+        key = "model" if operation == "set_model" else "effort"
+        allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
+        value = request.get(key)
+        if value not in allowed:
+            return host_refuse("invalid_" + key)
+        config = host_config(provider, sid)
+        if config is None:
+            return host_refuse("host_disabled")
+        config[key] = value
+        host_write(host_paths(provider, sid)["config"], config)
+        session["settings"][key] = value
+        host_settings_event(provider, sid, tmux, session)
+        return dict(status="ok")
     if operation == "set_permission_mode":
         if request.get("mode") not in HOST_PERMISSION_MODES:
             return host_refuse("invalid_permission_mode")
         return adapter["set_mode"](provider, sid, session, request["mode"])
     if operation != "deliver":
         return dict(status="error", reason="invalid_op")
+    if provider == "claude" and "settings" in session and (session.get("agent") is None or session.get("starting_settings") != session["settings"]):
+        return dict(status="busy", reason="settings_pending")
+    if (provider == "claude" and session.get("ready") and session.get("settings", {}).get("model")
+            and session.get("init_model") and session["init_model"] != session["settings"]["model"]):
+        return host_refuse("model_mismatch")
     token, attempt, epoch, text = request.get("id"), request.get("attempt"), request.get("epoch"), request.get("text")
     if not isinstance(text, str) or not text.strip() or "\x00" in text:
         return host_refuse("invalid_text")
@@ -3922,6 +4029,18 @@ def host_claude_event(provider, sid, tmux, session, event):
     if kind == "system":
         if event.get("subtype") == "init":
             session["ready"] = True
+            if "starting_settings" in session:
+                settings = session["starting_settings"]
+                actual = host_model_name(event.get("model"))
+                session["init_model"] = actual
+                session["applied_settings"] = dict(settings) if actual and (not settings["model"] or settings["model"] == actual) else None
+                host_settings_event(provider, sid, tmux, session)
+                if session["applied_settings"] is not None:
+                    host_log(provider, sid, "model_effort_settings_applied",
+                             dict(model=actual, effort=settings["effort"] or "default"))
+                elif settings["model"]:
+                    host_log(provider, sid, "model_settings_mismatch",
+                             dict(requested=settings["model"], actual=actual or "unknown"))
             if isinstance(event.get("session_id"), str):
                 session["state"]["native_session"] = event["session_id"]
             host_state_write(provider, sid, session["state"])
@@ -4551,12 +4670,36 @@ def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0)
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
+    if provider == "claude":
+        session["settings"] = host_settings(provider, sid)
+        session["starting_settings"] = dict(session["settings"])
+        session["applied_settings"] = None
+        host_settings_event(provider, sid, tmux, session)
     host_event(provider, sid, tmux, session, "host.status", dict(state="starting"))
     HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
     with selectors.DefaultSelector() as selector:
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
+            if (provider == "claude" and session["settings"] != session["starting_settings"]
+                    and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
+                selector.unregister(agent.stdout)
+                host_agent_stop(agent)
+                session["agent"] = None
+                session["ready"] = False
+                session["starting_settings"] = dict(session["settings"])
+                try:
+                    agent = host_agent_start(provider, sid, session["state"].get("mode"))
+                except (OSError, RuntimeError):
+                    agent = None
+                if agent is None:
+                    host_log(provider, sid, "settings_restart_failed")
+                    return
+                session["agent"] = agent
+                session["buffer"] = b""
+                session["state"]["agent_pid"] = agent.pid
+                host_state_write(provider, sid, session["state"])
+                selector.register(agent.stdout, selectors.EVENT_READ, "agent")
             idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
             if session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
                 host_log(provider, sid, "idle_stop")
@@ -4643,7 +4786,7 @@ def host_main(provider, sid):
         host_log(provider, sid, "host_error", dict(error=type(error).__name__))
         return 4
     finally:
-        host_agent_stop(agent)
+        host_agent_stop(session.get("agent") if "session" in locals() else agent)
         if server is not None:
             server.close()
         try:
@@ -5134,6 +5277,16 @@ def message_store_transaction(q):
                 items = [dict(message=message_row(row)) for row in db.execute('SELECT * FROM shared_messages WHERE provider=? AND sid=? ORDER BY position', (provider, sid))]
                 items.extend(dict(native_message=json.loads(body)) for (body,) in db.execute("SELECT body FROM connector_facts WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='message' ORDER BY rowid", (provider, sid)))
                 items.extend(dict(attempt_receipt=json.loads(body)) for (body,) in db.execute("SELECT body FROM connector_facts WHERE provider=? AND sid=? AND json_extract(body,'$.kind') IN ('accepted','started') ORDER BY rowid", (provider, sid)))
+                if provider == "claude" and host_enabled(provider, sid):
+                    settings = host_settings(provider, sid)
+                    last = db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='host.settings' ORDER BY seq DESC LIMIT 1", (provider, sid)).fetchone()
+                    payload = json.loads(last[0]).get("payload", {}) if last else {}
+                    applied = (host_owned(provider, sid) and payload.get("applied") is True
+                               and payload.get("effort") == settings["effort"]
+                               and (not settings["model"] or payload.get("model") == settings["model"]))
+                    if applied and not settings["model"]:
+                        settings["model"] = host_model_name(payload.get("model"))
+                    items.append(dict(host_settings=dict(settings, applied=applied)))
                 db.execute('INSERT INTO message_snapshots VALUES (?,?,?,?,?,?,?)', (snapshot, provider, sid, epoch, seq, time.time(), json.dumps(items, separators=(',', ':'))))
             else:
                 saved = db.execute('SELECT epoch,seq,body FROM message_snapshots WHERE id=? AND provider=? AND sid=?', (snapshot, provider, sid)).fetchone()
@@ -6308,7 +6461,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "interrupt"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):

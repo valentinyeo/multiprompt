@@ -21,6 +21,8 @@ const std = @import("std");
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 fn chatCancelFinish() void {}
 fn chatLivePlanReply(_: []const u16) bool { return false; }
+var test_settings_pending = false;
+fn chatSettingsPending(_: u32) bool { return test_settings_pending; }
 fn chatLiveQuestionText(_: []const u16) bool { return false; }
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -322,6 +324,8 @@ fn clear() void {
     enters_at_steer = 0;
     state_at_steer = null;
     composer_text = &.{};
+    test_settings_pending = false;
+    g_chat_draft_dirty = false;
     terminal_notices = 0;
     g_chat_ac_dialog_len = 0;
     g_chat_ac_dialog_shell_id = 0;
@@ -546,6 +550,22 @@ test "delivery: IGSH-1522 live slash commands never enter the ordinary outbox" {
     sendChatPrompt();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expect(mode_picker == null);
+}
+test "delivery: pending settings preserve the draft and outbox" {
+    clear();
+    defer clear();
+    const draft = std.unicode.utf8ToUtf16LeStringLiteral("Next message");
+    composer_text = draft;
+    test_settings_pending = true;
+    sendChatPrompt();
+    try std.testing.expectEqualSlices(u16, draft, composer_text);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), read_marks);
+    try std.testing.expect(!g_chat_draft_dirty);
+    test_settings_pending = false;
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
 }
 test "delivery: IGSH-1655 only terminal tabs get an Alt+C hint after a dialog command" {
     defer clear();
@@ -2019,6 +2039,7 @@ function runHarness(control = false) {
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
     let functions = [...names, 'chatMessageCaptureAdmission', 'chatOutboxRecoverOlderAdmission'].map(body).join('\n')
+      .replaceAll('@import("chat_session.zig").chatSettingsPending', 'chatSettingsPending')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
@@ -2141,6 +2162,16 @@ test('IGSH-1605 a successful reconnect requeues sends that failed while the link
   assert.match(requeue, /chat_echo\.requeueOnReconnect\(entry\.state, /);
   assert.match(requeue, /entry\.state = \.queued;[\s\S]*entry\.write_started = false;/);
 });
+test('pending settings block the composer before any delivery mutation', () => {
+  const send = body('sendChatPrompt');
+  const guard = send.indexOf('chatSettingsPending(');
+  assert.ok(guard >= 0, 'pending settings guard');
+  for (const mutation of ['chatLivePlanReply(', 'chatEchoEnqueueForShell(', 'chatReadMark(', 'SetWindowTextW(']) {
+    assert.ok(send.indexOf(mutation) > guard, mutation);
+  }
+  assert.match(send, /Wait for chat settings to update/);
+});
+
 test('composer always persists through the same outbox before delivery', () => {
   const send = body('sendChatPrompt');
   assert.match(send, /chatEchoEnqueueForShell\(active_shell, send_text, \.queued\)/);

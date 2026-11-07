@@ -637,6 +637,12 @@ const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_B
 const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
 const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
 const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
+const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
+const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
+const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
 const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
@@ -5489,6 +5495,24 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const gid = @import("rename.zig").paletteGroupId();
                     _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
                     if (findGroupIdx(gid)) |gi| @import("rename.zig").runGroupPaletteAction(hwnd, gi, target - app_state.SEARCH_GROUPCTX_BASE);
+                    return 0;
+                }
+                if (target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    const setting: @import("chat_live.zig").Setting = switch (target) {
+                        SEARCH_CHAT_MODEL_OPUS_OFFSET => .{ .model = .opus },
+                        SEARCH_CHAT_MODEL_SONNET_OFFSET => .{ .model = .sonnet },
+                        SEARCH_CHAT_MODEL_HAIKU_OFFSET => .{ .model = .haiku },
+                        SEARCH_CHAT_EFFORT_LOW_OFFSET => .{ .effort = .low },
+                        SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => .{ .effort = .medium },
+                        SEARCH_CHAT_EFFORT_HIGH_OFFSET => .{ .effort = .high },
+                        else => unreachable,
+                    };
+                    if (!@import("chat_send.zig").chatSetLiveSetting(setting)) showHeaderNoticeAscii("Could not change chat settings", 4000, true);
+                    showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
                 if (target >= SEARCH_ADDFAVICON_OFFSET) {

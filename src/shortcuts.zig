@@ -390,6 +390,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
     .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Model Opus / Sonnet / Haiku\"", .b = "Choose the model for the next message in a live Claude chat", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Effort Low / Medium / High\"", .b = "Choose the effort for the next message in a live Claude chat", .header = false },
     .{ .a = "1 or Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Approve the pending permission once", .header = false },
     .{ .a = "2 or Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Always allow the pending permission this session", .header = false },
     .{ .a = "3 or Alt+D in Chat View / Ctrl+K \"Chat View: Deny\"", .b = "Decline the pending permission", .header = false },
