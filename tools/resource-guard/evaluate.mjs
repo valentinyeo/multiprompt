@@ -8,6 +8,9 @@ export function evaluateResources(limits, baseline, candidate) {
   for (const [label, run] of [['baseline', baseline], ['candidate', candidate]]) {
     if (run?.workload !== limits.workload || run?.sessionCount !== limits.sessionCount || run?.readySessions !== limits.sessionCount || run?.cleaned !== true || run?.appAlive !== true || !Array.isArray(run?.rawProcesses) || run.rawProcesses.length !== run.processes || run?.jobActiveProcesses !== run.processes || run?.syntheticSshProcesses < 1 || run?.syntheticSshReaders < 1) failures.push(`${label}: incomplete workload or process evidence`);
     for (const field of fields) if (!Number.isFinite(run?.[field]) || run[field] < 0) failures.push(`${label}: missing ${field}`);
+    const ownedIds = new Set((Array.isArray(run?.rawProcesses) ? run.rawProcesses : []).map(process => process?.id));
+    const consoles = run?.associatedExternalConsoles;
+    if (!Array.isArray(consoles) || new Set(consoles.map(console => console?.ProcessId)).size !== consoles.length || consoles.some(console => !Number.isSafeInteger(console?.ProcessId) || console.ProcessId <= 0 || !Number.isSafeInteger(console.ParentProcessId) || console.ParentProcessId <= 0 || !ownedIds.has(console.ParentProcessId) || ownedIds.has(console.ProcessId) || !/^(conhost|OpenConsole)\.exe$/i.test(console.Name || ''))) failures.push(`${label}: invalid associatedExternalConsoles evidence`);
     for (const name of ['exe', 'bridge', 'config', 'helper']) {
       const file = run?.staging?.[name];
       if (!file?.inputPath || !file?.stagedPath || !/^[a-f0-9]{64}$/i.test(file?.inputSha256 || '') || file.inputSha256 !== file.stagedSha256) failures.push(`${label}: invalid ${name} staging evidence`);
@@ -15,6 +18,7 @@ export function evaluateResources(limits, baseline, candidate) {
   }
   for (const name of ['config', 'helper']) if (!baseline?.staging?.[name]?.stagedSha256 || baseline.staging[name].stagedSha256 !== candidate?.staging?.[name]?.stagedSha256) failures.push(`telemetry ${name} differs between measurements`);
   for (const field of ['processes', 'syntheticSshProcesses', 'syntheticSshReaders', 'jobConsoleProcesses']) if (candidate?.[field] > baseline?.[field]) failures.push(`${field}: ${candidate[field]} exceeds baseline ${baseline[field]}`);
+  if (Array.isArray(candidate?.associatedExternalConsoles) && Array.isArray(baseline?.associatedExternalConsoles) && candidate.associatedExternalConsoles.length > baseline.associatedExternalConsoles.length) failures.push(`associatedExternalConsoles: ${candidate.associatedExternalConsoles.length} exceeds baseline ${baseline.associatedExternalConsoles.length}`);
   if (candidate?.workingSetBytes > baseline?.workingSetBytes + limits.resources?.memoryToleranceBytes) failures.push(`workingSetBytes: ${candidate.workingSetBytes} exceeds baseline ${baseline.workingSetBytes} plus tolerance`);
   return failures;
 }
@@ -35,6 +39,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const fields = ['processes', 'syntheticSshProcesses', 'syntheticSshReaders', 'jobConsoleProcesses', 'workingSetBytes', 'idleCpuPercent'];
   let text = `## 30-session synthetic SSH resource guard: ${failures.length ? 'FAIL' : 'PASS'}\n\nBaseline: ${limits.baselineTag}; candidate and baseline on same host.\n\n| Metric | Baseline | Candidate |\n|---|---:|---:|\n`;
   for (const field of fields) text += `| ${field} | ${baseline?.[field] ?? 'MISSING'} | ${candidate?.[field] ?? 'MISSING'} |\n`;
+  text += `| associatedExternalConsoles | ${Array.isArray(baseline?.associatedExternalConsoles) ? baseline.associatedExternalConsoles.length : 'MISSING'} | ${Array.isArray(candidate?.associatedExternalConsoles) ? candidate.associatedExternalConsoles.length : 'MISSING'} |\n`;
   text += `\n${failures.map(x => `- ${x}`).join('\n')}\n\nCPU is informational. SSH processes are a synthetic proxy, not TCP connections. External console attribution is incomplete.\n`;
   for (const [metric, result] of Object.entries(latency)) text += `\n30-session ${metric}: ${result.status}${result.worstMs === undefined ? ` (${result.reason})` : ` (${result.worstMs} ms; target ${result.limitMs} ms)`}.\n`;
   fs.mkdirSync('resource-evidence', { recursive: true });

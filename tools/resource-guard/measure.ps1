@@ -111,9 +111,13 @@ try {
     $result.latency = @{ method=@{ typing='Stopwatch before SendInput character to observed owned Edit text via WM_GETTEXT; 5 ms polling'; send='app debug send-latency painted_us after SendInput Enter; input-to-transcript paint instrumentation' }; typing=@(); send=@(); errors=@() }
     for ($i = 0; $i -lt $sessionCount; $i++) {
         try {
-            $composer = [ChatDeliveryDesktop]::Composer($main)
-            $focus = [ChatDeliveryDesktop]::Focus($main)
-            if ($composer -eq [IntPtr]::Zero -or $focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Composer not focused before switching' }
+            Wait-For 'composer focus before switching' {
+                $composer = [ChatDeliveryDesktop]::Composer($main)
+                if ($composer -eq [IntPtr]::Zero) { return $false }
+                $focus = [ChatDeliveryDesktop]::Focus($main)
+                if ($focus[0] -eq $main.ToInt64() -and $focus[1] -eq $composer.ToInt64()) { return $true }
+                [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            } 15
             $offset = (Read-Log).Length
             [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
             Wait-For 'latency session switched' {
