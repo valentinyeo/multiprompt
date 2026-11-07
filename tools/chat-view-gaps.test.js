@@ -115,6 +115,20 @@ test "audit failed permission send can be retried" {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
+test('IGSH-1852 bypass console status auto allows safety approvals', () => {
+  const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows');
+  assert.match(capture, /chatConsoleBypassPermissionsActive/);
+  assert.match(capture, /bypass permissions on/);
+  assert.match(capture, /chatPermissionAnswer\(shell_index, \.allow\)/);
+});
+
+test('IGSH-1852 bypass host auto accepts approval requests', () => {
+  const reader = fs.readFileSync(path.join(__dirname, '../src/chat_history_reader.py'), 'utf8');
+  assert.match(reader, /HOST_BYPASS_APPROVAL_MODES/);
+  assert.match(reader, /host_bypass_approvals\(session\)/);
+  assert.match(reader, /auto="bypass"/);
+});
+
 test('ISSUE-400 failed remote permission sends restore only the matching shell and never roll back stop', (t) => {
   const thread = fileBody('chat_send.zig', 'chatStopTmuxThread')
     .replaceAll('@import("chat_transcript.zig").Identity', 'Identity')

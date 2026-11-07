@@ -984,6 +984,13 @@ pub fn chatTrimRawConsoleRow(width: usize, chars_read: DWORD, row_idx: usize) []
     return app_state.g_chat_raw[raw_start + first .. raw_start + last];
 }
 
+fn chatConsoleBypassPermissionsActive(lines: []const []const u16) bool {
+    for (lines) |line| {
+        if (chatWideContainsAscii(line, "bypass permissions on")) return true;
+    }
+    return false;
+}
+
 fn chatPermissionSendFailedApply() void {
     const shell_id = app_state.g_chat_permission_send_failed.swap(0, .acq_rel);
     if (shell_id == 0) return;
@@ -1041,6 +1048,11 @@ pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWO
     app_state.g_chat_permission = menu orelse .{};
     app_state.g_chat_permission_sid = shell.shell_id;
     if (presentation_changed) @import("chat_render.zig").chatPermissionChanged();
+    if (menu != null and app_state.g_chat_active and chatConsoleBypassPermissionsActive(lines[0..count]) and
+        shell.permission_presentation.state == .pending and !shell.permission_answered)
+    {
+        _ = @import("chat_send.zig").chatPermissionAnswer(shell_index, .allow);
+    }
     if (changed and app_state.g_chat_active) {
         if (menu == null) @import("diagnostics.zig").debugLog("[chat] permission cleared");
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();
