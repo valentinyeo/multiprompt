@@ -90,10 +90,18 @@ if ($quoteChars -ne $copiedBlock.Replace("`r`n", "`n").Length) { throw "Reply qu
 if (@((Fake-State).queue).Count -ne 0 -or [ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Reply submitted or changed the untouched draft' }
 $observation.groupedQuoteChars = $quoteChars
 Shot 'message-block-reply'
-Press @(0x11, 0x41) 'Ctrl+A: temporarily clear the saved draft' $true
-Press @(0x08) 'Backspace: empty draft before cancelling quote' $true
-Press @(0x1B) 'Esc: cancel the quote without sending' $true
-Type-Composer $plan.text
+$replyFrames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($quoteStart), '\[chat\] composer card (\d+),(\d+),(\d+),(\d+) size=(\d+)')
+if (-not $replyFrames.Count) { throw 'Reply composer geometry was not published' }
+$replyCard = $replyFrames[$replyFrames.Count - 1]
+$replyScale = [int]$replyCard.Groups[5].Value / 32.0
+$cancelX = [int]([int]$replyCard.Groups[3].Value - 20 * $replyScale)
+$cancelY = [int]([int]$replyCard.Groups[2].Value + 12 * $replyScale)
+$actions.Add(@{case=$plan.name; input='click existing quote cancel button without editing the draft'; x=$cancelX; y=$cancelY})
+[ChatDeliveryDesktop]::PressClient($main, $app.Id, $cancelX, $cancelY)
+[void](Wait-For 'quote cancelled with draft retained' {
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($quoteStart), '\[chat\] composer card (\d+),(\d+),(\d+),(\d+) size=(\d+)')
+    $frames.Count -gt 1 -and [int]$frames[$frames.Count - 1].Groups[2].Value -gt [int]$replyCard.Groups[2].Value -and [ChatDeliveryDesktop]::Text($composer) -ceq $plan.text
+})
 [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, $view, $point.x, $point.y)
 foreach ($entry in @('emoji', 'more')) {
     $menuStart = (Read-Shared "$settings/debug.log").Length
