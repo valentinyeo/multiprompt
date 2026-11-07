@@ -129,7 +129,7 @@ try {
     Remove-Item Env:\MULTIPROMPT_KEY -ErrorAction SilentlyContinue
     $env:APPDATA = $roaming
     $env:LOCALAPPDATA = Join-Path $workRoot 'local'
-    $env:USERPROFILE = $workRoot
+    [Environment]::SetEnvironmentVariable('USERPROFILE', $workRoot, 'Process')
     $env:HOME = $workRoot
     $env:ZIGSHELL_DEBUG = '1'
     Remove-Item Env:\MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue

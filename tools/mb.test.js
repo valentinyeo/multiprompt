@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { run } from './mb.mjs';
+let run;
+try {
+  ({ run } = await import('./mb.mjs'));
+} catch (error) {
+  if (error?.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+}
 
 const FEATURES = 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups';
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==', 'base64');
@@ -63,6 +68,7 @@ function harness(options = {}) {
     return { status: 0, stdout: '' };
   };
   const call = async args => {
+    assert.equal(typeof run, 'function');
     const lines = [], errors = [];
     const code = await run(args, {
       env: { MULTIPROMPT_KEY: 'test-key', MULTIPROMPT_URL: 'http://layout.test', HOME: dir, MULTIPROMPT_HOST: '0' },
@@ -80,6 +86,7 @@ function harness(options = {}) {
 const text = result => [...result.lines, ...result.errors].join('\n');
 
 test('help lists style, workspace color, and roster apply', async () => {
+  assert.equal(typeof run, 'function');
   const lines = [];
   assert.equal(await run(['help'], { out: line => lines.push(line), err() {} }), 0);
   const help = lines.join('\n');
@@ -88,6 +95,7 @@ test('help lists style, workspace color, and roster apply', async () => {
 });
 
 test('invalid face and color are refused before any request', async () => {
+  assert.equal(typeof run, 'function');
   const box = harness();
   let fetches = 0;
   const lines = [], errors = [];

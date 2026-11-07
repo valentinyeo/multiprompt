@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { hash } from '../worker.js';
 import { run } from '../../tools/mp-layout.mjs';
-import { run as mbRun } from '../../tools/mb.mjs';
 
 let mf, db;
 const base = 'http://localhost';
@@ -219,6 +218,13 @@ test('the key never appears in output and a missing key is reported', async () =
 });
 
 test('roster apply sets group, face, color, photo, and workspace color once', async () => {
+  let mbRun;
+  try {
+    ({ run: mbRun } = await import('../../tools/mb.mjs'));
+  } catch (error) {
+    if (error?.code !== 'ERR_MODULE_NOT_FOUND') throw error;
+  }
+  assert.equal(typeof mbRun, 'function');
   await reset();
   await db.prepare('DELETE FROM bot_photos').run();
   const dir = mkdtempSync(join(tmpdir(), 'mb-service-'));
