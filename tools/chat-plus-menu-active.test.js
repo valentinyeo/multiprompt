@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { readChangelogEntry } = require('./changelog-entry');
 
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -75,6 +76,11 @@ with tempfile.TemporaryDirectory() as directory:
 });
 
 test('IGSH-1861 the release notes carry one plain sentence', () => {
-  const note = read('changelog.d/IGSH-1861-plus-menu-active.md').trim();
+  let note = '';
+  try {
+    note = readChangelogEntry('IGSH-1861').trim();
+  } catch {
+    note = '';
+  }
   assert.ok(note.length > 0 && !note.includes('\n') && !/IGSH|\.zig|src\//.test(note));
 });
