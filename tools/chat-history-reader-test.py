@@ -2463,6 +2463,44 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(base64.b64decode(supplied).decode(), reader.READER_SOURCE)
         self.assertEqual(json.loads(forwarded), dict(query, discovery_pid=99))
 
+    def watch_forwarded_to_owner(self, query, **patches):
+        class Input(io.BytesIO):
+            def close(self):
+                self.payload = self.getvalue()
+                super().close()
+        owner = ('secondary', Path('/home/secondary'))
+        incoming = types.SimpleNamespace(buffer=io.BytesIO(json.dumps(query).encode() + b'\n'), fileno=lambda: 55)
+        child = types.SimpleNamespace(stdin=Input(), wait=lambda: 0)
+        with patch.object(reader, 'conversation_owner', return_value=owner), \
+                patch.object(reader, 'tmux_owner_process', return_value=None), \
+                patch.object(reader, 'host_dispatch_switch', side_effect=lambda agent, sid: sid == '783da795-e250-4189-bd8a-8947248eecae'), \
+                patch.object(reader, 'host_sid_for_tmux', patches.get('lookup', lambda agent, tmux: None)), \
+                patch.object(reader.subprocess, 'Popen', return_value=child) as start, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.os, 'read', return_value=b''):
+            reader.watch(reader.READER_SOURCE)
+        self.assertEqual(start.call_args.args[0][:6], ['sudo', '-n', '-H', '-u', 'secondary', '--'])
+        return json.loads(child.stdin.payload.splitlines()[1])
+
+    def test_IGSH_1822_watch_hands_hosted_other_user_chat_its_pinned_transcript(self):
+        sid = '783da795-e250-4189-bd8a-8947248eecae'
+        forwarded = self.watch_forwarded_to_owner(dict(self.query, sid=sid, cwd='/home/secondary/project', follow=True))
+        self.assertEqual(forwarded['sid'], sid)
+        self.assertFalse(forwarded['follow'], 'the owner has no host state, so a hosted chat must reach it pinned, not following the tab')
+
+    def test_IGSH_1822_watch_finds_hosted_other_user_chat_by_its_tab(self):
+        sid = '783da795-e250-4189-bd8a-8947248eecae'
+        asked = []
+        forwarded = self.watch_forwarded_to_owner(dict(self.query, sid='', cwd='/home/secondary/project', follow=True),
+                                                  lookup=lambda agent, tmux: asked.append((agent, tmux)) or sid)
+        self.assertEqual(asked, [('claude', 'term-1')])
+        self.assertEqual(forwarded['sid'], sid)
+        self.assertFalse(forwarded['follow'])
+
+    def test_IGSH_1822_watch_keeps_following_terminal_other_user_chat(self):
+        forwarded = self.watch_forwarded_to_owner(dict(self.query, sid='stale', cwd='/home/secondary/project', follow=True))
+        self.assertEqual(forwarded['sid'], 'stale')
+        self.assertTrue(forwarded['follow'])
+
     def test_IGSH_1064_watch_discovers_owner_without_a_remote_cwd(self):
         owner = ('secondary', Path('/home/secondary'))
         query = dict(self.query, cwd='', follow=True)

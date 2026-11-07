@@ -1565,6 +1565,17 @@ def live_fields(source, size, tmux, shown=None, sid=None):
     return fields
 
 
+def pin_hosted_claude(q, agent, as_owner=False):
+    if agent != "claude" or not q.get("tmux"):
+        return q
+    if not q.get("sid") and not as_owner:
+        q["sid"] = host_sid_for_tmux(agent, q["tmux"]) or ""
+    sid = q.get("sid")
+    if q.get("follow") and isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
+        q["follow"] = False
+    return q
+
+
 def resolve_response_path(q, source=None, as_owner=False):
     rid = q["id"]
     agent = q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q["codex"] else "claude"
@@ -1585,11 +1596,9 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             return agent, sid, None, missing_response(q, "permission denied")
         return (agent, sid, path, None) if path else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
-    if not sid and tmux and agent == "claude" and not as_owner:
-        sid = q["sid"] = host_sid_for_tmux(agent, tmux) or ""
+    pin_hosted_claude(q, agent, as_owner)
+    sid = q["sid"]
     follow = bool(tmux and (q.get("follow") or agent == "codex"))
-    if follow and agent == "claude" and isinstance(sid, str) and SESSION_ID.fullmatch(sid) and host_dispatch_switch(agent, sid):
-        follow = q["follow"] = False
     denied = False
     delegated = None
     try:
@@ -6073,6 +6082,8 @@ def watch_changes(q, resolved, source, as_owner):
 
 def watch(source, as_owner=False):
     q = json.loads(sys.stdin.buffer.readline())
+    if not as_owner:
+        q = pin_hosted_claude(q, q.get("provider") if q.get("provider") in HOST_PROVIDERS else "codex" if q.get("codex") else "claude")
     owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") and q.get("provider") != "pi" else None
     if not as_owner and q.get("tmux") and q.get("provider") != "pi":
         discovered = tmux_owner_process("codex" if q.get("codex") else "claude", q["tmux"], source)
@@ -6333,7 +6344,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 84
+RUNTIME_GENERATION = 85
 
 if __name__ == '__main__':
     import base64 as _base64
