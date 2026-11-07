@@ -115,6 +115,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       assert.equal(observation.restartComposerText, 'draft stays here');
       assert.equal(observation.copiedRequestId, 'msg_first');
       assert.equal(observation.hoverMenusMatch, true);
+      assert.equal(observation.groupedHoverStable, true, 'one fixed action row for both paragraphs');
+      const groupedSource = 'Same first words ' + 'for this example '.repeat(8) + '\n\nFIRST REPLY ✓ ⚠ 👍 👍🏽 👨‍👩‍👧 ❤️';
+      const normalize = text => text.replaceAll('\r\n', '\n').split('\n').map(line => line.trimEnd()).join('\n');
+      assert.equal(normalize(observation.groupedCopied), normalize(groupedSource), 'whole-bubble selection copies both paragraphs only');
+      assert.equal(observation.groupedContextCopied, observation.groupedCopied, 'context Copy uses the whole bubble without a text selection');
+      assert.equal(observation.groupedQuoteChars, observation.groupedCopied.replaceAll('\r\n', '\n').length, 'Reply uses the entire selected bubble');
+      const groupedArea = json('reactions/area.json');
+      for (const name of ['first', 'last']) {
+        const image = readBmp(path.join(root, `message-block-hover-${name}.bmp`));
+        const frame = inspect(image, groupedArea);
+        assertHoverActions(image, frame.agent[0]);
+      }
       const clean = json('cleanup.json');
       assert.equal(clean.remaining_owned_processes, 0);
       assert.equal(clean.scratch_removed, true);

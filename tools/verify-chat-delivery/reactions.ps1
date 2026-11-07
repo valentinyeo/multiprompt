@@ -49,6 +49,52 @@ $hover = Wait-For 'all three message hover controls are painted' {
     $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --hover 2> "$caseDir/oracle-hover-stderr.log"
     if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
 }
+Copy-Item "$Evidence/reactions-hover.bmp" "$Evidence/message-block-hover-first.bmp"
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)
+$lastHover = Wait-For 'same action row while hovering the final paragraph' {
+    Shot 'reactions-hover'
+    $ErrorActionPreference = 'Continue'
+    $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --hover 2> "$caseDir/oracle-hover-last-stderr.log"
+    if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
+}
+if ($lastHover.y -ne $hover.y -or $lastHover.emojiX -ne $hover.emojiX -or $lastHover.moreX -ne $hover.moreX) { throw 'Message actions moved between paragraphs in one bubble' }
+Copy-Item "$Evidence/reactions-hover.bmp" "$Evidence/message-block-hover-last.bmp"
+$observation.groupedHoverStable = $true
+$view = [IntPtr]$views[0].Current.NativeWindowHandle
+$clientX = [int]($point.x - $bounds.Left)
+$clientY = [int]($point.y - $bounds.Top)
+for ($click = 0; $click -lt 3; $click++) { [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, $view, $clientX, $clientY) }
+[Windows.Forms.Clipboard]::Clear()
+Press @(0x11, 0x43) 'Ctrl+C: copy the selected whole reply bubble'
+$copiedBlock = Wait-For 'whole joined bubble reaches the clipboard' { $value = [Windows.Forms.Clipboard]::GetText(); if ($value.Contains('Same first words') -and $value.Contains('FIRST REPLY')) { $value } }
+if ($copiedBlock.Contains('SECOND REPLY') -or $copiedBlock.Contains('start the reaction session')) { throw 'Whole-message selection crossed a neighbouring bubble' }
+$observation.groupedCopied = $copiedBlock
+[IO.File]::WriteAllText("$caseDir/message-block-copied.txt", $copiedBlock)
+Shot 'message-block-selected'
+Press @(0x1B) 'Esc: clear whole-message selection'
+[Windows.Forms.Clipboard]::Clear()
+[ChatDeliveryDesktop]::RightClickOwnedTranscript($main, $app.Id, $view, $hover.insideX, $hover.insideY)
+[void](Wait-For 'whole-message copy menu appears' { [ChatDeliveryDesktop]::Menu($app.Id) -ne [IntPtr]::Zero })
+for ($key = 0; $key -lt 5; $key++) { Press @(0x28) 'Down: select Copy for the whole reply' }
+Press @(0x0D) 'Enter: copy the whole joined reply without a text selection'
+[void](Wait-For 'context Copy includes both paragraphs' { [Windows.Forms.Clipboard]::GetText() -ceq $copiedBlock })
+$observation.groupedContextCopied = [Windows.Forms.Clipboard]::GetText()
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, $view, $point.x, $point.y)
+$quoteStart = (Read-Shared "$settings/debug.log").Length
+[ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, $view, ([int]($hover.emojiX + 28 - $bounds.Left)), ([int]($hover.y - $bounds.Top)))
+$quoteChars = Wait-For 'Reply quotes both paragraphs without sending' {
+    $matches = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($quoteStart), '\[chat\] reply quote chars=(\d+)')
+    if ($matches.Count) { [int]$matches[$matches.Count - 1].Groups[1].Value }
+}
+if ($quoteChars -ne $copiedBlock.Replace("`r`n", "`n").Length) { throw "Reply quoted $quoteChars characters rather than the whole selected bubble" }
+if (@((Fake-State).queue).Count -ne 0 -or [ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Reply submitted or changed the untouched draft' }
+$observation.groupedQuoteChars = $quoteChars
+Shot 'message-block-reply'
+Press @(0x11, 0x41) 'Ctrl+A: temporarily clear the saved draft' $true
+Press @(0x08) 'Backspace: empty draft before cancelling quote' $true
+Press @(0x1B) 'Esc: cancel the quote without sending' $true
+Type-Composer $plan.text
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, $view, $point.x, $point.y)
 foreach ($entry in @('emoji', 'more')) {
     $menuStart = (Read-Shared "$settings/debug.log").Length
     $x = if ($entry -eq 'emoji') { $hover.emojiX } else { $hover.moreX }

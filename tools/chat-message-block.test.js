@@ -22,7 +22,7 @@ const std = @import("std");
 const chat_style = @import("chat_style.zig");
 const ChatBlock = @import("chat_markdown.zig").Block;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
-const text = std.unicode.utf8ToUtf16LeStringLiteral("questionFirstSecondThirdnext");
+const capture = std.unicode.utf8ToUtf16LeStringLiteral("questionFirstSecondThirdnext");
 const app_state = struct {
     var g_chat_block_count: usize = 5;
     var g_chat_bubble_pos = [_]chat_style.BubblePos{ .single, .first, .middle, .last, .single };
@@ -40,7 +40,7 @@ const Display = struct { text: []const u16, block: ChatBlock, source_map: ?[]con
 fn chatSelectionDisplay(index: usize) ?Display {
     if (index >= app_state.g_chat_block_count) return null;
     const block = app_state.g_chat_blocks[index];
-    return .{ .text = text[block.start..][0..block.len], .block = block };
+    return .{ .text = capture[block.start..][0..block.len], .block = block };
 }
 fn chatSelectionRect(index: usize) RECT {
     const row: i32 = @intCast(index);
@@ -49,7 +49,7 @@ fn chatSelectionRect(index: usize) RECT {
 fn uiScaled(value: i32) i32 { return value; }
 fn chatViewClientRect(rect: *RECT) void { rect.* = .{ .left = 0, .top = 0, .right = 960, .bottom = 800 }; }
 fn chatCopyBlockText(out: []u16, block: ChatBlock, _: usize, _: usize) !usize {
-    return chatCopyPlainText(out, text[block.start..][0..block.len]);
+    return chatCopyPlainText(out, capture[block.start..][0..block.len]);
 }
 ` + ['chatMessageBounds', 'chatMessageRect', 'chatMessageTextAlloc', 'chatCopyCapacity', 'chatCopyPlainText', 'chatMessageActionRect', 'chatNavEligible'].map(body).join('\n') + String.raw`
 test "one bubble is one message without changing its text or adjacent messages" {
