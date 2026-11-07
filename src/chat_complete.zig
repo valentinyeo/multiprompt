@@ -153,7 +153,7 @@ pub fn promoteRecent(items: *[20][201]u8, count: *usize, name: []const u8) void 
 }
 
 pub fn insertionFor(agent: Agent, mode: Mode, e: Entry, buf: []u8) []const u8 {
-    const prefix: []const u8 = if (mode == .file and agent == .codex) "" else if (mode == .dollar or e.kind == 'K') "$" else if (mode == .file) "@" else "/";
+    const prefix: []const u8 = if (e.kind == 'M') "@" else if (mode == .file and agent == .codex) "" else if (mode == .dollar or e.kind == 'K') "$" else if (mode == .file) "@" else "/";
     const suffix: []const u8 = if (e.kind == 'D') "/" else " ";
     if (prefix.len + e.name.len + suffix.len > buf.len) return "";
     @memcpy(buf[0..prefix.len], prefix);
@@ -210,6 +210,7 @@ test "response framing, rank and insertion" {
     try std.testing.expectEqualStrings("/compact ", insertionFor(.claude, .slash, entries[0], &buf));
     try std.testing.expectEqualStrings("$pospeak ", insertionFor(.codex, .slash, .{ .kind = 'K', .name = "pospeak", .hint = "", .desc = "" }, &buf));
     try std.testing.expectEqualStrings("@dir/", insertionFor(.claude, .file, .{ .kind = 'D', .name = "dir", .hint = "", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("@SF Design Lead ", insertionFor(.codex, .file, .{ .kind = 'M', .name = "SF Design Lead", .hint = "live-abc", .desc = "" }, &buf));
     const input = [_]u16{ '/', 'c', 'o', 'x' };
     var wide: [32]u16 = undefined;
     const applied = applyAccept(&input, .{ .mode = .slash, .start = 0, .end = 3 }, &.{ '/', 'c', 'o', 'm', 'p', ' ' }, &wide);

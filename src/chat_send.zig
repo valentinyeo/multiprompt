@@ -630,6 +630,12 @@ pub fn sendChatPrompt() void {
         text_buf[send_text.len] = ' ';
         send_text = text_buf[0 .. send_text.len + 1];
     }
+    var mention_buf: []u16 = &.{};
+    defer if (mention_buf.len != 0) std.heap.page_allocator.free(mention_buf);
+    if (std.heap.page_allocator.alloc(u16, @min(CHAT_OUTBOX_MSG_CAP, send_text.len +| 16 * 66))) |buf| {
+        mention_buf = buf;
+        send_text = @import("chat_mention.zig").apply(send_text, buf);
+    } else |_| {}
     if (app_state.g_voice_mode_active and !app_state.g_voice_auto_sending) {
         app_state.g_voice_last_activity_tick = GetTickCount64();
         for (&app_state.g_voice_utt_open) |*slot| if (slot.id != 0) {
@@ -640,6 +646,7 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
     };
+    @import("chat_mention.zig").clearPicks();
     send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
     app_state.g_chat_read_open_pending = false;
     app_state.g_chat_read_hold = false;
