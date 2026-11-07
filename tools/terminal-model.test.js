@@ -22,7 +22,13 @@ static void capture(const char *data, size_t length, void *user) {
     output[used] = 0;
 }
 static void feed(MPTerminal *t, const char *text) { mp_terminal_feed(t, text, strlen(text)); }
+#ifdef _WIN32
+#include "terminal-window.c"
+#endif
 int main(void) {
+#ifdef _WIN32
+    terminal_window_fixture();
+#endif
     assert(!mp_terminal_new(0, 80, capture, NULL));
     MPTerminal *t = mp_terminal_new(4, 30, capture, NULL);
     assert(t);
@@ -87,11 +93,13 @@ test('terminal model preserves ANSI, true color, Unicode, alternate screen, inpu
     fs.writeFileSync(file, fixture);
     const vendor = path.join(root, 'src/terminal/vendor/libvterm');
     const sources = fs.readdirSync(path.join(vendor, 'src')).filter((name) => name.endsWith('.c')).map((name) => path.join(vendor, 'src', name));
-    const built = spawnSync(process.env.ZIG || 'zig', ['cc', '-std=c99', '-I' + path.join(root, 'src'), '-I' + path.join(vendor, 'include'), path.join(root, 'src/terminal_model.c'), ...sources, file, '-o', exe], { encoding: 'utf8', timeout: 60000 });
+    const native = process.platform === 'win32' ? [path.join(root, 'src/terminal_window.c'), '-luser32', '-lgdi32'] : [];
+    const built = spawnSync(process.env.ZIG || 'zig', ['cc', '-std=c99', '-I' + path.join(root, 'src'), '-I' + path.join(root, 'tools/fixtures/IGSH-1824'), '-I' + path.join(vendor, 'include'), path.join(root, 'src/terminal_model.c'), ...sources, ...native, file, '-o', exe], { encoding: 'utf8', timeout: 60000 });
     assert.equal(built.status, 0, JSON.stringify({ signal: built.signal, error: built.error?.message, stdout: built.stdout, stderr: built.stderr }));
     const ran = spawnSync(exe, [], { encoding: 'utf8', timeout: 15000 });
     assert.equal(ran.status, 0, ran.stdout + ran.stderr);
     assert.match(ran.stdout, /TERMINAL_MODEL_PASS/);
+    if (process.platform === 'win32') assert.match(ran.stdout, /TERMINAL_WINDOW_PASS 30 owned child windows/);
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
   }
