@@ -129,9 +129,11 @@ test('invalid groups are refused before any layout write', async () => {
 });
 
 test('multibot help lists the same shell and chat open commands', () => {
+  const { existsSync } = require('node:fs');
   const { spawnSync } = require('node:child_process');
+  assert.equal(existsSync('tools/multibot.mjs'), true);
   const help = spawnSync(process.execPath, ['tools/multibot.mjs', 'help'], { encoding: 'utf8' });
-  assert.equal(help.status, 0, help.stderr);
+  assert.equal(help.status, 0);
   assert.match(help.stdout, /--kind shell/);
   assert.match(help.stdout, /--kind chat/);
   assert.match(help.stdout, /--group/);
