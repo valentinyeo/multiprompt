@@ -147,6 +147,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | --- | --- |
 | Alt+1 | Go to Starred workspace |
 | Alt+1 ... 9 | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
+| Ctrl+K -&gt; Archive workspace | Hide a workspace without deleting its server sessions |
+| Ctrl+K -&gt; Archived workspaces | Pick an archived workspace to restore its sessions |
+| Ctrl+K -&gt; Delete workspace | Delete an archived workspace; press Enter again to confirm |
+| Right-click workspace pill -&gt; Archive workspace | Archive that workspace; Other stays available |
 | Ctrl+Shift+Y | Snooze this workspace until a chosen time |
 | Ctrl+K -&gt; Workspace: Wake &lt;name&gt; | Wake a snoozed workspace now and switch to it |
 | Ctrl+K -&gt; Workspace: Bring Back All Sessions | Reopen every recorded tmux session of this workspace |
