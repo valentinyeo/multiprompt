@@ -16,7 +16,7 @@ function body(name, text = source) {
 async function zig(code, filter, state = true, expected = 0, failure = /FAIL \(|expected 15000, found 1000/) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
-    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig'], dir);
+    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig', 'chat_view.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });

@@ -127,6 +127,10 @@ function armRuntime(tests) {
   return runtime(tests);
 }
 
+test('IGSH-1759 live chat disconnect skips the placeholder reconnect arm', () => {
+  assert.match(body('sshDisconnect'), /@import\("chat_view\.zig"\)\.isLive/);
+});
+
 describe('SSH clock and standby', { concurrency: os.availableParallelism() }, () => {
   for (const kind of ['tmux', 'vps', 'vps2']) {
     test(`ISSUE-501 ${kind} link exit routes to single reconnect arm`, async () => {

@@ -7036,6 +7036,10 @@ class HostedWithoutPaneTest(unittest.TestCase):
     sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
     name = 'live-no-pane'
 
+    def require_reader(self, *names):
+        missing = [name for name in names if not callable(getattr(reader, name, None))]
+        self.assertEqual(missing, [])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -7051,8 +7055,11 @@ class HostedWithoutPaneTest(unittest.TestCase):
         reader.host_cli(['enable', 'claude', self.sid, '--tmux', self.name, '--cwd', str(self.home)])
 
     def test_name_and_identity_are_discoverable_before_the_agent_starts_without_a_pane(self):
+        self.require_reader('host_list_lines')
         self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
-        chats = reader.host_cli(['list'])['chats']
+        listed = reader.host_cli(['list'])
+        self.assertIn('chats', listed)
+        chats = listed['chats']
         self.assertEqual([(c['name'], c['sid']) for c in chats], [(self.name, self.sid)])
         self.assertEqual(self.commands, [])
         self.assertIn(self.name + '|', reader.host_list_lines())
@@ -7065,6 +7072,7 @@ class HostedWithoutPaneTest(unittest.TestCase):
         self.assertEqual(self.commands, [])
 
     def test_legacy_state_still_resolves_the_name(self):
+        self.require_reader('host_chats')
         paths = reader.host_paths('claude', self.sid)
         reader.host_write(paths['config'], dict(enabled=True, tmux=self.name, cwd=str(self.home)))
         reader.host_write(paths['state'], dict(provider='claude', sid=self.sid))
@@ -7072,6 +7080,7 @@ class HostedWithoutPaneTest(unittest.TestCase):
         self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
 
     def test_old_physical_and_headless_sessions_are_not_listed_twice_or_exposed(self):
+        self.require_reader('host_list_lines')
         with patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(stdout=self.name + '\n', returncode=0)):
             self.assertEqual(reader.host_list_lines(), '')
         paths = reader.host_paths('claude', self.sid)
@@ -7081,12 +7090,14 @@ class HostedWithoutPaneTest(unittest.TestCase):
         self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
 
     def test_duplicate_names_never_connect_to_an_arbitrary_agent(self):
+        self.require_reader('host_connect')
         reader.host_cli(['enable', 'codex', self.sid, '--tmux', self.name, '--cwd', str(self.home)])
         with patch.object(reader, 'host_start') as start:
             self.assertEqual(reader.host_connect(self.name)['status'], 'refused')
         start.assert_not_called()
 
     def test_terminal_handover_is_not_reclaimed_by_reconnect(self):
+        self.require_reader('host_chats', 'host_connect')
         reader.host_write(reader.host_paths('claude', self.sid)['owner'], dict(owner='terminal'))
         self.assertEqual(reader.host_chats(), [])
         with patch.object(reader.os, 'execvp') as attach, patch.object(reader, 'host_start') as start:

@@ -27,6 +27,12 @@ function native(source, files) {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+test('IGSH-1759 live restore connects by name and does not park on sleep', () => {
+  const identity = read('src/tmux_identity.zig');
+  assert.match(identity, /host connect /);
+  assert.doesNotMatch(identity, /exec sleep infinity/);
+});
+
 test('IGSH-1516 offline end survives stale account layout and rejects an unaccepted end', () => {
   const archive = read('src/archive.zig');
   const end = between(archive, 'pub fn endTmuxSessionAt(', 'pub fn endActiveTmuxSession(');
