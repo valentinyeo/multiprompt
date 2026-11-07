@@ -1,10 +1,12 @@
 import argparse
+import base64
 import importlib.util
 import itertools
 import json
 import os
 import sys
 import tempfile
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +18,7 @@ TAB = 'live-b06323d'
 FIRST = 'first reply PROBE-A'
 LATER = 'later reply PROBE-B'
 DIMENSIONS = dict(
+    path=('serve', 'watch'),
     tab=('hosted', 'terminal'),
     owner=('same-user', 'other-user'),
     query_sid=('sid', 'empty', 'stale'),
@@ -85,12 +88,14 @@ def check_case(reader, case, base):
             return None
         return parts[2], homes[parts[2]]
 
-    def as_owner(q, owner, source):
+    def as_owner(q, owner, source, run=None):
         user, home = owner
         previous = acting['user'], reader.HOME
         acting['user'] = user
         try:
             with patch.object(reader, 'HOME', home):
+                if run is not None:
+                    return run()
                 wire = reader.response(json.loads(json.dumps(q)), source, as_owner=True)
         finally:
             acting['user'], _ = previous
@@ -126,6 +131,8 @@ def check_case(reader, case, base):
     for p in patches:
         p.start()
     try:
+        if case['path'] == 'watch':
+            return check_watch(reader, query, written, lambda user, run: as_owner(None, (user, homes[user]), None, run))
         head, texts = rows(reader.response(dict(query), reader.READER_SOURCE))
         problems = []
         if head[3:4] != ['ok'] or not any(FIRST in t for t in texts) or any(OLD in t for t in texts):
@@ -141,6 +148,59 @@ def check_case(reader, case, base):
     finally:
         for p in reversed(patches):
             p.stop()
+
+
+def run_watch(reader, text, as_owner):
+    read_end, write_end = os.pipe()
+    os.write(write_end, text.encode())
+    os.close(write_end)
+    with os.fdopen(read_end, 'rb') as stream:
+        with patch.object(reader.sys, 'stdin', types.SimpleNamespace(buffer=stream, fileno=stream.fileno)):
+            reader.watch(reader.READER_SOURCE, as_owner)
+
+
+def check_watch(reader, query, written, run_as):
+    frames = []
+
+    class Output:
+        def write(self, text):
+            frames.extend(json.loads(x) for x in text.splitlines() if x.strip())
+
+        def flush(self):
+            pass
+
+    def changes(q, resolved, source, as_owner):
+        q['watch_screen'] = ''
+        yield resolved
+        with written.open('a') as stream:
+            stream.write(line('user', 'question two') + line('assistant', LATER))
+        yield resolved
+
+    def sudo(command, stdin=None, **_kwargs):
+        user = command[command.index('-u') + 1]
+        sent = []
+
+        def wait():
+            source, forwarded = b''.join(sent).decode().splitlines()[:2]
+            if base64.b64decode(source).decode() != reader.READER_SOURCE:
+                raise AssertionError('owner got another reader')
+            run_as(user, lambda: run_watch(reader, forwarded + '\n', True))
+            return 0
+
+        return types.SimpleNamespace(stdin=types.SimpleNamespace(write=sent.append, flush=lambda: None, close=lambda: None), wait=wait)
+
+    with patch.object(reader, 'watch_changes', changes), \
+            patch.object(reader.subprocess, 'Popen', sudo), \
+            patch.object(reader.sys, 'stdout', Output()):
+        run_watch(reader, json.dumps(query) + '\n', False)
+    if not frames:
+        return ['open: no frame sent']
+    head, texts = rows(frames[0]['wire'])
+    if head[3:4] != ['ok'] or not any(FIRST in t for t in texts) or any(OLD in t for t in texts):
+        return [f"open: status={head[3:4]} reason={head[6:7] if head[3:4] != ['ok'] else '-'} first_reply_shown={any(FIRST in t for t in texts)} old_chat_shown={any(OLD in t for t in texts)}"]
+    if not any(LATER in t for frame in frames[1:] for t in rows(frame['wire'])[1]):
+        return [f"next reply: frames={len(frames)} later_reply_shown=False"]
+    return []
 
 
 def main():
