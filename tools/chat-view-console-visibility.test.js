@@ -291,7 +291,6 @@ test('executed production Zig decision, show, picker-close and input paths pass;
     assert.notEqual(broken, source);
     fs.writeFileSync(file, (harness(broken)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const negative = spawnSync(zig, ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
-    if (negative.signal) fs.cpSync(dir, '/tmp/chat-neg', { recursive: true });
     assert.notEqual(negative.status, 0, 'an unconditional show must fail real execution');
     assert.match(negative.stderr, /URL picker close[^]*FAIL/, JSON.stringify({ status: negative.status, signal: negative.signal, error: negative.error?.message, stdout: negative.stdout }));
     const oldPicker = source.replace(fn(source, 'closeUrlPickerInternal'), fn(source, 'closeUrlPickerInternal').replace('showShellConsole(active_shell, SW_SHOW, "closeUrlPickerInternal")', 'ShowWindow(shells[active_shell].hwnd, SW_SHOW)'));
