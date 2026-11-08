@@ -230,7 +230,7 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
     for (base_order, 0..) |name, bi| {
         if (order.items.len >= layout.max_groups or containsName(order.items, name)) continue;
         const held = for (tabs.items) |t| {
-            if (eq(u8, t.group orelse "", name)) break true;
+            if (eq(u8, t.group orelse "", name) or eq(u8, t.starred_group orelse "", name)) break true;
         } else false;
         if (!held) continue;
         var at: usize = 0;
@@ -1289,6 +1289,11 @@ test "IGSH-1087 a synced tab missing here keeps its group in the order so nothin
     const closed = try keepHeld(a, base, here, &.{elsewhere});
     try std.testing.expectEqual(@as(usize, 1), closed.group_order.?.len);
     try std.testing.expect(publishNeeded(closed, base, base));
+    const starred = Tab{ .name = "Three", .tmux_host = 2, .tmux_session = "three", .workspace = "Other", .group = "", .starred_group = "Favorites only" };
+    const favorites_base = Layout{ .workspaces = &test_ws, .tabs = &.{ starred, work }, .group_order = &.{ "Work", "Favorites only" } };
+    const favorites_kept = try keepHeld(a, favorites_base, here, &.{});
+    try std.testing.expect(!publishNeeded(favorites_kept, favorites_base, favorites_base));
+    try std.testing.expectEqualStrings("Favorites only", favorites_kept.group_order.?[1]);
 }
 
 test "IGSH-1890 a pulled layout carries group order and a local move wins only when this device moved" {
