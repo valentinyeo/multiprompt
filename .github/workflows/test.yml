@@ -40,6 +40,8 @@ jobs:
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
+      - name: Verify shared reader engine startup
+        run: python3 tools/chat-shared-runtime.test.py -v
       - name: Track each message by its id
         run: python3 -W error::DeprecationWarning tools/message-id-delivery-test.py -v
       - name: Check every hosted chat read shape returns its replies
