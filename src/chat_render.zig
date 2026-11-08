@@ -232,6 +232,7 @@ const chat_image_insert = @import("chat_image_insert.zig");
 const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
 const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
 const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
+const chatOutboxShellForKey = @import("chat_send.zig").chatOutboxShellForKey;
 const chatOutboxIndexById = @import("chat_send.zig").chatOutboxIndexById;
 const chatEchoSendAgain = @import("chat_send.zig").chatEchoSendAgain;
 const chatEchoRemove = @import("chat_send.zig").chatEchoRemove;
