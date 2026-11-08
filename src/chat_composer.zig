@@ -1687,6 +1687,9 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
             if (nav_action == .open) dropPendingActivationChar(hwnd, 0x0D);
             return 0;
         }
+        if (nav_action == .none and wp == 0x2E and GetWindowTextLengthW(hwnd) == 0 and !isCtrlDown() and (GetAsyncKeyState(0x10) & key_down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) == 0) {
+            if (@import("chat_render.zig").chatRemoveActiveTabNotSent()) return 0;
+        }
     }
     if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
         clearChatReply();

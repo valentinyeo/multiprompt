@@ -5807,6 +5807,23 @@ fn chatNavReveal(index: usize) void {
     }
 }
 
+pub fn chatRemoveActiveTabNotSent() bool {
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return false;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return false;
+    var i: usize = app_state.g_chat_outbox.items.len;
+    while (i > 0) {
+        i -= 1;
+        const e = &app_state.g_chat_outbox.items[i];
+        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or e.state != .not_sent or !e.removable()) continue;
+        const id = e.id;
+        chatEchoRemove(id);
+        return chatOutboxIndexById(id) == null;
+    }
+    return false;
+}
+
 pub fn chatNavStart() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     const count = app_state.g_chat_block_count + app_state.g_chat_echo_layout_count;
@@ -5862,21 +5879,7 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
                     return true;
                 }
             } else chatNavClear();
-            if (app_state.active_shell < app_state.shell_count) {
-                var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-                const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
-                if (key.len > 0) {
-                    var i: usize = app_state.g_chat_outbox.items.len;
-                    while (i > 0) {
-                        i -= 1;
-                        const e = &app_state.g_chat_outbox.items[i];
-                        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or e.state != .not_sent or !e.removable()) continue;
-                        chatEchoRemove(e.id);
-                        if (chatOutboxIndexById(e.id) == null) chatNavClear();
-                        break;
-                    }
-                }
-            }
+            _ = chatRemoveActiveTabNotSent();
             return true;
         },
         .open => {
