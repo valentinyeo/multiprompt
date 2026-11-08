@@ -108,6 +108,7 @@ class RuntimeTest(unittest.TestCase):
         for process in processes:
             output, error = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 0, error)
+            self.assertTrue(output.strip(), 'superseded reader dropped an open reply')
             self.assertIn(json.loads(output)['engine_info']['generation'], (GENERATION, GENERATION + 1))
         self.assertEqual(self.info()['generation'], GENERATION + 1)
 
