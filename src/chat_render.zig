@@ -235,6 +235,7 @@ const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
 const chatOutboxIndexById = @import("chat_send.zig").chatOutboxIndexById;
 const chatEchoSendAgain = @import("chat_send.zig").chatEchoSendAgain;
 const chatEchoRemove = @import("chat_send.zig").chatEchoRemove;
+const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardUnsentForActive;
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
@@ -5808,20 +5809,18 @@ fn chatNavReveal(index: usize) void {
 }
 
 pub fn chatRemoveActiveTabNotSent() bool {
-    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return false;
+    if (app_state.active_shell >= app_state.shell_count) return false;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
     if (key.len == 0) return false;
-    var i: usize = app_state.g_chat_outbox.items.len;
-    while (i > 0) {
-        i -= 1;
-        const e = &app_state.g_chat_outbox.items[i];
-        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or e.state != .not_sent or !e.removable()) continue;
-        const id = e.id;
-        chatEchoRemove(id);
-        return chatOutboxIndexById(id) == null;
+    var pending: u32 = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.state == .not_sent and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) pending += 1;
     }
-    return false;
+    if (pending == 0) return false;
+    const before = app_state.g_chat_outbox.items.len;
+    chatEchoDiscardUnsentForActive();
+    return app_state.g_chat_outbox.items.len < before;
 }
 
 pub fn chatNavStart() void {
