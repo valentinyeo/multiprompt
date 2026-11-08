@@ -1282,13 +1282,110 @@ def run_message_worker():
 
 
 
+def terminal_session(command):
+    value = state()
+    if value.get("binding") and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="workspace")
+        return "workspace", None
+    if value.get("binding") and "tmux if-shell -F -t " in command:
+        expected = re.search(r"#\{==:#\{start_time\}:#\{pid\}:#\{session_id\},([0-9:$]+)\}", command)
+        current = value.get("generation", "1700:123:$7")
+        if not expected:
+            raise RuntimeError("Guarded attach omitted the expected generation")
+        if expected[1] != current:
+            record("invocations.jsonl", kind="refused", expected=expected[1], actual=current, command=command)
+            return None, "Saved terminal session changed; refusing to attach.\r\n"
+        record("invocations.jsonl", kind="attach", session="workspace", identity=current, command=command)
+        return "workspace", None
+    match = re.search(r"tmux attach -t ['\"]?=?([A-Za-z0-9._:-]+)", command)
+    if match and match[1] in session_names():
+        record("invocations.jsonl", kind="attach", session=match[1])
+        return match[1], None
+    record("unsupported.jsonl", operation="terminal command", command=command)
+    return None, None
+
+
+def terminal_frame(session, size):
+    value = state()
+    if value.get("fake"):
+        claude = fake_locked(fake_read)
+        shown = fake_screen(claude, False)
+        marked = fake_screen(claude, True)
+        grey = fake_suggestion_shown(claude)
+        key = json.dumps(claude, sort_keys=True)
+    else:
+        shown = marked = screen(value)
+        grey = value["mode"] == "idle"
+        key = json.dumps(value, sort_keys=True)
+    lines = marked.splitlines()
+    row = next((i for i, line in enumerate(shown.splitlines()) if line.startswith("❯")), 0)
+    text = "\x1b[0m\x1b[2J\x1b[H" + "\r\n".join(lines) + "\r\n\x1b[" + str(row + 1) + ";3H"
+    return (key, tuple(size)), shown, text, grey, row
+
+
 def terminal_reader():
-    try:
-        for line in sys.stdin.buffer:
-            if not line:
-                break
-    except (OSError, ValueError):
-        return 1
+    import base64
+    import threading
+
+    box = dict(size=[24, 80], opening=None, closed=False)
+    changed = threading.Event()
+    opened = threading.Event()
+
+    def drain():
+        try:
+            for raw in sys.stdin.buffer:
+                try:
+                    value = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(value, dict):
+                    continue
+                if box["opening"] is None and isinstance(value.get("command"), str):
+                    box["opening"] = value
+                    if isinstance(value.get("size"), list):
+                        box["size"] = value["size"]
+                    opened.set()
+                elif isinstance(value.get("size"), list):
+                    box["size"] = value["size"]
+                    changed.set()
+        except (OSError, ValueError):
+            pass
+        finally:
+            box["closed"] = True
+            opened.set()
+            changed.set()
+
+    threading.Thread(target=drain, daemon=True).start()
+    opened.wait()
+    if box["opening"] is None:
+        return 0
+
+    def send(data):
+        sys.stdout.buffer.write(base64.b64encode(data) + b"\n")
+        sys.stdout.buffer.flush()
+
+    session, refusal = terminal_session(box["opening"]["command"])
+    if session is None:
+        if refusal:
+            send(refusal.encode("utf-8"))
+            return 0
+        return 96
+    if (ROOT / "console-detached").exists():
+        return 0
+    (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
+    previous = None
+    while not box["closed"]:
+        if (ROOT / "console-detached").exists():
+            return 0
+        key, shown, text, grey, row = terminal_frame(session, box["size"])
+        if key != previous:
+            send(text.encode("utf-8"))
+            rows = [line.rstrip() for line in shown.splitlines()]
+            record("console.jsonl", session=session, screen=shown, rows=rows, suggestionAttribute=8 if grey else 7, promptRow=row, greySuggestion=grey)
+            (ROOT / "ready.json").write_text(json.dumps(dict(pid=os.getpid(), session=session, screen=shown)), encoding="utf-8")
+            previous = key
+        changed.wait(0.05)
+        changed.clear()
     return 0
 
 
