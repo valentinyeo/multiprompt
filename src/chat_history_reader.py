@@ -5055,6 +5055,44 @@ def host_pane_release(tmux, sid):
     return dict(status="error", reason="pane_prompt_timeout")
 
 
+CHAT_NAME_TMUX = re.compile(r"[A-Za-z0-9_.:-]{1,64}\Z")
+
+
+def chat_names_path():
+    return HOME / ".local/state/multiprompt/chat-names.json"
+
+
+def chat_names_publish(entries):
+    if not isinstance(entries, list) or len(entries) > 256:
+        return dict(status="refused", reason="invalid_names")
+    path = chat_names_path()
+    try:
+        known = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        known = {}
+    if not isinstance(known, dict):
+        known = {}
+    now = time.time()
+    count = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        tmux, name = entry.get("tmux"), entry.get("name")
+        if not isinstance(tmux, str) or CHAT_NAME_TMUX.match(tmux) is None or not isinstance(name, str):
+            continue
+        name = name.strip()
+        if not name or len(name) > 192 or any(ord(c) < 32 for c in name):
+            continue
+        sid = entry.get("sid")
+        known[tmux] = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
+        count += 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    temporary.write_text(json.dumps(known, separators=(",", ":")), encoding="utf-8")
+    os.replace(temporary, path)
+    return dict(status="ok", count=count)
+
+
 def host_adopt(provider, sid, tmux, cwd=None, mode=None):
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
@@ -6526,6 +6564,9 @@ def serve_request(line, source, subscriptions, lock):
             raise ValueError("invalid request id")
         if query.get("op") == "engine_info":
             serve_print(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1], room_message_protocols=[ROOM_MESSAGE_PROTOCOL]))
+            return
+        if query.get("op") == "chat_names":
+            serve_print(dict(id=rid, message_protocol=1, result=chat_names_publish(query.get("names"))))
             return
         if query.get("op") == "host_adopt":
             serve_print(dict(id=rid, host_adopt=host_adopt(query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))))
