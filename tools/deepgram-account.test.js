@@ -15,13 +15,17 @@ function functionBody(text, name) {
 
 test("IGSH-1889: the worker serves the Deepgram key per account to devices only", () => {
   const worker = read("service/worker.js");
-  const route = worker.match(/if \(url\.pathname === '\/v1\/secrets\/deepgram'[^]*?\n      \}\n/)[0];
+  const found = worker.match(/if \(url\.pathname === '\/v1\/secrets\/deepgram'[^]*?\n      \}\n/);
+  assert.ok(found, "the secrets route is missing");
+  const route = found[0];
   assert.match(route, /request\.method === 'GET' \|\| request\.method === 'PUT'/);
   assert.match(route, /if \(!device\.id\) fail\(403/);
   assert.match(route, /bind\(device\.account, 'deepgram'/);
   assert.match(route, /FROM account_secrets WHERE account=\? AND name=\?/);
   assert.match(worker, /const validSecret = .*length <= 256.*\\x21-\\x7e/);
-  assert.doesNotMatch(worker.match(/async function authenticateKey[^]*?\n\}\n/)[0], /secrets/);
+  const gate = worker.match(/async function authenticateKey[^]*?\n\}\n/);
+  assert.ok(gate, "authenticateKey is missing");
+  assert.doesNotMatch(gate[0], /secrets/);
 });
 
 test("IGSH-1889: the account table is additive and keyed by account and name", () => {
