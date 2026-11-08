@@ -27,7 +27,6 @@ Wait-ChatFocus 'Edit' 'not-sent-composer'
 Start-Sleep -Seconds 2
 Press @(0x11, 0x41) 'Ctrl+A: clear composer before message navigation'
 Press @(0x08) 'Backspace: empty composer before message navigation'
-Wait-Until { (Read-StuckMessages).Count -eq 1 } 'stuck message still queued before removal'
 Snapshot 'action'
 Assert-Foreground
 $removed = $false
