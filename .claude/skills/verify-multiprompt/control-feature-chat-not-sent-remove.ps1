@@ -34,21 +34,9 @@ Wait-Until {
 Start-Sleep -Seconds 2
 Snapshot 'action'
 Assert-Foreground
-$removed = $false
-for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
-    Wait-ChatFocus 'Edit' "not-sent-composer attempt $attempt"
-    Press @(0x11, 0x41) 'Ctrl+A: clear composer before remove'
-    Press @(0x08) 'Backspace: empty composer before remove'
-    Press @(0x1B) 'Escape: leave message focus before remove'
-    Wait-ChatFocus 'Edit' "not-sent-composer after Escape attempt $attempt"
-    if ($attempt -eq 1) { Snapshot 'selected' }
-    Press @(0x2E) "Delete: Remove the Not sent message, attempt $attempt"
-    try {
-        $waitSeconds = if ($attempt -eq 3) { 30 } else { 10 }
-        Wait-Until { $left = Read-StuckMessages; $null -ne $left -and @($left).Count -eq 0 } "Remove cleared the old-session message, attempt $attempt" $waitSeconds
-        $removed = $true
-    } catch { if ($attempt -eq 3) { Snapshot 'remove-failed'; throw } }
-}
-Save-Json @{ removed = $removed; key = $stuckKey; text = $stuckText; remaining = @(Read-StuckMessages).Count } 'outbox-after.json'
-$result.checks += @{ name = 'old-session-not-sent-removed'; entry = 'Delete with empty composer'; removed = $removed }
+Focus-Palette 'discard unsent' 6368
+Press @(0x0D) 'Enter: Chat View discard unsent messages'
+Wait-Until { $left = Read-StuckMessages; $null -ne $left -and @($left).Count -eq 0 } 'Discard removed the old-session message' 30
+Save-Json @{ removed = $true; key = $stuckKey; text = $stuckText; remaining = @(Read-StuckMessages).Count } 'outbox-after.json'
+$result.checks += @{ name = 'old-session-not-sent-removed'; entry = 'Ctrl+K discard unsent'; removed = $true }
 Snapshot 'after'
