@@ -398,7 +398,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $seedDir 'chat-outbox.json'), (ConvertTo-Json -InputObject $seedOutbox -Depth 8), (New-Object Text.UTF8Encoding $false))
         Save-Json $seed 'seed-session.json'
         Save-Json $seedOutbox 'seed-outbox.json'
-        $result.seedBoundary = 'The harness writes the saved-tab file and the unsent-message file once before launch: one message marked sent under a session id the tab no longer has. Nothing is edited after launch; the only input is Alt+C, Up and Delete.'
+        $result.seedBoundary = 'The harness writes the saved-tab file and the unsent-message file once before launch: one message marked sent under a session id the tab no longer has. Nothing is edited after launch; the only input is Alt+C and Delete with an empty composer.'
     }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'
