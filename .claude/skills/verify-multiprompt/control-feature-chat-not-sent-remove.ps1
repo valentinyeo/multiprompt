@@ -35,7 +35,8 @@ Snapshot 'action'
 Assert-Foreground
 $removed = $false
 for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
-    foreach ($n in 1..2) { Press @(0x26) "Up: select the Not sent message, attempt $attempt step $n" }
+    Wait-ChatFocus 'Edit' "not-sent-composer attempt $attempt"
+    Press @(0x26) "Up: select the Not sent message, attempt $attempt"
     Start-Sleep -Milliseconds 600
     if ($attempt -eq 1) { Snapshot 'selected' }
     Press @(0x2E) "Delete: Remove the Not sent message, attempt $attempt"

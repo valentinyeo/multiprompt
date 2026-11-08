@@ -5852,16 +5852,17 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
             return true;
         },
         .remove => {
-            const index = chatNavIndex() orelse {
-                chatNavClear();
-                return true;
-            };
-            if (index >= app_state.g_chat_block_count) {
-                const id = app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count];
-                const ei = chatOutboxIndexById(id) orelse return true;
-                if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
-                if (chatOutboxIndexById(id) == null) chatNavClear();
-            } else if (app_state.active_shell < app_state.shell_count) {
+            const index = chatNavIndex();
+            if (index) |idx| {
+                if (idx >= app_state.g_chat_block_count) {
+                    const id = app_state.g_chat_echo_layout_ids[idx - app_state.g_chat_block_count];
+                    const ei = chatOutboxIndexById(id) orelse return true;
+                    if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
+                    if (chatOutboxIndexById(id) == null) chatNavClear();
+                    return true;
+                }
+            } else chatNavClear();
+            if (app_state.active_shell < app_state.shell_count) {
                 var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
                 const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
                 if (key.len > 0) {
