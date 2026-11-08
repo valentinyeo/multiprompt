@@ -2111,6 +2111,18 @@ pub fn chatEchoRetryAllForActive() void {
     showHeaderNoticeAscii(msg, 3000, false);
 }
 
+pub fn chatEchoDiscardableForShell(e: ChatOutboxEntry, shell: u32) bool {
+    const ek = e.key[0..@as(usize, e.key_len)];
+    const owner = chatOutboxShellForKey(ek) orelse return false;
+    if (owner != shell or e.state == .cancelled) return false;
+    if (e.state == .not_sent) return true;
+    if (!e.message_v1) return false;
+    const sid = std.mem.sliceTo(&e.message_sid, 0);
+    if (sid.len == 0) return false;
+    const identity = chatFileIdentityForShell(shell);
+    return !std.mem.eql(u8, sid, &identity.sid);
+}
+
 pub fn chatEchoDiscardUnsentForActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell = app_state.active_shell;
@@ -2118,12 +2130,7 @@ pub fn chatEchoDiscardUnsentForActive() void {
     var i: usize = 0;
     while (i < app_state.g_chat_outbox.items.len) {
         const e = app_state.g_chat_outbox.items[i];
-        const ek = e.key[0..@as(usize, e.key_len)];
-        const owner = chatOutboxShellForKey(ek) orelse {
-            i += 1;
-            continue;
-        };
-        if (e.state == .not_sent and owner == shell) {
+        if (chatEchoDiscardableForShell(e, shell)) {
             chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
             dropped += 1;
         } else {

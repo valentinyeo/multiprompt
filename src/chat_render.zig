@@ -5814,9 +5814,7 @@ pub fn chatRemoveActiveTabNotSent() bool {
     const shell = app_state.active_shell;
     var pending: u32 = 0;
     for (app_state.g_chat_outbox.items) |e| {
-        const ek = e.key[0..@as(usize, e.key_len)];
-        const owner = chatOutboxShellForKey(ek) orelse continue;
-        if (e.state == .not_sent and owner == shell) pending += 1;
+        if (@import("chat_send.zig").chatEchoDiscardableForShell(e, shell)) pending += 1;
     }
     if (pending == 0) return false;
     const before = app_state.g_chat_outbox.items.len;
