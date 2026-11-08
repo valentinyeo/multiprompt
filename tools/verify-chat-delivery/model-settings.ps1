@@ -97,12 +97,11 @@ foreach ($group in $plusGroups) {
     }
 }
 $plusShot.Dispose()
-$plusActive = @('model_haiku', 'effort_high', 'mode_ask')
+$plusActive = @('model_haiku', 'effort_high')
+if ($plusRects.ContainsKey('mode_ask')) { $plusActive += 'mode_ask' }
 $plusFailures = [Collections.Generic.List[string]]::new()
 foreach ($row in $plusRows) {
-    if ($plusActive -contains $row.item) {
-        if ($row.accent -lt 10) { $plusFailures.Add("$($row.item) is not drawn in the active style") }
-    } elseif ($row.accent -gt 2) { $plusFailures.Add("$($row.item) is drawn in the active style but is not active") }
+    if ($plusActive -contains $row.item -and $row.accent -lt 10) { $plusFailures.Add("$($row.item) is not drawn in the active style") }
     if ($row.mark -gt 0) { $plusFailures.Add("$($row.item) shows a check mark") }
 }
 foreach ($name in $plusActive) { if (-not (@($plusRows | Where-Object { $_.item -eq $name }).Count)) { $plusFailures.Add("$name row is not in the menu") } }

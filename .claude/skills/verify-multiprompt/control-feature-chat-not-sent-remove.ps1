@@ -25,11 +25,14 @@ Wait-Until {
 } 'visible native Chat View transcript control'
 Wait-ChatFocus 'Edit' 'not-sent-composer'
 Start-Sleep -Seconds 2
+Press @(0x11, 0x41) 'Ctrl+A: clear composer before message navigation'
+Press @(0x08) 'Backspace: empty composer before message navigation'
+Wait-Until { (Read-StuckMessages).Count -eq 1 } 'stuck message still queued before removal'
 Snapshot 'action'
 Assert-Foreground
 $removed = $false
 for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
-    Press @(0x26) "Up: select the Not sent message, attempt $attempt"
+    foreach ($n in 1..2) { Press @(0x26) "Up: select the Not sent message, attempt $attempt step $n" }
     Start-Sleep -Milliseconds 600
     if ($attempt -eq 1) { Snapshot 'selected' }
     Press @(0x2E) "Delete: Remove the Not sent message, attempt $attempt"
