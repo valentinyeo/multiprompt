@@ -2162,7 +2162,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
             break :blk to_apply;
         };
-    } else {
+    } else if (!std.mem.eql(u8, app_state.g_account_base orelse "", bytes)) {
         app_state.g_account_locked = false;
         applyServerLayout(to_apply) catch {
             accountSyncFailed(true);
