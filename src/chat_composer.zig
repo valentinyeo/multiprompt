@@ -3002,7 +3002,7 @@ test "IGSH-922 slash filtering presents one completed popup frame" {
         if (expected_count > 0) {
             const dc = GetDC(popup) orelse return error.TestUnexpectedResult;
             defer _ = ReleaseDC(popup, dc);
-            try std.testing.expectEqual(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)), w.GetPixel(dc, 2, 2));
+            try std.testing.expectEqual(@import("more_menu.zig").colors().raised, w.GetPixel(dc, uiScaled(10), chatAcPad() + @divTrunc(uiScaled(32), 2)));
         }
     }
     std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ inline_paints, queued_paints, chat_ac_window_clears - clears_before });
