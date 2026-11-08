@@ -1204,13 +1204,9 @@ pub fn chatOutboxWorkingForShell(idx: u32) bool {
 
 pub fn chatEchoCountNotSentForShell(idx: u32) usize {
     if (idx >= app_state.shell_count) return 0;
-    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-    const key = chatOutboxKeyForShell(idx, &key_buf);
-    if (key.len == 0) return 0;
     var n: usize = 0;
     for (app_state.g_chat_outbox.items) |e| {
-        if (e.state != .not_sent) continue;
-        if (e.state != .cancelled and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
+        if (chatEchoDiscardableForShell(e, idx)) n += 1;
     }
     return n;
 }
@@ -2111,10 +2107,19 @@ pub fn chatEchoRetryAllForActive() void {
     showHeaderNoticeAscii(msg, 3000, false);
 }
 
+fn chatOutboxOwnedByShell(key: []const u8, shell: u32) bool {
+    if (chatOutboxShellForKey(key)) |owner| return owner == shell;
+    if (shell >= app_state.shell_count) return false;
+    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const canonical = chatOutboxKeyForShell(shell, &buf);
+    if (canonical.len > 0 and std.mem.eql(u8, key, canonical)) return true;
+    const legacy = chatOutboxLegacyKeyForShell(shell, &buf);
+    return legacy.len > 0 and std.mem.eql(u8, key, legacy);
+}
+
 pub fn chatEchoDiscardableForShell(e: ChatOutboxEntry, shell: u32) bool {
     const ek = e.key[0..@as(usize, e.key_len)];
-    const owner = chatOutboxShellForKey(ek) orelse return false;
-    if (owner != shell or e.state == .cancelled) return false;
+    if (!chatOutboxOwnedByShell(ek, shell) or e.state == .cancelled) return false;
     if (e.state == .not_sent) return true;
     if (!e.message_v1) return false;
     const sid = std.mem.sliceTo(&e.message_sid, 0);

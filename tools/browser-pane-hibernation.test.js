@@ -183,6 +183,7 @@ test("IGSH-1864 empty composer Delete discards stuck not-sent rows for the tab",
   const render = fs.readFileSync(path.join(root, "src", "chat_render.zig"), "utf8");
   const send = fs.readFileSync(path.join(root, "src", "chat_send.zig"), "utf8");
   assert.match(render, /pub fn chatRemoveActiveTabNotSent\(\) bool \{[\s\S]*chatEchoDiscardableForShell/);
+  assert.match(send, /fn chatOutboxOwnedByShell/);
   assert.match(send, /pub fn chatEchoDiscardableForShell/);
   assert.match(send, /pub fn chatEchoDiscardUnsentForActive\(\) void \{[\s\S]*chatEchoDiscardableForShell/);
 });
