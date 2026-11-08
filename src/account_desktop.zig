@@ -767,8 +767,7 @@ fn accountDeleteToken() void {
 }
 fn accountLock() void {
     @import("room_frontend.zig").setAccount(null);
-    if (g_applied_layout) |old| std.heap.page_allocator.free(old);
-    g_applied_layout = null;
+    g_applied_layout.forget(std.heap.page_allocator);
     if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
@@ -1923,7 +1922,7 @@ pub fn resumeStartupReply() void {
     if (reply != 0) handleLayoutReply(reply);
 }
 
-var g_applied_layout: ?[]u8 = null;
+var g_applied_layout: account_layout.AppliedLayout = .{};
 pub fn handleLayoutReply(lp: LPARAM) void {
     if (lp != 0 and @import("launch_cache.zig").pending) {
         const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
@@ -2165,15 +2164,14 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
             break :blk to_apply;
         };
-    } else if (!std.mem.eql(u8, g_applied_layout orelse "", bytes)) {
+    } else if (g_applied_layout.changed(bytes)) {
         app_state.g_account_locked = false;
         applyServerLayout(to_apply) catch {
             accountSyncFailed(true);
             if (app_state.active_shell < app_state.shell_count) switchToShell(app_state.active_shell);
             return;
         };
-        if (g_applied_layout) |old| a.free(old);
-        g_applied_layout = a.dupe(u8, bytes) catch null;
+        g_applied_layout.remember(a, bytes);
     }
     const final_target = session_layout.parse(alloc, to_apply) catch return;
     defer final_target.deinit();

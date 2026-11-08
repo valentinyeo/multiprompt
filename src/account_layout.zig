@@ -34,6 +34,24 @@ fn workspaceIndex(workspaces: []const layout.Workspace, name: []const u8) ?usize
     for (workspaces, 0..) |ws, i| if (eq(u8, ws.name, name)) return i;
     return null;
 }
+pub const AppliedLayout = struct {
+    bytes: ?[]u8 = null,
+
+    pub fn changed(self: AppliedLayout, incoming: []const u8) bool {
+        return !eq(u8, self.bytes orelse return true, incoming);
+    }
+
+    pub fn remember(self: *AppliedLayout, a: Allocator, incoming: []const u8) void {
+        self.forget(a);
+        self.bytes = a.dupe(u8, incoming) catch null;
+    }
+
+    pub fn forget(self: *AppliedLayout, a: Allocator) void {
+        if (self.bytes) |old| a.free(old);
+        self.bytes = null;
+    }
+};
+
 pub fn equal(a: Layout, b: Layout) bool {
     return equalWithin(a, b, 0);
 }
@@ -1271,6 +1289,18 @@ test "IGSH-1533 old palette projects white without losing pending edits" {
     const new_values = try projectPalette7(a, edited, .{ .workspaces = &.{}, .tabs = &.{} });
     try std.testing.expectEqual(@as(?u8, null), new_values.workspaces[0].color);
     try std.testing.expectEqual(@as(?u8, null), new_values.tabs[0].color);
+}
+
+test "IGSH-1087 a desktop that ran alone and polled the same layout twice applies it once" {
+    var applied: AppliedLayout = .{};
+    defer applied.forget(std.testing.allocator);
+    const first = "{\"revision\":15226,\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}";
+    try std.testing.expect(applied.changed(first));
+    applied.remember(std.testing.allocator, first);
+    try std.testing.expect(!applied.changed(first));
+    try std.testing.expect(applied.changed("{\"revision\":15227,\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}"));
+    applied.forget(std.testing.allocator);
+    try std.testing.expect(applied.changed(first));
 }
 
 test "IGSH-1087 a synced tab missing here keeps its group in the order so nothing republishes" {
