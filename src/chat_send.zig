@@ -2113,14 +2113,17 @@ pub fn chatEchoRetryAllForActive() void {
 
 pub fn chatEchoDiscardUnsentForActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
-    if (key.len == 0) return;
+    const shell = app_state.active_shell;
     var dropped: u32 = 0;
     var i: usize = 0;
     while (i < app_state.g_chat_outbox.items.len) {
         const e = app_state.g_chat_outbox.items[i];
-        if (e.state == .not_sent and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) {
+        const ek = e.key[0..@as(usize, e.key_len)];
+        const owner = chatOutboxShellForKey(ek) orelse {
+            i += 1;
+            continue;
+        };
+        if (e.state == .not_sent and owner == shell) {
             chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
             dropped += 1;
         } else {

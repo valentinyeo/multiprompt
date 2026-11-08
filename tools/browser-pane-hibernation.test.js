@@ -181,7 +181,9 @@ test("F1 shortcuts overview lists Alt+P and the Hibernate Browser Panes Now comm
 
 test("IGSH-1864 empty composer Delete discards stuck not-sent rows for the tab", () => {
   const render = fs.readFileSync(path.join(root, "src", "chat_render.zig"), "utf8");
-  assert.match(render, /pub fn chatRemoveActiveTabNotSent\(\) bool \{[\s\S]*chatEchoDiscardUnsentForActive\(\)/);
+  const send = fs.readFileSync(path.join(root, "src", "chat_send.zig"), "utf8");
+  assert.match(render, /pub fn chatRemoveActiveTabNotSent\(\) bool \{[\s\S]*chatOutboxShellForKey/);
+  assert.match(send, /pub fn chatEchoDiscardUnsentForActive\(\) void \{[\s\S]*chatOutboxShellForKey/);
 });
 
 test("wiki page exists and documents the tiers", () => {

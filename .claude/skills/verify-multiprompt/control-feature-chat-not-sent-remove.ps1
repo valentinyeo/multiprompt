@@ -34,6 +34,8 @@ Assert-Foreground
 $removed = $false
 for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
     Wait-ChatFocus 'Edit' "not-sent-composer attempt $attempt"
+    Press @(0x11, 0x41) 'Ctrl+A: clear composer before remove'
+    Press @(0x08) 'Backspace: empty composer before remove'
     Press @(0x1B) 'Escape: leave message focus before remove'
     Wait-ChatFocus 'Edit' "not-sent-composer after Escape attempt $attempt"
     if ($attempt -eq 1) { Snapshot 'selected' }
