@@ -320,6 +320,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&message_id_tests.step);
     const mp_send_tests = b.addSystemCommand(&.{ "python3", "tools/mp-send-test.py" });
     vps_test_step.dependOn(&mp_send_tests.step);
+    const mp_talk_tests = b.addSystemCommand(&.{ "python3", "tools/mp-talk-test.py" });
+    vps_test_step.dependOn(&mp_talk_tests.step);
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
