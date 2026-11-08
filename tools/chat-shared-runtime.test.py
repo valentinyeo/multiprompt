@@ -99,18 +99,20 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(active.read_text(), 'null')
 
     def test_concurrent_generations_cannot_downgrade(self):
-        processes = []
-        for source in (SOURCE, self.newer(), SOURCE, self.newer()):
-            process = subprocess.Popen([sys.executable, '-u', '-c', BOOTSTRAP, '--serve'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.env)
-            process.stdin.write(base64.b64encode(source.encode()).decode() + '\n' + json.dumps({'id': 7, 'op': 'engine_info'}) + '\n')
-            process.stdin.flush()
-            processes.append(process)
-        for process in processes:
-            output, error = process.communicate(timeout=10)
-            self.assertEqual(process.returncode, 0, error)
-            self.assertTrue(output.strip(), 'superseded reader dropped an open reply')
-            self.assertIn(json.loads(output)['engine_info']['generation'], (GENERATION, GENERATION + 1))
-        self.assertEqual(self.info()['generation'], GENERATION + 1)
+        for attempt in range(5):
+            with self.subTest(attempt=attempt):
+                processes = []
+                for source in (SOURCE, self.newer(), SOURCE, self.newer()):
+                    process = subprocess.Popen([sys.executable, '-u', '-c', BOOTSTRAP, '--serve'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.env)
+                    process.stdin.write(base64.b64encode(source.encode()).decode() + '\n' + json.dumps({'id': 7, 'op': 'engine_info'}) + '\n')
+                    process.stdin.flush()
+                    processes.append(process)
+                for process in processes:
+                    output, error = process.communicate(timeout=10)
+                    self.assertEqual(process.returncode, 0, error)
+                    self.assertTrue(output.strip(), 'superseded reader dropped an open reply before ThreadPoolExecutor load')
+                    self.assertIn(json.loads(output)['engine_info']['generation'], (GENERATION, GENERATION + 1))
+                self.assertEqual(self.info()['generation'], GENERATION + 1)
 
     def test_mp_send_ships_inside_the_runtime(self):
         body = "#!/usr/bin/env python3\nprint('mp-send')\n"
