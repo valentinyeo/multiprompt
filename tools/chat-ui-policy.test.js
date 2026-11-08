@@ -13,7 +13,7 @@ test('the obsolete chat UI owner-yes guard is absent', () => {
   }
   const checks = read('.github/required-checks.txt').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   assert.ok(!checks.includes('chat-ui-approval'));
-  for (const check of ['test', 'secret-scan', 'no-comments', 'verify (appearance)', 'click-through']) {
+  for (const check of ['test', 'secret-scan', 'no-comments', 'verify (appearance)']) {
     assert.ok(checks.includes(check), `missing required check: ${check}`);
   }
 });

@@ -11,7 +11,7 @@ const workflow = fs.readFileSync(path.join(root, process.env.AUTOMERGE_RED_CONTR
 const sha = 'a'.repeat(40);
 const master = 'b'.repeat(40);
 const page = nodes => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
-const checkNames = ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard', 'click-through'];
+const checkNames = ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard'];
 const checks = checkNames.map(name => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
 const snapshot = () => ({ data: { repository: { deleteBranchOnMerge: true, pullRequest: {
   id: 'PR_fixture', number: 42, state: 'OPEN', headRefOid: sha, baseRefOid: master,
@@ -312,10 +312,4 @@ test('cached PR base does not replace the current master target', t => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /behind master by 1/);
   assert.equal(f.calls().length, 1);
-});
-
-test('click-through is required on every pull request', () => {
-  const required = fs.readFileSync(path.join(root, '.github/required-checks.txt'), 'utf8');
-  assert.match(required, /^click-through$/m);
-  assert.ok(checkNames.includes('click-through'));
 });

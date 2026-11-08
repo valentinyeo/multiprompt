@@ -142,7 +142,6 @@ def tmux_config(fifo):
         "set-option -g silence-action any",
         "set-option -g visual-activity off",
         "set-option -g visual-silence off",
-        "set-option -s terminal-overrides[514] '*:bel@'",
         "set-environment -gh MULTIPROMPT_NOTIFY_STATE 0",
         "set-environment -gh MULTIPROMPT_NOTIFY_READY 1",
     ]

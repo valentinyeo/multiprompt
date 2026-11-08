@@ -1204,9 +1204,13 @@ pub fn chatOutboxWorkingForShell(idx: u32) bool {
 
 pub fn chatEchoCountNotSentForShell(idx: u32) usize {
     if (idx >= app_state.shell_count) return 0;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return 0;
     var n: usize = 0;
     for (app_state.g_chat_outbox.items) |e| {
-        if (chatEchoDiscardableForShell(e, idx)) n += 1;
+        if (e.state != .not_sent) continue;
+        if (e.state != .cancelled and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
     }
     return n;
 }
@@ -2107,58 +2111,31 @@ pub fn chatEchoRetryAllForActive() void {
     showHeaderNoticeAscii(msg, 3000, false);
 }
 
-fn chatOutboxOwnedByShell(key: []const u8, shell: u32) bool {
-    if (chatOutboxShellForKey(key)) |owner| return owner == shell;
-    if (shell >= app_state.shell_count) return false;
-    var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
-    const canonical = chatOutboxKeyForShell(shell, &buf);
-    if (canonical.len > 0 and std.mem.eql(u8, key, canonical)) return true;
-    const legacy = chatOutboxLegacyKeyForShell(shell, &buf);
-    return legacy.len > 0 and std.mem.eql(u8, key, legacy);
-}
-
-pub fn chatEchoDiscardableForShell(e: ChatOutboxEntry, shell: u32) bool {
-    const ek = e.key[0..@as(usize, e.key_len)];
-    if (!chatOutboxOwnedByShell(ek, shell) or e.state == .cancelled) return false;
-    if (e.state == .not_sent) return true;
-    if (!e.message_v1) return false;
-    const phase = std.mem.sliceTo(&e.message_phase, 0);
-    const now_ms = @as(i64, @intCast(GetTickCount64()));
-    if (chat_echo.showsNotSent(e.message_v1, e.state, phase, e.sent_tick_ms, now_ms)) return true;
-    const sid = std.mem.sliceTo(&e.message_sid, 0);
-    if (sid.len == 0) return false;
-    const identity = chatFileIdentityForShell(shell);
-    if (identity.sid[0] == 0) return true;
-    return !std.mem.eql(u8, sid, &identity.sid);
-}
-
 pub fn chatEchoDiscardUnsentForActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    const shell = app_state.active_shell;
-    var pass: u8 = 0;
-    while (pass < 2) : (pass += 1) {
-        if (pass == 1) loadChatOutbox();
-        var dropped: u32 = 0;
-        var i: usize = 0;
-        while (i < app_state.g_chat_outbox.items.len) {
-            const e = app_state.g_chat_outbox.items[i];
-            if (chatEchoDiscardableForShell(e, shell)) {
-                chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
-                dropped += 1;
-            } else {
-                i += 1;
-            }
-        }
-        if (dropped > 0) {
-            _ = saveChatOutbox();
-            chatOutboxChanged();
-            var buf: [64]u8 = undefined;
-            const msg = std.fmt.bufPrint(&buf, "Discarded {d} unsent message{s}", .{ dropped, if (dropped == 1) "" else "s" }) catch "Discarded unsent messages";
-            showHeaderNoticeAscii(msg, 3000, false);
-            return;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+    if (key.len == 0) return;
+    var dropped: u32 = 0;
+    var i: usize = 0;
+    while (i < app_state.g_chat_outbox.items.len) {
+        const e = app_state.g_chat_outbox.items[i];
+        if (e.state == .not_sent and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) {
+            chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+            dropped += 1;
+        } else {
+            i += 1;
         }
     }
-    showHeaderNoticeAscii("No unsent messages for this tab", 3000, false);
+    if (dropped == 0) {
+        showHeaderNoticeAscii("No unsent messages for this tab", 3000, false);
+        return;
+    }
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+    var buf: [64]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "Discarded {d} unsent message{s}", .{ dropped, if (dropped == 1) "" else "s" }) catch "Discarded unsent messages";
+    showHeaderNoticeAscii(msg, 3000, false);
 }
 
 fn chatOutboxPrefixOf(text: []const u16, out: *[20]u16) []const u16 {

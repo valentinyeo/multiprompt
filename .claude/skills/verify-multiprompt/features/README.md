@@ -95,9 +95,6 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat switch speed](chat-switch-speed.md) (on demand only): 20 Ctrl+N switches across five seeded remote Claude sessions in Chat View with the browser pane closed and open; fail above a 150 ms median click-to-chat-shown time or any 100 ms window hang.
 - [Own browser profile](browser-own-profile.md): a workspace listed in `browser-own-profile.txt` opens its pane in its own empty Chrome profile and pipe, while other workspaces keep the shared profile untouched, including after restart.
 - [Browser pane stuck](browser-pane-stuck.md): close and reopen panes, then keep a docked pane visible past the opening deadline without an extension.
-- [Chat tab browser shortcut](chat-browser-shortcut.md): Alt+A opens a real browser window from a Chat View tab.
-- [Chat tab browser starts by itself](chat-browser-autoload.md): switching to a Chat View tab with its browser slot on starts the browser with no key.
-- [Remove a stuck Not sent message](chat-not-sent-remove.md): Up then Delete removes a Not sent message from an old session.
 - [Browser typing](browser-typing.md): real page and address typing, plus one controlled lost Alt release.
 - [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.

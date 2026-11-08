@@ -15,28 +15,7 @@ const SshResult = extern struct {
     local_port: u16 = 0,
     profile: ProfileKey = @splat(0),
     json: [4096]u8 = @splat(0),
-    stage: c_int = 0,
-    code: c_int = 0,
 };
-const ssh_steps = [_][]const u8{ "unknown", "resolve ssh settings", "read ssh settings", "ssh settings unsupported", "ssh settings changed", "pick local port", "start ssh", "send discovery", "ssh or remote discovery exited", "malformed discovery output", "forward closed" };
-
-fn log(comptime format: []const u8, args: anytype) void {
-    var buffer: [320]u8 = undefined;
-    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&buffer, "[computer] " ++ format, args) catch return);
-}
-
-fn sshStep(stage: c_int) []const u8 {
-    return if (stage > 0 and stage < ssh_steps.len) ssh_steps[@as(usize, @intCast(stage))] else ssh_steps[0];
-}
-
-fn unavailableReason(data: []const u8) ?[]const u8 {
-    const prefix = "{\"unavailable\": \"";
-    if (!std.mem.startsWith(u8, data, prefix) or data.len > 96) return null;
-    const rest = data[prefix.len..];
-    const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
-    for (rest[0..end]) |c| if (!std.ascii.isAlphanumeric(c) and c != '_' and c != ':') return null;
-    return rest[0..end];
-}
 const Owner = struct {
     sid: u32,
     session: SessionKey,
@@ -264,7 +243,6 @@ fn send(comptime command: []const u8, extra: []const u8) void {
 fn setState(state: State) void {
     const changed = machine.state != state;
     machine.state = state;
-    if (changed) log("state {s}", .{@tagName(state)});
     var extra: [80]u8 = undefined;
     if (changed) send("state", std.fmt.bufPrint(&extra, ",\"state\":\"{s}\"", .{@tagName(state)}) catch unreachable);
     const caption = switch (state) { .connecting => words.computer_connecting, .live => words.computer_live, .sleeping => words.computer_sleeping, .reconnecting => words.computer_reconnecting, .lost => words.computer_lost_retry };
@@ -317,7 +295,6 @@ fn startJob(remote_port: u16, profile: ?ProfileKey) bool {
     const alias = @import("console.zig").tmuxSshTarget(owner.host);
     const script = @import("computer/resources.zig").discovery;
     const handle = mp_computer_ssh_start(&prefix, pos, alias.ptr, alias.len, script.ptr, script.len, remote_port, if (profile) |*key| key else null) orelse return false;
-    if (remote_port == 0) log("discovering desktop on {s}", .{alias}) else log("forwarding viewer port {d} on {s}", .{ remote_port, alias });
     machine.job = .{ .handle = handle, .generation = machine.generation, .owner = owner, .target = if (remote_port == 0) null else machine.target };
     machine.phase = if (remote_port == 0) .discover else .forward;
     machine.deadline = w.GetTickCount64() + 20000;
@@ -331,11 +308,10 @@ fn begin() void {
     machine.target = if (machine.owner) |owner| knownTarget(owner) else null;
     setState(if (machine.attempts == 0) .connecting else .reconnecting);
     selectPage();
-    if (!startJob(0, null)) fail("could not start ssh");
+    if (!startJob(0, null)) fail();
 }
 
-fn fail(reason: []const u8) void {
-    log("attempt {d} failed: {s}", .{ machine.attempts + 1, reason });
+fn fail() void {
     revoke();
     if (machine.phase == .connected or machine.phase == .paint) {
         send("suspend", "");
@@ -417,7 +393,7 @@ pub fn sync() void {
     if (machine.owner == null) { machine.owner = owner; machine.generation += 1; machine.page_selected = false; }
     if (!timer_armed) timer_armed = w.SetTimer(app.g_main_hwnd, TIMER, 50, null) != 0;
     @import("crash_recorder.zig").disableMemoryDumpsForPrivateViewer();
-    if (mp_computer_create(app.g_main_hwnd) < 0) { if (machine.state != .lost) log("viewer could not start, WebView2 unavailable", .{}); closeJob(); machine.phase = .idle; setState(.lost); }
+    if (mp_computer_create(app.g_main_hwnd) < 0) { closeJob(); machine.phase = .idle; setState(.lost); }
     if (!machine.page_selected and mp_computer_ready() != 0) selectPage();
     if (machine.phase == .idle and machine.state != .lost) { machine.attempts = 0; begin(); }
     present();
@@ -455,56 +431,45 @@ pub fn tick() void {
     if (machine.phase == .page) {
         if (mp_computer_ready() != 0) {
             selectPage();
-            const target = machine.target orelse { fail("no discovered desktop"); return; };
-            if (!startJob(target.port, target.profile)) fail("could not start ssh forward");
-        } else if (now >= machine.deadline) fail("viewer page did not load");
+            const target = machine.target orelse { fail(); return; };
+            if (!startJob(target.port, target.profile)) fail();
+        } else if (now >= machine.deadline) fail();
         return;
     }
     if (machine.phase == .delay) {
         if (now >= machine.deadline and machine.state == .reconnecting) begin();
         return;
     }
-    if (machine.phase == .paint and now >= machine.deadline) { fail("no picture within 15 seconds"); return; }
+    if (machine.phase == .paint and now >= machine.deadline) { fail(); return; }
     if (machine.phase != .discover and machine.phase != .forward and machine.phase != .connected and machine.phase != .paint) return;
     const job = machine.job orelse return;
     if (machine.phase == .connected) {
-        if (job.target == null or machine.target == null or !Target.same(job.target.?, machine.target.?)) { fail("desktop changed"); return; }
+        if (job.target == null or machine.target == null or !Target.same(job.target.?, machine.target.?)) { fail(); return; }
     } else if (!machine.accepts(job.generation, job.owner)) { closeJob(); return; }
     var result: SshResult = .{};
     defer std.crypto.secureZero(u8, std.mem.asBytes(&result));
     const status = mp_computer_ssh_poll(job.handle, &result);
-    if (status < 0) {
-        var reason: [96]u8 = undefined;
-        fail(std.fmt.bufPrint(&reason, "ssh step {s}, exit code {d}", .{ sshStep(result.stage), result.code }) catch "ssh failed");
-        return;
-    }
-    if ((machine.phase == .discover or machine.phase == .forward) and now >= machine.deadline) { fail("ssh timed out"); return; }
+    if (status < 0 or ((machine.phase == .discover or machine.phase == .forward) and now >= machine.deadline)) { fail(); return; }
     if (status == 0 or machine.phase == .connected or machine.phase == .paint) return;
     var password: [8]u8 = @splat(0);
     defer std.crypto.secureZero(u8, &password);
     var password_len: usize = 0;
     const data = std.mem.sliceTo(&result.json, 0);
-    const target = parseTarget(data, result.profile, &password, &password_len) orelse {
-        var reason: [128]u8 = undefined;
-        fail(if (unavailableReason(data)) |check| std.fmt.bufPrint(&reason, "server desktop check {s} did not pass", .{check}) catch "server desktop unavailable" else "discovery output rejected");
-        return;
-    };
+    const target = parseTarget(data, result.profile, &password, &password_len) orelse { fail(); return; };
     if (machine.phase == .discover) {
-        if (password_len != 0) { fail("discovery returned a credential"); return; }
-        log("found display {s}, viewer port {d}", .{ target.display[0..target.display_len], target.port });
+        if (password_len != 0) { fail(); return; }
         closeJob();
         machine.target = target;
         machine.phase = .page;
         machine.deadline = now + 20000;
         selectPage();
     } else {
-        if (machine.target == null or !Target.same(machine.target.?, target) or password_len == 0 or result.local_port == 0) { fail("forward did not match discovery"); return; }
-        if (mp_computer_ready() == 0) { fail("viewer page not ready"); return; }
+        if (machine.target == null or !Target.same(machine.target.?, target) or password_len == 0 or result.local_port == 0) { fail(); return; }
+        if (mp_computer_ready() == 0) { fail(); return; }
         var gen_buf: [24]u8 = undefined;
-        const payload = std.json.Stringify.valueAlloc(std.heap.page_allocator, .{ .command = "connect", .generation = std.fmt.bufPrint(&gen_buf, "{d}", .{machine.generation}) catch unreachable, .port = result.local_port, .password = password[0..password_len] }, .{}) catch { fail("out of memory"); return; };
+        const payload = std.json.Stringify.valueAlloc(std.heap.page_allocator, .{ .command = "connect", .generation = std.fmt.bufPrint(&gen_buf, "{d}", .{machine.generation}) catch unreachable, .port = result.local_port, .password = password[0..password_len] }, .{}) catch { fail(); return; };
         defer { std.crypto.secureZero(u8, payload); std.heap.page_allocator.free(payload); }
         mp_computer_command(machine.generation, payload.ptr, payload.len);
-        log("connecting viewer through local port {d}", .{result.local_port});
         rememberTarget(job.owner, target);
         machine.phase = .paint;
         machine.deadline = now + 15000;
@@ -540,7 +505,7 @@ pub export fn mp_computer_event(generation: u64, event: c_uint) void {
         return;
     }
     switch (event) {
-        2 => if (machine.visible and machine.phase != .stopping and machine.state != .lost) { fail("viewer lost the connection"); },
+        2 => if (machine.visible and machine.phase != .stopping and machine.state != .lost) { fail(); },
         3 => if (machine.visible and allowed() and machine.phase == .paint) { machine.phase = .connected; machine.attempts = 0; setState(.live); },
         4 => {},
         5 => if (!machine.controlling) { takeOrGiveControl(); },

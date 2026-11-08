@@ -9,27 +9,6 @@ pub fn find(tabs: []const Tab, tab: Tab) ?usize {
     for (tabs, 0..) |old, i| if (layout.sameTab(old, tab)) return i;
     return null;
 }
-fn sameNames(a: []const []const u8, b: []const []const u8) bool {
-    if (a.len != b.len) return false;
-    for (a, b) |x, y| if (!eq(u8, x, y)) return false;
-    return true;
-}
-fn containsName(names: []const []const u8, name: []const u8) bool {
-    for (names) |old| if (eq(u8, old, name)) return true;
-    return false;
-}
-fn rebaseGroupOrder(a: Allocator, base: Layout, edited: Layout, remote: Layout) !?[]const []const u8 {
-    const base_names = base.group_order orelse &.{};
-    const edited_names = edited.group_order orelse &.{};
-    if (sameNames(base_names, edited_names)) return remote.group_order;
-    var names: std.ArrayList([]const u8) = .empty;
-    try names.appendSlice(a, edited_names);
-    for (remote.group_order orelse &.{}) |name| {
-        if (!containsName(base_names, name) and !containsName(names.items, name)) try names.append(a, name);
-    }
-    if (names.items.len > layout.max_groups) names.shrinkRetainingCapacity(layout.max_groups);
-    return if (names.items.len > 0) try names.toOwnedSlice(a) else null;
-}
 fn workspaceIndex(workspaces: []const layout.Workspace, name: []const u8) ?usize {
     for (workspaces, 0..) |ws, i| if (eq(u8, ws.name, name)) return i;
     return null;
@@ -56,7 +35,6 @@ pub fn publishNeeded(local: Layout, base: Layout, synced: Layout) bool {
 
 fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!eq(u8, a.removed_hosts orelse &.{}, b.removed_hosts orelse &.{})) return false;
-    if (!sameNames(a.group_order orelse &.{}, b.group_order orelse &.{})) return false;
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
@@ -87,7 +65,7 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
         try tabs.append(a, tab);
     }
     if (ws.items.len > max_ws or tabs.items.len > max_tabs) return error.LayoutCapacity;
-    return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .group_order = remote.group_order, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn colorsFrom(a: Allocator, target: Layout, source: Layout) !Layout {
@@ -173,13 +151,6 @@ pub fn withoutGroups(a: Allocator, target: Layout) !Layout {
     const tabs = try a.dupe(Tab, target.tabs);
     for (tabs) |*tab| tab.group = null;
     result.tabs = tabs;
-    result.group_order = null;
-    return result;
-}
-
-pub fn withoutGroupOrder(target: Layout) Layout {
-    var result = target;
-    result.group_order = null;
     return result;
 }
 
@@ -215,7 +186,7 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
         if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, if (workspaceIndex(base.workspaces, t.workspace)) |wi| base.workspaces[wi] else .{ .name = t.workspace });
     }
     const removed = try @import("account_hosts.zig").mergeRemoved(a, base.removed_hosts orelse &.{}, edited.removed_hosts orelse &.{});
-    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .removed_hosts = if (removed.len > 0) removed else null, .group_order = edited.group_order, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .removed_hosts = if (removed.len > 0) removed else null, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layout {
@@ -324,7 +295,7 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
     }
     var removed = try @import("account_hosts.zig").mergeRemoved(a, base.removed_hosts orelse &.{}, edited.removed_hosts orelse &.{});
     removed = try @import("account_hosts.zig").mergeRemoved(a, removed, remote.removed_hosts orelse &.{});
-    const result = Layout{ .settings = settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = if (removed.len > 0) removed else null, .group_order = try rebaseGroupOrder(a, base, edited, remote), .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    const result = Layout{ .settings = settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = if (removed.len > 0) removed else null, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
     try layout.validate(result);
     return result;
 }
@@ -1229,53 +1200,4 @@ test "IGSH-1533 old palette projects white without losing pending edits" {
     const new_values = try projectPalette7(a, edited, .{ .workspaces = &.{}, .tabs = &.{} });
     try std.testing.expectEqual(@as(?u8, null), new_values.workspaces[0].color);
     try std.testing.expectEqual(@as(?u8, null), new_values.tabs[0].color);
-}
-
-test "IGSH-1890 a pulled layout carries group order and a local move wins only when this device moved" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const base = Layout{ .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{ "Work", "Home" } };
-    const moved_elsewhere = Layout{ .revision = 4, .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{ "Home", "Work" } };
-    const pulled = try rebase(a, base, base, moved_elsewhere);
-    try std.testing.expectEqualStrings("Home", pulled.group_order.?[0]);
-    const applied = try apply(a, base, &.{true}, pulled, 9, 256);
-    try std.testing.expectEqualStrings("Home", applied.group_order.?[0]);
-    const mine = Layout{ .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{ "Work", "Research", "Home" } };
-    const both = try rebase(a, base, mine, moved_elsewhere);
-    try std.testing.expectEqual(@as(usize, 3), both.group_order.?.len);
-    try std.testing.expectEqualStrings("Work", both.group_order.?[0]);
-    try std.testing.expectEqualStrings("Research", both.group_order.?[1]);
-    try std.testing.expectEqualStrings("Home", both.group_order.?[2]);
-}
-
-test "IGSH-1890 a group order change alone is a publishable edit and old servers never see it" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const base = Layout{ .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{ "Work", "Home" } };
-    const reordered = Layout{ .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{ "Home", "Work" } };
-    try std.testing.expect(!equal(base, reordered));
-    try std.testing.expect(publishNeeded(reordered, base, base));
-    try std.testing.expect(!publishNeeded(base, base, base));
-    const legacy = Layout{ .workspaces = &test_ws, .tabs = &.{one} };
-    try std.testing.expect(equal(legacy, Layout{ .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{} }));
-    try std.testing.expect(publishNeeded(base, legacy, legacy));
-    const stripped = try withoutGroups(a, base);
-    try std.testing.expect(stripped.group_order == null);
-    try std.testing.expect(equal(stripped, legacy));
-    const kept = try keepHeld(a, base, reordered, &.{});
-    try std.testing.expectEqualStrings("Home", kept.group_order.?[0]);
-}
-
-test "IGSH-1890 an unmoved device keeps a legacy remote without inventing an order" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const legacy = Layout{ .workspaces = &test_ws, .tabs = &.{one} };
-    const result = try rebase(a, legacy, legacy, legacy);
-    try std.testing.expect(result.group_order == null);
-    const mine = Layout{ .workspaces = &test_ws, .tabs = &.{one}, .group_order = &.{"Work"} };
-    const published = try rebase(a, legacy, mine, legacy);
-    try std.testing.expectEqualStrings("Work", published.group_order.?[0]);
 }

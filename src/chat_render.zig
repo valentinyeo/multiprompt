@@ -232,11 +232,9 @@ const chat_image_insert = @import("chat_image_insert.zig");
 const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
 const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
 const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
-const chatOutboxShellForKey = @import("chat_send.zig").chatOutboxShellForKey;
 const chatOutboxIndexById = @import("chat_send.zig").chatOutboxIndexById;
 const chatEchoSendAgain = @import("chat_send.zig").chatEchoSendAgain;
 const chatEchoRemove = @import("chat_send.zig").chatEchoRemove;
-const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardUnsentForActive;
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
@@ -5809,19 +5807,6 @@ fn chatNavReveal(index: usize) void {
     }
 }
 
-pub fn chatRemoveActiveTabNotSent() bool {
-    if (app_state.active_shell >= app_state.shell_count) return false;
-    const shell = app_state.active_shell;
-    var pending: u32 = 0;
-    for (app_state.g_chat_outbox.items) |e| {
-        if (@import("chat_send.zig").chatEchoDiscardableForShell(e, shell)) pending += 1;
-    }
-    if (pending == 0) return false;
-    const before = app_state.g_chat_outbox.items.len;
-    chatEchoDiscardUnsentForActive();
-    return app_state.g_chat_outbox.items.len < before;
-}
-
 pub fn chatNavStart() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     const count = app_state.g_chat_block_count + app_state.g_chat_echo_layout_count;
@@ -5867,17 +5852,16 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
             return true;
         },
         .remove => {
-            const index = chatNavIndex();
-            if (index) |idx| {
-                if (idx >= app_state.g_chat_block_count) {
-                    const id = app_state.g_chat_echo_layout_ids[idx - app_state.g_chat_block_count];
-                    const ei = chatOutboxIndexById(id) orelse return true;
-                    if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
-                    if (chatOutboxIndexById(id) == null) chatNavClear() else _ = chatRemoveActiveTabNotSent();
-                    return true;
-                }
-            } else chatNavClear();
-            _ = chatRemoveActiveTabNotSent();
+            const index = chatNavIndex() orelse {
+                chatNavClear();
+                return true;
+            };
+            if (index >= app_state.g_chat_block_count) {
+                const id = app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count];
+                const ei = chatOutboxIndexById(id) orelse return true;
+                if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
+                if (chatOutboxIndexById(id) == null) chatNavClear();
+            }
             return true;
         },
         .open => {

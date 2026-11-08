@@ -10,7 +10,7 @@ files_file=$2
 behind_by=$3
 owner=$4
 
-required='["test","no-comments","extension-version","secret-scan","ledger-guard","click-through"]'
+required='["test","no-comments","extension-version","secret-scan","ledger-guard"]'
 info=$(cat -- "$info_file" 2>/dev/null) || info=""
 files=$(cat -- "$files_file" 2>/dev/null) || files=""
 

@@ -4,7 +4,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 temp=$(mktemp -d)
 trap 'rm -rf "$temp"' EXIT
 owner=fixture-owner
-jq -n --arg owner "$owner" '{headRefOid: ("a" * 40), isCrossRepository: false, author: {login: $owner}, baseRefName: "master", isDraft: false, labels: [], mergeable: "MERGEABLE", statusCheckRollup: (["test", "no-comments", "extension-version", "secret-scan", "ledger-guard", "click-through"] | map({__typename: "CheckRun", name: ., status: "COMPLETED", conclusion: "SUCCESS"}))}' > "$temp/green.json"
+jq -n --arg owner "$owner" '{headRefOid: ("a" * 40), isCrossRepository: false, author: {login: $owner}, baseRefName: "master", isDraft: false, labels: [], mergeable: "MERGEABLE", statusCheckRollup: (["test", "no-comments", "extension-version", "secret-scan", "ledger-guard"] | map({__typename: "CheckRun", name: ., status: "COMPLETED", conclusion: "SUCCESS"}))}' > "$temp/green.json"
 printf '["README.md"]\n' > "$temp/files.json"
 check() {
     local name=$1 expected=$2 filter=$3 behind=${4:-0} files=${5:-'["README.md"]'}

@@ -136,10 +136,7 @@ fn finishKeyCheck() void {
     }
     const saved = @import("voice.zig").saveDeepgramApiKey(request.key[0..request.len :0]);
     releaseKeyRequest(request);
-    if (saved) {
-        @import("account_desktop.zig").accountPushDeepgramKey();
-        closeKey();
-    } else setKeyStatus(L(words.settings_key_save_error));
+    if (saved) closeKey() else setKeyStatus(L(words.settings_key_save_error));
 }
 var fonts: [3]w.HANDLE = @splat(null);
 var scroll: i32 = 0;

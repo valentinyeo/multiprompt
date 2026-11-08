@@ -64,11 +64,7 @@ its old user unit and script, and preserves unrelated tmux hooks using index 514
 The tmux snippet enables activity and ten-second silence monitoring, with
 `activity-action any` and `silence-action any`: tmux's default `other` misses the
 current window even when attached. `visual-activity off` and `visual-silence off`
-avoid status-line alert messages. In tmux 3.4, `off` still sends a terminal bell to
-every attached client, which Windows plays as its default ding on each remote tab.
-The snippet therefore sets `terminal-overrides[514]` to `*:bel@`, which removes the
-bell capability from every client terminal; alert hooks and sidebar alerts still run.
-The fixed index keeps the override single when the snippet is sourced again.
+avoid status-line alert messages. In tmux 3.4, `off` still sends a terminal bell;
 `bell-action` controls bell alerts, not activity/silence bells, so it is unchanged.
 Only detached sessions need their latched alert flags cleared to rearm monitoring.
 Attached current windows do not latch these flags.

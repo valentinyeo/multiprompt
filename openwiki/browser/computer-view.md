@@ -70,12 +70,10 @@ Current connection limits:
 - A non-root Linux desktop user.
 - Already-running `x11vnc.service` and `novnc-desktop.service`.
 - The known literal Python websockify service layout.
-- A websockify script only its user can change. A private user group may share write access.
-- The VNC port on `127.0.0.1` belongs to `x11vnc.service`. Another server may hold the same port on `::1`.
 - Same-user processes, display, and private auth file.
 - Loopback-only viewer listeners.
 
-Unsupported layouts show **Lost**. The debug log names the failed step with a `[computer]` line. Desktop ports come from live service discovery. Password decoding uses the existing x11vnc capability. No password enters a URL or process argument.
+Unsupported layouts show **Lost**. Desktop ports come from live service discovery. Password decoding uses the existing x11vnc capability. No password enters a URL or process argument.
 
 Active connections retain their original SSH settings. Reconnecting resolves those settings again.
 

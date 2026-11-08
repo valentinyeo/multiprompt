@@ -1011,18 +1011,17 @@ fn chatLiveSyncCard() void {
         if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;
     }
+    if (app_state.g_chat_permission_sid != shell_id or app_state.g_chat_permission.count == 0) return;
     if (!live.cardDismissed(shell_id)) return;
-    live.cardShown(shell_id);
+    app_state.g_chat_permission = .{};
+    app_state.g_chat_permission.count = 0;
     const presentation = &app_state.shells[app_state.active_shell].permission_presentation;
-    if (presentation.state != .absent) {
+    if (presentation.state == .pending) {
         presentation.state = .absent;
         @import("chat_render.zig").chatPermissionChanged();
     }
-    if (app_state.g_chat_permission_sid == shell_id) {
-        app_state.g_chat_permission = .{};
-        app_state.g_chat_permission.count = 0;
-        g_chat_live_card_len = 0;
-    }
+    g_chat_live_card_len = 0;
+    live.cardShown(shell_id);
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 

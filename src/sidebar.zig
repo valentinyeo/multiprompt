@@ -1066,44 +1066,6 @@ pub fn moveGroupToIndex(src: u32, dst: u32) bool {
     return true;
 }
 
-pub fn orderGroupsByName(names: []const []const u8) bool {
-    var changed = false;
-    var dest: u32 = 0;
-    for (names) |name| {
-        var wide: [64]u16 = undefined;
-        const len = std.unicode.utf8ToUtf16Le(&wide, name) catch continue;
-        var src = dest;
-        while (src < app_state.group_count) : (src += 1) {
-            const group = app_state.groups[src];
-            if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) break;
-        }
-        if (src >= app_state.group_count) continue;
-        if (moveGroupToIndex(src, dest)) changed = true;
-        dest += 1;
-    }
-    return changed;
-}
-
-pub fn groupOrderFor(a: std.mem.Allocator, tabs: []const @import("session_layout.zig").Tab) !?[]const []const u8 {
-    var names: std.ArrayList([]const u8) = .empty;
-    for (app_state.groups[0..app_state.group_count]) |group| {
-        const name = try std.unicode.utf16LeToUtf8Alloc(a, group.name[0..group.name_len]);
-        if (name.len == 0 or groupNameListed(names.items, name) or !groupNameInTabs(tabs, name)) continue;
-        try names.append(a, name);
-    }
-    return if (names.items.len > 0) try names.toOwnedSlice(a) else null;
-}
-
-fn groupNameListed(names: []const []const u8, name: []const u8) bool {
-    for (names) |old| if (std.mem.eql(u8, old, name)) return true;
-    return false;
-}
-
-fn groupNameInTabs(tabs: []const @import("session_layout.zig").Tab, name: []const u8) bool {
-    for (tabs) |tab| if (std.mem.eql(u8, tab.group orelse "", name)) return true;
-    return false;
-}
-
 pub fn createGroup(name: []const u16) u32 {
     if (app_state.group_count >= MAX_GROUPS) return 0;
     const g = &app_state.groups[app_state.group_count];
@@ -5355,39 +5317,4 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 17), app_state.shells[1].starred_group_id);
     try std.testing.expect(app_state.shells[0].pinned_top);
-}
-
-test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {
-    const saved_groups = app_state.groups;
-    const saved_count = app_state.group_count;
-    const saved_next = app_state.next_group_id;
-    defer {
-        app_state.groups = saved_groups;
-        app_state.group_count = saved_count;
-        app_state.next_group_id = saved_next;
-    }
-    app_state.group_count = 0;
-    app_state.next_group_id = 1;
-    const work = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Work"));
-    const home = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Home"));
-    const local = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Local"));
-    try std.testing.expect(orderGroupsByName(&.{ "Local", "Missing", "Work" }));
-    try std.testing.expectEqual(local, app_state.groups[0].id);
-    try std.testing.expectEqual(work, app_state.groups[1].id);
-    try std.testing.expectEqual(home, app_state.groups[2].id);
-    try std.testing.expect(!orderGroupsByName(&.{ "Local", "Work", "Home" }));
-    try std.testing.expect(orderGroupsByName(&.{ "Home", "Work", "Local" }));
-    try std.testing.expectEqual(home, app_state.groups[0].id);
-    try std.testing.expectEqual(local, app_state.groups[2].id);
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const tabs = [_]@import("session_layout.zig").Tab{
-        .{ .name = "a", .tmux_session = "a", .tmux_host = 0, .workspace = "W", .group = "Local" },
-        .{ .name = "b", .tmux_session = "b", .tmux_host = 0, .workspace = "W", .group = "Home" },
-        .{ .name = "c", .tmux_session = "c", .tmux_host = 0, .workspace = "W", .group = "" },
-    };
-    const names = (try groupOrderFor(arena.allocator(), &tabs)).?;
-    try std.testing.expectEqual(@as(usize, 2), names.len);
-    try std.testing.expectEqualStrings("Home", names[0]);
-    try std.testing.expectEqualStrings("Local", names[1]);
 }

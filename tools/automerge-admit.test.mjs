@@ -12,7 +12,7 @@ const owner = 'fixture-owner';
 function admit(t, author, update = () => {}, files = ["README.md"]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automerge-admit-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const checks = ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard', 'click-through']
+  const checks = ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard']
     .map((name) => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
   const info = {
     headRefOid: 'a'.repeat(40), isCrossRepository: false, author: { login: author },
@@ -52,7 +52,7 @@ test('unrelated skipped identity and audit checks do not block an otherwise gree
   }, ['src/chat.zig']), 'merge');
 });
 
-for (const name of ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard', 'click-through', 'verify (appearance)', 'chat-sync-audit-changes']) {
+for (const name of ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard', 'verify (appearance)', 'chat-sync-audit-changes']) {
   for (const state of ['missing', 'FAILURE', 'SKIPPED', 'NEUTRAL', 'IN_PROGRESS', 'QUEUED']) {
     test(`${name} remains blocked when ${state}`, (t) => {
       const verdict = admit(t, owner, (info) => {

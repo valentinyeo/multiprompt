@@ -81,8 +81,6 @@ class Installation(unittest.TestCase):
             self.assertEqual(len(list(service.parent.glob("*.pre-zigshell-*"))), 1)
             self.assertTrue((dest / "tmux_notify.py").exists())
             self.assertEqual(snippet, (dest / "tmux-notifications.conf").read_text(encoding="utf-8"))
-            self.assertEqual(snippet.splitlines().count("set-option -s terminal-overrides[514] '*:bel@'"), 1)
-            self.assertEqual(snippet.count("terminal-overrides"), 1)
             calls = [call.args[0] for call in self.run.call_args_list]
             self.assertIn(["systemctl", "--user", "disable", "--now", "zigshell-watcher.service"], calls)
             self.assertIn(["tmux", "source-file", str(dest / "tmux-notifications.conf")], calls)

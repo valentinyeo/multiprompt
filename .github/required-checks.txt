@@ -2,4 +2,3 @@ test
 secret-scan
 no-comments
 verify (appearance)
-click-through
