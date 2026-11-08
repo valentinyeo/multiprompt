@@ -313,3 +313,9 @@ test('cached PR base does not replace the current master target', t => {
   assert.match(result.stdout, /behind master by 1/);
   assert.equal(f.calls().length, 1);
 });
+
+test('click-through is required on every pull request', () => {
+  const required = fs.readFileSync(path.join(root, '.github/required-checks.txt'), 'utf8');
+  assert.match(required, /^click-through$/m);
+  assert.ok(checkNames.includes('click-through'));
+});

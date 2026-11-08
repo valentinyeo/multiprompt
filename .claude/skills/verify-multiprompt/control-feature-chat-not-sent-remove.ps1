@@ -23,6 +23,7 @@ Wait-Until {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count -eq 1
 } 'visible native Chat View transcript control'
+Wait-ChatFocus 'Edit' 'not-sent-composer'
 Start-Sleep -Seconds 2
 Snapshot 'action'
 Assert-Foreground
