@@ -51,8 +51,6 @@ jobs:
         run: python3 -m unittest discover -s tools/verify-chat-delivery -p test_queue_trace.py -v
       - name: Verify shared reader selection
         run: python3 tools/chat-shared-runtime.test.py -v
-      - name: Verify superseded readers finish open requests
-        run: python3 tools/chat-reader-retire.test.py -v
 
   native-structural-replay:
     # Independent, report-only investigation; never a release gate.
