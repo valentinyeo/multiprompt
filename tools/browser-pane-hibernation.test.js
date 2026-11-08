@@ -179,6 +179,11 @@ test("F1 shortcuts overview lists Alt+P and the Hibernate Browser Panes Now comm
   assert.match(source, /\.a = "Ctrl\+K.*Hibernate Browser Panes Now", \.b = "Immediately hibernate/);
 });
 
+test("IGSH-1864 empty composer Delete discards stuck not-sent rows for the tab", () => {
+  const render = fs.readFileSync(path.join(root, "src", "chat_render.zig"), "utf8");
+  assert.match(render, /pub fn chatRemoveActiveTabNotSent\(\) bool \{[\s\S]*chatEchoDiscardUnsentForActive\(\)/);
+});
+
 test("wiki page exists and documents the tiers", () => {
   const wiki = fs.readFileSync(path.join(root, "openwiki", "browser", "pane-hibernation.md"), "utf8");
   assert.match(wiki, /Tier 1/);
