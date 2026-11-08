@@ -3784,9 +3784,7 @@ def host_bypass_approvals(session):
 
 
 def host_auto_approve_safety(session, request, kind):
-    if kind != "approval" or not host_bypass_approvals(session):
-        return False
-    return bool(request.get("decision_reason"))
+    return kind == "approval" and host_bypass_approvals(session)
 
 
 def host_auto_approval_response(request):
@@ -3904,6 +3902,10 @@ def host_set_mode(provider, sid, session, mode):
         return dict(status="error", reason="stdin_write_failed")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
+    config = host_config(provider, sid)
+    if mode != "plan" and config is not None and config.get("permission_mode") != mode:
+        config["permission_mode"] = mode
+        host_write(host_paths(provider, sid)["config"], config)
     if "settings" in session:
         host_settings_event(provider, sid, host_chat_name(provider, sid), session)
     return dict(status="ok")
@@ -6705,7 +6707,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 94
+RUNTIME_GENERATION = 95
 
 if __name__ == '__main__':
     import base64 as _base64
