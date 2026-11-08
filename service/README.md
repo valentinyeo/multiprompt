@@ -111,6 +111,8 @@ Clients advertising `host_removal` may send optional `removed_hosts`, a unique a
 
 Desktop clients advertising `group_order` may send optional `group_order`, a unique array of at most 16 group names (each 1 to 64 UTF-16 units) in sidebar order. Clients that do not advertise it never see the field, and their saves keep the stored order. The response header echoes `group_order` only to clients that advertised it. Android does not advertise it, so its layout responses are unchanged.
 
+Desktop clients advertising `starred_groups` may send an optional per-tab `starred_group`: the name of the tab's group in the Favorites view (empty string for none, otherwise 1 to 64 UTF-16 units). Clients that do not advertise it never see the field, and their saves keep each tab's stored value. The response header echoes `starred_groups` only to clients that advertised it, so Android layout responses are unchanged.
+
 ## Service keys and the mp-layout tool
 
 A service key lets a server edit the same account layout the apps sync, without a device sign-in. Keys are `mpk_a_` (admin) or `mpk_w_` (workspace) followed by 43 URL-safe characters. Only the SHA-256 hash is stored, in `service_keys`, and a key works on `GET` and `PUT /v1/layout` plus `GET`, `PUT` and `DELETE /v1/bot-photos/{key}`; every other route answers `403 key_scope`. Revoking a key means setting `revoked=1`.

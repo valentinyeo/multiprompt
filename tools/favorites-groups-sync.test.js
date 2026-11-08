@@ -68,7 +68,7 @@ test('IGSH-1890 the desktop captures, orders, publishes, pulls and applies Favor
   assert.match(capture, /\.starred_group = /, 'capture sends the Favorites group name');
   assert.match(desktop.slice(desktop.indexOf('pub fn applyServerLayout(')), /if \(tab\.starred_group\) \|name\| shell\.starred_group_id = /, 'apply places the tab in its Favorites group');
   assert.match(sidebar.slice(sidebar.indexOf('fn groupNameInTabs(')), /tab\.starred_group/, 'group order lists Favorites groups');
-  assert.match(desktop, /if \(!app_state\.g_account_starred_groups_supported\) \{\s*plain_local = try account_layout\.withoutStarredGroups\(arena\.allocator\(\), plain_local\);/);
+  assert.match(desktop, /if \(!app_state\.g_account_starred_groups_supported\) \{\s*plain_local = account_layout\.withoutStarredGroups\(arena\.allocator\(\), plain_local\) catch return;/);
   assert.match(desktop, /if \(!remote\.starred_groups_supported\) rebased = try account_layout\.withoutStarredGroups\(alloc, rebased\)/);
   assert.equal((desktop.match(/reply\.starred_groups_supported = remote\.starred_groups_supported/g) || []).length, 2);
   assert.match(desktop, /app_state\.g_account_starred_groups_supported = reply\.starred_groups_supported/);

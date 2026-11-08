@@ -1697,3 +1697,33 @@ test('IGSH-1890 group order syncs between desktops and stays hidden from clients
   const rejected = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: after.revision, layout: { ...after.layout, group_order: ['Home', 'Home'] } }) });
   assert.equal(rejected.status, 400);
 });
+
+test('IGSH-1890 Favorites groups sync between desktops and stay hidden from clients that do not declare them', async () => {
+  const { token } = await enroll();
+  const tabs = [{ ...layout.tabs[0], favorite: true }, { ...layout.tabs[0], tmux_session: 'two', favorite: true }];
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify({ ...layout, tabs })).run();
+  const desktop = { ...auth(token), 'X-Layout-Features': 'favorite,groups,group_order,starred_groups' };
+  const oldDesktop = { ...auth(token), 'X-Layout-Features': 'favorite,groups,group_order' };
+  const android = { ...auth(token), 'X-Layout-Features': 'favorite,groups' };
+  const starred = [{ ...tabs[0], starred_group: 'Hypertask' }, { ...tabs[1], starred_group: 'Multi Bot' }];
+  const put = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: 1, layout: { ...layout, tabs: starred, group_order: ['Multi Bot', 'Hypertask'] } }) });
+  assert.equal(put.status, 200);
+  assert.ok(put.headers.get('X-Layout-Features').split(',').includes('starred_groups'));
+  const stored = await put.json();
+  const otherDesktop = await (await request('/v1/layout', { headers: desktop })).json();
+  assert.deepEqual(otherDesktop.layout.tabs.map(tab => tab.starred_group), ['Hypertask', 'Multi Bot']);
+  assert.deepEqual(otherDesktop.layout.group_order, ['Multi Bot', 'Hypertask']);
+  for (const headers of [oldDesktop, android]) {
+    const response = await request('/v1/layout', { headers });
+    assert.equal(response.headers.get('X-Layout-Features').split(',').includes('starred_groups'), false);
+    assert.ok((await response.json()).layout.tabs.every(tab => !Object.hasOwn(tab, 'starred_group')));
+  }
+  const mobile = (await (await request('/v1/layout', { headers: android })).json()).layout;
+  const mobileWrite = await request('/v1/layout', { method: 'PUT', headers: android, body: JSON.stringify({ base_revision: stored.revision, layout: mobile }) });
+  assert.equal(mobileWrite.status, 200);
+  assert.ok((await mobileWrite.json()).layout.tabs.every(tab => !Object.hasOwn(tab, 'starred_group')));
+  const after = await (await request('/v1/layout', { headers: desktop })).json();
+  assert.deepEqual(after.layout.tabs.map(tab => tab.starred_group), ['Hypertask', 'Multi Bot']);
+  const rejected = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: after.revision, layout: { ...after.layout, tabs: [{ ...after.layout.tabs[0], starred_group: 'x'.repeat(65) }, after.layout.tabs[1]] } }) });
+  assert.equal(rejected.status, 400);
+});

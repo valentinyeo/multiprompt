@@ -26,6 +26,7 @@ pub const Tab = struct {
     name: []const u8,
     manual: bool = false,
     group: ?[]const u8 = null,
+    starred_group: ?[]const u8 = null,
     favorite: ?bool = null,
     muted: ?bool = null,
     used: ?u64 = null,
@@ -112,6 +113,7 @@ pub fn validate(layout: Layout) !void {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
         if (tab.group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
+        if (tab.starred_group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
         if (tab.face) |face| {
             if (face >= 20) return error.InvalidLayout;
         }
@@ -706,4 +708,17 @@ test "IGSH-1890 merge carries the server group order" {
     defer freeMerge(std.testing.allocator, result);
     try std.testing.expectEqualStrings("Work", result.group_order.?[0]);
     try std.testing.expectEqual(@as(usize, 2), result.group_order.?.len);
+}
+
+test "IGSH-1890 Favorites group names round trip and reject bad text" {
+    const a = std.testing.allocator;
+    const parsed = try parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"Agent\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\",\"starred_group\":\"Hypertask\"}]}");
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("Hypertask", parsed.value.tabs[0].starred_group.?);
+    const bytes = try encode(a, parsed.value);
+    defer a.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"starred_group\":\"Hypertask\"") != null);
+    var bad = test_tab;
+    bad.starred_group = "x" ** 65;
+    try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &test_ws, .tabs = &.{bad} }));
 }
