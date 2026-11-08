@@ -972,6 +972,8 @@ test "IGSH-870 newest reply survives tail gap and older pages restore all messag
 });
 
 test('IGSH-1063 typed question progress repaints without waiting for a transcript message', (t) => {
+  const bypass = fileBody('chat_capture.zig', 'chatWideContainsAscii')
+    + fileBody('chat_capture.zig', 'chatConsoleBypassPermissionsActive');
   const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows')
     .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
     .replaceAll('@import("chat_render.zig").chatPermissionChanged', 'chatPermissionChanged')
@@ -1001,7 +1003,7 @@ fn PostMessageW(hwnd: usize, message: u32, _: usize, _: isize) i32 {
     repaints += 1;
     return 1;
 }
-` + capture + String.raw`
+` + bypass + capture + String.raw`
 test "question progress repaint is active-session and answer specific" {
     chatPermissionCaptureRows(0, 2, 4, 2);
     try std.testing.expectEqual(@as(usize, 0), repaints);
