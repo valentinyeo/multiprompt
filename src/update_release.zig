@@ -139,6 +139,10 @@ pub fn poll() ?[]const u8 {
     if (!enabled() or !initialize()) return null;
     if (checker) |process| {
         if (win.WaitForSingleObject(process, 0) == 0) {
+            var code: u32 = 0;
+            _ = win.GetExitCodeProcess(process, &code);
+            var line: [48]u8 = undefined;
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&line, "[update] check exit {d}", .{code}) catch "[update] check exit");
             _ = win.CloseHandle(process);
             checker = null;
         }

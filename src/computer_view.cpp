@@ -474,6 +474,8 @@ struct SshResult {
     unsigned short localPort = 0;
     unsigned char profile[32]{};
     char json[4096]{};
+    int stage = 0;
+    int code = 0;
 };
 struct SshJob {
     HANDLE cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -595,6 +597,7 @@ bool pinnedConfig(const std::string& config, std::wstring& arguments, std::strin
         if (value.find_first_of("\r\n\0",0,3) != std::string::npos) return false;
         if ((key == "proxycommand" || key == "proxyjump" || key == "knownhostscommand") && value != "none") return false;
         if (std::find(allowed.begin(),allowed.end(),key) == allowed.end()) continue;
+        if (key == "globalknownhostsfile" && value.rfind("__PROGRAMDATA__",0) == 0) continue;
         if (key == "user") {
             if (value.empty() || value.size() > 128) return false;
             for (unsigned char c : value) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) return false;
@@ -631,37 +634,45 @@ bool pinnedConfig(const std::string& config, std::wstring& arguments, std::strin
 }
 void sshWorker(std::shared_ptr<SshJob> job, std::wstring prefix, std::wstring alias, std::string script,
                unsigned short remotePort, std::array<unsigned char,32> expected) {
-    auto fail = [&] { std::lock_guard<std::mutex> lock(job->mutex); job->result.state = -1; SecureZeroMemory(job->result.json,sizeof(job->result.json)); };
+    auto fail = [&](int stage) { std::lock_guard<std::mutex> lock(job->mutex); job->result.state = -1; job->result.stage = stage; SecureZeroMemory(job->result.json,sizeof(job->result.json)); };
     const std::wstring safe = L" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o AddKeysToAgent=no -o ControlMaster=no -o ControlPath=none -o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o Tunnel=no -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o LogLevel=QUIET ";
     std::string config;
     unsigned char hash[32];
     {
         Child resolve;
-        if (!spawn(*job, prefix + L" -G " + alias, resolve)) { fail(); return; }
+        if (!spawn(*job, prefix + L" -G " + alias, resolve)) { fail(1); return; }
         CloseHandle(resolve.input); resolve.input = nullptr;
-        if (!readOutput(*job, resolve, config,65536,false) || !digest(config.data(),config.size(),hash)) { wipe(config); fail(); return; }
+        if (!readOutput(*job, resolve, config,65536,false) || !digest(config.data(),config.size(),hash)) { wipe(config); fail(2); return; }
     }
     std::wstring pinned;
     std::string user;
-    if (!pinnedConfig(config,pinned,user)) { wipe(config); fail(); return; }
+    if (!pinnedConfig(config,pinned,user)) { wipe(config); fail(3); return; }
     wipe(config);
-    if (remotePort && memcmp(expected.data(),hash,32)) { fail(); return; }
+    if (remotePort && memcmp(expected.data(),hash,32)) { fail(4); return; }
     unsigned short port = remotePort ? localPort() : 0;
-    if (remotePort && !port) { fail(); return; }
+    if (remotePort && !port) { fail(5); return; }
     std::wstring forward = remotePort ? L" -o ExitOnForwardFailure=yes -L 127.0.0.1:" + std::to_wstring(port) + L":127.0.0.1:" + std::to_wstring(remotePort) : L" -o ClearAllForwardings=yes";
-    std::string body = "__name__='computer'\n" + script + "\ntry:\n r=discover(" + (remotePort ? "True" : "False") + ",'" + user + "')\n print(json.dumps(r,separators=(',',':')),flush=True)\nexcept Exception:\n sys.exit(1)\n";
-    body += "r.clear()\n";
-    if (remotePort) body += "sys.stdin.buffer.read(1)\n";
+    std::string body = script + "\nmain(" + (remotePort ? "True" : "False") + ",'" + user + "')\n";
     std::string bootstrap = "python3 -u -c \"import sys;exec(compile(sys.stdin.buffer.read(" + std::to_string(body.size()) + "),'<computer>','exec'))\"";
     Child child;
-    if (!spawn(*job,prefix + safe + pinned + forward + L" -T " + alias + L" " + quote(wide(bootstrap)),child)) { wipe(body); fail(); return; }
+    if (!spawn(*job,prefix + safe + pinned + forward + L" -T " + alias + L" " + quote(wide(bootstrap)),child)) { wipe(body); fail(6); return; }
     DWORD written = 0;
-    if (!WriteFile(child.input,body.data(),DWORD(body.size()),&written,nullptr) || written != body.size()) { wipe(body); fail(); return; }
+    if (!WriteFile(child.input,body.data(),DWORD(body.size()),&written,nullptr) || written != body.size()) { wipe(body); fail(7); return; }
     wipe(body);
     if (!remotePort) { CloseHandle(child.input); child.input = nullptr; }
     std::string output;
-    if (!readOutput(*job,child,output,4095,remotePort != 0)) { wipe(output); fail(); return; }
-    if (output.empty() || output.front() != '{' || output.back() != '\n') { wipe(output); fail(); return; }
+    if (!readOutput(*job,child,output,4095,remotePort != 0)) {
+        wipe(output);
+        DWORD code = STILL_ACTIVE;
+        GetExitCodeProcess(child.process,&code);
+        {
+            std::lock_guard<std::mutex> lock(job->mutex);
+            job->result.code = int(code);
+        }
+        fail(8);
+        return;
+    }
+    if (output.empty() || output.front() != '{' || output.back() != '\n') { wipe(output); fail(9); return; }
     {
         std::lock_guard<std::mutex> lock(job->mutex);
         memcpy(job->result.profile,hash,32);
@@ -673,7 +684,7 @@ void sshWorker(std::shared_ptr<SshJob> job, std::wstring prefix, std::wstring al
     if (!remotePort) return;
     HANDLE waits[] = {job->cancel,child.process};
     WaitForMultipleObjects(2,waits,FALSE,INFINITE);
-    fail();
+    fail(10);
 }
 }
 extern "C" void* mp_computer_ssh_start(const uint16_t* prefix, size_t prefixLen, const char* alias, size_t aliasLen,
@@ -713,6 +724,7 @@ extern "C" int mp_computer_profile_policy_test() {
     if (arguments.find(L"known_hosts") == std::wstring::npos || arguments.find(L"example-key") == std::wstring::npos || arguments.find(L"Example Person") == std::wstring::npos) return 3;
     if (pinnedConfig(config + "proxycommand arbitrary\n",arguments,user)) return 4;
     if (pinnedConfig(config + "proxyjump example-hop\n",arguments,user)) return 5;
+    if (!pinnedConfig(config + "globalknownhostsfile __PROGRAMDATA__\\ssh/ssh_known_hosts __PROGRAMDATA__\\ssh/ssh_known_hosts2\n",arguments,user) || arguments.find(L"__PROGRAMDATA__") != std::wstring::npos) return 11;
     if (pinnedConfig(config + "knownhostscommand arbitrary\n",arguments,user)) return 6;
     if (pinnedConfig("hostname example.invalid\nuser bad'user\nport 22\n",arguments,user)) return 7;
     if (pinnedConfig("hostname example.invalid\nuser example\nport 65536\n",arguments,user)) return 8;

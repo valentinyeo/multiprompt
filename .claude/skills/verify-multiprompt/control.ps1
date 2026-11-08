@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -372,6 +372,36 @@ try {
         Save-Json $seed 'seed-session.json'
         $result.seedBoundary = 'Two local CMD sessions with seeded activity times; a scripted notification simulates an update, not a cloud reply.'
     }
+    if ($Feature -eq 'chat-browser-autoload') {
+        $seedDir = Join-Path $scratch 'roaming/ZigShell'
+        New-Item -ItemType Directory -Force $seedDir | Out-Null
+        $seedTabs = @(
+            @{ kind = 'cmd'; name = 'Terminal'; manual = $true; shell_id = 1 },
+            @{ kind = 'cmd'; name = 'Chat with browser'; manual = $true; shell_id = 2; cv = $true; bon = $true }
+        )
+        $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }
+        [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding $false))
+        Save-Json $seed 'seed-session.json'
+        $result.seedBoundary = 'The harness writes the saved-tab file once before launch: a terminal tab selected first and a second tab already in Chat View with its browser slot on. Nothing is edited after launch; the only input is Ctrl+Tab.'
+    }
+    if ($Feature -eq 'chat-not-sent-remove') {
+        $seedDir = Join-Path $scratch 'roaming/ZigShell'
+        New-Item -ItemType Directory -Force $seedDir | Out-Null
+        $seedChatId = [UInt64]1234567890123
+        $seedTabName = 'Old session chat'
+        $script:notSentKey = 'cmd:#' + ('{0:x16}' -f $seedChatId)
+        $script:notSentText = 'stuck message from an old session'
+        $seedTabs = @(@{ kind = 'cmd'; name = $seedTabName; manual = $true; shell_id = 1; chat_id = $seedChatId })
+        $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }
+        $sessionJson = '{"active_tab":0,"single_window":true,"tabs":[{"kind":"cmd","name":"' + $seedTabName + '","manual":true,"shell_id":1,"chat_id":' + $seedChatId + '}]}'
+        [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), $sessionJson, (New-Object Text.UTF8Encoding $false))
+        $sentMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $outboxJson = '{"version":2,"queues":[{"key":"' + $script:notSentKey + '","messages":[{"t":"' + $script:notSentText + '","s":2,"x":1,"r":1,"w":' + $sentMs + ',"v1":1,"sid":"old-session-id","phase":"failed","wire_id":""}]}]}'
+        [IO.File]::WriteAllText((Join-Path $seedDir 'chat-outbox.json'), $outboxJson, (New-Object Text.UTF8Encoding $false))
+        Save-Json $seed 'seed-session.json'
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-outbox.json') -Value $outboxJson
+        $result.seedBoundary = 'The harness writes the saved-tab file and the unsent-message file once before launch: one message marked sent under a session id the tab no longer has. Nothing is edited after launch; the only input is Alt+C and Delete with an empty composer.'
+    }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'
         New-Item -ItemType Directory -Force -Path $seedFolder, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -409,7 +439,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash')) {
+    } elseif ($Feature -in @('sessions', 'browser-own-profile', 'tab-names', 'inbox-order', 'chat-options', 'chat-slash', 'chat-browser-autoload', 'chat-not-sent-remove')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -430,7 +460,7 @@ try {
         Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
         $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
     }
-    if ($Feature -in @('browser-pane-stuck', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
+    if ($Feature -in @('browser-pane-stuck', 'chat-browser-shortcut', 'chat-browser-autoload', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls', 'live-chat-pane')) {
         if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed', 'live-chat-pane')) {
             $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
             $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
@@ -544,6 +574,15 @@ try {
             . (Join-Path $PSScriptRoot 'control-feature-session-restore.ps1')
         }
         'workspaces' { . (Join-Path $PSScriptRoot 'workspace-switcher.ps1') }
+        'chat-browser-shortcut' {
+            . (Join-Path $PSScriptRoot 'control-feature-chat-browser-shortcut.ps1')
+        }
+        'chat-browser-autoload' {
+            . (Join-Path $PSScriptRoot 'control-feature-chat-browser-autoload.ps1')
+        }
+        'chat-not-sent-remove' {
+            . (Join-Path $PSScriptRoot 'control-feature-chat-not-sent-remove.ps1')
+        }
         'tab-names' {
             . (Join-Path $PSScriptRoot 'control-feature-tab-names.ps1')
         }

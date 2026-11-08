@@ -6230,8 +6230,8 @@ class AgentHostStreamFixture(AgentHostFixture):
         os.environ.pop('FAKE_CLAUDE_MODE', None)
         super().enable(mode, **extra)
 
-    def fake(self, mode):
-        self.enable(mode)
+    def fake(self, mode, **extra):
+        self.enable(mode, **extra)
         os.environ['FAKE_CLAUDE_MODE'] = mode
 
     def events(self, kind=None):
@@ -6575,7 +6575,7 @@ class AgentHostControlFixture(AgentHostStreamFixture):
 
 class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
     def test_an_approval_request_reaches_the_event_log_and_the_answer_runs_the_tool(self):
-        self.fake('approval')
+        self.fake('approval', permission_mode='acceptEdits')
         self.seed()
         self.dispatch()
         asked = self.wait_for(lambda: self.events('approval.request'))
@@ -6596,7 +6596,7 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertEqual(decisions[0]['toolUseID'], 'toolu_req')
 
     def test_the_answer_is_refused_once_the_host_is_gone(self):
-        self.fake('approval')
+        self.fake('approval', permission_mode='acceptEdits')
         self.seed()
         self.dispatch()
         asked = self.wait_for(lambda: self.events('approval.request'))
