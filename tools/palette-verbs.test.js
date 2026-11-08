@@ -1,0 +1,36 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { screenOnly, verbs, screen, coverage } from './palette-verbs.mjs';
+
+const palette = readFileSync(new URL('../src/command_palette.zig', import.meta.url), 'utf8');
+const claude = readFileSync(new URL('../CLAUDE.md', import.meta.url), 'utf8');
+const doc = readFileSync(new URL('../openwiki/operations/spawn-multibot-session.md', import.meta.url), 'utf8');
+const usage = readFileSync(new URL('./mb.mjs', import.meta.url), 'utf8');
+
+test('every palette row has a verb or a screen-only place', () => {
+  const result = coverage(palette);
+  assert.deepEqual(result.missing, []);
+  assert.deepEqual(result.both, []);
+  assert.ok(result.ids.length > 200);
+  for (const id of result.ids) {
+    if (verbs[id]) assert.equal(screen[id], undefined);
+    else assert.ok(screenOnly[screen[id]], id);
+  }
+});
+
+test('a new palette row with no verb fails the check', () => {
+  const result = coverage(palette + '\napp_state.g_search_results[0] = SEARCH_NOT_A_REAL_OFFSET;\n');
+  assert.deepEqual(result.missing, ['SEARCH_NOT_A_REAL_OFFSET']);
+});
+
+test('each verb is an mb command', () => {
+  for (const name of new Set(Object.values(verbs))) assert.match(usage, new RegExp('^  ' + name + ' ', 'm'));
+});
+
+test('the screen-only list is written next to the three-part rule', () => {
+  for (const line of Object.values(screenOnly)) {
+    assert.ok(claude.includes(line), line);
+    assert.ok(doc.includes(line), line);
+  }
+});

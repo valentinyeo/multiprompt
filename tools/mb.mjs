@@ -17,6 +17,11 @@ commands:
   rename <name> <title> [--host N]
   move <name> [--group <group>] [--workspace <name>] [--host N]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
+  star <name> on|off [--host N]
+  mute <name> on|off [--host N]
+  manual <name> on|off [--host N]
+  settings <frequent|favorites|all|frequent_first> on|off
+  pull [--json]
   workspace list
   workspace create <name> [--color N]
   workspace rename <old> <new>
@@ -216,15 +221,16 @@ function pngFromFile(file) {
 }
 
 async function list(ctx, flags) {
+  ctx.features = LAYOUT_FEATURES + ',favorite,muted';
   const read = await readLayout(ctx);
   const { revision, layout } = read.data;
-  const sessions = layout.tabs.map(tab => ({ session: tab.tmux_session, name: tab.name, host: tab.tmux_host, workspace: tab.workspace, group: tab.group || null, face: tab.face ?? null, color: tab.color ?? null, photo: tab.photo ?? null }));
+  const sessions = layout.tabs.map(tab => ({ session: tab.tmux_session, name: tab.name, host: tab.tmux_host, workspace: tab.workspace, group: tab.group || null, face: tab.face ?? null, color: tab.color ?? null, photo: tab.photo ?? null, favorite: tab.favorite === true, muted: tab.muted === true }));
   if (flags.json) { ctx.out(JSON.stringify({ revision, workspaces: layout.workspaces, sessions })); return; }
   ctx.out(`revision ${revision}`);
   for (const workspace of layout.workspaces) {
     const tabs = sessions.filter(tab => tab.workspace === workspace.name);
     ctx.out(`${workspace.name}${workspace.color === undefined ? '' : ' color ' + workspace.color} (${tabs.length})`);
-    for (const tab of tabs) ctx.out(`  ${tab.session}  host ${tab.host}  ${tab.name}${tab.group ? '  group ' + tab.group : ''}${tab.face === null ? '' : '  face ' + tab.face}${tab.color === null ? '' : '  color ' + tab.color}`);
+    for (const tab of tabs) ctx.out(`  ${tab.session}  host ${tab.host}  ${tab.name}${tab.group ? '  group ' + tab.group : ''}${tab.face === null ? '' : '  face ' + tab.face}${tab.color === null ? '' : '  color ' + tab.color}${tab.favorite ? '  star' : ''}${tab.muted ? '  mute' : ''}`);
   }
 }
 
@@ -738,6 +744,59 @@ async function applyRoster(ctx, file, dry) {
   ctx.out(`revision ${revision}`);
 }
 
+function onOff(word, value) {
+  if (value === 'on') return true;
+  if (value === 'off') return false;
+  throw new Failure(`${word} needs on or off`);
+}
+
+async function setTabBool(ctx, flags, field, feature, word) {
+  if (flags._.length !== 2) throw new Failure(`${word} needs <name> on|off`);
+  const value = onOff(word, flags._[1]);
+  if (feature) {
+    ctx.features = LAYOUT_FEATURES + ',' + feature;
+    requireFeature(await readLayout(ctx), feature);
+  }
+  const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const result = await edit(ctx, layout => {
+    const tab = choose(layout, flags._[0], host);
+    if (!tab) throw new Failure('no such session');
+    if ((tab[field] === true) === value) return null;
+    tab[field] = value;
+    return layout;
+  });
+  ctx.out(`${result.changed ? word : 'already ' + word} ${value ? 'on' : 'off'} ${clean(flags._[0])}`);
+}
+
+const star = (ctx, flags) => setTabBool(ctx, flags, 'favorite', 'favorite', 'star');
+const mute = (ctx, flags) => setTabBool(ctx, flags, 'muted', 'muted', 'mute');
+const manual = (ctx, flags) => setTabBool(ctx, flags, 'manual', null, 'manual');
+
+const SETTING_KEYS = ['frequent', 'favorites', 'all', 'frequent_first'];
+const SETTING_DEFAULTS = { frequent: true, favorites: true, all: true, frequent_first: true };
+
+async function settings(ctx, flags) {
+  const key = flags._[0];
+  if (flags._.length !== 2 || !SETTING_KEYS.includes(key)) throw new Failure('settings needs <frequent|favorites|all|frequent_first> on|off');
+  const value = onOff('settings', flags._[1]);
+  ctx.features = LAYOUT_FEATURES + ',settings';
+  requireFeature(await readLayout(ctx), 'settings');
+  const result = await edit(ctx, layout => {
+    const current = { ...SETTING_DEFAULTS, ...(layout.settings || {}) };
+    const stored = layout.settings && layout.settings[key];
+    if (stored === value || (!layout.settings && value === SETTING_DEFAULTS[key])) return null;
+    layout.settings = { frequent: current.frequent, favorites: current.favorites, all: current.all, frequent_first: current.frequent_first };
+    layout.settings[key] = value;
+    return layout;
+  });
+  ctx.out(`${result.changed ? 'set' : 'already'} ${key} ${value ? 'on' : 'off'}`);
+}
+
+async function pull(ctx, flags) {
+  if (flags._.length) throw new Failure('pull takes no arguments');
+  await list(ctx, flags);
+}
+
 export async function run(argv, overrides = {}) {
   const env = overrides.env || process.env;
   const out = overrides.out || (line => process.stdout.write(line + '\n'));
@@ -769,7 +828,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style };
+    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;

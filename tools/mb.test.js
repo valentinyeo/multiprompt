@@ -37,6 +37,8 @@ function harness(options = {}) {
       revision += 1;
       layout.workspaces = body.layout.workspaces;
       layout.tabs = body.layout.tabs;
+      if (body.layout.settings) layout.settings = body.layout.settings;
+      else delete layout.settings;
       return { status: 200, headers, json: async () => ({ revision, layout: structuredClone(layout) }) };
     }
     const photo = path.match(/^\/v1\/bot-photos\/([0-9a-f]{64})$/);
@@ -90,7 +92,7 @@ test('help lists style, workspace color, and roster apply', async () => {
   const lines = [];
   assert.equal(await run(['help'], { out: line => lines.push(line), err() {} }), 0);
   const help = lines.join('\n');
-  for (const word of ['list', 'open', 'close', 'rename', 'move', 'style', '--face', '--color', '--photo', 'workspace color', 'group create', 'roster apply', '--dry-run']) assert.match(help, new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  for (const word of ['list', 'open', 'close', 'rename', 'move', 'style', 'star', 'mute', 'manual', 'settings', 'pull', '--face', '--color', '--photo', 'workspace color', 'group create', 'roster apply', '--dry-run']) assert.match(help, new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(await run([], { out() {}, err() {} }), 2);
 });
 
@@ -326,5 +328,69 @@ test('a listed unowned runner is regrouped and not claimed', async () => {
   assert.equal(after.code, 0, text(after));
   assert.equal(box.layout.tabs.length, 1);
   assert.equal(after.tmux.some(args => args[0] === 'kill-session'), false);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+test('star, mute, manual, and settings publish once and then match', async () => {
+  const box = harness({ layout: { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [
+    { kind: 'tmux', name: 'Runner', tmux_session: 'mp-runner-1', tmux_host: 1, workspace: 'Work' },
+    { kind: 'tmux', name: 'Runner', tmux_session: 'mp-runner-1', tmux_host: 0, workspace: 'Work' }
+  ] } });
+  const ambiguous = await box.call(['star', 'mp-runner-1', 'on']);
+  assert.equal(ambiguous.code, 1);
+  assert.match(ambiguous.errors[0], /give --host/);
+  assert.equal(box.puts.length, 0);
+  const starred = await box.call(['star', 'Runner', 'on', '--host', '1']);
+  assert.equal(starred.code, 0, text(starred));
+  assert.equal(box.layout.tabs[0].favorite, true);
+  assert.match(starred.puts.at(-1).features, /(^|,)favorite(,|$)/);
+  const starredPuts = box.puts.length;
+  const again = await box.call(['star', 'mp-runner-1', 'on', '--host', '1']);
+  assert.match(again.lines.at(-1), /already star on/);
+  assert.equal(box.puts.length, starredPuts);
+  const off = await box.call(['star', 'mp-runner-1', 'off', '--host', '0']);
+  assert.equal(off.code, 0, text(off));
+  assert.equal(box.puts.length, starredPuts);
+  const muted = await box.call(['mute', 'mp-runner-1', 'on', '--host', '1']);
+  assert.equal(muted.code, 0, text(muted));
+  assert.equal(box.layout.tabs[0].muted, true);
+  assert.match(muted.puts.at(-1).features, /(^|,)muted(,|$)/);
+  const mutedPuts = box.puts.length;
+  const muteAgain = await box.call(['mute', 'Runner', 'on', '--host', '1']);
+  assert.equal(muteAgain.code, 0, text(muteAgain));
+  assert.equal(box.puts.length, mutedPuts);
+  const named = await box.call(['manual', 'mp-runner-1', 'on', '--host', '1']);
+  assert.equal(named.code, 0, text(named));
+  assert.equal(box.layout.tabs[0].manual, true);
+  const namedPuts = box.puts.length;
+  const namedAgain = await box.call(['manual', 'mp-runner-1', 'on', '--host', '1']);
+  assert.match(namedAgain.lines.at(-1), /already manual on/);
+  assert.equal(box.puts.length, namedPuts);
+  const shown = await box.call(['settings', 'frequent', 'off']);
+  assert.equal(shown.code, 0, text(shown));
+  assert.deepEqual(box.layout.settings, { frequent: false, favorites: true, all: true, frequent_first: true });
+  assert.match(shown.puts.at(-1).features, /(^|,)settings(,|$)/);
+  const shownPuts = box.puts.length;
+  const shownAgain = await box.call(['settings', 'frequent', 'off']);
+  assert.match(shownAgain.lines.at(-1), /already frequent off/);
+  assert.equal(box.puts.length, shownPuts);
+  const pulled = await box.call(['pull']);
+  assert.equal(pulled.code, 0, text(pulled));
+  assert.match(pulled.lines[0], /revision/);
+  assert.match(pulled.lines.join('\n'), /star/);
+  assert.match(pulled.lines.join('\n'), /mute/);
+  assert.equal(box.puts.length, shownPuts);
+  const missing = await box.call(['star', 'nobody', 'on']);
+  assert.equal(missing.code, 1);
+  assert.match(missing.errors[0], /no such session/);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+test('star is refused when the service has no favorite feature', async () => {
+  const box = harness({ features: 'groups', layout: { schema: 1, revision: 1, workspaces: [{ name: 'Work' }], tabs: [{ kind: 'tmux', name: 'Runner', tmux_session: 'mp-runner-1', tmux_host: 0, workspace: 'Work' }] } });
+  const refused = await box.call(['star', 'mp-runner-1', 'on']);
+  assert.equal(refused.code, 1);
+  assert.match(refused.errors[0], /does not support favorite/);
+  assert.equal(box.puts.length, 0);
   rmSync(box.dir, { recursive: true, force: true });
 });
