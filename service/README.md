@@ -56,6 +56,9 @@ Read Android crashes newest first with `python3 service/crash-reports.py --limit
 - `POST /v1/crash-reports`: device Bearer auth; strict Android report fields, 32 KiB body limit, duplicate IDs scoped to each device, newest 50 reports per device retained and deleted on revocation
 - `GET /v1/layout`, `PUT /v1/layout`: revision-based layout sync; stale writes return 409
 - `GET`, `PUT`, `DELETE /v1/bot-photos/{key}`: account-scoped remote session pictures. Workspace keys can access only their workspace's sessions. PUT accepts `{ "png": "<base64>" }`, with a PNG no larger than 256 by 256 pixels and 65536 decoded bytes. GET returns the same shape or 404. Keys use the lowercase hex remote digest from `bot_photo_key.zig`, including the raw host byte. The Worker owns each tab's positive `photo` revision, exposes it only to clients requesting `bot_photo`, and preserves it regardless of layout PUT contents. DELETE removes the picture and tab revision.
+- `GET`, `PUT /v1/secrets/deepgram`: device Bearer auth only; the account's Deepgram dictation key, shared by every device on the account. PUT accepts `{ "key": "<text>" }`, one to 256 printable ASCII characters without spaces, and answers `{ "stored": true }`. GET answers `{ "key": "<text>" }` or 404. Service keys and browser sessions are refused with 403, and one account can never read another account's key. The desktop app logs only where the key came from, never its value.
+
+Apply the additive `account_secrets` table in `schema.sql` before deploying a Worker that serves this route.
 
 Apply the additive `bot_photos` table in `schema.sql` before deploying this Worker. Existing clients remain compatible: layout responses omit `photo` unless requested, and old layout uploads cannot erase pictures.
 

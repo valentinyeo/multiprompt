@@ -83,6 +83,8 @@ function validateCrashReport(x) {
   return x;
 }
 
+const validSecret = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[\x21-\x7e]+$/.test(value);
+
 async function body(request, limit = 1024 * 1024, invalid = 'invalid_json') {
   if (Number(request.headers.get('Content-Length')) > limit) fail(413, 'too_large');
   const reader = request.body?.getReader();
@@ -324,6 +326,17 @@ export default {
         ]);
         if (!result[0].meta.changes && !await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
         return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
+      }
+      if (url.pathname === '/v1/secrets/deepgram' && (request.method === 'GET' || request.method === 'PUT')) {
+        if (!device.id) fail(403, 'device_required');
+        if (request.method === 'PUT') {
+          const b = await body(request, 1024, 'invalid_secret');
+          if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).length !== 1 || !validSecret(b.key)) fail(400, 'invalid_secret');
+          await db.prepare('INSERT INTO account_secrets (account,name,value,updated_at) VALUES (?,?,?,?) ON CONFLICT(account,name) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').bind(device.account, 'deepgram', b.key, now()).run();
+          return json({ stored: true });
+        }
+        const row = await db.prepare('SELECT value FROM account_secrets WHERE account=? AND name=?').bind(device.account, 'deepgram').first();
+        return row ? json({ key: row.value }) : json({ error: 'not_found' }, 404);
       }
       const photoMatch = url.pathname.match(/^\/v1\/bot-photos\/([0-9a-f]{64})$/);
       if (photoMatch && ['GET', 'PUT', 'DELETE'].includes(request.method)) {
