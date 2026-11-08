@@ -98,6 +98,12 @@ class RuntimeTest(unittest.TestCase):
         self.assertIn('history\\terror', self.invoke().stdout)
         self.assertEqual(active.read_text(), 'null')
 
+    def test_thread_pool_executor_loads_before_retire_thread(self):
+        prelude = SOURCE.split('def serve(', 1)[0]
+        serve_head = SOURCE.split('def serve(', 1)[1].split('chats = {}', 1)[0]
+        self.assertIn('from concurrent.futures import ThreadPoolExecutor', prelude)
+        self.assertNotIn('from concurrent.futures import ThreadPoolExecutor', serve_head)
+
     def test_concurrent_generations_cannot_downgrade(self):
         for attempt in range(5):
             with self.subTest(attempt=attempt):
