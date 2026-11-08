@@ -387,9 +387,9 @@ try {
     if ($Feature -eq 'chat-not-sent-remove') {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'
         New-Item -ItemType Directory -Force $seedDir | Out-Null
-        $seedChatId = 1234567890123
+        $seedChatId = [UInt64]1234567890123
         $seedTabName = 'Old session chat'
-        $script:notSentKey = 'cmd:' + $seedTabName
+        $script:notSentKey = 'cmd:#' + ('{0:x16}' -f $seedChatId)
         $script:notSentText = 'stuck message from an old session'
         $seedTabs = @(@{ kind = 'cmd'; name = $seedTabName; manual = $true; shell_id = 1; chat_id = $seedChatId })
         $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }
@@ -400,7 +400,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $seedDir 'chat-outbox.json'), $outboxJson, (New-Object Text.UTF8Encoding $false))
         Save-Json $seed 'seed-session.json'
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-outbox.json') -Value $outboxJson
-        $result.seedBoundary = 'The harness writes the saved-tab file and the unsent-message file once before launch: one message marked sent under a session id the tab no longer has. Nothing is edited after launch; the only input is Alt+C and Ctrl+K discard unsent.'
+        $result.seedBoundary = 'The harness writes the saved-tab file and the unsent-message file once before launch: one message marked sent under a session id the tab no longer has. Nothing is edited after launch; the only input is Alt+C and Delete with an empty composer.'
     }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'

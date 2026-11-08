@@ -185,7 +185,8 @@ test("IGSH-1864 empty composer Delete discards stuck not-sent rows for the tab",
   assert.match(render, /pub fn chatRemoveActiveTabNotSent\(\) bool \{[\s\S]*chatEchoDiscardableForShell/);
   assert.match(send, /fn chatOutboxOwnedByShell/);
   assert.match(send, /pub fn chatEchoDiscardableForShell/);
-  assert.match(send, /pub fn chatEchoDiscardUnsentForActive\(\) void \{[\s\S]*chatEchoDiscardableForShell/);
+  assert.match(send, /chat_echo\.showsNotSent/);
+  assert.match(send, /pub fn chatEchoDiscardUnsentForActive\(\) void \{[\s\S]*while \(pass < 2\)/);
 });
 
 test("wiki page exists and documents the tiers", () => {
