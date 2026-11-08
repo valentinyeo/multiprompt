@@ -5874,7 +5874,7 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
                     const id = app_state.g_chat_echo_layout_ids[idx - app_state.g_chat_block_count];
                     const ei = chatOutboxIndexById(id) orelse return true;
                     if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
-                    if (chatOutboxIndexById(id) == null) chatNavClear();
+                    if (chatOutboxIndexById(id) == null) chatNavClear() else _ = chatRemoveActiveTabNotSent();
                     return true;
                 }
             } else chatNavClear();

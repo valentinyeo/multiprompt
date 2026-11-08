@@ -34,8 +34,8 @@ Assert-Foreground
 $removed = $false
 for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
     Wait-ChatFocus 'Edit' "not-sent-composer attempt $attempt"
-    Press @(0x26) "Up: select the Not sent message, attempt $attempt"
-    Start-Sleep -Milliseconds 600
+    Press @(0x1B) 'Escape: leave message focus before remove'
+    Wait-ChatFocus 'Edit' "not-sent-composer after Escape attempt $attempt"
     if ($attempt -eq 1) { Snapshot 'selected' }
     Press @(0x2E) "Delete: Remove the Not sent message, attempt $attempt"
     try {
@@ -45,5 +45,5 @@ for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
     } catch { if ($attempt -eq 3) { Snapshot 'remove-failed'; throw } }
 }
 Save-Json @{ removed = $removed; key = $stuckKey; text = $stuckText; remaining = @(Read-StuckMessages).Count } 'outbox-after.json'
-$result.checks += @{ name = 'old-session-not-sent-removed'; entry = 'Up then Delete'; removed = $removed }
+$result.checks += @{ name = 'old-session-not-sent-removed'; entry = 'Delete with empty composer'; removed = $removed }
 Snapshot 'after'
