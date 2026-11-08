@@ -105,7 +105,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertNotIn('from concurrent.futures import ThreadPoolExecutor', serve_head)
 
     def test_concurrent_generations_cannot_downgrade(self):
-        for attempt in range(5):
+        for attempt in range(50):
             with self.subTest(attempt=attempt):
                 processes = []
                 for source in (SOURCE, self.newer(), SOURCE, self.newer()):
