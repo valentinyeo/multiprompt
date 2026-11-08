@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: node tools/check-routing-ids.mjs
       - run: node tools/shortcuts-doc.mjs --check
-      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/shortcuts-doc.test.js
+      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/palette-verbs.test.js tools/shortcuts-doc.test.js
   desktop:
     runs-on: windows-latest
     timeout-minutes: 25

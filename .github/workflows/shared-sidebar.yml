@@ -82,7 +82,7 @@ jobs:
           echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
           tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js
+      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/palette-verbs.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js
         env:
           ZIG: zig
   sidebar:
