@@ -2061,12 +2061,9 @@ pub fn chatEchoRemove(id: u64) void {
     const pending = app_state.g_chat_outbox.items[ei];
     if (pending.message_v1 and pending.channel_pending) return;
     if (pending.message_v1 and (pending.message_phase[0] != 0 or pending.write_started)) {
-        if (chatOutboxShellForKey(pending.key[0..pending.key_len])) |si| {
-            if (std.mem.eql(u8, &chatFileIdentityForShell(si).sid, &pending.message_sid)) {
-                if (!chatTmuxSendStart(si, pending.text, id, false, false, true)) showHeaderNoticeAscii("Could not remove yet. Try again", 3500, true);
-                return;
-            }
-        }
+        const si = chatOutboxShellForKey(pending.key[0..pending.key_len]) orelse return;
+        if (!chatTmuxSendStart(si, pending.text, id, false, false, true)) showHeaderNoticeAscii("Could not remove yet. Try again", 3500, true);
+        return;
     }
     const entry = app_state.g_chat_outbox.orderedRemove(ei);
     if (!saveChatOutbox()) {

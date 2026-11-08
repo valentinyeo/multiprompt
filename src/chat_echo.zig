@@ -575,8 +575,7 @@ fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: 
             if (before.message_id == p.anchor.after_id) break true;
         } else false);
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !after_anchor and !p.unanchored_delivery) continue;
-        const sent_after = p.anchor.sent_ms > 0 and isNewBlock(p.anchor, b.stamp_ms, bi, window_full);
-        if (p.unanchored_delivery and !sent_after and (p.text.len == 0 or (!sameText(b.text, p.text) and !(p.confirmed and sameSkillText(b.text, norm))))) continue;
+        if (p.unanchored_delivery and (p.text.len == 0 or (!sameText(b.text, p.text) and !(p.confirmed and sameSkillText(b.text, norm))))) continue;
         const already_claimed = for (claimed) |claim| {
             if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
             if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) break true;
@@ -949,16 +948,6 @@ test "delivery: legacy typed entries without anchors reconcile exact normalized 
     pending[0].unanchored_delivery = false;
     assign(&pending, &.{ub("https://screencast2.com/a.png", 200)}, false, &.{}, &out);
     try std.testing.expect(out[0] == null);
-}
-
-test "IGSH-1859 a sent message merged into a later turn matches only after its send time" {
-    const text = w("https://example.com/b.png too much text");
-    var pending = [_]Pending{.{ .prefix = &text, .text = &text, .anchor = .{ .sent_ms = 100_000 }, .unanchored_delivery = true }};
-    var out: [1]?usize = undefined;
-    assign(&pending, &.{ub("/reduce-first fix this https://example.com/b.png too much text https://example.com/c.png more", 1000)}, false, &.{}, &out);
-    try std.testing.expect(out[0] == null);
-    assign(&pending, &.{ub("/reduce-first fix this https://example.com/b.png too much text https://example.com/c.png more", 160_000)}, false, &.{}, &out);
-    try std.testing.expectEqual(@as(?usize, 0), out[0]);
 }
 
 test "retirement: full transcript text ignores late anchors and claimed copies" {

@@ -1096,7 +1096,6 @@ test "delivery: IGSH-1810 queued live removal waits for server confirmation and 
     g_chat_outbox.items[0].message_v1 = true;
     g_chat_outbox.items[0].write_started = true;
     @memcpy(g_chat_outbox.items[0].message_phase[0..6], "queued");
-    @memcpy(g_chat_outbox.items[0].message_sid[0..1], "s");
     chatEchoRemove(id);
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
@@ -1109,41 +1108,6 @@ test "delivery: IGSH-1810 queued live removal waits for server confirmation and 
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), writes + enters);
-}
-test "delivery: IGSH-1859 Remove clears a Not sent message tied to an older session" {
-    defer clear();
-    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("sent while a helper held the chat"), .not_sent);
-    const id = g_chat_outbox.items[0].id;
-    g_chat_outbox.items[0].message_v1 = true;
-    g_chat_outbox.items[0].write_started = true;
-    @memcpy(g_chat_outbox.items[0].message_phase[0..6], "queued");
-    @memcpy(g_chat_outbox.items[0].message_sid[0..6], "helper");
-    chatEchoRemove(id);
-    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
-    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
-}
-test "delivery: IGSH-1859 a message the agent merged into a later turn stops showing Not sent" {
-    defer clear();
-    const text = std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/b.png  too much text everywhere ");
-    const merged = std.unicode.utf8ToUtf16LeStringLiteral("/reduce-first https://example.com/a.png fix this page\\n\\nhttps://example.com/b.png  too much text everywhere \\n\\nhttps://example.com/c.png one more note");
-    try enqueue(text, .not_sent);
-    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/c.png one more note"), .not_sent);
-    for (g_chat_outbox.items) |*entry| {
-        entry.anchor = .{ .sent_ms = 100_000 };
-        entry.message_v1 = true;
-        entry.write_started = true;
-        entry.channel_sent = true;
-        entry.retryable = true;
-        @memcpy(entry.message_phase[0..6], "queued");
-    }
-    transcript(merged, 1000);
-    chatEchoMatchActive();
-    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
-    transcript(merged, 160_000);
-    chatEchoMatchActive();
-    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
-    try std.testing.expectEqual(@as(usize, 2), g_chat_confirmed.items.len);
-    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
 test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
     defer clear();
