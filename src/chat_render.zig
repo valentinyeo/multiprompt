@@ -5861,6 +5861,20 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
                 const ei = chatOutboxIndexById(id) orelse return true;
                 if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
                 if (chatOutboxIndexById(id) == null) chatNavClear();
+            } else if (app_state.active_shell < app_state.shell_count) {
+                var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+                const key = chatOutboxKeyForShell(app_state.active_shell, &key_buf);
+                if (key.len > 0) {
+                    var i: usize = app_state.g_chat_outbox.items.len;
+                    while (i > 0) {
+                        i -= 1;
+                        const e = &app_state.g_chat_outbox.items[i];
+                        if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or e.state != .not_sent or !e.removable()) continue;
+                        chatEchoRemove(e.id);
+                        if (chatOutboxIndexById(e.id) == null) chatNavClear();
+                        break;
+                    }
+                }
             }
             return true;
         },

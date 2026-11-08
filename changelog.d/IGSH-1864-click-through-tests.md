@@ -1,1 +1,1 @@
-Alt+A opens the browser from a chat tab, the plus menu marks your chosen model, effort and permission, and a stuck unsent message can be removed.
+Alt+A opens the browser from a chat tab, the plus menu marks your chosen model, effort and permission, and a stuck unsent message can be removed. Delete removes a not-sent outbox message even when message focus sits on transcript history above it.

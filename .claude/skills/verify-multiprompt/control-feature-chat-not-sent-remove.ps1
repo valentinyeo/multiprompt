@@ -1,5 +1,6 @@
 $script:browserShellId = 1
 $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
+$debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $stuckKey = $script:notSentKey
 $stuckText = $script:notSentText
 function Read-StuckMessages {
@@ -24,6 +25,9 @@ Wait-Until {
     @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count -eq 1
 } 'visible native Chat View transcript control'
 Wait-ChatFocus 'Edit' 'not-sent-composer'
+Wait-Until {
+    (Test-Path $debugLog) -and (Get-Content $debugLog -Raw) -match '\[switch\] chat content shown shell='
+} 'transcript content painted before removal' 45
 Start-Sleep -Seconds 2
 Press @(0x11, 0x41) 'Ctrl+A: clear composer before message navigation'
 Press @(0x08) 'Backspace: empty composer before message navigation'
