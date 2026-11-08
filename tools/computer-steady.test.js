@@ -32,6 +32,9 @@ test('IGSH-1087 a pull that brings the same server layout does not apply it agai
   const call = reply.indexOf('applyServerLayout(to_apply)');
   assert.ok(call >= 0);
   const branch = reply.slice(reply.lastIndexOf('} else', call), call);
-  assert.match(branch, /if \(!std\.mem\.eql\(u8, app_state\.g_account_base orelse "", bytes\)\)/, 'apply runs only when the server layout differs from the last synced one');
-  assert.ok(reply.indexOf('app_state.g_account_base = a.dupe(u8, bytes)') > call, 'the synced layout is remembered after the apply decision');
+  assert.match(branch, /if \(!std\.mem\.eql\(u8, g_applied_layout orelse "", bytes\)\)/, 'apply runs only when the server layout differs from the last applied one');
+  const remembered = reply.indexOf('g_applied_layout = a.dupe(u8, bytes)');
+  assert.ok(remembered > call, 'the applied layout is remembered only after a successful apply');
+  const lock = slice(desktop, 'fn accountLock() void {', '\n}');
+  assert.match(lock, /g_applied_layout = null;/, 'a lock forgets the applied layout so the next sign-in applies once');
 });
