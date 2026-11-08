@@ -972,13 +972,16 @@ test "IGSH-870 newest reply survives tail gap and older pages restore all messag
 });
 
 test('IGSH-1063 typed question progress repaints without waiting for a transcript message', (t) => {
-  const bypass = fileBody('chat_capture.zig', 'chatWideContainsAscii')
+  const bypass = fileBody('chat_capture.zig', 'chatWideStartsWithAscii')
+    + fileBody('chat_capture.zig', 'chatWideContainsAscii')
     + fileBody('chat_capture.zig', 'chatConsoleBypassPermissionsActive');
   const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows')
     .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
     .replaceAll('@import("chat_render.zig").chatPermissionChanged', 'chatPermissionChanged')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate')
-    .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog')
+    .replaceAll('@import("chat_send.zig").chatPermissionAnswer', 'chatPermissionAnswer')
+    .replaceAll('@import("chat_live.zig").attached', 'chatLiveAttached');
   const result = execute(t, 'question-progress', String.raw`
 const std = @import("std");
 const DWORD = u32;
@@ -998,6 +1001,8 @@ fn chatPermissionSendFailedApply() void {}
 fn chatQuestionCaptureRows(_: u32, _: []const []const u16) void {}
 fn chatWorkingIndicatorInvalidate() void {}
 fn debugLog(_: []const u8) void {}
+fn chatPermissionAnswer(_: u32, _: @import("chat_permission.zig").Action) bool { return false; }
+fn chatLiveAttached(_: u32) bool { return false; }
 fn PostMessageW(hwnd: usize, message: u32, _: usize, _: isize) i32 {
     std.debug.assert(hwnd == 123 and message == 456);
     repaints += 1;
