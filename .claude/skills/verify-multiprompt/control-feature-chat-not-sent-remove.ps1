@@ -8,8 +8,11 @@ function Read-StuckMessages {
     try { $outbox = Get-Content -LiteralPath $outboxPath -Raw | ConvertFrom-Json } catch { return $null }
     $found = @()
     foreach ($queue in @($outbox.queues)) {
-        if ($queue.key -ne $stuckKey) { continue }
-        foreach ($message in @($queue.messages)) { if ($message.t -eq $stuckText) { $found += $message } }
+        foreach ($message in @($queue.messages)) {
+            if ($message.t -ne $stuckText) { continue }
+            $found += $message
+            if ($queue.key) { $script:stuckKey = $queue.key }
+        }
     }
     return $found
 }
