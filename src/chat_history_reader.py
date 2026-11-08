@@ -6494,10 +6494,24 @@ def events_push(subscriptions):
         serve_print(dict(id=rid, message_protocol=1, result=page))
 
 
+SERVE_WORK = dict(busy=0, last=time.monotonic())
+SERVE_WORK_LOCK = threading.Lock()
+
+
+def serve_work(delta):
+    with SERVE_WORK_LOCK:
+        SERVE_WORK['busy'] += delta
+        SERVE_WORK['last'] = time.monotonic()
+
+
 def serve_retire(interval=2.0):
-    while not superseded_engine():
+    while True:
         time.sleep(interval)
-    os._exit(0)
+        if not superseded_engine():
+            continue
+        with SERVE_WORK_LOCK:
+            if not SERVE_WORK['busy'] and time.monotonic() - SERVE_WORK['last'] >= interval:
+                os._exit(0)
 
 
 def serve_push(subscriptions, lock, wake):
@@ -6590,6 +6604,7 @@ def serve(source):
         for line in sys.stdin.buffer:
             if not line.strip():
                 continue
+            serve_work(1)
             try:
                 query = json.loads(line)
             except (ValueError, UnicodeError):
@@ -6597,7 +6612,10 @@ def serve(source):
             if (not isinstance(query, dict) or not str(query.get('op', '')).startswith('message_')
                     or query.get('provider') not in HOST_PROVIDERS or not isinstance(query.get('sid'), str)
                     or not SESSION_ID.fullmatch(query['sid'])):
-                serve_request(line, source, subscriptions, lock)
+                try:
+                    serve_request(line, source, subscriptions, lock)
+                finally:
+                    serve_work(-1)
                 continue
             key = (query['provider'], query['sid'])
             if key not in chats and len(chats) >= 256:
@@ -6611,10 +6629,11 @@ def serve(source):
                 rid = query.get('id', 0)
                 rid = rid if type(rid) is int and rid >= 0 else 0
                 serve_print(dict(id=rid, wire=f"@mp\t{rid}\thistory\terror\t-\t0\n{END}\n"))
+                serve_work(-1)
                 continue
             executor, slots, last = chats[key]
             future = executor.submit(serve_request, line, source, subscriptions, lock)
-            future.add_done_callback(lambda done, slots=slots: slots.release())
+            future.add_done_callback(lambda done, slots=slots: (slots.release(), serve_work(-1)))
             chats[key] = (executor, slots, future)
     finally:
         for executor, slots, last in chats.values():
@@ -6649,7 +6668,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 92
+RUNTIME_GENERATION = 93
 
 if __name__ == '__main__':
     import base64 as _base64
