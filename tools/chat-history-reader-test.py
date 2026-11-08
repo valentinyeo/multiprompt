@@ -6540,6 +6540,31 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         self.assertEqual(self.session['state']['mode'], 'acceptEdits')
         self.assertEqual(self.reply(op='set_permission_mode', mode='yolo')['reason'], 'invalid_permission_mode')
 
+    def test_a_chosen_permission_mode_survives_an_agent_restart(self):
+        config_path = reader.host_paths(self.provider, self.sid)['config']
+        reader.host_write(config_path, dict(enabled=True, tmux=self.tmux, permission_mode='acceptEdits'))
+        self.assertEqual(self.reply(op='set_permission_mode', mode='bypassPermissions')['status'], 'ok')
+        self.assertEqual(reader.host_read(config_path)['permission_mode'], 'bypassPermissions')
+        argv = reader.host_claude_argv(self.provider, self.sid, ['claude'])
+        self.assertEqual(argv[argv.index('--permission-mode') + 1], 'bypassPermissions')
+        self.assertEqual(self.reply(op='set_permission_mode', mode='plan')['status'], 'ok')
+        self.assertEqual(reader.host_read(config_path)['permission_mode'], 'bypassPermissions', 'plan stays a temporary mode')
+
+    def test_bypass_answers_helper_approvals_without_asking(self):
+        self.session['state']['mode'] = 'bypassPermissions'
+        request_id = self.approval()
+        self.assertEqual(self.events('approval.request'), [], 'bypass must not show an approval card')
+        self.assertEqual(self.session['parked'], {})
+        self.assertEqual(self.writes(), [dict(type='control_response', response=dict(
+            subtype='success', request_id=request_id,
+            response=dict(behavior='allow', updatedInput=dict(command='rm -rf build', description='Remove the build directory'),
+                          toolUseID='toolu_req', decisionClassification='user_temporary')))])
+
+    def test_bypass_still_asks_questions(self):
+        self.session['state']['mode'] = 'bypassPermissions'
+        self.approval(tool='AskUserQuestion', input=dict(questions=[dict(question='Which one?', header='Pick', options=[])]))
+        self.assertEqual(len(self.events('question.request')), 1)
+
 
 
 
