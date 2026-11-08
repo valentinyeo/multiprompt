@@ -51,9 +51,9 @@ test('settings requests report refusal and show confirmed next values', () => {
   assert.match(main, /chatSetLiveSetting\(setting\).*showHeaderNoticeAscii/);
   assert.ok(fs.existsSync(path.join(root, 'src/plus_menu.zig')), 'plus menu source exists');
   const plus = read('src/plus_menu.zig');
-  assert.match(plus, /chat_live\.zig"\)\.settings\(/);
-  assert.match(plus, /state\.checked\[@intFromEnum\(Item\.model_opus\)\] = selected\.model == \.opus/);
-  assert.match(plus, /state\.checked\[@intFromEnum\(Item\.effort_high\)\] = selected\.effort == \.high/);
+  assert.match(plus, /chat_live\.settings\(/);
+  assert.match(plus, /state\.active\[@intFromEnum\(Item\.model_opus\)\] = model == \.opus/);
+  assert.match(plus, /state\.active\[@intFromEnum\(Item\.effort_high\)\] = selected\.effort == \.high/);
 });
 
 test('F1 and keyboard docs list both palette actions', () => {

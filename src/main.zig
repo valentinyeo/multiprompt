@@ -3860,7 +3860,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         .effort_medium => .{ .effort = .medium },
                         else => .{ .effort = .high },
                     };
-                    if (!@import("chat_send.zig").chatSetLiveSetting(setting)) showHeaderNoticeAscii("Could not change chat settings", 4000, true);
+                    if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
                 },
                 .mode_ask, .mode_edits, .mode_plan, .mode_bypass => {
                     const mode: @import("chat_slash.zig").PermissionMode = switch (item) {
@@ -5561,7 +5561,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         SEARCH_CHAT_EFFORT_HIGH_OFFSET => .{ .effort = .high },
                         else => unreachable,
                     };
-                    if (!@import("chat_send.zig").chatSetLiveSetting(setting)) showHeaderNoticeAscii("Could not change chat settings", 4000, true);
+                    if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
                     showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
