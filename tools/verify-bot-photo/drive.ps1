@@ -283,7 +283,7 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool
         Press @(0x12, 0x43)
         [void](Wait-For 'chat title visible' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['cv'] -and $saved.cv })
     }
-    Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
+    Press @(0x11, 0x4b); Query 'pin to top' '(7113|6293)'; Press @(0x0d)
     [void](Wait-For 'Starred tile pinned' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['starred_pinned_top'] -and $saved.starred_pinned_top })
     Shot "$Name-starred-header"
     if ($Generated) { Assert-Generated $index "$Name-starred" 'pinned' } else { Assert-Avatar 'pinned' $index "$Name-starred" $Tall }
@@ -306,7 +306,7 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool
         if ($Generated) { Assert-Generated $index "$Name-palette" 'palette' } else { Assert-Avatar 'palette' $index "$Name-palette" $Tall }
     } catch { $failures += $_.Exception.Message }
     Press @(0x1b)
-    Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Press @(0x11, 0x4b); Query 'unpin from top' '(7113|6293)'; Press @(0x0d)
     Press @(0x12, 0x32)
     [void](Wait-For 'home workspace' { -not (State).starred_view })
     if (-not $wasChat) {
