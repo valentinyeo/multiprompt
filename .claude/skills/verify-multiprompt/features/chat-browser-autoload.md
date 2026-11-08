@@ -18,7 +18,7 @@ Dispatch `gh workflow run verify.yml -f feature=chat-browser-autoload`, or run t
 Seeding boundary: the harness writes `session.json` once before launch with a terminal tab selected first and a second tab already in Chat View with its browser slot on (`cv` and `bon`). It is copied to `seed-session.json`. Switching to a Chat View tab is the only way to reach this state without a restart.
 
 1. Launch with `--single-window` and wait for both tabs.
-2. Wait ten seconds and require the chat tab browser still closed.
+2. Wait ten seconds and require no connected pane and no docked browser window; the inbox may say opening while the slot stays off-screen.
 3. Press Ctrl+Tab, nothing else.
 4. Require the chat tab pane opening or connected within 30 seconds, then docked and visible.
 5. Require no `shortcutToggle` log line.

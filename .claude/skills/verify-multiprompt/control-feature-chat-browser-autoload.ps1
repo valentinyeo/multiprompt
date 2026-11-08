@@ -4,7 +4,7 @@ Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -
 Wait-Until { $null -ne (Read-BrowserPaneFor 2) } 'chat tab published in the Inbox'
 Start-Sleep -Seconds 10
 $idle = Read-BrowserPaneFor 2
-if ($idle.browser_state -ne 'closed') { throw 'The chat tab browser opened before the tab was shown' }
+if ($idle.browser_state -eq 'connected' -or [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero) { throw 'The chat tab browser opened before the tab was shown' }
 Save-Json $idle 'browser-pane-before-switch.json'
 Assert-Foreground
 $toggles = @(Select-String -Path $debug -Pattern 'shortcutToggle' -ErrorAction SilentlyContinue).Count

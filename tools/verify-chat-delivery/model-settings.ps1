@@ -37,7 +37,7 @@ foreach ($choice in $choices) {
     $oldArgs = (Read-Shared "$state/model-argv.jsonl").Length
     if ($choice.name -eq 'haiku') {
         $plusOffset = (Read-Shared "$settings/debug.log").Length
-        Model-Palette 'chat view plus menu' 'model-palette-haiku'
+        Model-Palette 'plus attach file' 'model-palette-haiku'
         [void](Wait-For 'plus menu opened' { (Read-Shared "$settings/debug.log").Substring($plusOffset) -match '\[chat\] plus menu model_opus rect=' })
         Shot 'model-plus-menu'
         foreach ($step in 1..4) { Press @(0x28) "Down: plus menu row $step" }
@@ -62,7 +62,7 @@ foreach ($choice in $choices) {
     Shot "model-after-$($choice.name)"
 }
 $plusOffset = (Read-Shared "$settings/debug.log").Length
-Model-Palette 'chat view plus menu' 'model-palette-active'
+Model-Palette 'plus attach file' 'model-palette-active'
 $plusLog = Wait-For 'plus menu opened for active rows' { $t = (Read-Shared "$settings/debug.log").Substring($plusOffset); if ($t -match '\[chat\] plus menu model_opus rect=') { $t } }
 $plusRects = @{}
 foreach ($found in [regex]::Matches($plusLog, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
