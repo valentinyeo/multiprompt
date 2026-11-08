@@ -18,3 +18,11 @@ test('the @ and / suggestion list uses the plus menu look with rounded corners',
   assert.doesNotMatch(paint, /var strip = RECT\{ \.left = 0/);
   assert.match(source, /CreateRoundRectRgn\(0, 0, ac_w \+ 1, ac_h \+ 1, chatAcRadius\(\) \* 2/);
 });
+
+test('the suggestion list drops the key hint footer and pads rows inside the rounded card', () => {
+  const paint = body('chatAcPaint');
+  assert.doesNotMatch(source, /Tab or Enter to insert/);
+  assert.match(paint, /const top = chatAcPad\(\) \+ y \* row_h;/);
+  assert.match(paint, /drawAscii\(dc, "Bot"/);
+  assert.match(source, /@divFloor\(GET_Y\(lp\) - chatAcPad\(\)/);
+});
