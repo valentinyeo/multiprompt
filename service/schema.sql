@@ -75,3 +75,8 @@ CREATE TABLE IF NOT EXISTS bot_photos (
  account TEXT NOT NULL, key TEXT NOT NULL, png TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision > 0),
  PRIMARY KEY (account,key)
 );
+
+CREATE TABLE IF NOT EXISTS account_secrets (
+ account TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, updated_at INTEGER NOT NULL,
+ PRIMARY KEY (account,name)
+);

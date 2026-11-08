@@ -1,0 +1,88 @@
+name: Click-through journeys
+run-name: click-through ${{ github.head_ref || github.ref_name }}
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: click-through-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE...$HEAD" -- src build.zig build.zig.zon .claude/skills/verify-multiprompt tools/verify-chat-delivery tools/chat-model-proof.cjs .github/workflows/click-through.yml .github/workflows/verify.yml)
+          if [ -n "$changed" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
+  chat-browser-shortcut:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-browser-shortcut
+  chat-browser-autoload:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-browser-autoload
+  chat-model:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-model
+  chat-not-sent-remove:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-not-sent-remove
+  click-through:
+    name: click-through
+    needs: [changes, chat-browser-shortcut, chat-browser-autoload, chat-model, chat-not-sent-remove]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every click-through journey
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RUN: ${{ needs.changes.outputs.run }}
+          SHORTCUT: ${{ needs.chat-browser-shortcut.result }}
+          AUTOLOAD: ${{ needs.chat-browser-autoload.result }}
+          MODEL: ${{ needs.chat-model.result }}
+          REMOVE: ${{ needs.chat-not-sent-remove.result }}
+        run: |
+          [ "$CHANGES" = success ] || exit 1
+          if [ "$RUN" = false ]; then
+            echo 'No desktop files changed; journeys skipped.'
+            exit 0
+          fi
+          for result in "$SHORTCUT" "$AUTOLOAD" "$MODEL" "$REMOVE"; do
+            [ "$result" = success ] || exit 1
+          done

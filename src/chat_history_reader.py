@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 HOME = Path.home()
@@ -6637,7 +6638,6 @@ def serve(source):
     push = threading.Thread(target=serve_push, args=(subscriptions, lock, wake), daemon=True)
     push.start()
     threading.Thread(target=serve_retire, daemon=True).start()
-    from concurrent.futures import ThreadPoolExecutor
     chats = {}
     try:
         for line in sys.stdin.buffer:

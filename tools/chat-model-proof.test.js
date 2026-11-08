@@ -15,6 +15,9 @@ function fixture() {
   write('cleanup.json', { remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true });
   write('observation.json', { error: null, draft: 'model draft retained' });
   write('doctor.json', { pid: 1, hwnd: 1, chat: true, sha256: 'a'.repeat(64) });
+  const expected = ['model_haiku', 'effort_high', 'mode_ask'];
+  const rows = ['model_opus', 'model_sonnet', 'model_haiku', 'effort_low', 'effort_medium', 'effort_high', 'mode_ask', 'mode_edits'].map(item => ({ item, accent: expected.includes(item) ? 40 : 0, mark: 0 }));
+  write('plus-active.json', { rows, expected_active: expected, failures: [] });
   write('before-history.txt', 'start the fake session\nThe fake session is ready.');
   write('after-history.txt', 'start the fake session\nThe fake session is ready.');
   const actions = [];
@@ -36,7 +39,7 @@ function fixture() {
   fs.writeFileSync(path.join(root, 'actions.json'), JSON.stringify(actions));
   const png = Buffer.alloc(1024);
   Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
-  for (const name of ['model-before', 'model-after', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-palette-${choice}`, `model-after-${choice}`])]) fs.writeFileSync(path.join(root, `${name}.png`), png);
+  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-palette-${choice}`, `model-after-${choice}`])]) fs.writeFileSync(path.join(root, `${name}.png`), png);
   return { root, dir, write };
 }
 
@@ -93,4 +96,20 @@ test('rejects a wrong launched effort and missing history', t => {
   f.write('stand-in/model-argv.jsonl', original);
   f.write('after-history.txt', 'missing');
   assert.throws(() => verify(f.root));
+});
+
+test('rejects a plus menu that keeps a check mark or loses the active style', t => {
+  const f = fixture();
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const good = JSON.parse(fs.readFileSync(path.join(f.dir, 'plus-active.json'), 'utf8'));
+  const marked = structuredClone(good);
+  marked.rows.find(row => row.item === 'model_haiku').mark = 12;
+  f.write('plus-active.json', marked);
+  assert.throws(() => verify(f.root));
+  const plain = structuredClone(good);
+  plain.rows.find(row => row.item === 'effort_high').accent = 0;
+  f.write('plus-active.json', plain);
+  assert.throws(() => verify(f.root));
+  f.write('plus-active.json', good);
+  assert.deepEqual(verify(f.root).efforts, ['low', 'medium', 'high']);
 });
