@@ -1038,7 +1038,11 @@ fn chatAcLayout() void {
     const rows: i32 = @intCast(@min(app_state.g_chat_ac.count, 8));
     const height = @max(uiScaled(54), rows * row_h + uiScaled(30));
     const top = @max(layout.transcript.top, layout.composer_card.top - uiScaled(6) - height);
-    _ = MoveWindow(app_state.g_chat_ac_hwnd, layout.composer_card.left, top, layout.composer_card.right - layout.composer_card.left, layout.composer_card.top - uiScaled(6) - top, 1);
+    const ac_w = layout.composer_card.right - layout.composer_card.left;
+    const ac_h = layout.composer_card.top - uiScaled(6) - top;
+    _ = MoveWindow(app_state.g_chat_ac_hwnd, layout.composer_card.left, top, ac_w, ac_h, 1);
+    const ac_region = @import("win32.zig").CreateRoundRectRgn(0, 0, ac_w + 1, ac_h + 1, chatAcRadius() * 2, chatAcRadius() * 2);
+    if (ac_region != null and @import("win32.zig").SetWindowRgn(app_state.g_chat_ac_hwnd, ac_region, 1) == 0) _ = DeleteObject(ac_region);
     _ = SetWindowPos(app_state.g_chat_ac_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     _ = InvalidateRect(app_state.g_chat_ac_hwnd, null, 0);
 }
@@ -1066,8 +1070,11 @@ fn chatAcPaint(hwnd: HANDLE) void {
         _ = SelectObject(memory, old_bitmap);
     };
     const dc = if (old_bitmap != null) memory else target;
-    const background = CreateSolidBrush(customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(250, 250, 252) else RGB(38, 40, 47)));
+    const menu_colors = @import("more_menu.zig").colors();
+    const background = CreateSolidBrush(menu_colors.outline);
     _ = FillRect(dc, &rc, background);
+    const edge = @max(1, uiScaled(1));
+    @import("smooth.zig").fillRoundRect(dc, .{ .left = edge, .top = edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, chatAcRadius() - edge, menu_colors.panel);
     if (@import("builtin").is_test and @import("win32.zig").WindowFromDC(dc) == hwnd) chat_ac_window_clears += 1;
     _ = DeleteObject(background);
     _ = SelectObject(dc, ensureChatFont());
@@ -1089,10 +1096,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
             const y: i32 = @intCast(v);
             const top = y * row_h;
             if (i == app_state.g_chat_ac.sel) {
-                const selected = CreateSolidBrush(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)));
-                var strip = RECT{ .left = 0, .top = top, .right = rc.right, .bottom = top + row_h };
-                _ = FillRect(dc, &strip, selected);
-                _ = DeleteObject(selected);
+                @import("smooth.zig").fillRoundRect(dc, .{ .left = uiScaled(6), .top = top + uiScaled(2), .right = rc.right - uiScaled(6), .bottom = top + row_h - uiScaled(2) }, uiScaled(10), menu_colors.raised);
             }
             const size = uiScaled(24);
             const avatar = RECT{ .left = uiScaled(12), .top = top + @divTrunc(row_h - size, 2), .right = uiScaled(12) + size, .bottom = top + @divTrunc(row_h - size, 2) + size };
@@ -1114,10 +1118,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
         const y: i32 = @intCast(v);
         const top = y * row_h;
         if (i == app_state.g_chat_ac.sel) {
-            const selected = CreateSolidBrush(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)));
-            var strip = RECT{ .left = 0, .top = top, .right = rc.right, .bottom = top + row_h };
-            _ = FillRect(dc, &strip, selected);
-            _ = DeleteObject(selected);
+            @import("smooth.zig").fillRoundRect(dc, .{ .left = uiScaled(6), .top = top + uiScaled(2), .right = rc.right - uiScaled(6), .bottom = top + row_h - uiScaled(2) }, uiScaled(10), menu_colors.raised);
         }
         var name: [257]u8 = undefined;
         const prefix = if (entry.kind == 'K') "$" else "/";
@@ -1156,6 +1157,10 @@ fn chatAcPaint(hwnd: HANDLE) void {
     _ = SetTextColor(dc, customColorOr("hint", RGB(135, 139, 147)));
     drawAscii(dc, label, &footer_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     if (dc != target) _ = w.BitBlt(target, 0, 0, rc.right, rc.bottom, dc, 0, 0, w.GDI_SRCCOPY);
+}
+
+fn chatAcRadius() i32 {
+    return uiScaled(14);
 }
 
 fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
