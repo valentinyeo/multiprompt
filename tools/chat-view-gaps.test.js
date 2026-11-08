@@ -115,6 +115,21 @@ test "audit failed permission send can be retried" {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
+test('IGSH-1852 bypass console status auto allows safety approvals', () => {
+  const helper = fileBody('chat_capture.zig', 'chatConsoleBypassPermissionsActive');
+  assert.match(helper, /bypass permissions on/);
+  const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows');
+  assert.match(capture, /chatConsoleBypassPermissionsActive/);
+  assert.match(capture, /chatPermissionAnswer\(shell_index, \.allow\)/);
+});
+
+test('IGSH-1852 bypass host auto accepts approval requests', () => {
+  const reader = fs.readFileSync(path.join(__dirname, '../src/chat_history_reader.py'), 'utf8');
+  assert.match(reader, /HOST_BYPASS_APPROVAL_MODES/);
+  assert.match(reader, /host_auto_approve_safety\(session, request, kind\)/);
+  assert.match(reader, /auto="bypass"/);
+});
+
 test('ISSUE-400 failed remote permission sends restore only the matching shell and never roll back stop', (t) => {
   const thread = fileBody('chat_send.zig', 'chatStopTmuxThread')
     .replaceAll('@import("chat_transcript.zig").Identity', 'Identity')
@@ -957,11 +972,16 @@ test "IGSH-870 newest reply survives tail gap and older pages restore all messag
 });
 
 test('IGSH-1063 typed question progress repaints without waiting for a transcript message', (t) => {
+  const bypass = fileBody('chat_capture.zig', 'chatWideStartsWithAscii')
+    + fileBody('chat_capture.zig', 'chatWideContainsAscii')
+    + fileBody('chat_capture.zig', 'chatConsoleBypassPermissionsActive');
   const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows')
     .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
     .replaceAll('@import("chat_render.zig").chatPermissionChanged', 'chatPermissionChanged')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate')
-    .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog')
+    .replaceAll('@import("chat_send.zig").chatPermissionAnswer', 'chatPermissionAnswer')
+    .replaceAll('@import("chat_live.zig").attached', 'chatLiveAttached');
   const result = execute(t, 'question-progress', String.raw`
 const std = @import("std");
 const DWORD = u32;
@@ -981,12 +1001,14 @@ fn chatPermissionSendFailedApply() void {}
 fn chatQuestionCaptureRows(_: u32, _: []const []const u16) void {}
 fn chatWorkingIndicatorInvalidate() void {}
 fn debugLog(_: []const u8) void {}
+fn chatPermissionAnswer(_: u32, _: @import("chat_permission.zig").Action) bool { return false; }
+fn chatLiveAttached(_: u32) bool { return false; }
 fn PostMessageW(hwnd: usize, message: u32, _: usize, _: isize) i32 {
     std.debug.assert(hwnd == 123 and message == 456);
     repaints += 1;
     return 1;
 }
-` + capture + String.raw`
+` + bypass + capture + String.raw`
 test "question progress repaint is active-session and answer specific" {
     chatPermissionCaptureRows(0, 2, 4, 2);
     try std.testing.expectEqual(@as(usize, 0), repaints);

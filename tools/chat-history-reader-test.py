@@ -6334,6 +6334,42 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         self.assertEqual(self.writes(), [], 'a parked request must not answer itself')
         self.assertEqual(list(self.session['parked']), [request_id])
 
+    def test_bypass_mode_auto_accepts_safety_approvals_without_parking(self):
+        self.session['state']['mode'] = 'bypassPermissions'
+        request_id = self.approval(decision_reason='Dangerous rm operation not ruled out.')
+        self.assertEqual([event for event in self.events('approval.request')
+                          if event['payload'].get('request_id') == request_id], [])
+        self.assertEqual(self.session['parked'], {})
+        self.assertEqual(self.writes(), [dict(type='control_response', response=dict(
+            subtype='success', request_id=request_id,
+            response=dict(behavior='allow', updatedInput=dict(command='rm -rf build', description='Remove the build directory'),
+                          toolUseID='toolu_req', decisionClassification='user_temporary')))])
+        resolved = [event for event in self.events('approval.resolved')
+                    if event['payload'].get('request_id') == request_id]
+        self.assertEqual(resolved[0]['payload'], dict(request_id=request_id, decision='accept', by='host'))
+
+    def test_accept_edits_mode_still_parks_shell_approvals(self):
+        self.session['state']['mode'] = 'acceptEdits'
+        request_id = self.approval()
+        self.assertEqual(self.events('approval.request')[0]['payload']['request_id'], request_id)
+        self.assertEqual(list(self.session['parked']), [request_id])
+        self.assertEqual(self.writes(), [])
+
+    def test_bypass_mode_still_parks_questions_and_plans(self):
+        self.session['state']['mode'] = 'bypassPermissions'
+        self.feed(dict(type='control_request', request_id='req-q', request=dict(
+            subtype='can_use_tool', tool_name='AskUserQuestion', display_name='AskUserQuestion',
+            tool_use_id='toolu_ask', input=dict(questions=[
+                dict(question='Which database?', header='Database', multiSelect=False,
+                     options=[dict(label='Postgres', description='prod')])]), requires_user_interaction=True)))
+        self.assertEqual(self.events('question.request')[0]['payload']['request_id'], 'req-q')
+        self.assertIn('req-q', self.session['parked'])
+        self.feed(dict(type='control_request', request_id='req-p', request=dict(
+            subtype='can_use_tool', tool_name='ExitPlanMode', display_name='ExitPlanMode',
+            tool_use_id='toolu_plan', input=dict(plan='## Plan\n1. Step'), requires_user_interaction=True)))
+        self.assertEqual(self.events('plan.proposed')[0]['payload']['request_id'], 'req-p')
+        self.assertIn('req-p', self.session['parked'])
+
     def test_accepting_an_approval_answers_the_request_once(self):
         request_id = self.approval()
         self.assertEqual(self.reply(op='approval_reply', request_id=request_id, decision='accept')['status'], 'ok')
