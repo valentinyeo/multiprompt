@@ -139,7 +139,11 @@ test("Alt+P and the Ctrl+K row share one toggle implementation with a header not
   assert.match(fn, /showHeaderNoticeAscii\(if \(shells\[active_shell\]\.keep_awake\) "Keep Tab Awake: On" else "Keep Tab Awake: Off"/);
   assert.match(source, /const WM_APP_TOGGLE_KEEP_AWAKE: u32 = WM_APP \+ 134;/);
   assert.match(source, /kb\.vkCode == 0x50 and foregroundIsOurs\(\)[\s\S]{0,600}WM_APP_TOGGLE_KEEP_AWAKE/, "Alt+P (vk 0x50) must post the toggle message");
-  assert.match(source, /WM_APP_TOGGLE_KEEP_AWAKE => \{\s*toggleKeepAwakeForActiveShell\(\);/);
+  assert.match(
+    source,
+    /WM_APP_TOGGLE_KEEP_AWAKE => \{[\s\S]{0,120}toggleKeepAwakeForActiveShell\(\);/,
+    "keep-awake toggle may gate private actions first",
+  );
 });
 
 test("the two new Ctrl+K offsets are excluded from the open-ended new-window/new-shell/tmux catch-alls", () => {
@@ -156,7 +160,10 @@ test("the two new Ctrl+K offsets are excluded from the open-ended new-window/new
 test("right-click tab-context row toggles keep_awake on the captured tab, not the active one", () => {
   assert.match(source, /const SEARCH_TABCTX_KEEPAWAKE: usize = 7115;/);
   assert.match(source, /tc_kaw = if \(findShellById\(g_tabctx_sid\)\) \|ti\| shells\[ti\]\.keep_awake else false/);
-  assert.match(source, /result_idx == SEARCH_TABCTX_KEEPAWAKE\) \(if \(tc_kaw\) L\("Keep Tab Awake: On"\) else L\("Keep Tab Awake: Off"\)\)/);
+  assert.match(
+    source,
+    /result_idx == SEARCH_TABCTX_KEEPAWAKE\) \(if \(tc_kaw\) L\(ui_words\.tab_context_keep_awake_on\) else L\(ui_words\.tab_context_keep_awake_off\)\)/,
+  );
   assert.match(source, /else if \(target == SEARCH_TABCTX_KEEPAWAKE\) \{\s*shells\[ti\]\.keep_awake = !shells\[ti\]\.keep_awake;/);
   assert.match(source, /target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE\) \{/);
 });

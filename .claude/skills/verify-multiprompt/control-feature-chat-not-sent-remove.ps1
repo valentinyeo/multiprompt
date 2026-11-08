@@ -32,6 +32,8 @@ Start-Sleep -Seconds 2
 Press @(0x11, 0x41) 'Ctrl+A: clear composer before remove'
 Press @(0x08) 'Backspace: empty composer before remove'
 Wait-Until { [VerifyNative]::GetFocusedWindow($script:window) -ne [IntPtr]::Zero } 'composer still focused before Delete' 15
+Press @(0x1B) 'Escape: leave message focus before remove'
+Wait-ChatFocus 'Edit' 'not-sent-composer after Escape'
 Snapshot 'action'
 Assert-Foreground
 $removed = $false
