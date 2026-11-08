@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 HOME = Path.home()
@@ -2473,6 +2474,7 @@ HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
+HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_IDLE_SECONDS = 300
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
@@ -3777,6 +3779,35 @@ def host_questions(request):
     return questions
 
 
+def host_bypass_approvals(session):
+    mode = (session.get("state") or {}).get("mode")
+    return mode in HOST_BYPASS_APPROVAL_MODES
+
+
+def host_auto_approve_safety(session, request, kind):
+    if kind != "approval" or not host_bypass_approvals(session):
+        return False
+    return bool(request.get("decision_reason"))
+
+
+def host_auto_approval_response(request):
+    edited = request.get("input") if isinstance(request.get("input"), dict) else {}
+    return dict(behavior="allow", updatedInput=edited, toolUseID=request.get("tool_use_id"),
+                decisionClassification="user_temporary")
+
+
+def host_save_default_permission_mode(provider, sid):
+    config = host_config(provider, sid) or {}
+    mode = config.get("permission_mode")
+    if mode in HOST_PERMISSION_MODES:
+        return mode
+    if provider == "claude" and config.get("enabled") is True:
+        config["permission_mode"] = "bypassPermissions"
+        host_write(host_paths(provider, sid)["config"], config)
+        return "bypassPermissions"
+    return mode
+
+
 def host_approval(request, request_id):
     return dict(request_id=request_id, tool=request.get("tool_name"), tool_use_id=request.get("tool_use_id"),
                 input=request.get("input") or {}, title=request.get("title") or request.get("tool_name"),
@@ -3798,6 +3829,12 @@ def host_control_request_event(provider, sid, tmux, session, event):
         return
     tool = request.get("tool_name")
     kind = "plan" if tool == "ExitPlanMode" else "question" if tool == "AskUserQuestion" else "approval"
+    if host_auto_approve_safety(session, request, kind):
+        host_control_response(session, request_id, host_auto_approval_response(request))
+        host_event(provider, sid, tmux, session, "approval.resolved",
+                   dict(request_id=request_id, decision="accept", by="host"))
+        host_log(provider, sid, "control_request", dict(request_id=request_id, tool=tool, kind=kind, auto="bypass"))
+        return
     session["parked"][request_id] = dict(kind=kind, request=request, signal=threading.Event(), at=time.time())
     if kind == "plan":
         session["state"].setdefault("plan_before", session["state"].get("mode") or "default")
@@ -4862,7 +4899,8 @@ def host_main(provider, sid):
             return 5 if reason == "agent_not_found" else 4
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         state["agent_pid"] = agent.pid
-        state["mode"] = (host_config(provider, sid) or {}).get("permission_mode") or "default"
+        mode = host_save_default_permission_mode(provider, sid)
+        state["mode"] = mode if mode in HOST_PERMISSION_MODES else "default"
         host_state_write(provider, sid, state)
         session = dict(state=state, retry_generation=retry_generation)
         host_loop(provider, sid, tmux, session, server, agent)
@@ -6532,10 +6570,24 @@ def events_push(subscriptions):
         serve_print(dict(id=rid, message_protocol=1, result=page))
 
 
+SERVE_WORK = dict(busy=0, last=time.monotonic())
+SERVE_WORK_LOCK = threading.Lock()
+
+
+def serve_work(delta):
+    with SERVE_WORK_LOCK:
+        SERVE_WORK['busy'] += delta
+        SERVE_WORK['last'] = time.monotonic()
+
+
 def serve_retire(interval=2.0):
-    while not superseded_engine():
+    while True:
         time.sleep(interval)
-    os._exit(0)
+        if not superseded_engine():
+            continue
+        with SERVE_WORK_LOCK:
+            if not SERVE_WORK['busy'] and time.monotonic() - SERVE_WORK['last'] >= interval:
+                os._exit(0)
 
 
 def serve_push(subscriptions, lock, wake):
@@ -6625,12 +6677,12 @@ def serve(source):
     push = threading.Thread(target=serve_push, args=(subscriptions, lock, wake), daemon=True)
     push.start()
     threading.Thread(target=serve_retire, daemon=True).start()
-    from concurrent.futures import ThreadPoolExecutor
     chats = {}
     try:
         for line in sys.stdin.buffer:
             if not line.strip():
                 continue
+            serve_work(1)
             try:
                 query = json.loads(line)
             except (ValueError, UnicodeError):
@@ -6638,7 +6690,10 @@ def serve(source):
             if (not isinstance(query, dict) or not str(query.get('op', '')).startswith('message_')
                     or query.get('provider') not in HOST_PROVIDERS or not isinstance(query.get('sid'), str)
                     or not SESSION_ID.fullmatch(query['sid'])):
-                serve_request(line, source, subscriptions, lock)
+                try:
+                    serve_request(line, source, subscriptions, lock)
+                finally:
+                    serve_work(-1)
                 continue
             key = (query['provider'], query['sid'])
             if key not in chats and len(chats) >= 256:
@@ -6652,10 +6707,11 @@ def serve(source):
                 rid = query.get('id', 0)
                 rid = rid if type(rid) is int and rid >= 0 else 0
                 serve_print(dict(id=rid, wire=f"@mp\t{rid}\thistory\terror\t-\t0\n{END}\n"))
+                serve_work(-1)
                 continue
             executor, slots, last = chats[key]
             future = executor.submit(serve_request, line, source, subscriptions, lock)
-            future.add_done_callback(lambda done, slots=slots: slots.release())
+            future.add_done_callback(lambda done, slots=slots: (slots.release(), serve_work(-1)))
             chats[key] = (executor, slots, future)
     finally:
         for executor, slots, last in chats.values():
@@ -6690,7 +6746,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 93
+RUNTIME_GENERATION = 97
 
 if __name__ == '__main__':
     import base64 as _base64

@@ -135,6 +135,111 @@ Record 'Click New workspace in workspace card'
 [VerifyNative]::ClickClient($card, 50, (6 + $newRow * 28 + 7 + 14))
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).workspace_count -eq $count + 1 } 'card created one workspace and closed'
 $result.checks += @{ name = 'workspace-card-create'; workspacesBefore = $count; workspacesAfter = (Read-Session).workspace_count }
+
+function Rename-DeleteFixture([string]$Name) {
+    Focus-Palette 'rename workspace' 7000
+    Press @(0x0D) 'Enter: rename the current synthetic workspace'
+    Wait-Until { [VerifyNative]::Class([VerifyNative]::GetFocusedWindow($script:window)) -eq 'Edit' } 'workspace rename input focused'
+    Press @(0x11, 0x41) 'Ctrl+A: select the whole workspace rename text'
+    Type-Text $Name
+    Wait-Until { [VerifyNative]::EditText([VerifyNative]::GetFocusedWindow($script:window)) -ceq $Name } 'complete synthetic workspace name visible before commit'
+    Press @(0x0D) 'Enter: save synthetic workspace name'
+    Wait-Until { $saved = Read-Session; $saved.workspaces[$saved.active_workspace].name -ceq $Name } 'workspace rename saved'
+}
+
+function Begin-WorkspaceDelete([string]$Name) {
+    $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+    $rows = @($registry.windows)
+    $target = -1
+    for ($index = 0; $index -lt $rows.Count; $index++) {
+        if ($rows[$index].name -ceq $Name) { $target = 6400 + $index }
+    }
+    if ($target -lt 6400) { throw 'Synthetic delete target missing from registry' }
+    Focus-Palette 'delete workspace' 6201
+    Press @(0x0D) 'Enter: open Delete workspace'
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $start = ((Get-Content $log -Raw) -join '').Length
+    Type-Text $Name
+    Wait-Until {
+        ((Get-Content $log -Raw) -join '').Substring($start) -match ('\[palette\] ready chars=' + $Name.Length + ' count=2 target=' + $target + '(?:\r?\n|$)')
+    } 'one matching workspace selected after Back'
+}
+
+function Delete-WorkspaceFixture([string]$Name, [bool]$Mouse) {
+    $saved = Read-Session
+    $slot = $saved.active_workspace
+    $identity = $saved.workspaces[$slot].wid
+    $ownedTabs = @($saved.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $slot })
+    if ($ownedTabs.Count -lt 1) { throw 'Delete fixture must contain a real session' }
+    $ownedPids = @($ownedTabs | ForEach-Object { if ($_.PSObject.Properties['pid']) { [int]$_.pid } })
+    if ($ownedPids.Count -lt 1 -or @($ownedPids | Where-Object { $_ -le 0 -or $null -eq (Get-Process -Id $_ -ErrorAction SilentlyContinue) }).Count -ne 0) { throw 'Delete fixture sessions must be running' }
+    Begin-WorkspaceDelete $Name
+    Snapshot ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '-before')
+    if ($Mouse) {
+        if ([VerifyNative]::GetDpiForWindow($script:window) -ne 96) { throw 'Mouse delete fixture requires 100% scale' }
+        $rect = New-Object VerifyNative+Rect
+        if (-not [VerifyNative]::GetClientRect($script:window, [ref]$rect)) { throw 'Delete palette client rectangle unavailable' }
+        $top = [Math]::Max(8, [Math]::Min(120, $rect.Bottom - (72 + 2 * 39 + 44) - 8))
+        $confirmLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+        $confirmStart = ((Get-Content $confirmLog -Raw) -join '').Length
+        Record 'Mouse: select the sole matching workspace delete row'
+        [VerifyNative]::ClickClient($script:window, [int]($rect.Right / 2), ($top + 72 + 39 + 19))
+        Wait-Until { ((Get-Content $confirmLog -Raw) -join '').Substring($confirmStart) -match '\[palette\] confirm target=64\d\d' } 'delete confirmation armed by mouse'
+        Snapshot 'workspace-delete-mouse-confirm'
+        Record 'Mouse: confirm deletion on the same workspace row'
+        [VerifyNative]::ClickClient($script:window, [int]($rect.Right / 2), ($top + 72 + 39 + 19))
+    } else {
+        Press @(0x0D) 'Enter: arm workspace deletion'
+        Snapshot 'workspace-delete-keyboard-confirm'
+        Press @(0x0D) 'Enter again: delete workspace and its sessions'
+    }
+    Wait-Until {
+        $state = Read-Session
+        $null -ne $state -and $state.workspace_count -eq $saved.workspace_count - 1 -and @($state.workspaces | Where-Object { $_.wid -ceq $identity }).Count -eq 0
+    } 'deleted workspace removed from saved slots'
+    Wait-Until {
+        $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+        @($registry.windows | Where-Object { $_.id -ceq $identity }).Count -eq 0 -and @($ownedPids | Where-Object { $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) }).Count -eq 0
+    } 'deleted registry identity gone and owned session processes closed'
+    $paintedLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $paintedLine = @(Select-String -Path $paintedLog -Pattern '\[palette\] delete-visible ' | Select-Object -Last 1)
+    if ($paintedLine.Count -lt 1) { throw 'Delete list did not record its painted rows' }
+    $paintedText = [string]$paintedLine[0].Line
+    $marker = 'delete-visible '
+    $paintedNames = @(($paintedText.Substring($paintedText.LastIndexOf($marker) + $marker.Length).Trim()) -split '\|' | ForEach-Object { $_.Trim() })
+    if ($paintedNames -contains $Name) { throw "Deleted workspace is still painted in the delete list: $Name" }
+    Snapshot ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '-after')
+    Save-Json (Read-Session) ('workspace-delete-' + $Name.Replace(' ', '-').ToLower() + '.session.json')
+    Press @(0x1B) 'Escape: close delete list'
+    $result.checks += @{ name = 'workspace-delete'; workspace = $Name; identity = $identity; mouse = $Mouse; closedPids = $ownedPids }
+}
+
+Rename-DeleteFixture 'Workspace 9'
+Delete-WorkspaceFixture 'Workspace 9' $true
+Select-WorkspaceCard $created 'workspace-delete-select-ceo'
+Rename-DeleteFixture 'CEO Runners'
+Delete-WorkspaceFixture 'CEO Runners' $false
+
+$registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
+$base = @($registry.windows | Where-Object { $_.id -ceq 'default' })
+if ($base.Count -ne 1) { throw 'Main identity must remain after deleting both synthetic workspaces' }
+Begin-WorkspaceDelete $base[0].name
+Press @(0x0D) 'Enter: arm Main deletion refusal'
+Press @(0x0D) 'Enter again: show Main cannot be deleted'
+Wait-Until { [VerifyNative]::Class([VerifyNative]::GetForegroundWindow()) -eq 'MultiPromptDialog' } 'persistent refusal dialog foreground'
+Snapshot 'workspace-delete-main-refused'
+$refusalDeadline = [DateTime]::UtcNow.AddSeconds(6)
+Wait-Until { [DateTime]::UtcNow -ge $refusalDeadline } 'wait beyond the old transient notice lifetime' 10
+if ([VerifyNative]::Class([VerifyNative]::GetForegroundWindow()) -ne 'MultiPromptDialog') { throw 'Refusal disappeared without dismissal' }
+Snapshot 'workspace-delete-main-still-visible'
+Record 'Enter dismisses the persistent refusal'
+[VerifyNative]::Chord(@(0x0D))
+Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'refusal explicitly dismissed'
+Press @(0x1B) 'Escape: close delete list after Main refusal'
+$deleteLog = Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw
+if (@([regex]::Matches($deleteLog, 'workspace-delete attempt')).Count -lt 3 -or @([regex]::Matches($deleteLog, 'workspace-delete result=deleted')).Count -lt 2 -or $deleteLog -notmatch 'workspace-delete result=refused reason=Main cannot be deleted') { throw 'Every deletion and Main refusal must be logged' }
+$result.checks += @{ name = 'workspace-delete-main-protected'; persistentSeconds = 6; dismissedByKeyboard = $true }
+Snapshot 'workspace-delete-complete'
 Snapshot 'after'
 
 Select-WorkspaceCard $created 'archive-before'

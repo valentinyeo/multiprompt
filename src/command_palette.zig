@@ -3300,13 +3300,14 @@ pub fn updateSearchResults() void {
         for (0..app_state.g_workspace_count) |wi| {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
             const e = &app_state.g_workspaces[wi];
-            const archived = app_state.g_search_workspace_delete_mode or app_state.g_search_workspace_action == .restore;
-            if (e.archived != archived) continue;
+            if (!app_state.g_search_workspace_delete_mode) {
+                const archived = app_state.g_search_workspace_action == .restore;
+                if (e.archived != archived) continue;
+            }
             if (app_state.g_search_workspace_action == .archive and !@import("workspaces.zig").workspaceCanArchive(@intCast(wi))) continue;
             if (findMyWorkspaceSlot(e.id[0..e.id_len])) |slot| {
-                if (app_state.g_ws_snoozed[slot]) continue;
+                if (app_state.g_ws_snoozed[slot] and !app_state.g_search_workspace_delete_mode) continue;
             }
-            if (app_state.g_search_workspace_delete_mode and !workspaceCanDelete(@intCast(wi))) continue;
             if (app_state.g_search_len == 0 or workspaceMatchesSearch(e, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = if (app_state.g_search_workspace_delete_mode)
                     SEARCH_WORKSPACE_DELETE_OFFSET + wi
@@ -3314,6 +3315,27 @@ pub fn updateSearchResults() void {
                     SEARCH_WORKSPACE_OFFSET + wi;
                 app_state.g_search_result_count += 1;
             }
+        }
+        if (app_state.g_search_workspace_delete_mode) {
+            var visible: [768]u8 = undefined;
+            const head = "[palette] delete-visible ";
+            @memcpy(visible[0..head.len], head);
+            var pos: usize = head.len;
+            for (app_state.g_search_results[0..app_state.g_search_result_count]) |target| {
+                if (target < SEARCH_WORKSPACE_DELETE_OFFSET or target >= SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES) continue;
+                const wi = target - SEARCH_WORKSPACE_DELETE_OFFSET;
+                if (wi >= @as(usize, app_state.g_workspace_count) or pos >= visible.len) continue;
+                const name = app_state.g_workspaces[wi].name[0..app_state.g_workspaces[wi].name_len];
+                if (pos != head.len and pos < visible.len) {
+                    visible[pos] = '|';
+                    pos += 1;
+                }
+                const room = visible.len - pos;
+                const n = @min(name.len, room);
+                @memcpy(visible[pos..][0..n], name[0..n]);
+                pos += n;
+            }
+            @import("diagnostics.zig").debugLog(visible[0..pos]);
         }
 
         preferFirstFilteredResultAfterBack();

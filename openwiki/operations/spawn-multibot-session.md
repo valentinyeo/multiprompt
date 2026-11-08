@@ -77,7 +77,11 @@ Run the command once per shell runner. Three runners can share one workspace and
 
 ## One roster command
 
-`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb workspace color <workspace> <color>` sets a workspace color from 0 to 7. `mb style <session> --face <0-19> --color <0-7> --photo <png>` sets the face, color, and photo the layout service already stores. A photo is a PNG file; the service keeps the image and a revision on the session.
+`node tools/mb.mjs` lists, opens, closes, renames, and moves runners, and it creates, renames, deletes, and lists workspaces and groups. `mb star`, `mb mute`, and `mb manual` turn those session marks on or off. `mb settings` turns frequent, favorites, all, and frequent-first on or off. `mb pull` reads the shared layout again. Running any of these twice leaves the same result.
+
+These actions stay on this PC and have no command: this window's look and size; the chat open on this screen; the browser or computer pane on this screen; menus that only open another list; marks stored on this PC (pin, lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools; sign-in and account devices; focusing a tab or workspace already on screen.
+
+`mb workspace color <workspace> <color>` sets a workspace color from 0 to 7. `mb style <session> --face <0-19> --color <0-7> --photo <png>` sets the face, color, and photo the layout service already stores. A photo is a PNG file; the service keeps the image and a revision on the session.
 
 `mb roster apply <file>` makes the account match the file. The file names workspaces (with an optional color), groups, and runners. Runner fields are name, kind, title, group, workspace, command, model, face, color, and photo. `--dry-run` prints the plan and changes nothing. A second apply of the same file does not publish again. Close, delete, and stopping a host apply only to workspaces, groups, and sessions this command created. There is no separate session registry. An empty group is remembered on this machine and shows up in Multibot once a session carries that group name.
 

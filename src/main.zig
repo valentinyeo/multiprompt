@@ -2824,6 +2824,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDBLCLK => {
+            if (app_state.g_search_active and app_state.g_search_workspace_delete_mode) return wndProc(hwnd, WM_LBUTTONDOWN, wp, lp);
             const mx = GET_X(lp);
             const my = GET_Y(lp);
             if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
