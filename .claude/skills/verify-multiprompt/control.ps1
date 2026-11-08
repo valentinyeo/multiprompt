@@ -388,11 +388,12 @@ try {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'
         New-Item -ItemType Directory -Force $seedDir | Out-Null
         $seedChatId = 1234567890123
-        $script:notSentKey = 'cmd:#' + ('{0:x16}' -f $seedChatId)
+        $seedTabName = 'Old session chat'
+        $script:notSentKey = 'cmd:' + $seedTabName
         $script:notSentText = 'stuck message from an old session'
-        $seedTabs = @(@{ kind = 'cmd'; name = 'Old session chat'; manual = $true; shell_id = 1; chat_id = $seedChatId })
+        $seedTabs = @(@{ kind = 'cmd'; name = $seedTabName; manual = $true; shell_id = 1; chat_id = $seedChatId })
         $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }
-        $sessionJson = '{"active_tab":0,"single_window":true,"tabs":[{"kind":"cmd","name":"Old session chat","manual":true,"shell_id":1,"chat_id":' + $seedChatId + '}]}'
+        $sessionJson = '{"active_tab":0,"single_window":true,"tabs":[{"kind":"cmd","name":"' + $seedTabName + '","manual":true,"shell_id":1,"chat_id":' + $seedChatId + '}]}'
         [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), $sessionJson, (New-Object Text.UTF8Encoding $false))
         $sentMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         $outboxJson = '{"version":2,"queues":[{"key":"' + $script:notSentKey + '","messages":[{"t":"' + $script:notSentText + '","s":2,"x":1,"r":1,"w":' + $sentMs + ',"v1":1,"sid":"old-session-id","phase":"sent","wire_id":""}]}]}'
