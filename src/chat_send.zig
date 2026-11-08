@@ -472,7 +472,13 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
                 chatDraftFlush();
             }
         }
-        showHeaderNoticeAscii("Permission mode changed", 3000, false);
+        const text: []const u8 = switch (job.mode) {
+            .manual => "Ask on",
+            .acceptEdits => "Accept edits on",
+            .plan => "Plan on",
+            .bypassPermissions => "Bypass on",
+        };
+        showHeaderNoticeAscii(text, 3000, false);
     }
 }
 
@@ -2055,9 +2061,12 @@ pub fn chatEchoRemove(id: u64) void {
     const pending = app_state.g_chat_outbox.items[ei];
     if (pending.message_v1 and pending.channel_pending) return;
     if (pending.message_v1 and (pending.message_phase[0] != 0 or pending.write_started)) {
-        const si = chatOutboxShellForKey(pending.key[0..pending.key_len]) orelse return;
-        if (!chatTmuxSendStart(si, pending.text, id, false, false, true)) showHeaderNoticeAscii("Could not remove yet. Try again", 3500, true);
-        return;
+        if (chatOutboxShellForKey(pending.key[0..pending.key_len])) |si| {
+            if (std.mem.eql(u8, &chatFileIdentityForShell(si).sid, &pending.message_sid)) {
+                if (!chatTmuxSendStart(si, pending.text, id, false, false, true)) showHeaderNoticeAscii("Could not remove yet. Try again", 3500, true);
+                return;
+            }
+        }
     }
     const entry = app_state.g_chat_outbox.orderedRemove(ei);
     if (!saveChatOutbox()) {
@@ -4074,6 +4083,24 @@ fn chatLiveReply(line: []u8) bool {
     if (@import("chat_session.zig").chatLiveWrite(line)) return true;
     debugLog("[chat] live reply failed");
     return false;
+}
+
+pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
+    const text: []const u8 = switch (setting) {
+        .model => |model| switch (model) {
+            .opus => "Model: Opus",
+            .sonnet => "Model: Sonnet",
+            .haiku => "Model: Haiku",
+            .unknown => return,
+        },
+        .effort => |effort| switch (effort) {
+            .low => "Effort: Low",
+            .medium => "Effort: Medium",
+            .high => "Effort: High",
+            .unknown => return,
+        },
+    };
+    showHeaderNoticeAscii(text, 3000, false);
 }
 
 pub fn chatSetLiveSetting(setting: @import("chat_live.zig").Setting) bool {

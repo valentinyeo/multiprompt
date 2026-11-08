@@ -201,7 +201,7 @@ pub fn currentLive(exclude: ?u32) []const Chat {
         const shell = &app.shells[i];
         if (shell.name_len == 0 or shell.name_len > shell.name.len or shell.tmux_session_len == 0 or shell.tmux_session_len > shell.tmux_session.len) continue;
         const session = shell.tmux_session[0..shell.tmux_session_len];
-        if (!@import("chat_view.zig").isLive(session) or !sessionOkUtf8(session)) continue;
+        if (!(@import("chat_view.zig").isLive(session) or shell.chat_view_on) or !sessionOkUtf8(session)) continue;
         const name_len = std.unicode.utf16LeToUtf8(&live_names[n], shell.name[0..shell.name_len]) catch continue;
         if (name_len == 0) continue;
         @memcpy(live_sessions[n][0..session.len], session);
@@ -295,20 +295,21 @@ test "IGSH-1811 @ names another live chat and the sent text keeps its session" {
 }
 
 test "IGSH-1811 the list is other live chats filtered by the typed name" {
-    const Snap = struct { name: [64]u16, name_len: u32, session: [64]u8, session_len: u32 };
+    const Snap = struct { name: [64]u16, name_len: u32, session: [64]u8, session_len: u32, chat_view_on: bool };
     const count = app.shell_count;
-    var prior: [3]Snap = undefined;
-    for (0..3) |i| prior[i] = .{ .name = app.shells[i].name, .name_len = app.shells[i].name_len, .session = app.shells[i].tmux_session, .session_len = app.shells[i].tmux_session_len };
+    var prior: [4]Snap = undefined;
+    for (0..4) |i| prior[i] = .{ .name = app.shells[i].name, .name_len = app.shells[i].name_len, .session = app.shells[i].tmux_session, .session_len = app.shells[i].tmux_session_len, .chat_view_on = app.shells[i].chat_view_on };
     defer {
         app.shell_count = count;
-        for (0..3) |i| {
+        for (0..4) |i| {
             app.shells[i].name = prior[i].name;
             app.shells[i].name_len = prior[i].name_len;
             app.shells[i].tmux_session = prior[i].session;
             app.shells[i].tmux_session_len = prior[i].session_len;
+            app.shells[i].chat_view_on = prior[i].chat_view_on;
         }
     }
-    app.shell_count = 3;
+    app.shell_count = 4;
     const set = struct {
         fn chat(index: u32, name: []const u8, session: []const u8) void {
             const shell = &app.shells[index];
@@ -316,17 +317,23 @@ test "IGSH-1811 the list is other live chats filtered by the typed name" {
             @memset(&shell.tmux_session, 0);
             @memcpy(shell.tmux_session[0..session.len], session);
             shell.tmux_session_len = @intCast(session.len);
+            shell.chat_view_on = false;
         }
     };
     set.chat(0, "This chat", "live-here");
     set.chat(1, "SF Design Lead", "live-design");
     set.chat(2, "Terminal", "term-main");
-    const rows = show(0, "");
+    set.chat(3, "Multi Bot Android", "multiprompt-android");
+    app.shells[3].chat_view_on = true;
+    const rows = show(0, "sf");
     try std.testing.expectEqual(@as(usize, 1), rows.len);
     try std.testing.expectEqualStrings("SF Design Lead", rows[0].name);
     try std.testing.expectEqualStrings("live-design", rows[0].session);
     try std.testing.expectEqual(@as(u32, 1), rows[0].index);
     try std.testing.expectEqual(@as(usize, 1), show(0, "sf").len);
     try std.testing.expectEqual(@as(usize, 0), show(0, "missing").len);
-    try std.testing.expectEqual(@as(usize, 2), show(null, "").len);
+    try std.testing.expectEqual(@as(usize, 3), show(null, "").len);
+    const android = show(0, "multi");
+    try std.testing.expectEqual(@as(usize, 1), android.len);
+    try std.testing.expectEqualStrings("multiprompt-android", android[0].session);
 }

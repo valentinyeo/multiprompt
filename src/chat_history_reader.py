@@ -38,6 +38,7 @@ TAIL_BYTES = 512 * 1024
 QUESTION_SCAN_BYTES = 16 * TAIL_BYTES
 STATUS_CACHE = {}
 QUEUE_CACHE = {}
+TAIL_CACHE = {}
 QUEUE_SCAN_BYTES = 4 * 1024 * 1024
 QUEUE_SHOWN = 8
 QUEUE_TEXT = 500
@@ -1855,6 +1856,53 @@ def search_response(q, path, agent, sid):
     return "\n".join((header, *(wire_row(row) for row in hits), END, ""))
 
 
+def tail_view(q, agent, fill):
+    return (agent, bool(fill), bool(q.get("settlement")), q.get("message_protocol"), bool(q.get("source_offsets")),
+            bool(ISSUE_263_TOOL_STEPS), bool(ISSUE_349_QUEUED_STAMP_FROM_QUEUE),
+            bool(ISSUE_358_TAIL_STARTS_AT_QUESTION), bool(ISSUE_631_TAIL_FILLS_SHOWN_BUDGET))
+
+
+def recall_tail(path, source, info, q, agent, fill):
+    hit = TAIL_CACHE.get((str(Path(path).resolve()), info.st_ino, tail_view(q, agent, fill)))
+    if not hit or hit["end"] > info.st_size or info.st_size - hit["end"] > TAIL_BYTES:
+        return None
+    source.seek(max(0, hit["end"] - 64))
+    if hashlib.sha256(source.read(min(hit["end"], 64))).hexdigest() != hit["probe"]:
+        return None
+    rows = [json.loads(line) for line in hit["wires"]]
+    if hit["size"] == info.st_size and hit["mtime"] == info.st_mtime_ns:
+        return hit["base"], hit["end"], b"", hit["oldest"], rows, "exact", hit["end"]
+    source.seek(hit["end"])
+    extra = source.read(info.st_size - hit["end"])
+    complete = extra.rfind(b"\n") + 1
+    extra = extra[:complete]
+    return hit["base"], hit["end"] + len(extra), extra, hit["oldest"], rows, "append", hit["end"]
+
+
+def remember_tail(path, info, q, agent, fill, base, end, oldest, rows, probe):
+    if end <= 0:
+        return
+    TAIL_CACHE[(str(Path(path).resolve()), info.st_ino, tail_view(q, agent, fill))] = dict(
+        size=info.st_size, mtime=info.st_mtime_ns, base=base, end=end,
+        oldest=oldest, probe=probe, wires=[wire_row(row) for row in rows])
+    while len(TAIL_CACHE) > 8:
+        del TAIL_CACHE[next(iter(TAIL_CACHE))]
+
+
+def fit_tail(rows, oldest):
+    budget = sum(len(wire_row(row)) + 1 for row in rows)
+    if budget <= TAIL_BYTES or len(rows) < 2:
+        return rows, oldest
+    start = 0
+    while budget > TAIL_BYTES and start + 1 < len(rows):
+        budget -= len(wire_row(rows[start])) + 1
+        start += 1
+    kept = rows[start:]
+    if kept and isinstance(kept[0].get("offset"), int):
+        oldest = kept[0]["offset"]
+    return kept, oldest
+
+
 def response(q, source=None, as_owner=False, resolved=None):
     q["_held_queue_progress"] = False
     if ISSUE_268_CHAT_FIND and "search" in q:
@@ -1891,6 +1939,9 @@ def response(q, source=None, as_owner=False, resolved=None):
             raise ValueError("invalid page")
         scan_more = False
         jumped = False
+        tail_fill = None
+        tail_reuse = None
+        append_at = None
         if before and valid:
             mode = "older"
             base, end, data = read_window(source, before)
@@ -1901,17 +1952,32 @@ def response(q, source=None, as_owner=False, resolved=None):
             oldest = base
         elif not valid:
             mode = "tail"
-            base, end, data = read_tail(source, info.st_size, agent, captured)
-            oldest = base
+            tail_fill = True
+            recalled = recall_tail(path, source, info, q, agent, True)
+            if recalled:
+                base, end, data, oldest, rows, tail_reuse, append_at = recalled
+                budget = sum(len(wire_row(row)) + 1 for row in rows)
+            else:
+                base, end, data = read_tail(source, info.st_size, agent, captured)
+                oldest = base
         else:
             mode = "delta"
             if ISSUE_345_STALE_JUMPS_TO_TAIL and not q.get("no_jump") and info.st_size - offset > 2 * SCAN_BYTES:
-                base, end, data = read_tail(source, info.st_size, agent, captured, fill=False)
-                if data:
+                tail_fill = False
+                recalled = recall_tail(path, source, info, q, agent, False)
+                if recalled and (recalled[2] or recalled[4]):
+                    base, end, data, oldest, rows, tail_reuse, append_at = recalled
+                    budget = sum(len(wire_row(row)) + 1 for row in rows)
                     jumped = True
                     mode = "tail"
-                    oldest = base
                     scan_more = False
+                else:
+                    base, end, data = read_tail(source, info.st_size, agent, captured, fill=False)
+                    if data:
+                        jumped = True
+                        mode = "tail"
+                        oldest = base
+                        scan_more = False
             if mode == "delta":
                 base = offset
                 oldest = q.get("start", 0)
@@ -1932,7 +1998,7 @@ def response(q, source=None, as_owner=False, resolved=None):
                     data = data[:end - base]
         page_more = False
         groups = []
-        consumed = base
+        consumed = append_at if tail_reuse == "append" else base
         for raw in data.splitlines(keepends=True):
             event = load_line(raw)
             messages = conversation_rows(event, agent, consumed)
@@ -1970,7 +2036,9 @@ def response(q, source=None, as_owner=False, resolved=None):
             rows.extend(messages)
             budget += cost
             consumed += len(raw)
-        if mode != "delta" and budget > TAIL_BYTES and len(groups) > 1 and any(row["role"] in ("tool", "tool_result") for row in rows):
+        if tail_reuse == "append":
+            rows, oldest = fit_tail(rows, oldest)
+        elif tail_reuse != "exact" and mode != "delta" and budget > TAIL_BYTES and len(groups) > 1 and any(row["role"] in ("tool", "tool_result") for row in rows):
             first = 0
             while budget > TAIL_BYTES and first + 1 < len(groups):
                 budget -= groups[first][2]
@@ -1993,8 +2061,11 @@ def response(q, source=None, as_owner=False, resolved=None):
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
+        paired = pair_tool_rows(rows)
+        if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
+            remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     header = f"@mp\t{rid}\thistory\tok\t{sid}\t{base}\t{end}\t{info.st_ino}\t{int(more)}\t{agent}\t{tmux or '-'}\t{info.st_mtime_ns}\t{probe}\t{mode}\t{oldest}"
-    return "\n".join((header, *(wire_row(row) for row in pair_tool_rows(rows)), *((wire_row(status),) if status else ()), END, ""))
+    return "\n".join((header, *(wire_row(row) for row in paired), *((wire_row(status),) if status else ()), END, ""))
 
 
 def prompt_box_text(target):
@@ -2898,7 +2969,7 @@ def host_reply(query):
             host_write(host_paths(provider, sid)["config"], config)
             settings = host_settings(provider, sid)
             host_event(provider, sid, host_chat_name(provider, sid), dict(state={}),
-                       "host.settings", dict(settings, applied=False))
+                       "host.settings", dict(settings, applied=False, mode=host_permission_mode(provider, sid)))
             return dict(status="ok")
         finally:
             host_release(lock)
@@ -3264,8 +3335,21 @@ def host_hax_argv(provider, sid, base):
 def host_model_name(value):
     if not isinstance(value, str):
         return ""
-    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku)(?:-[a-zA-Z0-9._-]+)?", value)
+    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku)(?:-[a-zA-Z0-9._-]+)?(?:\[[a-zA-Z0-9]+\])?", value)
     return match.group(1) if match else ""
+
+
+HOST_MODE_NAMES = dict(default="manual", manual="manual", acceptEdits="acceptEdits", plan="plan", bypassPermissions="bypassPermissions")
+
+
+def host_permission_mode(provider, sid, state=None):
+    mode = state.get("mode") if isinstance(state, dict) else None
+    if mode is None:
+        stored = host_read(host_paths(provider, sid)["state"])
+        mode = stored.get("mode") if stored else None
+    if mode is None:
+        mode = (host_config(provider, sid) or {}).get("permission_mode")
+    return HOST_MODE_NAMES.get(mode if mode is not None else "default", "")
 
 
 def host_settings(provider, sid):
@@ -3292,7 +3376,7 @@ def host_settings_event(provider, sid, tmux, session):
     shown = dict(settings)
     if not shown["model"] and applied:
         shown["model"] = session.get("init_model", "")
-    host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied))
+    host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied, mode=host_permission_mode(provider, sid, session.get("state"))))
 
 
 def host_agent_start(provider, sid, mode=None):
@@ -3820,6 +3904,8 @@ def host_set_mode(provider, sid, session, mode):
         return dict(status="error", reason="stdin_write_failed")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
+    if "settings" in session:
+        host_settings_event(provider, sid, host_chat_name(provider, sid), session)
     return dict(status="ok")
 
 
@@ -3901,6 +3987,8 @@ def host_plan_settled(provider, sid, session):
     else:
         session["state"].pop("mode", None)
     host_state_write(provider, sid, session["state"])
+    if "settings" in session:
+        host_settings_event(provider, sid, host_chat_name(provider, sid), session)
 
 
 def host_refuse(reason, **extra):
@@ -5323,7 +5411,7 @@ def message_store_transaction(q):
                                and (not settings["model"] or payload.get("model") == settings["model"]))
                     if applied and not settings["model"]:
                         settings["model"] = host_model_name(payload.get("model"))
-                    items.append(dict(host_settings=dict(settings, applied=applied)))
+                    items.append(dict(host_settings=dict(settings, applied=applied, mode=host_permission_mode(provider, sid))))
                 db.execute('INSERT INTO message_snapshots VALUES (?,?,?,?,?,?,?)', (snapshot, provider, sid, epoch, seq, time.time(), json.dumps(items, separators=(',', ':'))))
             else:
                 saved = db.execute('SELECT epoch,seq,body FROM message_snapshots WHERE id=? AND provider=? AND sid=?', (snapshot, provider, sid)).fetchone()
@@ -6443,10 +6531,24 @@ def events_push(subscriptions):
         serve_print(dict(id=rid, message_protocol=1, result=page))
 
 
+SERVE_WORK = dict(busy=0, last=time.monotonic())
+SERVE_WORK_LOCK = threading.Lock()
+
+
+def serve_work(delta):
+    with SERVE_WORK_LOCK:
+        SERVE_WORK['busy'] += delta
+        SERVE_WORK['last'] = time.monotonic()
+
+
 def serve_retire(interval=2.0):
-    while not superseded_engine():
+    while True:
         time.sleep(interval)
-    os._exit(0)
+        if not superseded_engine():
+            continue
+        with SERVE_WORK_LOCK:
+            if not SERVE_WORK['busy'] and time.monotonic() - SERVE_WORK['last'] >= interval:
+                os._exit(0)
 
 
 def serve_push(subscriptions, lock, wake):
@@ -6539,6 +6641,7 @@ def serve(source):
         for line in sys.stdin.buffer:
             if not line.strip():
                 continue
+            serve_work(1)
             try:
                 query = json.loads(line)
             except (ValueError, UnicodeError):
@@ -6546,7 +6649,10 @@ def serve(source):
             if (not isinstance(query, dict) or not str(query.get('op', '')).startswith('message_')
                     or query.get('provider') not in HOST_PROVIDERS or not isinstance(query.get('sid'), str)
                     or not SESSION_ID.fullmatch(query['sid'])):
-                serve_request(line, source, subscriptions, lock)
+                try:
+                    serve_request(line, source, subscriptions, lock)
+                finally:
+                    serve_work(-1)
                 continue
             key = (query['provider'], query['sid'])
             if key not in chats and len(chats) >= 256:
@@ -6560,10 +6666,11 @@ def serve(source):
                 rid = query.get('id', 0)
                 rid = rid if type(rid) is int and rid >= 0 else 0
                 serve_print(dict(id=rid, wire=f"@mp\t{rid}\thistory\terror\t-\t0\n{END}\n"))
+                serve_work(-1)
                 continue
             executor, slots, last = chats[key]
             future = executor.submit(serve_request, line, source, subscriptions, lock)
-            future.add_done_callback(lambda done, slots=slots: slots.release())
+            future.add_done_callback(lambda done, slots=slots: (slots.release(), serve_work(-1)))
             chats[key] = (executor, slots, future)
     finally:
         for executor, slots, last in chats.values():
@@ -6598,7 +6705,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 91
+RUNTIME_GENERATION = 94
 
 if __name__ == '__main__':
     import base64 as _base64

@@ -27,7 +27,7 @@ pub const State = struct {
     model_len: usize = 0,
 };
 
-const Colors = struct {
+pub const Colors = struct {
     panel: u32,
     outline: u32,
     card: u32,
@@ -37,7 +37,7 @@ const Colors = struct {
     red: u32,
 };
 
-fn colors() Colors {
+pub fn colors() Colors {
     if (app_state.g_light_theme) return .{
         .panel = RGB(250, 250, 251),
         .outline = RGB(222, 224, 228),

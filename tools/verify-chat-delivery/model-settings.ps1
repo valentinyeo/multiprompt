@@ -35,7 +35,16 @@ $choices = @(
 foreach ($choice in $choices) {
     $oldLog = (Read-Shared $hostLog).Length
     $oldArgs = (Read-Shared "$state/model-argv.jsonl").Length
-    Model-Palette $choice.query "model-palette-$($choice.name)"
+    if ($choice.name -eq 'haiku') {
+        $plusOffset = (Read-Shared "$settings/debug.log").Length
+        Model-Palette 'chat view plus menu' 'model-palette-haiku'
+        [void](Wait-For 'plus menu opened' { (Read-Shared "$settings/debug.log").Substring($plusOffset) -match '\[chat\] plus menu model_opus rect=' })
+        Shot 'model-plus-menu'
+        foreach ($step in 1..4) { Press @(0x28) "Down: plus menu row $step" }
+        Press @(0x0D) 'Enter: plus menu Haiku'
+    } else {
+        Model-Palette $choice.query "model-palette-$($choice.name)"
+    }
     [void](Wait-For "production host applied $($choice.name)" {
         $config = Read-Shared $configPath | ConvertFrom-Json
         $lines = @((Read-Shared $hostLog).Substring($oldLog) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })

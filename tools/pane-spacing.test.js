@@ -41,7 +41,7 @@ function harness() {
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
-  const production = functions.join('\n').replaceAll('@import("chat_session.zig").chatSettingsEligible', 'chatSettingsEligible').replaceAll('@import("computer_pane.zig").', 'computer.').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('@import("console.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
+  const production = functions.join('\n').replaceAll('@import("computer_pane.zig").', 'computer.').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('@import("console.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -121,8 +121,6 @@ fn mainWindowDpi() u32 { return 96; }
 ${fn(browser, 'browserSplitPermilleForActiveShell').replaceAll('@import("computer_pane.zig").', 'computer.')}
 fn browserSlotReserved() bool { return reserved; }
 fn chatComposerBaseCardH() i32 { return uiScaled(44); }
-var test_settings_eligible = false;
-fn chatSettingsEligible() bool { return test_settings_eligible; }
 var test_permission_visible = false;
 fn chatPermissionVisible() bool { return test_permission_visible; }
 ${fn(layout, 'chatWorkingIndicatorH')}
@@ -308,23 +306,6 @@ test "IGSH-549 splitter paint is a bounded grip in the gap" {
         try std.testing.expect(splitter_paint.bottom - splitter_paint.top <= uiScaled(32));
     }
     reserved = false;
-}
-test "live settings reserve composer space without shrinking the draft" {
-    defer { test_settings_eligible = false; g_chat_composer_extra_h = 0; g_ui_scale = 100; }
-    for ([_]u32{100, 125, 150}) |scale| {
-        g_ui_scale = scale;
-        g_chat_composer_extra_h = uiScaled(80);
-        test_settings_eligible = false;
-        const before = chatViewLayout();
-        test_settings_eligible = true;
-        const after = chatViewLayout();
-        try std.testing.expectEqual(uiScaled(20), before.composer_card.top - after.composer_card.top);
-        try std.testing.expectEqual(before.composer_card.bottom, after.composer_card.bottom);
-        try std.testing.expectEqual(before.composer_card.left, after.composer_card.left);
-        try std.testing.expectEqual(before.composer_card.right, after.composer_card.right);
-        try std.testing.expectEqual(before.composer.bottom - before.composer.top, after.composer.bottom - after.composer.top);
-        try std.testing.expectEqual(before.transcript.bottom - uiScaled(20), after.transcript.bottom);
-    }
 }
 test "IGSH-549 Chat View content stays inside the pane content inset" {
     g_chat_active = true;

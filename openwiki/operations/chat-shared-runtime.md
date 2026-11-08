@@ -102,14 +102,18 @@ That acceptance check requires post-release observation.
 
 ## Model and effort
 
-Use Ctrl+K inside a live Claude chat.
+Click the plus button left of the message box in a live Claude chat.
+The plus menu lists Attach file, Model, Effort and Permission level.
 Choose Model Opus, Sonnet, or Haiku.
 Choose Effort Low, Medium, or High.
-The composer shows the accepted selection.
-“Next” means the current turn finishes first.
+Choose Permission level Ask, Accept edits, Plan, or Bypass.
+A check mark shows the current model and effort.
+The permission rows carry no check mark because the desktop never receives the current mode.
+The message box shows no model or effort text.
+Ctrl+K "Chat View: Plus Menu" opens the same menu from the keyboard.
+Ctrl+K still lists every model, effort and permission choice.
 The next message waits for the new agent.
 It resumes the same conversation and keeps history.
-An unconfigured value remains Default.
 No new keyboard shortcut is assigned.
 
 The host accepts `set_model` and `set_effort` requests.

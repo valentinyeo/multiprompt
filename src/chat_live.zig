@@ -16,7 +16,8 @@ pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
 pub const Model = enum { unknown, opus, sonnet, haiku };
 pub const Effort = enum { unknown, low, medium, high };
-pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, applied: bool = false };
+pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
+pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
 pub const RequestKind = enum { approval, question, plan };
 pub const Decision = enum { accept, accept_for_session, decline, cancel };
 pub const PlanAction = enum { implement, feedback };
@@ -209,6 +210,7 @@ fn settingsOf(payload: std.json.Value) Settings {
     return .{
         .model = std.meta.stringToEnum(Model, strOf(payload, "model")) orelse .unknown,
         .effort = std.meta.stringToEnum(Effort, strOf(payload, "effort")) orelse .unknown,
+        .mode = std.meta.stringToEnum(Mode, strOf(payload, "mode")) orelse .unknown,
         .applied = boolOf(payload, "applied"),
     };
 }
@@ -1482,6 +1484,16 @@ test "IGSH-1266 an empty thinking item does not hide the reply after it" {
 fn parse(a: std.mem.Allocator, json: []const u8) !std.json.Value {
     const parsed = try std.json.parseFromSlice(std.json.Value, a, json, .{});
     return parsed.value;
+}
+
+test "IGSH-1861 host settings carry the permission mode" {
+    var live: Live = .{};
+    defer live.deinit(std.testing.allocator);
+    const event = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"kind\":\"host.settings\",\"payload\":{\"model\":\"\",\"effort\":\"low\",\"mode\":\"bypassPermissions\",\"applied\":true}}", .{});
+    defer event.deinit();
+    try std.testing.expect(try applyValue(&live, std.testing.allocator, 1, event.value));
+    try std.testing.expectEqual(Mode.bypassPermissions, live.settings.mode);
+    try std.testing.expectEqual(Model.unknown, live.settings.model);
 }
 
 test "host settings belong to a live session and survive turns" {

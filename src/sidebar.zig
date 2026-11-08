@@ -258,6 +258,8 @@ const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
 const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
 const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
 const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
+const SEARCH_CHAT_MODE_BYPASS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_BYPASS_OFFSET;
+const SEARCH_CHAT_PLUS_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_PLUS_MENU_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
 const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
@@ -2698,6 +2700,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_newest = result_idx == SEARCH_CHAT_NEWEST_OFFSET;
                     const is_chat_resync = result_idx == SEARCH_CHAT_RESYNC_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
+                    const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -2705,7 +2708,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_focus_messages = result_idx == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
-                    const is_chat_mode = result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET or result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET or result_idx == SEARCH_CHAT_MODE_EDITS_OFFSET;
+                    const is_chat_mode = result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET or result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET or result_idx == SEARCH_CHAT_MODE_EDITS_OFFSET or result_idx == SEARCH_CHAT_MODE_BYPASS_OFFSET;
                     const is_chat_queue_send = result_idx == SEARCH_CHAT_QUEUE_SEND_OFFSET;
                     const is_chat_reset = result_idx == SEARCH_CHAT_RESET_OFFSET;
                     const is_chat_tab_url = result_idx == SEARCH_CHAT_TAB_URL_OFFSET;
@@ -3678,11 +3681,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var find_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3732,7 +3735,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var mode_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        const label = if (result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET) L("Chat permission mode: Plan") else if (result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET) L("Chat permission mode: Ask") else L("Chat permission mode: Accept edits");
+                        const label = if (result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET) L("Chat permission mode: Plan") else if (result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET) L("Chat permission mode: Ask") else if (result_idx == SEARCH_CHAT_MODE_BYPASS_OFFSET) L("Chat permission mode: Bypass") else L("Chat permission mode: Accept edits");
                         _ = paletteDrawText(hdc, label, -1, &mode_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_ac) {
                         _ = SelectObject(hdc, palette_font);
