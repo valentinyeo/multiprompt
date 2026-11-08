@@ -3924,7 +3924,10 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status('message_fixture_0003')['state'], 'queued')
         with patch.object(reader, 'host_owned', return_value=True), \
                 patch.object(reader, 'host_request', return_value=dict(status='ok')) as recall:
-            result = self.request('dismiss', message_id='message_fixture_0002', text='CANCEL_TARGET')
+            try:
+                result = self.request('dismiss', message_id='message_fixture_0002', text='CANCEL_TARGET')
+            except ValueError as error:
+                self.fail('a handed-off waiting message must be taken back: %s' % error)
         self.assertEqual(result['message']['state'], 'cancelled')
         self.assertEqual(recall.call_args.args[2]['op'], 'recall')
         self.assertEqual(recall.call_args.args[2]['id'], 'message_fixture_0002')
@@ -3961,7 +3964,10 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
 
         with patch.object(reader, 'prompt_box_text', side_effect=box), \
                 patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0, stdout='')) as run:
-            result = self.request('dismiss', message_id='message_fixture_0002', text='CANCEL_TARGET')
+            try:
+                result = self.request('dismiss', message_id='message_fixture_0002', text='CANCEL_TARGET')
+            except ValueError as error:
+                self.fail('a message still in the box must be taken back: %s' % error)
         self.assertEqual(result['message']['state'], 'cancelled')
         self.assertEqual(self.status('message_fixture_0001')['state'], 'sent')
         self.assertTrue(any('C-u' in call.args[0] for call in run.call_args_list))
