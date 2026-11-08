@@ -11,7 +11,7 @@ const workflow = fs.readFileSync(path.join(root, process.env.AUTOMERGE_RED_CONTR
 const sha = 'a'.repeat(40);
 const master = 'b'.repeat(40);
 const page = nodes => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
-const checkNames = ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard'];
+const checkNames = ['test', 'no-comments', 'extension-version', 'secret-scan', 'ledger-guard', 'click-through'];
 const checks = checkNames.map(name => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
 const snapshot = () => ({ data: { repository: { deleteBranchOnMerge: true, pullRequest: {
   id: 'PR_fixture', number: 42, state: 'OPEN', headRefOid: sha, baseRefOid: master,

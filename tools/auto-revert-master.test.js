@@ -421,7 +421,7 @@ test('revert PR dispatches exactly the required workflows on its branch after cr
     assert.ok(index > create && index < merge);
   }
   const required = fs.readFileSync(`${__dirname}/../.github/required-checks.txt`, 'utf8').trim().split(/\r?\n/).sort();
-  assert.deepEqual(required, ['no-comments', 'secret-scan', 'test', 'verify (appearance)']);
+  assert.deepEqual(required, ['click-through', 'no-comments', 'secret-scan', 'test', 'verify (appearance)']);
   const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  actions: write\n/);
 });
