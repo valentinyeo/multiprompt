@@ -1709,3 +1709,29 @@ test('deepgram secret: device-only, per account, never readable by another accou
   const cookie = await emailSignIn();
   assert.equal((await request(path, { headers: { Cookie: cookie } })).status, 403);
 });
+
+test('IGSH-1890 group order syncs between desktops and stays hidden from clients that do not declare it', async () => {
+  const { token } = await enroll();
+  const grouped = { ...layout, tabs: [{ ...layout.tabs[0], group: 'Work' }, { ...layout.tabs[0], tmux_session: 'two', group: 'Home' }] };
+  await db.prepare('UPDATE layouts SET revision=1,layout=?').bind(JSON.stringify(grouped)).run();
+  const desktop = { ...auth(token), 'X-Layout-Features': 'groups,group_order' };
+  const android = { ...auth(token), 'X-Layout-Features': 'groups' };
+  const put = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: 1, layout: { ...grouped, group_order: ['Home', 'Work'] } }) });
+  assert.equal(put.status, 200);
+  assert.ok(put.headers.get('X-Layout-Features').split(',').includes('group_order'));
+  const stored = await put.json();
+  assert.deepEqual(stored.layout.group_order, ['Home', 'Work']);
+  const otherDesktop = await (await request('/v1/layout', { headers: desktop })).json();
+  assert.deepEqual(otherDesktop.layout.group_order, ['Home', 'Work']);
+  const mobile = await request('/v1/layout', { headers: android });
+  assert.equal(mobile.headers.get('X-Layout-Features'), 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups');
+  const mobileLayout = (await mobile.json()).layout;
+  assert.equal(Object.hasOwn(mobileLayout, 'group_order'), false);
+  const mobileWrite = await request('/v1/layout', { method: 'PUT', headers: android, body: JSON.stringify({ base_revision: stored.revision, layout: mobileLayout }) });
+  assert.equal(mobileWrite.status, 200);
+  assert.equal(Object.hasOwn((await mobileWrite.json()).layout, 'group_order'), false);
+  const after = await (await request('/v1/layout', { headers: desktop })).json();
+  assert.deepEqual(after.layout.group_order, ['Home', 'Work']);
+  const rejected = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: after.revision, layout: { ...after.layout, group_order: ['Home', 'Home'] } }) });
+  assert.equal(rejected.status, 400);
+});

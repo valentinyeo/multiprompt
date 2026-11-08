@@ -18,6 +18,15 @@ function verify(root) {
     assert.ok(history.includes('start the fake session'));
     assert.ok(history.includes('The fake session is ready.'));
   }
+  const plus = json('plus-active.json');
+  assert.deepEqual(plus.failures, []);
+  assert.ok(plus.expected_active.includes('model_haiku'));
+  assert.ok(plus.expected_active.includes('effort_high'));
+  for (const row of plus.rows) {
+    assert.equal(row.mark, 0, row.item);
+    if (plus.expected_active.includes(row.item)) assert.ok(row.accent >= 10, row.item);
+  }
+  for (const item of plus.expected_active) assert.ok(plus.rows.some(row => row.item === item), item);
   const hostFiles = fs.readdirSync(path.join(dir, 'host'));
   const eventFile = hostFiles.filter(name => name.endsWith('.events.log'));
   assert.equal(eventFile.length, 1);
@@ -47,7 +56,7 @@ function verify(root) {
       return model >= 0 && args[model + 1] === 'haiku' && (effort === 'default' ? level < 0 : level >= 0 && args[level + 1] === effort);
     }));
   }
-  for (const name of ['model-before', 'model-after', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-palette-${choice}`, `model-after-${choice}`])]) {
+  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-palette-${choice}`, `model-after-${choice}`])]) {
     const png = fs.readFileSync(path.join(root, `${name}.png`));
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(png.length > 1000);

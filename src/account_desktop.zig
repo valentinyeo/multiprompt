@@ -209,7 +209,8 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .workspace = workspaces.items[ws].name,
         });
     }
-    return .{ .settings = app_state.g_layout_settings, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);
+    return .{ .settings = app_state.g_layout_settings, .group_order = group_order, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 var g_account_hosts_cache: struct {
@@ -360,6 +361,11 @@ pub fn publishSessionLayout() void {
         plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
         plain_synced = account_layout.withoutGroups(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_group_order_supported) {
+        plain_local = account_layout.withoutGroupOrder(plain_local);
+        plain_base = account_layout.withoutGroupOrder(plain_base);
+        plain_synced = account_layout.withoutGroupOrder(plain_synced);
     }
     if (!app_state.g_account_colors_supported) {
         plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
@@ -785,6 +791,7 @@ pub fn accountSignOut() void {
     app_state.g_account_colors_supported = false;
     app_state.g_account_appearance_supported = false;
     app_state.g_account_groups_supported = false;
+    app_state.g_account_group_order_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -1377,6 +1384,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status != 200) return error.Network;
     reply.colors_supported = remote.colors_supported;
     reply.groups_supported = remote.groups_supported;
+    reply.group_order_supported = remote.group_order_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1448,6 +1456,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         }
         synced_hosts = merged_hosts;
         if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
+        if (!remote.group_order_supported) rebased = account_layout.withoutGroupOrder(rebased);
         if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
         if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
@@ -1479,6 +1488,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status != 200) return error.Conflict;
     reply.colors_supported = remote.colors_supported;
     reply.groups_supported = remote.groups_supported;
+    reply.group_order_supported = remote.group_order_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
@@ -1794,6 +1804,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         switchToWorkspace(app_state.g_active_workspace);
     }
     app_state.g_layout_settings = desired.settings;
+    if (desired.group_order) |names| _ = @import("sidebar.zig").orderGroupsByName(names);
     @import("inbox.zig").ensureInboxSplitVisible();
     app_state.g_restoring = old_restoring;
     saveSession();
@@ -2000,6 +2011,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
     app_state.g_account_groups_supported = reply.groups_supported;
+    app_state.g_account_group_order_supported = reply.group_order_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {

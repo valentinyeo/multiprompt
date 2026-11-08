@@ -35,16 +35,18 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
+  if (value.layout && !layoutFeature(request, 'group_order')) delete value.layout.group_order;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups' + (layoutFeature(request, 'group_order') ? ',group_order' : ''));
   return response;
 }
 export function validateLayout(x) {
   const keys = (v, expected) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === expected.sort().join(',');
   const text = (v, n) => typeof v === 'string' && v.length > 0 && v.length <= n && !/[\x00-\x1f\x7f]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v);
-  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts', 'removed_hosts'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
+  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts', 'removed_hosts', 'group_order'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
       !Array.isArray(x.workspaces) || x.workspaces.length > 9 || !Array.isArray(x.tabs) || x.tabs.length > 256) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'settings') && (!x.settings || typeof x.settings !== 'object' || Array.isArray(x.settings) || Object.entries(x.settings).some(([key, value]) => !['frequent', 'favorites', 'all', 'frequent_first'].includes(key) || typeof value !== 'boolean'))) fail(400, 'invalid_layout');
+  if (Object.hasOwn(x, 'group_order') && (!Array.isArray(x.group_order) || x.group_order.length > 16 || new Set(x.group_order).size !== x.group_order.length || x.group_order.some(name => !text(name, 64)))) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'removed_hosts') && (!Array.isArray(x.removed_hosts) || x.removed_hosts.length > 3 || new Set(x.removed_hosts).size !== x.removed_hosts.length || x.removed_hosts.some(slot => !Number.isInteger(slot) || slot < 0 || slot > 2))) fail(400, 'invalid_hosts');
   if (Object.hasOwn(x, 'hosts')) {
     const slots = new Set();
@@ -397,7 +399,7 @@ export default {
         const confined = device.kind === 'workspace';
         if (confined) layout = confine(device, layout, previousLayout);
         if (row && row.revision !== b.base_revision) return reply({ revision: row.revision, layout: scoped(device, previousLayout) }, 409);
-        const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal'].includes(feature)).join(',') }) } : request;
+        const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal', 'group_order'].includes(feature)).join(',') }) } : request;
         if (!layoutFeature(req, 'bot_palette8')) {
           const previous = new Map((previousLayout?.workspaces || []).map(workspace => [workspace.name, workspace]));
           for (const workspace of layout.workspaces) {
@@ -415,6 +417,10 @@ export default {
         if (!layoutFeature(req, 'settings')) {
           if (previousLayout?.settings !== undefined) layout.settings = { ...previousLayout.settings };
           else delete layout.settings;
+        }
+        if (!layoutFeature(req, 'group_order')) {
+          if (previousLayout?.group_order !== undefined) layout.group_order = previousLayout.group_order;
+          else delete layout.group_order;
         }
         if (!layoutFeature(req, 'hosts')) {
           if (previousLayout?.hosts !== undefined) layout.hosts = previousLayout.hosts;

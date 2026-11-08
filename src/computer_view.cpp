@@ -597,6 +597,7 @@ bool pinnedConfig(const std::string& config, std::wstring& arguments, std::strin
         if (value.find_first_of("\r\n\0",0,3) != std::string::npos) return false;
         if ((key == "proxycommand" || key == "proxyjump" || key == "knownhostscommand") && value != "none") return false;
         if (std::find(allowed.begin(),allowed.end(),key) == allowed.end()) continue;
+        if (key == "globalknownhostsfile" && value.rfind("__PROGRAMDATA__",0) == 0) continue;
         if (key == "user") {
             if (value.empty() || value.size() > 128) return false;
             for (unsigned char c : value) if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) return false;
@@ -723,6 +724,7 @@ extern "C" int mp_computer_profile_policy_test() {
     if (arguments.find(L"known_hosts") == std::wstring::npos || arguments.find(L"example-key") == std::wstring::npos || arguments.find(L"Example Person") == std::wstring::npos) return 3;
     if (pinnedConfig(config + "proxycommand arbitrary\n",arguments,user)) return 4;
     if (pinnedConfig(config + "proxyjump example-hop\n",arguments,user)) return 5;
+    if (!pinnedConfig(config + "globalknownhostsfile __PROGRAMDATA__\\ssh/ssh_known_hosts __PROGRAMDATA__\\ssh/ssh_known_hosts2\n",arguments,user) || arguments.find(L"__PROGRAMDATA__") != std::wstring::npos) return 11;
     if (pinnedConfig(config + "knownhostscommand arbitrary\n",arguments,user)) return 6;
     if (pinnedConfig("hostname example.invalid\nuser bad'user\nport 22\n",arguments,user)) return 7;
     if (pinnedConfig("hostname example.invalid\nuser example\nport 65536\n",arguments,user)) return 8;
