@@ -2968,7 +2968,7 @@ def host_reply(query):
             host_write(host_paths(provider, sid)["config"], config)
             settings = host_settings(provider, sid)
             host_event(provider, sid, host_chat_name(provider, sid), dict(state={}),
-                       "host.settings", dict(settings, applied=False, mode=host_permission_mode(provider, sid)))
+                       "host.settings", dict(settings, applied=False))
             return dict(status="ok")
         finally:
             host_release(lock)
@@ -3334,21 +3334,8 @@ def host_hax_argv(provider, sid, base):
 def host_model_name(value):
     if not isinstance(value, str):
         return ""
-    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku)(?:-[a-zA-Z0-9._-]+)?(?:\[[a-zA-Z0-9]+\])?", value)
+    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku)(?:-[a-zA-Z0-9._-]+)?", value)
     return match.group(1) if match else ""
-
-
-HOST_MODE_NAMES = dict(default="manual", manual="manual", acceptEdits="acceptEdits", plan="plan", bypassPermissions="bypassPermissions")
-
-
-def host_permission_mode(provider, sid, state=None):
-    mode = state.get("mode") if isinstance(state, dict) else None
-    if mode is None:
-        stored = host_read(host_paths(provider, sid)["state"])
-        mode = stored.get("mode") if stored else None
-    if mode is None:
-        mode = (host_config(provider, sid) or {}).get("permission_mode")
-    return HOST_MODE_NAMES.get(mode if mode is not None else "default", "")
 
 
 def host_settings(provider, sid):
@@ -3375,7 +3362,7 @@ def host_settings_event(provider, sid, tmux, session):
     shown = dict(settings)
     if not shown["model"] and applied:
         shown["model"] = session.get("init_model", "")
-    host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied, mode=host_permission_mode(provider, sid, session.get("state"))))
+    host_event(provider, sid, tmux, session, "host.settings", dict(shown, applied=applied))
 
 
 def host_agent_start(provider, sid, mode=None):
@@ -3868,8 +3855,6 @@ def host_set_mode(provider, sid, session, mode):
         return dict(status="error", reason="stdin_write_failed")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
-    if "settings" in session:
-        host_settings_event(provider, sid, host_chat_name(provider, sid), session)
     return dict(status="ok")
 
 
@@ -3951,8 +3936,6 @@ def host_plan_settled(provider, sid, session):
     else:
         session["state"].pop("mode", None)
     host_state_write(provider, sid, session["state"])
-    if "settings" in session:
-        host_settings_event(provider, sid, host_chat_name(provider, sid), session)
 
 
 def host_refuse(reason, **extra):
@@ -5374,7 +5357,7 @@ def message_store_transaction(q):
                                and (not settings["model"] or payload.get("model") == settings["model"]))
                     if applied and not settings["model"]:
                         settings["model"] = host_model_name(payload.get("model"))
-                    items.append(dict(host_settings=dict(settings, applied=applied, mode=host_permission_mode(provider, sid))))
+                    items.append(dict(host_settings=dict(settings, applied=applied)))
                 db.execute('INSERT INTO message_snapshots VALUES (?,?,?,?,?,?,?)', (snapshot, provider, sid, epoch, seq, time.time(), json.dumps(items, separators=(',', ':'))))
             else:
                 saved = db.execute('SELECT epoch,seq,body FROM message_snapshots WHERE id=? AND provider=? AND sid=?', (snapshot, provider, sid)).fetchone()
@@ -6649,7 +6632,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 92
+RUNTIME_GENERATION = 91
 
 if __name__ == '__main__':
     import base64 as _base64

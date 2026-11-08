@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['host_reply'](request)['status'] == 'ok'
     assert r['host_config'](provider, offline_sid)['model'] == 'haiku'
     events = r['message_events_page'](provider, offline_sid, 0)['events']
-    assert len(events) == 1 and events[0]['event']['payload'] == dict(model='haiku', effort='', applied=False, mode='manual'), events
+    assert len(events) == 1 and events[0]['event']['payload'] == dict(model='haiku', effort='', applied=False), events
     assert r['host_reply'](dict(request, model='invalid'))['reason'] == 'invalid_model'
     assert r['host_reply'](dict(request, op='set_effort', effort='invalid'))['reason'] == 'invalid_effort'
     assert len(r['message_events_page'](provider, offline_sid, 0)['events']) == 1
@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory() as directory:
     unknown = dict(state={}, settings=dict(model='', effort=''), starting_settings=dict(model='', effort=''))
     r['host_session_reset'](unknown)
     r['host_agent_event'](provider, sid, tmux, unknown, json.dumps(dict(type='system', subtype='init', model='claude-opus-4-6')))
-    assert ('host.settings', dict(model='opus', effort='', applied=True, mode='manual')) in events
+    assert ('host.settings', dict(model='opus', effort='', applied=True)) in events
     assert any(log[2:] == ('model_effort_settings_applied', dict(model='opus', effort='default')) for log in logs)
     for actual in ('claude-opus-4-6', None, 'unrecognized-secret-model'):
         mismatch = dict(state={}, settings=dict(model='sonnet', effort='low'), starting_settings=dict(model='sonnet', effort='low'))
@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory() as directory:
         before_events, before_logs = len(events), len(logs)
         r['host_agent_event'](provider, sid, tmux, mismatch, json.dumps(dict(type='system', subtype='init', model=actual)))
         assert mismatch['applied_settings'] is None
-        assert ('host.settings', dict(model='sonnet', effort='low', applied=False, mode='manual')) in events[before_events:]
+        assert ('host.settings', dict(model='sonnet', effort='low', applied=False)) in events[before_events:]
         assert not any(log[2] == 'model_effort_settings_applied' for log in logs[before_logs:])
         assert any(log[2:] == ('model_settings_mismatch', dict(requested='sonnet', actual='opus' if actual == 'claude-opus-4-6' else 'unknown')) for log in logs[before_logs:])
         if actual == 'claude-opus-4-6':
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory() as directory:
     before_logs = len(logs)
     r['host_agent_event'](provider, sid, tmux, matching, json.dumps(dict(type='system', subtype='init', model='claude-sonnet-4-6')))
     assert matching['applied_settings'] == matching['settings']
-    assert ('host.settings', dict(model='sonnet', effort='low', applied=True, mode='manual')) in events
+    assert ('host.settings', dict(model='sonnet', effort='low', applied=True)) in events
     assert any(log[2:] == ('model_effort_settings_applied', dict(model='sonnet', effort='low')) for log in logs[before_logs:])
     session = dict(state={}, agent=None)
     r['host_session_reset'](session)
@@ -146,7 +146,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['host_handle_request'](provider, sid, tmux, session, dict(op='set_effort', effort='bad'))['status'] == 'refused'
     result = r['host_handle_request'](provider, sid, tmux, session, dict(op='deliver'))
     assert result['status'] == 'busy', result
-    assert events[-1] == ('host.settings', dict(model='haiku', effort='high', applied=False, mode='manual')), events
+    assert events[-1] == ('host.settings', dict(model='haiku', effort='high', applied=False)), events
     assert r['host_config'](provider, sid)['model'] == 'haiku'
     assert r['host_config'](provider, sid)['effort'] == 'high'
     r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='result', subtype='success')))
@@ -166,7 +166,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert command[command.index('--resume')+1] == sid, command
     session['starting_settings'] = dict(session['settings'])
     r['host_agent_event'](provider, sid, tmux, session, json.dumps(dict(type='system', subtype='init', model='claude-haiku-4-5')))
-    assert ('host.settings', dict(model='haiku', effort='high', applied=True, mode='manual')) in events, events
+    assert ('host.settings', dict(model='haiku', effort='high', applied=True)) in events, events
     r['host_attempt'] = lambda *args, **kwargs: dict(status='claimed')
     class Input:
         def __init__(self): self.lines = []

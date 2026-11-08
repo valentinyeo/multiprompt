@@ -3,17 +3,14 @@ const app_state = @import("app_state.zig");
 const w = @import("win32.zig");
 const drawing = @import("drawing.zig");
 const focus = @import("focus.zig");
-const chat_live = @import("chat_live.zig");
 const chat_composer = @import("chat_composer.zig");
 const startup = @import("startup.zig");
 const more_menu = @import("more_menu.zig");
-const themes = @import("themes.zig");
 const fillRoundRect = @import("smooth.zig").fillRoundRect;
 
 const RECT = w.RECT;
 const HANDLE = w.HANDLE;
 const L = startup.L;
-const RGB = startup.RGB;
 const uiScaled = drawing.uiScaled;
 
 pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
@@ -30,7 +27,7 @@ const sections = [_]Section{
 
 pub const State = struct {
     shown: [ITEM_COUNT]bool = @splat(false),
-    active: [ITEM_COUNT]bool = @splat(false),
+    checked: [ITEM_COUNT]bool = @splat(false),
     hover: ?Item = null,
 };
 
@@ -156,10 +153,6 @@ fn solid(dc: HANDLE, rc: RECT, color: u32) void {
     _ = w.DeleteObject(brush);
 }
 
-fn activeInk() u32 {
-    return themes.customColorOr("accent", if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
-}
-
 pub fn paint(dc: HANDLE, bounds: RECT, anchor: RECT, state: *const State) void {
     const g = geometry(bounds, anchor, &state.shown);
     if (g.panel.right <= g.panel.left) return;
@@ -193,10 +186,14 @@ pub fn paint(dc: HANDLE, bounds: RECT, anchor: RECT, state: *const State) void {
                 solid(dc, .{ .left = cell.left + uiScaled(14), .top = cell.top, .right = cell.right - uiScaled(14), .bottom = cell.top + edge }, c.outline);
             }
             first = false;
-            _ = w.SetTextColor(dc, if (state.active[idx]) activeInk() else c.text);
+            _ = w.SetTextColor(dc, c.text);
             _ = w.SelectObject(dc, drawing.uiFontTitle());
-            var row_rc = RECT{ .left = cell.left + uiScaled(14), .top = cell.top, .right = cell.right - uiScaled(14), .bottom = cell.bottom };
+            var row_rc = RECT{ .left = cell.left + uiScaled(14), .top = cell.top, .right = cell.right - uiScaled(40), .bottom = cell.bottom };
             drawing.drawAscii(dc, label(item), &row_rc, flags);
+            if (state.checked[idx]) {
+                var mark_rc = RECT{ .left = cell.right - uiScaled(40), .top = cell.top, .right = cell.right - uiScaled(14), .bottom = cell.bottom };
+                _ = w.DrawTextW(dc, L("\u{2713}"), -1, &mark_rc, flags | w.DT_RIGHT);
+            }
         }
     }
 }
@@ -213,24 +210,6 @@ pub fn isOpen() bool {
     return g_open;
 }
 
-fn modelFromStatus(text: []const u16) chat_live.Model {
-    inline for (.{ .{ "opus", chat_live.Model.opus }, .{ "sonnet", chat_live.Model.sonnet }, .{ "haiku", chat_live.Model.haiku } }) |entry| {
-        const name = entry[0];
-        if (text.len >= name.len) {
-            var same = true;
-            for (name, 0..) |ch, i| {
-                if (text[i] != ch and text[i] != ch - 32) same = false;
-            }
-            if (same and (text.len == name.len or text[name.len] == ' ' or text[name.len] == '-')) return entry[1];
-        }
-    }
-    return .unknown;
-}
-
-fn modelOf(selected: chat_live.Settings, status: []const u16) chat_live.Model {
-    return if (selected.model != .unknown) selected.model else modelFromStatus(status);
-}
-
 fn snapshot(state: *State) void {
     state.* = .{};
     state.shown[@intFromEnum(Item.attach)] = true;
@@ -238,38 +217,20 @@ fn snapshot(state: *State) void {
     const chat_send = @import("chat_send.zig");
     chat_send.chatModeCapturePicker();
     const session = @import("chat_session.zig");
-    const selected: chat_live.Settings = chat_live.settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
     if (session.chatSettingsEligible()) {
+        const selected: @import("chat_live.zig").Settings = @import("chat_live.zig").settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
         for ([_]Item{ .model_opus, .model_sonnet, .model_haiku, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
-        const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
-        const model = modelOf(selected, status);
-        state.active[@intFromEnum(Item.model_opus)] = model == .opus;
-        state.active[@intFromEnum(Item.model_sonnet)] = model == .sonnet;
-        state.active[@intFromEnum(Item.model_haiku)] = model == .haiku;
-        state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
-        state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
-        state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
+        state.checked[@intFromEnum(Item.model_opus)] = selected.model == .opus;
+        state.checked[@intFromEnum(Item.model_sonnet)] = selected.model == .sonnet;
+        state.checked[@intFromEnum(Item.model_haiku)] = selected.model == .haiku;
+        state.checked[@intFromEnum(Item.effort_low)] = selected.effort == .low;
+        state.checked[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
+        state.checked[@intFromEnum(Item.effort_high)] = selected.effort == .high;
     }
     const identity = session.chatFileIdentityForShell(app_state.active_shell);
     if (std.mem.eql(u8, identity.provider(), "claude") and chat_send.chatModePickerAvailable()) {
         for ([_]Item{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
-        state.active[@intFromEnum(Item.mode_ask)] = selected.mode == .manual;
-        state.active[@intFromEnum(Item.mode_edits)] = selected.mode == .acceptEdits;
-        state.active[@intFromEnum(Item.mode_plan)] = selected.mode == .plan;
-        state.active[@intFromEnum(Item.mode_bypass)] = selected.mode == .bypassPermissions;
     }
-}
-
-test "IGSH-1861 the model falls back to the transcript name and never guesses" {
-    const opus = std.unicode.utf8ToUtf16LeStringLiteral("Opus 4.7");
-    const raw = std.unicode.utf8ToUtf16LeStringLiteral("sonnet-4-5");
-    const other = std.unicode.utf8ToUtf16LeStringLiteral("Fable 1.0");
-    const empty = std.unicode.utf8ToUtf16LeStringLiteral("");
-    try std.testing.expectEqual(chat_live.Model.opus, modelOf(.{}, opus));
-    try std.testing.expectEqual(chat_live.Model.sonnet, modelOf(.{}, raw));
-    try std.testing.expectEqual(chat_live.Model.unknown, modelOf(.{}, other));
-    try std.testing.expectEqual(chat_live.Model.unknown, modelOf(.{}, empty));
-    try std.testing.expectEqual(chat_live.Model.haiku, modelOf(.{ .model = .haiku }, opus));
 }
 
 fn ensureClass() void {
