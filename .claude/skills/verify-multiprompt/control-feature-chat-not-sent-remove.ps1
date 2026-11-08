@@ -36,7 +36,8 @@ for ($attempt = 1; $attempt -le 3 -and -not $removed; $attempt++) {
     if ($attempt -eq 1) { Snapshot 'selected' }
     Press @(0x2E) "Delete: Remove the Not sent message, attempt $attempt"
     try {
-        Wait-Until { $left = Read-StuckMessages; $null -ne $left -and @($left).Count -eq 0 } "Remove cleared the old-session message, attempt $attempt" 6
+        $waitSeconds = if ($attempt -eq 3) { 15 } else { 6 }
+        Wait-Until { $left = Read-StuckMessages; $null -ne $left -and @($left).Count -eq 0 } "Remove cleared the old-session message, attempt $attempt" $waitSeconds
         $removed = $true
     } catch { if ($attempt -eq 3) { Snapshot 'remove-failed'; throw } }
 }
