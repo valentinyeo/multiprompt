@@ -2131,6 +2131,11 @@ pub fn chatEchoDiscardableForShell(e: ChatOutboxEntry, shell: u32) bool {
 pub fn chatEchoDiscardUnsentForActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell = app_state.active_shell;
+    var discardable: usize = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (chatEchoDiscardableForShell(e, shell)) discardable += 1;
+    }
+    if (discardable == 0) loadChatOutbox();
     var dropped: u32 = 0;
     var i: usize = 0;
     while (i < app_state.g_chat_outbox.items.len) {

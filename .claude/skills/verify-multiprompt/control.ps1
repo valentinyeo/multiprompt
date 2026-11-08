@@ -396,7 +396,7 @@ try {
         $sessionJson = '{"active_tab":0,"single_window":true,"tabs":[{"kind":"cmd","name":"' + $seedTabName + '","manual":true,"shell_id":1,"chat_id":' + $seedChatId + '}]}'
         [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), $sessionJson, (New-Object Text.UTF8Encoding $false))
         $sentMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        $outboxJson = '{"version":2,"queues":[{"key":"' + $script:notSentKey + '","messages":[{"t":"' + $script:notSentText + '","s":2,"x":1,"r":1,"w":' + $sentMs + ',"v1":1,"sid":"old-session-id","phase":"sent","wire_id":""}]}]}'
+        $outboxJson = '{"version":2,"queues":[{"key":"' + $script:notSentKey + '","messages":[{"t":"' + $script:notSentText + '","s":2,"x":1,"r":1,"w":' + $sentMs + ',"v1":1,"sid":"old-session-id","phase":"failed","wire_id":""}]}]}'
         [IO.File]::WriteAllText((Join-Path $seedDir 'chat-outbox.json'), $outboxJson, (New-Object Text.UTF8Encoding $false))
         Save-Json $seed 'seed-session.json'
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-outbox.json') -Value $outboxJson
