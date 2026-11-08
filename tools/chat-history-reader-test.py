@@ -3779,7 +3779,7 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         def resolve(provider, tmux, **kwargs):
             if tmux == 'fixture':
                 entered.set()
-                release.wait(30)
+                release.wait(5)
             return ('sid' if tmux == 'fixture' else 'other-sid', self.path)
 
         def request(query, done=None):
@@ -3798,11 +3798,11 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             second = threading.Thread(target=request, args=(dict(self.base, sid='other-sid', tmux='other-chat', op='message_submit', message_id='message_fixture_0002', text='second'), completed))
             second.start()
             try:
-                self.assertTrue(completed.wait(10), 'chat A discovery held the shared SQLite writer')
+                self.assertTrue(completed.wait(2), 'chat A discovery held the shared SQLite writer')
             finally:
                 release.set()
-                first.join(30)
-                second.join(30)
+                first.join(5)
+                second.join(5)
         self.assertEqual(failures, [])
         self.assertFalse(first.is_alive() or second.is_alive())
 
