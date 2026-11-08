@@ -388,7 +388,7 @@ try {
         $seedDir = Join-Path $scratch 'roaming/ZigShell'
         New-Item -ItemType Directory -Force $seedDir | Out-Null
         $seedChatId = 1234567890123
-        $script:notSentKey = 'cmd:#' + ('{0:x16}' -f $seedChatId)
+        $script:notSentKey = 'cmd:#' + ([string]::Format('{0:x}', $seedChatId)).PadLeft(16, '0')
         $script:notSentText = 'stuck message from an old session'
         $seedTabs = @(@{ kind = 'cmd'; name = 'Old session chat'; manual = $true; shell_id = 1; chat_id = $seedChatId })
         $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }

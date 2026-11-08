@@ -589,7 +589,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
   assert.doesNotMatch(release, /\n  journeys:/);
   assert.match(release, /\n  launch:\n    needs: \[prepare, build\]/);
-  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks\]/);
+  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
