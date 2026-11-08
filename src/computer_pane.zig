@@ -417,7 +417,7 @@ pub fn sync() void {
     if (machine.owner == null) { machine.owner = owner; machine.generation += 1; machine.page_selected = false; }
     if (!timer_armed) timer_armed = w.SetTimer(app.g_main_hwnd, TIMER, 50, null) != 0;
     @import("crash_recorder.zig").disableMemoryDumpsForPrivateViewer();
-    if (mp_computer_create(app.g_main_hwnd) < 0) { log("viewer could not start, WebView2 unavailable", .{}); closeJob(); machine.phase = .idle; setState(.lost); }
+    if (mp_computer_create(app.g_main_hwnd) < 0) { if (machine.state != .lost) log("viewer could not start, WebView2 unavailable", .{}); closeJob(); machine.phase = .idle; setState(.lost); }
     if (!machine.page_selected and mp_computer_ready() != 0) selectPage();
     if (machine.phase == .idle and machine.state != .lost) { machine.attempts = 0; begin(); }
     present();

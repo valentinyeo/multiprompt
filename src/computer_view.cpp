@@ -664,9 +664,11 @@ void sshWorker(std::shared_ptr<SshJob> job, std::wstring prefix, std::wstring al
         wipe(output);
         DWORD code = STILL_ACTIVE;
         GetExitCodeProcess(child.process,&code);
+        {
+            std::lock_guard<std::mutex> lock(job->mutex);
+            job->result.code = int(code);
+        }
         fail(8);
-        std::lock_guard<std::mutex> lock(job->mutex);
-        job->result.code = int(code);
         return;
     }
     if (output.empty() || output.front() != '{' || output.back() != '\n') { wipe(output); fail(9); return; }
