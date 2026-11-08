@@ -537,7 +537,7 @@ try {
     Assert-Avatar 'expanded' $firstIndex 'restored-local-photo' $true
     Assert-Avatar 'expanded' $secondIndex 'restored-other-local-photo'
     Shot 'after-restart'
-    Focus; Press @(0x11, 0x4b); Query 'renamed alpha' $firstIndex; Press @(0x0d)
+    Focus; Press @(0x11, 0x4b); Query 'alpha' $firstIndex; Press @(0x0d)
     Look 'bot face' 'square dots' 7147
     Check 'face-change-keeps-photo' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $replacementHash)
     Look 'bot face' 'reset to show' 7194
