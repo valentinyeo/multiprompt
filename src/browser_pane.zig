@@ -4299,13 +4299,10 @@ pub fn updateBrowserVisibility() void {
         hideBrowserEdgeMasks();
     }
     if (app_state.shells[app_state.active_shell].browser_hwnd == null and !app_state.g_restoring and
-        !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0)
+        !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0 and
+        @import("idle_footprint.zig").passiveBrowserLaunchAllowed(app_state.active_shell))
     {
-        if (@import("idle_footprint.zig").passiveBrowserLaunchAllowed(app_state.active_shell)) {
-            if (app_state.shells[app_state.active_shell].browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
-        } else if (@import("idle_footprint.zig").startupSettled() and browserPaneMayOccupyLayout(app_state.active_shell)) {
-            launchBrowserForShell(app_state.active_shell);
-        }
+        if (app_state.shells[app_state.active_shell].browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
     }
 }
 
