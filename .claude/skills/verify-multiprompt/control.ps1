@@ -391,14 +391,14 @@ try {
         $script:notSentKey = 'cmd:#' + ('{0:x16}' -f $seedChatId)
         $script:notSentText = 'stuck message from an old session'
         $seedTabs = @(@{ kind = 'cmd'; name = 'Old session chat'; manual = $true; shell_id = 1; chat_id = $seedChatId })
-        $seed = @{ active_tab = 0; single_window = $true; tabs = [object[]]$seedTabs }
-        [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding $false))
+        $seed = @{ active_tab = 0; single_window = $true; tabs = $seedTabs }
+        $sessionJson = '{"active_tab":0,"single_window":true,"tabs":[{"kind":"cmd","name":"Old session chat","manual":true,"shell_id":1,"chat_id":' + $seedChatId + '}]}'
+        [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), $sessionJson, (New-Object Text.UTF8Encoding $false))
         $sentMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        $stuckMessage = @{ t = $script:notSentText; s = 2; x = 1; r = 1; w = $sentMs; v1 = 1; sid = 'old-session-id'; phase = 'sent'; wire_id = '' }
-        $seedOutbox = @{ version = 2; queues = [object[]]@(@{ key = $script:notSentKey; messages = [object[]]@($stuckMessage) }) }
-        [IO.File]::WriteAllText((Join-Path $seedDir 'chat-outbox.json'), (ConvertTo-Json -InputObject $seedOutbox -Depth 8), (New-Object Text.UTF8Encoding $false))
+        $outboxJson = '{"version":2,"queues":[{"key":"' + $script:notSentKey + '","messages":[{"t":"' + $script:notSentText + '","s":2,"x":1,"r":1,"w":' + $sentMs + ',"v1":1,"sid":"old-session-id","phase":"sent","wire_id":""}]}]}'
+        [IO.File]::WriteAllText((Join-Path $seedDir 'chat-outbox.json'), $outboxJson, (New-Object Text.UTF8Encoding $false))
         Save-Json $seed 'seed-session.json'
-        Save-Json $seedOutbox 'seed-outbox.json'
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-outbox.json') -Value $outboxJson
         $result.seedBoundary = 'The harness writes the saved-tab file and the unsent-message file once before launch: one message marked sent under a session id the tab no longer has. Nothing is edited after launch; the only input is Alt+C and Delete with an empty composer.'
     }
     if ($Feature -eq 'tab-names') {
