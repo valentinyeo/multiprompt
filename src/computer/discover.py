@@ -1,10 +1,8 @@
 import ast
 import base64
-import grp
 import hashlib
 import json
 import os
-import pwd
 import re
 import stat
 import subprocess
@@ -143,6 +141,8 @@ def listeners(pid, expected, uid):
 
 
 def writable_only_by(info, uid):
+    import grp
+    import pwd
     if info.st_mode & 0o002:
         return False
     if not info.st_mode & 0o020:
@@ -174,6 +174,7 @@ def private_file(path, uid, maximum):
 
 
 def discover(include_password=True, expected_user=None):
+    import pwd
     import resource
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     uid = os.getuid()
