@@ -261,7 +261,9 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         }
         if (t.starred_group == null) {
             if (find(edited.tabs, r)) |ei| {
-                if ((edited.tabs[ei].starred_group orelse "").len > 0) t.starred_group = edited.tabs[ei].starred_group;
+                if (edited.tabs[ei].starred_group) |group| {
+                    if (group.len > 0) t.starred_group = group;
+                }
             }
         }
         if (t.favorite == null) {
@@ -279,7 +281,11 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
             if (edited.tabs[ei].group) |group| {
                 if (!eq(u8, group, base.tabs[bi].group orelse "")) t.group = group;
             }
-            if (r.starred_group == null and t.starred_group == null and (base.tabs[bi].starred_group orelse "").len > 0) t.starred_group = base.tabs[bi].starred_group;
+            if (r.starred_group == null and t.starred_group == null) {
+                if (base.tabs[bi].starred_group) |group| {
+                    if (group.len > 0) t.starred_group = group;
+                }
+            }
             if (edited.tabs[ei].starred_group) |group| {
                 if (!eq(u8, group, base.tabs[bi].starred_group orelse "")) t.starred_group = group;
             }
