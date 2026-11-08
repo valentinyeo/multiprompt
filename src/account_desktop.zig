@@ -1237,6 +1237,66 @@ fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const s
     try result;
 }
 
+var g_deepgram_push_pending = std.atomic.Value(bool).init(false);
+var g_deepgram_checked_at: u64 = 0;
+
+pub fn accountPushDeepgramKey() void {
+    g_deepgram_push_pending.store(true, .release);
+    if (!app_state.g_account_has_token or app_state.g_account_reauth) return;
+    pullSessionLayout();
+}
+
+fn putDeepgramKey(access: []const u8, key: []const u8) bool {
+    const a = std.heap.page_allocator;
+    const body = std.json.Stringify.valueAlloc(a, .{ .key = key }, .{}) catch return false;
+    defer freeSecret(body);
+    const response = account_client.request("PUT", "/v1/secrets/deepgram", access, body) catch return false;
+    defer response.deinit();
+    return response.status == 200;
+}
+
+fn accountSyncDeepgramKey(access: []const u8, kind: AccountJobKind) void {
+    const voice = @import("voice.zig");
+    var local_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &local_buf);
+    const local = voice.readDeepgramApiKey(&local_buf);
+    if (g_deepgram_push_pending.load(.acquire)) {
+        const key = local orelse {
+            g_deepgram_push_pending.store(false, .release);
+            return;
+        };
+        if (putDeepgramKey(access, key)) {
+            g_deepgram_push_pending.store(false, .release);
+            debugLog("[voice] deepgram key saved to account");
+        }
+        return;
+    }
+    const now = GetTickCount64();
+    if (kind != .startup and kind != .login and g_deepgram_checked_at != 0 and now -% g_deepgram_checked_at < 60_000) return;
+    g_deepgram_checked_at = now;
+    const response = account_client.request("GET", "/v1/secrets/deepgram", access, "") catch return;
+    defer response.deinit();
+    if (response.status == 404) {
+        if (local) |key| {
+            if (putDeepgramKey(access, key)) debugLog("[voice] deepgram key saved to account");
+        }
+        return;
+    }
+    if (response.status != 200) return;
+    const remote = account_client.field(response.bytes, "key") catch return;
+    defer freeSecret(remote);
+    if (remote.len > 256) return;
+    if (local) |key| if (std.mem.eql(u8, key, remote)) return;
+    var wide: [257:0]u16 = @splat(0);
+    defer std.crypto.secureZero(u16, &wide);
+    for (remote, 0..) |c, i| {
+        if (c < 0x21 or c > 0x7e) return;
+        wide[i] = c;
+    }
+    if (g_deepgram_push_pending.load(.acquire)) return;
+    if (voice.saveDeepgramApiKey(wide[0..remote.len :0])) debugLog("[voice] deepgram key source=account");
+}
+
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const a = std.heap.page_allocator;
     var renewed = job.kind == .login;
@@ -1458,6 +1518,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             debugLog("account-sync: picture upload deferred");
         };
     }
+    accountSyncDeepgramKey(access, job.kind);
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };

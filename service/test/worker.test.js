@@ -1672,6 +1672,44 @@ test('bot photo revision survives closing and reopening a tab and legacy layout 
   assert.equal((await request(path, { headers })).status, 404);
 });
 
+test('deepgram secret: device-only, per account, never readable by another account or a workspace key', async () => {
+  const path = '/v1/secrets/deepgram';
+  const put = (headers, value) => request(path, { method: 'PUT', headers, body: JSON.stringify(value) });
+  assert.equal((await request(path)).status, 401);
+  assert.equal((await put({}, { key: 'a'.repeat(40) })).status, 401);
+  const workspaceKey = 'mpk_w_' + 'W'.repeat(43);
+  await db.prepare('INSERT INTO service_keys (hash,account,kind,workspace,label,created) VALUES (?,?,?,?,?,?)').bind(await hash(workspaceKey), 'owner@example.com', 'workspace', 'Other', 'secrets-test', 1).run();
+  const scoped = { Authorization: 'Bearer ' + workspaceKey };
+  assert.equal((await request(path, { headers: scoped })).status, 403);
+  assert.equal((await put(scoped, { key: 'a'.repeat(40) })).status, 403);
+  const { token } = await enroll();
+  const owner = auth(token);
+  assert.equal((await request(path, { headers: owner })).status, 404);
+  for (const bad of [{}, { key: '' }, { key: 5 }, { key: 'a'.repeat(257) }, { key: 'has space' }, { key: 'café' }, { key: 'k', extra: 1 }, ['k']]) assert.equal((await put(owner, bad)).status, 400);
+  const secret = 'dg_' + 'a1b2c3'.repeat(6);
+  assert.equal((await put(owner, { key: secret })).status, 200);
+  const read = await request(path, { headers: owner });
+  assert.equal(read.status, 200);
+  assert.deepEqual(await read.json(), { key: secret });
+  const replacement = 'z'.repeat(256);
+  assert.equal((await put(owner, { key: replacement })).status, 200);
+  assert.deepEqual(await (await request(path, { headers: owner })).json(), { key: replacement });
+  const { token: second } = await enroll();
+  assert.deepEqual(await (await request(path, { headers: auth(second) })).json(), { key: replacement });
+  const strangerToken = 's'.repeat(43);
+  await db.batch([
+    db.prepare('INSERT INTO devices (id,account,name,refresh_hash,created,last_seen,revoked) VALUES (?,?,?,?,?,?,0)').bind('stranger-device', 'stranger@example.com', 'Stranger', 'stranger-refresh', 1, 1),
+    db.prepare('INSERT INTO access_tokens (hash,device,expires) VALUES (?,?,?)').bind(await hash(strangerToken), 'stranger-device', Math.floor(Date.now() / 1000) + 600)
+  ]);
+  const stranger = { Authorization: 'Bearer ' + strangerToken };
+  assert.equal((await request(path, { headers: stranger })).status, 404);
+  assert.equal((await put(stranger, { key: 'other-accounts-key' })).status, 200);
+  assert.deepEqual(await (await request(path, { headers: stranger })).json(), { key: 'other-accounts-key' });
+  assert.deepEqual(await (await request(path, { headers: owner })).json(), { key: replacement });
+  const cookie = await emailSignIn();
+  assert.equal((await request(path, { headers: { Cookie: cookie } })).status, 403);
+});
+
 test('IGSH-1890 group order syncs between desktops and stays hidden from clients that do not declare it', async () => {
   const { token } = await enroll();
   const grouped = { ...layout, tabs: [{ ...layout.tabs[0], group: 'Work' }, { ...layout.tabs[0], tmux_session: 'two', group: 'Home' }] };
