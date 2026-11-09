@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { readControlSource } = require('./app-source');
 assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
+const path = require('node:path');
 const src = require('./app-source').readAppSource();
 const build = fs.readFileSync('build.zig', 'utf8');
 const docs = fs.readFileSync('openwiki/operations/keyboard-shortcuts.md', 'utf8');
@@ -34,8 +35,9 @@ test('markdown measurement paint and link hit test share the same layout', () =>
   for (const name of ['chatMeasureProjectedBlockRect', 'chatPaintProjectedBlock', 'chatTranscriptLinkAt']) {
     assert.match(body(name), /chatFlowBlock/);
   }
-  assert.match(body('chatTableLayout'), /chatTableLayoutIn\(&g_chat_tables,/);
-  assert.match(body('chatTableLayoutIn'), /cache\.layout\(/);
+  const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
+  assert.match(render, /fn chatTableLayout\([^]*chatTableLayoutIn\(/);
+  assert.match(render, /fn chatTableLayoutIn\([^]*cache\.layout\(/);
   assert.match(body('chatFlowBlock'), /block\.kind == \.list/);
   assert.match(body('chatRichText'), /chat_markdown\.inlineSpans/);
   assert.match(body('chatRichFont'), /uiScaled\(g_chat_font_pt \+ extra\)/);
