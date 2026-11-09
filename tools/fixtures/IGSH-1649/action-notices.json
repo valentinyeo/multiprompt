@@ -78,6 +78,7 @@
     "chatCopyTextToClipboard: showHeaderNoticeAscii(\"Could not copy to clipboard; try again\",2500,true)",
     "chatCopyTextToClipboard: showHeaderNoticeAscii(\"Nothing selected\",1200,false)",
     "chatDropFiles: showHeaderNoticeAscii(\"Could not read those files\",3000,true)",
+    "chatExpandTableNearest: showHeaderNoticeAscii(@import(\"ui_words.zon\").chat_table_none,1600,false)",
     "chatFileNotice: showHeaderNoticeAscii(\"\",4000,true)",
     "chatFileNotice: showHeaderNoticeAscii(\"Could not send that file to the server\",4000,true)",
     "chatInsertBrowserTabUrl: showHeaderNoticeAscii(\"No browser tab URL available\",2000,false)",

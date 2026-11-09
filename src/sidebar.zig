@@ -252,6 +252,7 @@ const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
 const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECTION_MENU_OFFSET;
+const SEARCH_CHAT_EXPAND_TABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_EXPAND_TABLE_OFFSET;
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
@@ -2743,6 +2744,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
                     const is_chat_selection_menu = result_idx == SEARCH_CHAT_SELECTION_MENU_OFFSET;
+                    const is_chat_expand_table = result_idx == SEARCH_CHAT_EXPAND_TABLE_OFFSET;
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_focus_messages = result_idx == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
@@ -2756,7 +2758,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
                     const is_chat_setting = result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -3745,6 +3747,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var selection_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L(ui_words.palette_chat_selection_menu), -1, &selection_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (is_chat_expand_table) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var expand_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.palette_chat_expand_table), -1, &expand_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy_sel) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

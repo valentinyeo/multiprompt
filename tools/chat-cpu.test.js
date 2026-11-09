@@ -377,7 +377,7 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
   assert.match(body(source, 'refreshChatBlockCache'), /history\.revision/);
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
   assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
-  assert.match(body(source, 'chatTableLayout'), /g_chat_tables\.layout/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8'), /fn chatTableLayout\([^]*chatTableLayoutIn\(/);
   assert.match(body(source, 'chatPaintTranscriptContent'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
   assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
   assert.match(body(source, 'chatImgFirstBlock'), /g_chat_blocks_from_file[^]*block\.image_count/);
