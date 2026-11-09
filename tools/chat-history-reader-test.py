@@ -4970,7 +4970,7 @@ class AgentHostFixture:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
             position = db.execute("SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider='claude' AND sid=?",
                                   (self.sid,)).fetchone()[0]
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?,'human')",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
                        (token, 'claude', self.sid, text or self.text, position, time.time()))
         db.close()
         return token
@@ -6604,7 +6604,7 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         db = reader.message_store_db(self.tmux)
         with db:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?,'human')",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?)",
                        (self.sid, 'second prompt', time.time() - 60, time.time()))
         reader.message_expire(db, 'claude', self.sid)
         state = db.execute("SELECT state FROM shared_messages WHERE id='second'").fetchone()[0]
@@ -6619,7 +6619,7 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         db = reader.message_store_db(self.tmux)
         with db:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES ('waiting','claude',?,?,1,'a','queued',NULL,NULL,0,?,'agent')",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created,origin) VALUES ('waiting','claude',?,?,1,'a','queued',NULL,NULL,0,?,'agent')",
                        (self.sid, 'alarm for a busy turn', time.time() - 601))
         reader.message_expire(db, 'claude', self.sid)
         state = db.execute("SELECT state FROM shared_messages WHERE id='waiting'").fetchone()[0]
