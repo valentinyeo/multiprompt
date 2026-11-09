@@ -218,7 +218,7 @@ test('table measure, paint, link and character hit testing share rich grid flow'
   for (const name of ['chatMeasureProjectedBlockRect', 'chatPaintProjectedBlock', 'chatTranscriptLinkAt', 'chatTranscriptCharAt']) assert.match(body(name), /chatFlowBlock/);
   for (const name of ['chatMeasureBlockRect', 'chatPaintBlock']) assert.match(body(name), /chatMeasureProjectedBlockRect|chatPaintProjectedBlock/, 'the plain entry points keep the rich projected flow');
   assert.match(body('chatFlowBlock'), /block\.kind == \.table\) return chatFlowTable/);
-  assert.match(body('chatFlowTable'), /chatRichText/);
+  assert.match(body('chatFlowTableIn'), /chatRichText/);
   assert.match(body('captureChatTranscript'), /table_line\) hiding_tool_block = false/);
 });
 

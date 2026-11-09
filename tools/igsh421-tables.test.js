@@ -329,7 +329,7 @@ function execute(control) {
   try {
     copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_table_measure.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig', 'chat_reaction.zig', 'chat_reply.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
-    let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY', 'chatReplyLineHeight'].map(name => body(name)).join('\n');
+    let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatTableLayoutIn', 'chatFlowTableIn', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY', 'chatReplyLineHeight'].map(name => body(name)).join('\n');
     const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
     const displayStart = render.indexOf('pub const ChatDisplay = struct {');
     const displayEnd = render.indexOf('test "IGSH-1132', displayStart);

@@ -34,7 +34,8 @@ test('markdown measurement paint and link hit test share the same layout', () =>
   for (const name of ['chatMeasureProjectedBlockRect', 'chatPaintProjectedBlock', 'chatTranscriptLinkAt']) {
     assert.match(body(name), /chatFlowBlock/);
   }
-  assert.match(body('chatTableLayout'), /g_chat_tables\.layout/);
+  assert.match(body('chatTableLayout'), /chatTableLayoutIn\(&g_chat_tables,/);
+  assert.match(body('chatTableLayoutIn'), /cache\.layout\(/);
   assert.match(body('chatFlowBlock'), /block\.kind == \.list/);
   assert.match(body('chatRichText'), /chat_markdown\.inlineSpans/);
   assert.match(body('chatRichFont'), /uiScaled\(g_chat_font_pt \+ extra\)/);
