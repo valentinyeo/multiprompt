@@ -229,6 +229,11 @@ test "shutdown during a fetch blocks new spawns and fallback and defers handle c
 }
 `;
 
+test('IGSH-1903 failed history requests respawn the shared transport', () => {
+  assert.match(body('chatHistoryPersistent'), /transport\.respawn\(host\)/);
+  assert.match(require('fs').readFileSync('src/chat_transport.zig', 'utf8'), /pub fn respawn\(index: u8\)/);
+});
+
 test('persistent history production transport: reuse, framing, timeout, fallback, backoff and shutdown', () => {
   assert.match(body('chatHistoryPersistent'), /transport\.read/);
   const start = source.indexOf('const ChatHistoryChannel = struct {');
