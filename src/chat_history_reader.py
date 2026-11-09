@@ -4825,6 +4825,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 session["state"]["agent_pid"] = agent.pid
                 host_state_write(provider, sid, session["state"])
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+                HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
             if session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
                 host_log(provider, sid, "idle_stop")
