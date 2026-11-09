@@ -2,6 +2,7 @@ const app_state = @import("app_state.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const tmux_identity = @import("tmux_identity.zig");
+const browser_pane_name = @import("browser_pane_name.zig");
 const archive_rules = @import("archive_rules.zig");
 const crash_recorder = @import("crash_recorder.zig");
 const DWORD = @import("win32.zig").DWORD;
@@ -527,11 +528,10 @@ pub fn findZsbPaneTarget(session: []const u8) ?u32 {
     }
     if (best) |ti| {
         _ = maybeAdoptRemoteTmuxSessionFromToken(ti, token);
-        return findLocalTmuxTab(app_state.shells[ti].tmux_host, token) orelse ti;
+        return ti;
     }
     for (0..app_state.shell_count) |i| {
-        if (maybeAdoptRemoteTmuxSessionFromConsole(@intCast(i), token))
-            return findLocalTmuxTab(app_state.shells[i].tmux_host, token) orelse @intCast(i);
+        if (maybeAdoptRemoteTmuxSessionFromConsole(@intCast(i), token)) return @intCast(i);
     }
     return null;
 }
@@ -593,13 +593,10 @@ fn shellMatchesTmuxSessionTarget(i: usize, token: []const u8) bool {
 
 fn shellMatchesZsbPaneTarget(i: usize, token: []const u8) bool {
     if (i >= app_state.shell_count) return false;
-    const t = std.mem.trim(u8, token, &[_]u8{ ' ', '\t', '\r', '\n' });
-    if (t.len == 0) return false;
-    if (shellMatchesTmuxSessionTarget(i, t)) return true;
-    if ((app_state.shells[i].kind == .vps or app_state.shells[i].kind == .vps2) and shellNameHasSessionPrefix(i, t)) return true;
-    var key_buf: [64]u8 = undefined;
-    const key = shellZsbSessionKey(app_state.shells[i].shell_id, &key_buf);
-    return key.len == t.len and std.ascii.eqlIgnoreCase(key, t);
+    var listed: [app_state.MAX_SHELLS]browser_pane_name.Session = undefined;
+    const sessions = @import("browser_pane.zig").browserPaneSessions(&listed);
+    const hit = browser_pane_name.target(sessions, token) orelse return false;
+    return hit == i;
 }
 
 fn shellMatchesNotification(i: usize, session: []const u8) bool {

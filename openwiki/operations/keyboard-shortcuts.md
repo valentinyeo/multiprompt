@@ -147,6 +147,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | --- | --- |
 | Alt+1 | Go to Starred workspace |
 | Alt+1 ... 9 | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
+| Ctrl+K -&gt; Archive workspace | Hide a workspace without deleting its server sessions |
+| Ctrl+K -&gt; Archived workspaces | Pick an archived workspace to restore its sessions |
+| Ctrl+K -&gt; Delete workspace | Delete an archived workspace; press Enter again to confirm |
+| Right-click workspace pill -&gt; Archive workspace | Archive that workspace; Other stays available |
 | Ctrl+Shift+Y | Snooze this workspace until a chosen time |
 | Ctrl+K -&gt; Workspace: Wake &lt;name&gt; | Wake a snoozed workspace now and switch to it |
 | Ctrl+K -&gt; Workspace: Bring Back All Sessions | Reopen every recorded tmux session of this workspace |
@@ -272,11 +276,14 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages including waiting ones, Enter opens the right-click options, Delete cancels a waiting message, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
-| /plan or /permissions in live chat / Ctrl+K "Chat permission mode" | Choose Plan, Ask, or Accept edits for this chat; /plan selects Plan first |
+| /plan or /permissions in live chat / Ctrl+K "Chat permission mode" | Choose Plan, Ask, Accept edits, or Bypass for this chat; /plan selects Plan first |
+| Ctrl+K "Chat View: Plus Menu" | Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
+| Ctrl+K "Chat View: Model Opus / Sonnet / Haiku" | Choose the model for the next message in a live Claude chat; the plus menu has the same choices |
+| Ctrl+K "Chat View: Effort Low / Medium / High" | Choose the effort for the next message in a live Claude chat; the plus menu has the same choices |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
 | 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |
@@ -318,7 +325,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K → Crash Reports: Open Folder | Open the folder with crash reports saved after a crash (the app also reopens itself) |
 | Ctrl+K → Hibernate Browser Panes Now | Immediately hibernate every parked, unpinned browser pane |
 | Ctrl+K -&gt; External Browser Links When Pane Off | Toggle desktop browser for HTTP(S) links when the session pane is off (default on) |
-| Ctrl+K → Close All Browser Panes | Close browser panes in every workspace and keep their saved URLs |
+| Ctrl+K → Close All Browser Panes | Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's dedicated browser profile |
 | Ctrl+K → Browser: Insert Agent Instructions | Paste the multiprompt-browser guide into the active shell |
 | URL bar (click strip above pane) | Type a URL and press Enter to navigate the docked pane |
 | Ctrl+Click URL in shell | Open link in the docked browser pane (was: default browser) |

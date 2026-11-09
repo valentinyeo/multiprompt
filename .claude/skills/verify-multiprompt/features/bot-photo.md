@@ -17,6 +17,8 @@ IGSH-1541 adds the real Alt+S / Alt+1 Starred path, pins the selected bot there,
 Before launching Multiprompt, an independent legacy Windows file picker must pass the identical Alt+Tab and file-entry sequence against a separate blank window. It records the actual selected path. This distinguishes driver/native-dialog failures from app behavior.
 
 The upload and Cancel paths each Alt+Tab away to a separate, job-owned blank window and back three times with the native picker open. Real keyboard input must return to the same visible, enabled picker owned by the main app window, without focus repair. Each cycle records before/away/return screenshots and independently read native ownership, foreground and enabled state. Upload then proves persisted image pixels; Cancel proves the dialog is destroyed, the main window is enabled and Ctrl+K accepts another query. Both owned jobs must clean up to zero processes.
+IGSH-1894 adds an edge check to every photo crop. The top-left quarter, two pixels in from the crop border, must hold at least max(4, size/8) pixels blended between the photo and the background behind it. An aliased circle has none. Each crop is also saved 8x enlarged as `<name>-zoom.png`, and `result.json` records the blend count per crop under `edges`. Dispatching with `feature=bot-photo` runs at 96 and 144 DPI through the same real monitor scaling as the title-bar journey, and the expanded avatar must measure 36 px times the DPI scale.
+
 ### Recorded desktop proof
 
 - Positive: [41933658328](https://github.com/valentinyeo/multiprompt/actions/runs/41933658328), app/harness/embedded revision `a1f75a771853c63495f95410314e0d190b276da8`. All 67 checks passed; cleanup reported zero owned processes.

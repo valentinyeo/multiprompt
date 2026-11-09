@@ -673,6 +673,8 @@ pub fn themeTitleBarBg() DWORD {
     return themeSidebarBg();
 }
 
+pub const DARK_WINDOW_OUTLINE: DWORD = RGB(86, 86, 86);
+
 pub fn applyTitleBarTheme() void {
     if (app_state.g_main_hwnd == null) return;
     const DWMWA_USE_IMMERSIVE_DARK_MODE: DWORD = 20;
@@ -688,7 +690,7 @@ pub fn applyTitleBarTheme() void {
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&dark_mode), @sizeOf(BOOL));
         const text_color: DWORD = RGB(208, 214, 224);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
-        const border_color: DWORD = multipromptColorOr("border_bg", RGB(35, 37, 42));
+        const border_color: DWORD = DARK_WINDOW_OUTLINE;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_BORDER_COLOR, @ptrCast(&border_color), @sizeOf(DWORD));
         return;
     }
@@ -698,7 +700,7 @@ pub fn applyTitleBarTheme() void {
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&dark_mode), @sizeOf(BOOL));
         const text_color: DWORD = RGB(255, 255, 255);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
-        const border_color: DWORD = app_state.g_dev_theme.border_bg;
+        const border_color: DWORD = DARK_WINDOW_OUTLINE;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_BORDER_COLOR, @ptrCast(&border_color), @sizeOf(DWORD));
         return;
     }
@@ -714,7 +716,7 @@ pub fn applyTitleBarTheme() void {
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, @ptrCast(&dark_mode), @sizeOf(BOOL));
         const text_color: DWORD = RGB(255, 255, 255);
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_TEXT_COLOR, @ptrCast(&text_color), @sizeOf(DWORD));
-        const border_color: DWORD = if (app_state.g_amoled_theme) RGB(0, 0, 0) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(104, 104, 104) else RGB(86, 86, 86);
+        const border_color: DWORD = if (app_state.g_mid_theme) RGB(104, 104, 104) else DARK_WINDOW_OUTLINE;
         _ = DwmSetWindowAttribute(app_state.g_main_hwnd, DWMWA_BORDER_COLOR, @ptrCast(&border_color), @sizeOf(DWORD));
     }
 }

@@ -1036,9 +1036,13 @@ fn chatAcLayout() void {
     const layout = chatViewLayout();
     const row_h = uiScaled(32);
     const rows: i32 = @intCast(@min(app_state.g_chat_ac.count, 8));
-    const height = @max(uiScaled(54), rows * row_h + uiScaled(30));
+    const height = @max(row_h + chatAcPad() * 2, rows * row_h + chatAcPad() * 2);
     const top = @max(layout.transcript.top, layout.composer_card.top - uiScaled(6) - height);
-    _ = MoveWindow(app_state.g_chat_ac_hwnd, layout.composer_card.left, top, layout.composer_card.right - layout.composer_card.left, layout.composer_card.top - uiScaled(6) - top, 1);
+    const ac_w = layout.composer_card.right - layout.composer_card.left;
+    const ac_h = layout.composer_card.top - uiScaled(6) - top;
+    _ = MoveWindow(app_state.g_chat_ac_hwnd, layout.composer_card.left, top, ac_w, ac_h, 1);
+    const ac_region = @import("win32.zig").CreateRoundRectRgn(0, 0, ac_w + 1, ac_h + 1, chatAcRadius() * 2, chatAcRadius() * 2);
+    if (ac_region != null and @import("win32.zig").SetWindowRgn(app_state.g_chat_ac_hwnd, ac_region, 1) == 0) _ = DeleteObject(ac_region);
     _ = SetWindowPos(app_state.g_chat_ac_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     _ = InvalidateRect(app_state.g_chat_ac_hwnd, null, 0);
 }
@@ -1066,36 +1070,64 @@ fn chatAcPaint(hwnd: HANDLE) void {
         _ = SelectObject(memory, old_bitmap);
     };
     const dc = if (old_bitmap != null) memory else target;
-    const background = CreateSolidBrush(customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(250, 250, 252) else RGB(38, 40, 47)));
+    const menu_colors = @import("more_menu.zig").colors();
+    const background = CreateSolidBrush(menu_colors.outline);
     _ = FillRect(dc, &rc, background);
+    const edge = @max(1, uiScaled(1));
+    @import("smooth.zig").fillRoundRect(dc, .{ .left = edge, .top = edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, chatAcRadius() - edge, menu_colors.panel);
     if (@import("builtin").is_test and @import("win32.zig").WindowFromDC(dc) == hwnd) chat_ac_window_clears += 1;
     _ = DeleteObject(background);
     _ = SelectObject(dc, ensureChatFont());
     _ = SetBkMode(dc, TRANSPARENT);
     const slot = &app_state.g_chat_ac_slots[app_state.g_chat_ac.slot];
     const row_h = uiScaled(32);
+    const mentioning = app_state.g_chat_ac.token.mode == .file;
     if (app_state.g_chat_ac.count == 0) {
-        const text = if (slot.pending != 0 or slot.status == .loading) "Loading commands from VPS..." else if (slot.status == .@"error") "Commands unavailable: the VPS helper is not installed" else "No matches";
-        var line = RECT{ .left = uiScaled(12), .top = 0, .right = rc.right - uiScaled(12), .bottom = row_h };
-        _ = SetTextColor(dc, customColorOr("hint", RGB(135, 139, 147)));
+        const text = if (mentioning) "No matches" else if (slot.pending != 0 or slot.status == .loading) "Loading commands from VPS..." else if (slot.status == .@"error") "Commands unavailable: the VPS helper is not installed" else "No matches";
+        var line = RECT{ .left = uiScaled(14), .top = chatAcPad(), .right = rc.right - uiScaled(14), .bottom = chatAcPad() + row_h };
+        _ = SetTextColor(dc, menu_colors.hint);
         drawAscii(dc, text, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
+    if (mentioning) {
+        const rows = @import("chat_mention.zig").shownRows();
+        for (0..@min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top)) |v| {
+            const i = v + app_state.g_chat_ac.top;
+            if (i >= rows.len) break;
+            const y: i32 = @intCast(v);
+            const top = chatAcPad() + y * row_h;
+            if (i == app_state.g_chat_ac.sel) {
+                @import("smooth.zig").fillRoundRect(dc, .{ .left = uiScaled(6), .top = top + uiScaled(2), .right = rc.right - uiScaled(6), .bottom = top + row_h - uiScaled(2) }, uiScaled(10), menu_colors.raised);
+            }
+            const size = uiScaled(18);
+            const avatar = RECT{ .left = uiScaled(16), .top = top + @divTrunc(row_h - size, 2), .right = uiScaled(16) + size, .bottom = top + @divTrunc(row_h - size, 2) + size };
+            if (rows[i].index < app_state.shell_count) {
+                const shell = &app_state.shells[rows[i].index];
+                if (!@import("bot_photo.zig").draw(shell, dc, avatar)) @import("bot_avatar.zig").draw(dc, avatar, @import("bot_avatar.zig").forShell(shell));
+            }
+            var wide_name: [192]u16 = undefined;
+            const name_len = std.unicode.utf8ToUtf16Le(&wide_name, rows[i].name) catch 0;
+            var name_rc = RECT{ .left = avatar.right + uiScaled(10), .top = top, .right = rc.right - uiScaled(56), .bottom = top + row_h };
+            _ = SetTextColor(dc, menu_colors.text);
+            _ = chatDrawText(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            var kind_rc = RECT{ .left = rc.right - uiScaled(56), .top = top, .right = rc.right - uiScaled(16), .bottom = top + row_h };
+            _ = SetTextColor(dc, menu_colors.hint);
+            drawAscii(dc, "Bot", &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+        }
+    }
     for (0..@min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top)) |v| {
+        if (mentioning) break;
         const i = v + app_state.g_chat_ac.top;
         const entry = slot.entries[app_state.g_chat_ac.idx[i]];
         const y: i32 = @intCast(v);
-        const top = y * row_h;
+        const top = chatAcPad() + y * row_h;
         if (i == app_state.g_chat_ac.sel) {
-            const selected = CreateSolidBrush(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)));
-            var strip = RECT{ .left = 0, .top = top, .right = rc.right, .bottom = top + row_h };
-            _ = FillRect(dc, &strip, selected);
-            _ = DeleteObject(selected);
+            @import("smooth.zig").fillRoundRect(dc, .{ .left = uiScaled(6), .top = top + uiScaled(2), .right = rc.right - uiScaled(6), .bottom = top + row_h - uiScaled(2) }, uiScaled(10), menu_colors.raised);
         }
         var name: [257]u8 = undefined;
         const prefix = if (entry.kind == 'K') "$" else "/";
         const title = std.fmt.bufPrint(&name, "{s}{s}", .{ prefix, entry.name }) catch entry.name;
-        var name_rc = RECT{ .left = uiScaled(12), .top = top, .right = @divTrunc(rc.right, 3), .bottom = top + row_h };
-        _ = SetTextColor(dc, customColorOr("text", if (app_state.g_light_theme) RGB(30, 35, 44) else RGB(232, 235, 243)));
+        var name_rc = RECT{ .left = uiScaled(16), .top = top, .right = @divTrunc(rc.right, 3), .bottom = top + row_h };
+        _ = SetTextColor(dc, menu_colors.text);
         var wide_name: [257]u16 = undefined;
         const name_len = std.unicode.utf8ToUtf16Le(&wide_name, title) catch 0;
         _ = chatDrawText(dc, &wide_name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
@@ -1110,7 +1142,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
         };
         const tag_width = if (!live_interactive and std.mem.eql(u8, entry.hint, "opens in terminal")) uiScaled(142) else uiScaled(82);
         var hint_rc = RECT{ .left = @divTrunc(rc.right, 3), .top = top, .right = rc.right - tag_width, .bottom = top + row_h };
-        _ = SetTextColor(dc, customColorOr("hint", if (app_state.g_light_theme) RGB(100, 108, 118) else RGB(167, 171, 181)));
+        _ = SetTextColor(dc, menu_colors.hint);
         var hint_text: [512]u8 = undefined;
         const hint = if (entry.hint.len != 0 and !std.mem.eql(u8, entry.hint, "opens in terminal"))
             std.fmt.bufPrint(&hint_text, "{s}  {s}", .{ entry.hint, entry.desc }) catch entry.desc
@@ -1119,15 +1151,18 @@ fn chatAcPaint(hwnd: HANDLE) void {
         var wide_hint: [512]u16 = undefined;
         const hint_len = std.unicode.utf8ToUtf16Le(&wide_hint, hint) catch 0;
         _ = chatDrawText(dc, &wide_hint, @intCast(hint_len), &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        var tag_rc = RECT{ .left = rc.right - tag_width, .top = top, .right = rc.right - uiScaled(12), .bottom = top + row_h };
+        var tag_rc = RECT{ .left = rc.right - tag_width, .top = top, .right = rc.right - uiScaled(16), .bottom = top + row_h };
         drawAscii(dc, tag, &tag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
     }
-    var footer: [96]u8 = undefined;
-    const label = std.fmt.bufPrint(&footer, "Tab or Enter to insert | Esc to close | {d} matches", .{app_state.g_chat_ac.count}) catch "Tab or Enter to insert | Esc to close";
-    var footer_rc = RECT{ .left = uiScaled(12), .top = rc.bottom - uiScaled(30), .right = rc.right - uiScaled(12), .bottom = rc.bottom };
-    _ = SetTextColor(dc, customColorOr("hint", RGB(135, 139, 147)));
-    drawAscii(dc, label, &footer_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     if (dc != target) _ = w.BitBlt(target, 0, 0, rc.right, rc.bottom, dc, 0, 0, w.GDI_SRCCOPY);
+}
+
+fn chatAcRadius() i32 {
+    return uiScaled(14);
+}
+
+fn chatAcPad() i32 {
+    return uiScaled(6);
 }
 
 fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
@@ -1145,8 +1180,8 @@ fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
             if (!list_input.skills.hover()) return 0;
             var client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &client);
-            if (GET_Y(lp) < 0 or GET_Y(lp) >= client.bottom - uiScaled(30)) return 0;
-            const row: usize = @intCast(@max(0, @divFloor(GET_Y(lp), @max(1, uiScaled(32)))));
+            if (GET_Y(lp) < chatAcPad() or GET_Y(lp) >= client.bottom - chatAcPad()) return 0;
+            const row: usize = @intCast(@max(0, @divFloor(GET_Y(lp) - chatAcPad(), @max(1, uiScaled(32)))));
             const idx = row + app_state.g_chat_ac.top;
             if (row < @min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top) and idx != app_state.g_chat_ac.sel) {
                 app_state.g_chat_ac.sel = idx;
@@ -1158,8 +1193,8 @@ fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
         WM_LBUTTONDOWN => {
             var client: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &client);
-            if (GET_Y(lp) < 0 or GET_Y(lp) >= client.bottom - uiScaled(30)) return 0;
-            const row: usize = @intCast(@max(0, @divFloor(GET_Y(lp), @max(1, uiScaled(32)))));
+            if (GET_Y(lp) < chatAcPad() or GET_Y(lp) >= client.bottom - chatAcPad()) return 0;
+            const row: usize = @intCast(@max(0, @divFloor(GET_Y(lp) - chatAcPad(), @max(1, uiScaled(32)))));
             if (row < @min(8, app_state.g_chat_ac.count -| app_state.g_chat_ac.top)) {
                 app_state.g_chat_ac.sel = row + app_state.g_chat_ac.top;
                 chatAcRememberSelection();
@@ -1189,6 +1224,22 @@ fn chatAcRememberSelection() void {
         app_state.g_chat_ac.selected_len = 0;
         return;
     }
+    if (app_state.g_chat_ac.token.mode == .file) {
+        const rows = @import("chat_mention.zig").shownRows();
+        if (app_state.g_chat_ac.sel >= rows.len) {
+            app_state.g_chat_ac.selected_len = 0;
+            return;
+        }
+        const name = rows[app_state.g_chat_ac.sel].name;
+        if (name.len > app_state.g_chat_ac.selected_name.len) {
+            app_state.g_chat_ac.selected_len = 0;
+            return;
+        }
+        app_state.g_chat_ac.selected_len = name.len;
+        app_state.g_chat_ac.selected_kind = 'M';
+        @memcpy(app_state.g_chat_ac.selected_name[0..name.len], name);
+        return;
+    }
     const entry = app_state.g_chat_ac_slots[app_state.g_chat_ac.slot].entries[app_state.g_chat_ac.idx[app_state.g_chat_ac.sel]];
     app_state.g_chat_ac.selected_len = entry.name.len;
     app_state.g_chat_ac.selected_kind = entry.kind;
@@ -1207,6 +1258,28 @@ fn chatAcMove(amount: i32) void {
 }
 
 fn chatAcRank(text: []const u16, token: chat_complete.Token) void {
+    if (token.mode == .file) {
+        var query_buf: [800]u8 = undefined;
+        const query = if (token.end > token.start and token.end - token.start <= 200)
+            query_buf[0 .. std.unicode.utf16LeToUtf8(&query_buf, text[token.start + 1 .. token.end]) catch 0]
+        else
+            "";
+        const rows = @import("chat_mention.zig").show(if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null, query);
+        const same_query = app_state.g_chat_ac.query_len == query.len and std.mem.eql(u8, app_state.g_chat_ac.query[0..app_state.g_chat_ac.query_len], query);
+        app_state.g_chat_ac.count = rows.len;
+        for (0..rows.len) |i| app_state.g_chat_ac.idx[i] = @intCast(i);
+        if (!same_query or app_state.g_chat_ac.sel >= rows.len) {
+            app_state.g_chat_ac.sel = 0;
+            app_state.g_chat_ac.top = 0;
+        }
+        if (app_state.g_chat_ac.sel < app_state.g_chat_ac.top) app_state.g_chat_ac.top = app_state.g_chat_ac.sel;
+        if (app_state.g_chat_ac.sel >= app_state.g_chat_ac.top + 8) app_state.g_chat_ac.top = app_state.g_chat_ac.sel - 7;
+        app_state.g_chat_ac.query_len = query.len;
+        @memcpy(app_state.g_chat_ac.query[0..query.len], query);
+        chatAcRememberSelection();
+        chatAcLayout();
+        return;
+    }
     const slot = &app_state.g_chat_ac_slots[app_state.g_chat_ac.slot];
     var query_buf: [800]u8 = undefined;
     const query = if (token.end > token.start and token.end - token.start <= 200)
@@ -1356,28 +1429,39 @@ fn chatAcOnComposerChanged() void {
         return;
     }
     const agent = chatAcAgent();
-    if (agent == .other or app_state.active_shell >= app_state.shell_count) {
-        chatAcClose();
-        return;
-    }
-    const shell = &app_state.shells[app_state.active_shell];
-    if (!isRemoteShellKind(shell.kind)) {
-        chatAcClose();
-        return;
-    }
     var text: [16384]u16 = undefined;
     const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
     if (n < 0) return;
     const current = text[0..@intCast(n)];
-    if (app_state.g_chat_ac_skill_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len])) app_state.g_chat_ac_skill_command_len = 0;
-    if (app_state.g_chat_ac_dialog_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) app_state.g_chat_ac_dialog_len = 0;
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        if (app_state.g_chat_ac_skill_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len])) app_state.g_chat_ac_skill_command_len = 0;
+        if (app_state.g_chat_ac_dialog_shell_id != shell.shell_id or !std.mem.startsWith(u16, current, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) app_state.g_chat_ac_dialog_len = 0;
+    }
     var caret: u32 = 0;
     _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&caret), 0);
-    const token = if (app_state.g_chat_ac.browse) app_state.g_chat_ac.token else chat_complete.tokenAtCaret(text[0..@intCast(n)], @min(caret, @as(u32, @intCast(n))), agent) orelse {
+    const lookup: chat_complete.Agent = if (agent == .other) .claude else agent;
+    const token = if (app_state.g_chat_ac.browse) app_state.g_chat_ac.token else chat_complete.tokenAtCaret(current, @min(caret, @as(u32, @intCast(n))), lookup) orelse {
         chatAcClose();
         return;
     };
     if (token.mode == .file) {
+        const fragment = current[token.start..token.end];
+        if (app_state.g_chat_ac.dismissed and app_state.g_chat_ac.dismissed_start == token.start and fragment.len == app_state.g_chat_ac.dismissed_len and
+            std.mem.eql(u16, fragment, app_state.g_chat_ac.dismissed_text[0..app_state.g_chat_ac.dismissed_len])) return;
+        app_state.g_chat_ac.dismissed = false;
+        const opening = !app_state.g_chat_ac.open or app_state.g_chat_ac.token.start != token.start or app_state.g_chat_ac.token.mode != .file;
+        if (opening) {
+            app_state.g_chat_ac.query_len = 0;
+            app_state.g_chat_ac.selected_len = 0;
+        }
+        if (!app_state.g_chat_ac.open) list_input.skills.keyboard();
+        app_state.g_chat_ac.open = true;
+        app_state.g_chat_ac.token = token;
+        chatAcRank(current, token);
+        return;
+    }
+    if (agent == .other or app_state.active_shell >= app_state.shell_count or !isRemoteShellKind(app_state.shells[app_state.active_shell].kind)) {
         chatAcClose();
         return;
     }
@@ -1435,8 +1519,13 @@ pub fn chatAcOpenBrowse() void {
 
 fn chatAcAccept() bool {
     if (!app_state.g_chat_ac.open or app_state.g_chat_ac.count == 0 or app_state.g_chat_composer_hwnd == null) return false;
-    const slot = &app_state.g_chat_ac_slots[app_state.g_chat_ac.slot];
-    const entry = slot.entries[app_state.g_chat_ac.idx[app_state.g_chat_ac.sel]];
+    const mentioning = app_state.g_chat_ac.token.mode == .file;
+    const entry: chat_complete.Entry = if (mentioning) blk: {
+        const rows = @import("chat_mention.zig").shownRows();
+        if (app_state.g_chat_ac.sel >= rows.len) return false;
+        const row = rows[app_state.g_chat_ac.sel];
+        break :blk .{ .kind = 'M', .name = row.name, .hint = row.session, .desc = "" };
+    } else app_state.g_chat_ac_slots[app_state.g_chat_ac.slot].entries[app_state.g_chat_ac.idx[app_state.g_chat_ac.sel]];
     var insertion: [512]u8 = undefined;
     const ins = chat_complete.insertionFor(chatAcAgent(), app_state.g_chat_ac.token.mode, entry, &insertion);
     if (ins.len == 0) return false;
@@ -1458,8 +1547,10 @@ fn chatAcAccept() bool {
     app_state.g_chat_skill_body_len = 0;
     app_state.g_chat_ac_dialog_len = 0;
     app_state.g_chat_ac_skill_command_len = 0;
-    app_state.g_chat_ac_dialog_shell_id = app_state.shells[app_state.active_shell].shell_id;
-    app_state.g_chat_ac_skill_shell_id = app_state.g_chat_ac_dialog_shell_id;
+    if (app_state.active_shell < app_state.shell_count) {
+        app_state.g_chat_ac_dialog_shell_id = app_state.shells[app_state.active_shell].shell_id;
+        app_state.g_chat_ac_skill_shell_id = app_state.g_chat_ac_dialog_shell_id;
+    }
     if ((entry.kind == 'S' or entry.kind == 'K') and ilen <= app_state.g_chat_ac_skill_command.len) {
         app_state.g_chat_ac_skill_command_len = ilen;
         @memcpy(app_state.g_chat_ac_skill_command[0..ilen], wide[0..ilen]);
@@ -1468,11 +1559,12 @@ fn chatAcAccept() bool {
         app_state.g_chat_ac_dialog_len = ilen;
         @memcpy(app_state.g_chat_ac_dialog_command[0..ilen], wide[0..ilen]);
     }
+    const a: usize = if (chatAcAgent() == .codex) 1 else 0;
+    chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], entry.name);
+    if (entry.kind == 'M') @import("chat_mention.zig").remember(entry.name, entry.hint);
     chatAcClose();
     _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&output));
     _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, applied.caret, @intCast(applied.caret));
-    const a: usize = if (chatAcAgent() == .codex) 1 else 0;
-    chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], entry.name);
     saveSession();
     chatAcOnComposerChanged();
     return true;
@@ -1575,6 +1667,10 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
         return 0;
     }
+    if (msg == WM_KEYDOWN and @import("plus_menu.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
+        return 0;
+    }
     if (msg == WM_KEYDOWN and !isCtrlDown()) {
         const down = @as(i16, @bitCast(@as(u16, 0x8000)));
         if ((GetAsyncKeyState(0x10) & down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & down) == 0 and @import("chat_render.zig").chatPermissionDigitKey(wp)) {
@@ -1597,6 +1693,9 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (@import("chat_render.zig").chatNavKey(nav_action)) {
             if (nav_action == .open) dropPendingActivationChar(hwnd, 0x0D);
             return 0;
+        }
+        if (nav_action == .none and wp == 0x2E and GetWindowTextLengthW(hwnd) == 0 and !isCtrlDown() and (GetAsyncKeyState(0x10) & key_down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) == 0) {
+            if (@import("chat_render.zig").chatRemoveActiveTabNotSent()) return 0;
         }
     }
     if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
@@ -2906,7 +3005,7 @@ test "IGSH-922 slash filtering presents one completed popup frame" {
         if (expected_count > 0) {
             const dc = GetDC(popup) orelse return error.TestUnexpectedResult;
             defer _ = ReleaseDC(popup, dc);
-            try std.testing.expectEqual(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)), w.GetPixel(dc, 2, 2));
+            try std.testing.expectEqual(@import("more_menu.zig").colors().raised, w.GetPixel(dc, uiScaled(10), chatAcPad() + @divTrunc(uiScaled(32), 2)));
         }
     }
     std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ inline_paints, queued_paints, chat_ac_window_clears - clears_before });

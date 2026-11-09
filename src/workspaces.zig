@@ -276,6 +276,7 @@ pub fn addOrUpdateWorkspace(id: []const u8, name: []const u8, restore: bool) voi
         app_state.g_workspace_count += 1;
         app_state.g_workspaces[ni].host = std.mem.zeroes([64]u8);
         app_state.g_workspaces[ni].host_len = 0;
+        app_state.g_workspaces[ni].archived = false;
         break :blk ni;
     };
     const e = &app_state.g_workspaces[idx];
@@ -405,8 +406,18 @@ fn parseWorkspaceRegistryJson(json: []const u8) void {
         const name_len = json_reader.copyString(obj, "name", &name_buf);
         const host_len = json_reader.copyString(obj, "host", &host_buf);
         const restore = !json_reader.boolFalse(obj, "restore");
-        if (id_len > 0) addOrUpdateWorkspaceHosted(id_buf[0..id_len], name_buf[0..name_len], restore, host_buf[0..host_len]);
+        if (id_len > 0) {
+            addOrUpdateWorkspaceHosted(id_buf[0..id_len], name_buf[0..name_len], restore, host_buf[0..host_len]);
+            if (findWorkspace(id_buf[0..id_len])) |wi| app_state.g_workspaces[wi].archived = json_reader.boolTrue(obj, "archived");
+        }
     }
+}
+
+fn readWorkspaceRegistryBytes(path: []const u8, buf: []u8) ?usize {
+    if (@import("file_io.zig").copyQueuedWrite(path, buf)) |n| return n;
+    const h = win32OpenRead(path) orelse return null;
+    defer _ = CloseHandle(h);
+    return win32ReadAll(h, buf);
 }
 
 pub fn loadWorkspaceRegistry() bool {
@@ -415,11 +426,8 @@ pub fn loadWorkspaceRegistry() bool {
     app_state.g_workspace_count = 0;
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return false;
-    const h = win32OpenRead(path) orelse return false;
-    defer _ = CloseHandle(h);
-
     var buf: [8192]u8 = undefined;
-    const n = win32ReadAll(h, &buf);
+    const n = readWorkspaceRegistryBytes(path, &buf) orelse return false;
     if (n == 0) return true;
     parseWorkspaceRegistryJson(buf[0..n]);
     return true;
@@ -430,10 +438,8 @@ pub fn mergeWorkspaceRegistryFromDisk() void {
     defer unlockWorkspaceRegistry(registry_lock);
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return;
-    const h = win32OpenRead(path) orelse return;
-    defer _ = CloseHandle(h);
     var buf: [8192]u8 = undefined;
-    const n = win32ReadAll(h, &buf);
+    const n = readWorkspaceRegistryBytes(path, &buf) orelse return;
     if (n == 0) return;
     app_state.g_workspace_count = 0;
     parseWorkspaceRegistryJson(buf[0..n]);
@@ -522,6 +528,11 @@ fn writeWorkspaceRegistryFile() void {
         const rv = if (e.restore) "true" else "false";
         @memcpy(json[pos .. pos + rv.len], rv);
         pos += rv.len;
+        if (e.archived) {
+            const flag = ",\"archived\":true";
+            @memcpy(json[pos .. pos + flag.len], flag);
+            pos += flag.len;
+        }
         if (e.host_len > 0) {
             const p4 = ",\"host\":\"";
             @memcpy(json[pos .. pos + p4.len], p4);
@@ -544,17 +555,16 @@ pub fn workspaceCanDelete(wi: u32) bool {
     const e = &app_state.g_workspaces[wi];
     const id = e.id[0..e.id_len];
     if (id.len == 0) return false;
-    if (std.mem.eql(u8, id, getInstanceName())) return false;
-    if (e.host_len > 0) {
-        return entryHostedBy(e, getInstanceName()) and app_state.g_single_window and
-            app_state.g_lws_count > 1 and findMyWorkspaceSlot(id) != null;
-    }
-    return true;
+    if (std.mem.eql(u8, id, "default") or std.mem.eql(u8, id, getInstanceName())) return false;
+    if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) return app_state.g_lws_count > 1;
+    if (!e.archived) return false;
+    return e.host_len == 0;
 }
 
 fn workspaceCanOpen(wi: u32) bool {
     if (wi >= app_state.g_workspace_count) return false;
     const e = &app_state.g_workspaces[wi];
+    if (e.archived) return false;
     const id = e.id[0..e.id_len];
     if (id.len == 0) return false;
     if (std.mem.eql(u8, id, getInstanceName())) return false;
@@ -835,30 +845,134 @@ fn archiveWorkspaceFile(path: []const u8, stamp: []const u8) void {
     _ = win32MovePath(path, dst[0..pos]);
 }
 
-pub fn deleteWorkspaceByIndex(wi: u32) bool {
-    if (!workspaceCanDelete(wi)) return false;
+pub fn workspaceCanArchive(wi: u32) bool {
+    if (wi >= app_state.g_workspace_count) return false;
     const e = &app_state.g_workspaces[wi];
-    var id_copy: [64]u8 = std.mem.zeroes([64]u8);
-    const id_len = @min(e.id_len, id_copy.len - 1);
-    if (id_len == 0) return false;
-    @memcpy(id_copy[0..id_len], e.id[0..id_len]);
-    const id = id_copy[0..id_len];
+    if (e.archived or e.id_len == 0) return false;
+    const id = e.id[0..e.id_len];
+    if (app_state.g_single_window) {
+        if (findMyWorkspaceSlot(id)) |slot| {
+            return !isOtherWorkspaceSlot(slot) and !app_state.g_ws_snoozed[slot] and app_state.g_lws_count > 1;
+        }
+        if (std.mem.eql(u8, id, getInstanceName())) return false;
+    }
+    return e.host_len == 0;
+}
 
-    if (entryHostedBy(e, getInstanceName())) {
-        const slot = findMyWorkspaceSlot(id) orelse return false;
-        deleteMyWorkspaceSlot(slot);
+pub fn archiveWorkspaceByIndex(wi: u32) bool {
+    if (!workspaceCanArchive(wi)) return false;
+    const entry = app_state.g_workspaces[wi];
+    const id = entry.id[0..entry.id_len];
+    if (app_state.g_single_window) {
+        if (findMyWorkspaceSlot(id)) |slot| {
+            const before = app_state.g_lws_count;
+            closeMyWorkspaceSlot(slot);
+            return app_state.g_lws_count < before;
+        }
+    }
+    if (std.mem.eql(u8, id, getInstanceName())) {
+        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_archive);
         return true;
     }
-
     scanLiveWorkspaceWindows(true);
     if (findLiveWorkspaceTarget(id)) |t| {
         if (t.slot >= 0) return false;
         const target: HANDLE = @ptrFromInt(t.hwnd);
-        app_state.requestAppClose(target, .workspace_delete);
+        app_state.requestAppClose(target, .workspace_archive);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) return false;
-        Sleep(150);
+    }
+    const registry_lock = lockWorkspaceRegistry() orelse return false;
+    defer unlockWorkspaceRegistry(registry_lock);
+    mergeWorkspaceRegistryFromDisk();
+    const cur = findWorkspace(id) orelse return false;
+    app_state.g_workspaces[cur].archived = true;
+    app_state.g_workspaces[cur].restore = false;
+    writeWorkspaceRegistryFile();
+    return true;
+}
+
+pub fn archiveCurrentWorkspaceOnClose() void {
+    const registry_lock = lockWorkspaceRegistry() orelse return;
+    defer unlockWorkspaceRegistry(registry_lock);
+    mergeWorkspaceRegistryFromDisk();
+    if (findWorkspace(getInstanceName())) |wi| {
+        app_state.g_workspaces[wi].archived = true;
+        app_state.g_workspaces[wi].restore = false;
+        writeWorkspaceRegistryFile();
+    }
+}
+
+pub fn restoreArchivedWorkspaceByIndex(wi: u32) bool {
+    if (wi >= app_state.g_workspace_count or !app_state.g_workspaces[wi].archived) return false;
+    const entry = app_state.g_workspaces[wi];
+    const id = entry.id[0..entry.id_len];
+    const name = entry.name[0..entry.name_len];
+    if (app_state.g_single_window) {
+        if (app_state.g_lws_count >= MAX_LWS or !absorbWorkspaceIntoSlots(id, name)) return false;
+    } else if (spawnWorkspaceWindowAndWait(id) == null) return false;
+    const registry_lock = lockWorkspaceRegistry() orelse return false;
+    defer unlockWorkspaceRegistry(registry_lock);
+    mergeWorkspaceRegistryFromDisk();
+    const cur = findWorkspace(id) orelse return false;
+    app_state.g_workspaces[cur].archived = false;
+    writeWorkspaceRegistryFile();
+    if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
+    publishInboxState();
+    if (!app_state.g_restoring) saveSession();
+    return true;
+}
+
+fn workspaceDeleteFailed(reason: []const u8) bool {
+    debugLog2("workspace-delete result=refused reason=", reason);
+    var text: [256:0]u16 = @splat(0);
+    const len = @min(reason.len, text.len);
+    for (reason[0..len], 0..) |c, i| text[i] = c;
+    _ = @import("dialog.zig").messageBox(app_state.g_main_hwnd, &text, L("Cannot delete workspace"), 0);
+    return false;
+}
+
+pub fn deleteWorkspaceByIndex(wi: u32) bool {
+    var log: [192]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "workspace-delete attempt index={d}", .{wi}) catch "workspace-delete attempt");
+    if (wi >= app_state.g_workspace_count) return workspaceDeleteFailed("This workspace is no longer in the list. Open Delete workspace again.");
+    if (!workspaceCanDelete(wi)) {
+        const entry = &app_state.g_workspaces[wi];
+        const identity = entry.id[0..entry.id_len];
+        if (std.mem.eql(u8, identity, "default")) return workspaceDeleteFailed("Main cannot be deleted");
+        if (std.mem.eql(u8, identity, getInstanceName())) return workspaceDeleteFailed("This workspace owns the current window. Close its window before deleting it.");
+        if (identity.len == 0) return workspaceDeleteFailed("This workspace has no saved identity. Close and reopen the workspace list.");
+        if (app_state.g_single_window and findMyWorkspaceSlot(identity) != null and app_state.g_lws_count <= 1) return workspaceDeleteFailed("At least one workspace must stay open.");
+        return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
+    }
+    const e = &app_state.g_workspaces[wi];
+    var id_copy: [64]u8 = std.mem.zeroes([64]u8);
+    const id_len = @min(e.id_len, id_copy.len - 1);
+    if (id_len == 0) return workspaceDeleteFailed("This workspace has no saved identity.");
+    @memcpy(id_copy[0..id_len], e.id[0..id_len]);
+    const id = id_copy[0..id_len];
+    debugLog2("workspace-delete target=", id);
+
+    var local = false;
+    if (app_state.g_single_window) {
+        if (findMyWorkspaceSlot(id)) |slot| {
+            if (!deleteMyWorkspaceSlot(slot)) return false;
+            local = true;
+        }
+    }
+
+    scanLiveWorkspaceWindows(true);
+    if (!local) {
+        if (findLiveWorkspaceTarget(id)) |t| {
+            if (t.slot >= 0) return workspaceDeleteFailed("This workspace is open in another window. Delete it from that window.");
+            const target: HANDLE = @ptrFromInt(t.hwnd);
+            app_state.requestAppClose(target, .workspace_delete);
+            var waited: u32 = 0;
+            while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
+            if (IsWindow(target) != 0) return workspaceDeleteFailed("The other workspace window did not close. Close it and try again.");
+            Sleep(150);
+        }
     }
 
     var stamp_buf: [32]u8 = undefined;
@@ -868,12 +982,12 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     var audit_path_buf: [512]u8 = undefined;
     if (getSessionAuditPathForWorkspace(&audit_path_buf, id)) |path| archiveWorkspaceFile(path, stamp);
 
-    const registry_lock = lockWorkspaceRegistry() orelse return false;
+    const registry_lock = lockWorkspaceRegistry() orelse return workspaceDeleteFailed("The workspace list is busy. Please try again.");
     defer unlockWorkspaceRegistry(registry_lock);
     mergeWorkspaceRegistryFromDisk();
-    const cur = findWorkspace(id) orelse return true;
-    removeWorkspaceEntryAt(cur);
+    if (findWorkspace(id)) |cur| removeWorkspaceEntryAt(cur);
     writeWorkspaceRegistryFile();
+    debugLog2("workspace-delete result=deleted id=", id);
     return true;
 }
 
@@ -1048,6 +1162,10 @@ pub fn reconcileWorkspaceRegistry(force_scan: bool) bool {
     while (wi < app_state.g_workspace_count) {
         const e = &app_state.g_workspaces[wi];
         const id = e.id[0..e.id_len];
+        if (e.archived) {
+            wi += 1;
+            continue;
+        }
         var drop = false;
         if (std.mem.eql(u8, id, me)) {} else if (e.host_len > 0) {
             const host = e.host[0..e.host_len];
@@ -1525,6 +1643,7 @@ pub fn workspaceCanMoveIntoClosedStandalone(workspace_idx: u32) bool {
     if (!app_state.g_single_window or app_state.g_lws_count >= MAX_LWS) return false;
     if (workspace_idx >= app_state.g_workspace_count) return false;
     const e = &app_state.g_workspaces[workspace_idx];
+    if (e.archived) return false;
     const id = e.id[0..e.id_len];
     if (id.len == 0) return false;
     if (std.mem.eql(u8, id, getInstanceName())) return false;
@@ -4128,7 +4247,7 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     defer unlockWorkspaceRegistry(registry_lock);
     if (!app_state.g_single_window or slot >= app_state.g_lws_count) return;
     if (app_state.g_ws_snoozed[slot]) {
-        showHeaderNoticeAscii("Wake workspace before closing it", 3500, true);
+        showHeaderNoticeAscii("Wake workspace before archiving it", 3500, true);
         return;
     }
     if (isOtherWorkspaceSlot(slot)) {
@@ -4136,10 +4255,16 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
         return;
     }
     if (app_state.g_lws_count <= 1) {
-        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
+        showHeaderNoticeAscii("Create another workspace before archiving this one", 4500, true);
         return;
     }
+    const original_id = app_state.g_ws_ids[slot];
+    const original_id_len = app_state.g_ws_id_len[slot];
     ensureWorkspaceSlotId(slot);
+    if (std.mem.eql(u8, app_state.g_ws_ids[slot][0..app_state.g_ws_id_len[slot]], getInstanceName())) {
+        app_state.g_ws_id_len[slot] = 0;
+        ensureWorkspaceSlotId(slot);
+    }
     var id_copy: [32]u8 = undefined;
     const id_len = app_state.g_ws_id_len[slot];
     @memcpy(id_copy[0..id_len], app_state.g_ws_ids[slot][0..id_len]);
@@ -4152,7 +4277,9 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
 
     const exported = exportSlotSessionFile(slot);
     if (!exported) {
-        showHeaderNoticeAscii("Could not hibernate workspace - tabs left open", 4500, true);
+        app_state.g_ws_ids[slot] = original_id;
+        app_state.g_ws_id_len[slot] = original_id_len;
+        showHeaderNoticeAscii("Could not archive workspace - tabs left open", 4500, true);
         return;
     }
     var i: u32 = app_state.shell_count;
@@ -4170,14 +4297,8 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     }
     mergeWorkspaceRegistryFromDisk();
     upsertMySlotEntries();
-    if (!std.mem.eql(u8, id, "default") and workspaceNameIsDefault(name)) {
-        var stamp_buf: [32]u8 = undefined;
-        const stamp = workspaceDeleteStamp(&stamp_buf);
-        var path_buf: [512]u8 = undefined;
-        if (getSessionPathForWorkspace(&path_buf, id)) |path| archiveWorkspaceFile(path, stamp);
-    } else {
-        addOrUpdateWorkspaceHosted(id, name, false, "");
-    }
+    addOrUpdateWorkspaceHosted(id, name, false, "");
+    if (findWorkspace(id)) |wi| app_state.g_workspaces[wi].archived = true;
     syncCurrentWorkspaceToRegistry();
     writeWorkspaceRegistryFile();
     publishInboxState();
@@ -4188,17 +4309,15 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
-fn deleteMyWorkspaceSlot(slot: u8) void {
-    if (slot >= app_state.g_lws_count) return;
+fn deleteMyWorkspaceSlot(slot: u8) bool {
+    if (slot >= app_state.g_lws_count) return workspaceDeleteFailed("This workspace is no longer open.");
     if (app_state.g_ws_snoozed[slot]) {
-        showHeaderNoticeAscii("Wake workspace before deleting it", 3500, true);
-        return;
+        return workspaceDeleteFailed("Wake workspace before deleting it");
     }
     if (isOtherWorkspaceSlot(slot)) {
-        showHeaderNoticeAscii("Other is the permanent catch-all", 3500, true);
-        return;
+        return workspaceDeleteFailed("Other is the permanent catch-all and cannot be deleted.");
     }
-    if (rejectPinnedWorkspaceClose(slot)) return;
+    if (rejectPinnedWorkspaceClose(slot)) return workspaceDeleteFailed("Unpin the sessions in this workspace before deleting it.");
     var i: u32 = app_state.shell_count;
     while (i > 0) {
         i -= 1;
@@ -4219,6 +4338,7 @@ fn deleteMyWorkspaceSlot(slot: u8) void {
     updateMainWindowTitle();
     repositionActive();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
 }
 
 fn importWorkspaceGroups(json: []const u8, tabs: []SavedTab) bool {
@@ -4631,6 +4751,7 @@ fn collapseOtherWindowsIntoThis() void {
 pub fn openWorkspaceByIndex(workspace_idx: usize) void {
     if (workspace_idx < app_state.g_workspace_count) {
         const e = &app_state.g_workspaces[workspace_idx];
+        if (e.archived) return;
         var id_copy: [64]u8 = std.mem.zeroes([64]u8);
         const id_len = @min(e.id_len, id_copy.len - 1);
         if (id_len > 0) @memcpy(id_copy[0..id_len], e.id[0..id_len]);

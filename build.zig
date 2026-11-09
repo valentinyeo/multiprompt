@@ -316,6 +316,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&pane_spacing_tests.step);
     const chat_reader_tests = b.addSystemCommand(&.{ "python3", "tools/chat-history-reader-test.py" });
     vps_test_step.dependOn(&chat_reader_tests.step);
+    const message_id_tests = b.addSystemCommand(&.{ "python3", "tools/message-id-delivery-test.py" });
+    vps_test_step.dependOn(&message_id_tests.step);
     const mp_send_tests = b.addSystemCommand(&.{ "python3", "tools/mp-send-test.py" });
     vps_test_step.dependOn(&mp_send_tests.step);
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js" });
@@ -390,6 +392,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
+    const chat_last_batch_time_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-last-batch-time.test.js" });
+    test_step.dependOn(&chat_last_batch_time_tests.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
     test_step.dependOn(&chat_backfill_fairness_tests.step);
     vps_test_step.dependOn(&chat_backfill_fairness_tests.step);
@@ -643,6 +647,10 @@ pub fn build(b: *std.Build) void {
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
+    const instant_chat_tests = b.addSystemCommand(&.{ "node", "--test", "tools/igsh-1815-open-instant.test.js" });
+    instant_chat_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&instant_chat_tests.step);
+    vps_test_step.dependOn(&instant_chat_tests.step);
     const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js", "tools/font-probe.test.js", "tools/chat-font-weight.test.js", "tools/file-picker-font-hook.test.js" });
     test_step.dependOn(&one_font_tests.step);
     vps_test_step.dependOn(&one_font_tests.step);
@@ -676,6 +684,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&external_browser_links_tests.step);
     const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
     test_step.dependOn(&close_all_browser_panes_tests.step);
+    const close_all_browser_processes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-processes.test.js" });
+    close_all_browser_processes_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&close_all_browser_processes_tests.step);
+    const footprint_telemetry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/footprint-telemetry.test.js" });
+    footprint_telemetry_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&footprint_telemetry_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });
@@ -750,6 +764,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&sidebar_drag_pin_tests.step);
     const session_lock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-lock.test.js" });
     test_step.dependOn(&session_lock_tests.step);
+    const inbox_pinned_archive_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-pinned-archive.test.js" });
+    test_step.dependOn(&inbox_pinned_archive_tests.step);
     const agent_recognition_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-recognition.test.js" });
     test_step.dependOn(&agent_recognition_tests.step);
     const capacity_guardian_tests = b.addSystemCommand(&.{ "node", "--test", "tools/capacity-guardian.test.js" });

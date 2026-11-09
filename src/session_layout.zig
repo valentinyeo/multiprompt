@@ -14,6 +14,7 @@ pub fn decodeTransferColor(value: u8) ?u8 {
 }
 
 pub const max_bytes = 1024 * 1024;
+pub const max_groups = 16;
 pub const Host = @import("account_hosts.zig").Host;
 pub const Workspace = struct { name: []const u8, color: ?u8 = null };
 
@@ -25,6 +26,7 @@ pub const Tab = struct {
     name: []const u8,
     manual: bool = false,
     group: ?[]const u8 = null,
+    starred_group: ?[]const u8 = null,
     favorite: ?bool = null,
     muted: ?bool = null,
     used: ?u64 = null,
@@ -45,6 +47,7 @@ pub const Layout = struct {
     tabs: []const Tab,
     hosts: ?[]const Host = null,
     removed_hosts: ?[]const u8 = null,
+    group_order: ?[]const []const u8 = null,
 
     pub fn jsonStringify(self: Layout, json: anytype) !void {
         try json.beginObject();
@@ -94,6 +97,13 @@ pub fn validate(layout: Layout) !void {
     if (layout.schema != 1 or layout.workspaces.len > 64 or layout.tabs.len > 4096) return error.InvalidLayout;
     if (layout.removed_hosts) |removed| try @import("account_hosts.zig").validateRemoved(removed);
     if (layout.hosts) |hosts| try @import("account_hosts.zig").validate(hosts);
+    if (layout.group_order) |names| {
+        if (names.len > max_groups) return error.InvalidLayout;
+        for (names, 0..) |name, i| {
+            if (!validText(name, 64)) return error.InvalidLayout;
+            for (names[0..i]) |old| if (std.mem.eql(u8, old, name)) return error.InvalidLayout;
+        }
+    }
     for (layout.workspaces, 0..) |ws, i| {
         if (ws.color != null and ws.color.? >= color_count) return error.InvalidLayout;
         if (ws.name.len > 32 or !validText(ws.name, 32)) return error.InvalidLayout;
@@ -103,6 +113,7 @@ pub fn validate(layout: Layout) !void {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
         if (tab.group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
+        if (tab.starred_group) |group| if (group.len > 0 and !validText(group, 64)) return error.InvalidLayout;
         if (tab.face) |face| {
             if (face >= 20) return error.InvalidLayout;
         }
@@ -203,7 +214,7 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
     if (workspaces.items.len > max_workspaces or tabs.items.len > max_tabs) return error.LayoutCapacity;
     const ws = try workspaces.toOwnedSlice(a);
     errdefer a.free(ws);
-    return .{ .settings = server.settings, .revision = server.revision, .hosts = server.hosts, .removed_hosts = server.removed_hosts, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = server.settings, .revision = server.revision, .hosts = server.hosts, .removed_hosts = server.removed_hosts, .group_order = server.group_order, .workspaces = ws, .tabs = try tabs.toOwnedSlice(a) };
 }
 
 fn freeMerge(a: Allocator, layout: Layout) void {
@@ -659,4 +670,55 @@ test "IGSH-1533 tab white and auto round trip and invalid color fails" {
     try std.testing.expectEqual(@as(?u8, 7), restored.value.tabs[0].color);
     try std.testing.expectError(error.InvalidLayout, parse(a, "{\"workspaces\":[{\"name\":\"Other\",\"color\":8}],\"tabs\":[]}"));
     try std.testing.expectError(error.InvalidLayout, parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"Agent\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\",\"color\":8}]}"));
+}
+
+test "IGSH-1890 group order round trips and legacy layouts without it stay valid" {
+    const a = std.testing.allocator;
+    const legacy = try parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}");
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(?[]const []const u8, null), legacy.value.group_order);
+    const bytes = try encode(a, legacy.value);
+    defer a.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "group_order") == null);
+    const ordered = try parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[],\"group_order\":[\"Work\",\"Home\"]}");
+    defer ordered.deinit();
+    try std.testing.expectEqualStrings("Home", ordered.value.group_order.?[1]);
+    const encoded = try encode(a, ordered.value);
+    defer a.free(encoded);
+    const restored = try parse(a, encoded);
+    defer restored.deinit();
+    try std.testing.expectEqual(@as(usize, 2), restored.value.group_order.?.len);
+    try std.testing.expectEqualStrings("Work", restored.value.group_order.?[0]);
+}
+
+test "IGSH-1890 group order rejects duplicates blanks and more than sixteen names" {
+    const a = std.testing.allocator;
+    try std.testing.expectError(error.InvalidLayout, parse(a, "{\"workspaces\":[],\"tabs\":[],\"group_order\":[\"Work\",\"Work\"]}"));
+    try std.testing.expectError(error.InvalidLayout, parse(a, "{\"workspaces\":[],\"tabs\":[],\"group_order\":[\"\"]}"));
+    const names = [_][]const u8{ "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q" };
+    try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &.{}, .tabs = &.{}, .group_order = &names }));
+    const bytes = try encode(a, .{ .workspaces = &.{}, .tabs = &.{}, .group_order = names[0..max_groups] });
+    a.free(bytes);
+}
+
+test "IGSH-1890 merge carries the server group order" {
+    const local = Layout{ .workspaces = &test_ws, .tabs = &.{test_tab}, .group_order = &.{"Local"} };
+    const server = Layout{ .workspaces = &test_ws, .tabs = &.{test_tab}, .group_order = &.{ "Work", "Home" } };
+    const result = try merge(std.testing.allocator, local, server, 9, 256);
+    defer freeMerge(std.testing.allocator, result);
+    try std.testing.expectEqualStrings("Work", result.group_order.?[0]);
+    try std.testing.expectEqual(@as(usize, 2), result.group_order.?.len);
+}
+
+test "IGSH-1890 Favorites group names round trip and reject bad text" {
+    const a = std.testing.allocator;
+    const parsed = try parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[{\"name\":\"Agent\",\"tmux_session\":\"one\",\"tmux_host\":0,\"workspace\":\"Other\",\"starred_group\":\"Hypertask\"}]}");
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("Hypertask", parsed.value.tabs[0].starred_group.?);
+    const bytes = try encode(a, parsed.value);
+    defer a.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"starred_group\":\"Hypertask\"") != null);
+    var bad = test_tab;
+    bad.starred_group = "x" ** 65;
+    try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &test_ws, .tabs = &.{bad} }));
 }

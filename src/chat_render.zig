@@ -232,9 +232,11 @@ const chat_image_insert = @import("chat_image_insert.zig");
 const CHAT_OUTBOX_KEY_CAP = @import("app_state.zig").CHAT_OUTBOX_KEY_CAP;
 const ChatOutboxEntry = @import("app_state.zig").ChatOutboxEntry;
 const chatOutboxKeyForShell = @import("chat_send.zig").chatOutboxKeyForShell;
+const chatOutboxShellForKey = @import("chat_send.zig").chatOutboxShellForKey;
 const chatOutboxIndexById = @import("chat_send.zig").chatOutboxIndexById;
 const chatEchoSendAgain = @import("chat_send.zig").chatEchoSendAgain;
 const chatEchoRemove = @import("chat_send.zig").chatEchoRemove;
+const chatEchoDiscardUnsentForActive = @import("chat_send.zig").chatEchoDiscardUnsentForActive;
 const chatEchoBlockConfirmed = @import("chat_send.zig").chatEchoBlockConfirmed;
 const chatEchoRowLanded = @import("chat_send.zig").chatEchoRowLanded;
 const chatEchoPushQueuedNow = @import("chat_send.zig").chatEchoPushQueuedNow;
@@ -474,6 +476,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     var x: i32 = 0;
     var y: i32 = 0;
     var pos: usize = 0;
+    const mentions: []const @import("chat_mention.zig").Chat = if (skill_pills) @import("chat_mention.zig").currentLive(null) else &.{};
     var search: usize = 0;
     var link: ?link_detect.Range = null;
     var syntax = chat_code.Iterator{ .text = text };
@@ -492,6 +495,65 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             x = 0;
             y += line_h;
             continue;
+        }
+        if (skill_pills and text[pos] == '@') {
+            if (@import("chat_mention.zig").spanAt(text, pos, mentions)) |span| {
+                const visible = text[span.start..span.visible_end];
+                const w = chatTextWidth(hdc, visible);
+                if (x > 0 and w > max_w - x) {
+                    x = indent;
+                    y += line_h;
+                }
+                const rect = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
+                if (hit) |pt| {
+                    if (pt.find) |find| {
+                        for (visible, 0..) |_, i| {
+                            const source = offset + if (source_map) |map| map[span.start + i] else span.start + i;
+                            if (find.position == source) find.y.* = rect.top;
+                        }
+                    }
+                    if (pt.char != null) {
+                        const at = span.start + (if (pt.y >= rect.top and pt.y < rect.bottom) chatCharAtX(hdc, visible, pt.x - rect.left) else if (pt.y < rect.top or pt.x <= rect.left) @as(usize, 0) else visible.len);
+                        const source = if (source_map) |map| (if (map.len == 0) @as(usize, 0) else if (at > span.start and at == span.visible_end) map[at - 1] + 1 else if (at < map.len) map[at] else map[map.len - 1] + 1) else at;
+                        nearest.consider(pt.x, pt.y, rect.left, rect.top, rect.right, rect.bottom, offset + source);
+                    }
+                }
+                if (paint) {
+                    _ = SetTextColor(hdc, @import("chat_skill.zig").paint(hdc, rect, chatUserBubbleColor()));
+                    if (app_state.g_chat_find_open) {
+                        if (source_map) |map| {
+                            var left = rect.left;
+                            var i: usize = 0;
+                            while (i < visible.len) {
+                                var end = i + 1;
+                                while (end < visible.len and map[span.start + end] == map[span.start + end - 1] + 1) : (end += 1) {}
+                                @import("chat_find_ui.zig").paintRun(hdc, visible[i..end], offset + map[span.start + i], left, rect.top, line_h);
+                                left += chatTextWidth(hdc, visible[i..end]);
+                                i = end;
+                            }
+                        } else @import("chat_find_ui.zig").paintRun(hdc, visible, offset + span.start, rect.left, rect.top, line_h);
+                    }
+                    if (app_state.g_chat_sel_active) {
+                        if (source_map) |map| {
+                            var left = rect.left;
+                            var i: usize = 0;
+                            while (i < visible.len) {
+                                var end = i + 1;
+                                while (end < visible.len and map[span.start + end] == map[span.start + end - 1] + 1) : (end += 1) {}
+                                chatPaintSelectionRun(hdc, visible[i..end], offset + map[span.start + i], left, rect.top, line_h);
+                                left += chatTextWidth(hdc, visible[i..end]);
+                                i = end;
+                            }
+                        } else chatPaintSelectionRun(hdc, visible, offset + span.start, rect.left, rect.top, line_h);
+                    }
+                    var draw = rect;
+                    _ = chatDrawText(hdc, visible.ptr, @intCast(visible.len), &draw, DT_SINGLELINE | DT_NOPREFIX);
+                    _ = SelectObject(hdc, base);
+                }
+                x += w;
+                pos = span.end;
+                continue;
+            }
         }
         const word_start = pos;
         var word_end = pos;
@@ -1036,8 +1098,27 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
             const old_font = SelectObject(hdc, ensureChatFont());
             const ref = display.reply_ref;
             const body = text[if (ref) |r| r.body_start else 0..];
-            _ = DrawTextW(hdc, body.ptr, @intCast(body.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            var measure_text = body;
+            var stripped: []u16 = &.{};
+            defer if (stripped.len != 0) std.heap.page_allocator.free(stripped);
+            if (@import("chat_mention.zig").hasMarker(body)) {
+                stripped = std.heap.page_allocator.alloc(u16, body.len) catch &.{};
+                if (stripped.len == body.len) measure_text = @import("chat_mention.zig").copyVisible(body, &.{}, stripped);
+            }
+            _ = DrawTextW(hdc, measure_text.ptr, @intCast(measure_text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             var natural_w = calc.right;
+            if (std.mem.indexOfScalar(u16, body, '@') != null) {
+                const live = @import("chat_mention.zig").currentLive(null);
+                var scan: usize = 0;
+                while (scan < body.len) {
+                    const span = @import("chat_mention.zig").spanAt(body, scan, live) orelse {
+                        scan += 1;
+                        continue;
+                    };
+                    natural_w = @max(natural_w, @min(max_text_w, chatTextWidth(hdc, body[span.start..span.visible_end])));
+                    scan = if (span.end > scan) span.end else scan + 1;
+                }
+            }
             if (ref) |r| {
                 _ = SelectObject(hdc, chatMetadataFont());
                 var preview: RECT = .{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
@@ -2433,6 +2514,12 @@ pub fn chatRelayout(client_width: i32) void {
         app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, boundary.index orelse count, app_state.g_chat_read_boundary.index orelse count);
     }
     app_state.g_chat_read_boundary = boundary;
+    const batch = chat_history.lastBatchStart(app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
+    if (!std.meta.eql(batch, app_state.g_chat_batch_boundary)) {
+        const count = app_state.g_chat_block_count;
+        app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, batch.index orelse count, app_state.g_chat_batch_boundary.index orelse count);
+    }
+    app_state.g_chat_batch_boundary = batch;
     var reuse = @min(app_state.g_chat_layout_reuse, app_state.g_chat_block_count);
     const old_choice_sig = g_choice_sig;
     chatChoicesRefresh(buf);
@@ -2463,6 +2550,10 @@ pub fn chatRelayout(client_width: i32) void {
     for (reuse..app_state.g_chat_block_count) |i| {
         if (boundary.index == i) {
             app_state.g_chat_read_divider_y = y;
+            y += uiScaled(28);
+        }
+        if (app_state.g_chat_batch_boundary.index == i) {
+            app_state.g_chat_batch_divider_y = y;
             y += uiScaled(28);
         }
         if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) {
@@ -2496,6 +2587,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (chatEchoRowLanded(e)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureProjectedEchoRect(hdc, e.text, width, y, g_reaction_view.projectedPending(e.id));
+                if (e.state == .not_sent) rc.bottom += uiScaled(CHAT_STATUS_H);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
                 app_state.g_chat_echo_layout[app_state.g_chat_echo_layout_count] = rc;
@@ -2544,6 +2636,7 @@ pub fn chatSetTopPad(new_pad: i32) void {
         rect.bottom += delta;
     }
     if (app_state.g_chat_read_boundary.index != null) app_state.g_chat_read_divider_y += delta;
+    if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
     app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
@@ -3899,11 +3992,16 @@ fn chatPaintProjectedBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos:
     }
 }
 
+fn chatEchoNotSent(e: app_state.ChatOutboxEntry) bool {
+    return chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, @as(i64, @intCast(GetTickCount64())));
+}
+
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
+    const extra: i32 = if (chatEchoNotSent(e)) uiScaled(CHAT_STATUS_H) else 0;
     var display = chatDisplayForBlock(e.text, .{ .start = 0, .len = e.text.len, .role = .user, .markdown = true }, g_reaction_view.projectedPending(e.id));
     display.offset += offset;
-    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom };
+    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(display.reply_ref), .right = rc.right, .bottom = rc.bottom - extra };
     chatPaintReplyLine(hdc, display.text, display.reply_ref, rc);
     fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
@@ -5224,6 +5322,23 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     _ = chatDrawText(hdc, L("New"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
+fn chatPaintBatchDivider(hdc: HANDLE, width: i32) void {
+    const boundary = app_state.g_chat_batch_boundary;
+    if (boundary.index == null or boundary.stamp_ms == 0) return;
+    const stamp = chat_history.batchDayFromUnixMs(boundary.stamp_ms) orelse return;
+    const now = chat_history.batchDayNow() orelse return;
+    var label: [48]u16 = undefined;
+    const label_len = chat_history.formatBatchTimeLabel(stamp, now, &label);
+    if (label_len == 0) return;
+    const top = app_state.g_chat_batch_divider_y - app_state.g_chat_scroll_y;
+    const old = SelectObject(hdc, chatMetadataFont());
+    defer _ = SelectObject(hdc, old);
+    _ = SetBkMode(hdc, TRANSPARENT);
+    _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
+    var rc = RECT{ .left = uiScaled(16), .top = top, .right = width - uiScaled(16), .bottom = top + uiScaled(28) };
+    _ = chatDrawText(hdc, &label, @intCast(label_len), &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+}
+
 fn chatPaintNavRing(hdc: HANDLE, rc: RECT) void {
     const brush = CreateSolidBrush(customColorOr("accent", RGB(110, 175, 245)));
     defer _ = DeleteObject(brush);
@@ -5287,6 +5402,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
         }
         chatPaintMessageActions(mem_dc);
         chatPaintReadDivider(mem_dc, w);
+        chatPaintBatchDivider(mem_dc, w);
         chatPaintChoices(mem_dc, h, paint);
         for (0..app_state.g_chat_echo_layout_count) |i| {
             var rc = app_state.g_chat_echo_layout[i];
@@ -5297,6 +5413,13 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
             const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
             chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
+            if (chatEchoNotSent(app_state.g_chat_outbox.items[ei])) {
+                const old_font = SelectObject(mem_dc, chatMetadataFont());
+                defer _ = SelectObject(mem_dc, old_font);
+                _ = SetTextColor(mem_dc, if (app_state.g_light_theme) RGB(176, 78, 58) else RGB(232, 146, 122));
+                var label = RECT{ .left = rc.left, .top = rc.bottom - uiScaled(CHAT_STATUS_H), .right = rc.right - uiScaled(6), .bottom = rc.bottom };
+                _ = chatDrawText(mem_dc, L("Not sent"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+            }
             if (nav_index != null and nav_index.? == app_state.g_chat_block_count + i) chatPaintNavRing(mem_dc, rc);
             send_latency.noteDrawn(app_state.g_chat_outbox.items[ei].id);
         }
@@ -5320,7 +5443,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             if (paint_note) {
                 const extra_top = if (g_working_rect) |working| working.bottom - app_state.g_chat_scroll_y else 0;
                 const message: ?LPCWSTR = if (entry) |e|
-                    (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else null)
+                    (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else null)
                 else
                     null;
                 if (message) |text| chatPaintEmpty(mem_dc, w, text, extra_top);
@@ -5396,7 +5519,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
     defer if (link_text) |text| std.heap.page_allocator.free(text);
     const echo_id = if (keyboard_index) |index| (if (index >= app_state.g_chat_block_count and index - app_state.g_chat_block_count < app_state.g_chat_echo_layout_count) app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count] else null) else chatEchoAt(GET_X(lp), GET_Y(lp));
     const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
-    const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
+    const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again or chatEchoNotSent(app_state.g_chat_outbox.items[ei]) else false;
     const block_at = if (keyboard_index != null or echo_id != null) keyboard_block else chatTranscriptBlockAtPoint(GET_Y(lp));
     const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
@@ -5686,6 +5809,19 @@ fn chatNavReveal(index: usize) void {
     }
 }
 
+pub fn chatRemoveActiveTabNotSent() bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const shell = app_state.active_shell;
+    var pending: u32 = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (@import("chat_send.zig").chatEchoDiscardableForShell(e, shell)) pending += 1;
+    }
+    if (pending == 0) return false;
+    const before = app_state.g_chat_outbox.items.len;
+    chatEchoDiscardUnsentForActive();
+    return app_state.g_chat_outbox.items.len < before;
+}
+
 pub fn chatNavStart() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     const count = app_state.g_chat_block_count + app_state.g_chat_echo_layout_count;
@@ -5731,16 +5867,17 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
             return true;
         },
         .remove => {
-            const index = chatNavIndex() orelse {
-                chatNavClear();
-                return true;
-            };
-            if (index >= app_state.g_chat_block_count) {
-                const id = app_state.g_chat_echo_layout_ids[index - app_state.g_chat_block_count];
-                const ei = chatOutboxIndexById(id) orelse return true;
-                if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
-                if (chatOutboxIndexById(id) == null) chatNavClear();
-            }
+            const index = chatNavIndex();
+            if (index) |idx| {
+                if (idx >= app_state.g_chat_block_count) {
+                    const id = app_state.g_chat_echo_layout_ids[idx - app_state.g_chat_block_count];
+                    const ei = chatOutboxIndexById(id) orelse return true;
+                    if (app_state.g_chat_outbox.items[ei].state == .not_sent) chatEchoRemove(id) else chatCancelQueuedFromMenu(id);
+                    if (chatOutboxIndexById(id) == null) chatNavClear() else _ = chatRemoveActiveTabNotSent();
+                    return true;
+                }
+            } else chatNavClear();
+            _ = chatRemoveActiveTabNotSent();
             return true;
         },
         .open => {

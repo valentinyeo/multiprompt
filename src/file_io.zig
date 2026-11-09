@@ -135,6 +135,9 @@ const PendingWrite = struct {
 pub var g_save_failure_pending = std.atomic.Value(bool).init(false);
 var g_writer_thread_started = false;
 var g_writer_in_flight = false;
+var g_writer_flight_bytes: ?[]u8 = null;
+var g_writer_flight_path: [520]u8 = std.mem.zeroes([520]u8);
+var g_writer_flight_path_len: usize = 0;
 var g_writer_pending: [MAX_PENDING_WRITES]PendingWrite = [_]PendingWrite{.{}} ** MAX_PENDING_WRITES;
 
 fn writerGate() *@import("app_state.zig").SpinMutex {
@@ -180,6 +183,9 @@ fn writerLoop() void {
             path_len = slot.path_len;
             payload = slot.bytes;
             notify_hwnd = slot.notify_hwnd;
+            g_writer_flight_bytes = slot.bytes;
+            g_writer_flight_path_len = slot.path_len;
+            @memcpy(g_writer_flight_path[0..slot.path_len], slot.path[0..slot.path_len]);
             g_writer_in_flight = true;
             slot.bytes = null;
             slot.path_len = 0;
@@ -191,10 +197,12 @@ fn writerLoop() void {
                 const w = @import("win32.zig");
                 if (@import("app_state.zig").FocusNative.PostMessageW(notify_hwnd, w.WM_APP_APP_SAVE_FAILED, 0, 0) == 0) g_save_failure_pending.store(false, .release);
             }
-            std.heap.page_allocator.free(bytes);
             while (!gate.tryLock()) Sleep(1);
             g_writer_in_flight = false;
+            g_writer_flight_bytes = null;
+            g_writer_flight_path_len = 0;
             gate.unlock();
+            std.heap.page_allocator.free(bytes);
         } else {
             Sleep(20);
         }
@@ -244,6 +252,29 @@ pub fn flushPendingWrites() void {
         if (empty) return;
         Sleep(5);
     }
+}
+
+fn queuedBytesLocked(path: []const u8) ?[]const u8 {
+    for (&g_writer_pending) |*slot| {
+        if (slot.bytes) |bytes| {
+            if (slot.path_len == path.len and std.mem.eql(u8, slot.path[0..slot.path_len], path)) return bytes;
+        }
+    }
+    if (g_writer_in_flight and g_writer_flight_path_len == path.len and std.mem.eql(u8, g_writer_flight_path[0..g_writer_flight_path_len], path)) {
+        return g_writer_flight_bytes;
+    }
+    return null;
+}
+
+pub fn copyQueuedWrite(path: []const u8, buf: []u8) ?usize {
+    if (path.len == 0 or path.len > 519 or !g_writer_thread_started) return null;
+    const gate = writerGate();
+    while (!gate.tryLock()) Sleep(1);
+    defer gate.unlock();
+    const queued = queuedBytesLocked(path) orelse return null;
+    if (queued.len > buf.len) return null;
+    @memcpy(buf[0..queued.len], queued);
+    return queued.len;
 }
 
 pub fn writeFileAtomicW(path: []const u8, bytes: []const u8) bool {

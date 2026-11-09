@@ -56,6 +56,9 @@ Read Android crashes newest first with `python3 service/crash-reports.py --limit
 - `POST /v1/crash-reports`: device Bearer auth; strict Android report fields, 32 KiB body limit, duplicate IDs scoped to each device, newest 50 reports per device retained and deleted on revocation
 - `GET /v1/layout`, `PUT /v1/layout`: revision-based layout sync; stale writes return 409
 - `GET`, `PUT`, `DELETE /v1/bot-photos/{key}`: account-scoped remote session pictures. Workspace keys can access only their workspace's sessions. PUT accepts `{ "png": "<base64>" }`, with a PNG no larger than 256 by 256 pixels and 65536 decoded bytes. GET returns the same shape or 404. Keys use the lowercase hex remote digest from `bot_photo_key.zig`, including the raw host byte. The Worker owns each tab's positive `photo` revision, exposes it only to clients requesting `bot_photo`, and preserves it regardless of layout PUT contents. DELETE removes the picture and tab revision.
+- `GET`, `PUT /v1/secrets/deepgram`: device Bearer auth only; the account's Deepgram dictation key, shared by every device on the account. PUT accepts `{ "key": "<text>" }`, one to 256 printable ASCII characters without spaces, and answers `{ "stored": true }`. GET answers `{ "key": "<text>" }` or 404. Service keys and browser sessions are refused with 403, and one account can never read another account's key. The desktop app logs only where the key came from, never its value.
+
+Apply the additive `account_secrets` table in `schema.sql` before deploying a Worker that serves this route.
 
 Apply the additive `bot_photos` table in `schema.sql` before deploying this Worker. Existing clients remain compatible: layout responses omit `photo` unless requested, and old layout uploads cannot erase pictures.
 
@@ -108,6 +111,10 @@ Clients send the `hosts` feature token to share up to three server addresses, us
 Hosts are hidden from older clients, whose saves preserve them; host-aware saves replace only the server slots they send.
 
 Clients advertising `host_removal` may send optional `removed_hosts`, a unique array of slot integers 0 through 2 (at most three). These permanent slot tombstones are unioned with stored removals and saved in sorted order; empty arrays are omitted. Every save filters removed slots, including stale uploads from older clients. GET, PUT and conflict replies expose tombstones only to clients advertising `host_removal`; older saves cannot erase them. Removing an account server does not remove local SSH configuration or sessions.
+
+Desktop clients advertising `group_order` may send optional `group_order`, a unique array of at most 16 group names (each 1 to 64 UTF-16 units) in sidebar order. Clients that do not advertise it never see the field, and their saves keep the stored order. The response header echoes `group_order` only to clients that advertised it. Android does not advertise it, so its layout responses are unchanged.
+
+Desktop clients advertising `starred_groups` may send an optional per-tab `starred_group`: the name of the tab's group in the Favorites view (empty string for none, otherwise 1 to 64 UTF-16 units). Clients that do not advertise it never see the field, and their saves keep each tab's stored value. The response header echoes `starred_groups` only to clients that advertised it, so Android layout responses are unchanged.
 
 ## Service keys and the mp-layout tool
 

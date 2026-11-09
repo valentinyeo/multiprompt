@@ -54,6 +54,7 @@ pub fn editPaletteRoom(_: anytype) void {}
 
 function writeRoomFrontend(dir) {
   fs.writeFileSync(path.join(dir, 'room_frontend.zig'), roomFrontend);
+  writeChatMention(dir);
 }
 
 const voice = `const std = @import("std");
@@ -73,10 +74,35 @@ function writeAccountDesktop(dir) {
   fs.writeFileSync(path.join(dir, 'account_desktop.zig'), accountDesktop);
 }
 
+const chatMention = `pub const Chat = struct { name: []const u8 = "", session: []const u8 = "", index: u32 = 0 };
+pub const Span = struct { start: usize = 0, visible_end: usize = 0, end: usize = 0 };
+pub fn currentLive(_: ?u32) []const Chat {
+    return &.{};
+}
+pub fn spanAt(_: []const u16, _: usize, _: []const Chat) ?Span {
+    return null;
+}
+pub fn hasMarker(_: []const u16) bool {
+    return false;
+}
+pub fn copyVisible(text: []const u16, _: []const Chat, _: []u16) []const u16 {
+    return text;
+}
+pub fn apply(text: []const u16, _: []u16) []const u16 {
+    return text;
+}
+pub fn clearPicks() void {}
+`;
+
+function writeChatMention(dir) {
+  fs.writeFileSync(path.join(dir, 'chat_mention.zig'), chatMention);
+}
+
 function writeAll(dir) {
   writeRoomFrontend(dir);
   writeVoice(dir);
   writeAccountDesktop(dir);
+  writeChatMention(dir);
 }
 
-module.exports = { roomFrontend, voice, accountDesktop, writeRoomFrontend, writeVoice, writeAccountDesktop, writeAll };
+module.exports = { roomFrontend, voice, accountDesktop, chatMention, writeRoomFrontend, writeVoice, writeAccountDesktop, writeChatMention, writeAll };

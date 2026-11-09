@@ -95,7 +95,10 @@ test "oldest cache eviction preserves personal files directories and the bound" 
 test('disk reads are bounded and disk writes/pruning are serialized on the worker', () => {
   assert.match(body('chatHistoryRead'), /bytes.items.len \+ n > chat_history.MAX_CACHE_BYTES/);
   assert.match(body('chatFileFetchThread'), /g_chat_cache_write_mutex.tryLock\(\)\) Sleep\(1\);[\s\S]*defer g_chat_cache_write_mutex.unlock\(\);[\s\S]*writeFileAtomicW\(path, bytes\)\)[\s\S]*chatHistoryPrune\(path\)/);
-  assert.doesNotMatch(body('chatDeferTranscriptLoad'), /chatHistoryRead|History.decode|refreshChatTranscript/);
+  assert.match(body('chatDeferTranscriptLoad'), /chatLoadSaved\(entry\)/);
+  assert.match(body('chatLoadSaved'), /chatHistoryRead\(path\)[\s\S]*History\.decode/);
+  assert.doesNotMatch(body('chatDeferTranscriptLoad'), /refreshChatTranscript|chatHistoryFetch|fetchAcPersistent/);
+  assert.doesNotMatch(body('chatLoadSaved'), /chatHistoryFetch|fetchAcPersistent|refreshChatTranscript/);
   assert.match(body('chatFileRequestForDelivery'), /!load_disk and pushed == null and !chatFetchAcquire/);
   assert.match(body('chatFileOnReady'), /if \(!entry.loading_disk and !entry.push_pending\) chatFetchRelease/);
 });

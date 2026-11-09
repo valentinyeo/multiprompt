@@ -15,6 +15,78 @@ ETA_LOG_MAX = 5000
 ETA_LOG_KEEP = 2000
 NOTIFY_PORT_FIRST = 19548
 NOTIFY_PORT_LAST = 19571
+NESTED_PROGRAMS = {"claude", "codex", "grok", "cursor-agent", "pi"}
+
+
+def proc_parent(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            argv = [part.decode("utf-8", "replace") for part in handle.read().split(b"\0") if part]
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+            ppid = int(handle.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return (os.path.basename(argv[0]) if argv else ""), ppid
+
+
+def process_chain(pid, parent=proc_parent):
+    chain = []
+    while pid and pid > 1 and pid not in chain and len(chain) < 64:
+        chain.append(pid)
+        row = parent(pid)
+        if row is None:
+            break
+        pid = row[1]
+    return chain
+
+
+def tab_owners(name, pane_pid, root):
+    owners = {pane_pid} if pane_pid else set()
+    for config_path in Path(root).glob("*.config.json"):
+        try:
+            if json.loads(config_path.read_text(encoding="utf-8")).get("tmux") != name:
+                continue
+            state = json.loads(config_path.with_name(config_path.name.replace(".config.json", ".state.json")).read_text(encoding="utf-8"))
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(state.get("pid"), int):
+            owners.add(state["pid"])
+    return owners
+
+
+def pane_pid(env):
+    if not env.get("TMUX") or not re.fullmatch(r"%[0-9]+", env.get("TMUX_PANE", "")):
+        return 0
+    try:
+        result = subprocess.run(["tmux", "display-message", "-p", "-t", env.get("TMUX_PANE", ""), "#{pane_pid}"],
+                                capture_output=True, text=True, timeout=0.5, check=True)
+        pid = int(result.stdout.strip())
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return 0
+    return pid if isinstance(pid, int) and pid > 1 else 0
+
+
+def foreign_to_tab(name, env, pid, parent=proc_parent):
+    owners = tab_owners(name, pane_pid(env), state_dir(env) / "agent-host")
+    return bool(owners) and not owners.intersection(process_chain(pid, parent))
+
+
+def nested_agent(pid, parent=proc_parent):
+    found = 0
+    previous = None
+    seen = set()
+    while pid and pid > 1 and pid not in seen:
+        seen.add(pid)
+        row = parent(pid)
+        if row is None:
+            return False
+        name, pid = row
+        if name in NESTED_PROGRAMS and name != previous:
+            found += 1
+            if found > 1:
+                return True
+        previous = name
+    return False
 
 
 def target(env):
@@ -372,6 +444,8 @@ def main():
         return
     resolved = target(os.environ)
     if not resolved:
+        return
+    if resolved[2] and (nested_agent(os.getppid()) or foreign_to_tab(resolved[0], os.environ, os.getppid())):
         return
     agent, event = sys.argv[1:3]
     raw = sys.argv[3] if len(sys.argv) > 3 else sys.stdin.read(1024 * 1024)

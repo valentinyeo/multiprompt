@@ -1,5 +1,10 @@
 import ast
 import base64
+try:
+    import grp
+    import pwd
+except ImportError:
+    grp = pwd = None
 import hashlib
 import json
 import os
@@ -120,7 +125,7 @@ def listeners(pid, expected, uid):
         if match:
             inodes.add(match[1])
     found = set()
-    for table, loopbacks in [('tcp', {'0100007F'}), ('tcp6', {'00000000000000000000000001000000'})]:
+    for table, loopback in [('tcp', '0100007F'), ('tcp6', '00000000000000000000000001000000')]:
         entries = open('/proc/net/' + table, encoding='ascii').read(1048577)
         require(len(entries) <= 1048576)
         for line in entries.splitlines()[1:]:
@@ -131,9 +136,23 @@ def listeners(pid, expected, uid):
             number = int(number, 16)
             if number not in expected:
                 continue
-            require(address in loopbacks and int(fields[7]) == uid and fields[9] in inodes)
-            found.add(number)
+            owned = int(fields[7]) == uid and fields[9] in inodes
+            if table == 'tcp6' and address == loopback and not owned:
+                continue
+            require(address == loopback and owned)
+            if table == 'tcp':
+                found.add(number)
     require(found == set(expected))
+
+
+def writable_only_by(info, uid):
+    if info.st_mode & 0o002:
+        return False
+    if not info.st_mode & 0o020:
+        return True
+    user = pwd.getpwuid(uid).pw_name
+    return (set(grp.getgrgid(info.st_gid).gr_mem) <= {user} and
+            all(entry.pw_uid == uid for entry in pwd.getpwall() if entry.pw_gid == info.st_gid))
 
 
 def started_at(pid):
@@ -158,7 +177,6 @@ def private_file(path, uid, maximum):
 
 
 def discover(include_password=True, expected_user=None):
-    import pwd
     import resource
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     uid = os.getuid()
@@ -183,7 +201,7 @@ def discover(include_password=True, expected_user=None):
     fd = os.open(script, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         info = os.fstat(fd)
-        require(stat.S_ISREG(info.st_mode) and info.st_uid in {0, uid} and info.st_mode & 0o022 == 0 and info.st_size <= 16384)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid in {0, uid} and writable_only_by(info, uid) and info.st_size <= 16384)
         require(info.st_mtime <= started_at(proxy_pid))
         source = os.read(fd, 16385).decode('utf-8', 'strict')
     finally:
@@ -222,3 +240,20 @@ def discover(include_password=True, expected_user=None):
     return {'version': 1, 'host': os.uname().nodename, 'uid': uid, 'user': user, 'display': display, 'desktop': identity,
             'viewer_port': viewer_port, 'password': base64.b64encode(decoded).decode('ascii')}
 
+
+def main(include_password, expected_user):
+    try:
+        result = discover(include_password, expected_user)
+    except Unavailable as error:
+        trace = error.__traceback__
+        while trace.tb_next is not None and trace.tb_next.tb_frame.f_code.co_name != 'require':
+            trace = trace.tb_next
+        print(json.dumps({'unavailable': trace.tb_frame.f_code.co_name + ':' + str(trace.tb_lineno)}), flush=True)
+        return
+    except Exception as error:
+        print(json.dumps({'unavailable': type(error).__name__}), flush=True)
+        return
+    print(json.dumps(result, separators=(',', ':')), flush=True)
+    result.clear()
+    if include_password:
+        sys.stdin.buffer.read(1)

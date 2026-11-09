@@ -21,6 +21,8 @@ const std = @import("std");
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 fn chatCancelFinish() void {}
 fn chatLivePlanReply(_: []const u16) bool { return false; }
+var test_settings_pending = false;
+fn chatSettingsPending(_: u32) bool { return test_settings_pending; }
 fn chatLiveQuestionText(_: []const u16) bool { return false; }
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -142,6 +144,7 @@ const ChatTmuxSendJob = struct {
     reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = true,
     rejected: bool = false,
@@ -321,6 +324,8 @@ fn clear() void {
     enters_at_steer = 0;
     state_at_steer = null;
     composer_text = &.{};
+    test_settings_pending = false;
+    g_chat_draft_dirty = false;
     terminal_notices = 0;
     g_chat_ac_dialog_len = 0;
     g_chat_ac_dialog_shell_id = 0;
@@ -545,6 +550,22 @@ test "delivery: IGSH-1522 live slash commands never enter the ordinary outbox" {
     sendChatPrompt();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expect(mode_picker == null);
+}
+test "delivery: pending settings preserve the draft and outbox" {
+    clear();
+    defer clear();
+    const draft = std.unicode.utf8ToUtf16LeStringLiteral("Next message");
+    composer_text = draft;
+    test_settings_pending = true;
+    sendChatPrompt();
+    try std.testing.expectEqualSlices(u16, draft, composer_text);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), read_marks);
+    try std.testing.expect(!g_chat_draft_dirty);
+    test_settings_pending = false;
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
 }
 test "delivery: IGSH-1655 only terminal tabs get an Alt+C hint after a dialog command" {
     defer clear();
@@ -1075,6 +1096,7 @@ test "delivery: IGSH-1810 queued live removal waits for server confirmation and 
     g_chat_outbox.items[0].message_v1 = true;
     g_chat_outbox.items[0].write_started = true;
     @memcpy(g_chat_outbox.items[0].message_phase[0..6], "queued");
+    @memcpy(g_chat_outbox.items[0].message_sid[0..1], "s");
     chatEchoRemove(id);
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
@@ -1087,6 +1109,41 @@ test "delivery: IGSH-1810 queued live removal waits for server confirmation and 
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     try std.testing.expectEqual(@as(usize, 0), writes + enters);
+}
+test "delivery: IGSH-1859 Remove clears a Not sent message tied to an older session" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("sent while a helper held the chat"), .not_sent);
+    const id = g_chat_outbox.items[0].id;
+    g_chat_outbox.items[0].message_v1 = true;
+    g_chat_outbox.items[0].write_started = true;
+    @memcpy(g_chat_outbox.items[0].message_phase[0..6], "queued");
+    @memcpy(g_chat_outbox.items[0].message_sid[0..6], "helper");
+    chatEchoRemove(id);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
+test "delivery: IGSH-1859 a message the agent merged into a later turn stops showing Not sent" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/b.png  too much text everywhere ");
+    const merged = std.unicode.utf8ToUtf16LeStringLiteral("/reduce-first https://example.com/a.png fix this page\\n\\nhttps://example.com/b.png  too much text everywhere \\n\\nhttps://example.com/c.png one more note");
+    try enqueue(text, .not_sent);
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("https://example.com/c.png one more note"), .not_sent);
+    for (g_chat_outbox.items) |*entry| {
+        entry.anchor = .{ .sent_ms = 100_000 };
+        entry.message_v1 = true;
+        entry.write_started = true;
+        entry.channel_sent = true;
+        entry.retryable = true;
+        @memcpy(entry.message_phase[0..6], "queued");
+    }
+    transcript(merged, 1000);
+    chatEchoMatchActive();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    transcript(merged, 160_000);
+    chatEchoMatchActive();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 2), g_chat_confirmed.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
 test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
     defer clear();
@@ -2005,15 +2062,20 @@ const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across cha
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }).join('\n');
+test('IGSH-1811 a sent mention keeps the live session for the bot', () => {
+  assert.match(body('sendChatPrompt'), /chat_mention\.zig"\)\.apply/);
+});
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
   try {
     copyZig(['chat_echo.zig', 'chat_history.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'chat_complete.zig', 'skills.zig', 'chat_reply.zig'], dir);
+    require('./fixtures/inline-stubs').writeChatMention(dir);
     if (control === true) {
       const file = path.join(dir, 'chat_history.zig');
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
     let functions = [...names, 'chatMessageCaptureAdmission', 'chatOutboxRecoverOlderAdmission'].map(body).join('\n')
+      .replaceAll('@import("chat_session.zig").chatSettingsPending', 'chatSettingsPending')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
@@ -2136,12 +2198,29 @@ test('IGSH-1605 a successful reconnect requeues sends that failed while the link
   assert.match(requeue, /chat_echo\.requeueOnReconnect\(entry\.state, /);
   assert.match(requeue, /entry\.state = \.queued;[\s\S]*entry\.write_started = false;/);
 });
+test('pending settings block the composer before any delivery mutation', () => {
+  const send = body('sendChatPrompt');
+  const guard = send.indexOf('chatSettingsPending(');
+  assert.ok(guard >= 0, 'pending settings guard');
+  for (const mutation of ['chatLivePlanReply(', 'chatEchoEnqueueForShell(', 'chatReadMark(', 'SetWindowTextW(']) {
+    assert.ok(send.indexOf(mutation) > guard, mutation);
+  }
+  assert.match(send, /Wait for chat settings to update/);
+});
+
 test('composer always persists through the same outbox before delivery', () => {
   const send = body('sendChatPrompt');
   assert.match(send, /chatEchoEnqueueForShell\(active_shell, send_text, \.queued\)/);
   assert.match(send, /chatOutboxTick\(\)/);
   assert.match(send, /UpdateWindow\(g_chat_transcript_hwnd\)[\s\S]*SetWindowTextW\(g_chat_composer_hwnd[\s\S]*RedrawWindow\(g_main_hwnd[\s\S]*chatOutboxTick\(\)/);
   assert.doesNotMatch(send, /sendTextToActiveShellVerified|chatEchoConfirm/);
+});
+
+test('IGSH-1847 a message that was not sent is sent again under a new wire id', () => {
+  assert.match(body('chatEchoSendAgain'), /message_replaces/);
+  assert.match(body('chatEchoSendAgain'), /desktop-\{x:0>16\}\{x:0>16\}/);
+  assert.match(body('chatOutboxTick'), /NOT_SENT_WAIT_MS/);
+  assert.match(body('chatRelayout'), /e\.state == \.not_sent/);
 });
 
 test('deliberate recovery remains evidence-safe without automatic retry controls', () => {

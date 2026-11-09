@@ -197,6 +197,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .name = name,
             .manual = shell.name_source == .manual,
             .group = if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
+            .starred_group = if (@import("sidebar.zig").findGroupIdx(shell.starred_group_id)) |gi| try std.unicode.utf16LeToUtf8Alloc(a, app_state.groups[gi].name[0..app_state.groups[gi].name_len]) else "",
             .favorite = shell.favorite,
             .muted = shell.muted,
             .face = shell.face,
@@ -209,7 +210,8 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .workspace = workspaces.items[ws].name,
         });
     }
-    return .{ .settings = app_state.g_layout_settings, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    const group_order = try @import("sidebar.zig").groupOrderFor(a, tabs.items);
+    return .{ .settings = app_state.g_layout_settings, .group_order = group_order, .workspaces = try workspaces.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 var g_account_hosts_cache: struct {
@@ -360,6 +362,16 @@ pub fn publishSessionLayout() void {
         plain_local = account_layout.withoutGroups(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutGroups(arena.allocator(), plain_base) catch return;
         plain_synced = account_layout.withoutGroups(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_starred_groups_supported) {
+        plain_local = account_layout.withoutStarredGroups(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutStarredGroups(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutStarredGroups(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_group_order_supported) {
+        plain_local = account_layout.withoutGroupOrder(plain_local);
+        plain_base = account_layout.withoutGroupOrder(plain_base);
+        plain_synced = account_layout.withoutGroupOrder(plain_synced);
     }
     if (!app_state.g_account_colors_supported) {
         plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
@@ -755,6 +767,7 @@ fn accountDeleteToken() void {
 }
 fn accountLock() void {
     @import("room_frontend.zig").setAccount(null);
+    g_applied_layout.forget(std.heap.page_allocator);
     if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
@@ -785,6 +798,8 @@ pub fn accountSignOut() void {
     app_state.g_account_colors_supported = false;
     app_state.g_account_appearance_supported = false;
     app_state.g_account_groups_supported = false;
+    app_state.g_account_group_order_supported = false;
+    app_state.g_account_starred_groups_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -1230,6 +1245,66 @@ fn accountSyncPhotos(access: []const u8, credential: []const u8, tabs: []const s
     try result;
 }
 
+var g_deepgram_push_pending = std.atomic.Value(bool).init(false);
+var g_deepgram_checked_at: u64 = 0;
+
+pub fn accountPushDeepgramKey() void {
+    g_deepgram_push_pending.store(true, .release);
+    if (!app_state.g_account_has_token or app_state.g_account_reauth) return;
+    pullSessionLayout();
+}
+
+fn putDeepgramKey(access: []const u8, key: []const u8) bool {
+    const a = std.heap.page_allocator;
+    const body = std.json.Stringify.valueAlloc(a, .{ .key = key }, .{}) catch return false;
+    defer freeSecret(body);
+    const response = account_client.request("PUT", "/v1/secrets/deepgram", access, body) catch return false;
+    defer response.deinit();
+    return response.status == 200;
+}
+
+fn accountSyncDeepgramKey(access: []const u8, kind: AccountJobKind) void {
+    const voice = @import("voice.zig");
+    var local_buf: [512]u8 = undefined;
+    defer std.crypto.secureZero(u8, &local_buf);
+    const local = voice.readDeepgramApiKey(&local_buf);
+    if (g_deepgram_push_pending.load(.acquire)) {
+        const key = local orelse {
+            g_deepgram_push_pending.store(false, .release);
+            return;
+        };
+        if (putDeepgramKey(access, key)) {
+            g_deepgram_push_pending.store(false, .release);
+            debugLog("[voice] deepgram key saved to account");
+        }
+        return;
+    }
+    const now = GetTickCount64();
+    if (kind != .startup and kind != .login and g_deepgram_checked_at != 0 and now -% g_deepgram_checked_at < 60_000) return;
+    g_deepgram_checked_at = now;
+    const response = account_client.request("GET", "/v1/secrets/deepgram", access, "") catch return;
+    defer response.deinit();
+    if (response.status == 404) {
+        if (local) |key| {
+            if (putDeepgramKey(access, key)) debugLog("[voice] deepgram key saved to account");
+        }
+        return;
+    }
+    if (response.status != 200) return;
+    const remote = account_client.field(response.bytes, "key") catch return;
+    defer freeSecret(remote);
+    if (remote.len > 256) return;
+    if (local) |key| if (std.mem.eql(u8, key, remote)) return;
+    var wide: [257:0]u16 = @splat(0);
+    defer std.crypto.secureZero(u16, &wide);
+    for (remote, 0..) |c, i| {
+        if (c < 0x21 or c > 0x7e) return;
+        wide[i] = c;
+    }
+    if (g_deepgram_push_pending.load(.acquire)) return;
+    if (voice.saveDeepgramApiKey(wide[0..remote.len :0])) debugLog("[voice] deepgram key source=account");
+}
+
 fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     const a = std.heap.page_allocator;
     var renewed = job.kind == .login;
@@ -1317,6 +1392,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status != 200) return error.Network;
     reply.colors_supported = remote.colors_supported;
     reply.groups_supported = remote.groups_supported;
+    reply.group_order_supported = remote.group_order_supported;
+    reply.starred_groups_supported = remote.starred_groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1388,6 +1465,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         }
         synced_hosts = merged_hosts;
         if (!remote.groups_supported) rebased = try account_layout.withoutGroups(alloc, rebased);
+        if (!remote.group_order_supported) rebased = account_layout.withoutGroupOrder(rebased);
+        if (!remote.starred_groups_supported) rebased = try account_layout.withoutStarredGroups(alloc, rebased);
         if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
         if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
@@ -1419,6 +1498,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (remote.status != 200) return error.Conflict;
     reply.colors_supported = remote.colors_supported;
     reply.groups_supported = remote.groups_supported;
+    reply.group_order_supported = remote.group_order_supported;
+    reply.starred_groups_supported = remote.starred_groups_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
@@ -1448,6 +1529,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             debugLog("account-sync: picture upload deferred");
         };
     }
+    accountSyncDeepgramKey(access, job.kind);
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
@@ -1550,6 +1632,26 @@ fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cach
     if (!writeFileAtomicW(path, cache)) return error.Storage;
     return normalized;
 }
+fn syncedGroupId(current_id: u32, name: []const u8, starred: bool) !u32 {
+    var wide: [64]u16 = undefined;
+    const len = try std.unicode.utf8ToUtf16Le(&wide, name);
+    if (len == 0) return 0;
+    if (@import("sidebar.zig").findGroupIdx(current_id)) |gi| {
+        const current = app_state.groups[gi];
+        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) return current.id;
+    }
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        if (!std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) continue;
+        const other_view = for (app_state.shells[0..app_state.shell_count]) |other| {
+            if ((if (starred) other.group_id else other.starred_group_id) == group.id) break true;
+        } else false;
+        if (!other_view) return group.id;
+    }
+    const created = @import("sidebar.zig").createGroup(wide[0..len]);
+    if (created == 0) return error.LayoutCapacity;
+    return created;
+}
+
 pub fn applyServerLayout(json: []const u8) !void {
     const was_starred = app_state.g_starred_workspace;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -1677,27 +1779,8 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
             @import("agent_host.zig").restoreSyncedSession(shell, tab.tmux_session);
-            if (tab.group) |name| {
-                var wide: [64]u16 = undefined;
-                const len = try std.unicode.utf8ToUtf16Le(&wide, name);
-                var group_id: u32 = 0;
-                if (len > 0) {
-                    if (@import("sidebar.zig").findGroupIdx(shell.group_id)) |gi| {
-                        const current = app_state.groups[gi];
-                        if (std.mem.eql(u16, current.name[0..current.name_len], wide[0..len])) group_id = current.id;
-                    }
-                    for (app_state.groups[0..app_state.group_count]) |group| {
-                        if (group_id != 0) break;
-                        if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) {
-                            group_id = group.id;
-                            break;
-                        }
-                    }
-                    if (group_id == 0) group_id = @import("sidebar.zig").createGroup(wide[0..len]);
-                    if (group_id == 0) return error.LayoutCapacity;
-                }
-                shell.group_id = group_id;
-            }
+            if (tab.group) |name| shell.group_id = try syncedGroupId(shell.group_id, name, false);
+            if (tab.starred_group) |name| shell.starred_group_id = try syncedGroupId(shell.starred_group_id, name, true);
             shell.face = tab.face;
             shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
@@ -1733,6 +1816,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         switchToWorkspace(app_state.g_active_workspace);
     }
     app_state.g_layout_settings = desired.settings;
+    if (desired.group_order) |names| _ = @import("sidebar.zig").orderGroupsByName(names);
     @import("inbox.zig").ensureInboxSplitVisible();
     app_state.g_restoring = old_restoring;
     saveSession();
@@ -1838,6 +1922,7 @@ pub fn resumeStartupReply() void {
     if (reply != 0) handleLayoutReply(reply);
 }
 
+var g_applied_layout: account_layout.AppliedLayout = .{};
 pub fn handleLayoutReply(lp: LPARAM) void {
     if (lp != 0 and @import("launch_cache.zig").pending) {
         const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
@@ -1939,6 +2024,8 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     g_palette8_supported = reply.palette8_supported;
     app_state.g_account_colors_supported = reply.colors_supported;
     app_state.g_account_groups_supported = reply.groups_supported;
+    app_state.g_account_group_order_supported = reply.group_order_supported;
+    app_state.g_account_starred_groups_supported = reply.starred_groups_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {
@@ -2077,13 +2164,14 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
             break :blk to_apply;
         };
-    } else {
+    } else if (g_applied_layout.changed(bytes)) {
         app_state.g_account_locked = false;
         applyServerLayout(to_apply) catch {
             accountSyncFailed(true);
             if (app_state.active_shell < app_state.shell_count) switchToShell(app_state.active_shell);
             return;
         };
+        g_applied_layout.remember(a, bytes);
     }
     const final_target = session_layout.parse(alloc, to_apply) catch return;
     defer final_target.deinit();

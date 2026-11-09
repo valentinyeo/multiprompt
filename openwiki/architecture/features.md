@@ -74,3 +74,7 @@ Favorites (Alt+1) has its own session groups using the existing group actions, i
 ## Chat unread boundary (IGSH-814)
 
 Reopening a supported conversation places one thin NEW line above its first unread message. The last fully visible message is saved when leaving the chat; reaching bottom or sending marks the loaded tail read and clears the line. The marker stays with that chat in the existing saved tab and launch snapshot through restart, reconnect and account layout re-sync. It fingerprints the conversation and source message ID, never a timestamp or display index. If that ID has disappeared, a single plain “Earlier read position is unknown” line appears instead of guessing. Chats without a saved marker and chats with everything read have no divider. The separate new-messages pill still counts arrivals below the fold; no setting or extra action is needed.
+
+## Footprint telemetry (IGSH-1895)
+
+Hovering the sidebar status card shows Multiprompt's own footprint: memory, CPU and process count for the app and every process under it, refreshed every ten seconds off the UI thread. The peak of the running version sits under it and is recorded in `footprint.json` beside the other app data, so each release keeps its own baseline. "Close All Browser Panes" now closes every pane and then waits a grace period before terminating any Google Chrome or Microsoft Edge process still alive on a Multiprompt browser profile; a browser on someone else's profile is never touched.

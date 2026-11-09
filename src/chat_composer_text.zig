@@ -97,6 +97,25 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
                 const accent = @import("chat_skill.zig").paint(dc, rect, background);
                 if (!dwrite.drawPositioned(dc, text[lo..hi], advances[lo..hi], left.x, origin.y, clip, accent)) return false;
             }
+            var scan: usize = 0;
+            const live = @import("chat_mention.zig").currentLive(null);
+            while (scan < n) {
+                const span = @import("chat_mention.zig").spanAt(text[0..n], scan, live) orelse {
+                    scan += 1;
+                    continue;
+                };
+                scan = if (span.end > scan) span.end else scan + 1;
+                const lo = @max(begin, span.start);
+                const hi = @min(i, span.visible_end);
+                if (hi <= lo) continue;
+                const left = position(hwnd, lo) orelse continue;
+                if (left.y != origin.y) continue;
+                const after = position(hwnd, hi);
+                const edge = if (after != null and after.?.y == origin.y) after.?.x else right;
+                const rect = w.RECT{ .left = left.x, .top = origin.y, .right = edge, .bottom = origin.y + metric.cy };
+                const accent = @import("chat_skill.zig").paint(dc, rect, background);
+                if (!dwrite.drawPositioned(dc, text[lo..hi], advances[lo..hi], left.x, origin.y, clip, accent)) return false;
+            }
             if (selected and end > begin and start < i + @as(usize, @intFromBool(i < n and text[i] == '\t'))) {
                 const selected_start: usize = @max(start, begin);
                 const selected_end: usize = @min(end, i + @as(usize, @intFromBool(i < n and text[i] == '\t')));

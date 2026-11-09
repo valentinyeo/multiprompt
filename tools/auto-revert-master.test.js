@@ -421,7 +421,7 @@ test('revert PR dispatches exactly the required workflows on its branch after cr
     assert.ok(index > create && index < merge);
   }
   const required = fs.readFileSync(`${__dirname}/../.github/required-checks.txt`, 'utf8').trim().split(/\r?\n/).sort();
-  assert.deepEqual(required, ['no-comments', 'secret-scan', 'test', 'verify (appearance)']);
+  assert.deepEqual(required, ['click-through', 'no-comments', 'secret-scan', 'test', 'verify (appearance)']);
   const workflow = fs.readFileSync(`${__dirname}/../.github/workflows/auto-revert-master.yml`, 'utf8');
   assert.match(workflow, /\n  actions: write\n/);
 });
@@ -589,7 +589,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
   assert.doesNotMatch(release, /\n  journeys:/);
   assert.match(release, /\n  launch:\n    needs: \[prepare, build\]/);
-  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks\]/);
+  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {

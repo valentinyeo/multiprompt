@@ -26,6 +26,7 @@ function run(code) {
   require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
+    require('./fixtures/inline-stubs').writeChatMention(dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
@@ -181,6 +182,13 @@ fn chatShellReactionId(text: []const u16) u64 { return std.hash.Wyhash.hash(0, s
 const chat_echo = @import("chat_echo.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");
+const chat_history = struct {
+    pub const BatchBoundary = struct { index: ?usize = null, stamp_ms: i64 = 0 };
+    pub fn lastBatchStart(message_blocks: []const chat_markdown.Block) BatchBoundary {
+        _ = message_blocks;
+        return .{};
+    }
+};
 const HANDLE = ?*anyopaque;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 const ChatBlock = chat_markdown.Block;
@@ -210,6 +218,8 @@ var g_chat_layout_reuse: usize = 0;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
+var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+var g_chat_batch_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
@@ -328,6 +338,10 @@ test('production layout measures only changed suffixes and caches unchanged geom
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+test('IGSH-1754 layout keeps the last batch boundary', () => {
+  assert.match(body(source, 'chatRelayout'), /g_chat_batch_boundary/);
+  assert.match(body(source, 'chatRelayout'), /chat_history\.lastBatchStart/);
+});
 test('IGSH-1415 a local copy the transcript already carries is not laid out', () => {
   assert.match(body(source, 'chatRelayout'), /if \(chatEchoRowLanded\(e\)\) continue;/);
 });
@@ -429,6 +443,9 @@ test "table paint without selection makes no per-character GDI calls; real selec
     }
 }
 `;
+test('IGSH-1811 a named live chat is one pill inside the sent message', () => {
+  assert.match(body(source, 'chatFlowText'), /spanAt\(text, pos, mentions\)/);
+});
 test('production table paint avoids per-character selection measurement when nothing is selected', () => {
   const result = run(flow + body(source, 'chatFlowText') + flowChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -797,7 +814,7 @@ test "pending geometry is independent of state and clean mode" {
             g_chat_outbox.items = &entries;
             chatRelayout(400);
             try std.testing.expectEqual(@as(usize, 1), g_chat_echo_layout_count);
-            try std.testing.expectEqual(@as(i32, 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
+            try std.testing.expectEqual(@as(i32, if (state == .not_sent) 40 else 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
         }
     }
 }

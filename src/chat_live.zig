@@ -14,6 +14,10 @@ pub const MAX_PAGE: usize = 4 * 1024 * 1024;
 pub const ItemKind = enum { text, thinking, tool, plan };
 pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
+pub const Model = enum { unknown, opus, sonnet, haiku };
+pub const Effort = enum { unknown, low, medium, high };
+pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
+pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
 pub const RequestKind = enum { approval, question, plan };
 pub const Decision = enum { accept, accept_for_session, decline, cancel };
 pub const PlanAction = enum { implement, feedback };
@@ -67,6 +71,30 @@ pub const Request = struct {
     }
 };
 
+pub const PendingSettings = struct {
+    count: std.atomic.Value(u32) = .init(0),
+
+    pub fn start(self: *PendingSettings) void {
+        _ = self.count.fetchAdd(1, .acq_rel);
+    }
+
+    pub fn finish(self: *PendingSettings) bool {
+        var current = self.count.load(.acquire);
+        while (current > 0) {
+            current = self.count.cmpxchgWeak(current, current - 1, .acq_rel, .acquire) orelse return true;
+        }
+        return false;
+    }
+
+    pub fn clear(self: *PendingSettings) u32 {
+        return self.count.swap(0, .acq_rel);
+    }
+
+    pub fn pending(self: *const PendingSettings) bool {
+        return self.count.load(.acquire) > 0;
+    }
+};
+
 pub const SENT_KEYS: usize = 4;
 
 pub const Live = struct {
@@ -83,6 +111,9 @@ pub const Live = struct {
     sent_keys: [SENT_KEYS]u64 = @splat(0),
     sent_key_count: usize = 0,
     state: State = .idle,
+    settings: Settings = .{},
+    settings_seq: u64 = 0,
+    settings_known: bool = false,
     ended: ItemStatus = .ok,
     revision: u64 = 0,
     card_dismissed: bool = false,
@@ -175,6 +206,15 @@ fn boolOf(value: std.json.Value, key: []const u8) bool {
     };
 }
 
+fn settingsOf(payload: std.json.Value) Settings {
+    return .{
+        .model = std.meta.stringToEnum(Model, strOf(payload, "model")) orelse .unknown,
+        .effort = std.meta.stringToEnum(Effort, strOf(payload, "effort")) orelse .unknown,
+        .mode = std.meta.stringToEnum(Mode, strOf(payload, "mode")) orelse .unknown,
+        .applied = boolOf(payload, "applied"),
+    };
+}
+
 fn statusOf(name: []const u8) ItemStatus {
     if (std.mem.eql(u8, name, "failed") or std.mem.eql(u8, name, "error")) return .failed;
     if (std.mem.eql(u8, name, "interrupted")) return .interrupted;
@@ -263,11 +303,25 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.held = self.state == .running and !self.reply_in_history;
         self.state = .idle;
         self.ended = statusOf(strOf(payload, "status"));
-    } else if (std.mem.eql(u8, kind, "host.status") and std.mem.eql(u8, strOf(payload, "state"), "ready") and self.turn_len == 0 and self.state == .running) {
-        self.state = .idle;
-    } else if (std.mem.eql(u8, kind, "host.status") and std.mem.eql(u8, strOf(payload, "state"), "stopped")) {
-        self.held = self.held or self.state == .running;
-        self.state = .idle;
+    } else if (std.mem.eql(u8, kind, "host.settings")) {
+        if (seq >= self.settings_seq) {
+            self.settings = settingsOf(payload);
+            self.settings_seq = seq;
+            self.settings_known = true;
+        } else {
+            changed = false;
+        }
+    } else if (std.mem.eql(u8, kind, "host.status")) {
+        const status = strOf(payload, "state");
+        if (std.mem.eql(u8, status, "stopped")) {
+            if (seq >= self.settings_seq) self.settings.applied = false;
+            self.held = self.held or self.state == .running;
+            self.state = .idle;
+        } else if (std.mem.eql(u8, status, "ready") or std.mem.eql(u8, status, "starting")) {
+            if (std.mem.eql(u8, status, "ready") and self.turn_len == 0 and self.state == .running) self.state = .idle;
+        } else {
+            changed = false;
+        }
     } else {
         changed = false;
     }
@@ -383,6 +437,30 @@ pub fn unsubscribeLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid:
     return finish(&out, a);
 }
 
+pub const SETTING_REQUEST_ID: u32 = 0xffffffff;
+
+pub fn settingReplyFailed(page: []const u8) ?bool {
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, page, .{}) catch return null;
+    defer parsed.deinit();
+    const id = intOf(parsed.value, "id") orelse return null;
+    if (id != SETTING_REQUEST_ID) return null;
+    const result = fieldOf(parsed.value, "result") orelse return true;
+    return !std.mem.eql(u8, strOf(result, "status"), "ok");
+}
+
+pub const Setting = union(enum) { model: Model, effort: Effort };
+
+pub fn settingLine(a: std.mem.Allocator, id: u32, sid: []const u8, setting: Setting) ![]u8 {
+    const op: []const u8 = switch (setting) { .model => "set_model", .effort => "set_effort" };
+    const value: []const u8 = switch (setting) { .model => |model| @tagName(model), .effort => |effort| @tagName(effort) };
+    if (std.mem.eql(u8, value, "unknown")) return error.InvalidSetting;
+    var out = try openLine(a, id, op, "claude", sid);
+    errdefer out.deinit(a);
+    try out.appendSlice(a, if (setting == .model) ",\"model\":" else ",\"effort\":");
+    try appendQuoted(&out, a, value);
+    return finish(&out, a);
+}
+
 pub fn interruptLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8) ![]u8 {
     var out = try openLine(a, id, "interrupt", provider, sid);
     errdefer out.deinit(a);
@@ -455,10 +533,15 @@ fn slotFor(shell_id: u32, sid: []const u8) ?*Live {
 }
 
 fn claim(shell_id: u32, host: u8, sid: []const u8) ?*Live {
-    if (slotFor(shell_id, sid)) |found| return found;
+    if (slotFor(shell_id, sid)) |found| {
+        if (found.host == host) return found;
+    }
     for (&slots) |*live| {
         if (live.used and live.shell_id == shell_id) {
             live.clear(std.heap.page_allocator);
+            live.settings = .{};
+            live.settings_seq = 0;
+            live.settings_known = false;
             live.sid_len = 0;
             return adopt(live, shell_id, host, sid);
         }
@@ -531,6 +614,36 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
     }
     if (changed) live.touch();
     return changed;
+}
+
+pub fn applySettingsSnapshot(shell_id: u32, sid: []const u8, seq: u64, payload: std.json.Value) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    const live = slotFor(shell_id, sid) orelse return false;
+    if (seq < live.settings_seq or (seq == live.settings_seq and seq != 0)) return false;
+    live.settings = settingsOf(payload);
+    live.settings_seq = seq;
+    live.settings_known = true;
+    live.touch();
+    return true;
+}
+
+pub fn settingsKnown(shell_id: u32) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return live.settings_known;
+    }
+    return false;
+}
+
+pub fn settings(shell_id: u32) ?Settings {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return live.settings;
+    }
+    return null;
 }
 
 pub fn running(shell_id: u32) bool {
@@ -1371,4 +1484,147 @@ test "IGSH-1266 an empty thinking item does not hide the reply after it" {
 fn parse(a: std.mem.Allocator, json: []const u8) !std.json.Value {
     const parsed = try std.json.parseFromSlice(std.json.Value, a, json, .{});
     return parsed.value;
+}
+
+test "IGSH-1861 host settings carry the permission mode" {
+    var live: Live = .{};
+    defer live.deinit(std.testing.allocator);
+    const event = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"kind\":\"host.settings\",\"payload\":{\"model\":\"\",\"effort\":\"low\",\"mode\":\"bypassPermissions\",\"applied\":true}}", .{});
+    defer event.deinit();
+    try std.testing.expect(try applyValue(&live, std.testing.allocator, 1, event.value));
+    try std.testing.expectEqual(Mode.bypassPermissions, live.settings.mode);
+    try std.testing.expectEqual(Model.unknown, live.settings.model);
+}
+
+test "host settings belong to a live session and survive turns" {
+    var live: Live = .{};
+    defer live.deinit(std.testing.allocator);
+    const event = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"kind\":\"host.settings\",\"payload\":{\"model\":\"haiku\",\"effort\":\"high\",\"applied\":false}}", .{});
+    defer event.deinit();
+    try std.testing.expect(try applyValue(&live, std.testing.allocator, 1, event.value));
+    try std.testing.expectEqual(Model.haiku, live.settings.model);
+    try std.testing.expectEqual(Effort.high, live.settings.effort);
+    try std.testing.expect(!live.settings.applied);
+    const turn = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"kind\":\"turn.started\",\"payload\":{}}", .{});
+    defer turn.deinit();
+    try std.testing.expect(try applyValue(&live, std.testing.allocator, 2, turn.value));
+    try std.testing.expectEqual(State.running, live.state);
+    try std.testing.expectEqual(Model.haiku, live.settings.model);
+    live.clear(std.testing.allocator);
+    try std.testing.expectEqual(Effort.high, live.settings.effort);
+}
+
+test "setting requests and refused replies" {
+    const a = std.testing.allocator;
+    const model = try settingLine(a, SETTING_REQUEST_ID, "session", .{ .model = .haiku });
+    defer a.free(model);
+    try std.testing.expect(std.mem.indexOf(u8, model, "\"op\":\"set_model\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, model, "\"provider\":\"claude\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, model, "\"model\":\"haiku\"") != null);
+    const effort = try settingLine(a, SETTING_REQUEST_ID, "session", .{ .effort = .high });
+    defer a.free(effort);
+    try std.testing.expect(std.mem.indexOf(u8, effort, "\"op\":\"set_effort\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, effort, "\"effort\":\"high\"") != null);
+    try std.testing.expectError(error.InvalidSetting, settingLine(a, 1, "session", .{ .model = .unknown }));
+    try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"refused\"}}").?);
+    try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"error\":\"failed\"}").?);
+    try std.testing.expect(!settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"ok\"}}").?);
+    try std.testing.expect(settingReplyFailed("{\"id\":3,\"result\":{\"status\":\"error\"}}") == null);
+}
+
+test "settings snapshots cannot replace newer events or another session" {
+    const sid = "11111111-2222-3333-4444-555555555555";
+    const other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    _ = begin(99001, 0, sid);
+    _ = begin(99002, 0, other);
+    defer release(99001);
+    defer release(99002);
+    const page = "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"host.settings\",\"payload\":{\"model\":\"opus\",\"effort\":\"low\",\"applied\":true}}}]}}";
+    try std.testing.expect(applyPage(99001, sid, page));
+    const snapshot = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"model\":\"haiku\",\"effort\":\"high\",\"applied\":false}", .{});
+    defer snapshot.deinit();
+    try std.testing.expect(!applySettingsSnapshot(99001, sid, 4, snapshot.value));
+    try std.testing.expectEqual(Model.opus, settings(99001).?.model);
+    try std.testing.expect(applySettingsSnapshot(99002, other, 6, snapshot.value));
+    try std.testing.expectEqual(Model.haiku, settings(99002).?.model);
+    try std.testing.expect(settingsKnown(99002));
+    const replay = "{\"result\":{\"events\":[" ++
+        "{\"seq\":2,\"event\":{\"kind\":\"turn.started\",\"turn\":\"turn-1\",\"payload\":{}}}," ++
+        "{\"seq\":5,\"event\":{\"kind\":\"host.settings\",\"payload\":{\"model\":\"opus\",\"effort\":\"low\",\"applied\":true}}}," ++
+        "{\"seq\":7,\"event\":{\"kind\":\"text.delta\",\"item\":\"reply\",\"payload\":{\"text\":\"hello\"}}}]}}";
+    try std.testing.expect(applyPage(99002, other, replay));
+    try std.testing.expect(running(99002));
+    try std.testing.expectEqual(Model.haiku, settings(99002).?.model);
+    {
+        mutex.lock();
+        defer mutex.unlock();
+        const replayed = slotFor(99002, other).?;
+        try std.testing.expectEqual(@as(u64, 7), replayed.after);
+        try std.testing.expectEqualStrings("hello", replayed.items.items[0].text.items);
+    }
+    try std.testing.expectEqual(Model.opus, settings(99001).?.model);
+    try std.testing.expect(!applySettingsSnapshot(99001, other, 9, snapshot.value));
+}
+
+test "idle hosted settings remain available without the agent" {
+    const sid = "11111111-2222-3333-4444-555555555555";
+    const replacement = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const shell_id = 99003;
+    _ = begin(shell_id, 0, sid);
+    defer release(shell_id);
+    try std.testing.expect(!settingsKnown(shell_id));
+    const ready = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"ready\"}}}]}}";
+    try std.testing.expect(applyPage(shell_id, sid, ready));
+    try std.testing.expect(!settingsKnown(shell_id));
+    const configured = "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"host.settings\",\"payload\":{\"model\":\"sonnet\",\"effort\":\"low\",\"applied\":true}}},{\"seq\":3,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
+    try std.testing.expect(applyPage(shell_id, sid, configured));
+    try std.testing.expect(settingsKnown(shell_id));
+    try std.testing.expect(!running(shell_id));
+    try std.testing.expectEqual(Model.sonnet, settings(shell_id).?.model);
+    try std.testing.expectEqual(Effort.low, settings(shell_id).?.effort);
+    try std.testing.expect(!settings(shell_id).?.applied);
+    const pending = "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"host.settings\",\"payload\":{\"model\":\"haiku\",\"effort\":\"high\",\"applied\":false}}}]}}";
+    try std.testing.expect(applyPage(shell_id, sid, pending));
+    try std.testing.expect(settingsKnown(shell_id));
+    try std.testing.expectEqual(Model.haiku, settings(shell_id).?.model);
+    try std.testing.expectEqual(Effort.high, settings(shell_id).?.effort);
+    _ = begin(shell_id, 0, replacement);
+    try std.testing.expect(!settingsKnown(shell_id));
+    try std.testing.expectEqual(Model.unknown, settings(shell_id).?.model);
+    const snapshot = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"model\":\"opus\",\"effort\":\"medium\",\"applied\":true}", .{});
+    defer snapshot.deinit();
+    try std.testing.expect(applySettingsSnapshot(shell_id, replacement, 5, snapshot.value));
+    try std.testing.expect(settingsKnown(shell_id));
+    try std.testing.expectEqual(Model.opus, settings(shell_id).?.model);
+    const old_stop = "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
+    try std.testing.expect(applyPage(shell_id, replacement, old_stop));
+    try std.testing.expect(settings(shell_id).?.applied);
+    _ = begin(shell_id, 1, replacement);
+    try std.testing.expect(!settingsKnown(shell_id));
+    try std.testing.expectEqual(Model.unknown, settings(shell_id).?.model);
+    release(shell_id);
+    try std.testing.expect(!settingsKnown(shell_id));
+}
+
+test "pending setting requests block until replies failure or disconnect" {
+    var pending: PendingSettings = .{};
+    const other: PendingSettings = .{};
+    try std.testing.expect(!pending.pending());
+    pending.start();
+    pending.start();
+    try std.testing.expect(!other.pending());
+    try std.testing.expect(pending.pending());
+    try std.testing.expect(pending.finish());
+    try std.testing.expect(pending.pending());
+    try std.testing.expect(pending.finish());
+    try std.testing.expect(!pending.pending());
+    try std.testing.expect(!pending.finish());
+    pending.start();
+    try std.testing.expect(pending.finish());
+    try std.testing.expect(!pending.pending());
+    pending.start();
+    pending.start();
+    try std.testing.expectEqual(@as(u32, 2), pending.clear());
+    try std.testing.expect(!pending.pending());
+    try std.testing.expectEqual(@as(u32, 0), pending.clear());
 }

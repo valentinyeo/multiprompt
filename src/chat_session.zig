@@ -723,6 +723,7 @@ const ChatLiveStream = struct {
     mutex: @import("app_state.zig").SpinMutex = .{},
     cancelled: std.atomic.Value(bool) = .init(false),
     ended: std.atomic.Value(bool) = .init(false),
+    pending_settings: @import("chat_live.zig").PendingSettings = .{},
     channel: ChatHistoryChannel = .{},
 };
 
@@ -734,6 +735,21 @@ fn chatLiveLock(mutex: *@import("app_state.zig").SpinMutex) void {
     while (!mutex.tryLock()) Sleep(1);
 }
 var g_chat_live_stream: ?*ChatLiveStream = null;
+
+pub fn chatSettingsEligible() bool {
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or !@import("room_frontend.zig").privateActionsAllowed()) return false;
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    return std.mem.eql(u8, key.provider(), "claude") and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
+}
+
+pub fn chatSettingsPending(shell_id: u32) bool {
+    chatLiveLock(&g_chat_live_mutex);
+    defer g_chat_live_mutex.unlock();
+    const stream = g_chat_live_stream orelse return false;
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    return stream.shell_id == shell_id and key.shell_id == shell_id and std.mem.eql(u8, key.provider(), "claude") and std.mem.eql(u8, stream.provider, key.provider()) and stream.pending_settings.pending();
+}
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
     if (key.shell_id == 0 or key.sid[0] == 0) return false;
@@ -796,10 +812,22 @@ fn chatLiveLog(stage: []const u8, shell_id: u32, amount: usize, flag: u8) void {
     debugLog(std.fmt.bufPrint(&buf, "[chat-live] {s} shell={d} n={d} f={d}", .{ stage, shell_id, amount, flag }) catch return);
 }
 
+fn chatSettingsFailureNotice() void {
+    const a = std.heap.page_allocator;
+    const text = a.dupeZ(u8, "Could not change chat settings") catch return;
+    if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(text.ptr))) == 0) a.free(text);
+}
+
 fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) void {
     const a = std.heap.page_allocator;
     defer chatLiveStreamRelease(stream);
-    defer stream.ended.store(true, .release);
+    defer {
+        stream.ended.store(true, .release);
+        while (!stream.mutex.tryLock()) Sleep(1);
+        const pending = stream.pending_settings.clear();
+        stream.mutex.unlock();
+        if (pending > 0) chatSettingsFailureNotice();
+    }
     const sid = stream.sid[0..stream.sid_len];
     const after = @import("chat_live.zig").begin(stream.shell_id, stream.host, sid);
     while (!stream.mutex.tryLock()) Sleep(1);
@@ -832,6 +860,9 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
             frame.appendSlice(a, chunk[0..n]) catch return;
         }
         const end = std.mem.indexOfScalar(u8, frame.items, '\n').?;
+        if (@import("chat_live.zig").settingReplyFailed(frame.items[0..end])) |failed| {
+            if (stream.pending_settings.finish() and failed) chatSettingsFailureNotice();
+        }
         const changed = @import("chat_live.zig").applyPage(stream.shell_id, sid, frame.items[0..end]);
         chatLiveLog("page", stream.shell_id, end, @intFromBool(changed));
         std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
@@ -903,13 +934,22 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
 }
 
 pub fn chatLiveWrite(line: []const u8) bool {
+    const setting = std.mem.indexOf(u8, line, ",\"op\":\"set_model\",") != null or std.mem.indexOf(u8, line, ",\"op\":\"set_effort\",") != null;
     chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     const stream = g_chat_live_stream orelse return false;
     if (stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
+    if (setting) {
+        const key = chatFileIdentityForShell(app_state.active_shell);
+        if (stream.shell_id != key.shell_id or stream.host != key.host or !std.mem.eql(u8, key.provider(), "claude") or !std.mem.eql(u8, stream.provider, key.provider()) or !std.mem.eql(u8, stream.sid[0..stream.sid_len], std.mem.sliceTo(&key.sid, 0))) return false;
+    }
     while (!stream.mutex.tryLock()) Sleep(1);
     defer stream.mutex.unlock();
-    return transport.write(stream.channel.shared orelse return false, line);
+    if (stream.cancelled.load(.acquire) or stream.ended.load(.acquire)) return false;
+    if (setting) stream.pending_settings.start();
+    const ok = transport.write(stream.channel.shared orelse return false, line);
+    if (setting and !ok) _ = stream.pending_settings.finish();
+    return ok;
 }
 
 fn chatLiveSyncQuestion() void {
@@ -971,17 +1011,18 @@ fn chatLiveSyncCard() void {
         if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;
     }
-    if (app_state.g_chat_permission_sid != shell_id or app_state.g_chat_permission.count == 0) return;
     if (!live.cardDismissed(shell_id)) return;
-    app_state.g_chat_permission = .{};
-    app_state.g_chat_permission.count = 0;
+    live.cardShown(shell_id);
     const presentation = &app_state.shells[app_state.active_shell].permission_presentation;
-    if (presentation.state == .pending) {
+    if (presentation.state != .absent) {
         presentation.state = .absent;
         @import("chat_render.zig").chatPermissionChanged();
     }
-    g_chat_live_card_len = 0;
-    live.cardShown(shell_id);
+    if (app_state.g_chat_permission_sid == shell_id) {
+        app_state.g_chat_permission = .{};
+        app_state.g_chat_permission.count = 0;
+        g_chat_live_card_len = 0;
+    }
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
@@ -1324,6 +1365,7 @@ pub fn chatFileOnReady() void {
             active_changed = true;
             chatLiveSyncWorking();
             preview_changed = true;
+            if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
             @import("window_layout.zig").chatWorkingIndicatorSync();
             if (live.held(live_shell)) chatFileRequest(key);
         }
@@ -1425,7 +1467,7 @@ pub fn chatFileOnReady() void {
             if (belongs_to_active) {
                 active_changed = active_changed or !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
-                app_state.g_chat_switch_loading = history.more;
+                app_state.g_chat_switch_loading = history.more and entry.history.blocks.items.len == 0;
                 const idx = findShellById(key.shell_id) orelse continue;
                 const sid = std.mem.sliceTo(&history.sid, 0);
                 var changed = false;
@@ -1752,6 +1794,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_cache_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     if (cached) |entry| {
+        chatLoadSaved(entry);
         const history = &entry.history;
         if (chatEnsureTranscriptCapacity(history.text.items.len, history.blocks.items.len)) {
             app_state.g_chat_last_hash = history.revision;
@@ -1765,12 +1808,13 @@ pub fn chatDeferTranscriptLoad() void {
         }
     }
     chatEchoMatchActive();
-    app_state.g_chat_switch_loading = app_state.g_chat_block_count == 0;
+    app_state.g_chat_switch_loading = false;
     app_state.g_chat_content_h = 0;
     app_state.g_chat_scroll_y = 0;
     app_state.g_chat_scrolled_up = false;
     app_state.g_chat_new_messages = .{};
     app_state.g_chat_read_boundary = .{};
+    app_state.g_chat_batch_boundary = .{};
     if (app_state.g_chat_read_visit_shell_id != app_state.g_chat_cache_shell_id) {
         app_state.g_chat_read_visit_shell_id = app_state.g_chat_cache_shell_id;
         app_state.g_chat_read_visit_marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
@@ -1793,6 +1837,64 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_layout_dirty = true;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     if (app_state.g_chat_block_count == 0) chatFileRequest(chatFileIdentity());
+}
+
+fn chatLoadSaved(entry: *ChatHistoryEntry) void {
+    if (entry.disk_loaded or entry.pending or entry.loading_disk or entry.history.blocks.items.len != 0 or entry.history.rows.items.len != 0) return;
+    var path_buf: [560]u8 = undefined;
+    const path = chatHistoryPath(entry.key, &path_buf) orelse return;
+    const bytes = chatHistoryRead(path) orelse {
+        entry.disk_loaded = true;
+        return;
+    };
+    defer std.heap.page_allocator.free(bytes);
+    const decoded = chat_history.History.decode(std.heap.page_allocator, bytes, entry.key) catch {
+        entry.disk_loaded = true;
+        return;
+    };
+    entry.history.deinit(std.heap.page_allocator);
+    entry.history = decoded;
+    entry.disk_loaded = true;
+    if (entry.key.sid[0] == 0) entry.key.sid = entry.history.sid;
+}
+
+pub fn chatWarmOftenUsed() void {
+    if (app_state.g_main_hwnd == null or IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0) return;
+    const now = GetTickCount64();
+    const active_busy = if (app_state.g_chat_active) blk: {
+        const entry = chatHistoryEntry(chatFileIdentity());
+        break :blk entry != null and (entry.?.pending or chat_history.retryDue(false, now, entry.?.next));
+    } else false;
+    const Ranked = struct { idx: u32, viewed: u64 };
+    var ranked: [5]Ranked = undefined;
+    var count: usize = 0;
+    var i: u32 = 0;
+    while (i < app_state.shell_count) : (i += 1) {
+        if (i == app_state.active_shell) continue;
+        const shell = &app_state.shells[i];
+        if (shell.last_viewed == 0 or shell.kind != .tmux) continue;
+        const key = chatFileIdentityForShell(i);
+        if (key.shell_id == 0 or key.tmux[0] == 0) continue;
+        var place: usize = count;
+        while (place > 0 and ranked[place - 1].viewed < shell.last_viewed) : (place -= 1) {}
+        if (place == ranked.len) continue;
+        var shift = if (count < ranked.len) count else ranked.len - 1;
+        while (shift > place) : (shift -= 1) ranked[shift] = ranked[shift - 1];
+        ranked[place] = .{ .idx = i, .viewed = shell.last_viewed };
+        if (count < ranked.len) count += 1;
+    }
+    var remote = false;
+    var n: usize = 0;
+    while (n < count) : (n += 1) {
+        const key = chatFileIdentityForShell(ranked[n].idx);
+        const entry = chatHistoryEntry(key) orelse continue;
+        if (entry.retired) continue;
+        if (!entry.disk_loaded and !entry.pending and !entry.loading_disk) chatFileRequestForDelivery(key, true);
+        if (remote or active_busy or entry.pending or entry.history.blocks.items.len == 0) continue;
+        if (!chat_history.retryDue(false, now, entry.next)) continue;
+        chatFileRequestForDelivery(key, true);
+        remote = true;
+    }
 }
 
 pub fn chatSwitchDidPaint() void {

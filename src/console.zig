@@ -2765,6 +2765,10 @@ pub fn switchToShell(idx: u32) void {
             app_state.g_ws_focus[app_state.shells[idx].workspace] = .none;
         app_state.g_ws_last_shell[app_state.shells[idx].workspace] = app_state.shells[idx].shell_id;
     }
+    if (idx != prev) {
+        if (prev < app_state.shell_count) writePaneSessionFileForShell(prev);
+        if (idx < app_state.shell_count) writePaneSessionFileForShell(idx);
+    }
     @import("main.zig").sessionFrontChanged();
 
     if (idx != prev) {

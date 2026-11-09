@@ -703,7 +703,7 @@ pub var g_dev_font_hud: bool = false;
 pub var g_dev_console_cell_w: i32 = 0;
 pub const GROUP_HEADER_H: i32 = 28;
 pub const BTN_H: i32 = 32;
-pub const SIDEBAR_STATUS_DETAIL_H: i32 = 222;
+pub const SIDEBAR_STATUS_DETAIL_H: i32 = 246;
 pub const SIDEBAR_STICKY_CARD_H: i32 = 26;
 pub const SIDEBAR_STICKY_CARD_COLLAPSED_H: i32 = 58;
 pub const SIDEBAR_STICKY_CARD_GAP: i32 = 6;
@@ -1062,6 +1062,7 @@ pub var g_search_active: bool = false;
 pub var g_search_from_inbox: bool = false;
 pub var g_search_spawn_ws: u8 = 0xFF;
 pub var g_search_workspace_mode: bool = false;
+pub var g_search_workspace_action: enum { open, archive, restore } = .open;
 pub var g_search_workspace_delete_mode: bool = false;
 pub var g_search_ws_sort_mode: bool = false;
 pub var g_search_ws_move_mode: bool = false;
@@ -1303,6 +1304,8 @@ pub var g_chat_read_open_ready = false;
 pub var g_chat_read_hold = false;
 pub var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 pub var g_chat_read_divider_y: i32 = 0;
+pub var g_chat_batch_boundary: chat_history.BatchBoundary = .{};
+pub var g_chat_batch_divider_y: i32 = 0;
 pub var g_chat_new_messages: chat_history.NewMessages = .{};
 pub var g_chat_content_left: i32 = 0;
 pub var g_chat_sel_anchor: usize = 0;
@@ -1461,6 +1464,7 @@ pub const SEARCH_NEWWIN_OFFSET: usize = 6000;
 pub const SEARCH_CREATEWS_OFFSET: usize = 6001;
 pub const SEARCH_WORKSPACES_MENU_OFFSET: usize = 6200;
 pub const SEARCH_WORKSPACE_DELETE_MENU_OFFSET: usize = 6201;
+pub const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET: usize = 6387;
 pub const SEARCH_QUIT_OFFSET: usize = 6202;
 pub const SEARCH_FULLWIDTH_OFFSET: usize = 6203;
 pub const SEARCH_SHORTCUTS_OFFSET: usize = 6204;
@@ -1531,6 +1535,12 @@ pub const SEARCH_GROUPMOVE_NEW_OFFSET: usize = 6303;
 pub const SEARCH_GROUPMOVE_NONE_OFFSET: usize = 6304;
 pub const SEARCH_CHAT_VIEW_OFFSET: usize = 6305;
 pub const SEARCH_CHAT_STOP_OFFSET: usize = 6306;
+pub const SEARCH_CHAT_MODEL_OPUS_OFFSET: usize = 12003;
+pub const SEARCH_CHAT_MODEL_SONNET_OFFSET: usize = 12004;
+pub const SEARCH_CHAT_MODEL_HAIKU_OFFSET: usize = 12005;
+pub const SEARCH_CHAT_EFFORT_LOW_OFFSET: usize = 12006;
+pub const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET: usize = 12007;
+pub const SEARCH_CHAT_EFFORT_HIGH_OFFSET: usize = 12008;
 pub const SEARCH_CHAT_ALLOW_OFFSET: usize = 6373;
 pub const SEARCH_CHAT_ALWAYS_OFFSET: usize = 6374;
 pub const SEARCH_CHAT_DENY_OFFSET: usize = 6375;
@@ -1597,6 +1607,8 @@ pub const SEARCH_CHAT_AC_OFFSET: usize = 6356;
 pub const SEARCH_CHAT_MODE_PLAN_OFFSET: usize = 12000;
 pub const SEARCH_CHAT_MODE_MANUAL_OFFSET: usize = 12001;
 pub const SEARCH_CHAT_MODE_EDITS_OFFSET: usize = 12002;
+pub const SEARCH_CHAT_MODE_BYPASS_OFFSET: usize = 12009;
+pub const SEARCH_CHAT_PLUS_MENU_OFFSET: usize = 12010;
 pub const SEARCH_CHAT_QUEUE_SEND_OFFSET: usize = 6365;
 pub const SEARCH_CHAT_RESET_OFFSET: usize = 6394;
 pub const SEARCH_CHAT_TAB_URL_OFFSET: usize = 6384;
@@ -1960,6 +1972,7 @@ pub const WorkspaceEntry = struct {
     name: [64]u8,
     name_len: u32,
     restore: bool,
+    archived: bool = false,
     host: [64]u8,
     host_len: u32,
 };
@@ -2009,6 +2022,7 @@ pub const CloseReason = enum(usize) {
     workspace_delete,
     workspace_collapse,
     bench_exit,
+    workspace_archive,
 };
 
 pub fn requestAppClose(target: HANDLE, reason: CloseReason) void {
@@ -2301,6 +2315,8 @@ pub var g_account_base: ?[]u8 = null;
 pub var g_account_local_base: ?[]u8 = null;
 pub var g_account_colors_supported = false;
 pub var g_account_groups_supported = false;
+pub var g_account_group_order_supported = false;
+pub var g_account_starred_groups_supported = false;
 pub var g_account_appearance_supported = false;
 pub var g_account_dirty_at: u64 = 0;
 pub var g_account_status: []const u8 = "Sign in to Multi Bot to open your workspaces.";
@@ -2314,7 +2330,7 @@ pub const AppearanceEdit = @import("appearance_intent.zig").Edit;
 pub const AppearanceIntent = @import("appearance_intent.zig").Intent;
 pub const AppearanceTouch = @import("appearance_intent.zig").Touch;
 pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null, appearance: ?[]AppearanceIntent = null };
-pub const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, group_order_supported: bool = false, starred_groups_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
@@ -2898,9 +2914,11 @@ pub const ChatLayoutSnapshot = struct {
     font_pt: i32,
     clean: bool,
     boundary: chat_history.ReadBoundary,
+    batch_boundary: chat_history.BatchBoundary,
     img_first_block: usize,
     first_image: usize,
     read_divider_y: i32,
+    batch_divider_y: i32,
     rects: []RECT,
 };
 pub const ChatHistoryEntry = struct {
@@ -3208,6 +3226,7 @@ pub const ChatOutboxEntry = struct {
     message_sid: [40]u8 = @splat(0),
     message_phase: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     retry_nonce: u64 = 0,
     reset_pending: bool = false,
     channel_pending: bool = false,
@@ -3230,9 +3249,10 @@ pub const ChatOutboxEntry = struct {
 
     pub fn removable(self: ChatOutboxEntry) bool {
         if (!self.message_v1) return chat_echo.pendingActions(self.state).remove;
+        if (self.channel_pending) return false;
+        if (self.state == .not_sent) return true;
         const phase = std.mem.sliceTo(&self.message_phase, 0);
-        return !self.channel_pending and (self.state == .not_sent or self.state == .queued) and
-            (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
+        return self.state == .queued and (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
     }
 };
 
@@ -3999,6 +4019,7 @@ pub const ChatTmuxSendJob = struct {
     reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0),
     message_wire_id: [81]u8 = @splat(0),
+    message_replaces: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = false,
     rejected: bool = false,

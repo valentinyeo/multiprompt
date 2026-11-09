@@ -73,6 +73,7 @@ const capacityLoadPercent = @import("capacity.zig").capacityLoadPercent;
 const drawAsciiRun = @import("drawing.zig").drawAsciiRun;
 const asciiTextWidth = @import("drawing.zig").asciiTextWidth;
 const status_line = @import("status_line.zig");
+const app_footprint = @import("footprint.zig");
 const paintSidebarCardFrame = @import("capacity.zig").paintSidebarCardFrame;
 const nowFileTime = @import("inbox.zig").nowFileTime;
 
@@ -152,6 +153,16 @@ pub fn ensureUsageTelemetryCollector() void {
         _ = CloseHandle(launch);
         app_state.g_usage_launch_mutex = null;
     }
+}
+
+pub fn syncUsageTelemetryCollector() void {
+    if (app_state.g_status_card_hover) app_footprint.wake();
+    const footprint = @import("idle_footprint.zig");
+    if (footprint.usageCollectorWanted()) {
+        ensureUsageTelemetryCollector();
+        return;
+    }
+    if (usage_telemetry_mode.isRunning()) usage_telemetry_mode.stopForRelaunch();
 }
 
 fn aiPaceJsonString(value: ?std.json.Value) ?[]const u8 {
@@ -709,6 +720,8 @@ pub fn cycleSidebarStatusCard(direction: i32) void {
         @intCast((@as(usize, app_state.g_sidebar_status_card) + 1) % 3)
     else
         @intCast((@as(usize, app_state.g_sidebar_status_card) + 2) % 3);
+    @import("idle_footprint.zig").setUsageCollectorHold(true);
+    syncUsageTelemetryCollector();
     saveSidebarStatusCard();
     invalidateSidebar();
 }
@@ -1458,8 +1471,18 @@ fn paintSidebarCombinedDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_
     var urgent_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(129), .right = inner_right, .bottom = rect.top + uiScaled(157) };
     drawAscii(hdc, urgent_text, &urgent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
+    const live = app_footprint.reading();
+    _ = SetTextColor(hdc, bright);
+    var live_buf: [96]u8 = undefined;
+    var live_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(158), .right = inner_right, .bottom = rect.top + uiScaled(180) };
+    drawAscii(hdc, app_footprint.formatReading(&live_buf, live), &live_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+
+    var peak_buf: [96]u8 = undefined;
     _ = SetTextColor(hdc, dim);
-    var hint_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(181), .right = inner_right, .bottom = rect.bottom - uiScaled(5) };
+    var peak_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(181), .right = inner_right, .bottom = rect.top + uiScaled(203) };
+    drawAscii(hdc, app_footprint.formatPeak(&peak_buf, live), &peak_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+
+    var hint_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(205), .right = inner_right, .bottom = rect.bottom - uiScaled(5) };
     drawAscii(hdc, "Ctrl+Shift+G cycles cards", &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_CENTER | DT_END_ELLIPSIS);
 }
 

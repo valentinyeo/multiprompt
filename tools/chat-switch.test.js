@@ -46,12 +46,14 @@ test('chat paints before the coalesced browser exchange, including stale refresh
   assert.throws(() => paintFirst(baseline), assert.AssertionError);
 });
 
-test('switch restores the unified parsed cache and defers disk/remote IO', () => {
+test('switch restores the unified parsed cache and defers remote IO', () => {
   const restore = body('chatDeferTranscriptLoad');
   assert.match(restore, /chatHistoryEntry\(chatCacheIdentity\(\)\)/);
+  assert.match(restore, /chatLoadSaved\(entry\)/);
   assert.match(restore, /history.text.items/);
+  assert.match(restore, /g_chat_switch_loading = false/);
   assert.doesNotMatch(source, /g_chat_tab_cache|g_chat_file_token/);
-  assert.doesNotMatch(restore, /chat_transcript\.parse|captureChatTranscript|readFile|fetchAcPersistent/);
+  assert.doesNotMatch(restore, /chat_transcript\.parse|captureChatTranscript|readFile|fetchAcPersistent|chatHistoryFetch/);
   assert.match(body('chatFileFetchThread'), /history.apply/);
   assert.match(body('chatFileFetchThread'), /chatHistoryRead[\s\S]*History.decode/);
   assert.doesNotMatch(body('chatHistoryEntry'), /chatHistoryRead|History.decode/);
@@ -79,7 +81,9 @@ test('pane follows without requesting browser focus and debug timings sample act
   assert.match(body('switchToShell'), /armSshReconnectTimerIfNeeded\(\)/);
   assert.doesNotMatch(body('switchToShell'), /respawnShellInPlace\(/);
   assert.doesNotMatch(body('openChatView'), /shells\[active_shell\]\.hwnd == null/);
-  assert.match(body('updateBrowserVisibility'), /if \(g_chat_active or shells\[active_shell\]\.browser_pending_intent == \.select_preserve_focus\) launchBrowserForShellFromRequest/);
+  assert.match(body('updateBrowserVisibility'), /passiveBrowserLaunchAllowed\(active_shell\)/);
+  assert.match(body('updateBrowserVisibility'), /if \(shells\[active_shell\]\.browser_pending_intent == \.select_preserve_focus\) launchBrowserForShellFromRequest/);
+  assert.doesNotMatch(body('updateBrowserVisibility'), /if \(g_chat_active or shells\[active_shell\]\.browser_pending_intent/);
   assert.doesNotMatch(body('chatSwitchBrowserTick'), /requestNativeBrowserFocus|focusActiveBrowserPane/);
   const log = body('chatSwitchLogBrowserShown');
   assert.match(log, /verboseLoggingEnabled\(\)/);

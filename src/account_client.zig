@@ -42,6 +42,8 @@ pub const Response = struct {
     colors_supported: bool = false,
     appearance_supported: bool = false,
     groups_supported: bool = false,
+    group_order_supported: bool = false,
+    starred_groups_supported: bool = false,
     photos_supported: bool = false,
     palette8_supported: bool = false,
     pub fn deinit(self: Response) void {
@@ -93,7 +95,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     defer _ = WinHttpCloseHandle(req);
     const disable_redirects: u32 = 2;
     _ = WinHttpSetOption(req, 63, &disable_redirects, @sizeOf(u32));
-    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
+    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
     defer a.free(headers);
     const hw = try std.unicode.utf8ToUtf16LeAllocZ(a, headers);
     defer a.free(hw);
@@ -106,6 +108,8 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     var colors_supported = false;
     var appearance_supported = false;
     var groups_supported = false;
+    var group_order_supported = false;
+    var starred_groups_supported = false;
     var photos_supported = false;
     var palette8_supported = false;
     var header_buf: [8192]u16 = @splat(0);
@@ -118,6 +122,8 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
         colors_supported = layoutSupportsColors(raw);
         appearance_supported = layoutSupportsAppearance(raw);
         groups_supported = layoutSupports(raw, "groups");
+        group_order_supported = layoutSupports(raw, "group_order");
+        starred_groups_supported = layoutSupports(raw, "starred_groups");
         photos_supported = layoutSupports(raw, "bot_photo");
         palette8_supported = layoutSupportsPalette8(raw);
     }
@@ -128,7 +134,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     while (GetTickCount64() < deadline) {
         var n: u32 = 0;
         if (WinHttpReadData(req, &chunk, chunk.len, &n) == 0) return error.Network;
-        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported, .photos_supported = photos_supported, .palette8_supported = palette8_supported, .groups_supported = groups_supported };
+        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported, .photos_supported = photos_supported, .palette8_supported = palette8_supported, .groups_supported = groups_supported, .group_order_supported = group_order_supported, .starred_groups_supported = starred_groups_supported };
         if (out.items.len + n >= 1024 * 1024) return error.TooLarge;
         try out.appendSlice(a, chunk[0..n]);
     }

@@ -13,6 +13,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout) value = { ...value, layout: { ...value.layout, tabs: value.layout.tabs.map(tab => {
     const visible = { ...tab };
     if (!layoutFeature(request, 'groups')) delete visible.group;
+    if (!layoutFeature(request, 'starred_groups')) delete visible.starred_group;
     if (!layoutFeature(request, 'bot_photo')) delete visible.photo;
     if (!layoutFeature(request, 'favorite')) delete visible.favorite;
     if (!layoutFeature(request, 'muted')) delete visible.muted;
@@ -35,16 +36,18 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
+  if (value.layout && !layoutFeature(request, 'group_order')) delete value.layout.group_order;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : ''));
   return response;
 }
 export function validateLayout(x) {
   const keys = (v, expected) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === expected.sort().join(',');
   const text = (v, n) => typeof v === 'string' && v.length > 0 && v.length <= n && !/[\x00-\x1f\x7f]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(v);
-  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts', 'removed_hosts'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
+  if (!keys(x, ['schema', 'revision', 'workspaces', 'tabs', ...['settings', 'hosts', 'removed_hosts', 'group_order'].filter(key => Object.hasOwn(x || {}, key))]) || x.schema !== 1 || !Number.isSafeInteger(x.revision) || x.revision < 0 ||
       !Array.isArray(x.workspaces) || x.workspaces.length > 9 || !Array.isArray(x.tabs) || x.tabs.length > 256) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'settings') && (!x.settings || typeof x.settings !== 'object' || Array.isArray(x.settings) || Object.entries(x.settings).some(([key, value]) => !['frequent', 'favorites', 'all', 'frequent_first'].includes(key) || typeof value !== 'boolean'))) fail(400, 'invalid_layout');
+  if (Object.hasOwn(x, 'group_order') && (!Array.isArray(x.group_order) || x.group_order.length > 16 || new Set(x.group_order).size !== x.group_order.length || x.group_order.some(name => !text(name, 64)))) fail(400, 'invalid_layout');
   if (Object.hasOwn(x, 'removed_hosts') && (!Array.isArray(x.removed_hosts) || x.removed_hosts.length > 3 || new Set(x.removed_hosts).size !== x.removed_hosts.length || x.removed_hosts.some(slot => !Number.isInteger(slot) || slot < 0 || slot > 2))) fail(400, 'invalid_hosts');
   if (Object.hasOwn(x, 'hosts')) {
     const slots = new Set();
@@ -66,8 +69,8 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' ? t.group !== '' && !text(t.group, 64) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color', 'photo', 'group', 'starred_group'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'group' || key === 'starred_group' ? t[key] !== '' && !text(t[key], 64) : key === 'photo' ? !Number.isSafeInteger(t.photo) || t.photo < 1 : key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 8) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
@@ -82,6 +85,8 @@ function validateCrashReport(x) {
       Object.entries(limits).some(([key, limit]) => typeof x[key] !== 'string' || x[key].length > limit) || !x.stack_trace.length) fail(400, 'invalid_crash_report');
   return x;
 }
+
+const validSecret = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[\x21-\x7e]+$/.test(value);
 
 async function body(request, limit = 1024 * 1024, invalid = 'invalid_json') {
   if (Number(request.headers.get('Content-Length')) > limit) fail(413, 'too_large');
@@ -325,6 +330,17 @@ export default {
         if (!result[0].meta.changes && !await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
         return result[0].meta.changes ? json({ stored: true }, 201) : json({ stored: false, duplicate: true });
       }
+      if (url.pathname === '/v1/secrets/deepgram' && (request.method === 'GET' || request.method === 'PUT')) {
+        if (!device.id) fail(403, 'device_required');
+        if (request.method === 'PUT') {
+          const b = await body(request, 1024, 'invalid_secret');
+          if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).length !== 1 || !validSecret(b.key)) fail(400, 'invalid_secret');
+          await db.prepare('INSERT INTO account_secrets (account,name,value,updated_at) VALUES (?,?,?,?) ON CONFLICT(account,name) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').bind(device.account, 'deepgram', b.key, now()).run();
+          return json({ stored: true });
+        }
+        const row = await db.prepare('SELECT value FROM account_secrets WHERE account=? AND name=?').bind(device.account, 'deepgram').first();
+        return row ? json({ key: row.value }) : json({ error: 'not_found' }, 404);
+      }
       const photoMatch = url.pathname.match(/^\/v1\/bot-photos\/([0-9a-f]{64})$/);
       if (photoMatch && ['GET', 'PUT', 'DELETE'].includes(request.method)) {
         const key = photoMatch[1];
@@ -384,7 +400,7 @@ export default {
         const confined = device.kind === 'workspace';
         if (confined) layout = confine(device, layout, previousLayout);
         if (row && row.revision !== b.base_revision) return reply({ revision: row.revision, layout: scoped(device, previousLayout) }, 409);
-        const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal'].includes(feature)).join(',') }) } : request;
+        const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal', 'group_order'].includes(feature)).join(',') }) } : request;
         if (!layoutFeature(req, 'bot_palette8')) {
           const previous = new Map((previousLayout?.workspaces || []).map(workspace => [workspace.name, workspace]));
           for (const workspace of layout.workspaces) {
@@ -402,6 +418,10 @@ export default {
         if (!layoutFeature(req, 'settings')) {
           if (previousLayout?.settings !== undefined) layout.settings = { ...previousLayout.settings };
           else delete layout.settings;
+        }
+        if (!layoutFeature(req, 'group_order')) {
+          if (previousLayout?.group_order !== undefined) layout.group_order = previousLayout.group_order;
+          else delete layout.group_order;
         }
         if (!layoutFeature(req, 'hosts')) {
           if (previousLayout?.hosts !== undefined) layout.hosts = previousLayout.hosts;
@@ -426,6 +446,10 @@ export default {
           if (!layoutFeature(req, 'groups')) {
             if (previous?.group !== undefined) tab.group = previous.group;
             else delete tab.group;
+          }
+          if (!layoutFeature(req, 'starred_groups')) {
+            if (previous?.starred_group !== undefined) tab.starred_group = previous.starred_group;
+            else delete tab.starred_group;
           }
           const photo = photos.get(await remotePhotoKey(tab.tmux_host, tab.tmux_session));
           if (photo !== undefined) tab.photo = photo;

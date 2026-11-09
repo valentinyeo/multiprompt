@@ -20,7 +20,11 @@ server runtime and every client.
 - At most one host process per chat.
 - At most one owner per chat at a time: the host (app) or a terminal (`claude --resume`).
 - The store stays the source of truth for messages; the host only adds a delivery
-  transport. `shared_messages`, `message_attempts` and `message_events` keep their shape.
+  transport. `shared_messages`, `message_attempts` and `message_events` keep their shape,
+  except `shared_messages.origin` (`human` or `agent`), added by IGSH-1900.
+- `origin` says who wrote a message. The desktop and the phone submit `human`;
+  `mp-send` and `host send` submit `agent`. A client shows only `human` rows as the
+  person's own message, so an agent message that fails never turns into his unsent draft.
 
 ## State directory
 

@@ -113,6 +113,7 @@ const SEARCH_NEWWIN_OFFSET = @import("app_state.zig").SEARCH_NEWWIN_OFFSET;
 const SEARCH_CREATEWS_OFFSET = @import("app_state.zig").SEARCH_CREATEWS_OFFSET;
 const SEARCH_WORKSPACES_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACES_MENU_OFFSET;
 const SEARCH_WORKSPACE_DELETE_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+const SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET;
 const SEARCH_QUIT_OFFSET = @import("app_state.zig").SEARCH_QUIT_OFFSET;
 const SEARCH_FULLWIDTH_OFFSET = @import("app_state.zig").SEARCH_FULLWIDTH_OFFSET;
 const SEARCH_SHORTCUTS_OFFSET = @import("app_state.zig").SEARCH_SHORTCUTS_OFFSET;
@@ -187,6 +188,12 @@ const SEARCH_GROUPMOVE_BACK_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_B
 const SEARCH_GROUPMOVE_NEW_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NEW_OFFSET;
 const SEARCH_GROUPMOVE_NONE_OFFSET = @import("app_state.zig").SEARCH_GROUPMOVE_NONE_OFFSET;
 const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET;
+const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
+const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
+const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
+const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
 const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFSET;
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
@@ -251,6 +258,8 @@ const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
 const SEARCH_CHAT_MODE_PLAN_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_PLAN_OFFSET;
 const SEARCH_CHAT_MODE_MANUAL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_MANUAL_OFFSET;
 const SEARCH_CHAT_MODE_EDITS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_EDITS_OFFSET;
+const SEARCH_CHAT_MODE_BYPASS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODE_BYPASS_OFFSET;
+const SEARCH_CHAT_PLUS_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_PLUS_MENU_OFFSET;
 const SEARCH_CHAT_QUEUE_SEND_OFFSET = @import("app_state.zig").SEARCH_CHAT_QUEUE_SEND_OFFSET;
 const SEARCH_CHAT_RESET_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESET_OFFSET;
 const SEARCH_CHAT_TAB_URL_OFFSET = @import("app_state.zig").SEARCH_CHAT_TAB_URL_OFFSET;
@@ -570,7 +579,7 @@ pub fn readArchiveContent(i: usize) ?archive_rules.Content {
 }
 
 pub fn recordInboxArchive(i: usize) bool {
-    if (i >= app_state.shell_count or @import("archive.zig").rejectPinnedSessionClose(i)) return false;
+    if (i >= app_state.shell_count) return false;
     const content = readArchiveContent(i);
     app_state.shells[i].archive_content = content orelse .{};
     app_state.shells[i].archive_content_valid = content != null;
@@ -653,7 +662,6 @@ pub fn restoreArchiveMarkers(shell: *Shell, tab: *const SavedTab) void {
 pub fn hideActiveTabUntilAttention() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const idx = app_state.active_shell;
-    if (@import("archive.zig").rejectPinnedSessionClose(idx)) return;
     if (app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention) {
         if (findNextVisibleTab(idx, 1) orelse findNextVisibleTab(idx, -1)) |nxt| {
             @import("console.zig").switchToShellByUser(nxt);
@@ -1056,6 +1064,44 @@ pub fn moveGroupToIndex(src: u32, dst: u32) bool {
     }
     app_state.groups[dst] = moved;
     return true;
+}
+
+pub fn orderGroupsByName(names: []const []const u8) bool {
+    var changed = false;
+    var dest: u32 = 0;
+    for (names) |name| {
+        var wide: [64]u16 = undefined;
+        const len = std.unicode.utf8ToUtf16Le(&wide, name) catch continue;
+        var src = dest;
+        while (src < app_state.group_count) : (src += 1) {
+            const group = app_state.groups[src];
+            if (std.mem.eql(u16, group.name[0..group.name_len], wide[0..len])) break;
+        }
+        if (src >= app_state.group_count) continue;
+        if (moveGroupToIndex(src, dest)) changed = true;
+        dest += 1;
+    }
+    return changed;
+}
+
+pub fn groupOrderFor(a: std.mem.Allocator, tabs: []const @import("session_layout.zig").Tab) !?[]const []const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        const name = try std.unicode.utf16LeToUtf8Alloc(a, group.name[0..group.name_len]);
+        if (name.len == 0 or groupNameListed(names.items, name) or !groupNameInTabs(tabs, name)) continue;
+        try names.append(a, name);
+    }
+    return if (names.items.len > 0) try names.toOwnedSlice(a) else null;
+}
+
+fn groupNameListed(names: []const []const u8, name: []const u8) bool {
+    for (names) |old| if (std.mem.eql(u8, old, name)) return true;
+    return false;
+}
+
+fn groupNameInTabs(tabs: []const @import("session_layout.zig").Tab, name: []const u8) bool {
+    for (tabs) |tab| if (std.mem.eql(u8, tab.group orelse "", name) or std.mem.eql(u8, tab.starred_group orelse "", name)) return true;
+    return false;
 }
 
 pub fn createGroup(name: []const u16) u32 {
@@ -2619,7 +2665,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_workspace_delete_mode)
                 L("Search workspaces to delete...")
             else if (app_state.g_search_workspace_mode)
-                L("Search workspaces to open...")
+                switch (app_state.g_search_workspace_action) {
+                    .open => L("Search workspaces to open..."),
+                    .archive => L("Search workspaces to archive..."),
+                    .restore => L("Search archived workspaces to restore..."),
+                }
             else
                 L("Search sessions and commands");
             _ = DrawTextW(hdc, placeholder, -1, &input_text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
@@ -2688,6 +2738,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_newest = result_idx == SEARCH_CHAT_NEWEST_OFFSET;
                     const is_chat_resync = result_idx == SEARCH_CHAT_RESYNC_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
+                    const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -2695,7 +2746,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_focus_messages = result_idx == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
-                    const is_chat_mode = result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET or result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET or result_idx == SEARCH_CHAT_MODE_EDITS_OFFSET;
+                    const is_chat_mode = result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET or result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET or result_idx == SEARCH_CHAT_MODE_EDITS_OFFSET or result_idx == SEARCH_CHAT_MODE_BYPASS_OFFSET;
                     const is_chat_queue_send = result_idx == SEARCH_CHAT_QUEUE_SEND_OFFSET;
                     const is_chat_reset = result_idx == SEARCH_CHAT_RESET_OFFSET;
                     const is_chat_tab_url = result_idx == SEARCH_CHAT_TAB_URL_OFFSET;
@@ -2704,7 +2755,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
+                    const is_chat_setting = result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -3029,6 +3081,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_WORKSPACE_ARCHIVED_MENU_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var wm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Archived workspaces"), -1, &wm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_workspaces_menu) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3662,11 +3719,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var find_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3716,7 +3773,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var mode_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        const label = if (result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET) L("Chat permission mode: Plan") else if (result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET) L("Chat permission mode: Ask") else L("Chat permission mode: Accept edits");
+                        const label = if (result_idx == SEARCH_CHAT_MODE_PLAN_OFFSET) L("Chat permission mode: Plan") else if (result_idx == SEARCH_CHAT_MODE_MANUAL_OFFSET) L("Chat permission mode: Ask") else if (result_idx == SEARCH_CHAT_MODE_BYPASS_OFFSET) L("Chat permission mode: Bypass") else L("Chat permission mode: Accept edits");
                         _ = paletteDrawText(hdc, label, -1, &mode_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_ac) {
                         _ = SelectObject(hdc, palette_font);
@@ -3991,6 +4048,20 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var chat_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Alt+C"), -1, &chat_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_setting) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var setting_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        const label = switch (result_idx) {
+                            SEARCH_CHAT_MODEL_OPUS_OFFSET => L("Chat View: Model Opus"),
+                            SEARCH_CHAT_MODEL_SONNET_OFFSET => L("Chat View: Model Sonnet"),
+                            SEARCH_CHAT_MODEL_HAIKU_OFFSET => L("Chat View: Model Haiku"),
+                            SEARCH_CHAT_EFFORT_LOW_OFFSET => L("Chat View: Effort Low"),
+                            SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => L("Chat View: Effort Medium"),
+                            SEARCH_CHAT_EFFORT_HIGH_OFFSET => L("Chat View: Effort High"),
+                            else => unreachable,
+                        };
+                        _ = paletteDrawText(hdc, label, -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_chat_allow) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4263,7 +4334,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (is_current) RGB(120, 120, 130) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                             var ws_buf: [96]u16 = undefined;
                             var wsl: usize = 0;
-                            const prefix = if (is_live) "Switch to Workspace: " else "Open Workspace: ";
+                            const prefix = if (app_state.g_search_workspace_mode and app_state.g_search_workspace_action == .archive) "Archive Workspace: " else if (e.archived) "Restore Workspace: " else if (is_live) "Switch to Workspace: " else "Open Workspace: ";
                             for (prefix) |c| {
                                 ws_buf[wsl] = c;
                                 wsl += 1;
@@ -5284,4 +5355,64 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 17), app_state.shells[1].starred_group_id);
     try std.testing.expect(app_state.shells[0].pinned_top);
+}
+
+test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {
+    const saved_groups = app_state.groups;
+    const saved_count = app_state.group_count;
+    const saved_next = app_state.next_group_id;
+    defer {
+        app_state.groups = saved_groups;
+        app_state.group_count = saved_count;
+        app_state.next_group_id = saved_next;
+    }
+    app_state.group_count = 0;
+    app_state.next_group_id = 1;
+    const work = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Work"));
+    const home = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Home"));
+    const local = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Local"));
+    try std.testing.expect(orderGroupsByName(&.{ "Local", "Missing", "Work" }));
+    try std.testing.expectEqual(local, app_state.groups[0].id);
+    try std.testing.expectEqual(work, app_state.groups[1].id);
+    try std.testing.expectEqual(home, app_state.groups[2].id);
+    try std.testing.expect(!orderGroupsByName(&.{ "Local", "Work", "Home" }));
+    try std.testing.expect(orderGroupsByName(&.{ "Home", "Work", "Local" }));
+    try std.testing.expectEqual(home, app_state.groups[0].id);
+    try std.testing.expectEqual(local, app_state.groups[2].id);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tabs = [_]@import("session_layout.zig").Tab{
+        .{ .name = "a", .tmux_session = "a", .tmux_host = 0, .workspace = "W", .group = "Local" },
+        .{ .name = "b", .tmux_session = "b", .tmux_host = 0, .workspace = "W", .group = "Home" },
+        .{ .name = "c", .tmux_session = "c", .tmux_host = 0, .workspace = "W", .group = "" },
+    };
+    const names = (try groupOrderFor(arena.allocator(), &tabs)).?;
+    try std.testing.expectEqual(@as(usize, 2), names.len);
+    try std.testing.expectEqualStrings("Home", names[0]);
+    try std.testing.expectEqualStrings("Local", names[1]);
+}
+
+test "IGSH-1890 group order lists groups used only in the Favorites view" {
+    const saved_groups = app_state.groups;
+    const saved_count = app_state.group_count;
+    const saved_next = app_state.next_group_id;
+    defer {
+        app_state.groups = saved_groups;
+        app_state.group_count = saved_count;
+        app_state.next_group_id = saved_next;
+    }
+    app_state.group_count = 0;
+    app_state.next_group_id = 1;
+    _ = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Product"));
+    _ = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Hypertask"));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tabs = [_]@import("session_layout.zig").Tab{
+        .{ .name = "a", .tmux_session = "a", .tmux_host = 0, .workspace = "W", .group = "Product" },
+        .{ .name = "b", .tmux_session = "b", .tmux_host = 0, .workspace = "W", .group = "", .starred_group = "Hypertask" },
+    };
+    const names = (try groupOrderFor(arena.allocator(), &tabs)).?;
+    try std.testing.expectEqual(@as(usize, 2), names.len);
+    try std.testing.expectEqualStrings("Product", names[0]);
+    try std.testing.expectEqualStrings("Hypertask", names[1]);
 }
