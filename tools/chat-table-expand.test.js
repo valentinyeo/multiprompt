@@ -5,6 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { copyZig } = require('./zig-copy');
+const zig =
+  process.env.ZIG ||
+  process.env.ZIG_EXE ||
+  (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig'));
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -15,7 +19,7 @@ test('IGSH-1897 the expanded table opens centered, scrolls, and closes on Esc, t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh1897-'));
   try {
     copyZig(['chat_table_expand.zig'], dir);
-    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'chat_table_expand.zig', '-j1', '--cache-dir', path.join(dir, 'cache'), '--global-cache-dir', process.env.ZIG_GLOBAL_CACHE_DIR || path.join(dir, 'global-cache')], {
+    const run = spawnSync(zig, ['test', 'chat_table_expand.zig', '-j1', '--cache-dir', path.join(dir, 'cache'), '--global-cache-dir', process.env.ZIG_GLOBAL_CACHE_DIR || path.join(dir, 'global-cache')], {
       cwd: dir, encoding: 'utf8', timeout: 180000, maxBuffer: 4 * 1024 * 1024,
     });
     assert.equal(run.status, 0, `${run.error || ''}\n${run.stdout}\n${run.stderr}`);
