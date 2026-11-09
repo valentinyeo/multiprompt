@@ -287,7 +287,7 @@ pub fn searchOverlayW() i32 {
 }
 
 pub fn searchFooterH() i32 {
-    return uiScaled(44);
+    return uiScaled(12);
 }
 
 pub fn searchOverlayOy(win_h: i32, overlay_h: i32) i32 {
