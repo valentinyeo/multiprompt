@@ -2296,18 +2296,25 @@ def host_turn_busy(provider, sid):
     return isinstance(host_session_state(provider, sid).get('inflight'), dict)
 
 
+def host_held(provider, sid):
+    if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
+        return set()
+    state = host_session_state(provider, sid)
+    inflight = state.get('inflight')
+    held = {token for token in state.get('sends') or [] if isinstance(token, str)}
+    if isinstance(inflight, dict):
+        held.add(inflight.get('id'))
+    return held
+
+
 def message_expire(db, provider, sid):
     def idle(rows):
-        if rows and host_turn_busy(provider, sid):
+        if not rows:
+            return rows
+        if host_turn_busy(provider, sid):
             return []
-        if rows and provider in HOST_PROVIDERS and host_owned(provider, sid):
-            state = host_session_state(provider, sid)
-            inflight = state.get('inflight')
-            current = {token for token in state.get('sends') or [] if isinstance(token, str)}
-            if isinstance(inflight, dict):
-                current.add(inflight.get('id'))
-            return [row for row in rows if row[0] not in current]
-        return rows
+        held = host_held(provider, sid)
+        return [row for row in rows if row[0] not in held]
     now = time.time()
     for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND deadline IS NOT NULL AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state IN ('queued','sent')", (row[0],))
@@ -5591,7 +5598,8 @@ def message_worker(tmux, provider, sid):
                             return
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
-                        if pending != head:
+                        held = pending is not None and pending[0] in host_held(provider, sid)
+                        if pending != head or held:
                             head = pending
                             stalled_at = time.monotonic()
                         message_poll(tmux, provider, sid)
@@ -5605,7 +5613,7 @@ def message_worker(tmux, provider, sid):
                                 return
                         else:
                             idle_since = time.time()
-                        timeout = max(0.0, deadline - time.time()) if deadline is not None else 1.0
+                        timeout = max(0.0, deadline - time.time()) if deadline is not None and not held else 1.0
                         timeout = min(timeout, 1.0)
                     selector.select(timeout)
                 except MessageWorkerTimeout:
@@ -6718,7 +6726,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 98
+RUNTIME_GENERATION = 99
 
 if __name__ == '__main__':
     import base64 as _base64
