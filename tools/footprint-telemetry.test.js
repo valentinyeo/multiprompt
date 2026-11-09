@@ -6,10 +6,19 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-
-const footprint = read('src/footprint.zig');
 const telemetry = read('src/telemetry_panel.zig');
 const main = read('src/main.zig');
+
+function readIfPresent(file) {
+  const full = path.join(root, file);
+  return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : '';
+}
+
+function footprintSource() {
+  const text = readIfPresent('src/footprint.zig');
+  assert.ok(text.length > 0, 'the footprint sampler must exist');
+  return text;
+}
 
 function block(text, marker, indent) {
   const start = text.indexOf(marker);
@@ -20,6 +29,7 @@ function block(text, marker, indent) {
 }
 
 function pureSource() {
+  const footprint = footprintSource();
   const start = footprint.indexOf('pub const SAMPLE_INTERVAL_MS');
   const end = footprint.indexOf('fn baselinePath(');
   assert.ok(start >= 0 && end > start, 'the pure footprint core must stay separate from the Win32 sampling');
@@ -112,6 +122,7 @@ test "baseline json" {
     try std.testing.expectEqual(@as(?[]const u8, null), jsonStringField(json, "channel"));
 }
 `);
+  const footprint = footprintSource();
   assert.ok(footprint.includes('footprint.json'), 'the baseline file lives with the rest of the app data');
   assert.match(footprint, /std\.mem\.eql\(u8, stored, version\)/, 'a new release starts a fresh baseline');
   assert.match(footprint, /writeFileAtomicSync\(path, json\)/, 'the sampler thread writes the baseline off the UI thread');
@@ -132,6 +143,7 @@ test('the telemetry panel paints the three live numbers', () => {
 test('the sampler only repaints the UI through a posted message', () => {
   assert.match(main, /WM_APP_FOOTPRINT_READY => \{\s*invalidateSidebar\(\);\s*return 0;\s*\}/);
   assert.match(main, /@import\("footprint\.zig"\)\.start\(APP_VERSION\)/);
+  const footprint = footprintSource();
   assert.match(footprint, /PostMessageW\(app_state\.g_main_hwnd, win\.WM_APP_FOOTPRINT_READY/);
   assert.match(read('src/win32.zig'), /pub const WM_APP_FOOTPRINT_READY: u32 = WM_APP \+ 220;/);
   assert.match(telemetry, /if \(app_state\.g_status_card_hover\) app_footprint\.wake\(\);/);

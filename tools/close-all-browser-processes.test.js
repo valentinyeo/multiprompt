@@ -7,6 +7,17 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
+function readIfPresent(file) {
+  const full = path.join(root, file);
+  return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : '';
+}
+
+function reaperSource() {
+  const text = readIfPresent('src/browser_reap.zig');
+  assert.ok(text.length > 0, 'the browser reaper must exist');
+  return text;
+}
+
 function fn(text, name) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, `Missing production function ${name}`);
@@ -47,7 +58,7 @@ test('close all panes hands the browsers to the reaper after closing the panes',
 });
 
 test('the reaper only ever kills Multiprompt browsers', () => {
-  const source = read('src/browser_reap.zig');
+  const source = reaperSource();
   const kill = fn(source, 'terminateMultipromptBrowser');
   assert.match(kill, /PROCESS_TERMINATE/);
   assert.match(kill, /processIsMultipromptBrowser\(/, 'the reaper re-checks the profile before it kills');
@@ -64,7 +75,7 @@ test('the reaper only ever kills Multiprompt browsers', () => {
 });
 
 test('the reaper waits a grace period so Chrome can exit on its own first', () => {
-  const source = read('src/browser_reap.zig');
+  const source = reaperSource();
   assert.match(source, /pub const GRACE_MS: u32 = (\d+);/);
   assert.ok(Number(source.match(/pub const GRACE_MS: u32 = (\d+);/)[1]) >= 1000, 'the grace period is at least a second');
   const worker = fn(source, 'reapWorker');
@@ -74,7 +85,7 @@ test('the reaper waits a grace period so Chrome can exit on its own first', () =
 });
 
 test('our own browser profiles are recognised and a user profile is not', () => {
-  const source = read('src/browser_reap.zig');
+  const source = reaperSource();
   const harness = `const std = @import("std");
 ${fn(source, 'isBrowserImageName')}
 ${fn(source, 'profileIsMultiprompt')}
