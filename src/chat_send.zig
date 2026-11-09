@@ -1060,6 +1060,10 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         _ = json_reader.copyString(mobj, "sid", &entry.message_sid);
                         _ = json_reader.copyString(mobj, "phase", &entry.message_phase);
                         if (json_reader.field(mobj, "wire_id") != .null) _ = json_reader.copyString(mobj, "wire_id", &entry.message_wire_id);
+                        if (entry.message_v1 and std.mem.startsWith(u8, std.mem.sliceTo(&entry.message_wire_id, 0), "mp-")) {
+                            chatOutboxRemoveAtIn(list, allocator, list.items.len - 1);
+                            continue;
+                        }
                         entry.retry_nonce = json_reader.uintDefault(mobj, "retry_nonce", 0);
                         entry.reset_pending = json_reader.uintDefault(mobj, "reset_pending", 0) != 0;
                         if (entry.message_v1 and entry.message_phase[0] == 0 and !entry.reset_pending and entry.state != .cancelled) {
@@ -3055,6 +3059,18 @@ test "IGSH-1289 interrupted host submit reloads with its original identity" {
     try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, "tmux:0:test", true));
 }
 
+test "IGSH-1900 an agent message already saved as his draft is dropped on load" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| allocator.free(entry.text);
+        list.deinit(allocator);
+    }
+    chatOutboxParseJson(&list, allocator, "{\"version\":2,\"queues\":[{\"key\":\"tmux:0:test\",\"messages\":[{\"t\":\"Fleet idle alarm\",\"s\":2,\"x\":1,\"v1\":1,\"wire_id\":\"mp-ada6c782898f406ea2eafc77bd8648da\"},{\"t\":\"mine\",\"s\":0,\"v1\":1,\"wire_id\":\"desktop-0123456789abcdef\"}]}]}");
+    try std.testing.expectEqual(@as(usize, 1), list.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("mine"), list.items[0].text);
+}
+
 test "IGSH-1266 restored Codex queue requires explicit binding" {
     const allocator = std.testing.allocator;
     const saved_outbox = app_state.g_chat_outbox;
@@ -3518,11 +3534,28 @@ fn chatMessageSentMs(message: std.json.Value, fallback: i64) i64 {
     };
 }
 
+fn chatMessageFromAgent(message: std.json.Value) bool {
+    const origin = json_reader.string(json_reader.field(message, "origin")) orelse return false;
+    return std.mem.eql(u8, origin, "agent");
+}
+
+test "IGSH-1900 an agent message never becomes his unsent draft" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const agent = try json_reader.parse(arena.allocator(), "{\"id\":\"mp-ada6c782898f406ea2eafc77bd8648da\",\"state\":\"failed\",\"text\":\"Fleet idle alarm\",\"origin\":\"agent\"}");
+    try std.testing.expect(chatMessageFromAgent(agent.value));
+    const human = try json_reader.parse(arena.allocator(), "{\"id\":\"desktop-0123456789abcdef\",\"state\":\"failed\",\"text\":\"mine\",\"origin\":\"human\"}");
+    try std.testing.expect(!chatMessageFromAgent(human.value));
+    const older = try json_reader.parse(arena.allocator(), "{\"id\":\"desktop-0123456789abcdef\",\"state\":\"failed\",\"text\":\"mine\"}");
+    try std.testing.expect(!chatMessageFromAgent(older.value));
+}
+
 fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const wrapped = json_reader.field(value, "message");
     const message = if (wrapped == .null) value else wrapped;
     const token = json_reader.string(json_reader.field(message, "id")) orelse return true;
     const phase = json_reader.string(json_reader.field(message, "state")) orelse return true;
+    if (chatMessageFromAgent(message)) return true;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
     const identity = chatFileIdentityForShell(idx);

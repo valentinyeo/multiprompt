@@ -54,7 +54,7 @@ function reducerFrom(zig) {
     .replace('_ = json_reader.copyString(message, "state", &entry.message_phase);', 'json_reader.copyString(message, "state", entry, "message_phase");')
     .replace('entry.state = if (equal(phase, "failed")) .not_sent else if (equal(phase, "accepted") || equal(phase, "started")) .delivered else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : equal(phase, "accepted") || equal(phase, "started") ? "delivered" : "queued";')
     .replace('entry.state = if (equal(phase, "failed")) .not_sent else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : "queued";');
-  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'equal', code);
+  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'chatMessageFromAgent', 'equal', code);
 }
 
 function harness(zig = body('chatMessageReduce')) {
@@ -66,9 +66,23 @@ function harness(zig = body('chatMessageReduce')) {
       field: (object, field) => object && object[field] !== undefined ? object[field] : null,
       string: value => typeof value === 'string' ? value : null,
       copyString: (object, field, entry, target) => { entry[target] = object[field]; },
-    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text, anchor: {sent_ms: 0} }); return true; }, (a, b) => a === b),
+    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text, anchor: {sent_ms: 0} }); return true; }, message => message.origin === 'agent', (a, b) => a === b),
   };
 }
+
+test('IGSH-1900 an agent message is never adopted as his own unsent message', () => {
+  const h = harness();
+  const shell = { key: 'tab-a', sid: 'session-a' };
+  for (const state of ['queued', 'sent', 'failed']) {
+    assert.equal(h.send(shell, { id: 'mp-ada6c782898f406ea2eafc77bd8648da', text: 'Fleet idle alarm', state, origin: 'agent' }), true);
+    assert.equal(h.app.g_chat_outbox.items.length, 0, `an agent ${state} message became his draft`);
+  }
+  assert.equal(h.send(shell, { id: 'desktop-0123456789abcdef', text: 'mine', state: 'failed', origin: 'human' }), true);
+  assert.equal(h.app.g_chat_outbox.items.length, 1);
+  assert.equal(h.app.g_chat_outbox.items[0].state, 'not_sent');
+  assert.equal(h.send(shell, { id: 'desktop-0123456789abcdef01', text: 'older sender', state: 'queued' }), true);
+  assert.equal(h.app.g_chat_outbox.items.length, 2);
+});
 
 test('merge-base reducer parses and retains its original terminal behavior', () => {
   const original = fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1692/base-reducer.zig'), 'utf8');
