@@ -6619,7 +6619,7 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         db = reader.message_store_db(self.tmux)
         with db:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
-            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created,origin) VALUES ('waiting','claude',?,?,1,'a','queued',NULL,NULL,0,?,'agent')",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES ('waiting','claude',?,?,1,'a','queued',NULL,NULL,0,?)",
                        (self.sid, 'alarm for a busy turn', time.time() - 601))
         reader.message_expire(db, 'claude', self.sid)
         state = db.execute("SELECT state FROM shared_messages WHERE id='waiting'").fetchone()[0]
