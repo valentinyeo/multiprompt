@@ -296,3 +296,10 @@ for (const [name, verify, operator = 'match'] of reviewCases) {
   test(`ISSUE-543 ${name}`, () => verify(read));
   test(`ISSUE-543 negative control: ${name}`, () => assert.throws(() => verify(reviewBefore), { code: 'ERR_ASSERTION', operator }));
 }
+
+test('IGSH-1825 startup defers usage helper and passive browser chrome', () => {
+  const init = body(read('src/main.zig'), 'initializeDeferred');
+  assert.doesNotMatch(init, /\.telemetry => \{[\s\S]*?ensureUsageTelemetryCollector/);
+  assert.doesNotMatch(init, /relaunchActiveRestoredBrowserPane\(\)/);
+  assert.match(read('src/browser_pane.zig'), /passiveBrowserLaunchAllowed/);
+});
