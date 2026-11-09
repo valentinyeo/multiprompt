@@ -1021,6 +1021,7 @@ const browserSplitterHit = @import("browser_pane.zig").browserSplitterHit;
 const setBrowserSplitFromMouse = @import("browser_pane.zig").setBrowserSplitFromMouse;
 const wakeBrowserPaneFromFreeze = @import("browser_pane.zig").wakeBrowserPaneFromFreeze;
 const browserHibernationTick = @import("browser_pane.zig").browserHibernationTick;
+const browserPaneAgentAttached = @import("browser_pane.zig").browserPaneAgentAttached;
 const cleanupStalePanewinFiles = @import("browser_pane.zig").cleanupStalePanewinFiles;
 const handleBrowserWindowResolved = @import("browser_pane.zig").handleBrowserWindowResolved;
 const BrowserDockJob = @import("app_state.zig").BrowserDockJob;
@@ -8459,6 +8460,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 var any_expired = false;
                 for (0..app_state.shell_count) |i| {
                     if (app_state.shells[i].muted or app_state.shells[i].activity != .active) continue;
+                    if (browserPaneAgentAttached(i)) {
+                        any_active = true;
+                        continue;
+                    }
                     if (app_state.shells[i].last_active_event == 0) {
                         app_state.shells[i].activity = .idle;
                         app_state.shells[i].needs_attention = false;

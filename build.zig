@@ -833,6 +833,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
     test_step.dependOn(&console_url_copy_tests.step);
+    const agent_browser_pane_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-browser-pane.test.js", "tools/browser-pane-hibernation.test.js" });
+    test_step.dependOn(&agent_browser_pane_tests.step);
     const inbox_undo_shortcut_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-undo-shortcut.test.js" });
     test_step.dependOn(&inbox_undo_shortcut_tests.step);
     const windows_shortcut_passthrough_tests = b.addSystemCommand(&.{ "node", "--test", "tools/windows-shortcut-passthrough.test.js" });

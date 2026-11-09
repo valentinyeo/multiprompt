@@ -84,7 +84,9 @@ test("the tier 2 tick exempts the active tab, keep_awake, and a busy working ses
 });
 
 test("Task G: every hibernation tier shares one pure busy predicate and one pure zsb-quiet floor", () => {
-  assert.match(source, /fn browserPaneSessionBusyPure\(\s*activity_active: bool,[\s\S]{0,220}zsb_recent: bool,[\s\S]{0,120}\) bool \{/, "pure predicate over plain inputs");
+  assert.match(source, /fn browserPaneSessionBusyPure\(\s*activity_active: bool,[\s\S]{0,120}agent_attached: bool,[\s\S]{0,220}zsb_recent: bool,[\s\S]{0,120}\) bool \{/, "pure predicate over plain inputs");
+  assert.match(source, /fn browserPaneAgentAttached\(i: usize\) bool \{/, "agent attach keeps tier 2/3 off the pane");
+  assert.match(source, /browserPaneAgentAttached\(i\),/, "runtime busy predicate honors agent attach");
   assert.match(source, /fn browserPaneSessionBusy\(i: usize, window_ms: u64\) bool \{/, "runtime wrapper used by the tiers");
   const sweep = functionBody("sweepIdleBrowserPanes");
   assert.match(sweep, /agent_window_ms = @as\(u64, suspend_min\) \* 60 \* 1000;/, "tier-3 agent idle window is the tier's own idle window");

@@ -80,6 +80,7 @@ const buildSessionDirFilePath = @import("browser_pane.zig").buildSessionDirFileP
 const bridgeExePath = @import("browser_pane.zig").bridgeExePath;
 const startBrowserWindowResolve = @import("browser_pane.zig").startBrowserWindowResolve;
 const launchBrowserForShellFromRequest = @import("browser_pane.zig").launchBrowserForShellFromRequest;
+const browserPaneAgentAttached = @import("browser_pane.zig").browserPaneAgentAttached;
 const webView2OwnsShell = @import("browser_pane.zig").webView2OwnsShell;
 const openWebView2Tab = @import("browser_pane.zig").openWebView2Tab;
 const repositionActive = @import("window_layout.zig").repositionActive;
@@ -224,6 +225,9 @@ fn zsbTouchSession(session: []const u8) void {
     defer app_state.g_zsb_touch_mutex.unlock();
 
     zsbTouchTokenLocked(zsbPrimarySessionToken(session), now);
+    if (findZsbPaneTarget(session)) |ti| {
+        if (ti < app_state.shell_count) app_state.shells[ti].last_active_event = now;
+    }
 }
 
 fn zsbTouchHasRecentTokenLocked(token_raw: []const u8, now: u64, window_ms: u64) bool {
@@ -943,7 +947,10 @@ pub fn handleZsbBindRequest() void {
         }
         found = ensureZsbPaneBindingForShell(ti);
         const pane_missing = app_state.shells[ti].browser_hwnd == null or IsWindow(app_state.shells[ti].browser_hwnd) == 0;
-        if (!found and app_state.shells[ti].browser_enabled and pane_missing) {
+        const agent_needs_pane = browserPaneAgentAttached(ti) or zsbShellRecentlyDriven(ti, 60_000);
+        if (pane_missing and (app_state.shells[ti].browser_enabled or app_state.shells[ti].browser_suspended or agent_needs_pane)) {
+            app_state.shells[ti].browser_enabled = true;
+            app_state.shells[ti].browser_suspended = false;
             app_state.shells[ti].browser_hwnd = null;
             app_state.shells[ti].browser_docking = false;
             app_state.shells[ti].browser_window_id = 0;
