@@ -1980,7 +1980,16 @@ pub fn overlayOpen() bool {
 }
 
 pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
-    if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null) return 0;
+    if (idx >= app_state.shell_count) return 0;
+    if (app_state.shells[idx].hwnd == null and app_state.shells[idx].native_terminal and !app_state.shells[idx].disconnected) {
+        const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
+        const covered = app_state.g_search_active or app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
+            app_state.g_snippet_create_active or app_state.g_inbox_active or app_state.g_all_sessions_active;
+        if (shellConsoleVisibilityAllowed(idx == app_state.active_shell, app_state.g_chat_active, tab_wants_chat, covered)) {
+            _ = @import("native_session.zig").ensureWindow(app_state.shells[idx].shell_id);
+        }
+    }
+    if (app_state.shells[idx].hwnd == null) return 0;
     if (!shellConsoleShouldBeVisible(idx)) {
         if (IsWindowVisible(app_state.shells[idx].hwnd) == 0) return 0;
         if (verboseLoggingEnabled() and (app_state.g_chat_active or
@@ -1991,6 +2000,10 @@ pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
             debugLog(line);
         }
         return ShowWindowAsync(app_state.shells[idx].hwnd, SW_HIDE);
+    }
+    if (app_state.shells[idx].native_terminal and !@import("native_session.zig").alive(app_state.shells[idx].shell_id)) {
+        app_state.shells[idx].console_inflight = true;
+        if (!@import("native_session.zig").connect(app_state.shells[idx].shell_id)) @import("native_session.zig").ready(app_state.shells[idx].shell_id, false);
     }
     return ShowWindow(app_state.shells[idx].hwnd, cmd);
 }

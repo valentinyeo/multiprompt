@@ -432,6 +432,7 @@ pub const Shell = struct {
     eta_first_est_s: u32 = 0,
     eta_active_start_tick: u64 = 0,
     ssh_reconnect: @import("ssh_reconnect.zig").State = .{},
+    native_terminal: bool = false,
 };
 
 pub const BrowserNavigationIntent = enum { background, select_preserve_focus, select_and_focus };
@@ -645,6 +646,7 @@ pub var g_browser_dragging: bool = false;
 pub const BROWSER_SUSPEND_DEFAULT_MIN: u32 = 15;
 pub const BROWSER_SUSPEND_SAVING_MIN: u32 = 5;
 pub var g_external_browser_links: bool = true;
+pub var g_shared_server_connection: bool = false;
 pub var g_browser_autosuspend: bool = true;
 pub var g_browser_suspend_min: u32 = BROWSER_SUSPEND_DEFAULT_MIN;
 pub const BROWSER_FREEZE_PARK_MS_AC: u64 = 120_000;
@@ -1511,6 +1513,7 @@ pub const SEARCH_BROWSER_INSTRUCT_OFFSET: usize = 6237;
 pub const SEARCH_BROWSER_FOCUS_URL_OFFSET: usize = 6238;
 pub const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET: usize = 6239;
 pub const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET: usize = 6378;
+pub const SEARCH_SHARED_SERVER_CONNECTION_OFFSET: usize = 6388;
 pub const SEARCH_BROWSER_AUTOSUSPEND_OFFSET: usize = 6240;
 pub const SEARCH_CHANGELOG_OFFSET: usize = 6241;
 pub const SEARCH_BROWSER_BACK_OFFSET: usize = 6242;

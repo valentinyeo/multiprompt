@@ -616,6 +616,7 @@ const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_I
 const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
 const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
 const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+const SEARCH_SHARED_SERVER_CONNECTION_OFFSET = @import("app_state.zig").SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
 const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
 const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
 const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
@@ -1562,6 +1563,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     }
     if (msg == WM_APP_LAYOUT_READY) {
         handleLayoutReply(lp);
+        return 0;
+    }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_TERMINAL) {
+        @import("native_session.zig").pump(@intCast(wp));
+        return 0;
+    }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_SPAWN) {
+        @import("native_session.zig").finish(@intCast(wp));
+        return 0;
+    }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_READY) {
+        @import("native_session.zig").ready(@intCast(wp), lp != 0);
         return 0;
     }
     if (msg == @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE) {
@@ -6496,6 +6509,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     syncMouseHookForUrlClicks();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
+                if (target == SEARCH_SHARED_SERVER_CONNECTION_OFFSET) {
+                    app_state.g_shared_server_connection = !app_state.g_shared_server_connection;
+                    saveSession();
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
