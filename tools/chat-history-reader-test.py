@@ -4191,6 +4191,37 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'queued')
         self.assertEqual(self.send.call_count, 0)
 
+    def test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once(self):
+        self.submit()
+        self.request('dispatch')
+        self.accept()
+        self.assertEqual(self.status()['state'], 'accepted')
+        sent = threading.Event()
+        polled = threading.Event()
+        self.send.side_effect = lambda *args, **kwargs: (sent.set(), {'status': 'sent'})[1]
+        original_poll = reader.message_poll
+
+        def poll(*args):
+            original_poll(*args)
+            polled.set()
+
+        with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 3), \
+                patch.object(reader, 'superseded_engine', side_effect=sent.is_set), \
+                patch.object(reader, 'message_poll', side_effect=poll):
+            worker = threading.Thread(target=reader.message_worker, args=('fixture', 'claude', 'sid'), daemon=True)
+            worker.start()
+            self.assertTrue(polled.wait(5), 'the worker never started')
+            time.sleep(0.15)
+            started = time.monotonic()
+            self.submit('message_fixture_0002', 'second prompt')
+            reader.start_message_worker(dict(self.base, message_id='message_fixture_0002'), 'unused source')
+            self.assertTrue(sent.wait(3), 'the second message was never sent')
+            waited = time.monotonic() - started
+            worker.join(5)
+        print(f'IGSH-1907 submit_to_send_s={waited:.3f}', file=sys.stderr)
+        self.assertFalse(worker.is_alive(), 'the worker did not stop')
+        self.assertLess(waited, 0.4, f'a new message waited {waited:.2f}s for the idle worker to wake')
+
     def test_native_history_continues_after_started(self):
         self.submit()
         self.request('dispatch')
