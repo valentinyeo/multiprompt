@@ -35,3 +35,17 @@ test('native session spawn keeps remote tabs off per-tab ssh', () => {
   assert.match(body(read('src/chat_composer.zig'), 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);
   console.log('native session spawn keeps remote tabs off per-tab ssh');
 });
+
+test('remote typing path has no Windows console to answer device attributes', () => {
+  const start = body(read('src/chat_transport.zig'), 'start');
+  assert.match(start, /"-T -o BatchMode=yes /);
+  assert.match(start, /si\.hStdInput = child_input;/);
+  assert.match(start, /si\.hStdOutput = child_output;/);
+  assert.match(start, /CreateProcessW\(null, @ptrCast\(&cmd\), null, null, 1, 0x08000000,/);
+  const state = read('src/terminal/vendor/libvterm/src/state.c');
+  assert.match(state, /C1_CSI, "\?1;2c"\)/);
+  assert.match(state, /C1_CSI, ">%d;%d;%dc", 0, 100, 0\)/);
+  const native = read('src/native_session.zig');
+  assert.match(body(native, 'onOutput'), /emitInput\(slot, bytes\[0\.\.length\]\)/);
+  console.log('remote typing path has no Windows console to answer device attributes');
+});
