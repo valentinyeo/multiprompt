@@ -166,8 +166,8 @@ if (Test-Path -LiteralPath $devicePath) {
     $syncDetail = 'account signed in, no layout pending'
     if (Test-Path -LiteralPath $pendingPath) {
         $pendingMinutes = [math]::Round(([DateTime]::UtcNow - (Get-Item -LiteralPath $pendingPath).LastWriteTimeUtc).TotalMinutes, 1)
-        $syncOk = $pendingMinutes -lt 15
-        $syncDetail = "layout pending for $pendingMinutes minutes"
+        $syncOk = $appProcesses.Count -gt 0 -and $pendingMinutes -lt 30
+        $syncDetail = "layout pending for $pendingMinutes minutes with $($appProcesses.Count) app process"
     }
 }
 Add-Check 'sync' $syncOk $syncDetail

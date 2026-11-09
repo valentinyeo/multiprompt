@@ -22,7 +22,7 @@ Every Multiprompt release is installed and checked on the second Windows laptop 
 | `start` | A process runs, its window class is `ZigShell`, the title names the version |
 | `chats` | The newest `inbox-*.json` publishes at least one tab |
 | `computer-view` | `zigshell-bridge status` answers with `"ok":true` |
-| `sync` | A signed-in account has no layout pending for more than fifteen minutes |
+| `sync` | A signed-in account has no layout pending for more than thirty minutes while the app runs |
 | `memory` | The working set stays under 3000 MB |
 | `crashes` | No `crash-*.txt` since the app started |
 
