@@ -73,11 +73,9 @@ const GROUP_COLORS = @import("app_state.zig").GROUP_COLORS;
 const GROUP_COLOR_NAMES = @import("app_state.zig").GROUP_COLOR_NAMES;
 const deleteGroup = @import("sidebar.zig").deleteGroup;
 const normalizeGroupOrder = @import("sidebar.zig").normalizeGroupOrder;
-const Row = @import("app_state.zig").Row;
-const MAX_ROWS = @import("app_state.zig").MAX_ROWS;
-const layoutRows = @import("sidebar.zig").layoutRows;
 const uiScaled = @import("drawing.zig").uiScaled;
 const tabRowForShell = @import("sidebar.zig").tabRowForShell;
+const groupNameRect = @import("sidebar.zig").groupNameRect;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const focusGuardDispatchTick = @import("focus.zig").focusGuardDispatchTick;
 const focusGuard = @import("focus.zig").focusGuard;
@@ -333,6 +331,7 @@ fn startRenameInternal(idx: u32, thread_title: bool) void {
 }
 
 pub fn startGroupRename(gidx: u32) void {
+    app_state.g_focus_user_action_tick = renameCommitActionTick(app_state.g_focus_user_action_tick, GetTickCount64(), foregroundIsOurs());
     if (!focusGuard(app_state.g_main_hwnd)) return;
     commitRename();
     if (gidx >= app_state.group_count) return;
@@ -344,41 +343,31 @@ pub fn startGroupRename(gidx: u32) void {
     app_state.g_edit_sync_remote_name = false;
     app_state.g_edit_idx = gidx;
 
-    var rows: [MAX_ROWS]Row = undefined;
-    const n = layoutRows(&rows);
-    var hdr_y: i32 = 0;
-    for (0..n) |ri| {
-        if (rows[ri].kind == .header and rows[ri].gidx == gidx) {
-            hdr_y = rows[ri].y;
-            break;
-        }
-    }
-    const y: i32 = hdr_y - app_state.g_sidebar_scroll;
-
-    app_state.g_edit_hwnd = CreateWindowExW(
-        0,
-        L("EDIT"),
-        null,
-        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-        24,
-        y + 3,
-        SIDEBAR_W() - 48,
-        22,
-        app_state.g_main_hwnd,
-        null,
-        null,
-        null,
+    const name_rc = groupNameRect(gidx) orelse return;
+    const font = @import("drawing.zig").uiFontBot(.preview);
+    const rgb = @import("startup.zig").RGB;
+    setInlineColors(
+        @import("themes.zig").themeSidebarBg(),
+        if (app_state.g_light_theme) rgb(28, 28, 28) else rgb(242, 242, 242),
     );
+    const edit_h = uiScaled(19);
+    const edit_y = name_rc.top + @divTrunc(name_rc.bottom - name_rc.top - edit_h, 2);
+    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, name_rc.left, edit_y, @max(name_rc.right - name_rc.left, 1), edit_h, app_state.g_main_hwnd, null, null, null);
     if (app_state.g_edit_hwnd != null) {
-        @import("fonts.zig").setControlFont(app_state.g_edit_hwnd);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x0030, @intFromPtr(font), 1);
+        _ = SendMessageW(app_state.g_edit_hwnd, 0x00D3, 3, 0);
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&app_state.groups[gidx].name));
-        keybd_event(VK_MENU, 0, 0, 0);
-        _ = SetForegroundWindow(app_state.g_main_hwnd);
-        _ = SetFocus(app_state.g_edit_hwnd);
-        keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+        if (GetForegroundWindow() == app_state.g_main_hwnd) {
+            _ = SetFocus(app_state.g_edit_hwnd);
+        } else {
+            keybd_event(VK_MENU, 0, 0, 0);
+            _ = SetForegroundWindow(app_state.g_main_hwnd);
+            _ = SetFocus(app_state.g_edit_hwnd);
+            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+        }
         _ = SendMessageW(app_state.g_edit_hwnd, 0x00B1, 0, @bitCast(@as(isize, -1)));
     }
 }
