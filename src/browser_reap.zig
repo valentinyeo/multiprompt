@@ -46,7 +46,8 @@ fn processImageName(allocator: std.mem.Allocator, process: HANDLE) ?[]u8 {
 }
 
 fn processProfile(allocator: std.mem.Allocator, process: HANDLE) ?[]u8 {
-    const line = browser_own_profile.processCommandLine(allocator, process) catch return null;
+    const handle = process orelse return null;
+    const line = browser_own_profile.processCommandLine(allocator, handle) catch return null;
     defer allocator.free(line);
     return browser_own_profile.userDataArgument(allocator, line) catch null;
 }

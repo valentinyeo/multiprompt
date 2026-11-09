@@ -302,7 +302,7 @@ pub fn start(version: []const u8) void {
         @atomicStore(u32, &g_peak_processes, stored.peak_processes, .monotonic);
     }
     const version_copy = std.heap.page_allocator.dupe(u8, version) catch return;
-    const thread = std.Thread.spawn(.{}, samplerLoop, .{version_copy}) catch {
+    const thread = std.Thread.spawn(.{}, samplerLoop, .{@as([]const u8, version_copy)}) catch {
         std.heap.page_allocator.free(version_copy);
         return;
     };
