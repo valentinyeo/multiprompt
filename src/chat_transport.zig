@@ -224,6 +224,29 @@ pub fn shutdown() void {
     }
 }
 
+fn respawnHostUnlocked(host: *Host) void {
+    if (host.running) {
+        _ = w.TerminateProcess(host.process, 0);
+        _ = w.CloseHandle(host.process);
+        _ = w.CloseHandle(host.input);
+        _ = w.CloseHandle(host.output);
+        host.process = null;
+        host.input = null;
+        host.output = null;
+        for (host.channels.items) |channel| channel.ended = true;
+        host.running = false;
+    }
+    host.retry_at = 0;
+}
+
+pub fn respawn(index: u8) void {
+    if (index >= hosts.len or state.g_chat_history_channels_closing.load(.acquire)) return;
+    const host = &hosts[index];
+    lock(host);
+    defer host.mutex.unlock();
+    respawnHostUnlocked(host);
+}
+
 fn dispatch(host: *Host, line: []const u8) bool {
     const Reply = struct { channel: u32, data: ?[]const u8 = null, closed: bool = false };
     const parsed = std.json.parseFromSlice(Reply, a, line, .{}) catch return false;
