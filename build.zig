@@ -800,6 +800,8 @@ pub fn build(b: *std.Build) void {
     const native_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/native-session.test.js" });
     test_step.dependOn(&native_session_tests.step);
     vps_test_step.dependOn(&native_session_tests.step);
+    const harness_alt_tap_tests = b.addSystemCommand(&.{ "node", "--test", "tools/harness-alt-tap.test.js" });
+    test_step.dependOn(&harness_alt_tap_tests.step);
     const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js", "tools/verify-reconnect.test.js" });
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
