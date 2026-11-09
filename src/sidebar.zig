@@ -1257,6 +1257,22 @@ pub inline fn effPinnedTop(i: usize) bool {
     return if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top else app_state.shells[i].pinned_top;
 }
 
+fn sortShellsByRecency(ids: []usize) void {
+    var ii: usize = 1;
+    while (ii < ids.len) : (ii += 1) {
+        const tmp = ids[ii];
+        var jj = ii;
+        while (jj > 0) : (jj -= 1) {
+            const prev = ids[jj - 1];
+            const tmp_la = effLa(tmp);
+            const prev_la = effLa(prev);
+            if (tmp_la < prev_la or (tmp_la == prev_la and tmp > prev)) break;
+            ids[jj] = prev;
+        }
+        ids[jj] = tmp;
+    }
+}
+
 pub fn setPinnedTop(i: usize, pinned: bool) void {
     if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top = pinned else app_state.shells[i].pinned_top = pinned;
 }
@@ -1467,6 +1483,7 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
+        const show_section_headers = !app_state.g_sidebar_collapsed and sidebarHasVisibleSessions();
         for (0..app_state.shell_count) |i| {
             if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
             if (count >= app_state.MAX_SESSION_ROWS) return count;
@@ -1482,20 +1499,47 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
             count += 1;
             y += groupHeaderHeight();
             if (app_state.groups[gi].collapsed) continue;
+            var members: [MAX_SHELLS]usize = undefined;
+            var member_count: usize = 0;
             for (0..app_state.shell_count) |i| {
                 if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid or effPinnedTop(i)) continue;
+                if (member_count < MAX_SHELLS) {
+                    members[member_count] = i;
+                    member_count += 1;
+                }
+            }
+            sortShellsByRecency(members[0..member_count]);
+            for (members[0..member_count]) |i| {
                 if (count >= app_state.MAX_SESSION_ROWS) return count;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gi), .shell_idx = @intCast(i), .y = y };
                 count += 1;
                 y += tabRowH();
             }
         }
+        var ungrouped: [MAX_SHELLS]usize = undefined;
+        var ungrouped_count: usize = 0;
         for (0..app_state.shell_count) |i| {
-            if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
+            if (!tabInCurrentWorkspace(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
+            if (ungrouped_count < MAX_SHELLS) {
+                ungrouped[ungrouped_count] = i;
+                ungrouped_count += 1;
+            }
+        }
+        sortShellsByRecency(ungrouped[0..ungrouped_count]);
+        const recents_collapsed = show_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed(.recent);
+        if (show_section_headers and ungrouped_count > 0) {
             if (count >= app_state.MAX_SESSION_ROWS) return count;
-            out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+            out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = .recent, .y = y };
             count += 1;
-            y += tabRowH();
+            y += sectionHeaderHeight();
+        }
+        if (!recents_collapsed) {
+            for (ungrouped[0..ungrouped_count]) |i| {
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
+                out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+                count += 1;
+                y += tabRowH();
+            }
         }
         for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |row, i| {
             if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) continue;
@@ -5142,13 +5186,15 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
         app_state.shells[i].favorite = i != 2;
     }
     app_state.shells[3].inbox_excluded = true;
+    app_state.g_recents_section_collapsed = false;
     for ([_]bool{ true, false, true }) |favorite| {
         app_state.shells[0].favorite = favorite;
         app_state.shells[1].favorite = favorite;
         var rows: [MAX_ROWS]Row = undefined;
         const count = layoutRows(&rows);
-        try std.testing.expectEqual(@as(u32, if (favorite) 3 else 1), count);
-        var expected: u32 = 0;
+        try std.testing.expectEqual(@as(u32, if (favorite) 4 else 2), count);
+        try std.testing.expectEqual(.section, rows[0].kind);
+        var expected: u32 = 1;
         for (0..4) |i| {
             const shell = app_state.shells[i];
             const in_favorites = @import("workspace_view.zig").splitMatches(frequent.favorites_split, shell.workspace, shell.favorite);
@@ -5162,11 +5208,11 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     }
     app_state.shells[0].inbox_archived = true;
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
-    app_state.shells[0].needs_attention = true;
     try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    app_state.shells[0].needs_attention = true;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
-    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
@@ -5334,13 +5380,14 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     try std.testing.expect(!app_state.shells[1].pinned_top);
     var rows: [MAX_ROWS]Row = undefined;
     const count = layoutRows(&rows);
-    try std.testing.expectEqual(@as(u32, 4), count);
+    try std.testing.expectEqual(@as(u32, 5), count);
     try std.testing.expect(rows[0].tile);
     try std.testing.expectEqual(@as(u32, 1), rows[0].shell_idx);
     try std.testing.expectEqual(uiScaled(96), rowTotalHeight(rows[0]));
     try std.testing.expect(rows[1].kind == .header);
-    try std.testing.expect(!rows[2].tile);
-    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(.section, rows[2].kind);
+    try std.testing.expect(!rows[3].tile);
+    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
     try std.testing.expect(rows[0].y < rows[1].y);
     app_state.g_starred_workspace = false;
     try std.testing.expect(effPinnedTop(0));
@@ -5349,12 +5396,78 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     setPinnedTop(1, false);
     app_state.groups[0].collapsed = false;
     const unpinned = layoutRows(&rows);
-    try std.testing.expectEqual(@as(u32, 4), unpinned);
+    try std.testing.expectEqual(@as(u32, 5), unpinned);
     try std.testing.expect(rows[0].kind == .header);
     try std.testing.expect(!rows[1].tile);
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 17), app_state.shells[1].starred_group_id);
     try std.testing.expect(app_state.shells[0].pinned_top);
+}
+
+test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the groups" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_group = app_state.groups[0];
+    const saved_shells = app_state.shells[0..4].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    const saved_recents = app_state.g_recents_section_collapsed;
+    const saved_sticky = app_state.g_sticky_n;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    defer {
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.groups[0] = saved_group;
+        app_state.shells[0..4].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+        app_state.g_recents_section_collapsed = saved_recents;
+        app_state.g_sticky_n = saved_sticky;
+        app_state.g_ws_snoozed = saved_snoozed;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_single_window = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_sticky_n = 0;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.shell_count = 4;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 41, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 0 };
+    for (0..4) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(4200 + i);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].starred_group_id = 41;
+    app_state.shells[1].starred_group_id = 41;
+    app_state.shells[0].last_active = 10;
+    app_state.shells[1].last_active = 20;
+    app_state.shells[2].last_active = 30;
+    app_state.shells[3].last_active = 40;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(.section, rows[3].kind);
+    try std.testing.expectEqual(SidebarTier.recent, rows[3].section_tier);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+    app_state.groups[0].collapsed = true;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(.section, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 3), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[3].shell_idx);
+    app_state.g_recents_section_collapsed = true;
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

@@ -21,6 +21,19 @@ test("custom groups are top-level workspace blocks with pinned-first members", (
     "group rows must be scoped to the active workspace");
 });
 
+test("Starred sessions without a group sit under a Recents header below the groups", () => {
+  const layout = bodyOf("fn layoutRowsInner(out: *[MAX_SESSION_ROWS]Row) u32 {");
+  const starred = layout.slice(0, layout.indexOf("if (app_state.g_tab_sort_auto) {"));
+  assert.match(starred, /sortShellsByRecency\(members\[0\.\.member_count\]\)/,
+    "sessions inside a group are ordered by recency");
+  assert.match(starred, /sortShellsByRecency\(ungrouped\[0\.\.ungrouped_count\]\)/,
+    "sessions outside a group are ordered by recency");
+  assert.match(starred, /\.kind = \.section,[\s\S]*?\.section_tier = \.recent/,
+    "sessions outside a group sit under a Recents header");
+  assert.match(starred, /recents_collapsed = show_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed\(\.recent\)/,
+    "the Recents header folds its own sessions");
+});
+
 test("creating a group immediately opens its name editor", () => {
   assert.match(source, /target == SEARCH_TABCTX_GROUP_NEW[\s\S]*?rename_group_idx = findGroupIdx\(new_gid\)/);
   assert.match(source, /if \(rename_group_idx\) \|gidx\| \{\s*startGroupRename\(gidx\)/);
