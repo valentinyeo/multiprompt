@@ -34,6 +34,24 @@ fn workspaceIndex(workspaces: []const layout.Workspace, name: []const u8) ?usize
     for (workspaces, 0..) |ws, i| if (eq(u8, ws.name, name)) return i;
     return null;
 }
+pub const AppliedLayout = struct {
+    bytes: ?[]u8 = null,
+
+    pub fn changed(self: AppliedLayout, incoming: []const u8) bool {
+        return !eq(u8, self.bytes orelse return true, incoming);
+    }
+
+    pub fn remember(self: *AppliedLayout, a: Allocator, incoming: []const u8) void {
+        self.forget(a);
+        self.bytes = a.dupe(u8, incoming) catch null;
+    }
+
+    pub fn forget(self: *AppliedLayout, a: Allocator) void {
+        if (self.bytes) |old| a.free(old);
+        self.bytes = null;
+    }
+};
+
 pub fn equal(a: Layout, b: Layout) bool {
     return equalWithin(a, b, 0);
 }
@@ -224,8 +242,25 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
         try tabs.insert(a, @min(i, tabs.items.len), t);
         if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, if (workspaceIndex(base.workspaces, t.workspace)) |wi| base.workspaces[wi] else .{ .name = t.workspace });
     }
+    var order: std.ArrayList([]const u8) = .empty;
+    try order.appendSlice(a, edited.group_order orelse &.{});
+    const base_order = base.group_order orelse &.{};
+    for (base_order, 0..) |name, bi| {
+        if (order.items.len >= layout.max_groups or containsName(order.items, name)) continue;
+        const held = for (tabs.items) |t| {
+            if (eq(u8, t.group orelse "", name) or eq(u8, t.starred_group orelse "", name)) break true;
+        } else false;
+        if (!held) continue;
+        var at: usize = 0;
+        for (base_order[0..bi]) |prior| {
+            for (order.items, 0..) |placed, i| {
+                if (eq(u8, placed, prior)) at = i + 1;
+            }
+        }
+        try order.insert(a, at, name);
+    }
     const removed = try @import("account_hosts.zig").mergeRemoved(a, base.removed_hosts orelse &.{}, edited.removed_hosts orelse &.{});
-    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .removed_hosts = if (removed.len > 0) removed else null, .group_order = edited.group_order, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+    return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .removed_hosts = if (removed.len > 0) removed else null, .group_order = if (order.items.len > 0) try order.toOwnedSlice(a) else null, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
 pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layout {
@@ -1254,6 +1289,41 @@ test "IGSH-1533 old palette projects white without losing pending edits" {
     const new_values = try projectPalette7(a, edited, .{ .workspaces = &.{}, .tabs = &.{} });
     try std.testing.expectEqual(@as(?u8, null), new_values.workspaces[0].color);
     try std.testing.expectEqual(@as(?u8, null), new_values.tabs[0].color);
+}
+
+test "IGSH-1087 a desktop that ran alone and polled the same layout twice applies it once" {
+    var applied: AppliedLayout = .{};
+    defer applied.forget(std.testing.allocator);
+    const first = "{\"revision\":15226,\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}";
+    try std.testing.expect(applied.changed(first));
+    applied.remember(std.testing.allocator, first);
+    try std.testing.expect(!applied.changed(first));
+    try std.testing.expect(applied.changed("{\"revision\":15227,\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}"));
+    applied.forget(std.testing.allocator);
+    try std.testing.expect(applied.changed(first));
+}
+
+test "IGSH-1087 a synced tab missing here keeps its group in the order so nothing republishes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const work = Tab{ .name = "One", .tmux_host = 0, .tmux_session = "one", .workspace = "Other", .group = "Work" };
+    const elsewhere = Tab{ .name = "Two", .tmux_host = 1, .tmux_session = "two", .workspace = "Other", .group = "Held" };
+    const base = Layout{ .workspaces = &test_ws, .tabs = &.{ elsewhere, work }, .group_order = &.{ "Held", "Work" } };
+    const here = Layout{ .workspaces = &test_ws, .tabs = &.{work}, .group_order = &.{"Work"} };
+    const kept = try keepHeld(a, base, here, &.{});
+    try std.testing.expect(!publishNeeded(kept, base, base));
+    try std.testing.expectEqual(@as(usize, 2), kept.group_order.?.len);
+    try std.testing.expectEqualStrings("Held", kept.group_order.?[0]);
+    try std.testing.expectEqualStrings("Work", kept.group_order.?[1]);
+    const closed = try keepHeld(a, base, here, &.{elsewhere});
+    try std.testing.expectEqual(@as(usize, 1), closed.group_order.?.len);
+    try std.testing.expect(publishNeeded(closed, base, base));
+    const starred = Tab{ .name = "Three", .tmux_host = 2, .tmux_session = "three", .workspace = "Other", .group = "", .starred_group = "Favorites only" };
+    const favorites_base = Layout{ .workspaces = &test_ws, .tabs = &.{ starred, work }, .group_order = &.{ "Work", "Favorites only" } };
+    const favorites_kept = try keepHeld(a, favorites_base, here, &.{});
+    try std.testing.expect(!publishNeeded(favorites_kept, favorites_base, favorites_base));
+    try std.testing.expectEqualStrings("Favorites only", favorites_kept.group_order.?[1]);
 }
 
 test "IGSH-1890 a pulled layout carries group order and a local move wins only when this device moved" {

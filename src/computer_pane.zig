@@ -373,7 +373,7 @@ fn parseTarget(bytes: []const u8, profile: ProfileKey, password: *[8]u8, passwor
 }
 
 pub fn sync() void {
-    if (syncing or shutting_down or app.g_main_hwnd == null) return;
+    if (syncing or shutting_down or app.g_main_hwnd == null or app.g_account_applying) return;
     syncing = true;
     defer syncing = false;
     const now = w.GetTickCount64();
@@ -381,7 +381,7 @@ pub fn sync() void {
     if (!allowed()) {
         machine.visible = false;
         sleepView(now);
-        if ((app.g_account_locked or app.g_account_applying) and !account_suppressed) {
+        if (app.g_account_locked and !account_suppressed) {
             known_targets = @splat(.{});
             machine.target = null;
             send("forget", "");
@@ -424,6 +424,7 @@ pub fn sync() void {
 }
 
 pub fn present() void {
+    if (app.g_account_applying) return;
     if (!machine.visible or !allowed() or !currentOwnerMatches()) { mp_computer_present(0, 0, 0, 0, 0); return; }
     var client: w.RECT = std.mem.zeroes(w.RECT);
     _ = w.GetClientRect(app.g_main_hwnd, &client);

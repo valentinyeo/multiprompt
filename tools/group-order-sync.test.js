@@ -77,7 +77,7 @@ test('IGSH-1890 the desktop captures, publishes, pulls and applies the sidebar g
   assert.match(session, /group_order: \?\[\]const \[\]const u8 = null/);
   assert.match(layoutZig, /\.group_order = remote\.group_order/);
   assert.match(layoutZig, /\.group_order = try rebaseGroupOrder\(a, base, edited, remote\)/);
-  assert.match(layoutZig, /\.group_order = edited\.group_order/);
+  assert.match(layoutZig, /\.group_order = if \(order\.items\.len > 0\) try order\.toOwnedSlice\(a\) else null/);
   assert.match(layoutZig, /if \(!sameNames\(a\.group_order orelse &\.\{\}, b\.group_order orelse &\.\{\}\)\) return false/);
   assert.match(sidebar, /pub fn orderGroupsByName\(/);
 });
