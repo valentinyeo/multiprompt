@@ -1775,6 +1775,18 @@ fn repoPathMatchesQuery(path: []const u8, query: []const u16) bool {
     return true;
 }
 
+fn folderLeaf(path: []const u8) []const u8 {
+    const trimmed = std.mem.trimEnd(u8, path, "/\\");
+    const cut = std.mem.lastIndexOfAny(u8, trimmed, "/\\") orelse return trimmed;
+    return trimmed[cut + 1 ..];
+}
+
+fn sessionFolderMatchesQuery(shell: anytype, query: []const u16) bool {
+    const cwd = if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else shell.cached_cwd[0..shell.cached_cwd_len];
+    const leaf = folderLeaf(cwd);
+    return leaf.len > 0 and repoPathMatchesQuery(leaf, query);
+}
+
 fn repoRowMatchesQuery(row: *const RepoRow, query: []const u16) bool {
     var host_wide: [128]u16 = undefined;
     const host_len = std.unicode.utf8ToUtf16Le(&host_wide, row.host_name[0..row.host_name_len]) catch 0;
@@ -5241,6 +5253,7 @@ pub fn updateSearchResults() void {
         if (u16ContainsInsensitive(app_state.shells[i].name[0..app_state.shells[i].name_len], q) or
             (if (app_state.shells[i].last_title_len > 0) u16ContainsInsensitive(app_state.shells[i].last_title[0..@intCast(app_state.shells[i].last_title_len)], q) else false) or
             kindMatchesQuery(app_state.shells[i].kind, q) or
+            sessionFolderMatchesQuery(&app_state.shells[i], q) or
             (if (remote_host) |host| tmuxHostMatchesQuery(host, q) else false))
         {
             app_state.g_search_results[app_state.g_search_result_count] = i;
@@ -6109,6 +6122,27 @@ test "IGSH-1266 saved folder is written into commands.json so the next start use
     try std.testing.expect(std.mem.indexOf(u8, with_two, "},{\"label\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, with_two, "/home/x/projects/other") != null);
     try std.testing.expect(insertCommandEntry("no commands here", entry, &out_buf) == null);
+}
+
+test "palette finds an open session by its folder name" {
+    const query = [_]u16{ 'f', 'u', 'n', 'e', 'r', 'a', 'l' };
+    try std.testing.expectEqualStrings("funeralprints", folderLeaf("/home/x/projects/funeralprints"));
+    try std.testing.expectEqualStrings("funeralprints", folderLeaf("/home/x/projects/funeralprints/"));
+    try std.testing.expectEqualStrings("site", folderLeaf("C:\\work\\site"));
+    try std.testing.expectEqualStrings("", folderLeaf(""));
+    var shell = struct {
+        claude_cwd: [192]u8 = std.mem.zeroes([192]u8),
+        claude_cwd_len: u32 = 0,
+        cached_cwd: [512]u8 = std.mem.zeroes([512]u8),
+        cached_cwd_len: u32 = 0,
+    }{};
+    try std.testing.expect(!sessionFolderMatchesQuery(&shell, query[0..]));
+    const cwd = "/home/x/projects/funeralprints";
+    @memcpy(shell.claude_cwd[0..cwd.len], cwd);
+    shell.claude_cwd_len = cwd.len;
+    try std.testing.expect(sessionFolderMatchesQuery(&shell, query[0..]));
+    const home = [_]u16{ 'h', 'o', 'm', 'e' };
+    try std.testing.expect(!sessionFolderMatchesQuery(&shell, home[0..]));
 }
 
 test "IGSH-1266 pick repo typing filters paths case insensitively" {
