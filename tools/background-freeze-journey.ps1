@@ -46,6 +46,8 @@ public static class BackgroundFreezeJourney {
     [DllImport("user32.dll")] public static extern bool RedrawWindow(IntPtr window, IntPtr rect, IntPtr region, uint flags);
     public static void Focus(IntPtr window) {
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0xE8, 0, 0, UIntPtr.Zero);
+        keybd_event(0xE8, 0, 2, UIntPtr.Zero);
         keybd_event(0x12, 0, 2, UIntPtr.Zero);
         SetForegroundWindow(window);
     }

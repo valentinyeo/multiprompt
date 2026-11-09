@@ -43,6 +43,8 @@ public class MpRig {
         bool a = fgThread != 0 && fgThread != cur && AttachThreadInput(cur, fgThread, true);
         bool b = targetThread != 0 && targetThread != cur && targetThread != fgThread && AttachThreadInput(cur, targetThread, true);
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0xE8, 0, 0, UIntPtr.Zero);
+        keybd_event(0xE8, 0, 2, UIntPtr.Zero);
         try { AllowSetForegroundWindow(targetPid); BringWindowToTop(hwnd); ShowWindow(hwnd, 3); SetForegroundWindow(hwnd); }
         finally { keybd_event(0x12, 0, 2, UIntPtr.Zero); if (b) AttachThreadInput(cur, targetThread, false); if (a) AttachThreadInput(cur, fgThread, false); }
     }
