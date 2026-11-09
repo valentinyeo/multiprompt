@@ -66,6 +66,8 @@ Windows Terminal adds ~30-50 MB overhead per instance. Raw cmd.exe is ~2-3 MB. W
 
 Favorites (Alt+1) has its own session groups using the existing group actions, independently of each session’s home workspace group.
 
+Sessions without a group sit under a Recents header below the real groups, in both the workspace and Favorites.
+
 ## Future Features
 
 - Bookmarkable shell configs (like `?cwd=&cmd=` URLs)
