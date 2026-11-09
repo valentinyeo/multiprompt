@@ -1095,8 +1095,9 @@ fn paletteQueryRank(target: usize) u8 {
         return @max(1, paletteWideTextMatchRank(app_state.g_snippets[idx].name[0..app_state.g_snippets[idx].name_len], app_state.g_search_buf[0..app_state.g_search_len]));
     }
     if (target < app_state.shell_count) {
-        const rank = paletteWideTextMatchRank(app_state.shells[target].name[0..app_state.shells[target].name_len], app_state.g_search_buf[0..app_state.g_search_len]);
-        return if (rank == 0) 1 else rank;
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        const name_rank = paletteWideTextMatchRank(app_state.shells[target].name[0..app_state.shells[target].name_len], query);
+        return @max(1, name_rank, paletteTextMatchRank(sessionFolderLeaf(&app_state.shells[target]), query));
     }
     const group_index: ?usize = if (target >= SEARCH_GROUPMOVE_GROUP_OFFSET and target < SEARCH_GROUPMOVE_GROUP_OFFSET + MAX_GROUPS)
         target - SEARCH_GROUPMOVE_GROUP_OFFSET
@@ -1113,6 +1114,10 @@ fn paletteQueryRank(target: usize) u8 {
     if (target == app_state.SEARCH_TABCTX_HIDE) return @max(1, rank, paletteTextMatchRank("close tab", app_state.g_search_buf[0..app_state.g_search_len]));
     if (target == SEARCH_RENAME_SYNC_OFFSET or target == app_state.SEARCH_TABCTX_RENAME) return @max(1, rank, paletteTextMatchRank("rename session", app_state.g_search_buf[0..app_state.g_search_len]), paletteTextMatchRank("rename tab", app_state.g_search_buf[0..app_state.g_search_len]));
     return if (rank == 0) 1 else rank;
+}
+
+fn paletteRowIsArchived(target: usize) bool {
+    return target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64;
 }
 
 fn paletteWorkspaceRank(target: usize) u8 {
@@ -1174,6 +1179,9 @@ fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, n
         const key_match = paletteQueryRank(key);
         const prev_match = paletteQueryRank(prev);
         if (key_match != prev_match) return key_match > prev_match;
+        const key_open = key < app_state.shell_count;
+        const prev_open = prev < app_state.shell_count;
+        if (key_open != prev_open and (paletteRowIsArchived(key) or paletteRowIsArchived(prev))) return key_open;
         const key_workspace = paletteWorkspaceRank(key);
         const prev_workspace = paletteWorkspaceRank(prev);
         if (key_workspace != prev_workspace) return key_workspace > prev_workspace;
@@ -1781,9 +1789,12 @@ fn folderLeaf(path: []const u8) []const u8 {
     return trimmed[cut + 1 ..];
 }
 
+fn sessionFolderLeaf(shell: anytype) []const u8 {
+    return folderLeaf(if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else shell.cached_cwd[0..shell.cached_cwd_len]);
+}
+
 fn sessionFolderMatchesQuery(shell: anytype, query: []const u16) bool {
-    const cwd = if (shell.claude_cwd_len > 0) shell.claude_cwd[0..shell.claude_cwd_len] else shell.cached_cwd[0..shell.cached_cwd_len];
-    const leaf = folderLeaf(cwd);
+    const leaf = sessionFolderLeaf(shell);
     return leaf.len > 0 and repoPathMatchesQuery(leaf, query);
 }
 
@@ -6143,6 +6154,49 @@ test "palette finds an open session by its folder name" {
     try std.testing.expect(sessionFolderMatchesQuery(&shell, query[0..]));
     const home = [_]u16{ 'h', 'o', 'm', 'e' };
     try std.testing.expect(!sessionFolderMatchesQuery(&shell, home[0..]));
+}
+
+test "palette ranks the open chat in a folder ahead of an archived shell with the folder name" {
+    const old_shell = app_state.shells[0];
+    const old_shell_count = app_state.shell_count;
+    const old_archived = app_state.g_archived;
+    const old_archived_count = app_state.g_archived_count;
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    var archived: std.ArrayList(app_state.ArchivedEntry) = .empty;
+    defer {
+        archived.deinit(std.testing.allocator);
+        app_state.shells[0] = old_shell;
+        app_state.shell_count = old_shell_count;
+        app_state.g_archived = old_archived;
+        app_state.g_archived_count = old_archived_count;
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+    }
+    app_state.shell_count = 1;
+    for ("Claude", 0..) |c, i| app_state.shells[0].name[i] = c;
+    app_state.shells[0].name_len = 6;
+    const cwd = "/home/x/projects/funeralprints";
+    @memcpy(app_state.shells[0].claude_cwd[0..cwd.len], cwd);
+    app_state.shells[0].claude_cwd_len = cwd.len;
+    var entry = app_state.ArchivedEntry{};
+    @memcpy(entry.name[0..13], "Funeralprints");
+    entry.name_len = 13;
+    try archived.append(std.testing.allocator, entry);
+    app_state.g_archived = archived;
+    app_state.g_archived_count = 1;
+    for ([_][]const u8{ "fune", "funeralprints" }) |query| {
+        for (query, 0..) |c, i| app_state.g_search_buf[i] = c;
+        app_state.g_search_len = @intCast(query.len);
+        @memcpy(app_state.g_search_results[0..2], &[_]usize{ SEARCH_ARCHIVED_OFFSET, 0 });
+        app_state.g_search_result_count = 2;
+        sortSearchResultsByRank();
+        try std.testing.expectEqualSlices(usize, &.{ 0, SEARCH_ARCHIVED_OFFSET }, app_state.g_search_results[0..2]);
+    }
 }
 
 test "IGSH-1266 pick repo typing filters paths case insensitively" {
