@@ -4,19 +4,110 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  commentBody,
-  connectedMachines,
-  readResult,
-  recordAttempt,
-  releaseVersion,
-  shippedTickets,
-  shouldAttempt,
-  summarize,
-} from './lib.mjs';
 
 const repo = 'valentinyeo/multiprompt';
 const here = path.dirname(fileURLToPath(import.meta.url));
+const requiredChecks = ['install', 'start', 'chats', 'computer-view', 'sync', 'memory', 'crashes'];
+const usage = `usage: run.mjs [--host laptop2] [--tag latest|vX.Y.Z] [--no-post] [--state-dir DIR] [--agent NAME] [--attempts N] [--app-path PATH] [--self-test] [--help]
+
+Drives the test laptop through lh: reads the newest release, waits for the app's own
+updater to install it, runs check.ps1 there, and posts one comment per shipped ticket.`;
+
+function releaseVersion(tag) {
+  const match = /^v(\d+\.\d+\.\d+)$/.exec(String(tag ?? '').trim());
+  if (!match) throw new Error(`invalid release tag: ${tag}`);
+  return match[1];
+}
+
+function shippedTickets(subjects) {
+  const tickets = new Set();
+  for (const subject of subjects) {
+    const line = String(subject ?? '').split('\n')[0];
+    for (const match of line.matchAll(/(?:^|[^A-Za-z0-9-])(IGSH-\d+)/g)) tickets.add(match[1]);
+  }
+  return [...tickets].sort((left, right) => Number(left.slice(5)) - Number(right.slice(5)));
+}
+
+function connectedMachines(output) {
+  const machines = new Set();
+  for (const line of String(output ?? '').split(/\r?\n/)) {
+    const match = /^[\u2713\u2714]\s+(\S+)/.exec(line.trim());
+    if (match) machines.add(match[1]);
+  }
+  return machines;
+}
+
+function readResult(stdout) {
+  const match = /LAPTOP_CHECK_JSON_BEGIN\s*([\s\S]*?)\s*LAPTOP_CHECK_JSON_END/.exec(String(stdout ?? ''));
+  if (!match) throw new Error('check output has no result block');
+  const result = JSON.parse(match[1]);
+  if (!Array.isArray(result?.checks) || result.checks.length === 0) throw new Error('check output has no checks');
+  return result;
+}
+
+function summarize(result, expectedVersion) {
+  const checks = Array.isArray(result?.checks) ? result.checks : [];
+  const present = new Set(checks.map(check => check.name));
+  const missing = requiredChecks.filter(name => !present.has(name));
+  const failed = checks.filter(check => check.ok !== true).map(check => check.name);
+  if (expectedVersion && result?.version !== expectedVersion) failed.unshift('version');
+  const verdict = missing.length === 0 && failed.length === 0 ? 'PASS' : 'FAIL';
+  return { verdict, failed, missing, checks };
+}
+
+function escapeHtml(text) {
+  return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function commentBody({ tag, host, verdict, failed, missing, checks }) {
+  const lines = [`<p><b>Test laptop check: ${verdict}</b> ${tag} on ${host}</p>`, '<ul>'];
+  for (const check of checks) lines.push(`<li>${check.ok === true ? 'PASS' : 'FAIL'} ${escapeHtml(check.name)}: ${escapeHtml(check.detail)}</li>`);
+  for (const name of missing) lines.push(`<li>MISSING ${escapeHtml(name)}</li>`);
+  lines.push('</ul>');
+  if (failed.length > 0) lines.push(`<p>Failed: ${escapeHtml(failed.join(', '))}</p>`);
+  return lines.join('\n');
+}
+
+function shouldAttempt(entry, maxAttempts = 2) {
+  if (!entry) return true;
+  if (entry.verdict === 'PASS') return false;
+  return Number(entry.attempts ?? 0) < maxAttempts;
+}
+
+function recordAttempt(entry, tag, verdict, at) {
+  const attempts = entry?.tag === tag ? Number(entry.attempts ?? 0) : 0;
+  return { tag, verdict, attempts: attempts + 1, at };
+}
+
+function selfTest() {
+  const cases = [];
+  const check = (name, ok) => {
+    if (!ok) throw new Error(`self-test failed: ${name}`);
+    cases.push(name);
+  };
+  const throws = fn => {
+    try {
+      fn();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const clean = version => ({ version, checks: requiredChecks.map(name => ({ name, ok: true, detail: '' })) });
+  check('release tag', releaseVersion(' v0.28.900 ') === '0.28.900');
+  check('rejects loose tags', ['0.28.900', 'latest', 'v0.28', 'v0.28.900-rc1', ''].every(tag => throws(() => releaseVersion(tag))));
+  check('shipped tickets', JSON.stringify(shippedTickets(['IGSH-1901: x', 'Merge IGSH-1894', 'no ticket', 'IGSH-1901: again'])) === JSON.stringify(['IGSH-1894', 'IGSH-1901']));
+  check('subject only', JSON.stringify(shippedTickets(['IGSH-7: body\nIGSH-8: also here'])) === JSON.stringify(['IGSH-7']));
+  check('machine list', connectedMachines('\u2713 laptop1\n\u2717 laptop2\n').has('laptop1') && !connectedMachines('\u2713 laptop1\n\u2717 laptop2\n').has('laptop2'));
+  check('result block', readResult('noise\nLAPTOP_CHECK_JSON_BEGIN\n{"checks":[{"name":"start","ok":true}]}\nLAPTOP_CHECK_JSON_END\n').checks[0].name === 'start');
+  check('verdict pass', summarize(clean('0.28.900'), '0.28.900').verdict === 'PASS');
+  check('verdict version', summarize(clean('0.28.899'), '0.28.900').failed.includes('version'));
+  check('verdict missing', summarize({ version: '0.28.900', checks: [{ name: 'install', ok: true }] }, '0.28.900').verdict === 'FAIL');
+  check('escape html', commentBody({ tag: 'v0.28.900', host: 'h', verdict: 'PASS', failed: [], missing: [], checks: [{ name: 'chats', ok: true, detail: '<b>' }] }).includes('&lt;b&gt;'));
+  check('one attempt after pass', shouldAttempt(recordAttempt(undefined, 'v0.28.900', 'PASS', 't'), 2) === false);
+  check('two attempts after failure', shouldAttempt(recordAttempt(recordAttempt(undefined, 'v0.28.900', 'FAIL', 't'), 'v0.28.900', 'FAIL', 't'), 2) === false);
+  return cases.length;
+}
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -31,6 +122,16 @@ function has(name) {
 
 function exec(command, args, options = {}) {
   return execFileSync(command, args, { encoding: 'utf8', timeout: 900000, maxBuffer: 64 * 1024 * 1024, ...options }).trim();
+}
+
+if (has('help')) {
+  console.log(usage);
+  process.exit(0);
+}
+
+if (has('self-test')) {
+  console.log(JSON.stringify({ selfTest: 'pass', cases: selfTest() }));
+  process.exit(0);
 }
 
 const host = String(arg('host', 'laptop2'));

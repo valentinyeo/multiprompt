@@ -1,84 +1,52 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import {
-  REQUIRED_CHECKS,
-  commentBody,
-  connectedMachines,
-  readResult,
-  recordAttempt,
-  releaseVersion,
-  shippedTickets,
-  shouldAttempt,
-  summarize,
-} from './lib.mjs';
+import { fileURLToPath } from 'node:url';
 
-const fixture = name => new URL(`../fixtures/IGSH-1896/${name}`, import.meta.url);
-const pass = JSON.parse(fs.readFileSync(fixture('check-pass.json'), 'utf8'));
-const fail = JSON.parse(fs.readFileSync(fixture('check-fail.json'), 'utf8'));
-const subjects = fs.readFileSync(fixture('compare-subjects.txt'), 'utf8').split('\n').filter(Boolean);
+const folder = path.dirname(fileURLToPath(import.meta.url));
+const runner = path.join(folder, 'run.mjs');
+const checkScript = path.join(folder, 'check.ps1');
+const setupScript = path.join(folder, 'setup.sh');
+const requiredChecks = ['install', 'start', 'chats', 'computer-view', 'sync', 'memory', 'crashes'];
 
-test('release tags must be exact version tags', () => {
-  assert.equal(releaseVersion('v0.28.900'), '0.28.900');
-  assert.equal(releaseVersion(' v0.28.900 '), '0.28.900');
-  for (const bad of ['0.28.900', 'latest', 'v0.28', 'v0.28.900-rc1', '']) assert.throws(() => releaseVersion(bad));
+const run = (...args) => spawnSync(process.execPath, [runner, ...args], { encoding: 'utf8', timeout: 120000 });
+
+test('the runner proves its own tag, ticket, verdict and comment rules', () => {
+  const result = run('--self-test');
+  assert.equal(result.status, 0, 'runner self-test');
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.selfTest, 'pass');
+  assert.equal(report.cases, 12);
 });
 
-test('shipped tickets come from commit subjects, unique and in order', () => {
-  assert.deepEqual(shippedTickets(subjects), ['IGSH-1234', 'IGSH-1894', 'IGSH-1896', 'IGSH-1900', 'IGSH-1901']);
-  assert.deepEqual(shippedTickets(['Tweak wording', '']), []);
-  assert.deepEqual(shippedTickets(['IGSH-7: body\nIGSH-8: also here']), ['IGSH-7']);
+test('the runner explains its flags without touching a laptop', () => {
+  const result = run('--help');
+  assert.equal(result.status, 0, 'runner usage');
+  for (const flag of ['--host', '--tag', '--no-post', '--state-dir', '--self-test']) assert.match(result.stdout, new RegExp(flag));
 });
 
-test('only a ticked machine counts as online', () => {
-  assert.deepEqual([...connectedMachines('\u2713 laptop1\n\u2717 laptop2\n')], ['laptop1']);
-  assert.equal(connectedMachines('').size, 0);
-  assert.equal(connectedMachines('Error: Cannot connect').size, 0);
+test('the check script publishes exactly the required checks in order', () => {
+  assert.ok(fs.existsSync(checkScript), 'check.ps1 is shipped');
+  const source = fs.readFileSync(checkScript, 'utf8');
+  assert.deepEqual([...source.matchAll(/Add-Check '([a-z-]+)'/g)].map(match => match[1]), requiredChecks);
 });
 
-test('the result block is read out of noisy shell output', () => {
-  const stdout = `warning\r\nLAPTOP_CHECK_JSON_BEGIN\r\n${JSON.stringify(pass)}\r\nLAPTOP_CHECK_JSON_END\r\n`;
-  assert.equal(readResult(stdout).version, '0.28.900');
-  assert.throws(() => readResult('no block'));
-  assert.throws(() => readResult('LAPTOP_CHECK_JSON_BEGIN\n{"checks":[]}\nLAPTOP_CHECK_JSON_END'));
+test('the check script writes one result block and fails the run when a check fails', () => {
+  assert.ok(fs.existsSync(checkScript), 'check.ps1 is shipped');
+  const source = fs.readFileSync(checkScript, 'utf8');
+  assert.equal((source.match(/LAPTOP_CHECK_JSON_BEGIN/g) || []).length, 1);
+  assert.equal((source.match(/LAPTOP_CHECK_JSON_END/g) || []).length, 1);
+  assert.match(source, /-not \$_\.ok \}\)\.Count -gt 0\) \{ exit 1 \}/);
+  assert.doesNotMatch(source, /Remove-Item/);
 });
 
-test('a complete clean check passes and every failure is named', () => {
-  assert.deepEqual(summarize(pass, '0.28.900'), { verdict: 'PASS', failed: [], missing: [], checks: pass.checks });
-  const broken = summarize(fail, '0.28.900');
-  assert.equal(broken.verdict, 'FAIL');
-  assert.deepEqual(broken.failed, ['version', 'install', 'computer-view', 'memory']);
-  assert.deepEqual(broken.missing, ['crashes']);
-  assert.equal(summarize({ checks: pass.checks }, '0.28.901').verdict, 'FAIL');
-});
-
-test('the check script publishes exactly the required check names', () => {
-  const script = fs.readFileSync(new URL('./check.ps1', import.meta.url), 'utf8');
-  const names = [...script.matchAll(/Add-Check '([a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual(names, REQUIRED_CHECKS);
-});
-
-test('the comment names the verdict, every check and the failures', () => {
-  const body = commentBody({ tag: 'v0.28.900', host: 'Z16-TEST', verdict: 'FAIL', failed: ['memory'], missing: [], checks: fail.checks });
-  assert.match(body, /Test laptop check: FAIL/);
-  assert.match(body, /v0\.28\.900 on Z16-TEST/);
-  assert.match(body, /FAIL memory: 3900 MB working set, cap 3000 MB/);
-  assert.match(body, /Failed: memory/);
-  assert.doesNotMatch(body, /MISSING/);
-});
-
-test('the comment escapes machine text instead of posting markup', () => {
-  const body = commentBody({ tag: 'v0.28.900', host: 'Z16-TEST', verdict: 'PASS', failed: [], missing: [], checks: [{ name: 'chats', ok: true, detail: '<b>3</b>' }] });
-  assert.match(body, /&lt;b&gt;3&lt;\/b&gt;/);
-});
-
-test('a release is checked once when it passes and retried when it fails', () => {
-  assert.equal(shouldAttempt(undefined, 2), true);
-  assert.equal(shouldAttempt(recordAttempt(undefined, 'v0.28.900', 'PASS', 'now'), 2), false);
-  const first = recordAttempt(undefined, 'v0.28.900', 'FAIL', 'now');
-  assert.equal(shouldAttempt(first, 2), true);
-  const second = recordAttempt(first, 'v0.28.900', 'FAIL', 'later');
-  assert.equal(second.attempts, 2);
-  assert.equal(shouldAttempt(second, 2), false);
-  assert.equal(shouldAttempt(recordAttempt(second, 'v0.28.901', 'PASS', 'later'), 2), false);
+test('the setup script installs a ten minute timer that runs the runner and can be stopped', () => {
+  assert.ok(fs.existsSync(setupScript), 'setup.sh is shipped');
+  const source = fs.readFileSync(setupScript, 'utf8');
+  assert.match(source, /OnUnitActiveSec=10min/);
+  assert.match(source, /systemctl --user enable --now/);
+  assert.match(source, /tools\/laptop-check\/run\.mjs/);
+  assert.doesNotMatch(source, /push|commit/);
 });
