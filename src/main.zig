@@ -3892,6 +3892,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (shell_index >= app_state.shell_count) return 0;
             const to_terminal = lp != 0;
             app_state.shells[shell_index].chat_view_on = !to_terminal;
+            if (to_terminal and app_state.shells[shell_index].process == null) _ = respawnShellInPlace(shell_index, false);
             if (shell_index == app_state.active_shell) {
                 if (to_terminal) closeChatView() else openChatView();
             }

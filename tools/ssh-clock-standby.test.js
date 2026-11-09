@@ -17,7 +17,7 @@ function body(name, text = source) {
 async function zig(code, filter, files = modern ? ['ssh_reconnect.zig'] : []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
-    if (files.length) copyZig(files, dir);
+    if (files.length) copyZig([...files, 'chat_view.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
@@ -48,7 +48,8 @@ const Shell = struct {
     kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
-    tmux_identity_len: u32 = 0,
+    tmux_identity_len: u32 = 0, chat_view_on: bool = false,
+    tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
     spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
     ssh_reconnect: State = .{}, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
 };
@@ -125,6 +126,10 @@ function armRuntime(tests) {
   assert.ok(modern, 'reconnect state and single arm must exist');
   return runtime(tests);
 }
+
+test('IGSH-1759 live chat disconnect skips the placeholder reconnect arm', () => {
+  assert.match(body('sshDisconnect'), /@import\("chat_view\.zig"\)\.isLive/);
+});
 
 describe('SSH clock and standby', { concurrency: os.availableParallelism() }, () => {
   for (const kind of ['tmux', 'vps', 'vps2']) {

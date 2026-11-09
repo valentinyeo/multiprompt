@@ -5085,7 +5085,13 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
                 self.assertEqual(reply['mode'], 'headless')
                 self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
             self.assertEqual(self.user_lines(), [self.text])
-            self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'already')
+            started = None
+            for _ in range(10):
+                started = reader.host_start(self.provider, self.sid)
+                if started.get('status') == 'already' or started.get('reason') != 'owner_busy':
+                    break
+                time.sleep(0.2)
+            self.assertEqual(started.get('status'), 'already', started)
             self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
 
     def test_host_delivers_once_with_receipt(self):
@@ -5568,6 +5574,20 @@ class MoveToTerminalTest(unittest.TestCase):
         send_at = next(index for index, (call, _) in enumerate(self.calls) if call[:2] == ['tmux', 'send-keys'])
         self.assertLess(stop_at, send_at, 'the host must be stopped before the pane takes the chat')
         self.assertFalse(self.calls[send_at][1], 'typing into the pane while the host lives would run two drivers')
+        self.assertTrue(reader.host_handed_over('claude', self.sid))
+
+    def test_a_new_chat_creates_a_real_terminal_only_when_the_user_moves_it(self):
+        run = reader.subprocess.run.side_effect
+        def no_pane(command, **kwargs):
+            if command[:2] == ['tmux', 'has-session']:
+                self.calls.append((list(command), bool(self.host_running[0])))
+                return types.SimpleNamespace(stdout='', returncode=1)
+            return run(command, **kwargs)
+        reader.subprocess.run.side_effect = no_pane
+        self.assertEqual(reader.host_terminal('claude', self.sid)['status'], 'moved')
+        created = [call for call, _ in self.calls if call[:2] == ['tmux', 'new-session']]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0][2:6], ['-d', '-s', self.tmux, '-c'])
         self.assertTrue(reader.host_handed_over('claude', self.sid))
 
     def test_move_to_terminal_uses_the_permission_mode_the_host_used(self):
@@ -7279,6 +7299,83 @@ class ShardDiscoveryTest(unittest.TestCase):
                 os.environ['HISTORY_READER_SHARD'] = invalid
                 with self.subTest(shard=invalid), self.assertRaises(ValueError):
                     load_tests(loader, unittest.TestSuite(), None)
+
+
+class HostedWithoutPaneTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    name = 'live-no-pane'
+
+    def require_reader(self, *names):
+        missing = [name for name in names if not callable(getattr(reader, name, None))]
+        self.assertEqual(missing, [])
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.commands = []
+
+        def run(command, **kwargs):
+            self.commands.append(command)
+            return types.SimpleNamespace(stdout='', returncode=1)
+        patch.object(reader.subprocess, 'run', side_effect=run).start()
+        reader.host_cli(['enable', 'claude', self.sid, '--tmux', self.name, '--cwd', str(self.home)])
+
+    def test_name_and_identity_are_discoverable_before_the_agent_starts_without_a_pane(self):
+        self.require_reader('host_list_lines')
+        self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
+        listed = reader.host_cli(['list'])
+        self.assertIn('chats', listed)
+        chats = listed['chats']
+        self.assertEqual([(c['name'], c['sid']) for c in chats], [(self.name, self.sid)])
+        self.assertEqual(self.commands, [])
+        self.assertIn(self.name + '|', reader.host_list_lines())
+        self.assertEqual(self.commands, [['tmux', 'list-sessions', '-F', '#{session_name}']])
+
+    def test_reconnect_starts_the_registered_agent_without_creating_tmux(self):
+        with patch.object(reader, 'host_start', return_value=dict(status='started')) as start:
+            self.assertEqual(reader.host_cli(['connect', self.name]), dict(status='started'))
+        start.assert_called_once_with('claude', self.sid)
+        self.assertEqual(self.commands, [])
+
+    def test_legacy_state_still_resolves_the_name(self):
+        self.require_reader('host_chats')
+        paths = reader.host_paths('claude', self.sid)
+        reader.host_write(paths['config'], dict(enabled=True, tmux=self.name, cwd=str(self.home)))
+        reader.host_write(paths['state'], dict(provider='claude', sid=self.sid))
+        self.assertEqual(reader.host_chats()[0]['sid'], self.sid)
+        self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
+
+    def test_old_physical_and_headless_sessions_are_not_listed_twice_or_exposed(self):
+        self.require_reader('host_list_lines')
+        with patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(stdout=self.name + '\n', returncode=0)):
+            self.assertEqual(reader.host_list_lines(), '')
+        paths = reader.host_paths('claude', self.sid)
+        config = reader.host_config('claude', self.sid)
+        reader.host_write(paths['config'], dict(config, spawn_mode='headless'))
+        self.assertEqual(reader.host_list_lines(), '')
+        self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
+
+    def test_duplicate_names_never_connect_to_an_arbitrary_agent(self):
+        self.require_reader('host_connect')
+        reader.host_cli(['enable', 'codex', self.sid, '--tmux', self.name, '--cwd', str(self.home)])
+        with patch.object(reader, 'host_start') as start:
+            self.assertEqual(reader.host_connect(self.name)['status'], 'refused')
+        start.assert_not_called()
+
+    def test_terminal_handover_is_not_reclaimed_by_reconnect(self):
+        self.require_reader('host_chats', 'host_connect')
+        reader.host_write(reader.host_paths('claude', self.sid)['owner'], dict(owner='terminal'))
+        self.assertEqual(reader.host_chats(), [])
+        with patch.object(reader.os, 'execvp') as attach, patch.object(reader, 'host_start') as start:
+            attach.side_effect = SystemExit
+            with self.assertRaises(SystemExit):
+                reader.host_connect(self.name)
+        attach.assert_called_once_with('tmux', ['tmux', 'attach', '-t', '=' + self.name])
+        start.assert_not_called()
+
 
 
 def load_tests(loader, tests, pattern):

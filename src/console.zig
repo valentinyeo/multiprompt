@@ -1881,7 +1881,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         setEnvironmentAscii(L("COLORTERM"), SSH_COLORTERM);
     }
 
-    const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying;
+    const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying or
+        (kind == .tmux and tmux_session != null and @import("chat_view.zig").isLive(tmux_session.?));
     if (asynchronous) {
         const job = std.heap.page_allocator.create(StartupShell) catch return false;
         const environment = @import("win32.zig").GetEnvironmentStringsW() orelse {
@@ -2315,6 +2316,20 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (chatBenchEnabled() or idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return;
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
+    if (k == .tmux and app_state.shells[idx].chat_view_on and @import("chat_view.zig").isLive(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len])) {
+        const shell = &app_state.shells[idx];
+        var code: DWORD = 0;
+        if (shell.process != null and GetExitCodeProcess(shell.process, &code) != 0 and code != STILL_ACTIVE) {
+            unregisterShellExitWait(idx);
+            _ = CloseHandle(shell.process);
+            shell.process = null;
+            shell.pid = 0;
+            shell.hwnd = null;
+        }
+        shell.disconnected = false;
+        shell.ssh_reconnect = .{};
+        return;
+    }
     if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;
     const state_changed = !app_state.shells[idx].disconnected;
     var exit_code: DWORD = 0;
@@ -2695,7 +2710,7 @@ pub fn switchToShell(idx: u32) void {
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }
     chatAcClose();
-    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind)) {
+    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind) and !@import("chat_view.zig").isLive(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len])) {
         if (!app_state.shells[idx].disconnected) markSshTabDisconnected(idx);
         armSshReconnectTimerIfNeeded();
     }

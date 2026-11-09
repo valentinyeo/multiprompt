@@ -2610,7 +2610,7 @@ pub const VPS_PROBE_SCRIPT =
     "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "printf '\\n'; ";
-pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null";
+pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host list --tmux-format 2>/dev/null; true";
 
 pub var g_vps_poll_leader_mutex: HANDLE = null;
 pub var g_vps_poll_is_leader: bool = false;

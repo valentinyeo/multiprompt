@@ -2159,7 +2159,6 @@ test "IGSH-1447 a new Claude session spawns exactly the terminal launch command"
     const expected = @import("agent_host.zig").launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "tmux attach -t term-abc") != null);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 

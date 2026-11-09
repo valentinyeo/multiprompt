@@ -16,7 +16,7 @@ function body(name, text = source) {
 async function zig(code, filter, state = true, expected = 0, failure = /FAIL \(|expected 15000, found 1000/) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
-    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig'], dir);
+    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig', 'chat_view.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
@@ -45,6 +45,7 @@ fn chatReadMark(_: bool) bool { return false; }
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
+    chat_view_on: bool = false,
     kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
@@ -1122,4 +1123,25 @@ test('ISSUE-511 remote shell probe recognizes no-server but rejects unknown list
   }
 });
 
+});
+
+
+test('IGSH-1759 live chat setup exit does not reconnect a placeholder terminal', async () => {
+  await zig(runtime(`
+test "IGSH-1759 live setup exit" {
+    shells[0] = .{ .process = null, .chat_view_on = true, .tmux_session_len = 9 };
+    @memcpy(shells[0].tmux_session[0..9], "live-test");
+    alive = false;
+    sshDisconnect(0, "setup-finished");
+    sshReconnectArm(null, "power-resume");
+    for (0..3) |_| {
+        fake_now += 30000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expect(shells[0].ssh_reconnect.phase == .connected);
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 0), kills);
+}
+`), 'IGSH-1759');
 });

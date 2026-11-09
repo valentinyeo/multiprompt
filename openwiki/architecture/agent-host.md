@@ -123,6 +123,8 @@ one user line `reply with the word ok`:
 Run from the selected runtime file (`src/chat_history_reader.py`):
 
 ```
+python3 <reader> host list
+python3 <reader> host connect <name>
 python3 <reader> host start <provider> <sid> [--tmux NAME] [--permission-mode MODE]
 python3 <reader> host stop <provider> <sid>
 python3 <reader> host status <provider> <sid>

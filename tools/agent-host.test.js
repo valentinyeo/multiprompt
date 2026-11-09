@@ -43,7 +43,7 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.ok(!palette.includes('fn buildCodexTmuxLaunchCmd('), 'Codex no longer types into a terminal');
 });
 
-test('IGSH-1447 Ctrl+T opens a live chat parked on an idle wait with no shell and no terminal Claude', () => {
+test('IGSH-1447 Ctrl+T starts a live chat without a parking terminal or idle process', () => {
   const host = read('src/agent_host.zig');
   const launch = host.slice(host.indexOf('pub fn launchCommandFor('));
   const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
@@ -56,7 +56,8 @@ test('IGSH-1447 Ctrl+T opens a live chat parked on an idle wait with no shell an
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
   const command = parts.reduce((text, part, index) => text + (index > 0 ? values[ordered[index - 1]] : '') + part, '');
   assert.equal(command,
-    "tmux new-session -d -s live-abc -c ~ 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc");
+    "python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff");
+  assert.doesNotMatch(command, /new-session|tmux attach|sleep/);
   assert.ok(!command.includes('handover'), 'the terminal must never own a live chat');
   assert.ok(!command.includes('send-keys'), 'nothing is typed into a shell');
   assert.ok(!command.includes('claude --session-id'), 'Claude must not run in the terminal');
