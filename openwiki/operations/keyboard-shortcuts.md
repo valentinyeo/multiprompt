@@ -325,7 +325,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K → Crash Reports: Open Folder | Open the folder with crash reports saved after a crash (the app also reopens itself) |
 | Ctrl+K → Hibernate Browser Panes Now | Immediately hibernate every parked, unpinned browser pane |
 | Ctrl+K -&gt; External Browser Links When Pane Off | Toggle desktop browser for HTTP(S) links when the session pane is off (default on) |
-| Ctrl+K → Close All Browser Panes | Close browser panes in every workspace and keep their saved URLs |
+| Ctrl+K → Close All Browser Panes | Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's own browser profile |
 | Ctrl+K → Browser: Insert Agent Instructions | Paste the multiprompt-browser guide into the active shell |
 | URL bar (click strip above pane) | Type a URL and press Enter to navigate the docked pane |
 | Ctrl+Click URL in shell | Open link in the docked browser pane (was: default browser) |

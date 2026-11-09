@@ -174,6 +174,7 @@ const WM_APP_WEBVIEW2_FOCUS = @import("win32.zig").WM_APP_WEBVIEW2_FOCUS;
 const WM_APP_SESSION_INTERACTED = @import("win32.zig").WM_APP_SESSION_INTERACTED;
 const WM_APP_BROWSER_DROP_GESTURE = @import("win32.zig").WM_APP_BROWSER_DROP_GESTURE;
 const WM_APP_AI_PACE_READY = @import("win32.zig").WM_APP_AI_PACE_READY;
+const WM_APP_FOOTPRINT_READY = @import("win32.zig").WM_APP_FOOTPRINT_READY;
 const WM_APP_CYCLE_STATUS_CARD = @import("win32.zig").WM_APP_CYCLE_STATUS_CARD;
 const WM_APP_SEARCH_SELECT_ALL = @import("win32.zig").WM_APP_SEARCH_SELECT_ALL;
 const WM_APP_COPY_CLAUDE_LOGIN_URL = @import("win32.zig").WM_APP_COPY_CLAUDE_LOGIN_URL;
@@ -3382,6 +3383,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             invalidateSidebar();
             return 0;
         },
+        WM_APP_FOOTPRINT_READY => {
+            invalidateSidebar();
+            return 0;
+        },
         WM_APP_LADDER_DONE => {
             showHeaderNoticeAscii(app_state.g_ladder_notice[0..app_state.g_ladder_notice_len], 4000, false);
             requestAiPaceRefresh();
@@ -6526,6 +6531,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.shells[i].browser_enabled = false;
                         closeBrowserForShell(@intCast(i));
                     }
+                    _ = @import("browser_reap.zig").closeAllAfterGrace();
                     showActiveShellAfterOverlay();
                     updateBrowserVisibility();
                     repositionActive();
@@ -9377,6 +9383,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         .telemetry => {
             launch_cache.step(.telemetry);
             requestAiPaceRefresh();
+            @import("footprint.zig").start(APP_VERSION);
         },
         .links => {
             launch_cache.step(.links);

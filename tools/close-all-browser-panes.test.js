@@ -29,7 +29,7 @@ function block(text, marker, indent) {
 }
 
 function harness() {
-  const command = block(main, `if (target == ${offset}) {`, '                ');
+  const command = block(main, `if (target == ${offset}) {`, '                ').replaceAll('@import("browser_reap.zig").closeAllAfterGrace()', 'closeAllAfterGrace()');
   const row = block(palette, 'if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes"', '    ');
   const declaration = state.match(new RegExp(`pub const ${offset}: usize = \\d+;`));
   assert.ok(declaration, 'Missing Close All Browser Panes command offset');
@@ -43,6 +43,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn cancelPinnedBrowserEntry(_: u32) void {}
+fn closeAllAfterGrace() usize { return 0; }
 fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
 const computer = struct { fn selected() bool { return false; } };

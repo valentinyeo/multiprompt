@@ -684,6 +684,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&external_browser_links_tests.step);
     const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
     test_step.dependOn(&close_all_browser_panes_tests.step);
+    const close_all_browser_processes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-processes.test.js" });
+    close_all_browser_processes_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&close_all_browser_processes_tests.step);
+    const footprint_telemetry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/footprint-telemetry.test.js" });
+    footprint_telemetry_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&footprint_telemetry_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });

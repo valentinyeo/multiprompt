@@ -74,7 +74,7 @@ test("daily goals remain uncapped and persist through the sanitized snapshot", (
 
 test("collapsed carousel retains status data and expanded footer opens usage", () => {
   assert.match(source, /const SIDEBAR_STICKY_CARD_H: i32 = 26;/);
-  assert.match(source, /const SIDEBAR_STATUS_DETAIL_H: i32 = 222;/);
+  assert.match(source, /const SIDEBAR_STATUS_DETAIL_H: i32 = 246;/);
   assert.match(source, /const SIDEBAR_STICKY_CARD_COLLAPSED_H: i32 = 58;/);
   assert.match(source, /var g_sidebar_status_card: u8 = 0;/);
   const carousel = functionBody(source, "paintSidebarStickyStatusCard", "sidebarStatusPopupRect");
