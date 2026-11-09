@@ -42,7 +42,9 @@ test('remote typing path has no Windows console to answer device attributes', ()
   assert.match(start, /si\.hStdInput = child_input;/);
   assert.match(start, /si\.hStdOutput = child_output;/);
   assert.match(start, /CreateProcessW\(null, @ptrCast\(&cmd\), null, null, 1, 0x08000000,/);
-  const state = read('src/terminal/vendor/libvterm/src/state.c');
+  const vendored = 'src/terminal/vendor/libvterm/src/state.c';
+  assert.ok(fs.existsSync(path.join(root, vendored)), vendored);
+  const state = read(vendored);
   assert.match(state, /C1_CSI, "\?1;2c"\)/);
   assert.match(state, /C1_CSI, ">%d;%d;%dc", 0, 100, 0\)/);
   const native = read('src/native_session.zig');
