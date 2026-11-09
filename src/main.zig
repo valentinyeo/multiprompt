@@ -1831,7 +1831,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC => {
             const child: HANDLE = if (lp == 0) null else @ptrFromInt(@as(usize, @bitCast(lp)));
-            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
+            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
                 const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
                 _ = SetTextColor(dc, @import("rename.zig").inline_text_color);
                 _ = SetBkColor(dc, @import("rename.zig").inline_color);

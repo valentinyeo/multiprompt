@@ -1978,6 +1978,30 @@ pub fn tabRowForShell(shell_idx: u32) ?Row {
     return null;
 }
 
+pub fn groupNameRect(gidx: u32) ?RECT {
+    if (app_state.g_sidebar_collapsed) return null;
+    var rows: [MAX_ROWS]Row = undefined;
+    const n = layoutRows(&rows);
+    var hdr_y: ?i32 = null;
+    for (0..n) |ri| {
+        if (rows[ri].kind == .header and rows[ri].gidx == gidx) {
+            hdr_y = rows[ri].y;
+            break;
+        }
+    }
+    const base_y = hdr_y orelse return null;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    const column = @import("window_layout.zig").activePaneRects(client).sidebar;
+    const y = base_y - app_state.g_sidebar_scroll;
+    return .{
+        .left = column.left + uiScaled(12),
+        .top = y + uiScaled(12),
+        .right = column.right - uiScaled(8),
+        .bottom = y + uiScaled(42),
+    };
+}
+
 fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: i32) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138)));
