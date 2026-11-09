@@ -1084,6 +1084,7 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
     defer if (!ok) {
         chatHistoryChannelClose(ch);
         ch.retry_at = GetTickCount64() + 250;
+        transport.respawn(host);
     };
     if (ch.shared == null and !chatHistoryChannelStart(host, ch)) return false;
     if (!transport.write(ch.shared orelse return false, query)) return false;

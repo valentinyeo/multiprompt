@@ -14,6 +14,7 @@ const prelude = String.raw`
 const transport = struct {
     const Channel = opaque {};
     fn shutdown() void {}
+    fn respawn(_: u8) void {}
     fn close(_: *Channel) void { terminations += 1; closes += 3; }
     fn write(channel: *Channel, line: []const u8) bool {
         var written: u32 = 0;
@@ -227,6 +228,11 @@ test "shutdown during a fetch blocks new spawns and fallback and defers handle c
     try std.testing.expectEqual(@as(usize, 0), fallbacks);
 }
 `;
+
+test('IGSH-1903 failed history requests respawn the shared transport', () => {
+  assert.match(body('chatHistoryPersistent'), /transport\.respawn\(host\)/);
+  assert.match(require('fs').readFileSync('src/chat_transport.zig', 'utf8'), /pub fn respawn\(index: u8\)/);
+});
 
 test('persistent history production transport: reuse, framing, timeout, fallback, backoff and shutdown', () => {
   assert.match(body('chatHistoryPersistent'), /transport\.read/);

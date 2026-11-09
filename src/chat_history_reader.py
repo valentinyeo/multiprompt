@@ -6647,10 +6647,110 @@ def serve_push(subscriptions, lock, wake):
             events_push(subscriptions)
 
 
+def ensure_runtime_tools():
+    import fcntl
+    import hashlib
+    import json
+    import stat
+    if os.name != 'posix':
+        return
+    home = os.path.expanduser('~')
+    home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        directory = os.open('.multiprompt-runtime', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=home_fd)
+    except OSError:
+        return
+    finally:
+        os.close(home_fd)
+    lock = None
+    try:
+        def check(fd, mode):
+            st = os.fstat(fd)
+            if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != mode:
+                raise ValueError('unsafe runtime permissions')
+        check(directory, 0o700)
+        try:
+            lock = os.open('lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        except OSError:
+            return
+        try:
+            check(lock, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BlockingIOError):
+            return
+        try:
+            fd = os.open('active.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            try:
+                check(fd, 0o600)
+                active = json.loads(os.fdopen(fd, 'rb', closefd=False).read(4097))
+            finally:
+                os.close(fd)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return
+        if (not isinstance(active, dict) or active.get('protocol') != 1 or
+                not isinstance(active.get('sha256'), str) or len(active['sha256']) != 64):
+            return
+        canonical = active['sha256'] + '.py'
+        try:
+            fd = os.open(canonical, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            try:
+                check(fd, 0o600)
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_size > 4 * 1024 * 1024:
+                    return
+                data = os.read(fd, st.st_size + 1)
+            finally:
+                os.close(fd)
+        except OSError:
+            return
+        if hashlib.sha256(data).hexdigest() != active['sha256']:
+            return
+
+        runtime_root = os.path.join(home, HOST_RUNTIME_TOOLS)
+
+        def tool_matches(name):
+            path = os.path.join(runtime_root, name)
+            try:
+                target = os.readlink(path)
+            except OSError:
+                try:
+                    with open(path, 'rb') as stream:
+                        payload = stream.read(4 * 1024 * 1024 + 1)
+                except OSError:
+                    return False
+                if len(payload) > 4 * 1024 * 1024:
+                    return False
+                return hashlib.sha256(payload).hexdigest() == active['sha256']
+            return target == canonical or os.path.basename(target) == canonical
+
+        if tool_matches('reader.py'):
+            return
+
+        def relink(name):
+            path = os.path.join(runtime_root, name)
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            os.symlink(canonical, path)
+
+        relink('reader.py')
+    finally:
+        if lock is not None:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(lock)
+        os.close(directory)
+
+
 def serve_request(line, source, subscriptions, lock):
     query = None
     rid = 0
     try:
+        if os.name == 'posix':
+            ensure_runtime_tools()
         query = json.loads(line)
         if not isinstance(query, dict):
             raise ValueError("invalid request")
@@ -6789,7 +6889,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 100
+RUNTIME_GENERATION = 101
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -6849,21 +6949,41 @@ if __name__ == '__main__':
                     finally:
                         if _os.path.exists(path):
                             _os.unlink(path)
+                runtime_root = _os.path.join(home, '.multiprompt-runtime')
+
+                def relink(name, target):
+                    path = _os.path.join(runtime_root, name)
+                    try:
+                        _os.unlink(path)
+                    except FileNotFoundError:
+                        pass
+                    _os.symlink(target, path)
+
+                def publish_named_tool(name, payload):
+                    digest = _hashlib.sha256(payload).hexdigest()
+                    stem = digest + '-' + name
+                    publish(stem, payload)
+                    relink(name, stem)
+                    return stem
+
                 def publish_tools(data):
                     try:
-                        publish('reader.py', data)
+                        reader_digest = _hashlib.sha256(data).hexdigest()
+                        publish(reader_digest + '.py', data)
+                        relink('reader.py', reader_digest + '.py')
                     except OSError:
                         pass
                     mp_send_source = globals().get('MP_SEND_SOURCE')
                     if isinstance(mp_send_source, str) and mp_send_source:
                         try:
-                            publish('mp-send', _base64.b64decode(mp_send_source))
+                            published = publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
+                            _os.chmod(published, 0o600, dir_fd=directory)
                         except (ValueError, OSError):
                             pass
                     feedback_source = globals().get('FEEDBACK_SOURCE')
                     if isinstance(feedback_source, str) and feedback_source:
                         try:
-                            publish('multibot-feedback', _base64.b64decode(feedback_source))
+                            publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
                             _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass

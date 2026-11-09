@@ -92,9 +92,13 @@ test('history and live streams use logical channels, never per-stream SSH proces
   const session = fs.readFileSync(path.join(root, 'src/chat_session.zig'), 'utf8');
   assert.ok(fs.existsSync(path.join(root, 'src/chat_transport.zig')), 'shared SSH transport exists');
   const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
   assert.doesNotMatch(session, /CreateProcessW\(/);
   assert.match(session, /transport\.open\(host, ch\.watch\)/);
+  assert.match(session, /transport\.respawn\(host\)/);
+  assert.match(send, /chat_transport\.zig"\)\.respawn\(job\.key\.host\)/);
   assert.match(transport, /var hosts: \[3\]Host/);
   assert.match(transport, /if \(!host\.running\)/);
+  assert.match(transport, /pub fn respawn\(index: u8\)/);
   assert.match(transport, /channel\.bytes\.items\.len \+ bytes\.len \+ 1 > MAX_BUFFER/);
 });

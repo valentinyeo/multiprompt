@@ -3638,6 +3638,7 @@ fn chatMessageSyncFinish() void {
     if (history.generation != job.instance or history.message_generation != job.generation) return;
     if (!job.ok) {
         if (history.message_retry_step == 0) syncLog("chat-sync: message poll failed; retrying quietly");
+        @import("chat_transport.zig").respawn(job.key.host);
         history.message_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.message_retry_step);
         history.message_retry_step +|= 1;
         if (!job.synced and job.snapshot[0] != 0) {
