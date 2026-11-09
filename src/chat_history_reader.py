@@ -3071,6 +3071,19 @@ def host_reader_source():
         return None
 
 
+def host_scope_prefix(cgroup_path="/proc/self/cgroup"):
+    try:
+        lines = Path(cgroup_path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return []
+    unit = next((line[3:].strip() for line in lines if line.startswith("0::")), "")
+    tool = shutil.which("systemd-run")
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if "/user@" not in unit or not unit.endswith(".service") or not tool or not runtime or not os.path.exists(os.path.join(runtime, "bus")):
+        return []
+    return [tool, "--user", "--scope", "--quiet", "--collect", "--"]
+
+
 def host_spawn(provider, sid, source=None):
     bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
                  "exec(compile(s,'<agent-host>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
@@ -3078,14 +3091,15 @@ def host_spawn(provider, sid, source=None):
     standalone = host_runtime_file() if not isinstance(source, str) or not source else None
     if standalone is None and not isinstance(source, str):
         return None
+    scope = host_scope_prefix()
     errors = host_paths(provider, sid)["errors"].open("ab")
     try:
         if standalone is not None:
-            child = subprocess.Popen([sys.executable, "-u", standalone, "--agent-host", provider, sid],
+            child = subprocess.Popen(scope + [sys.executable, "-u", standalone, "--agent-host", provider, sid],
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
                                      start_new_session=True)
         else:
-            child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
+            child = subprocess.Popen(scope + [sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
                                      stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors,
                                      start_new_session=True)
     finally:
@@ -6889,7 +6903,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 101
+RUNTIME_GENERATION = 102
 
 if __name__ == '__main__':
     import base64 as _base64

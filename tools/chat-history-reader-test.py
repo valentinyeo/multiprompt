@@ -7378,6 +7378,50 @@ class HostedWithoutPaneTest(unittest.TestCase):
 
 
 
+class IGSH_1905_HostScopeTest(unittest.TestCase):
+    SERVICE = '0::/user.slice/user-1000.slice/user@1000.service/app.slice/solo-wake.service\n'
+
+    def spawn_argv(self, cgroup, tool='/usr/bin/systemd-run', bus=True):
+        read_text = Path.read_text
+
+        def fake_read(path, *args, **kwargs):
+            if str(path) == '/proc/self/cgroup':
+                if cgroup is None:
+                    raise OSError('unreadable')
+                return cgroup
+            return read_text(path, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as temp:
+            if bus:
+                (Path(temp) / 'bus').touch()
+            popen = unittest.mock.MagicMock()
+            with patch.dict(os.environ, {'XDG_RUNTIME_DIR': temp}), \
+                    patch.object(reader.shutil, 'which', return_value=tool), \
+                    patch.object(reader.Path, 'read_text', fake_read), \
+                    patch.object(reader, 'host_paths', return_value=dict(errors=Path(temp) / 'errors.log')), \
+                    patch.object(reader, 'HOST_CHILDREN', []), \
+                    patch.object(reader.subprocess, 'Popen', popen):
+                reader.host_spawn('claude', 'sid', 'source')
+            return popen.call_args.args[0]
+
+    def test_a_host_woken_from_a_user_timer_service_gets_its_own_scope(self):
+        argv = self.spawn_argv(self.SERVICE)
+        self.assertEqual(argv[:3], ['/usr/bin/systemd-run', '--user', '--scope'])
+        self.assertEqual(argv[argv.index('--') + 1:][:1], [sys.executable])
+
+    def test_a_host_started_over_ssh_keeps_the_plain_spawn(self):
+        self.assertEqual(self.spawn_argv('0::/system.slice/ssh.service\n')[0], sys.executable)
+
+    def test_a_host_started_from_a_login_scope_keeps_the_plain_spawn(self):
+        self.assertEqual(self.spawn_argv('0::/user.slice/user-1000.slice/session-12.scope\n')[0], sys.executable)
+
+    def test_no_scope_without_systemd_run_or_a_user_bus(self):
+        self.assertEqual(self.spawn_argv(self.SERVICE, tool=None)[0], sys.executable)
+        self.assertEqual(self.spawn_argv(self.SERVICE, bus=False)[0], sys.executable)
+
+    def test_no_scope_when_the_cgroup_is_unreadable(self):
+        self.assertEqual(self.spawn_argv(None)[0], sys.executable)
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
