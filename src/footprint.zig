@@ -102,8 +102,8 @@ pub fn formatBaseline(buf: []u8, version: []const u8, peak_memory_mb: u32, peak_
 pub fn jsonStringField(json: []const u8, key: []const u8) ?[]const u8 {
     var key_buf: [40]u8 = undefined;
     const needle = std.fmt.bufPrint(&key_buf, "\"{s}\":\"", .{key}) catch return null;
-    const start = std.mem.indexOf(u8, json, needle) orelse return null;
-    const from = start + needle.len;
+    const key_at = std.mem.indexOf(u8, json, needle) orelse return null;
+    const from = key_at + needle.len;
     const end = std.mem.indexOfScalarPos(u8, json, from, '"') orelse return null;
     return json[from..end];
 }
@@ -111,8 +111,8 @@ pub fn jsonStringField(json: []const u8, key: []const u8) ?[]const u8 {
 pub fn jsonNumberField(json: []const u8, key: []const u8) ?u32 {
     var key_buf: [40]u8 = undefined;
     const needle = std.fmt.bufPrint(&key_buf, "\"{s}\":", .{key}) catch return null;
-    const start = std.mem.indexOf(u8, json, needle) orelse return null;
-    var at = start + needle.len;
+    const key_at = std.mem.indexOf(u8, json, needle) orelse return null;
+    var at = key_at + needle.len;
     while (at < json.len and json[at] == ' ') at += 1;
     const digits_start = at;
     while (at < json.len and json[at] >= '0' and json[at] <= '9') at += 1;
