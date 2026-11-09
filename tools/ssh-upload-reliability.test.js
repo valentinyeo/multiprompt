@@ -29,6 +29,7 @@ const SECURITY_ATTRIBUTES = struct { nLength: usize, lpSecurityDescriptor: HANDL
 const STARTUPINFOW = struct { cb: usize = 0, dwFlags: u32 = 0, hStdOutput: HANDLE = null, hStdError: HANDLE = null, hStdInput: HANDLE = null };
 const PROCESS_INFORMATION = struct { hProcess: HANDLE = null, hThread: HANDLE = null };
 const HANDLE_FLAG_INHERIT = 1;
+const SSH_HELPER_FLAGS: DWORD = 0x00000008;
 var tick: u64 = 0;
 var emitted: u64 = 0;
 var progress = true;
