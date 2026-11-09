@@ -236,7 +236,7 @@ test('ISSUE-511 gone handling requires complete listing twice and defends live t
   assert.match(observe, /gone and eligible and !process_alive/);
   assert.match(observe, /self\.gone_results >= 2/);
   const finish = body('sshProbeFinish', send);
-  assert.match(finish, /else shell\.process != null and shellProcessAliveForRead\(idx\)/);
+  assert.match(finish, /const process_alive = shell\.process != null and shellProcessAliveForRead\(idx\)/);
   assert.match(finish, /if \(item\.session_gone and process_alive\) continue/);
   assert.match(finish, /gone_results > 0\) \{\s*sshRequestSessionProbe\(\);\s*continue/);
   assert.match(body('sshSessionEnded', send), /or \(shell\.process != null and shellProcessAliveForRead\(idx\)\)\) return/);
