@@ -3884,6 +3884,34 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'accepted')
         self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
 
+    def test_IGSH_1901_watchdog_spares_a_message_the_host_holds_while_the_bot_is_busy(self):
+        self.submit()
+        db = reader.message_store_db('fixture')
+        with db:
+            db.execute("UPDATE shared_messages SET state='sent',deadline=?", (time.time() - 1,))
+        db.close()
+        written = time.monotonic()
+
+        def host_state(provider, sid):
+            if time.monotonic() - written < 3.0:
+                return dict(sends=['message_fixture_0001'])
+            accepted = reader.message_store_db('fixture')
+            with accepted:
+                accepted.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id='message_fixture_0001'")
+            accepted.close()
+            return dict(sends=[])
+
+        with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 1.5), \
+                patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
+                patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_session_state', side_effect=host_state), \
+                patch.object(reader, 'message_poll'), \
+                patch.object(reader, 'message_store_request'), \
+                patch.object(reader, 'host_log') as log:
+            reader.message_worker('fixture', 'claude', 'sid')
+        self.assertEqual(self.status()['state'], 'accepted', 'a message the bot was still going to read was marked Not sent')
+        self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
+
     def test_submit_replay_has_one_handoff_and_global_id(self):
         first = self.submit()
         self.assertEqual(self.submit()['attempt'], first['attempt'])
