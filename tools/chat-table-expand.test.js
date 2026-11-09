@@ -5,10 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { copyZig } = require('./zig-copy');
-const zig =
-  process.env.ZIG ||
-  process.env.ZIG_EXE ||
-  (process.platform === 'win32' ? 'zig' : path.join(os.homedir(), '.local/zig-0.16.0/zig'));
+const localZig = path.join(os.homedir(), '.local/zig-0.16.0/zig');
+const zig = process.env.ZIG || process.env.ZIG_EXE || (fs.existsSync(localZig) ? localZig : 'zig');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
