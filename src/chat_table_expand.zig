@@ -187,7 +187,7 @@ test "IGSH-1897 the palette picks the most visible table, else the nearest, else
     var above = Nearest{ .view_top = 1000, .view_bottom = 1400 };
     above.consider(1, 0, 200);
     above.consider(4, 300, 900);
-    above.consider(7, 1500, 1800);
+    above.consider(7, 1600, 1800);
     try std.testing.expectEqual(@as(?usize, 4), above.index);
     var tie = Nearest{ .view_top = 1000, .view_bottom = 1400 };
     tie.consider(3, 100, 200);
