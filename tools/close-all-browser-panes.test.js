@@ -308,6 +308,9 @@ test "production palette lists command for its label and respects row capacity" 
 
 test('Close All Browser Panes is listed, painted, documented and registered in the test step', () => {
   assert.ok(main.includes(`if (target == ${offset}) {`), 'Missing Close All Browser Panes command');
+  const command_at = main.indexOf(`if (target == ${offset}) {`);
+  const command = main.slice(command_at, main.indexOf('showActiveShellAfterOverlay();', command_at));
+  assert.match(command, /@import\("browser_reap\.zig"\)\.closeAllAfterGrace\(\)/, 'Close All Browser Panes stops the browsers it started');
   assert.match(palette, new RegExp(`${offset} => "close all browser panes"`));
   assert.ok(palette.includes(`g_search_results[app_state.g_search_result_count] = ${offset};`));
   const sidebar = read('src/sidebar.zig');
