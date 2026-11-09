@@ -38,6 +38,8 @@ function reducerFrom(zig) {
     .replaceAll('std.mem.eql(u8, std.mem.sliceTo(&entry.message_wire_id, 0), token)', 'entry.message_wire_id === token')
     .replaceAll('std.mem.eql(u8, std.mem.sliceTo(&c.message_wire_id, 0), token)', 'c.message_wire_id === token')
     .replaceAll('std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")', 'entry.message_phase === "started"')
+    .replace('const origin = json_reader.string(json_reader.field(message, "origin")) orelse "";', 'const origin = json_reader.string(json_reader.field(message, "origin")) ?? "";')
+    .replace('if (std.mem.eql(u8, origin, "agent")) return true;', 'if (origin === "agent") return true;')
     .replaceAll('std.mem.eql(u8, phase, "', 'equal(phase, "')
     .replaceAll('app_state.shells[idx].ai_agent', '(idx.agent ?? 1)')
     .replaceAll('token.len', 'token.length')

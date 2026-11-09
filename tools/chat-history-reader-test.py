@@ -4340,14 +4340,14 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
 
     def test_IGSH_1900_an_agent_message_keeps_its_origin_all_the_way_to_the_desktop(self):
         row = self.request('submit', message_id='mp-ada6c782898f406ea2eafc77bd8648da', text='Fleet idle alarm', origin='agent')['message']
-        self.assertEqual(row['origin'], 'agent')
+        self.assertEqual(row.get('origin'), 'agent')
         snapshot = reader.message_store_request(dict(self.base, op='message_snapshot'))
-        self.assertEqual([item['message']['origin'] for item in snapshot['items'] if 'message' in item], ['agent'])
+        self.assertEqual([item['message'].get('origin') for item in snapshot['items'] if 'message' in item], ['agent'])
         with self.assertRaises(ValueError):
             self.request('submit', message_id='message_fixture_0002', text='synthetic prompt', origin='robot')
 
     def test_IGSH_1900_a_message_with_no_origin_stays_his(self):
-        self.assertEqual(self.submit()['origin'], 'human')
+        self.assertEqual(self.submit().get('origin'), 'human')
 
 
 class IGSH_1900_MpSendReportTest(unittest.TestCase):

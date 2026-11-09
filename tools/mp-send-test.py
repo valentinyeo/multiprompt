@@ -72,7 +72,8 @@ class MpSendTest(unittest.TestCase):
     def test_IGSH_1266_second_run_with_the_same_id_adds_no_second_message(self):
         first = self.run_send("claude", SID, "hello", "--tmux", "mp-test-once", "--id", "mp-0123456789abcdef0123")
         second = self.run_send("claude", SID, "hello", "--tmux", "mp-test-once", "--id", "mp-0123456789abcdef0123")
-        self.assertEqual(first.returncode, second.returncode)
+        self.assertEqual(first.returncode, 3, first.stderr)
+        self.assertEqual(second.returncode, 3, second.stderr)
         self.assertEqual(first.stdout, second.stdout)
         self.assertEqual(len(self.rows()), 1)
 

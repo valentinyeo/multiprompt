@@ -3534,28 +3534,13 @@ fn chatMessageSentMs(message: std.json.Value, fallback: i64) i64 {
     };
 }
 
-fn chatMessageFromAgent(message: std.json.Value) bool {
-    const origin = json_reader.string(json_reader.field(message, "origin")) orelse return false;
-    return std.mem.eql(u8, origin, "agent");
-}
-
-test "IGSH-1900 an agent message never becomes his unsent draft" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const agent = try json_reader.parse(arena.allocator(), "{\"id\":\"mp-ada6c782898f406ea2eafc77bd8648da\",\"state\":\"failed\",\"text\":\"Fleet idle alarm\",\"origin\":\"agent\"}");
-    try std.testing.expect(chatMessageFromAgent(agent.value));
-    const human = try json_reader.parse(arena.allocator(), "{\"id\":\"desktop-0123456789abcdef\",\"state\":\"failed\",\"text\":\"mine\",\"origin\":\"human\"}");
-    try std.testing.expect(!chatMessageFromAgent(human.value));
-    const older = try json_reader.parse(arena.allocator(), "{\"id\":\"desktop-0123456789abcdef\",\"state\":\"failed\",\"text\":\"mine\"}");
-    try std.testing.expect(!chatMessageFromAgent(older.value));
-}
-
 fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const wrapped = json_reader.field(value, "message");
     const message = if (wrapped == .null) value else wrapped;
     const token = json_reader.string(json_reader.field(message, "id")) orelse return true;
     const phase = json_reader.string(json_reader.field(message, "state")) orelse return true;
-    if (chatMessageFromAgent(message)) return true;
+    const origin = json_reader.string(json_reader.field(message, "origin")) orelse "";
+    if (std.mem.eql(u8, origin, "agent")) return true;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
     const identity = chatFileIdentityForShell(idx);
