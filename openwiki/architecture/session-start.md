@@ -293,8 +293,11 @@ starts nothing until the user picks.
 `tools/mp-send <provider> <sid> <text>` is the script path for "put a message
 into a session": it inserts one row through the same store code the app uses
 (`message_submit`), dispatches it with `message_dispatch`, prints the id, and with
-`--wait` prints the final state. It resolves the reader from the installed
-runtime selection (`~/.multiprompt-runtime/active.json`) before falling back to a
-repo checkout, and the runtime publishes a stable `reader.py` plus a copy of
+`--wait` prints the final state. Without `--wait` it waits up to 15 seconds for the
+handoff and exits 3 when the message failed, so a sender that only watches the exit
+code never reports a failed message as ok. It marks the message `origin=agent`, so a
+client never draws it as the person's own unsent message. It resolves the reader from
+the installed runtime selection (`~/.multiprompt-runtime/active.json`) before falling
+back to a repo checkout, and the runtime publishes a stable `reader.py` plus a copy of
 `mp-send` next to the selected generation, so both exist on the server without a
 script needing `tmux send-keys` or a repo path.

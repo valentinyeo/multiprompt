@@ -2218,7 +2218,9 @@ def message_store_db(tmux):
     db.execute('ATTACH DATABASE ? AS legacy', (str(held_queue_path(tmux)),))
     with db:
         db.execute("CREATE TABLE IF NOT EXISTS message_chats (provider TEXT NOT NULL, sid TEXT NOT NULL, epoch INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(provider,sid))")
-        db.execute("CREATE TABLE IF NOT EXISTS shared_messages (id TEXT PRIMARY KEY, provider TEXT NOT NULL, sid TEXT NOT NULL, text TEXT NOT NULL, position INTEGER NOT NULL, attempt TEXT NOT NULL, state TEXT NOT NULL, deadline REAL, receipt TEXT, epoch INTEGER NOT NULL, created REAL NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS shared_messages (id TEXT PRIMARY KEY, provider TEXT NOT NULL, sid TEXT NOT NULL, text TEXT NOT NULL, position INTEGER NOT NULL, attempt TEXT NOT NULL, state TEXT NOT NULL, deadline REAL, receipt TEXT, epoch INTEGER NOT NULL, created REAL NOT NULL, origin TEXT NOT NULL DEFAULT 'human')")
+        if 'origin' not in {row[1] for row in db.execute('PRAGMA table_info(shared_messages)')}:
+            db.execute("ALTER TABLE shared_messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'human'")
         db.execute("CREATE INDEX IF NOT EXISTS shared_messages_chat ON shared_messages(provider,sid,position)")
         db.execute("CREATE TABLE IF NOT EXISTS message_events (provider TEXT NOT NULL, sid TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(provider,sid,seq))")
         db.execute("CREATE TABLE IF NOT EXISTS message_attempts (provider TEXT NOT NULL, sid TEXT NOT NULL, id TEXT NOT NULL, attempt TEXT NOT NULL, epoch INTEGER NOT NULL, text_sha256 TEXT NOT NULL, outcome TEXT NOT NULL, binding TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(provider,sid,id,attempt))")
@@ -2285,11 +2287,19 @@ def message_events_page(provider, sid, after):
 
 
 def message_row(row):
-    return dict(zip(('id', 'provider', 'sid', 'text', 'position', 'attempt', 'state', 'deadline', 'receipt', 'epoch', 'created'), row))
+    return dict(zip(('id', 'provider', 'sid', 'text', 'position', 'attempt', 'state', 'deadline', 'receipt', 'epoch', 'created', 'origin'), row))
+
+
+def host_turn_busy(provider, sid):
+    if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
+        return False
+    return isinstance(host_session_state(provider, sid).get('inflight'), dict)
 
 
 def message_expire(db, provider, sid):
     def idle(rows):
+        if rows and host_turn_busy(provider, sid):
+            return []
         if rows and provider in HOST_PROVIDERS and host_owned(provider, sid):
             state = host_session_state(provider, sid)
             inflight = state.get('inflight')
@@ -2460,7 +2470,7 @@ def import_legacy_messages(db, sid, transcript, epoch):
         imported_state = 'accepted' if verified else 'cancelled' if state == 'cancelled' else 'failed'
         detail = json.dumps(dict(kind='legacy_verified_claim', inode=verified[1], offset=verified[2], digest=verified[3])) if verified else 'legacy_delivery_unconfirmed'
         position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', ('claude', sid)).fetchone()[0]
-        db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,?,?,?)', (identity, 'claude', sid, text, position, uuid.uuid4().hex, imported_state, None, detail, epoch, created / 1000000000))
+        db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (identity, 'claude', sid, text, position, uuid.uuid4().hex, imported_state, None, detail, epoch, created / 1000000000, 'human'))
         message_event(db, 'claude', sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (identity,)).fetchone()))
     db.execute("UPDATE legacy.messages SET state='cancelled' WHERE sid=? AND state IN ('queued','submitted') AND receipt NOT LIKE '@mp-shared-v1:%'", (sid,))
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
@@ -3221,7 +3231,7 @@ def host_send(provider, sid, text, tmux=None):
     token = 'mp-' + uuid.uuid4().hex
     store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux)
     try:
-        submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text))
+        submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text, origin='agent'))
         message_store_request(dict(store, op='message_dispatch'))
         message = message_store_request(dict(store, op='message_status', message_id=token)).get('message')
     except (OSError, ValueError, KeyError, TypeError):
@@ -5175,6 +5185,9 @@ def message_store_transaction(q):
             token, text = q.get('message_id'), q.get('text')
             if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or not text.strip() or '\x00' in text:
                 raise ValueError('invalid message')
+            origin = q.get('origin', 'human')
+            if origin not in ('human', 'agent'):
+                raise ValueError('invalid message origin')
             replaces = q.get('replaces')
             if isinstance(replaces, str) and replaces:
                 if not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', replaces) or replaces == token:
@@ -5223,7 +5236,7 @@ def message_store_transaction(q):
             position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
             state = 'cancelled' if admission_epoch is not None and admission_epoch < epoch else 'queued'
             deadline = None if state == 'cancelled' else time.time() + 15
-            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,NULL,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, deadline, epoch, time.time()))
+            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,NULL,?,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, deadline, epoch, time.time(), origin))
             if scope_body is not None:
                 db.execute('INSERT INTO message_room_scopes VALUES (?,?)', (token, scope_body))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
@@ -5237,7 +5250,7 @@ def message_store_transaction(q):
                 if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or '\x00' in text or db.execute('SELECT 1 FROM shared_messages WHERE id=?', (token,)).fetchone():
                     raise ValueError('message not found')
                 position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
-                db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,'cancelled',NULL,NULL,?,?)", (token, provider, sid, text, position, uuid.uuid4().hex, epoch, time.time()))
+                db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,'cancelled',NULL,NULL,?,?,?)", (token, provider, sid, text, position, uuid.uuid4().hex, epoch, time.time(), 'human'))
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
@@ -6705,7 +6718,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 95
+RUNTIME_GENERATION = 98
 
 if __name__ == '__main__':
     import base64 as _base64

@@ -4338,6 +4338,85 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         with self.path.open('rb') as source, patch.object(reader, 'box_draft', return_value=None):
             self.assertEqual(reader.live_fields(source, self.path.stat().st_size, 'fixture', sid='sid')['received'], [])
 
+    def test_IGSH_1900_an_agent_message_keeps_its_origin_all_the_way_to_the_desktop(self):
+        row = self.request('submit', message_id='mp-ada6c782898f406ea2eafc77bd8648da', text='Fleet idle alarm', origin='agent')['message']
+        self.assertEqual(row.get('origin'), 'agent')
+        snapshot = reader.message_store_request(dict(self.base, op='message_snapshot'))
+        self.assertEqual([item['message'].get('origin') for item in snapshot['items'] if 'message' in item], ['agent'])
+        with self.assertRaises(ValueError):
+            self.request('submit', message_id='message_fixture_0002', text='synthetic prompt', origin='robot')
+
+    def test_IGSH_1900_a_message_with_no_origin_stays_his(self):
+        self.assertEqual(self.submit().get('origin'), 'human')
+
+
+class IGSH_1900_MpSendReportTest(unittest.TestCase):
+    def module(self):
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader('mp_send_1900', str(ROOT / 'src/mp_send.py'))
+        spec = importlib.util.spec_from_loader('mp_send_1900', loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        return module
+
+    def run_main(self, module, reader_stub, *args):
+        import contextlib
+        module._reader = reader_stub
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return module.main(list(args))
+
+    def test_IGSH_1900_a_failed_message_makes_mp_send_exit_three_without_wait(self):
+        module = self.module()
+        queries = []
+
+        class Fake:
+            @staticmethod
+            def message_store_request(query):
+                queries.append(query)
+                state = 'queued' if query['op'] == 'message_submit' else 'failed'
+                return dict(message=dict(id=query.get('message_id'), state=state, receipt='session_unavailable'))
+
+            @staticmethod
+            def message_poll(tmux, provider, sid):
+                return None
+
+        code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-failed')
+        self.assertEqual(code, 3)
+        self.assertEqual(queries[0]['op'], 'message_submit')
+        self.assertEqual(queries[0]['origin'], 'agent')
+
+    def test_IGSH_1900_a_message_the_host_still_holds_reports_sent_and_exits_zero(self):
+        module = self.module()
+
+        class Fake:
+            @staticmethod
+            def message_store_request(query):
+                state = 'queued' if query['op'] == 'message_submit' else 'sent'
+                return dict(message=dict(id=query.get('message_id'), state=state, receipt=None))
+
+            @staticmethod
+            def message_poll(tmux, provider, sid):
+                return None
+
+        code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-held', '--json')
+        self.assertEqual(code, 0)
+
+    def test_IGSH_1900_wait_still_reports_the_final_failure(self):
+        module = self.module()
+
+        class Fake:
+            @staticmethod
+            def message_store_request(query):
+                state = 'queued' if query['op'] == 'message_submit' else 'failed'
+                return dict(message=dict(id=query.get('message_id'), state=state, receipt='session_unavailable'))
+
+            @staticmethod
+            def message_poll(tmux, provider, sid):
+                return None
+
+        code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-wait', '--wait', '--timeout', '1')
+        self.assertEqual(code, 3)
+
 
 class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
     def setUp(self):
@@ -4891,7 +4970,7 @@ class AgentHostFixture:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
             position = db.execute("SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider='claude' AND sid=?",
                                   (self.sid,)).fetchone()[0]
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
                        (token, 'claude', self.sid, text or self.text, position, time.time()))
         db.close()
         return token
@@ -6525,12 +6604,27 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         db = reader.message_store_db(self.tmux)
         with db:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?)",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?)",
                        (self.sid, 'second prompt', time.time() - 60, time.time()))
         reader.message_expire(db, 'claude', self.sid)
         state = db.execute("SELECT state FROM shared_messages WHERE id='second'").fetchone()[0]
         db.close()
         self.assertEqual(state, 'sent')
+
+    def test_IGSH_1900_a_message_waits_out_a_long_busy_turn_instead_of_failing(self):
+        reader.host_write(reader.host_paths(self.provider, self.sid)['owner'],
+                          dict(owner='host', pid=os.getpid(), at=time.time()))
+        reader.host_write(reader.host_paths(self.provider, self.sid)['state'],
+                          dict(inflight=dict(id='first'), sends=['first']))
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES ('waiting','claude',?,?,1,'a','queued',NULL,NULL,0,?)",
+                       (self.sid, 'alarm for a busy turn', time.time() - 601))
+        reader.message_expire(db, 'claude', self.sid)
+        state = db.execute("SELECT state FROM shared_messages WHERE id='waiting'").fetchone()[0]
+        db.close()
+        self.assertEqual(state, 'queued')
 
     def test_set_permission_mode_writes_the_control_request(self):
         self.assertEqual(self.reply(op='set_permission_mode', mode='acceptEdits')['status'], 'ok')
