@@ -981,6 +981,10 @@ pub fn nativePasteToShell(shell_index: u32) bool {
 
 pub fn pasteClipboardToShell(shell_index: u32) void {
     if (shell_index >= app_state.shell_count) return;
+    if (app_state.shells[shell_index].native_terminal) {
+        @import("native_session.zig").paste(app_state.shells[shell_index].hwnd);
+        return;
+    }
     const restore_focus = app_state.g_igsh354_paste_focus and shell_index == app_state.active_shell and
         !app_state.g_chat_active and foregroundIsOurs();
     defer if (restore_focus) requestShotFocus(shell_index, null);
@@ -1341,6 +1345,9 @@ test "console copy rejoins one visually wrapped URL" {
 
 pub fn copyConsoleSelectionToClipboard(shell_index: u32) CopySelectionResult {
     if (shell_index >= app_state.shell_count) return .failed;
+    if (app_state.shells[shell_index].native_terminal) {
+        return if (@import("native_session.zig").copy(app_state.shells[shell_index].hwnd)) .copied else .no_selection;
+    }
     const pid = app_state.shells[shell_index].pid;
     if (pid == 0) return .failed;
 
