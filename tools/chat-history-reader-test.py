@@ -7378,6 +7378,36 @@ class HostedWithoutPaneTest(unittest.TestCase):
 
 
 
+class IGSH_1905_HostScopeTest(unittest.TestCase):
+    def prefix(self, cgroup, tool='/usr/bin/systemd-run', bus=True):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'cgroup'
+            path.write_text(cgroup)
+            if bus:
+                (Path(temp) / 'bus').touch()
+            with patch.dict(os.environ, {'XDG_RUNTIME_DIR': temp}), patch.object(reader.shutil, 'which', return_value=tool):
+                return reader.host_scope_prefix(str(path))
+
+    def test_a_host_woken_from_a_user_timer_service_gets_its_own_scope(self):
+        prefix = self.prefix('0::/user.slice/user-1000.slice/user@1000.service/app.slice/solo-wake.service\n')
+        self.assertEqual(prefix[:3], ['/usr/bin/systemd-run', '--user', '--scope'])
+        self.assertEqual(prefix[-1], '--')
+
+    def test_a_host_started_over_ssh_keeps_the_plain_spawn(self):
+        self.assertEqual(self.prefix('0::/system.slice/ssh.service\n'), [])
+
+    def test_a_host_started_from_a_login_scope_keeps_the_plain_spawn(self):
+        self.assertEqual(self.prefix('0::/user.slice/user-1000.slice/session-12.scope\n'), [])
+
+    def test_no_scope_without_systemd_run_or_a_user_bus(self):
+        service = '0::/user.slice/user-1000.slice/user@1000.service/app.slice/solo-wake.service\n'
+        self.assertEqual(self.prefix(service, tool=None), [])
+        self.assertEqual(self.prefix(service, bus=False), [])
+
+    def test_no_scope_when_the_cgroup_is_unreadable(self):
+        self.assertEqual(reader.host_scope_prefix('/nonexistent/cgroup'), [])
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
