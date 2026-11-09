@@ -435,6 +435,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Crash Reports: Open Folder", .b = "Open the folder with crash reports saved after a crash (the app also reopens itself)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Hibernate Browser Panes Now", .b = "Immediately hibernate every parked, unpinned browser pane", .header = false },
     .{ .a = "Ctrl+K -> External Browser Links When Pane Off", .b = "Toggle desktop browser for HTTP(S) links when the session pane is off (default on)", .header = false },
+    .{ .a = "Ctrl+K -> Remote Tabs: Share One Server Connection", .b = "Toggle one shared connection per server for new remote tabs, no hidden console per tab (default off; open tabs switch on next launch)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's dedicated browser profile", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },

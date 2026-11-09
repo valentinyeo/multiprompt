@@ -1922,7 +1922,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     const shell_id = app_state.allocateShellId() orelse return false;
     const title_id = app_state.allocateConsoleTitleId() orelse return false;
     const idx = app_state.shell_count;
-    if (isRemoteShellKind(kind)) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
+    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
