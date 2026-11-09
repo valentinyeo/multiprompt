@@ -77,8 +77,9 @@ test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to
 
   const reader = read('src/chat_history_reader.py');
   assert.match(reader, /def publish_tools\(data\):/);
-  assert.match(reader, /publish\('reader\.py', data\)/);
-  assert.match(reader, /publish\('mp-send', _base64\.b64decode\(mp_send_source\)\)/);
+  assert.match(reader, /relink\('reader\.py', reader_digest \+ '\.py'\)/);
+  assert.match(reader, /publish_named_tool\('mp-send', _base64\.b64decode\(mp_send_source\)\)/);
+  assert.match(reader, /def ensure_runtime_tools\(\):/);
   assert.match(reader, /publish_tools\(source\)/);
   assert.match(reader, /publish_tools\(installed\)/);
 

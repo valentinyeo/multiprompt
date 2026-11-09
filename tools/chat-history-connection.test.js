@@ -14,6 +14,7 @@ const prelude = String.raw`
 const transport = struct {
     const Channel = opaque {};
     fn shutdown() void {}
+    fn respawn(_: u8) void {}
     fn close(_: *Channel) void { terminations += 1; closes += 3; }
     fn write(channel: *Channel, line: []const u8) bool {
         var written: u32 = 0;
