@@ -1483,7 +1483,7 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
-        const show_section_headers = !app_state.g_sidebar_collapsed and sidebarHasVisibleSessions();
+        const starred_section_headers = !app_state.g_sidebar_collapsed and sidebarHasVisibleSessions();
         for (0..app_state.shell_count) |i| {
             if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
             if (count >= app_state.MAX_SESSION_ROWS) return count;
@@ -1519,15 +1519,15 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
         var ungrouped: [MAX_SHELLS]usize = undefined;
         var ungrouped_count: usize = 0;
         for (0..app_state.shell_count) |i| {
-            if (!tabInCurrentWorkspace(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
+            if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
             if (ungrouped_count < MAX_SHELLS) {
                 ungrouped[ungrouped_count] = i;
                 ungrouped_count += 1;
             }
         }
         sortShellsByRecency(ungrouped[0..ungrouped_count]);
-        const recents_collapsed = show_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed(.recent);
-        if (show_section_headers and ungrouped_count > 0) {
+        const recents_collapsed = starred_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed(.recent);
+        if (starred_section_headers and ungrouped_count > 0) {
             if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = .recent, .y = y };
             count += 1;
@@ -5321,13 +5321,16 @@ test "IGSH-556 Favorites and home grouping keep independent memberships and grou
     try std.testing.expect(!groupInCurrentWorkspace(home));
     try std.testing.expect(groupInCurrentWorkspace(starred));
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(starred, app_state.groups[rows[0].gidx].id);
     try std.testing.expectEqual(.tab, rows[1].kind);
     try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    try std.testing.expectEqual(.section, rows[2].kind);
+    try std.testing.expectEqual(.tab, rows[3].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[3].shell_idx);
     app_state.groups[findGroupIdx(starred).?].collapsed = true;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
     try std.testing.expect(isTabHidden(0));
     app_state.g_starred_workspace = false;
     try std.testing.expect(!groupInCurrentWorkspace(starred));

@@ -30,7 +30,7 @@ test("Starred sessions without a group sit under a Recents header below the grou
     "sessions outside a group are ordered by recency");
   assert.match(starred, /\.kind = \.section,[\s\S]*?\.section_tier = \.recent/,
     "sessions outside a group sit under a Recents header");
-  assert.match(starred, /recents_collapsed = show_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed\(\.recent\)/,
+  assert.match(starred, /recents_collapsed = starred_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed\(\.recent\)/,
     "the Recents header folds its own sessions");
 });
 
