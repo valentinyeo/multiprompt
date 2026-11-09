@@ -10,6 +10,8 @@ const boundary = String.raw`
 const w = struct {
     const HANDLE = ?*anyopaque;
     fn Sleep(_: u32) void { std.Thread.yield() catch {}; }
+    fn SetEvent(_: HANDLE) i32 { return 1; }
+    fn WaitForSingleObject(_: HANDLE, _: u32) u32 { Sleep(1); return 0; }
     fn WriteFile(_: HANDLE, bytes: [*]const u8, count: u32, written: *u32, _: ?*anyopaque) i32 {
         std.debug.assert(test_host.?.mutex.tryLock());
         test_host.?.mutex.unlock();

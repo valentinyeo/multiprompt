@@ -31,6 +31,7 @@ const Host = struct {
     stopping: bool = false,
     outgoing: std.ArrayList(Packet) = .empty,
     outgoing_bytes: usize = 0,
+    wake: w.HANDLE = null,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -74,6 +75,7 @@ fn packet(host: *Host, value: anytype) bool {
         return false;
     };
     host.outgoing_bytes += bytes.len;
+    _ = w.SetEvent(host.wake);
     if (owner) |channel| {
         channel.pending_bytes += bytes.len;
         channel.pending_packets += 1;
@@ -89,8 +91,9 @@ fn transmit(host: *Host) void {
             return;
         }
         if (host.outgoing.items.len == 0) {
+            const wake = host.wake;
             host.mutex.unlock();
-            w.Sleep(1);
+            _ = w.WaitForSingleObject(wake, std.math.maxInt(u32));
             continue;
         }
         const item = host.outgoing.orderedRemove(0);
@@ -115,6 +118,8 @@ fn transmit(host: *Host) void {
 }
 
 fn start(host: *Host, index: u8) bool {
+    if (host.wake == null) host.wake = w.CreateEventW(null, 0, 0, null);
+    if (host.wake == null) return false;
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
     const console = @import("console.zig");
@@ -376,6 +381,7 @@ fn receive(host: *Host) void {
         lock(host);
         host.running = false;
         host.stopping = true;
+        _ = w.SetEvent(host.wake);
         _ = w.TerminateProcess(host.process, 0);
         for (host.channels.items) |channel| {
             channel.ended = true;
