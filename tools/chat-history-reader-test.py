@@ -6626,20 +6626,6 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         db.close()
         self.assertEqual(state, 'queued')
 
-    def test_IGSH_1900_a_message_waits_for_the_agent_to_be_ready(self):
-        output = io.BytesIO()
-        session = dict(state={})
-        reader.host_session_reset(session, types.SimpleNamespace(stdin=output))
-        session['turn'] = 't-1'
-        request = dict(op='deliver', id='host_fixture_message_01', attempt='a1', epoch=0, text='Fleet idle alarm')
-        self.assertEqual(reader.host_handle_request('claude', self.sid, self.tmux, session, request),
-                         dict(status='busy', reason='agent_starting'))
-        self.assertEqual(output.getvalue(), b'')
-        session['ready'] = True
-        with patch.object(reader, 'host_attempt', return_value=dict(status='claimed')), \
-                patch.object(reader, 'host_turn_started'), patch.object(reader, 'host_apply', return_value=True):
-            self.assertEqual(reader.host_handle_request('claude', self.sid, self.tmux, session, request)['status'], 'sent')
-
     def test_set_permission_mode_writes_the_control_request(self):
         self.assertEqual(self.reply(op='set_permission_mode', mode='acceptEdits')['status'], 'ok')
         written = self.writes()[0]

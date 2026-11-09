@@ -4073,7 +4073,7 @@ def host_handle_request(provider, sid, tmux, session, request):
             return dict(status="busy", reason="isolated_room_turn")
     if tmux is None:
         return host_refuse("no_chat")
-    if not session.get("ready"):
+    if provider != "claude" and not session.get("ready"):
         return dict(status="busy", reason="agent_starting")
     if provider == "hax" and (session["turn"] is not None or session["sends"]):
         return dict(status="busy", reason="hax_run_active")
