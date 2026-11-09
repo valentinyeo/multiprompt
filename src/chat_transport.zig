@@ -9,6 +9,7 @@ pub const Channel = struct {
     id: u32,
     watch: bool,
     terminal: bool = false,
+    command: []const u8 = "",
     started: bool = false,
     notify_hwnd: w.HANDLE = null,
     notify_message: u32 = 0,
@@ -161,7 +162,7 @@ fn start(host: *Host, index: u8) bool {
     si.hStdOutput = child_output;
     si.hStdError = stderr;
     var pi = std.mem.zeroes(w.PROCESS_INFORMATION);
-    if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, 0x08000000, null, null, &si, &pi) == 0) return false;
+    if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, console.SSH_HELPER_FLAGS, null, null, &si, &pi) == 0) return false;
     _ = w.CloseHandle(pi.hThread);
     process = pi.hProcess;
     if (state.g_tunnel_job == null or w.AssignProcessToJobObject(state.g_tunnel_job, process) == 0) return false;
@@ -235,6 +236,14 @@ pub fn open(index: u8, watch: bool) ?*Channel {
     return channel;
 }
 
+pub fn openCommand(index: u8, command: []const u8) ?*Channel {
+    const channel = open(index, false) orelse return null;
+    lock(channel.host);
+    channel.command = command;
+    channel.host.mutex.unlock();
+    return channel;
+}
+
 pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32, user: usize) ?*Channel {
     const channel = open(index, false) orelse return null;
     lock(channel.host);
@@ -255,7 +264,11 @@ pub fn write(channel: *Channel, line: []const u8) bool {
     lock(host);
     defer host.mutex.unlock();
     if (channel.ended or !host.running) return false;
-    if (!packet(host, .{ .channel = channel.id, .watch = channel.watch, .terminal = channel.terminal, .open = !channel.started, .data = line })) {
+    const sent = if (channel.command.len > 0 and !channel.started)
+        packet(host, .{ .channel = channel.id, .command = channel.command, .data = line })
+    else
+        packet(host, .{ .channel = channel.id, .watch = channel.watch, .terminal = channel.terminal, .open = !channel.started, .data = line });
+    if (!sent) {
         channel.ended = true;
         _ = packet(host, .{ .channel = channel.id, .close = true });
         notify(channel);

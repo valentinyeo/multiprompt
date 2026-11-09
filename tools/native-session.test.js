@@ -41,7 +41,8 @@ test('remote typing path has no Windows console to answer device attributes', ()
   assert.match(start, /"-T -o BatchMode=yes /);
   assert.match(start, /si\.hStdInput = child_input;/);
   assert.match(start, /si\.hStdOutput = child_output;/);
-  assert.match(start, /CreateProcessW\(null, @ptrCast\(&cmd\), null, null, 1, 0x08000000,/);
+  assert.match(start, /CreateProcessW\(null, @ptrCast\(&cmd\), null, null, 1, console\.SSH_HELPER_FLAGS,/);
+  assert.match(read('src/console.zig'), /pub const SSH_HELPER_FLAGS: u32 = 0x00000008;/);
   const vendored = 'src/terminal/vendor/libvterm/src/state.c';
   assert.ok(fs.existsSync(path.join(root, vendored)), vendored);
   const state = read(vendored);

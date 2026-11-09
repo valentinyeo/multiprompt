@@ -72,13 +72,23 @@ def serve(source):
                             if len(channels) >= MAX_CHANNELS:
                                 emit(dict(channel=cid, closed=True))
                                 continue
-                            mode = "--terminal" if packet.get("terminal") else "--watch" if packet.get("watch") else "--serve"
-                            worker_source = base64.b64decode(TERMINAL_SOURCE) if packet.get("terminal") else source.encode()
-                            bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<reader>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
-                            child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, mode], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+                            command = packet.get("command")
+                            if command:
+                                try:
+                                    child = subprocess.Popen(["/bin/sh", "-c", command], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+                                except OSError:
+                                    emit(dict(channel=cid, closed=True))
+                                    continue
+                                opening = bytearray()
+                            else:
+                                mode = "--terminal" if packet.get("terminal") else "--watch" if packet.get("watch") else "--serve"
+                                worker_source = base64.b64decode(TERMINAL_SOURCE) if packet.get("terminal") else source.encode()
+                                bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<reader>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
+                                child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, mode], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+                                opening = bytearray(base64.b64encode(worker_source) + b"\n")
                             os.set_blocking(child.stdin.fileno(), False)
                             os.set_blocking(child.stdout.fileno(), False)
-                            channels[cid] = dict(child=child, incoming=bytearray(), outgoing=bytearray(base64.b64encode(worker_source) + b"\n"))
+                            channels[cid] = dict(child=child, incoming=bytearray(), outgoing=opening, errors="replace" if command else "strict")
                             selector.register(child.stdout, selectors.EVENT_READ, (cid, "output"))
                             selector.register(child.stdin, selectors.EVENT_WRITE, (cid, "write"))
                         item = channels[cid]
@@ -118,7 +128,7 @@ def serve(source):
                             while b"\n" in item["incoming"]:
                                 line, _, rest = item["incoming"].partition(b"\n")
                                 item["incoming"][:] = rest
-                                emit(dict(channel=cid, data=line.decode()))
+                                emit(dict(channel=cid, data=line.decode(errors=item["errors"])))
                     except (OSError, UnicodeError):
                         close(cid)
                         emit(dict(channel=cid, closed=True))
