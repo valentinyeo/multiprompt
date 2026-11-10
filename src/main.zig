@@ -8006,6 +8006,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
+                @import("sidebar.zig").applyJumpBadgeKey(.focus_lost, false, false);
                 computer.revoke("app deactivated");
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 debugLog("[usage-hover] close requested by app deactivation");

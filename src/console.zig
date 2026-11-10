@@ -3031,7 +3031,7 @@ pub fn nthVisibleShell(n: u32) ?Row {
     const count = layoutRows(&rows);
     var position: u32 = 0;
     for (rows[0..count]) |row| {
-        if (row.kind != .tab and row.kind != .inbox) continue;
+        if (!@import("sidebar.zig").isJumpRow(row)) continue;
         if (position == n) return row;
         position += 1;
     }

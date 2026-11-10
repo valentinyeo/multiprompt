@@ -2167,6 +2167,80 @@ fn paletteSessionView(target: usize) ?PaletteSessionView {
     return null;
 }
 
+pub fn isJumpRow(row: Row) bool {
+    return row.kind == .tab or row.kind == .inbox;
+}
+
+fn rowAvatarRect(row: Row, column: RECT, y: i32) RECT {
+    if (row.tile) {
+        const size = uiScaled(56);
+        const left = row.x + @divTrunc(row.width - size, 2);
+        const top = y + uiScaled(8);
+        return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    }
+    if (app_state.g_sidebar_collapsed) {
+        var bottom = y + tabRowH();
+        if (chatDraftHasForShell(row.shell_idx)) bottom -= uiScaled(14);
+        const size = @min(uiScaled(28), bottom - y);
+        const left = @divTrunc(SIDEBAR_W() - 1 - size, 2);
+        const top = @divTrunc(y + bottom - size, 2);
+        return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    }
+    const size = uiScaled(36);
+    const left = column.left + uiScaled(12);
+    const top = y + @divTrunc(tabRowH() - size, 2);
+    return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+}
+
+fn jumpBadgeRect(avatar_rect: RECT) RECT {
+    const r = @import("jump_badges.zig").badgeRect(avatar_rect.left, avatar_rect.top, uiScaled);
+    return .{ .left = r.left, .top = r.top, .right = r.right, .bottom = r.bottom };
+}
+
+fn jumpBadgesVisible() bool {
+    return @import("jump_badges.zig").state.shown and @import("focus.zig").isCtrlDown();
+}
+
+fn drawJumpBadge(hdc: HANDLE, avatar_rect: RECT, digit: u32) void {
+    var rc = jumpBadgeRect(avatar_rect);
+    @import("smooth.zig").fillEllipse(hdc, rc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    const old_font = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    const old_color = SetTextColor(hdc, themeSidebarBg());
+    const text = [1]u16{@intCast('0' + digit)};
+    _ = DrawTextW(hdc, &text, 1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = SetTextColor(hdc, old_color);
+    _ = SelectObject(hdc, old_font);
+}
+
+pub fn applyJumpBadgeKey(key: @import("jump_badges.zig").Key, alt: bool, may_show: bool) void {
+    const jump_badges = @import("jump_badges.zig");
+    const was = jump_badges.state.shown;
+    jump_badges.state = jump_badges.next(jump_badges.state, key, alt, may_show);
+    if (jump_badges.state.shown != was) invalidateJumpBadges();
+}
+
+fn invalidateJumpBadges() void {
+    if (app_state.g_main_hwnd == null or app_state.g_hide_sidebar or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
+    var client_rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client_rc);
+    const column = @import("window_layout.zig").activePaneRects(client_rc).sidebar;
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRows(&rows);
+    var slot: u32 = 0;
+    for (rows[0..count]) |row| {
+        if (!isJumpRow(row)) continue;
+        slot += 1;
+        if (slot > 9) break;
+        if (row.kind != .tab) continue;
+        var rc = jumpBadgeRect(rowAvatarRect(row, column, row.y - app_state.g_sidebar_scroll));
+        rc.left -= 1;
+        rc.top -= 1;
+        rc.right += 1;
+        rc.bottom += 1;
+        _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+    }
+}
+
 fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
     const badge = @import("star_badge_geometry.zig");
     const g = badge.geometry(rect.right, rect.bottom, uiScaled);
@@ -2177,7 +2251,7 @@ fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry
     smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) { .disconnected => RGB(255, 145, 55), .unread => RGB(137, 180, 248), .favorite => RGB(240, 196, 75) });
 }
 
-fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
+fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rect: RECT) void {
     const shell = &app_state.shells[index];
     const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) RGB(200, 200, 200) else RGB(138, 138, 138);
     var right = column.right - uiScaled(12);
@@ -2194,11 +2268,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
             right = stamp.left - uiScaled(6);
         }
     }
-    const size = uiScaled(36);
-    const left = column.left + uiScaled(12);
-    const top = y + @divTrunc(tabRowH() - size, 2);
     const avatar = @import("bot_avatar.zig");
-    const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     const appearance = avatar.forShell(shell);
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
@@ -2227,9 +2297,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
 
 fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     const shell = &app_state.shells[row.shell_idx];
-    const size = uiScaled(56);
-    const left = row.x + @divTrunc(row.width - size, 2);
-    const top = y + uiScaled(8);
+    const avatar_rect = rowAvatarRect(row, std.mem.zeroes(RECT), y);
     if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) {
         const brush = CreateSolidBrush(if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58));
         const pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(154, 154, 154) else RGB(138, 138, 138));
@@ -2244,10 +2312,9 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), RGB(53, 53, 53));
     }
     const avatar = @import("bot_avatar.zig");
-    const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
+        debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
@@ -2256,7 +2323,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     }
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
-    var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
+    var name = RECT{ .left = row.x + uiScaled(4), .top = avatar_rect.bottom + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
     if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
@@ -2422,8 +2489,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         const sidebar_clip = @import("win32.zig").SaveDC(hdc);
         _ = @import("win32.zig").IntersectClipRect(hdc, 0, 0, SIDEBAR_W(), @max(0, client_rc.bottom - sidebarStickyCardSpan()));
+        const show_jump_badges = jumpBadgesVisible();
+        var jump_slot: u32 = 0;
         for (0..row_count) |ri| {
             const row = rows_arr[ri];
+            if (isJumpRow(row)) jump_slot += 1;
+            const jump_digit: ?u32 = if (show_jump_badges and isJumpRow(row) and jump_slot <= 9) jump_slot else null;
             const y: i32 = row.y - app_state.g_sidebar_scroll;
             if (y + rowTotalHeight(row) <= 0 or y >= client_rc.bottom - sidebarStickyCardSpan()) continue;
             const row_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + rowTotalHeight(row) };
@@ -2479,6 +2550,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const i: usize = row.shell_idx;
             if (row.tile) {
                 paintPinnedBot(hdc, row, y);
+                if (jump_digit) |digit| drawJumpBadge(hdc, rowAvatarRect(row, column, y), digit);
                 continue;
             }
 
@@ -2530,22 +2602,19 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (app_state.drag_active and i != app_state.drag_src) {}
 
             if (!app_state.g_sidebar_collapsed) {
-                paintChatSidebarRow(hdc, column, y, @intCast(i));
+                paintChatSidebarRow(hdc, column, y, @intCast(i), rowAvatarRect(row, column, y));
             } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };
                 if (chatDraftHasForShell(@intCast(i))) kind_rc.bottom -= uiScaled(14);
-                const size = @min(uiScaled(28), kind_rc.bottom - kind_rc.top);
-                const left = @divTrunc(kind_rc.left + kind_rc.right - size, 2);
-                const top = @divTrunc(kind_rc.top + kind_rc.bottom - size, 2);
-                const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+                const avatar_rect = rowAvatarRect(row, column, y);
                 const photo_drawn = @import("bot_photo.zig").draw(&app_state.shells[i], hdc, avatar_rect);
                 if (app_state.shells[i].ai_agent != 0 or app_state.shells[i].tmux_session_len > 0 or photo_drawn) {
                     const avatar = @import("bot_avatar.zig");
                     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
                         var log: [120]u8 = undefined;
-                        debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
+                        debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
                     }
                     if (!photo_drawn) avatar.draw(hdc, avatar_rect, avatar.forShell(&app_state.shells[i]));
                 } else {
@@ -2564,6 +2633,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     drawRobotMarker(hdc, avatar_rect, marker, background);
                 }
             }
+            if (jump_digit) |digit| drawJumpBadge(hdc, rowAvatarRect(row, column, y), digit);
         }
 
         const content_end_logical: i32 = if (row_count == 0) 0 else (rows_arr[row_count - 1].y + rowTotalHeight(rows_arr[row_count - 1]));
