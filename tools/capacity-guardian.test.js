@@ -45,7 +45,7 @@ test("neutral Alt+T shells skip admission while opt-in agents use it", () => {
   const spawnBody = functionBody("spawnWorkspaceSessionAt", "workspaceFolderForNewChat");
   assert.match(spawnBody, /program\.len > 0 and commandCreatesAgentWorkload\(program\) and\s+!capacityAdmitNewAgent/);
   assert.match(spawnBody, /spawnShellWithSession\(\.tmux/);
-  assert.match(spawnBody, /if \(hosted\) \|provider\| \{[\s\S]*?app_state\.shells\[ns\]\.ai_agent = provider\.aiAgent\(\)/);
+  assert.match(spawnBody, /if \(hosted\) \|provider\| \{[\s\S]*?shells\[ns\]\.ai_agent = provider\.aiAgent\(\)/);
 });
 
 test("workspace busy counts are diagnostic and never an admission ceiling", () => {
