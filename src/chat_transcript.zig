@@ -13,12 +13,22 @@ pub const Identity = struct {
     tmux: [64]u8 = @splat(0),
     cwd: [192]u8 = @splat(0),
 
+    fn providerAgentLabel(agent: u8) []const u8 {
+        return switch (agent) {
+            1 => "claude",
+            2 => "codex",
+            3 => "pi",
+            5 => "hax",
+            6 => "grok",
+            7 => "cursor",
+            else => "claude",
+        };
+    }
+
     pub fn provider(self: Identity) []const u8 {
         if (self.pi) return "pi";
         if (self.codex) return "codex";
-        const label = @import("workspaces.zig").aiAgentLabelValue(if (self.agent != 0) self.agent else 1);
-        if (std.mem.eql(u8, label, "none")) return "claude";
-        return label;
+        return providerAgentLabel(if (self.agent != 0) self.agent else 1);
     }
 
     pub fn init(shell_id: u32, host: u8, codex: bool, sid: []const u8, cwd: []const u8) Identity {

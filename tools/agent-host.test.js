@@ -124,7 +124,8 @@ test('IGSH-1546 Codex and Pi chats start the same live chat host with their own 
   assert.match(hosted, /live\.starting\(shell\.shell_id, host, sid\)/);
   assert.ok(!palette.includes('fn buildCodexTmuxSessionName('), 'Codex no longer types into a terminal');
   assert.match(transcript, /if \(self\.pi\) return "pi";\s*if \(self\.codex\) return "codex";/);
-  assert.match(transcript, /aiAgentLabelValue/);
+  assert.match(transcript, /fn providerAgentLabel\(agent: u8\)/);
+  assert.match(transcript, /7 => "cursor"/);
   assert.match(send, /\.provider = job\.key\.provider\(\), \.sid = /);
   assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7\);/);
   assert.doesNotMatch(send, /if \(job\.key\.codex\) "codex" else "claude"/);
