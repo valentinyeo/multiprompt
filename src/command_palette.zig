@@ -570,6 +570,7 @@ fn paletteTargetTracksUsage(target: usize) bool {
         target == SEARCH_THEME_MENU_OFFSET or
         target == SEARCH_SETTINGS_OFFSET or
         target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET or
+        target == app_state.SEARCH_SERVERS_OFFSET or
         (target >= SEARCH_OPENALL_OFFSET and target <= SEARCH_RECOVER_REPO_OFFSET) or
         (target >= SEARCH_NEWWIN_OFFSET and target <= SEARCH_CREATEWS_OFFSET) or
         (target >= SEARCH_WORKSPACES_MENU_OFFSET and target <= SEARCH_SNIPPET_BACK_OFFSET) or
@@ -692,6 +693,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == app_state.SEARCH_TABCTX_PIN_PAGE) return words.browser_pin_page;
     if (target == app_state.SEARCH_TABCTX_UNPIN_PAGE) return words.browser_unpin_page;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
+    if (target == app_state.SEARCH_SERVERS_OFFSET) return "servers ssh key add test remove server";
     if (target == app_state.SEARCH_TABCTX_BOT_FACE) return words.bot_face;
     if (target == app_state.SEARCH_TABCTX_BOT_COLOR) return words.bot_color;
     if (target == app_state.SEARCH_BOT_PHOTO_UPLOAD) return words.bot_photo_upload;
@@ -1383,6 +1385,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
+    if (target == app_state.SEARCH_SERVERS_OFFSET) return 3;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) return 2;
     if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return 0;
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
@@ -3640,6 +3643,12 @@ pub fn updateSearchResults() void {
         (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "settings", "preferences", "look and settings", "keys", "about" }, app_state.g_search_buf[0..app_state.g_search_len])))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SETTINGS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and app_state.g_search_len > 0 and
+        labelsMatchQuery(&.{ @import("ui_words.zon").settings_servers, "ssh", "ssh key", "add server", "remove server", "test server" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_SERVERS_OFFSET;
         app_state.g_search_result_count += 1;
     }
 

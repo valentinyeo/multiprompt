@@ -1608,6 +1608,7 @@ pub fn prepareStartupRestore() bool {
 
 fn startupRestoreWorker(path_buf: [512]u8, len: usize) void {
     _ = @import("console.zig").resolveSshPath(false);
+    @import("ssh_identity.zig").start();
     startup_bytes = if (len == 0) null else readSessionBytes(path_buf[0..len]);
     if (startup_bytes) |bytes| {
         startup_parsed = json_reader.parse(std.heap.page_allocator, bytes) catch null;

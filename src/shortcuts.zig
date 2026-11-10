@@ -444,6 +444,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
     .{ .a = "Ctrl+, / Ctrl+K -> Settings", .b = "Open Settings; Escape closes the panel", .header = false },
+    .{ .a = "Ctrl+K -> Servers", .b = "Add, test and remove the servers Multibot signs in to with its own key", .header = false },
     .{ .a = "Ctrl+K -> Changelog", .b = "what changed in each version", .header = false },
     .{ .a = "(agent-reported) Session ETA countdown", .b = "Sidebar row shows time left + a progress line; toggle either from Ctrl+K \u{2192} ETA Countdown Numbers / ETA Progress Line", .header = false },
     .{ .a = "Ctrl+K \u{2192} Estimate Accuracy", .b = "See how each agent's time estimates compare to how long tasks actually took", .header = false },
