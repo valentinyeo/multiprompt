@@ -317,6 +317,38 @@ test "ISSUE-511 creating reconnecting and never attached tabs cannot be gone" {
     }
 }
 
+test "IGSH-1923 a terminal channel that dies right after opening backs off and then stops" {
+    var state: State = .{};
+    state.ok();
+    var now: u64 = 0;
+    var delays: [GIVE_UP_AFTER]u64 = undefined;
+    for (0..GIVE_UP_AFTER) |i| {
+        state.ended(now, 0, 900);
+        delays[i] = state.delay_ms;
+        now = state.next_tick;
+        try std.testing.expect(state.due(now));
+        state.start();
+        state.opened();
+    }
+    for (1..GIVE_UP_AFTER) |i| try std.testing.expect(delays[i] >= delays[i - 1]);
+    try std.testing.expectEqual(@as(u64, 30_000), delays[GIVE_UP_AFTER - 1]);
+    state.ended(now, 0, 900);
+    try std.testing.expect(state.gave_up);
+    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+    state.manual(now);
+    try std.testing.expect(state.due(now));
+}
+
+test "IGSH-1923 a terminal channel that stayed up starts its backoff fresh" {
+    var state: State = .{};
+    state.attempts = 5;
+    state.opened();
+    try std.testing.expectEqual(@as(u8, 5), state.attempts);
+    state.ended(0, 0, HEALTHY_CHANNEL_MS);
+    try std.testing.expectEqual(backoffMs(0, 0), state.delay_ms);
+    try std.testing.expect(!state.gave_up);
+}
+
 fn testGoneLifecycle(restored: bool, output: []const u8) !void {
     var state: State = .{ .restored_session = restored };
     if (!restored) state.ok();
@@ -397,36 +429,4 @@ test "session status retains the failed exit through retry and clears it after a
     try std.testing.expectEqual(@as(u32, 255), state.exit_code);
     state.ok();
     try std.testing.expectEqual(std.math.maxInt(u32), state.exit_code);
-}
-
-test "IGSH-1923 a terminal channel that dies right after opening backs off and then stops" {
-    var state: State = .{};
-    state.ok();
-    var now: u64 = 0;
-    var delays: [GIVE_UP_AFTER]u64 = undefined;
-    for (0..GIVE_UP_AFTER) |i| {
-        state.ended(now, 0, 900);
-        delays[i] = state.delay_ms;
-        now = state.next_tick;
-        try std.testing.expect(state.due(now));
-        state.start();
-        state.opened();
-    }
-    for (1..GIVE_UP_AFTER) |i| try std.testing.expect(delays[i] >= delays[i - 1]);
-    try std.testing.expectEqual(@as(u64, 30_000), delays[GIVE_UP_AFTER - 1]);
-    state.ended(now, 0, 900);
-    try std.testing.expect(state.gave_up);
-    try std.testing.expect(!state.due(std.math.maxInt(u64)));
-    state.manual(now);
-    try std.testing.expect(state.due(now));
-}
-
-test "IGSH-1923 a terminal channel that stayed up starts its backoff fresh" {
-    var state: State = .{};
-    state.attempts = 5;
-    state.opened();
-    try std.testing.expectEqual(@as(u8, 5), state.attempts);
-    state.ended(0, 0, HEALTHY_CHANNEL_MS);
-    try std.testing.expectEqual(backoffMs(0, 0), state.delay_ms);
-    try std.testing.expect(!state.gave_up);
 }
