@@ -2,6 +2,9 @@ const std = @import("std");
 
 pub const Phase = enum { connected, disconnected, reconnecting, closed };
 
+pub const HEALTHY_CHANNEL_MS: u64 = 30_000;
+pub const GIVE_UP_AFTER: u8 = 8;
+
 pub fn backoffMs(attempt: u8, jitter: u64) u64 {
     const base = @min(@as(u64, 1000) << @as(u6, @intCast(@min(attempt, 5))), 30_000);
     return @min(base + jitter % (base / 4 + 1), 30_000);
@@ -26,6 +29,7 @@ pub const State = struct {
     next_tick: u64 = 0,
     delay_ms: u64 = 0,
     veto_until: ?u64 = null,
+    gave_up: bool = false,
 
     pub fn lost(self: *State, now: u64, jitter: u64) void {
         if (self.phase == .closed or self.phase == .disconnected) return;
@@ -41,7 +45,7 @@ pub const State = struct {
     }
 
     pub fn due(self: State, now: u64) bool {
-        return self.phase == .disconnected and !self.awaiting_probe and now >= self.next_tick;
+        return self.phase == .disconnected and !self.awaiting_probe and !self.gave_up and now >= self.next_tick;
     }
 
     pub fn start(self: *State) void {
@@ -56,6 +60,7 @@ pub const State = struct {
     pub fn manual(self: *State, now: u64) void {
         if (self.phase == .closed or self.phase == .reconnecting) return;
         self.awaiting_probe = false;
+        self.gave_up = false;
         self.gone_results = 0;
         self.gone_probe_deadline = null;
         self.phase = .disconnected;
@@ -66,6 +71,26 @@ pub const State = struct {
     pub fn ok(self: *State) void {
         if (self.phase == .closed) return;
         self.* = .{ .healthy_attach = true, .ever_healthy = true };
+    }
+
+    pub fn opened(self: *State) void {
+        if (self.phase == .closed) return;
+        const attempts = self.attempts;
+        self.ok();
+        self.attempts = attempts;
+    }
+
+    pub fn ended(self: *State, now: u64, jitter: u64, lived_ms: u64) void {
+        if (self.phase == .closed or self.phase == .disconnected) return;
+        if (lived_ms >= HEALTHY_CHANNEL_MS) self.attempts = 0;
+        if (self.attempts >= GIVE_UP_AFTER) {
+            self.phase = .disconnected;
+            self.gave_up = true;
+            self.delay_ms = 0;
+            self.next_tick = 0;
+            return;
+        }
+        self.lost(now, jitter);
     }
 
     pub fn observeGone(self: *State, gone: bool, process_alive: bool, now: u64) bool {
@@ -89,6 +114,7 @@ pub const State = struct {
     pub fn recreate(self: *State, now: u64, jitter: u64) void {
         if (self.phase == .closed) return;
         self.create_session = true;
+        self.gave_up = false;
         self.awaiting_probe = false;
         self.gone_results = 0;
         self.gone_probe_deadline = null;
@@ -371,4 +397,36 @@ test "session status retains the failed exit through retry and clears it after a
     try std.testing.expectEqual(@as(u32, 255), state.exit_code);
     state.ok();
     try std.testing.expectEqual(std.math.maxInt(u32), state.exit_code);
+}
+
+test "IGSH-1923 a terminal channel that dies right after opening backs off and then stops" {
+    var state: State = .{};
+    state.ok();
+    var now: u64 = 0;
+    var delays: [GIVE_UP_AFTER]u64 = undefined;
+    for (0..GIVE_UP_AFTER) |i| {
+        state.ended(now, 0, 900);
+        delays[i] = state.delay_ms;
+        now = state.next_tick;
+        try std.testing.expect(state.due(now));
+        state.start();
+        state.opened();
+    }
+    for (1..GIVE_UP_AFTER) |i| try std.testing.expect(delays[i] >= delays[i - 1]);
+    try std.testing.expectEqual(@as(u64, 30_000), delays[GIVE_UP_AFTER - 1]);
+    state.ended(now, 0, 900);
+    try std.testing.expect(state.gave_up);
+    try std.testing.expect(!state.due(std.math.maxInt(u64)));
+    state.manual(now);
+    try std.testing.expect(state.due(now));
+}
+
+test "IGSH-1923 a terminal channel that stayed up starts its backoff fresh" {
+    var state: State = .{};
+    state.attempts = 5;
+    state.opened();
+    try std.testing.expectEqual(@as(u8, 5), state.attempts);
+    state.ended(0, 0, HEALTHY_CHANNEL_MS);
+    try std.testing.expectEqual(backoffMs(0, 0), state.delay_ms);
+    try std.testing.expect(!state.gave_up);
 }
