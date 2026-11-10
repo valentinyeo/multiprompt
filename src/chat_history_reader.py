@@ -4946,6 +4946,7 @@ def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0)
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
+    host_nightly_mark(provider, sid, session)
     if provider == "claude":
         session["settings"] = host_settings(provider, sid)
         session["starting_settings"] = dict(session["settings"])
@@ -5031,8 +5032,6 @@ def host_main(provider, sid):
             pass
         state = host_session_state(provider, sid)
         state.pop("startup_failure", None)
-        if time.localtime().tm_hour >= HOST_NIGHTLY_HOUR:
-            state["nightly_day"] = host_nightly_day()
         state.update(dict(provider=provider, sid=sid, tmux=tmux, pid=os.getpid(), started=time.time()))
         host_written(state)
         host_write(paths["owner"], dict(owner="host", pid=os.getpid(), at=time.time(), tmux=tmux))
@@ -5096,6 +5095,15 @@ def host_main(provider, sid):
 
 def host_nightly_day(now=None):
     return time.strftime("%Y-%m-%d", time.localtime(time.time() if now is None else now))
+
+
+def host_nightly_mark(provider, sid, session):
+    if time.localtime().tm_hour < HOST_NIGHTLY_HOUR:
+        return
+    if session["state"].get("nightly_day") == host_nightly_day():
+        return
+    session["state"]["nightly_day"] = host_nightly_day()
+    host_state_write(provider, sid, session["state"])
 
 
 def host_nightly_due(provider, sid, now=None):
