@@ -3956,6 +3956,7 @@ fn chatTmuxSettle() void {
             }
         }
         var matched: ?usize = null;
+        const queue_stale = now_ms -| history.loaded_ms > 60_000 or chat_echo.pendingExpired(.delivered, entry.sent_tick_ms, now_ms);
         var evidence: chat_echo.TranscriptEvidence = if (entry.transcript_queued) .enqueued else .none;
         if (entry.channel_history_revision != history.history.revision or entry.channel_history_generation != history.generation) {
             const facts = history.history.deliveryEvidence(std.heap.page_allocator, .{ .text = entry.text, .prefix = &.{}, .anchor = entry.anchor }) catch {
@@ -3966,17 +3967,16 @@ fn chatTmuxSettle() void {
             chatEchoAssignForKey(entry.key[0..entry.key_len], history.history.blocks.items, history.history.text.items, !history.history.restore_full and history.history.start == 0, &assignment);
             chatEchoStoreAnchors(&assignment);
             matched = chatEchoAssignedBlock(&assignment, entry.id);
-            evidence = if (matched != null) .delivered else if (facts.enqueued) .enqueued else .none;
-            if (entry.transcript_queued != facts.enqueued) changed = true;
-            entry.transcript_queued = facts.enqueued;
+            const enqueued = facts.enqueued and !queue_stale;
+            evidence = if (matched != null) .delivered else if (enqueued) .enqueued else .none;
+            if (entry.transcript_queued != enqueued) changed = true;
+            entry.transcript_queued = enqueued;
             if (entry.delivery_watch.removed_ms != facts.removed_ms) changed = true;
             entry.delivery_watch.evidence(facts, now_ms);
             entry.channel_history_revision = history.history.revision;
             entry.channel_history_generation = history.generation;
         }
-        if (evidence == .enqueued and (now_ms -| history.loaded_ms > 60_000 or
-            chat_echo.pendingExpired(.delivered, entry.sent_tick_ms, now_ms)))
-        {
+        if (evidence == .enqueued and queue_stale) {
             evidence = .none;
             entry.transcript_queued = false;
             changed = true;
