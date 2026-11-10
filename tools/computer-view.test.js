@@ -331,7 +331,7 @@ test('RFB releases tracked keyboard state and zeroes the remote pointer mask bef
 
 test('IGSH-1909 Take control from a click inside the viewer never re-focuses the focused WebView', () => {
   const source = read('src/computer_view.cpp');
-  const body = source.slice(source.indexOf('extern "C" void mp_computer_focus()'), source.indexOf('extern "C" int mp_computer_has_input_focus()'));
+  const body = source.slice(source.indexOf('extern "C" void mp_computer_focus()'), source.indexOf('extern "C" int mp_computer_has_input_focus() {'));
   assert.match(body, /MoveFocus\(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC\)/, 'an outside take still moves focus into the viewer');
   assert.match(body, /!\s*mp_computer_has_input_focus\(\)[^;]*MoveFocus/, 'a viewer that already holds input focus is not re-focused, so WebView2 raises no LostFocus that revokes control');
 });

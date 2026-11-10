@@ -7971,7 +7971,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
-                computer.revoke();
+                computer.revoke("app deactivated");
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 debugLog("[usage-hover] close requested by app deactivation");
                 @import("usage_card.zig").close();
@@ -8038,7 +8038,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 forceReinstallHooksThrottled();
                 syncMouseHookForUrlClicks();
                 if (computer.cursorInside()) return 0;
-                computer.revoke();
+                computer.revoke("click outside the viewer");
                 if (webView2OwnsActiveShell() and (cursorInsideWebView2() or webView2HasInputFocus())) {
                     requestWebView2Focus();
                     return 0;
