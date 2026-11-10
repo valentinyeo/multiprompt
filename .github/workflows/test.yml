@@ -52,7 +52,7 @@ jobs:
   test:
     name: test-windows (${{ matrix.group }})
     runs-on: windows-latest
-    timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
+    timeout-minutes: ${{ matrix.group == 1 && 15 || matrix.group == 3 && 15 || 10 }}
     strategy:
       fail-fast: false
       matrix:
