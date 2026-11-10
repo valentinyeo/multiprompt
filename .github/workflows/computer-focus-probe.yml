@@ -1,0 +1,52 @@
+name: Computer take control
+on:
+  workflow_dispatch:
+  push:
+    branches: ['igsh-1909-*']
+    paths:
+      - src/computer_view.cpp
+      - tools/computer-focus-probe/**
+      - .github/workflows/computer-focus-probe.yml
+  pull_request:
+    paths:
+      - src/computer_view.cpp
+      - tools/computer-focus-probe/**
+      - .github/workflows/computer-focus-probe.yml
+
+permissions:
+  contents: read
+concurrency:
+  group: computer-take-control-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build the viewer with a probe host
+        shell: pwsh
+        run: |
+          zig c++ -target x86_64-windows-gnu -municode -std=c++17 -fno-exceptions -fno-rtti -fms-extensions -O1 -Isrc/computer/vendor/webview2/include src/computer_view.cpp tools/computer-focus-probe/probe.cpp -o computer-focus-probe.exe -lole32 -luuid -lws2_32 -luser32 -lgdi32 -lshell32 -ladvapi32 -lbcrypt -loleaut32
+          if ($LASTEXITCODE -ne 0) { throw 'Probe build failed' }
+      - name: Take control and keep it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $process = Start-Process -FilePath ./computer-focus-probe.exe -ArgumentList (Resolve-Path src/computer/vendor/webview2/x64/WebView2Loader.dll).Path -NoNewWindow -PassThru -RedirectStandardOutput evidence/probe.log -Wait
+          Get-Content evidence/probe.log
+          if ($process.ExitCode -ne 0) { throw "Control did not stay granted (exit $($process.ExitCode))" }
+      - name: Keep the focus log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: computer-take-control
+          path: evidence/
+          if-no-files-found: warn
