@@ -111,6 +111,14 @@ bool readLoader(const wchar_t* path) {
 }
 }
 
+void grant(const char* how) {
+    controlling = true;
+    ++takes;
+    note(how);
+    mp_computer_focus();
+    note("after focusing the viewer");
+}
+
 extern "C" const unsigned char* mp_computer_asset(const char* file, size_t length, size_t* size) {
     std::string wanted(file, length);
     if (wanted == "index.html") { *size = sizeof(page) - 1; return reinterpret_cast<const unsigned char*>(page); }
@@ -130,7 +138,7 @@ extern "C" void mp_computer_event(uint64_t generation, unsigned event) {
     snprintf(text, sizeof(text), "event %u generation %llu", event, static_cast<unsigned long long>(generation));
     note(text);
     if (event == 1) ready = true;
-    if (event == 5 && !controlling) { controlling = true; ++takes; note("take granted"); mp_computer_focus(); note("after MoveFocus"); }
+    if (event == 5 && !controlling) grant("take granted by page click");
     if (event == 9 && controlling) { controlling = false; ++lostFocusRevokes; note("revoked by LostFocus"); }
     if (event == 6 && controlling) { controlling = false; ++giveRevokes; note("revoked by page blur"); }
 }
@@ -164,7 +172,17 @@ int wmain(int argc, wchar_t** argv) {
     click(600, 400);
     pump(1500);
     note("after second click in page");
-    printf("RESULT takes=%d lostfocus_revokes=%d blur_revokes=%d controlling=%d input_focus=%d\n", takes, lostFocusRevokes, giveRevokes, controlling ? 1 : 0, mp_computer_has_input_focus());
+    bool clickKept = controlling;
+    controlling = false;
+    SetFocus(composer);
+    pump(800);
+    note("gave back to composer");
+    grant("take granted by palette");
+    pump(1500);
+    click(600, 400);
+    pump(1500);
+    note("after click while controlling");
+    printf("RESULT click_kept=%d takes=%d lostfocus_revokes=%d blur_revokes=%d controlling=%d input_focus=%d\n", clickKept ? 1 : 0, takes, lostFocusRevokes, giveRevokes, controlling ? 1 : 0, mp_computer_has_input_focus());
     fflush(stdout);
-    return takes == 1 && controlling && lostFocusRevokes == 0 && giveRevokes == 0 ? 0 : 1;
+    return clickKept && takes == 2 && controlling && lostFocusRevokes == 0 && giveRevokes == 0 ? 0 : 1;
 }
