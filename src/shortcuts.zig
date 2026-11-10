@@ -817,7 +817,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     } else if (message == WM_APP_BROWSER_TOGGLE) {
                         argument = if (kb.vkCode == 0x41 and shift) 2 else 1;
                     }
-                    @import("computer_pane.zig").revoke();
+                    @import("computer_pane.zig").revoke("app shortcut");
                     app_state.g_sysmenu_pending = false;
                     if (PostMessageW(app_state.g_main_hwnd, message, argument, if (message == WM_APP_BROWSER_TOGGLE) @intCast(kb.time) else 0) != 0) {
                         computer_consumed_keys[kb.vkCode] = true;

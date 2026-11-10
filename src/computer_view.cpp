@@ -22,6 +22,7 @@
 extern "C" const unsigned char* mp_computer_asset(const char*, size_t, size_t*);
 extern "C" const unsigned char* mp_computer_loader(size_t*, const char**);
 extern "C" void mp_computer_event(uint64_t, unsigned);
+extern "C" int mp_computer_has_input_focus();
 
 namespace {
 std::wstring wide(const std::string& s) {
@@ -453,7 +454,7 @@ extern "C" void mp_computer_fallback(uint64_t generation, const char* text, size
     InvalidateRect(view->host,nullptr,TRUE);
 }
 extern "C" void mp_computer_focus() {
-    if (view && view->controller && view->visible && !view->failed) view->controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+    if (view && view->controller && view->visible && !view->failed && !mp_computer_has_input_focus()) view->controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
 }
 extern "C" int mp_computer_has_input_focus() {
     if (!view || !view->controller || !view->visible || view->failed || GetForegroundWindow() != view->parent) return 0;

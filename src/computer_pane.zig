@@ -271,9 +271,10 @@ fn setState(state: State) void {
     mp_computer_fallback(machine.generation, caption.ptr, caption.len);
 }
 
-pub fn revoke() void {
+pub fn revoke(cause: []const u8) void {
     if (!machine.controlling) return;
     machine.controlling = false;
+    log("control off: {s}", .{cause});
     @import("shortcuts.zig").releaseComputerKeys();
     send("control", ",\"enabled\":false");
 }
@@ -284,7 +285,7 @@ fn closeJob() void {
 }
 
 fn sleepView(now: u64) void {
-    revoke();
+    revoke("view asleep");
     machine.full_width = false;
     if (machine.phase == .stopping) return;
     if (machine.phase == .paint or machine.phase == .connected) {
@@ -336,7 +337,7 @@ fn begin() void {
 
 fn fail(reason: []const u8) void {
     log("attempt {d} failed: {s}", .{ machine.attempts + 1, reason });
-    revoke();
+    revoke("connection failed");
     if (machine.phase == .connected or machine.phase == .paint) {
         send("suspend", "");
         machine.phase = .stopping;
@@ -377,7 +378,7 @@ pub fn sync() void {
     syncing = true;
     defer syncing = false;
     const now = w.GetTickCount64();
-    if (app.g_search_active or app.g_popup_menu_active or app.g_move_size_active or !@import("focus.zig").foregroundIsOurs()) revoke();
+    if (app.g_search_active or app.g_popup_menu_active or app.g_move_size_active or !@import("focus.zig").foregroundIsOurs()) revoke("menu, palette or another app took over");
     if (!allowed()) {
         machine.visible = false;
         sleepView(now);
@@ -394,7 +395,7 @@ pub fn sync() void {
     const owner = ownerFor(app.active_shell) orelse return;
     if (machine.owner) |current| {
         if (current.sid != owner.sid or !std.mem.eql(u8, &current.session, &owner.session)) {
-            revoke();
+            revoke("session changed");
             machine.full_width = false;
             const known = knownTarget(owner);
             if (current.host == owner.host and machine.phase == .connected and machine.target != null and known != null and Target.same(machine.target.?, known.?)) {
@@ -514,7 +515,7 @@ pub fn tick() void {
 
 pub fn toggleFullWidth() void {
     if (!machine.visible or !allowed() or !currentOwnerMatches()) return;
-    revoke();
+    revoke("full width toggled");
     machine.full_width = !machine.full_width;
     @import("window_layout.zig").repositionActive();
     present();
@@ -536,7 +537,7 @@ pub export fn mp_computer_event(generation: u64, event: c_uint) void {
     if (event == 1 and generation == 0) { machine.page_selected = false; return; }
     if (generation != machine.generation) return;
     if (event != 4 and !currentOwnerMatches()) {
-        revoke();
+        revoke("viewer owner changed");
         mp_computer_present(0, 0, 0, 0, 0);
         return;
     }
@@ -548,7 +549,7 @@ pub export fn mp_computer_event(generation: u64, event: c_uint) void {
         6 => giveBack(),
         7 => toggleFullWidth(),
         8 => retry(),
-        9 => revoke(),
+        9 => revoke("viewer lost focus"),
         else => {},
     }
 }
@@ -564,7 +565,7 @@ pub fn prepareClose() bool {
 
 pub fn giveBack() void {
     const had_control = machine.controlling;
-    revoke();
+    revoke("given back");
     const owner = machine.owner orelse return;
     if (had_control and machine.visible and allowed() and currentOwnerMatches() and !app.g_search_active and !app.g_popup_menu_active and app.active_shell < app.shell_count and
         app.shells[app.active_shell].shell_id == owner.sid and @import("focus.zig").foregroundIsOurs()) @import("focus.zig").focusActiveShell();
@@ -574,6 +575,7 @@ pub fn takeOrGiveControl() void {
     if (machine.controlling) { giveBack(); return; }
     if (!machine.visible or !allowed() or !currentOwnerMatches() or machine.state != .live or app.g_search_active or app.g_popup_menu_active or !@import("focus.zig").foregroundIsOurs()) return;
     machine.controlling = true;
+    log("control on", .{});
     @import("focus.zig").cancelPendingNativeBrowserFocus();
     app.g_browser_focus_mode = false;
     @import("focus.zig").cancelShellRefocus(app.g_main_hwnd);
@@ -584,7 +586,7 @@ pub fn takeOrGiveControl() void {
 
 pub fn shutdown() void {
     shutting_down = true;
-    revoke();
+    revoke("shutdown");
     send("suspend", "");
     closeJob();
     mp_computer_destroy();
