@@ -29,6 +29,7 @@ const SECURITY_ATTRIBUTES = struct { nLength: usize, lpSecurityDescriptor: HANDL
 const STARTUPINFOW = struct { cb: usize = 0, dwFlags: u32 = 0, hStdOutput: HANDLE = null, hStdError: HANDLE = null, hStdInput: HANDLE = null };
 const PROCESS_INFORMATION = struct { hProcess: HANDLE = null, hThread: HANDLE = null };
 const HANDLE_FLAG_INHERIT = 1;
+const SSH_HELPER_FLAGS: DWORD = 0x00000008;
 var tick: u64 = 0;
 var emitted: u64 = 0;
 var progress = true;
@@ -111,6 +112,10 @@ test "stdin partial writes refresh inactivity after each successful write" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('upload ssh starts detached so it gets no hidden console', () => {
+  assert.match(body('sshOneShotCaptureInput'), /CreateProcessW\(\s*null,\s*@ptrCast\(&cmd_buf\),\s*null,\s*null,\s*1,\s*SSH_HELPER_FLAGS,/);
 });
 
 test('server transfer reports real byte progress even after SSH has buffered all stdin', () => {

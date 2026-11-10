@@ -432,6 +432,7 @@ pub const Shell = struct {
     eta_first_est_s: u32 = 0,
     eta_active_start_tick: u64 = 0,
     ssh_reconnect: @import("ssh_reconnect.zig").State = .{},
+    native_terminal: bool = false,
 };
 
 pub const BrowserNavigationIntent = enum { background, select_preserve_focus, select_and_focus };
@@ -645,6 +646,7 @@ pub var g_browser_dragging: bool = false;
 pub const BROWSER_SUSPEND_DEFAULT_MIN: u32 = 15;
 pub const BROWSER_SUSPEND_SAVING_MIN: u32 = 5;
 pub var g_external_browser_links: bool = true;
+pub var g_shared_server_connection: bool = false;
 pub var g_browser_autosuspend: bool = true;
 pub var g_browser_suspend_min: u32 = BROWSER_SUSPEND_DEFAULT_MIN;
 pub const BROWSER_FREEZE_PARK_MS_AC: u64 = 120_000;
@@ -703,7 +705,7 @@ pub var g_dev_font_hud: bool = false;
 pub var g_dev_console_cell_w: i32 = 0;
 pub const GROUP_HEADER_H: i32 = 28;
 pub const BTN_H: i32 = 32;
-pub const SIDEBAR_STATUS_DETAIL_H: i32 = 222;
+pub const SIDEBAR_STATUS_DETAIL_H: i32 = 246;
 pub const SIDEBAR_STICKY_CARD_H: i32 = 26;
 pub const SIDEBAR_STICKY_CARD_COLLAPSED_H: i32 = 58;
 pub const SIDEBAR_STICKY_CARD_GAP: i32 = 6;
@@ -1449,6 +1451,7 @@ pub const SEARCH_OPENALL_HOST_UK_OFFSET: usize = 5005;
 pub const SEARCH_OPENALL_HOST_INNE_OFFSET: usize = 5006;
 pub const SEARCH_NEW_CLAUDE_CHAT_OFFSET: usize = 5100;
 pub const SEARCH_NEW_PI_CHAT_OFFSET: usize = 5101;
+pub const SEARCH_NEW_CURSOR_CHAT_OFFSET: usize = 5108;
 pub const SEARCH_NEW_TERMINAL_OFFSET: usize = 5102;
 pub const SEARCH_OPEN_SESSION_MENU_OFFSET: usize = 5103;
 pub const SEARCH_SHELLS_MENU_OFFSET: usize = 5104;
@@ -1511,6 +1514,7 @@ pub const SEARCH_BROWSER_INSTRUCT_OFFSET: usize = 6237;
 pub const SEARCH_BROWSER_FOCUS_URL_OFFSET: usize = 6238;
 pub const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET: usize = 6239;
 pub const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET: usize = 6378;
+pub const SEARCH_SHARED_SERVER_CONNECTION_OFFSET: usize = 6388;
 pub const SEARCH_BROWSER_AUTOSUSPEND_OFFSET: usize = 6240;
 pub const SEARCH_CHANGELOG_OFFSET: usize = 6241;
 pub const SEARCH_BROWSER_BACK_OFFSET: usize = 6242;
@@ -1599,6 +1603,7 @@ pub const SEARCH_CHAT_NEWEST_OFFSET: usize = 6465;
 pub const SEARCH_CHAT_MORE_MENU_OFFSET: usize = 6466;
 pub const SEARCH_CHAT_RESYNC_OFFSET: usize = 6493;
 pub const SEARCH_CHAT_SELECTION_MENU_OFFSET: usize = 6494;
+pub const SEARCH_CHAT_EXPAND_TABLE_OFFSET: usize = 6495;
 pub const SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362;
 pub const SEARCH_CHAT_COPY_SELECTION_OFFSET: usize = 6363;
 pub const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET: usize = 6469;
@@ -2316,6 +2321,7 @@ pub var g_account_local_base: ?[]u8 = null;
 pub var g_account_colors_supported = false;
 pub var g_account_groups_supported = false;
 pub var g_account_group_order_supported = false;
+pub var g_account_starred_groups_supported = false;
 pub var g_account_appearance_supported = false;
 pub var g_account_dirty_at: u64 = 0;
 pub var g_account_status: []const u8 = "Sign in to Multi Bot to open your workspaces.";
@@ -2329,7 +2335,7 @@ pub const AppearanceEdit = @import("appearance_intent.zig").Edit;
 pub const AppearanceIntent = @import("appearance_intent.zig").Intent;
 pub const AppearanceTouch = @import("appearance_intent.zig").Touch;
 pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null, appearance: ?[]AppearanceIntent = null };
-pub const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, group_order_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const LayoutReply = struct { palette8_supported: bool = false, groups_supported: bool = false, group_order_supported: bool = false, starred_groups_supported: bool = false, colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
@@ -2609,7 +2615,7 @@ pub const VPS_PROBE_SCRIPT =
     "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "printf '\\n'; ";
-pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null";
+pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host list --tmux-format 2>/dev/null; true";
 
 pub var g_vps_poll_leader_mutex: HANDLE = null;
 pub var g_vps_poll_is_leader: bool = false;

@@ -2612,33 +2612,43 @@ pub fn handleBrowserLifecycleDone(job: *BrowserLifecycleJob) void {
     if (job.frozen and (wake_requested or idx == app_state.active_shell or app_state.shells[idx].keep_awake)) wakeBrowserPaneFromFreeze(idx);
 }
 
+pub fn browserPaneAgentAttached(i: usize) bool {
+    if (i >= app_state.shell_count) return false;
+    const sh = &app_state.shells[i];
+    if (sh.activity == .active or sh.console_working) return true;
+    return i == app_state.active_shell and app_state.g_chat_active and app_state.g_chat_screen_working;
+}
+
 fn browserPaneSessionBusyPure(
     activity_active: bool,
+    agent_attached: bool,
     now_tick: u64,
     last_active_event_tick: u64,
     zsb_recent: bool,
     window_ms: u64,
 ) bool {
-    if (activity_active) return true;
+    if (activity_active or agent_attached) return true;
     if (last_active_event_tick != 0 and now_tick >= last_active_event_tick and
         now_tick - last_active_event_tick <= window_ms) return true;
     return zsb_recent;
 }
 
 test "browserPaneSessionBusyPure: active/recent agent and recent zsb are busy" {
-    try std.testing.expect(browserPaneSessionBusyPure(true, 10_000, 0, false, 5_000));
-    try std.testing.expect(browserPaneSessionBusyPure(false, 10_000, 6_000, false, 5_000));
-    try std.testing.expect(browserPaneSessionBusyPure(false, 10_000, 1_000, true, 5_000));
-    try std.testing.expect(!browserPaneSessionBusyPure(false, 10_000, 4_000, false, 5_000));
-    try std.testing.expect(!browserPaneSessionBusyPure(false, 10_000, 0, false, 5_000));
-    try std.testing.expect(!browserPaneSessionBusyPure(false, 10_000, 20_000, false, 5_000));
-    try std.testing.expect(!browserPaneSessionBusyPure(false, 10_000, 1_000, false, 0));
+    try std.testing.expect(browserPaneSessionBusyPure(true, false, 10_000, 0, false, 5_000));
+    try std.testing.expect(browserPaneSessionBusyPure(false, true, 10_000, 0, false, 5_000));
+    try std.testing.expect(browserPaneSessionBusyPure(false, false, 10_000, 6_000, false, 5_000));
+    try std.testing.expect(browserPaneSessionBusyPure(false, false, 10_000, 1_000, true, 5_000));
+    try std.testing.expect(!browserPaneSessionBusyPure(false, false, 10_000, 4_000, false, 5_000));
+    try std.testing.expect(!browserPaneSessionBusyPure(false, false, 10_000, 0, false, 5_000));
+    try std.testing.expect(!browserPaneSessionBusyPure(false, false, 10_000, 20_000, false, 5_000));
+    try std.testing.expect(!browserPaneSessionBusyPure(false, false, 10_000, 1_000, false, 0));
 }
 
 fn browserPaneSessionBusy(i: usize, window_ms: u64) bool {
     if (i >= app_state.shell_count) return false;
     return browserPaneSessionBusyPure(
         app_state.shells[i].activity == .active,
+        browserPaneAgentAttached(i),
         GetTickCount64(),
         app_state.shells[i].last_active_event,
         zsbShellRecentlyDriven(i, window_ms),

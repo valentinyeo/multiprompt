@@ -10,6 +10,8 @@ const root = path.resolve(__dirname, '..');
 const fixture = `import json,sys,time
 for line in sys.stdin.buffer:
     value=json.loads(line)
+    if value.get('op') == 'exit':
+        break
     if value.get('op') == 'slow':
         time.sleep(0.3)
     print(json.dumps(dict(id=value['id'],value=value.get('value'),watch='--watch' in sys.argv)),flush=True)
@@ -52,9 +54,18 @@ async function broker(t) {
   });
   child.stdin.write(Buffer.from(fixture).toString('base64') + '\n');
   assert.equal((await next((value) => value.ready)).ready, true);
+  const opened = new Set();
   return {
-    send(channel, value, watch = false) { child.stdin.write(JSON.stringify({ channel, watch, data: JSON.stringify(value) }) + '\n'); },
+    send(channel, value, watch = false) {
+      child.stdin.write(JSON.stringify({ channel, watch, open: !opened.has(channel), data: JSON.stringify(value) }) + '\n');
+      opened.add(channel);
+    },
     close(channel) { child.stdin.write(JSON.stringify({ channel, close: true }) + '\n'); },
+    async closed(channel) {
+      const value = await next((value) => value.channel === channel);
+      assert.equal(value.closed, true, 'ended channel must close, not execute queued input');
+      return value;
+    },
     async reply(channel) { return JSON.parse((await next((value) => value.channel === channel)).data); },
   };
 }
@@ -88,13 +99,27 @@ test('closing one channel preserves another and allows opening a new channel', r
   assert.equal((await b.reply(3)).value, 'new');
 });
 
+test('late queued input cannot reopen an exited logical session', remoteOnly, async (t) => {
+  const b = await broker(t);
+  b.send(1, { id: 1, op: 'exit' });
+  await b.closed(1);
+  b.send(1, { id: 2, value: 'must not restart' });
+  await b.closed(1);
+  b.send(2, { id: 3, value: 'independent' });
+  assert.equal((await b.reply(2)).value, 'independent');
+});
+
 test('history and live streams use logical channels, never per-stream SSH processes', () => {
   const session = fs.readFileSync(path.join(root, 'src/chat_session.zig'), 'utf8');
   assert.ok(fs.existsSync(path.join(root, 'src/chat_transport.zig')), 'shared SSH transport exists');
   const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
   assert.doesNotMatch(session, /CreateProcessW\(/);
   assert.match(session, /transport\.open\(host, ch\.watch\)/);
+  assert.match(session, /transport\.respawn\(host\)/);
+  assert.match(send, /chat_transport\.zig"\)\.respawn\(job\.key\.host\)/);
   assert.match(transport, /var hosts: \[3\]Host/);
   assert.match(transport, /if \(!host\.running\)/);
+  assert.match(transport, /pub fn respawn\(index: u8\)/);
   assert.match(transport, /channel\.bytes\.items\.len \+ bytes\.len \+ 1 > MAX_BUFFER/);
 });

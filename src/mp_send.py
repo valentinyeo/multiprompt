@@ -12,6 +12,8 @@ import uuid
 from pathlib import Path
 
 TERMINAL_STATES = ("accepted", "started", "failed", "cancelled")
+HANDOFF_STATES = ("sent", "accepted", "started", "failed", "cancelled")
+HANDOFF_TIMEOUT = 15.0
 PROVIDERS = ("claude", "codex")
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{16,80}\Z")
@@ -76,7 +78,7 @@ def submit(reader, provider, sid, tmux, text, message_id=None):
     token = message_id or ("mp-" + uuid.uuid4().hex)
     if MESSAGE_ID.match(token) is None:
         raise ValueError("invalid message id: " + token)
-    query = dict(op="message_submit", message_protocol=1, provider=provider, sid=sid, tmux=tmux, message_id=token, text=text)
+    query = dict(op="message_submit", message_protocol=1, provider=provider, sid=sid, tmux=tmux, message_id=token, text=text, origin="agent")
     result = reader.message_store_request(query)
     return result.get("message") or {"id": token, "state": "queued"}
 
@@ -105,6 +107,20 @@ def wait(reader, provider, sid, tmux, message_id, timeout):
     deadline = time.monotonic() + max(0.0, timeout)
     message = status(reader, provider, sid, tmux, message_id)
     while message is None or message.get("state") not in TERMINAL_STATES:
+        if time.monotonic() >= deadline:
+            return message
+        time.sleep(0.2)
+        if message is not None and message.get("state") == "queued":
+            dispatch(reader, provider, sid, tmux)
+        poll(reader, provider, sid, tmux)
+        message = status(reader, provider, sid, tmux, message_id) or message
+    return message
+
+
+def handoff(reader, provider, sid, tmux, message_id, timeout):
+    deadline = time.monotonic() + max(0.0, min(timeout, HANDOFF_TIMEOUT))
+    message = status(reader, provider, sid, tmux, message_id)
+    while message is None or message.get("state") not in HANDOFF_STATES:
         if time.monotonic() >= deadline:
             return message
         time.sleep(0.2)
@@ -289,24 +305,28 @@ def read_text(text):
 
 def deliver(args, provider, sid, tmux, text):
     reader = reader_module(args.reader)
+    if not tmux:
+        tmux = args.tmux or reader.host_chat_name(provider, sid) or locator_tmux(reader, provider, sid)
+        if not tmux:
+            raise ValueError("no terminal binding for this session; pass --tmux")
     message = submit(reader, provider, sid, tmux, text, args.message_id)
     message_id = message.get("id")
     dispatch(reader, provider, sid, tmux)
-    final = wait(reader, provider, sid, tmux, message_id, args.timeout) if args.wait else message
+    final = wait(reader, provider, sid, tmux, message_id, args.timeout) if args.wait else handoff(reader, provider, sid, tmux, message_id, args.timeout)
     if args.json:
         print(json.dumps(dict(id=message_id, state=(final or {}).get("state"), receipt=(final or {}).get("receipt")), separators=(",", ":")))
     else:
         print(message_id)
-        if args.wait:
+        if args.wait and (final or {}).get("state") is not None:
             line = "state=" + str((final or {}).get("state"))
             if (final or {}).get("receipt"):
                 line += " receipt=" + str(final["receipt"])
             print(line)
     state = (final or {}).get("state")
-    if not args.wait:
-        return 0
     if state == "failed" or state == "cancelled":
         return 3
+    if not args.wait:
+        return 0
     if state not in TERMINAL_STATES:
         print("timed out waiting for the message", file=sys.stderr)
         return 4

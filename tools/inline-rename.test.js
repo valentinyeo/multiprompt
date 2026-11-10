@@ -83,11 +83,23 @@ test('Inbox rename uses selected row colors and name geometry', () => {
   assert.match(editor, /setInlineColors\(if \(app_state\.g_light_theme\) RGB\(225, 225, 225\) else RGB\(53, 53, 53\)/);
   assert.match(editor, /y \+ uiScaled\(8\), edit_w, edit_h/);
   assert.doesNotMatch(editor, /WS_BORDER|uiFontInboxTitle/);
-  assert.match(main, /child == app_state\.g_edit_hwnd and !app_state\.g_edit_is_group and !app_state\.g_edit_is_window and !app_state\.g_edit_is_browser_urlbar\)/);
+  assert.match(main, /child == app_state\.g_edit_hwnd and !app_state\.g_edit_is_window and !app_state\.g_edit_is_browser_urlbar\)/);
   const driver = read('.claude/skills/verify-multiprompt/control-inline-rename.ps1');
   assert.match(driver, /Rename-Sidebar \$true[^]*?F2: locate the live title editor/);
   assert.match(driver, /Rename-Sidebar \$false[^]*?F2: edit sidebar name/);
   assert.match(driver, /F2: edit selected Inbox row/);
   assert.match(driver, /Click the session avatar outside the sidebar editor to save/);
   assert.doesNotMatch(driver, /\$sidePoint\[0\] - 50/);
+});
+
+test('group rename uses the same inline editor as sessions', () => {
+  const sidebar = read('src/sidebar.zig');
+  const group = rename.slice(rename.indexOf('pub fn startGroupRename'), rename.indexOf('pub fn commitRename'));
+  assert.match(sidebar, /pub fn groupNameRect\(gidx: u32\) \?RECT/);
+  assert.match(group, /groupNameRect\(gidx\) orelse return/);
+  assert.match(group, /uiFontBot\(\.preview\)/);
+  assert.match(group, /setInlineColors\(/);
+  assert.match(group, /WS_CHILD \| WS_VISIBLE \| ES_AUTOHSCROLL/);
+  assert.doesNotMatch(group, /WS_BORDER/);
+  assert.doesNotMatch(group, /setControlFont/);
 });

@@ -165,6 +165,7 @@ const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_I
 const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
 const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
 const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+const SEARCH_SHARED_SERVER_CONNECTION_OFFSET = @import("app_state.zig").SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
 const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
 const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
 const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
@@ -252,6 +253,7 @@ const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
 const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECTION_MENU_OFFSET;
+const SEARCH_CHAT_EXPAND_TABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_EXPAND_TABLE_OFFSET;
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
@@ -273,6 +275,7 @@ const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -1100,7 +1103,7 @@ fn groupNameListed(names: []const []const u8, name: []const u8) bool {
 }
 
 fn groupNameInTabs(tabs: []const @import("session_layout.zig").Tab, name: []const u8) bool {
-    for (tabs) |tab| if (std.mem.eql(u8, tab.group orelse "", name)) return true;
+    for (tabs) |tab| if (std.mem.eql(u8, tab.group orelse "", name) or std.mem.eql(u8, tab.starred_group orelse "", name)) return true;
     return false;
 }
 
@@ -1255,6 +1258,22 @@ inline fn effLa(i: usize) u64 {
 
 pub inline fn effPinnedTop(i: usize) bool {
     return if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top else app_state.shells[i].pinned_top;
+}
+
+fn sortShellsByRecency(ids: []usize) void {
+    var ii: usize = 1;
+    while (ii < ids.len) : (ii += 1) {
+        const tmp = ids[ii];
+        var jj = ii;
+        while (jj > 0) : (jj -= 1) {
+            const prev = ids[jj - 1];
+            const tmp_la = effLa(tmp);
+            const prev_la = effLa(prev);
+            if (tmp_la < prev_la or (tmp_la == prev_la and tmp > prev)) break;
+            ids[jj] = prev;
+        }
+        ids[jj] = tmp;
+    }
 }
 
 pub fn setPinnedTop(i: usize, pinned: bool) void {
@@ -1467,6 +1486,7 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
+        const starred_section_headers = !app_state.g_sidebar_collapsed and sidebarHasVisibleSessions();
         for (0..app_state.shell_count) |i| {
             if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
             if (count >= app_state.MAX_SESSION_ROWS) return count;
@@ -1482,20 +1502,47 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
             count += 1;
             y += groupHeaderHeight();
             if (app_state.groups[gi].collapsed) continue;
+            var members: [MAX_SHELLS]usize = undefined;
+            var member_count: usize = 0;
             for (0..app_state.shell_count) |i| {
                 if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid or effPinnedTop(i)) continue;
+                if (member_count < MAX_SHELLS) {
+                    members[member_count] = i;
+                    member_count += 1;
+                }
+            }
+            sortShellsByRecency(members[0..member_count]);
+            for (members[0..member_count]) |i| {
                 if (count >= app_state.MAX_SESSION_ROWS) return count;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gi), .shell_idx = @intCast(i), .y = y };
                 count += 1;
                 y += tabRowH();
             }
         }
+        var ungrouped: [MAX_SHELLS]usize = undefined;
+        var ungrouped_count: usize = 0;
         for (0..app_state.shell_count) |i| {
             if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
+            if (ungrouped_count < MAX_SHELLS) {
+                ungrouped[ungrouped_count] = i;
+                ungrouped_count += 1;
+            }
+        }
+        sortShellsByRecency(ungrouped[0..ungrouped_count]);
+        const recents_collapsed = starred_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed(.recent);
+        if (starred_section_headers and ungrouped_count > 0) {
             if (count >= app_state.MAX_SESSION_ROWS) return count;
-            out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+            out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = .recent, .y = y };
             count += 1;
-            y += tabRowH();
+            y += sectionHeaderHeight();
+        }
+        if (!recents_collapsed) {
+            for (ungrouped[0..ungrouped_count]) |i| {
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
+                out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+                count += 1;
+                y += tabRowH();
+            }
         }
         for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |row, i| {
             if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) continue;
@@ -1975,6 +2022,30 @@ pub fn tabRowForShell(shell_idx: u32) ?Row {
         if (rows[ri].kind == .tab and rows[ri].shell_idx == shell_idx) return rows[ri];
     }
     return null;
+}
+
+pub fn groupNameRect(gidx: u32) ?RECT {
+    if (app_state.g_sidebar_collapsed) return null;
+    var rows: [MAX_ROWS]Row = undefined;
+    const n = layoutRows(&rows);
+    var hdr_y: ?i32 = null;
+    for (0..n) |ri| {
+        if (rows[ri].kind == .header and rows[ri].gidx == gidx) {
+            hdr_y = rows[ri].y;
+            break;
+        }
+    }
+    const base_y = hdr_y orelse return null;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    const column = @import("window_layout.zig").activePaneRects(client).sidebar;
+    const y = base_y - app_state.g_sidebar_scroll;
+    return .{
+        .left = column.left + uiScaled(12),
+        .top = y + uiScaled(12),
+        .right = column.right - uiScaled(8),
+        .bottom = y + uiScaled(42),
+    };
 }
 
 fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: i32) void {
@@ -2584,8 +2655,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const overlay_radius: i32 = uiScaled(8);
         @import("dialog.zig").dim(hdc, win_w, win_h);
 
-        drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, overlay_radius);
-
         const overlay_border_col = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(200, 200, 200) else RGB(0x2E, 0x2E, 0x2E));
         const border_br = CreateSolidBrush(overlay_border_col);
         const border_pen = CreatePen(0, 1, overlay_border_col);
@@ -2617,7 +2686,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
         _ = SelectObject(hdc, palette_font);
-        var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
+        var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(32), .bottom = oy + uiScaled(56) };
         if (app_state.g_search_len == 0) {
             _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(160, 160, 160) else RGB(100, 100, 100)));
             const placeholder = if (app_state.g_search_ws_sort_mode)
@@ -2699,24 +2768,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
             var recent_rc = RECT{ .left = ox + uiScaled(28), .top = oy + uiScaled(64), .right = ox + overlay_w - uiScaled(24), .bottom = oy + input_h };
             _ = DrawTextW(hdc, L("RECENT SESSIONS"), -1, &recent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         }
-        var esc_rc = RECT{ .left = ox + overlay_w - uiScaled(56), .top = oy + uiScaled(24), .right = ox + overlay_w - uiScaled(24), .bottom = oy + uiScaled(48) };
-        @import("palette_text.zig").keycap(hdc, L("Esc"), &esc_rc);
-        const footer_y = oy + overlay_h - @import("drawing.zig").searchFooterH();
-        const divider = RECT{ .left = ox + uiScaled(16), .top = footer_y, .right = ox + overlay_w - uiScaled(16), .bottom = footer_y + 1 };
-        const divider_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
-        _ = FillRect(hdc, &divider, divider_br);
-        _ = DeleteObject(divider_br);
-        _ = SelectObject(hdc, palette_hint_font);
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));
-        var footer_rc = RECT{ .left = ox + uiScaled(24), .top = footer_y + 1, .right = ox + overlay_w - uiScaled(24), .bottom = oy + overlay_h };
-        @import("palette_text.zig").footer(hdc, &footer_rc);
-
         {
             if (app_state.g_search_rename_input_mode) {
                 _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(95, 95, 95) else RGB(155, 155, 155)));
                 _ = SelectObject(hdc, palette_hint_font);
                 var rename_hint_rc = RECT{ .left = ox + 12, .top = oy + input_h, .right = ox + overlay_w - 12, .bottom = oy + input_h + row_h };
-                _ = paletteDrawText(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs Multi Bot, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                _ = paletteDrawText(hdc, L("Saving syncs Multi Bot, tmux, and agent."), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             } else if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) {
                 _ = SetTextColor(hdc, customColorOr("hint", RGB(100, 100, 100)));
                 _ = SelectObject(hdc, palette_hint_font);
@@ -2743,6 +2800,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
                     const is_chat_selection_menu = result_idx == SEARCH_CHAT_SELECTION_MENU_OFFSET;
+                    const is_chat_expand_table = result_idx == SEARCH_CHAT_EXPAND_TABLE_OFFSET;
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_focus_messages = result_idx == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
@@ -2756,7 +2814,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
                     const is_chat_setting = result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -2841,7 +2899,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_usage_login = is_usage_login_primary or is_usage_login_inne;
                     const is_endtmux = result_idx == SEARCH_END_TMUX_OFFSET;
                     const is_reopen = result_idx == SEARCH_REOPEN_OFFSET;
-                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
+                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_CURSOR_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
                     const is_pick_repo_row = result_idx >= SEARCH_PICK_REPO_ROW_OFFSET and result_idx < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS;
                     const is_pick_repo_back = result_idx == SEARCH_PICK_REPO_BACK_OFFSET;
                     const is_urlpick = result_idx == SEARCH_URLPICK_OFFSET;
@@ -2864,6 +2922,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_browser_focus_url = result_idx == SEARCH_BROWSER_FOCUS_URL_OFFSET;
                     const is_browser_focus_toggle = result_idx == SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
                     const is_external_browser_links = result_idx == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+                    const is_shared_server_connection = result_idx == SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
                     const is_browser_autosuspend = result_idx == SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
                     const is_keepawake = result_idx == SEARCH_KEEPAWAKE_OFFSET;
                     const is_hibernate_now = result_idx == SEARCH_HIBERNATE_NOW_OFFSET;
@@ -2897,7 +2956,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_snippet_back = result_idx == SEARCH_SNIPPET_BACK_OFFSET;
                     const is_snippet = result_idx >= SEARCH_SNIPPET_OFFSET and result_idx < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS;
                     const is_snippet_action = is_snippets_menu or is_snippet_create or is_snippet_back or is_snippet;
-                    const is_newwin = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_font_bigger and !is_font_smaller and !is_font_reset and !is_customcmd_edit and !is_customcmd_reload and !is_archive and !is_unarchive_hidden and !is_unarchive_unattached and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_chat_view and !is_chat_stop and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_history and !is_browser_mode and !is_browser_engine and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_ui_bigger and !is_ui_smaller and !is_ui_reset and !is_restart and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEWWIN_OFFSET;
+                    const is_newwin = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_font_bigger and !is_font_smaller and !is_font_reset and !is_customcmd_edit and !is_customcmd_reload and !is_archive and !is_unarchive_hidden and !is_unarchive_unattached and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_chat_view and !is_chat_stop and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_shared_server_connection and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_history and !is_browser_mode and !is_browser_engine and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_ui_bigger and !is_ui_smaller and !is_ui_reset and !is_restart and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEWWIN_OFFSET;
                     const is_openall = !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_unarchive_hidden and !is_unarchive_unattached and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_pin_top and !is_endtmux and !is_browser_shoturl and !is_shell_diag and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_OPENALL_OFFSET;
                     const is_theme_back = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_shell_diag and result_idx == SEARCH_THEME_BACK_OFFSET;
                     const is_theme_menu = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_shell_diag and result_idx == SEARCH_THEME_MENU_OFFSET;
@@ -2905,8 +2964,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_theme_dev_edit = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_shell_diag and result_idx == SEARCH_THEME_DEV_EDIT_OFFSET;
                     const is_theme_dev_reload = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_shell_diag and result_idx == SEARCH_THEME_DEV_RELOAD_OFFSET;
                     const is_sound_toggle = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_endtmux and !is_browser_shoturl and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_shell_diag and result_idx == SEARCH_SOUND_OFFSET;
-                    const is_new_shell = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_pin_top and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEW_OFFSET;
-                    const is_tmux_inactive = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_archive and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_new_shell and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_TMUX_OFFSET;
+                    const is_new_shell = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_shared_server_connection and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_pin_top and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEW_OFFSET;
+                    const is_tmux_inactive = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_archive and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_shared_server_connection and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_new_shell and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_TMUX_OFFSET;
                     const is_archived = is_renamewin and result_idx >= SEARCH_ARCHIVED_OFFSET and result_idx < SEARCH_ARCHIVED_OFFSET + 64;
                     const is_reminder_row = is_renamewin and result_idx >= SEARCH_REMINDER_ROW_OFFSET and result_idx < SEARCH_REMINDER_ROW_OFFSET + 64;
                     const is_customcmd = is_renamewin and !is_ws_snoozed_row and !is_archived and !is_reminder_row and result_idx >= SEARCH_CUSTOMCMD_OFFSET;
@@ -2949,11 +3008,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
                         var rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        if (result_idx == SEARCH_TABCTX_END_TMUX) {
-                            _ = SelectObject(hdc, palette_hint_font);
-                            var hint = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                        }
                     } else if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3511,9 +3565,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var usage_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L(ui_words.global_usage_servers), -1, &usage_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, palette_hint_font);
-                        var hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+G"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ladder) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3745,6 +3796,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var selection_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L(ui_words.palette_chat_selection_menu), -1, &selection_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (is_chat_expand_table) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var expand_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.palette_chat_expand_table), -1, &expand_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy_sel) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3963,6 +4019,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const ns_label: [*:0]const u16 = switch (result_idx) {
                             SEARCH_NEW_CLAUDE_CHAT_OFFSET => L("New Claude session"),
                             SEARCH_NEW_PI_CHAT_OFFSET => L("New Pi chat"),
+                            SEARCH_NEW_CURSOR_CHAT_OFFSET => L("New Cursor chat"),
                             SEARCH_NEW_TERMINAL_OFFSET => L("New terminal"),
                             SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => L("New Claude in terminal"),
                             SEARCH_OPEN_SESSION_MENU_OFFSET => L("Open session\u{2026}"),
@@ -4213,6 +4270,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         links_rc.left = ox + overlay_w - 60;
                         links_rc.right = ox + overlay_w - 8;
                         _ = DrawTextW(hdc, if (app_state.g_external_browser_links) L("on") else L("off"), -1, &links_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_shared_server_connection) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var shared_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 60, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Remote Tabs: Share One Server Connection"), -1, &shared_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        shared_rc.left = ox + overlay_w - 60;
+                        shared_rc.right = ox + overlay_w - 8;
+                        _ = DrawTextW(hdc, if (app_state.g_shared_server_connection) L("on") else L("off"), -1, &shared_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_autosuspend) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4556,13 +4622,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
                             const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_VIEW) L("Alt+C") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
-                            if (tc_shortcut) |tc_hint| {
-                                _ = SelectObject(hdc, palette_hint_font);
-                                _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                                var tc_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                                _ = DrawTextW(hdc, tc_hint, -1, &tc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                            } else if (result_idx == SEARCH_TABCTX_WSMOVE) {
+                            if (result_idx == SEARCH_TABCTX_WSMOVE) {
                                 _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                                 var tc_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -5142,13 +5202,15 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
         app_state.shells[i].favorite = i != 2;
     }
     app_state.shells[3].inbox_excluded = true;
+    app_state.g_recents_section_collapsed = false;
     for ([_]bool{ true, false, true }) |favorite| {
         app_state.shells[0].favorite = favorite;
         app_state.shells[1].favorite = favorite;
         var rows: [MAX_ROWS]Row = undefined;
         const count = layoutRows(&rows);
-        try std.testing.expectEqual(@as(u32, if (favorite) 3 else 1), count);
-        var expected: u32 = 0;
+        try std.testing.expectEqual(@as(u32, if (favorite) 4 else 2), count);
+        try std.testing.expectEqual(.section, rows[0].kind);
+        var expected: u32 = 1;
         for (0..4) |i| {
             const shell = app_state.shells[i];
             const in_favorites = @import("workspace_view.zig").splitMatches(frequent.favorites_split, shell.workspace, shell.favorite);
@@ -5162,11 +5224,11 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     }
     app_state.shells[0].inbox_archived = true;
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
-    app_state.shells[0].needs_attention = true;
     try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    app_state.shells[0].needs_attention = true;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
-    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
@@ -5275,13 +5337,16 @@ test "IGSH-556 Favorites and home grouping keep independent memberships and grou
     try std.testing.expect(!groupInCurrentWorkspace(home));
     try std.testing.expect(groupInCurrentWorkspace(starred));
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(starred, app_state.groups[rows[0].gidx].id);
     try std.testing.expectEqual(.tab, rows[1].kind);
     try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    try std.testing.expectEqual(.section, rows[2].kind);
+    try std.testing.expectEqual(.tab, rows[3].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[3].shell_idx);
     app_state.groups[findGroupIdx(starred).?].collapsed = true;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
     try std.testing.expect(isTabHidden(0));
     app_state.g_starred_workspace = false;
     try std.testing.expect(!groupInCurrentWorkspace(starred));
@@ -5334,13 +5399,14 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     try std.testing.expect(!app_state.shells[1].pinned_top);
     var rows: [MAX_ROWS]Row = undefined;
     const count = layoutRows(&rows);
-    try std.testing.expectEqual(@as(u32, 4), count);
+    try std.testing.expectEqual(@as(u32, 5), count);
     try std.testing.expect(rows[0].tile);
     try std.testing.expectEqual(@as(u32, 1), rows[0].shell_idx);
     try std.testing.expectEqual(uiScaled(96), rowTotalHeight(rows[0]));
     try std.testing.expect(rows[1].kind == .header);
-    try std.testing.expect(!rows[2].tile);
-    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(.section, rows[2].kind);
+    try std.testing.expect(!rows[3].tile);
+    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
     try std.testing.expect(rows[0].y < rows[1].y);
     app_state.g_starred_workspace = false;
     try std.testing.expect(effPinnedTop(0));
@@ -5349,12 +5415,78 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     setPinnedTop(1, false);
     app_state.groups[0].collapsed = false;
     const unpinned = layoutRows(&rows);
-    try std.testing.expectEqual(@as(u32, 4), unpinned);
+    try std.testing.expectEqual(@as(u32, 5), unpinned);
     try std.testing.expect(rows[0].kind == .header);
     try std.testing.expect(!rows[1].tile);
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 17), app_state.shells[1].starred_group_id);
     try std.testing.expect(app_state.shells[0].pinned_top);
+}
+
+test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the groups" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_group = app_state.groups[0];
+    const saved_shells = app_state.shells[0..4].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    const saved_recents = app_state.g_recents_section_collapsed;
+    const saved_sticky = app_state.g_sticky_n;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    defer {
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.groups[0] = saved_group;
+        app_state.shells[0..4].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+        app_state.g_recents_section_collapsed = saved_recents;
+        app_state.g_sticky_n = saved_sticky;
+        app_state.g_ws_snoozed = saved_snoozed;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_single_window = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_sticky_n = 0;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.shell_count = 4;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 41, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 0 };
+    for (0..4) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(4200 + i);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].starred_group_id = 41;
+    app_state.shells[1].starred_group_id = 41;
+    app_state.shells[0].last_active = 10;
+    app_state.shells[1].last_active = 20;
+    app_state.shells[2].last_active = 30;
+    app_state.shells[3].last_active = 40;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(.section, rows[3].kind);
+    try std.testing.expectEqual(SidebarTier.recent, rows[3].section_tier);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+    app_state.groups[0].collapsed = true;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(.section, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 3), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[3].shell_idx);
+    app_state.g_recents_section_collapsed = true;
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {
@@ -5390,4 +5522,29 @@ test "IGSH-1890 group order by name moves known groups first and keeps the rest 
     try std.testing.expectEqual(@as(usize, 2), names.len);
     try std.testing.expectEqualStrings("Home", names[0]);
     try std.testing.expectEqualStrings("Local", names[1]);
+}
+
+test "IGSH-1890 group order lists groups used only in the Favorites view" {
+    const saved_groups = app_state.groups;
+    const saved_count = app_state.group_count;
+    const saved_next = app_state.next_group_id;
+    defer {
+        app_state.groups = saved_groups;
+        app_state.group_count = saved_count;
+        app_state.next_group_id = saved_next;
+    }
+    app_state.group_count = 0;
+    app_state.next_group_id = 1;
+    _ = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Product"));
+    _ = createGroup(std.unicode.utf8ToUtf16LeStringLiteral("Hypertask"));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tabs = [_]@import("session_layout.zig").Tab{
+        .{ .name = "a", .tmux_session = "a", .tmux_host = 0, .workspace = "W", .group = "Product" },
+        .{ .name = "b", .tmux_session = "b", .tmux_host = 0, .workspace = "W", .group = "", .starred_group = "Hypertask" },
+    };
+    const names = (try groupOrderFor(arena.allocator(), &tabs)).?;
+    try std.testing.expectEqual(@as(usize, 2), names.len);
+    try std.testing.expectEqualStrings("Product", names[0]);
+    try std.testing.expectEqualStrings("Hypertask", names[1]);
 }

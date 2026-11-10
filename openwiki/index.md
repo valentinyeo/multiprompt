@@ -3,6 +3,7 @@
 - [Design and features](architecture/features.md)
 - [Win32 and Zig reference](architecture/win32-gotchas.md)
 - [Build and release](operations/build-and-install.md)
+- [Test laptop release check](operations/laptop-check.md)
 - [Release cleanup and merge review, 2026-10-27](operations/release-audit-2026-10-27.md)
 - [Architecture](architecture/overview.md)
 - [App-owned agent session host](architecture/agent-host.md)

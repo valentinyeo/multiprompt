@@ -1060,6 +1060,10 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         _ = json_reader.copyString(mobj, "sid", &entry.message_sid);
                         _ = json_reader.copyString(mobj, "phase", &entry.message_phase);
                         if (json_reader.field(mobj, "wire_id") != .null) _ = json_reader.copyString(mobj, "wire_id", &entry.message_wire_id);
+                        if (entry.message_v1 and std.mem.startsWith(u8, std.mem.sliceTo(&entry.message_wire_id, 0), "mp-")) {
+                            chatOutboxRemoveAtIn(list, allocator, list.items.len - 1);
+                            continue;
+                        }
                         entry.retry_nonce = json_reader.uintDefault(mobj, "retry_nonce", 0);
                         entry.reset_pending = json_reader.uintDefault(mobj, "reset_pending", 0) != 0;
                         if (entry.message_v1 and entry.message_phase[0] == 0 and !entry.reset_pending and entry.state != .cancelled) {
@@ -1223,7 +1227,7 @@ fn chatOutboxDropForKey(key: []const u8) void {
 pub fn chatResetForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const key = chatFileIdentityForShell(idx);
-    if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2 or app_state.shells[idx].ai_agent == 3)) {
+    if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2 or app_state.shells[idx].ai_agent == 3 or app_state.shells[idx].ai_agent == 7)) {
         _ = chatPendingResetDropIfStale();
         if (app_state.g_chat_pending_reset) |pending| {
             if (key.sid[0] != 0 and chatResetSameChat(pending.key, key)) {
@@ -1619,12 +1623,13 @@ test "IGSH-1266 a chat typed before the tab finished starting still goes to the 
 }
 
 pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
-    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3);
+    return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7);
 }
 
 test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab does not" {
     try std.testing.expect(chatMessageGoesToHost(.tmux, 1));
     try std.testing.expect(chatMessageGoesToHost(.tmux, 2));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 7));
     try std.testing.expect(!chatMessageGoesToHost(.tmux, 0));
     try std.testing.expect(!chatMessageGoesToHost(.cmd, 1));
     try std.testing.expect(!chatMessageGoesToHost(.vps, 1));
@@ -2625,6 +2630,7 @@ pub fn armSshReconnectTimerIfNeeded() void {
     var urgent = any;
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         any = true;
         if (shell.disconnected or shell.ssh_reconnect.phase != .connected) urgent = true;
@@ -2646,9 +2652,12 @@ pub fn sshReconnectArm(affected: ?u32, reason: []const u8) void {
     for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
         if (affected != null and affected.? != i) continue;
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
         if (affected != null) {
             shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
+        } else if (shell.native_terminal) {
+            if (!app_state.g_chat_active and i == app_state.active_shell and !@import("native_session.zig").alive(shell.shell_id)) sshDisconnect(@intCast(i), reason);
         } else if (shell.process == null or !shellProcessAliveForRead(i)) {
             sshDisconnect(@intCast(i), reason);
         }
@@ -2661,6 +2670,10 @@ pub fn sshDisconnect(idx: u32, reason: []const u8) void {
     if (chatBenchEnabled() or idx >= app_state.shell_count) return;
     const shell = &app_state.shells[idx];
     if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) return;
+    if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) {
+        markSshTabDisconnected(idx);
+        return;
+    }
     var exit_code: DWORD = std.math.maxInt(DWORD);
     const got_code = shell.process != null and GetExitCodeProcess(shell.process, &exit_code) != 0;
     if (shell.kind == .tmux and got_code and exit_code == 1 and GetTickCount64() -| shell.spawn_tick <= 3000) {
@@ -2711,8 +2724,11 @@ pub fn sshAutoReconnectTick() void {
     for (0..app_state.shell_count) |i| {
         const shell = &app_state.shells[i];
         if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) continue;
+        if (shell.kind == .tmux and shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed) continue;
-        if (shell.process == null and !shell.disconnected) {
+        if (shell.native_terminal and !@import("native_session.zig").alive(shell.shell_id) and !shell.disconnected and !app_state.g_chat_active and i == app_state.active_shell) {
+            sshDisconnect(@intCast(i), "channel-missing-poll");
+        } else if (!shell.native_terminal and shell.process == null and !shell.disconnected) {
             sshDisconnect(@intCast(i), "process-missing-poll");
         } else if (shell.process != null and !shellProcessAliveForRead(i)) {
             sshDisconnect(@intCast(i), "process-exit-poll");
@@ -2777,6 +2793,21 @@ pub fn sshRequestSessionProbe() void {
 fn sshSessionEnded(idx: u32) void {
     if (chatBenchEnabled()) return;
     const shell = &app_state.shells[idx];
+    if (shell.native_terminal) {
+        if (shell.ssh_reconnect.phase == .closed or @import("native_session.zig").alive(shell.shell_id)) return;
+        @import("native_session.zig").dropChannel(shell.shell_id);
+        shell.disconnected = true;
+        shell.activity = .idle;
+        shell.needs_attention = false;
+        shell.tmux_identity_len = 0;
+        const now = GetTickCount64();
+        shell.ssh_reconnect.recreate(now, now ^ shell.shell_id);
+        var native_buf: [128]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&native_buf, "ssh-reconnect recreate id={d} reason=session-gone", .{shell.shell_id}) catch "ssh-reconnect recreate reason=session-gone");
+        @import("drawing.zig").invalidateReconnectContent(idx);
+        saveSession();
+        return;
+    }
     if (shell.ssh_reconnect.phase == .closed or (shell.process != null and shellProcessAliveForRead(idx))) return;
     @import("workspaces.zig").unregisterShellExitWait(idx);
     if (shell.hwnd != null) _ = @import("focus.zig").ShowWindow(shell.hwnd, @import("win32.zig").SW_HIDE);
@@ -2825,6 +2856,7 @@ fn sshProbeStart() void {
     const job = std.heap.page_allocator.create(SshProbeJob) catch return;
     job.* = .{ .started_tick = GetTickCount64() };
     for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.chat_view_on and @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len])) continue;
         if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.tmux_session_len == 0 or (!shell.ssh_reconnect.awaiting_probe and shell.ssh_reconnect.phase != .reconnecting and GetTickCount64() -| shell.spawn_tick < 3000)) continue;
         job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len, .spawn_tick = shell.spawn_tick };
         job.count += 1;
@@ -2926,7 +2958,7 @@ fn sshProbeFinish() void {
         debugLog(std.fmt.bufPrint(&tab_log, "ssh-probe tab id={d} phase={s} disconnected={} live={} attached={} gone={} incarnation={}", .{ shell.shell_id, @tagName(shell.ssh_reconnect.phase), shell.disconnected, shell.process != null and shellProcessAliveForRead(idx), item.attached, item.session_gone, shell.spawn_tick == item.spawn_tick }) catch "ssh-probe tab log-overflow");
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
             !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
-        const process_alive = shell.process != null and shellProcessAliveForRead(idx);
+        const process_alive = if (shell.native_terminal) @import("native_session.zig").alive(shell.shell_id) else shell.process != null and shellProcessAliveForRead(idx);
         if (job.healthy[item.host] and item.identity_len > 0) {
             const identity = item.identity[0..item.identity_len];
             if (shell.tmux_identity_len == 0 and item.attached and process_alive) {
@@ -2948,7 +2980,9 @@ fn sshProbeFinish() void {
         }
         shell.ssh_reconnect.awaiting_probe = false;
         if (item.session_gone and process_alive) continue;
-        if (app_state.shells[idx].process == null) {
+        if (shell.native_terminal) {
+            if (!process_alive and !app_state.g_chat_active and idx == app_state.active_shell) sshDisconnect(idx, "probe-channel-missing");
+        } else if (app_state.shells[idx].process == null) {
             sshDisconnect(idx, "probe-process-missing");
         } else if (!job.healthy[item.host]) {
             if (@import("ssh_reconnect.zig").probeUnreachable(ssh_probe_misses[item.host], shellProcessAliveForRead(idx))) {
@@ -3053,6 +3087,18 @@ test "IGSH-1289 interrupted host submit reloads with its original identity" {
     try std.testing.expect(!list.items[0].write_started);
     try std.testing.expectEqualStrings("desktop-original", std.mem.sliceTo(&list.items[0].message_wire_id, 0));
     try std.testing.expectEqual(@as(?usize, 0), chatOutboxFirstSendableIndexIn(&list, "tmux:0:test", true));
+}
+
+test "IGSH-1900 an agent message already saved as his draft is dropped on load" {
+    const allocator = std.testing.allocator;
+    var list: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (list.items) |entry| allocator.free(entry.text);
+        list.deinit(allocator);
+    }
+    chatOutboxParseJson(&list, allocator, "{\"version\":2,\"queues\":[{\"key\":\"tmux:0:test\",\"messages\":[{\"t\":\"Fleet idle alarm\",\"s\":2,\"x\":1,\"v1\":1,\"wire_id\":\"mp-ada6c782898f406ea2eafc77bd8648da\"},{\"t\":\"mine\",\"s\":0,\"v1\":1,\"wire_id\":\"desktop-0123456789abcdef\"}]}]}");
+    try std.testing.expectEqual(@as(usize, 1), list.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("mine"), list.items[0].text);
 }
 
 test "IGSH-1266 restored Codex queue requires explicit binding" {
@@ -3523,6 +3569,8 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const message = if (wrapped == .null) value else wrapped;
     const token = json_reader.string(json_reader.field(message, "id")) orelse return true;
     const phase = json_reader.string(json_reader.field(message, "state")) orelse return true;
+    const origin = json_reader.string(json_reader.field(message, "origin")) orelse "";
+    if (std.mem.eql(u8, origin, "agent")) return true;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
     const identity = chatFileIdentityForShell(idx);
@@ -3612,6 +3660,7 @@ fn chatMessageSyncFinish() void {
     if (history.generation != job.instance or history.message_generation != job.generation) return;
     if (!job.ok) {
         if (history.message_retry_step == 0) syncLog("chat-sync: message poll failed; retrying quietly");
+        @import("chat_transport.zig").respawn(job.key.host);
         history.message_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.message_retry_step);
         history.message_retry_step +|= 1;
         if (!job.synced and job.snapshot[0] != 0) {

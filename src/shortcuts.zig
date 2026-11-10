@@ -344,6 +344,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> New Claude in terminal", .b = "Start Claude the old way, typed into a terminal in this workspace folder", .header = false },
     .{ .a = "Ctrl+K -> New Codex chat", .b = "Start a Codex live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New Pi chat", .b = "Start a Pi live chat in this workspace folder, same chat view as Claude", .header = false },
+    .{ .a = "Ctrl+K -> New Cursor chat", .b = "Start a Cursor CLI live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },
@@ -376,6 +377,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Expand table\"", .b = "Open the table on screen full size over a dimmed window; also its Expand button on hover. Wheel, Shift+wheel and arrow keys scroll; Esc, the X or a click outside closes", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
     .{ .a = "Enter in the selection menu / Ctrl+K \"Chat View: Add selection to chat\"", .b = "Open selection actions. Enter adds text. Esc dismisses.", .header = false },
     .{ .a = "Ctrl+C in Chat View", .b = "Copy selected text. Right-click for more actions.", .header = false },
@@ -434,7 +436,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Crash Reports: Open Folder", .b = "Open the folder with crash reports saved after a crash (the app also reopens itself)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Hibernate Browser Panes Now", .b = "Immediately hibernate every parked, unpinned browser pane", .header = false },
     .{ .a = "Ctrl+K -> External Browser Links When Pane Off", .b = "Toggle desktop browser for HTTP(S) links when the session pane is off (default on)", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace and keep their saved URLs", .header = false },
+    .{ .a = "Ctrl+K -> Remote Tabs: Share One Server Connection", .b = "Toggle one shared connection per server for new remote tabs, no hidden console per tab (default off; open tabs switch on next launch)", .header = false },
+    .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's dedicated browser profile", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
@@ -783,6 +786,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (key_up) computer_consumed_keys[kb.vkCode] = false;
             return 1;
         }
+        if (@import("chat_table_overlay.zig").ownsForeground()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         if (key_down and kb.vkCode == 0x57) {
             var log_buf: [160]u8 = undefined;
             debugLog(std.fmt.bufPrint(&log_buf, "[session-close] ctrl={} shift={} alt={} win={} ours={} flags={X}", .{
@@ -814,7 +818,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     } else if (message == WM_APP_BROWSER_TOGGLE) {
                         argument = if (kb.vkCode == 0x41 and shift) 2 else 1;
                     }
-                    @import("computer_pane.zig").revoke();
+                    @import("computer_pane.zig").revoke("app shortcut");
                     app_state.g_sysmenu_pending = false;
                     if (PostMessageW(app_state.g_main_hwnd, message, argument, if (message == WM_APP_BROWSER_TOGGLE) @intCast(kb.time) else 0) != 0) {
                         computer_consumed_keys[kb.vkCode] = true;

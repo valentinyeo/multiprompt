@@ -83,12 +83,12 @@ class ChatsTalkTest(unittest.TestCase):
 
     def test_IGSH_1865_send_by_name_reaches_that_chat_and_says_who_sent_it(self):
         done = self.run_tool(MP_SEND, "--to", "alpha lead", "check the build", MULTIPROMPT_TAB="live-beta")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(self.rows(), [("claude", ALPHA, "From Beta Runner: check the build")])
 
     def test_IGSH_1865_send_accepts_a_unique_prefix_in_any_case(self):
         done = self.run_tool(MP_SEND, "--to", "BETA", "hello", MULTIPROMPT_TAB="live-alpha")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(self.rows(), [("claude", BETA, "From Alpha Lead: hello")])
 
     def test_IGSH_1865_send_refuses_an_ambiguous_prefix(self):
@@ -100,12 +100,12 @@ class ChatsTalkTest(unittest.TestCase):
 
     def test_IGSH_1865_send_takes_the_mention_form_with_the_terminal_session(self):
         done = self.run_tool(MP_SEND, "--to", "@Whatever Name{live-beta}", "hello", MULTIPROMPT_TAB="live-alpha")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(self.rows(), [("claude", BETA, "From Alpha Lead: hello")])
 
     def test_IGSH_1865_send_labels_an_unnamed_sender_by_its_terminal_session(self):
         done = self.run_tool(MP_SEND, "--to", "alpha", "hello", MULTIPROMPT_TAB="live-gamma")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(self.rows(), [("claude", ALPHA, "From live-gamma: hello")])
 
     def test_IGSH_1865_send_needs_to_know_who_is_sending(self):
@@ -126,7 +126,7 @@ class ChatsTalkTest(unittest.TestCase):
 
     def test_IGSH_1865_old_send_form_still_works(self):
         done = self.run_tool(MP_SEND, "claude", ALPHA, "plain", "--tmux", "live-alpha")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(self.rows(), [("claude", ALPHA, "plain")])
 
     def test_IGSH_1865_reader_stores_names_the_desktop_publishes(self):

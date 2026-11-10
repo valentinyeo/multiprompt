@@ -29,7 +29,7 @@ function block(text, marker, indent) {
 }
 
 function harness() {
-  const command = block(main, `if (target == ${offset}) {`, '                ');
+  const command = block(main, `if (target == ${offset}) {`, '                ').replaceAll('@import("browser_reap.zig").closeAllAfterGrace()', 'closeAllAfterGrace()');
   const row = block(palette, 'if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes"', '    ');
   const declaration = state.match(new RegExp(`pub const ${offset}: usize = \\d+;`));
   assert.ok(declaration, 'Missing Close All Browser Panes command offset');
@@ -43,6 +43,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn cancelPinnedBrowserEntry(_: u32) void {}
+fn closeAllAfterGrace() usize { return 0; }
 fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
 const computer = struct { fn selected() bool { return false; } };
@@ -307,6 +308,9 @@ test "production palette lists command for its label and respects row capacity" 
 
 test('Close All Browser Panes is listed, painted, documented and registered in the test step', () => {
   assert.ok(main.includes(`if (target == ${offset}) {`), 'Missing Close All Browser Panes command');
+  const command_at = main.indexOf(`if (target == ${offset}) {`);
+  const command = main.slice(command_at, main.indexOf('showActiveShellAfterOverlay();', command_at));
+  assert.match(command, /@import\("browser_reap\.zig"\)\.closeAllAfterGrace\(\)/, 'Close All Browser Panes stops the browsers it started');
   assert.match(palette, new RegExp(`${offset} => "close all browser panes"`));
   assert.ok(palette.includes(`g_search_results[app_state.g_search_result_count] = ${offset};`));
   const sidebar = read('src/sidebar.zig');

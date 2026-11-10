@@ -43,19 +43,19 @@ const State = struct {
     }
 };
 
-const Backdrop = struct {
+pub const Backdrop = struct {
     dc: w.HANDLE,
     bitmap: w.HANDLE,
     old: w.HANDLE,
 
-    fn release(self: Backdrop) void {
+    pub fn release(self: Backdrop) void {
         _ = w.SelectObject(self.dc, self.old);
         _ = w.DeleteObject(self.bitmap);
         _ = w.DeleteDC(self.dc);
     }
 };
 
-fn capture(dc: w.HANDLE, x: i32, y: i32, width: i32, height: i32) ?Backdrop {
+pub fn capture(dc: w.HANDLE, x: i32, y: i32, width: i32, height: i32) ?Backdrop {
     if (width <= 0 or height <= 0) return null;
     const memory = w.CreateCompatibleDC(dc) orelse return null;
     const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };

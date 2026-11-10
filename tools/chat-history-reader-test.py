@@ -3884,6 +3884,34 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'accepted')
         self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
 
+    def test_IGSH_1901_watchdog_spares_a_message_the_host_holds_while_the_bot_is_busy(self):
+        self.submit()
+        db = reader.message_store_db('fixture')
+        with db:
+            db.execute("UPDATE shared_messages SET state='sent',deadline=?", (time.time() - 1,))
+        db.close()
+        written = time.monotonic()
+
+        def host_state(provider, sid):
+            if time.monotonic() - written < 3.0:
+                return dict(sends=['message_fixture_0001'])
+            accepted = reader.message_store_db('fixture')
+            with accepted:
+                accepted.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id='message_fixture_0001'")
+            accepted.close()
+            return dict(sends=[])
+
+        with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 1.5), \
+                patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
+                patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_session_state', side_effect=host_state), \
+                patch.object(reader, 'message_poll'), \
+                patch.object(reader, 'message_store_request'), \
+                patch.object(reader, 'host_log') as log:
+            reader.message_worker('fixture', 'claude', 'sid')
+        self.assertEqual(self.status()['state'], 'accepted', 'a message the bot was still going to read was marked Not sent')
+        self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
+
     def test_submit_replay_has_one_handoff_and_global_id(self):
         first = self.submit()
         self.assertEqual(self.submit()['attempt'], first['attempt'])
@@ -4163,6 +4191,37 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'queued')
         self.assertEqual(self.send.call_count, 0)
 
+    def test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once(self):
+        self.submit()
+        self.request('dispatch')
+        self.accept()
+        self.assertEqual(self.status()['state'], 'accepted')
+        sent = threading.Event()
+        polled = threading.Event()
+        self.send.side_effect = lambda *args, **kwargs: (sent.set(), {'status': 'sent'})[1]
+        original_poll = reader.message_poll
+
+        def poll(*args):
+            original_poll(*args)
+            polled.set()
+
+        with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 1), \
+                patch.object(reader, 'message_poll', side_effect=poll):
+            worker = threading.Thread(target=reader.message_worker, args=('fixture', 'claude', 'sid'), daemon=True)
+            worker.start()
+            self.assertTrue(polled.wait(5), 'the worker never started')
+            time.sleep(0.15)
+            started = time.monotonic()
+            self.submit('message_fixture_0002', 'second prompt')
+            reader.start_message_worker(dict(self.base, message_id='message_fixture_0002'), 'unused source')
+            self.assertTrue(sent.wait(3), 'the second message was never sent')
+            waited = time.monotonic() - started
+            self.accept('second prompt')
+            worker.join(10)
+        print(f'IGSH-1907 submit_to_send_s={waited:.3f}', file=sys.stderr)
+        self.assertFalse(worker.is_alive(), 'the worker did not stop')
+        self.assertLess(waited, 0.4, f'a new message waited {waited:.2f}s for the idle worker to wake')
+
     def test_native_history_continues_after_started(self):
         self.submit()
         self.request('dispatch')
@@ -4337,6 +4396,85 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual([item if isinstance(item, str) else item.get('text') for item in sent].count('target'), 1)
         with self.path.open('rb') as source, patch.object(reader, 'box_draft', return_value=None):
             self.assertEqual(reader.live_fields(source, self.path.stat().st_size, 'fixture', sid='sid')['received'], [])
+
+    def test_IGSH_1900_an_agent_message_keeps_its_origin_all_the_way_to_the_desktop(self):
+        row = self.request('submit', message_id='mp-ada6c782898f406ea2eafc77bd8648da', text='Fleet idle alarm', origin='agent')['message']
+        self.assertEqual(row.get('origin'), 'agent')
+        snapshot = reader.message_store_request(dict(self.base, op='message_snapshot'))
+        self.assertEqual([item['message'].get('origin') for item in snapshot['items'] if 'message' in item], ['agent'])
+        with self.assertRaises(ValueError):
+            self.request('submit', message_id='message_fixture_0002', text='synthetic prompt', origin='robot')
+
+    def test_IGSH_1900_a_message_with_no_origin_stays_his(self):
+        self.assertEqual(self.submit().get('origin'), 'human')
+
+
+class IGSH_1900_MpSendReportTest(unittest.TestCase):
+    def module(self):
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader('mp_send_1900', str(ROOT / 'src/mp_send.py'))
+        spec = importlib.util.spec_from_loader('mp_send_1900', loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        return module
+
+    def run_main(self, module, reader_stub, *args):
+        import contextlib
+        module._reader = reader_stub
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return module.main(list(args))
+
+    def test_IGSH_1900_a_failed_message_makes_mp_send_exit_three_without_wait(self):
+        module = self.module()
+        queries = []
+
+        class Fake:
+            @staticmethod
+            def message_store_request(query):
+                queries.append(query)
+                state = 'queued' if query['op'] == 'message_submit' else 'failed'
+                return dict(message=dict(id=query.get('message_id'), state=state, receipt='session_unavailable'))
+
+            @staticmethod
+            def message_poll(tmux, provider, sid):
+                return None
+
+        code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-failed')
+        self.assertEqual(code, 3)
+        self.assertEqual(queries[0]['op'], 'message_submit')
+        self.assertEqual(queries[0]['origin'], 'agent')
+
+    def test_IGSH_1900_a_message_the_host_still_holds_reports_sent_and_exits_zero(self):
+        module = self.module()
+
+        class Fake:
+            @staticmethod
+            def message_store_request(query):
+                state = 'queued' if query['op'] == 'message_submit' else 'sent'
+                return dict(message=dict(id=query.get('message_id'), state=state, receipt=None))
+
+            @staticmethod
+            def message_poll(tmux, provider, sid):
+                return None
+
+        code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-held', '--json')
+        self.assertEqual(code, 0)
+
+    def test_IGSH_1900_wait_still_reports_the_final_failure(self):
+        module = self.module()
+
+        class Fake:
+            @staticmethod
+            def message_store_request(query):
+                state = 'queued' if query['op'] == 'message_submit' else 'failed'
+                return dict(message=dict(id=query.get('message_id'), state=state, receipt='session_unavailable'))
+
+            @staticmethod
+            def message_poll(tmux, provider, sid):
+                return None
+
+        code = self.run_main(module, Fake, 'claude', '11111111-2222-3333-4444-555555555555', 'hello', '--tmux', 'mp-test-wait', '--wait', '--timeout', '1')
+        self.assertEqual(code, 3)
 
 
 class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
@@ -4753,7 +4891,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 24)
+        self.assertEqual(len(base), 27)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
@@ -4891,7 +5029,7 @@ class AgentHostFixture:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
             position = db.execute("SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider='claude' AND sid=?",
                                   (self.sid,)).fetchone()[0]
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
                        (token, 'claude', self.sid, text or self.text, position, time.time()))
         db.close()
         return token
@@ -4978,7 +5116,13 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
                 self.assertEqual(reply['mode'], 'headless')
                 self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
             self.assertEqual(self.user_lines(), [self.text])
-            self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'already')
+            started = None
+            for _ in range(10):
+                started = reader.host_start(self.provider, self.sid)
+                if started.get('status') == 'already' or started.get('reason') != 'owner_busy':
+                    break
+                time.sleep(0.2)
+            self.assertEqual(started.get('status'), 'already', started)
             self.assertEqual(reader.host_chat_name(self.provider, self.sid), self.tmux)
 
     def test_host_delivers_once_with_receipt(self):
@@ -5176,6 +5320,39 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         config = reader.host_read(reader.host_paths(self.provider, self.sid)['config'])
         self.assertEqual(config['permission_mode'], 'acceptEdits')
         self.assertEqual(config['tmux'], self.tmux)
+
+    def test_a_level_chosen_while_the_chat_is_stopped_is_saved_and_shown(self):
+        self.enable(permission_mode='plan')
+        reply = reader.host_reply(dict(provider=self.provider, sid=self.sid, op='set_permission_mode',
+                                       mode='bypassPermissions'))
+        self.assertEqual(reply['status'], 'ok')
+        self.assertEqual(reader.host_config(self.provider, self.sid)['permission_mode'], 'bypassPermissions')
+        self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'bypassPermissions')
+        events = reader.message_events_page(self.provider, self.sid, 0)['events']
+        self.assertEqual(events[-1]['event']['kind'], 'host.settings')
+        self.assertEqual(events[-1]['event']['payload']['mode'], 'bypassPermissions')
+        self.assertEqual(reader.host_reply(dict(provider=self.provider, sid=self.sid, op='set_permission_mode',
+                                               mode='yolo'))['reason'], 'invalid_permission_mode')
+
+    def test_a_chosen_level_survives_a_host_restart(self):
+        self.enable(permission_mode='plan')
+        state = reader.host_session_state(self.provider, self.sid)
+        state['mode'] = 'bypassPermissions'
+        reader.host_state_write(self.provider, self.sid, state)
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        args = self.agent_rows('start')[0]['args']
+        self.assertIn('--permission-mode', args)
+        self.assertEqual(args[args.index('--permission-mode') + 1], 'bypassPermissions')
+        self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'bypassPermissions')
+        self.assertEqual(reader.host_config(self.provider, self.sid)['permission_mode'], 'bypassPermissions')
+
+    def test_enabling_a_chat_again_keeps_the_level_the_user_chose(self):
+        self.enable(permission_mode='manual')
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux,
+                                         '--permission-mode', 'bypassPermissions'])['status'], 'enabled')
+        self.assertEqual(reader.host_config(self.provider, self.sid)['permission_mode'], 'manual')
 
     def test_host_starts_from_a_published_runtime_file(self):
         self.enable()
@@ -5461,6 +5638,20 @@ class MoveToTerminalTest(unittest.TestCase):
         send_at = next(index for index, (call, _) in enumerate(self.calls) if call[:2] == ['tmux', 'send-keys'])
         self.assertLess(stop_at, send_at, 'the host must be stopped before the pane takes the chat')
         self.assertFalse(self.calls[send_at][1], 'typing into the pane while the host lives would run two drivers')
+        self.assertTrue(reader.host_handed_over('claude', self.sid))
+
+    def test_a_new_chat_creates_a_real_terminal_only_when_the_user_moves_it(self):
+        run = reader.subprocess.run.side_effect
+        def no_pane(command, **kwargs):
+            if command[:2] == ['tmux', 'has-session']:
+                self.calls.append((list(command), bool(self.host_running[0])))
+                return types.SimpleNamespace(stdout='', returncode=1)
+            return run(command, **kwargs)
+        reader.subprocess.run.side_effect = no_pane
+        self.assertEqual(reader.host_terminal('claude', self.sid)['status'], 'moved')
+        created = [call for call, _ in self.calls if call[:2] == ['tmux', 'new-session']]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0][2:6], ['-d', '-s', self.tmux, '-c'])
         self.assertTrue(reader.host_handed_over('claude', self.sid))
 
     def test_move_to_terminal_uses_the_permission_mode_the_host_used(self):
@@ -6230,8 +6421,8 @@ class AgentHostStreamFixture(AgentHostFixture):
         os.environ.pop('FAKE_CLAUDE_MODE', None)
         super().enable(mode, **extra)
 
-    def fake(self, mode):
-        self.enable(mode)
+    def fake(self, mode, **extra):
+        self.enable(mode, **extra)
         os.environ['FAKE_CLAUDE_MODE'] = mode
 
     def events(self, kind=None):
@@ -6347,6 +6538,16 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         resolved = [event for event in self.events('approval.resolved')
                     if event['payload'].get('request_id') == request_id]
         self.assertEqual(resolved[0]['payload'], dict(request_id=request_id, decision='accept', by='host'))
+
+    def test_bypass_mode_auto_accepts_a_helper_approval_without_a_reason(self):
+        self.session['state']['mode'] = 'bypassPermissions'
+        request_id = self.approval(tool='Edit', tool_use_id='toolu_helper')
+        self.assertEqual([event for event in self.events('approval.request')
+                          if event['payload'].get('request_id') == request_id], [])
+        self.assertEqual(self.session['parked'], {})
+        response = self.writes()[0]['response']['response']
+        self.assertEqual(response['behavior'], 'allow')
+        self.assertEqual(response['toolUseID'], 'toolu_helper')
 
     def test_accept_edits_mode_still_parks_shell_approvals(self):
         self.session['state']['mode'] = 'acceptEdits'
@@ -6525,12 +6726,27 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         db = reader.message_store_db(self.tmux)
         with db:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
-            db.execute("INSERT OR REPLACE INTO shared_messages VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?)",
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?)",
                        (self.sid, 'second prompt', time.time() - 60, time.time()))
         reader.message_expire(db, 'claude', self.sid)
         state = db.execute("SELECT state FROM shared_messages WHERE id='second'").fetchone()[0]
         db.close()
         self.assertEqual(state, 'sent')
+
+    def test_IGSH_1900_a_message_waits_out_a_long_busy_turn_instead_of_failing(self):
+        reader.host_write(reader.host_paths(self.provider, self.sid)['owner'],
+                          dict(owner='host', pid=os.getpid(), at=time.time()))
+        reader.host_write(reader.host_paths(self.provider, self.sid)['state'],
+                          dict(inflight=dict(id='first'), sends=['first']))
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
+            db.execute("INSERT OR REPLACE INTO shared_messages (id,provider,sid,text,position,attempt,state,deadline,receipt,epoch,created) VALUES ('waiting','claude',?,?,1,'a','queued',NULL,NULL,0,?)",
+                       (self.sid, 'alarm for a busy turn', time.time() - 601))
+        reader.message_expire(db, 'claude', self.sid)
+        state = db.execute("SELECT state FROM shared_messages WHERE id='waiting'").fetchone()[0]
+        db.close()
+        self.assertEqual(state, 'queued')
 
     def test_set_permission_mode_writes_the_control_request(self):
         self.assertEqual(self.reply(op='set_permission_mode', mode='acceptEdits')['status'], 'ok')
@@ -6550,7 +6766,7 @@ class AgentHostControlFixture(AgentHostStreamFixture):
 
 class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
     def test_an_approval_request_reaches_the_event_log_and_the_answer_runs_the_tool(self):
-        self.fake('approval')
+        self.fake('approval', permission_mode='manual')
         self.seed()
         self.dispatch()
         asked = self.wait_for(lambda: self.events('approval.request'))
@@ -6571,7 +6787,7 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertEqual(decisions[0]['toolUseID'], 'toolu_req')
 
     def test_the_answer_is_refused_once_the_host_is_gone(self):
-        self.fake('approval')
+        self.fake('approval', permission_mode='manual')
         self.seed()
         self.dispatch()
         asked = self.wait_for(lambda: self.events('approval.request'))
@@ -6640,6 +6856,32 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
             session['parked'].clear()
             running.join(timeout=5)
         self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
+        self.assertTrue([row for row in self.host_events('idle_stop')])
+
+    def test_IGSH_1907_a_host_quiet_for_ten_minutes_keeps_its_bot_warm(self):
+        import socket as module
+        path = self.home / 'warm.sock'
+        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        read_end, write_end = os.pipe()
+        self.addCleanup(os.close, write_end)
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
+        self.addCleanup(agent.stdout.close)
+        session = FixtureHostSession()
+        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
+                                   daemon=True)
+        running.start()
+        self.addCleanup(stop_fixture_host_loop, self, running, session)
+        self.assertTrue(session.started.wait(timeout=10), 'host loop must initialize')
+        session['idle'] = time.time() - 600
+        time.sleep(1.5)
+        self.assertTrue(running.is_alive(), 'a host quiet for ten minutes stopped its bot, so the next message pays a cold start')
+        self.assertEqual([row for row in self.host_events('idle_stop')], [])
+        session['idle'] = time.time() - 7200
+        running.join(timeout=5)
+        self.assertFalse(running.is_alive(), 'a host quiet for two hours must still stop its bot')
         self.assertTrue([row for row in self.host_events('idle_stop')])
 
     def test_a_long_turn_and_agent_output_keep_the_host_past_the_idle_timer(self):
@@ -7158,6 +7400,127 @@ class ShardDiscoveryTest(unittest.TestCase):
                 with self.subTest(shard=invalid), self.assertRaises(ValueError):
                     load_tests(loader, unittest.TestSuite(), None)
 
+
+class HostedWithoutPaneTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    name = 'live-no-pane'
+
+    def require_reader(self, *names):
+        missing = [name for name in names if not callable(getattr(reader, name, None))]
+        self.assertEqual(missing, [])
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.commands = []
+
+        def run(command, **kwargs):
+            self.commands.append(command)
+            return types.SimpleNamespace(stdout='', returncode=1)
+        patch.object(reader.subprocess, 'run', side_effect=run).start()
+        reader.host_cli(['enable', 'claude', self.sid, '--tmux', self.name, '--cwd', str(self.home)])
+
+    def test_name_and_identity_are_discoverable_before_the_agent_starts_without_a_pane(self):
+        self.require_reader('host_list_lines')
+        self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
+        listed = reader.host_cli(['list'])
+        self.assertIn('chats', listed)
+        chats = listed['chats']
+        self.assertEqual([(c['name'], c['sid']) for c in chats], [(self.name, self.sid)])
+        self.assertEqual(self.commands, [])
+        self.assertIn(self.name + '|', reader.host_list_lines())
+        self.assertEqual(self.commands, [['tmux', 'list-sessions', '-F', '#{session_name}']])
+
+    def test_reconnect_starts_the_registered_agent_without_creating_tmux(self):
+        with patch.object(reader, 'host_start', return_value=dict(status='started')) as start:
+            self.assertEqual(reader.host_cli(['connect', self.name]), dict(status='started'))
+        start.assert_called_once_with('claude', self.sid)
+        self.assertEqual(self.commands, [])
+
+    def test_legacy_state_still_resolves_the_name(self):
+        self.require_reader('host_chats')
+        paths = reader.host_paths('claude', self.sid)
+        reader.host_write(paths['config'], dict(enabled=True, tmux=self.name, cwd=str(self.home)))
+        reader.host_write(paths['state'], dict(provider='claude', sid=self.sid))
+        self.assertEqual(reader.host_chats()[0]['sid'], self.sid)
+        self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
+
+    def test_old_physical_and_headless_sessions_are_not_listed_twice_or_exposed(self):
+        self.require_reader('host_list_lines')
+        with patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(stdout=self.name + '\n', returncode=0)):
+            self.assertEqual(reader.host_list_lines(), '')
+        paths = reader.host_paths('claude', self.sid)
+        config = reader.host_config('claude', self.sid)
+        reader.host_write(paths['config'], dict(config, spawn_mode='headless'))
+        self.assertEqual(reader.host_list_lines(), '')
+        self.assertEqual(reader.host_sid_for_tmux('claude', self.name), self.sid)
+
+    def test_duplicate_names_never_connect_to_an_arbitrary_agent(self):
+        self.require_reader('host_connect')
+        reader.host_cli(['enable', 'codex', self.sid, '--tmux', self.name, '--cwd', str(self.home)])
+        with patch.object(reader, 'host_start') as start:
+            self.assertEqual(reader.host_connect(self.name)['status'], 'refused')
+        start.assert_not_called()
+
+    def test_terminal_handover_is_not_reclaimed_by_reconnect(self):
+        self.require_reader('host_chats', 'host_connect')
+        reader.host_write(reader.host_paths('claude', self.sid)['owner'], dict(owner='terminal'))
+        self.assertEqual(reader.host_chats(), [])
+        with patch.object(reader.os, 'execvp') as attach, patch.object(reader, 'host_start') as start:
+            attach.side_effect = SystemExit
+            with self.assertRaises(SystemExit):
+                reader.host_connect(self.name)
+        attach.assert_called_once_with('tmux', ['tmux', 'attach', '-t', '=' + self.name])
+        start.assert_not_called()
+
+
+
+class IGSH_1905_HostScopeTest(unittest.TestCase):
+    SERVICE = '0::/user.slice/user-1000.slice/user@1000.service/app.slice/solo-wake.service\n'
+
+    def spawn_argv(self, cgroup, tool='/usr/bin/systemd-run', bus=True):
+        read_text = Path.read_text
+
+        def fake_read(path, *args, **kwargs):
+            if str(path) == '/proc/self/cgroup':
+                if cgroup is None:
+                    raise OSError('unreadable')
+                return cgroup
+            return read_text(path, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as temp:
+            if bus:
+                (Path(temp) / 'bus').touch()
+            popen = unittest.mock.MagicMock()
+            with patch.dict(os.environ, {'XDG_RUNTIME_DIR': temp}), \
+                    patch.object(reader.shutil, 'which', return_value=tool), \
+                    patch.object(reader.Path, 'read_text', fake_read), \
+                    patch.object(reader, 'host_paths', return_value=dict(errors=Path(temp) / 'errors.log')), \
+                    patch.object(reader, 'HOST_CHILDREN', []), \
+                    patch.object(reader.subprocess, 'Popen', popen):
+                reader.host_spawn('claude', 'sid', 'source')
+            return popen.call_args.args[0]
+
+    def test_a_host_woken_from_a_user_timer_service_gets_its_own_scope(self):
+        argv = self.spawn_argv(self.SERVICE)
+        self.assertEqual(argv[:3], ['/usr/bin/systemd-run', '--user', '--scope'])
+        self.assertEqual(argv[argv.index('--') + 1:][:1], [sys.executable])
+
+    def test_a_host_started_over_ssh_keeps_the_plain_spawn(self):
+        self.assertEqual(self.spawn_argv('0::/system.slice/ssh.service\n')[0], sys.executable)
+
+    def test_a_host_started_from_a_login_scope_keeps_the_plain_spawn(self):
+        self.assertEqual(self.spawn_argv('0::/user.slice/user-1000.slice/session-12.scope\n')[0], sys.executable)
+
+    def test_no_scope_without_systemd_run_or_a_user_bus(self):
+        self.assertEqual(self.spawn_argv(self.SERVICE, tool=None)[0], sys.executable)
+        self.assertEqual(self.spawn_argv(self.SERVICE, bus=False)[0], sys.executable)
+
+    def test_no_scope_when_the_cgroup_is_unreadable(self):
+        self.assertEqual(self.spawn_argv(None)[0], sys.executable)
 
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')

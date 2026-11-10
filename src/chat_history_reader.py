@@ -1597,6 +1597,8 @@ def resolve_response_path(q, source=None, as_owner=False):
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
+    if not sid and tmux and not as_owner:
+        sid = q["sid"] = host_sid_for_tmux(agent, tmux) or ""
     if agent == "hax":
         return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     if agent == "pi":
@@ -2218,7 +2220,9 @@ def message_store_db(tmux):
     db.execute('ATTACH DATABASE ? AS legacy', (str(held_queue_path(tmux)),))
     with db:
         db.execute("CREATE TABLE IF NOT EXISTS message_chats (provider TEXT NOT NULL, sid TEXT NOT NULL, epoch INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(provider,sid))")
-        db.execute("CREATE TABLE IF NOT EXISTS shared_messages (id TEXT PRIMARY KEY, provider TEXT NOT NULL, sid TEXT NOT NULL, text TEXT NOT NULL, position INTEGER NOT NULL, attempt TEXT NOT NULL, state TEXT NOT NULL, deadline REAL, receipt TEXT, epoch INTEGER NOT NULL, created REAL NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS shared_messages (id TEXT PRIMARY KEY, provider TEXT NOT NULL, sid TEXT NOT NULL, text TEXT NOT NULL, position INTEGER NOT NULL, attempt TEXT NOT NULL, state TEXT NOT NULL, deadline REAL, receipt TEXT, epoch INTEGER NOT NULL, created REAL NOT NULL, origin TEXT NOT NULL DEFAULT 'human')")
+        if 'origin' not in {row[1] for row in db.execute('PRAGMA table_info(shared_messages)')}:
+            db.execute("ALTER TABLE shared_messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'human'")
         db.execute("CREATE INDEX IF NOT EXISTS shared_messages_chat ON shared_messages(provider,sid,position)")
         db.execute("CREATE TABLE IF NOT EXISTS message_events (provider TEXT NOT NULL, sid TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(provider,sid,seq))")
         db.execute("CREATE TABLE IF NOT EXISTS message_attempts (provider TEXT NOT NULL, sid TEXT NOT NULL, id TEXT NOT NULL, attempt TEXT NOT NULL, epoch INTEGER NOT NULL, text_sha256 TEXT NOT NULL, outcome TEXT NOT NULL, binding TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(provider,sid,id,attempt))")
@@ -2285,19 +2289,34 @@ def message_events_page(provider, sid, after):
 
 
 def message_row(row):
-    return dict(zip(('id', 'provider', 'sid', 'text', 'position', 'attempt', 'state', 'deadline', 'receipt', 'epoch', 'created'), row))
+    return dict(zip(('id', 'provider', 'sid', 'text', 'position', 'attempt', 'state', 'deadline', 'receipt', 'epoch', 'created', 'origin'), row))
+
+
+def host_turn_busy(provider, sid):
+    if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
+        return False
+    return isinstance(host_session_state(provider, sid).get('inflight'), dict)
+
+
+def host_held(provider, sid):
+    if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
+        return set()
+    state = host_session_state(provider, sid)
+    inflight = state.get('inflight')
+    held = {token for token in state.get('sends') or [] if isinstance(token, str)}
+    if isinstance(inflight, dict):
+        held.add(inflight.get('id'))
+    return held
 
 
 def message_expire(db, provider, sid):
     def idle(rows):
-        if rows and provider in HOST_PROVIDERS and host_owned(provider, sid):
-            state = host_session_state(provider, sid)
-            inflight = state.get('inflight')
-            current = {token for token in state.get('sends') or [] if isinstance(token, str)}
-            if isinstance(inflight, dict):
-                current.add(inflight.get('id'))
-            return [row for row in rows if row[0] not in current]
-        return rows
+        if not rows:
+            return rows
+        if host_turn_busy(provider, sid):
+            return []
+        held = host_held(provider, sid)
+        return [row for row in rows if row[0] not in held]
     now = time.time()
     for row in idle(db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') AND deadline IS NOT NULL AND deadline<=? ORDER BY position", (provider, sid, now)).fetchall()):
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state IN ('queued','sent')", (row[0],))
@@ -2460,22 +2479,23 @@ def import_legacy_messages(db, sid, transcript, epoch):
         imported_state = 'accepted' if verified else 'cancelled' if state == 'cancelled' else 'failed'
         detail = json.dumps(dict(kind='legacy_verified_claim', inode=verified[1], offset=verified[2], digest=verified[3])) if verified else 'legacy_delivery_unconfirmed'
         position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', ('claude', sid)).fetchone()[0]
-        db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,?,?,?)', (identity, 'claude', sid, text, position, uuid.uuid4().hex, imported_state, None, detail, epoch, created / 1000000000))
+        db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (identity, 'claude', sid, text, position, uuid.uuid4().hex, imported_state, None, detail, epoch, created / 1000000000, 'human'))
         message_event(db, 'claude', sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (identity,)).fetchone()))
     db.execute("UPDATE legacy.messages SET state='cancelled' WHERE sid=? AND state IN ('queued','submitted') AND receipt NOT LIKE '@mp-shared-v1:%'", (sid,))
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
-HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax')
+HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor')
 MESSAGE_WORKER_IDLE_SECONDS = 120
 MESSAGE_WORKER_STALL_SECONDS = 90
-HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax'}
+HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
-HOST_IDLE_SECONDS = 300
+HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
+HOST_IDLE_SECONDS = 1800
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -2756,6 +2776,54 @@ def host_chat_name(provider, sid):
     return located if isinstance(located, str) and TMUX_NAME.fullmatch(located) else None
 
 
+def host_chats(include_terminal=False):
+    root = HOME / ".local/state/multiprompt/agent-host"
+    chats = []
+    for path in sorted(root.glob("*.config.json")):
+        config = host_read(path) or {}
+        state = host_read(path.with_name(path.name[:-len(".config.json")] + ".state.json")) or {}
+        provider, sid = config.get("provider", state.get("provider")), config.get("sid", state.get("sid"))
+        name = config.get("tmux")
+        if (config.get("enabled") is not True or not host_identity(provider, sid) or
+                host_key(provider, sid) + ".config.json" != path.name or
+                not isinstance(name, str) or TMUX_NAME.fullmatch(name) is None or (not include_terminal and host_handed_over(provider, sid))):
+            continue
+        try:
+            activity = int(path.stat().st_mtime)
+        except OSError:
+            continue
+        chats.append(dict(provider=provider, sid=sid, name=name, cwd=host_cwd(provider, sid),
+                          activity=activity, visible=config.get("spawn_mode") != "headless"))
+    return chats
+
+
+def host_connect(name):
+    chats = [chat for chat in host_chats(include_terminal=True) if chat["name"] == name]
+    if len(chats) != 1:
+        return dict(status="refused", reason="unknown_or_ambiguous_chat")
+    chat = chats[0]
+    if host_handed_over(chat["provider"], chat["sid"]):
+        os.execvp("tmux", ["tmux", "attach", "-t", "=" + name])
+    return host_start(chat["provider"], chat["sid"])
+
+
+def host_list_lines():
+    try:
+        physical = set(subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"], capture_output=True,
+                                      text=True, timeout=5).stdout.splitlines())
+    except (OSError, subprocess.SubprocessError):
+        physical = set()
+    lines = []
+    for chat in host_chats():
+        if chat["name"] in physical or not chat["visible"]:
+            continue
+        cwd = chat["cwd"]
+        if any(c in cwd for c in "|\r\n"):
+            continue
+        lines.append("|".join([chat["name"], str(chat["activity"]), "0", cwd, chat["provider"], ""]))
+    return "\n".join(lines)
+
+
 def host_pane_option(tmux, value):
     if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
         return False
@@ -2850,8 +2918,8 @@ def host_sid_for_tmux(provider, tmux):
         if not isinstance(config, dict) or config.get("enabled") is not True or config.get("tmux") != tmux:
             continue
         state = host_read(path.with_name(path.name[:-len(".config.json")] + ".state.json")) or {}
-        sid = state.get("sid")
-        if state.get("provider") == provider and host_identity(provider, sid) and host_key(provider, sid) + ".config.json" == path.name:
+        sid = config.get("sid", state.get("sid"))
+        if config.get("provider", state.get("provider")) == provider and host_identity(provider, sid) and host_key(provider, sid) + ".config.json" == path.name:
             found.add(sid)
     return found.pop() if len(found) == 1 else None
 
@@ -2948,15 +3016,24 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") in ("set_model", "set_effort") and provider != "claude":
         return dict(status="refused", reason="unsupported_provider")
+    if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
+        return dict(status="refused", reason="unsupported_provider")
     if not host_owned(provider, sid):
         operation = query.get("op")
-        if operation not in ("set_model", "set_effort"):
+        if operation not in ("set_model", "set_effort", "set_permission_mode"):
             return dict(status="unavailable", reason="host_not_running")
-        key = "model" if operation == "set_model" else "effort"
-        allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
-        value = query.get(key)
-        if value not in allowed:
-            return dict(status="refused", reason="invalid_" + key)
+        mode = query.get("mode") if operation == "set_permission_mode" else None
+        if operation == "set_permission_mode":
+            if mode not in HOST_PERMISSION_MODES:
+                return dict(status="refused", reason="invalid_permission_mode")
+            key = "permission_mode"
+            value = mode
+        else:
+            key = "model" if operation == "set_model" else "effort"
+            allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
+            value = query.get(key)
+            if value not in allowed:
+                return dict(status="refused", reason="invalid_" + key)
         lock = host_lock(provider, sid)
         if lock is None:
             return dict(status="unavailable", reason="host_starting")
@@ -2968,6 +3045,10 @@ def host_reply(query):
                 return dict(status="refused", reason="host_disabled")
             config[key] = value
             host_write(host_paths(provider, sid)["config"], config)
+            if mode is not None:
+                state = host_session_state(provider, sid)
+                state["mode"] = mode
+                host_state_write(provider, sid, state)
             settings = host_settings(provider, sid)
             host_event(provider, sid, host_chat_name(provider, sid), dict(state={}),
                        "host.settings", dict(settings, applied=False, mode=host_permission_mode(provider, sid)))
@@ -3004,6 +3085,19 @@ def host_reader_source():
         return None
 
 
+def host_scope_prefix(cgroup_path="/proc/self/cgroup"):
+    try:
+        lines = Path(cgroup_path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return []
+    unit = next((line[3:].strip() for line in lines if line.startswith("0::")), "")
+    tool = shutil.which("systemd-run")
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if "/user@" not in unit or not unit.endswith(".service") or not tool or not runtime or not os.path.exists(os.path.join(runtime, "bus")):
+        return []
+    return [tool, "--user", "--scope", "--quiet", "--collect", "--"]
+
+
 def host_spawn(provider, sid, source=None):
     bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
                  "exec(compile(s,'<agent-host>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
@@ -3011,14 +3105,15 @@ def host_spawn(provider, sid, source=None):
     standalone = host_runtime_file() if not isinstance(source, str) or not source else None
     if standalone is None and not isinstance(source, str):
         return None
+    scope = host_scope_prefix()
     errors = host_paths(provider, sid)["errors"].open("ab")
     try:
         if standalone is not None:
-            child = subprocess.Popen([sys.executable, "-u", standalone, "--agent-host", provider, sid],
+            child = subprocess.Popen(scope + [sys.executable, "-u", standalone, "--agent-host", provider, sid],
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
                                      start_new_session=True)
         else:
-            child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
+            child = subprocess.Popen(scope + [sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
                                      stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors,
                                      start_new_session=True)
     finally:
@@ -3038,11 +3133,11 @@ def host_start(provider, sid, source=None):
         return dict(status="refused", reason="unsupported_provider")
     if not host_enabled(provider, sid):
         return dict(status="refused", reason="host_disabled")
+    if host_alive(provider, sid) and host_request(provider, sid, dict(op="ping"), timeout=2).get("status") == "ok":
+        return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
     failure = host_session_state(provider, sid).get("startup_failure")
     if host_failure_current(provider, sid, failure, message_retry_generation(provider, sid)):
         return dict(status="error", reason=failure.get("reason"), permanent=True)
-    if host_alive(provider, sid) and host_request(provider, sid, dict(op="ping"), timeout=2).get("status") == "ok":
-        return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
     host_clear_stale(provider, sid)
     child = host_spawn(provider, sid, source)
     if child is None:
@@ -3170,6 +3265,13 @@ def host_terminal(provider, sid, tmux=None):
         host_stop(provider, sid)
         host_write(host_paths(provider, sid)['owner'], dict(owner='terminal', at=time.time()))
         return dict(status='already', reason='pane_agent')
+    try:
+        exists = subprocess.run(['tmux', 'has-session', '-t', '=' + tmux], capture_output=True, timeout=5).returncode == 0
+        if not exists:
+            subprocess.run(['tmux', 'new-session', '-d', '-s', tmux, '-c', host_cwd(provider, sid)],
+                           capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return dict(status='error', reason='terminal_create_failed')
     if not host_pane_is_shell(tmux) and host_pane_prompt(tmux) is None:
         return dict(status='refused', reason='pane_busy')
     host_stop(provider, sid)
@@ -3221,7 +3323,7 @@ def host_send(provider, sid, text, tmux=None):
     token = 'mp-' + uuid.uuid4().hex
     store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux)
     try:
-        submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text))
+        submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text, origin='agent'))
         message_store_request(dict(store, op='message_dispatch'))
         message = message_store_request(dict(store, op='message_status', message_id=token)).get('message')
     except (OSError, ValueError, KeyError, TypeError):
@@ -3331,6 +3433,15 @@ def host_hax_argv(provider, sid, base):
     native = host_session_state(provider, sid).get("native_session")
     resume = ["--hax-resume", native] if isinstance(native, str) and SESSION_ID.fullmatch(native) else []
     return ["python3", "-u", "-c", HOST_HAX_BRIDGE] + base + ([] if chosen else list(HOST_HAX_MODEL)) + resume
+
+
+def host_cursor_argv(provider, sid, base, mode=None):
+    command = base + ["-p", "--output-format", "stream-json", "--stream-partial-output",
+                      "--trust", "--force", "--append-system-prompt", HOST_APPEND_PROMPT]
+    native = host_session_state(provider, sid).get("native_session")
+    if isinstance(native, str) and native:
+        return command + ["--resume", native]
+    return command
 
 
 def host_model_name(value):
@@ -3785,15 +3896,23 @@ def host_bypass_approvals(session):
 
 
 def host_auto_approve_safety(session, request, kind):
-    if kind != "approval" or not host_bypass_approvals(session):
-        return False
-    return bool(request.get("decision_reason"))
+    return kind == "approval" and host_bypass_approvals(session)
 
 
 def host_auto_approval_response(request):
     edited = request.get("input") if isinstance(request.get("input"), dict) else {}
     return dict(behavior="allow", updatedInput=edited, toolUseID=request.get("tool_use_id"),
                 decisionClassification="user_temporary")
+
+
+def host_save_permission_mode(provider, sid, mode):
+    if mode not in HOST_SAVED_PERMISSION_MODES:
+        return
+    config = host_config(provider, sid)
+    if config is None or config.get("permission_mode") == mode:
+        return
+    config["permission_mode"] = mode
+    host_write(host_paths(provider, sid)["config"], config)
 
 
 def host_save_default_permission_mode(provider, sid):
@@ -3905,6 +4024,7 @@ def host_set_mode(provider, sid, session, mode):
         return dict(status="error", reason="stdin_write_failed")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
+    host_save_permission_mode(provider, sid, mode)
     if "settings" in session:
         host_settings_event(provider, sid, host_chat_name(provider, sid), session)
     return dict(status="ok")
@@ -4148,6 +4268,23 @@ def host_agent_event(provider, sid, tmux, session, raw):
         HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
 
 
+def host_cursor_event(provider, sid, tmux, session, event):
+    kind = event.get("type")
+    if kind == "thinking":
+        subtype = event.get("subtype")
+        block_id = session.get("cursor_think_id", "think")
+        if subtype == "delta" and isinstance(event.get("text"), str):
+            block = host_stream_block(session, block_id, "thinking", 0)
+            session["cursor_think_id"] = block["item"]
+            host_delta(session, block, event["text"])
+        elif subtype == "completed":
+            block = host_stream_block(session, session.get("cursor_think_id", block_id), "thinking", 0)
+            host_complete(provider, sid, tmux, session, block)
+            session.pop("cursor_think_id", None)
+        return
+    host_claude_event(provider, sid, tmux, session, event)
+
+
 def host_claude_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     inflight = session.get("inflight")
@@ -4222,7 +4359,14 @@ def host_skill_file(name, cwd=None):
     else:
         bases = [home] + ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else [])
         files = [f for b in bases for f in (b / "skills" / name / "SKILL.md", b / "commands" / (name + ".md"))]
-    return next((f for f in files if f.is_file()), None)
+    return next((f for f in files if host_readable_file(f)), None)
+
+
+def host_readable_file(path):
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def host_skill_user_only(path):
@@ -4733,6 +4877,9 @@ HOST_ADAPTERS = {
     "hax": dict(argv=host_hax_argv, open=host_hax_open, write=host_hax_write, event=host_hax_event,
                 answer=host_pi_answer, interrupt=host_hax_interrupt, set_mode=host_hax_set_mode,
                 binding="hax_bridge_prompt", provenance="hax_run_started"),
+    "cursor": dict(argv=host_cursor_argv, open=host_claude_open, write=host_claude_write, event=host_cursor_event,
+                   answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
+                   binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }
 
 
@@ -4886,8 +5033,12 @@ def host_main(provider, sid):
         server.bind(str(paths["socket"]))
         os.chmod(paths["socket"], 0o600)
         server.listen(8)
+        saved = state.get("mode")
+        mode = saved if saved in HOST_SAVED_PERMISSION_MODES else host_save_default_permission_mode(provider, sid)
+        if mode in HOST_SAVED_PERMISSION_MODES:
+            host_save_permission_mode(provider, sid, mode)
         try:
-            agent = host_agent_start(provider, sid)
+            agent = host_agent_start(provider, sid, mode)
             reason = "agent_not_found" if agent is None else None
         except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
             reason = "cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else (
@@ -4899,7 +5050,6 @@ def host_main(provider, sid):
             return 5 if reason == "agent_not_found" else 4
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         state["agent_pid"] = agent.pid
-        mode = host_save_default_permission_mode(provider, sid)
         state["mode"] = mode if mode in HOST_PERMISSION_MODES else "default"
         host_state_write(provider, sid, state)
         session = dict(state=state, retry_generation=retry_generation)
@@ -4953,6 +5103,10 @@ def host_status(provider, sid):
 
 
 def host_cli(argv):
+    if argv == ["list"]:
+        return dict(chats=host_chats())
+    if len(argv) == 2 and argv[0] == "connect":
+        return host_connect(argv[1])
     if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
@@ -4975,12 +5129,12 @@ def host_cli(argv):
     paths = host_paths(provider, sid)
     if command == "enable":
         config = host_read(paths["config"]) or {}
-        config["enabled"] = True
+        config.update(enabled=True, provider=provider, sid=sid)
         if tmux is not None:
             config["tmux"] = tmux
         if folder is not None:
             config["cwd"] = folder
-        if mode is not None:
+        if mode is not None and config.get("permission_mode") not in HOST_PERMISSION_MODES:
             config["permission_mode"] = mode
         host_write(paths["config"], config)
         if host_handed_over(provider, sid):
@@ -5010,6 +5164,9 @@ def host_cli(argv):
                 config["cwd"] = folder
             if mode is not None:
                 config["permission_mode"] = mode
+                state = host_session_state(provider, sid)
+                state["mode"] = mode
+                host_state_write(provider, sid, state)
             host_write(paths["config"], config)
         return host_start(provider, sid)
     if command == "adopt":
@@ -5213,6 +5370,9 @@ def message_store_transaction(q):
             token, text = q.get('message_id'), q.get('text')
             if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or not text.strip() or '\x00' in text:
                 raise ValueError('invalid message')
+            origin = q.get('origin', 'human')
+            if origin not in ('human', 'agent'):
+                raise ValueError('invalid message origin')
             replaces = q.get('replaces')
             if isinstance(replaces, str) and replaces:
                 if not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', replaces) or replaces == token:
@@ -5261,7 +5421,7 @@ def message_store_transaction(q):
             position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
             state = 'cancelled' if admission_epoch is not None and admission_epoch < epoch else 'queued'
             deadline = None if state == 'cancelled' else time.time() + 15
-            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,NULL,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, deadline, epoch, time.time()))
+            db.execute('INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,NULL,?,?,?)', (token, provider, sid, text, position, uuid.uuid4().hex, state, deadline, epoch, time.time(), origin))
             if scope_body is not None:
                 db.execute('INSERT INTO message_room_scopes VALUES (?,?)', (token, scope_body))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
@@ -5275,7 +5435,7 @@ def message_store_transaction(q):
                 if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token) or not isinstance(text, str) or '\x00' in text or db.execute('SELECT 1 FROM shared_messages WHERE id=?', (token,)).fetchone():
                     raise ValueError('message not found')
                 position = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
-                db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,'cancelled',NULL,NULL,?,?)", (token, provider, sid, text, position, uuid.uuid4().hex, epoch, time.time()))
+                db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,'cancelled',NULL,NULL,?,?,?)", (token, provider, sid, text, position, uuid.uuid4().hex, epoch, time.time(), 'human'))
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
@@ -5527,6 +5687,7 @@ def start_message_worker(q, source, only_if_work=False):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            message_worker_wake(lock_path)
             return
     bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<message-worker>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
     child = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--message-worker', q['tmux'], q['provider'], q['sid']], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -5534,6 +5695,23 @@ def start_message_worker(q, source, only_if_work=False):
         child.stdin.write(base64.b64encode(source.encode()) + b'\n')
     finally:
         child.stdin.close()
+
+
+def message_worker_wake_path(lock_path):
+    return lock_path.with_suffix('.message-wake')
+
+
+def message_worker_wake(lock_path):
+    try:
+        fd = os.open(message_worker_wake_path(lock_path), os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        return
+    try:
+        os.write(fd, b'\0')
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def superseded_engine():
@@ -5587,7 +5765,14 @@ def message_worker(tmux, provider, sid):
         idle_since = time.time()
         head = None
         stalled_at = time.monotonic()
-        with selectors.DefaultSelector() as selector:
+        wake_path = message_worker_wake_path(lock_path)
+        try:
+            os.mkfifo(wake_path, 0o600)
+        except FileExistsError:
+            pass
+        wake = os.open(wake_path, os.O_RDWR | os.O_NONBLOCK)
+        with closing(os.fdopen(wake, 'rb', buffering=0)) as wake_file, selectors.DefaultSelector() as selector:
+            selector.register(wake_file, selectors.EVENT_READ)
             while True:
                 try:
                     if head is None:
@@ -5616,7 +5801,8 @@ def message_worker(tmux, provider, sid):
                             return
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
-                        if pending != head:
+                        held = pending is not None and pending[0] in host_held(provider, sid)
+                        if pending != head or held:
                             head = pending
                             stalled_at = time.monotonic()
                         message_poll(tmux, provider, sid)
@@ -5630,9 +5816,10 @@ def message_worker(tmux, provider, sid):
                                 return
                         else:
                             idle_since = time.time()
-                        timeout = max(0.0, deadline - time.time()) if deadline is not None else 1.0
+                        timeout = max(0.0, deadline - time.time()) if deadline is not None and not held else 1.0
                         timeout = min(timeout, 1.0)
-                    selector.select(timeout)
+                    if selector.select(timeout):
+                        wake_file.read(4096)
                 except MessageWorkerTimeout:
                     with closing(message_store_db(tmux)) as db, db:
                         db.execute('BEGIN IMMEDIATE')
@@ -6603,10 +6790,110 @@ def serve_push(subscriptions, lock, wake):
             events_push(subscriptions)
 
 
+def ensure_runtime_tools():
+    import fcntl
+    import hashlib
+    import json
+    import stat
+    if os.name != 'posix':
+        return
+    home = os.path.expanduser('~')
+    home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        directory = os.open('.multiprompt-runtime', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=home_fd)
+    except OSError:
+        return
+    finally:
+        os.close(home_fd)
+    lock = None
+    try:
+        def check(fd, mode):
+            st = os.fstat(fd)
+            if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != mode:
+                raise ValueError('unsafe runtime permissions')
+        check(directory, 0o700)
+        try:
+            lock = os.open('lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        except OSError:
+            return
+        try:
+            check(lock, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BlockingIOError):
+            return
+        try:
+            fd = os.open('active.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            try:
+                check(fd, 0o600)
+                active = json.loads(os.fdopen(fd, 'rb', closefd=False).read(4097))
+            finally:
+                os.close(fd)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return
+        if (not isinstance(active, dict) or active.get('protocol') != 1 or
+                not isinstance(active.get('sha256'), str) or len(active['sha256']) != 64):
+            return
+        canonical = active['sha256'] + '.py'
+        try:
+            fd = os.open(canonical, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            try:
+                check(fd, 0o600)
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_size > 4 * 1024 * 1024:
+                    return
+                data = os.read(fd, st.st_size + 1)
+            finally:
+                os.close(fd)
+        except OSError:
+            return
+        if hashlib.sha256(data).hexdigest() != active['sha256']:
+            return
+
+        runtime_root = os.path.join(home, HOST_RUNTIME_TOOLS)
+
+        def tool_matches(name):
+            path = os.path.join(runtime_root, name)
+            try:
+                target = os.readlink(path)
+            except OSError:
+                try:
+                    with open(path, 'rb') as stream:
+                        payload = stream.read(4 * 1024 * 1024 + 1)
+                except OSError:
+                    return False
+                if len(payload) > 4 * 1024 * 1024:
+                    return False
+                return hashlib.sha256(payload).hexdigest() == active['sha256']
+            return target == canonical or os.path.basename(target) == canonical
+
+        if tool_matches('reader.py'):
+            return
+
+        def relink(name):
+            path = os.path.join(runtime_root, name)
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            os.symlink(canonical, path)
+
+        relink('reader.py')
+    finally:
+        if lock is not None:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(lock)
+        os.close(directory)
+
+
 def serve_request(line, source, subscriptions, lock):
     query = None
     rid = 0
     try:
+        if os.name == 'posix':
+            ensure_runtime_tools()
         query = json.loads(line)
         if not isinstance(query, dict):
             raise ValueError("invalid request")
@@ -6726,6 +7013,8 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
 elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
     sys.exit(host_main(sys.argv[2], sys.argv[3]))
+elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"]:
+    print(host_list_lines())
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     print(json.dumps(host_cli(sys.argv[2:]), separators=(",", ":")))
 elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
@@ -6746,7 +7035,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 97
+RUNTIME_GENERATION = 108
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -6806,21 +7095,41 @@ if __name__ == '__main__':
                     finally:
                         if _os.path.exists(path):
                             _os.unlink(path)
+                runtime_root = _os.path.join(home, '.multiprompt-runtime')
+
+                def relink(name, target):
+                    path = _os.path.join(runtime_root, name)
+                    try:
+                        _os.unlink(path)
+                    except FileNotFoundError:
+                        pass
+                    _os.symlink(target, path)
+
+                def publish_named_tool(name, payload):
+                    digest = _hashlib.sha256(payload).hexdigest()
+                    stem = digest + '-' + name
+                    publish(stem, payload)
+                    relink(name, stem)
+                    return stem
+
                 def publish_tools(data):
                     try:
-                        publish('reader.py', data)
+                        reader_digest = _hashlib.sha256(data).hexdigest()
+                        publish(reader_digest + '.py', data)
+                        relink('reader.py', reader_digest + '.py')
                     except OSError:
                         pass
                     mp_send_source = globals().get('MP_SEND_SOURCE')
                     if isinstance(mp_send_source, str) and mp_send_source:
                         try:
-                            publish('mp-send', _base64.b64decode(mp_send_source))
+                            published = publish_named_tool('mp-send', _base64.b64decode(mp_send_source))
+                            _os.chmod(published, 0o600, dir_fd=directory)
                         except (ValueError, OSError):
                             pass
                     feedback_source = globals().get('FEEDBACK_SOURCE')
                     if isinstance(feedback_source, str) and feedback_source:
                         try:
-                            publish('multibot-feedback', _base64.b64decode(feedback_source))
+                            publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
                             _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass

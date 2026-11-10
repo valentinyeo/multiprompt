@@ -258,12 +258,17 @@ function runHarness(oldColor = false) {
   try {
     copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig', 'chat_reaction.zig', 'link_detect.zig'], dir);
     require('./fixtures/inline-stubs').writeChatMention(dir);
-    let functions = [...['chatReplyLineHeight', 'chatPaintReplyLine'].filter(name => source.includes(`fn ${name}(`)), 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatDisplayForBlock', 'chatMeasureBlockRect', 'chatMeasureProjectedBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatPaintProjectedBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
+    const paintNames = ['chatReplyLineHeight', 'chatPaintReplyLine', 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatDisplayForBlock', 'chatMeasureBlockRect', 'chatMeasureProjectedBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatPaintProjectedBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'];
+    let functions = paintNames.filter(name => source.includes(`fn ${name}(`)).map(body).join('\n');
+    if (source.includes('fn chatPaintTableExpand(')) functions += '\nfn chatPaintTableExpand(_: HANDLE, _: RECT, _: ChatBlock) void {}\n';
     if (oldColor) functions = functions.replace('chat_style.bubbleColors(themeConsoleBg()).user', 'chat_style.bubbleColors(themeConsoleBg()).agent');
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + functions + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'production'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+test('IGSH-1897 chatPaintBlock paints an expand control on table blocks', () => {
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8'), /chatPaintTableExpand\(hdc, rc, block\)/);
+});
 test('IGSH-1811 sent user bubbles measure the name without the session marker', () => {
   assert.match(body('chatMeasureProjectedBlockRect'), /hasMarker\(body\)/);
 });

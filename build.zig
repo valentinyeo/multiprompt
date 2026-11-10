@@ -12,6 +12,19 @@ fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.linkSystemLibrary("gdiplus", .{});
 }
 
+fn linkTerminal(b: *std.Build, module: *std.Build.Module) void {
+    const flags = &.{"-std=c99"};
+    module.addIncludePath(b.path("src"));
+    module.addIncludePath(b.path("src/terminal/vendor/libvterm/include"));
+    module.addIncludePath(b.path("src/terminal/vendor/libvterm/src"));
+    module.addCSourceFile(.{ .file = b.path("src/terminal_model.c"), .flags = flags });
+    module.addCSourceFile(.{ .file = b.path("src/terminal_window.c"), .flags = flags });
+    const sources = [_][]const u8{ "encoding.c", "keyboard.c", "mouse.c", "parser.c", "pen.c", "screen.c", "state.c", "unicode.c", "vterm.c" };
+    for (sources) |name| module.addCSourceFile(.{ .file = b.path(b.fmt("src/terminal/vendor/libvterm/src/{s}", .{name})), .flags = flags });
+    module.linkSystemLibrary("gdi32", .{});
+    module.linkSystemLibrary("user32", .{});
+}
+
 fn linkComputer(b: *std.Build, module: *std.Build.Module) void {
     module.addCSourceFile(.{ .file = b.path("src/computer_view.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti", "-fms-extensions" } });
     module.addIncludePath(b.path("src/computer/vendor/webview2/include"));
@@ -68,6 +81,7 @@ pub fn build(b: *std.Build) void {
 
     linkColorEmoji(b, exe.root_module);
     linkComputer(b, exe.root_module);
+    linkTerminal(b, exe.root_module);
     if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
@@ -119,6 +133,7 @@ pub fn build(b: *std.Build) void {
     });
     linkColorEmoji(b, dev_exe.root_module);
     linkComputer(b, dev_exe.root_module);
+    linkTerminal(b, dev_exe.root_module);
     dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
@@ -596,7 +611,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(chat_slash_tests).step);
     var previous_chat_run: ?*std.Build.Step = null;
-    for ([_][]const u8{ "src/agent_second_line.zig", "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_keynav.zig", "src/chat_reaction.zig", "src/chat_permission.zig", "src/chat_options.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_scrollbar.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_shell_sync.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig", "src/dictation_audio.zig" }) |file| {
+    for ([_][]const u8{ "src/agent_second_line.zig", "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_keynav.zig", "src/chat_reaction.zig", "src/chat_permission.zig", "src/chat_options.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_table_expand.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_scrollbar.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_shell_sync.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig", "src/dictation_audio.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(file),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -686,12 +701,18 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&external_browser_links_tests.step);
     const close_all_browser_panes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-panes.test.js" });
     test_step.dependOn(&close_all_browser_panes_tests.step);
+    const close_all_browser_processes_tests = b.addSystemCommand(&.{ "node", "--test", "tools/close-all-browser-processes.test.js" });
+    close_all_browser_processes_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&close_all_browser_processes_tests.step);
+    const footprint_telemetry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/footprint-telemetry.test.js" });
+    footprint_telemetry_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&footprint_telemetry_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });
     test_step.dependOn(&more_menu_tests.step);
     vps_test_step.dependOn(&more_menu_tests.step);
-    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
+    const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-expand.test.js", "tools/chat-table-bench/bench.test.js" });
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
     const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js", "tools/chat-skill-pill-proof.test.mjs" });
@@ -778,6 +799,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&blue_dot_persistence_tests.step);
     const hibernate_hook_recovery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/hibernate-hook-recovery.test.js" });
     test_step.dependOn(&hibernate_hook_recovery_tests.step);
+    const native_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/native-session.test.js" });
+    test_step.dependOn(&native_session_tests.step);
+    vps_test_step.dependOn(&native_session_tests.step);
+    const harness_alt_tap_tests = b.addSystemCommand(&.{ "node", "--test", "tools/harness-alt-tap.test.js" });
+    test_step.dependOn(&harness_alt_tap_tests.step);
     const ssh_reconnect_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ssh-clock-standby.test.js", "tools/ssh-reconnect.test.js", "tools/ssh-probe-511.test.js", "tools/verify-reconnect.test.js" });
     ssh_reconnect_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&ssh_reconnect_tests.step);
@@ -829,6 +855,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
     test_step.dependOn(&console_url_copy_tests.step);
+    const agent_browser_pane_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-browser-pane.test.js", "tools/browser-pane-hibernation.test.js" });
+    test_step.dependOn(&agent_browser_pane_tests.step);
     const inbox_undo_shortcut_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-undo-shortcut.test.js" });
     test_step.dependOn(&inbox_undo_shortcut_tests.step);
     const windows_shortcut_passthrough_tests = b.addSystemCommand(&.{ "node", "--test", "tools/windows-shortcut-passthrough.test.js" });
@@ -876,6 +904,10 @@ pub fn build(b: *std.Build) void {
     idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
+    const terminal_tests = b.addSystemCommand(&.{ "node", "--test", "tools/terminal-model.test.js", "tools/chat-transport-writer.test.js" });
+    terminal_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&terminal_tests.step);
+    vps_test_step.dependOn(&terminal_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{ "node", "tools/discover-tests.cjs" });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);

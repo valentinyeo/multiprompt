@@ -66,8 +66,16 @@ test('IGSH-1061: static labels and shortcut hints use the formatter, not user se
   const formatter = read('src/palette_text.zig');
   assert.match(formatter, /pub fn sentence/);
   assert.match(formatter, /pub fn keycap/);
-  assert.match(formatter, /L\("Ctrl"\)/);
-  assert.match(formatter, /L\("Shift"\)/);
+});
+
+test('IGSH-1906: Ctrl+K drops shortcut chips, footer, and modal shadow slabs', () => {
+  const paint = palette();
+  assert.doesNotMatch(paint, /keycap\(hdc, L\("Esc"\)/);
+  assert.doesNotMatch(paint, /palette_text\.zig"\)\.footer/);
+  assert.doesNotMatch(paint, /drawModalShadow\(hdc, ox, oy, overlay_w, overlay_h/);
+  const formatter = read('src/palette_text.zig');
+  assert.match(formatter, /if \(shortcut\) return 0;/);
+  assert.match(read('src/drawing.zig'), /pub fn searchFooterH\(\) i32 \{\s*return uiScaled\(12\)/);
 });
 
 test('IGSH-1061: custom native surfaces use declared Win32 APIs and guarded focus', () => {

@@ -19,7 +19,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 30)
     throw "Timed out: $Description"
 }
 function Session { try { Get-Content -LiteralPath "$settings/session.json" -Raw | ConvertFrom-Json } catch { $null } }
-function Log { try { [IO.File]::ReadAllText("$settings/debug.log") } catch { '' } }
+function Log { try { $file = [IO.File]::Open("$settings/debug.log", [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite); try { (New-Object IO.StreamReader($file)).ReadToEnd() } finally { $file.Dispose() } } catch { '' } }
 function Log-Tail([int]$Offset) { $log = Log; if ($Offset -gt $log.Length) { return '' }; $log.Substring($Offset) }
 function Focus {
     [void](Wait-For 'owned foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })

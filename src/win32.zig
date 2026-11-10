@@ -297,6 +297,10 @@ pub const WM_APP_PLUS_MENU_ACTION: u32 = WM_APP + 214;
 pub const WM_APP_SETTINGS_OPEN: u32 = WM_APP + 210;
 pub const WM_APP_APP_SAVE_FAILED: u32 = WM_APP + 211;
 pub const WM_APP_BROWSER_SIGNIN_DONE: u32 = WM_APP + 212;
+pub const WM_APP_NATIVE_TERMINAL: u32 = WM_APP + 217;
+pub const WM_APP_NATIVE_SPAWN: u32 = WM_APP + 218;
+pub const WM_APP_NATIVE_READY: u32 = WM_APP + 219;
+pub const WM_APP_FOOTPRINT_READY: u32 = WM_APP + 220;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;
@@ -1083,6 +1087,7 @@ pub extern "kernel32" fn Process32FirstW(HANDLE, *PROCESSENTRY32W) callconv(WINA
 pub extern "kernel32" fn Process32NextW(HANDLE, *PROCESSENTRY32W) callconv(WINAPI) BOOL;
 extern "kernel32" fn GetProcessId(HANDLE) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn GetExitCodeProcess(HANDLE, *DWORD) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn GetProcessTimes(HANDLE, *FILETIME, *FILETIME, *FILETIME, *FILETIME) callconv(WINAPI) BOOL;
 pub const STILL_ACTIVE: DWORD = 259;
 pub extern "kernel32" fn FindFirstChangeNotificationW(LPCWSTR, BOOL, DWORD) callconv(WINAPI) HANDLE;
 pub extern "kernel32" fn FindNextChangeNotification(HANDLE) callconv(WINAPI) BOOL;

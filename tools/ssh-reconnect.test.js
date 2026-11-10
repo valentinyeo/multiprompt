@@ -8,6 +8,9 @@ const { spawn, spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const root = path.resolve(__dirname, '..');
 const modern = fs.existsSync(path.join(root, 'src/ssh_reconnect.zig'));
+function nativeStubs(text) {
+  return text.replaceAll('@import("native_session.zig").alive', 'nativeChannelAlive').replaceAll('@import("native_session.zig").dropChannel', 'nativeDropChannel');
+}
 function body(name, text = source) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -16,7 +19,7 @@ function body(name, text = source) {
 async function zig(code, filter, state = true, expected = 0, failure = /FAIL \(|expected 15000, found 1000/) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
-    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig'], dir);
+    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig', 'chat_view.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
@@ -45,12 +48,13 @@ fn chatReadMark(_: bool) bool { return false; }
 const State = ${modern ? '@import("ssh_reconnect.zig").State' : 'struct {}'};
 const ShellKind = enum { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 const Shell = struct {
+    chat_view_on: bool = false,
     kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
     tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
-    spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
+    spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0, native_terminal: bool = false,
     ssh_reconnect: State = .{ .healthy_attach = true }, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
 };
 var shells = [_]Shell{.{}};
@@ -130,6 +134,8 @@ var header_notices: usize = 0;
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { header_notices += 1; }
 fn invalidateSidebar() void {}
 fn saveSession() void {}
+fn nativeChannelAlive(_: u32) bool { return true; }
+fn nativeDropChannel(_: u32) void {}
 fn repositionActive() void {}
 fn fetchTmuxSessions() void {}
 ${modern ? '' : 'const shell_exit = struct { const ISSUE_416_FAST_FAIL_MS: u64 = 60000; ' + body('hostProbeBusy', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + body('reconnectAllowed', fs.readFileSync(path.join(root, 'src/shell_exit.zig'), 'utf8')).replace('pub fn ', 'fn ') + ' };'}
@@ -138,8 +144,14 @@ function runtime(tests, input = source) {
   const functions = ['armSshReconnectTimerIfNeeded', 'markSshTabDisconnected', 'sshAutoReconnectTick'];
   if (modern) functions.push('sshDisconnect', 'sshReconnectNow', 'sshReconnectAttempt', 'sshReconnectArm', 'sshNetworkVeto', 'sshSessionEnded');
   else functions.push('chatReconnectBackoffMs');
-  return prelude + functions.map(name => body(name, name === 'sshSessionEnded' ? source : input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE')).join('\n') + tests;
+  return prelude + functions.map(name => nativeStubs(body(name, name === 'sshSessionEnded' ? source : input).replaceAll('@import("chat_send.zig").sshReconnectArm', 'sshReconnectArm').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent').replaceAll('@import("drawing.zig").reconnectTabVisible', 'reconnectTabVisible').replaceAll('@import("workspaces.zig").unregisterShellExitWait', 'unregisterShellExitWait').replaceAll('@import("console.zig").killProcessTree', 'killProcessTree').replaceAll('@import("focus.zig").ShowWindow', 'ShowWindow').replaceAll('@import("win32.zig").SW_HIDE', 'SW_HIDE'))).join('\n') + tests;
 }
+test('native remote tabs stay connected without a per-tab process', () => {
+  assert.match(body('sshAutoReconnectTick'), /shell\.native_terminal and !@import\("native_session\.zig"\)\.alive\(shell\.shell_id\)/);
+  assert.match(body('sshReconnectArm'), /shell\.native_terminal/);
+  assert.match(body('sshSessionEnded'), /shell\.native_terminal/);
+});
+
 describe('SSH reconnect', { concurrency: os.availableParallelism() }, () => {
   const loadingChecks = `
 test "ISSUE-543 loading remote tabs" {
@@ -258,7 +270,7 @@ test "ISSUE-501 live ssh silent detach" {
   const code = runtime('').replace('var ssh_probe_job: ?*anyopaque = null;', '').replace('fn sshProbeFinish() void {}', '') + job + `
 var ssh_probe_job: ?*SshProbeJob = null;
 fn findShellById(id: u32) ?u32 { return if (id == shells[0].shell_id and shell_count > 0) 0 else null; }
-` + body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + `
+` + nativeStubs(body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById')) + `
 test "ISSUE-501 live ssh silent detach" {
     const probe = try std.heap.page_allocator.create(SshProbeJob);
     probe.* = .{};
@@ -302,7 +314,7 @@ const FakeThread = struct { fn detach(_: FakeThread) void {} };
 fn spawnProbe(_: anytype, _: anytype, args: anytype) !FakeThread { _ = args; probe_starts += 1; return .{}; }
 fn sshProbeThread(_: *SshProbeJob) void {}
 ` + body('sshProbeStart').replace('std.Thread.spawn', 'spawnProbe') + '\n' +
-    body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById') + tests;
+    nativeStubs(body('sshProbeFinish').replaceAll('@import("inbox.zig").findShellById', 'findShellById')) + tests;
 }
 
 function startupRuntime(tests) {
@@ -1122,4 +1134,25 @@ test('ISSUE-511 remote shell probe recognizes no-server but rejects unknown list
   }
 });
 
+});
+
+
+test('IGSH-1759 live chat setup exit does not reconnect a placeholder terminal', async () => {
+  await zig(runtime(`
+test "IGSH-1759 live setup exit" {
+    shells[0] = .{ .process = null, .chat_view_on = true, .tmux_session_len = 9 };
+    @memcpy(shells[0].tmux_session[0..9], "live-test");
+    alive = false;
+    sshDisconnect(0, "setup-finished");
+    sshReconnectArm(null, "power-resume");
+    for (0..3) |_| {
+        fake_now += 30000;
+        sshAutoReconnectTick();
+    }
+    try std.testing.expect(!shells[0].disconnected);
+    try std.testing.expect(shells[0].ssh_reconnect.phase == .connected);
+    try std.testing.expectEqual(@as(usize, 0), spawns);
+    try std.testing.expectEqual(@as(usize, 0), kills);
+}
+`), 'IGSH-1759');
 });

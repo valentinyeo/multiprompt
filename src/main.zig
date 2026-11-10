@@ -174,6 +174,7 @@ const WM_APP_WEBVIEW2_FOCUS = @import("win32.zig").WM_APP_WEBVIEW2_FOCUS;
 const WM_APP_SESSION_INTERACTED = @import("win32.zig").WM_APP_SESSION_INTERACTED;
 const WM_APP_BROWSER_DROP_GESTURE = @import("win32.zig").WM_APP_BROWSER_DROP_GESTURE;
 const WM_APP_AI_PACE_READY = @import("win32.zig").WM_APP_AI_PACE_READY;
+const WM_APP_FOOTPRINT_READY = @import("win32.zig").WM_APP_FOOTPRINT_READY;
 const WM_APP_CYCLE_STATUS_CARD = @import("win32.zig").WM_APP_CYCLE_STATUS_CARD;
 const WM_APP_SEARCH_SELECT_ALL = @import("win32.zig").WM_APP_SEARCH_SELECT_ALL;
 const WM_APP_COPY_CLAUDE_LOGIN_URL = @import("win32.zig").WM_APP_COPY_CLAUDE_LOGIN_URL;
@@ -615,6 +616,7 @@ const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_I
 const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
 const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
 const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+const SEARCH_SHARED_SERVER_CONNECTION_OFFSET = @import("app_state.zig").SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
 const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
 const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
 const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
@@ -704,6 +706,7 @@ const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
 const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECTION_MENU_OFFSET;
+const SEARCH_CHAT_EXPAND_TABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_EXPAND_TABLE_OFFSET;
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
@@ -721,6 +724,7 @@ const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -925,6 +929,7 @@ const spawnWorkspaceTmuxSession = @import("command_palette.zig").spawnWorkspaceT
 const spawnWorkspacePlainClaudeSession = @import("command_palette.zig").spawnWorkspacePlainClaudeSession;
 const spawnCodexTmuxSession = @import("command_palette.zig").spawnCodexTmuxSession;
 const spawnPiTmuxSession = @import("command_palette.zig").spawnPiTmuxSession;
+const spawnCursorTmuxSession = @import("command_palette.zig").spawnCursorTmuxSession;
 const spawnWorkspaceTerminalSession = @import("command_palette.zig").spawnWorkspaceTerminalSession;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const notifyTabCapReached = @import("console.zig").notifyTabCapReached;
@@ -1019,6 +1024,7 @@ const browserSplitterHit = @import("browser_pane.zig").browserSplitterHit;
 const setBrowserSplitFromMouse = @import("browser_pane.zig").setBrowserSplitFromMouse;
 const wakeBrowserPaneFromFreeze = @import("browser_pane.zig").wakeBrowserPaneFromFreeze;
 const browserHibernationTick = @import("browser_pane.zig").browserHibernationTick;
+const browserPaneAgentAttached = @import("browser_pane.zig").browserPaneAgentAttached;
 const cleanupStalePanewinFiles = @import("browser_pane.zig").cleanupStalePanewinFiles;
 const handleBrowserWindowResolved = @import("browser_pane.zig").handleBrowserWindowResolved;
 const BrowserDockJob = @import("app_state.zig").BrowserDockJob;
@@ -1562,6 +1568,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         handleLayoutReply(lp);
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_TERMINAL) {
+        @import("native_session.zig").pump(@intCast(wp));
+        return 0;
+    }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_SPAWN) {
+        @import("native_session.zig").finish(@intCast(wp));
+        return 0;
+    }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_READY) {
+        @import("native_session.zig").ready(@intCast(wp), lp != 0);
+        return 0;
+    }
     if (msg == @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE) {
         @import("browser_pane.zig").handleBrowserSigninDone(@bitCast(lp), wp);
         return 0;
@@ -1830,7 +1848,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC => {
             const child: HANDLE = if (lp == 0) null else @ptrFromInt(@as(usize, @bitCast(lp)));
-            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_group and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
+            if (child != null and child == app_state.g_edit_hwnd and !app_state.g_edit_is_window and !app_state.g_edit_is_browser_urlbar) {
                 const dc: HANDLE = if (wp == 0) null else @ptrFromInt(wp);
                 _ = SetTextColor(dc, @import("rename.zig").inline_text_color);
                 _ = SetBkColor(dc, @import("rename.zig").inline_color);
@@ -3383,6 +3401,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             invalidateSidebar();
             return 0;
         },
+        WM_APP_FOOTPRINT_READY => {
+            invalidateSidebar();
+            return 0;
+        },
         WM_APP_LADDER_DONE => {
             showHeaderNoticeAscii(app_state.g_ladder_notice[0..app_state.g_ladder_notice_len], 4000, false);
             requestAiPaceRefresh();
@@ -3888,6 +3910,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (shell_index >= app_state.shell_count) return 0;
             const to_terminal = lp != 0;
             app_state.shells[shell_index].chat_view_on = !to_terminal;
+            if (to_terminal and app_state.shells[shell_index].process == null) _ = respawnShellInPlace(shell_index, false);
             if (shell_index == app_state.active_shell) {
                 if (to_terminal) closeChatView() else openChatView();
             }
@@ -5329,6 +5352,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == SEARCH_CHAT_EXPAND_TABLE_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    @import("chat_render.zig").chatExpandTableNearest();
+                    return 0;
+                }
                 if (target == SEARCH_CHAT_COPY_SELECTION_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
@@ -6040,6 +6073,23 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
+                if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    applySearchSpawnContext(hwnd);
+                    const spawned_cursor = spawnCursorTmuxSession();
+                    applyPendingGroup();
+                    if (!spawned_cursor) showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    if (spawned_cursor) {
+                        app_state.g_refocus_remaining = 4;
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
+                    } else {
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    }
+                    return 0;
+                }
                 if (target == SEARCH_NEW_TERMINAL_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -6483,6 +6533,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
+                if (target == SEARCH_SHARED_SERVER_CONNECTION_OFFSET) {
+                    app_state.g_shared_server_connection = !app_state.g_shared_server_connection;
+                    saveSession();
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
                 if (target == SEARCH_BROWSER_AUTOSUSPEND_OFFSET) {
                     app_state.g_browser_autosuspend = !app_state.g_browser_autosuspend;
                     if (app_state.g_browser_autosuspend and app_state.g_browser_suspend_min == 0) app_state.g_browser_suspend_min = BROWSER_SUSPEND_DEFAULT_MIN;
@@ -6527,6 +6588,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.shells[i].browser_enabled = false;
                         closeBrowserForShell(@intCast(i));
                     }
+                    _ = @import("browser_reap.zig").closeAllAfterGrace();
                     showActiveShellAfterOverlay();
                     updateBrowserVisibility();
                     repositionActive();
@@ -7929,7 +7991,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
-                computer.revoke();
+                computer.revoke("app deactivated");
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 debugLog("[usage-hover] close requested by app deactivation");
                 @import("usage_card.zig").close();
@@ -7996,7 +8058,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 forceReinstallHooksThrottled();
                 syncMouseHookForUrlClicks();
                 if (computer.cursorInside()) return 0;
-                computer.revoke();
+                computer.revoke("click outside the viewer");
                 if (webView2OwnsActiveShell() and (cursorInsideWebView2() or webView2HasInputFocus())) {
                     requestWebView2Focus();
                     return 0;
@@ -8442,6 +8504,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 var any_expired = false;
                 for (0..app_state.shell_count) |i| {
                     if (app_state.shells[i].muted or app_state.shells[i].activity != .active) continue;
+                    if (browserPaneAgentAttached(i)) {
+                        any_active = true;
+                        continue;
+                    }
                     if (app_state.shells[i].last_active_event == 0) {
                         app_state.shells[i].activity = .idle;
                         app_state.shells[i].needs_attention = false;
@@ -9378,6 +9444,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         .telemetry => {
             launch_cache.step(.telemetry);
             requestAiPaceRefresh();
+            @import("footprint.zig").start(APP_VERSION);
         },
         .links => {
             launch_cache.step(.links);

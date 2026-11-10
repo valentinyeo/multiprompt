@@ -158,7 +158,7 @@ test('issue: agent wakes never foreground, never refocus, never block the UI thr
 
 function auditFocusTrace(focus, composer, main, diagnostics) {
   assert.match(composer, /msg == WM_KILLFOCUS[^]*?hwnd == app_state.g_chat_composer_hwnd[^]*?focusTrace\(\.composer_killfocus, @ptrFromInt\(wp\), 0\)/);
-  assert.match(main, /WM_ACTIVATEAPP =>[^]*?if \(wp == 0\) \{\s*computer\.revoke\(\);\s*@import\("diagnostics.zig"\).focusTrace\(\.activateapp_inactive, GetForegroundWindow\(\), 0\)/);
+  assert.match(main, /WM_ACTIVATEAPP =>[^]*?if \(wp == 0\) \{\s*computer\.revoke\("app deactivated"\);\s*@import\("diagnostics.zig"\).focusTrace\(\.activateapp_inactive, GetForegroundWindow\(\), 0\)/);
   assert.match(main, /if \(active == 0\) @import\("diagnostics.zig"\).focusTrace\(\.activate_inactive, @ptrFromInt/);
   assert.match(focus, /fn focusGuardAt[^]*?focusTrace\(\.allowed, target, caller\)[^]*?focusTrace\(\.activation_refocus, target, caller\)[^]*?focusTrace\(\.blocked, target, caller\)/);
   const wrappers = focus.slice(focus.indexOf('fn SetForegroundWindow('), focus.indexOf('pub fn SetWindowPos('));
