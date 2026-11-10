@@ -1289,6 +1289,7 @@ pub fn voiceManualRetry() void {
         const bottom = app_state.g_chat_layout_rects[highlight.end - 1].bottom;
         const pad = app_state.g_chat_top_pad;
         if (top < app_state.g_chat_scroll_y + pad or bottom > app_state.g_chat_scroll_y + client.bottom - client.top) {
+            app_state.g_chat_read_hold = false;
             app_state.g_chat_scroll_y = std.math.clamp(if (bottom - top <= client.bottom - client.top - pad) bottom - (client.bottom - client.top) else top - pad, chatMinScroll(), chatMaxScroll());
         }
     }

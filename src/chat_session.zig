@@ -1897,7 +1897,7 @@ pub fn chatWarmOftenUsed() void {
     const now = GetTickCount64();
     const active_busy = if (app_state.g_chat_active) blk: {
         const entry = chatHistoryEntry(chatFileIdentity());
-        break :blk entry != null and (entry.?.pending or chat_history.retryDue(false, now, entry.?.next));
+        break :blk entry != null and entry.?.stream == null and (entry.?.pending or chat_history.retryDue(false, now, entry.?.next));
     } else false;
     const Ranked = struct { idx: u32, viewed: u64 };
     var ranked: [5]Ranked = undefined;
@@ -2051,6 +2051,7 @@ pub fn refreshChatTranscript(force: bool) void {
         else
             app_state.g_chat_content_h - viewport_h;
     }
+    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y);
     chatScrollStateChanged(viewport_h);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
@@ -2061,6 +2062,7 @@ pub fn chatRelayoutPreservingScroll(width: i32, viewport_h: i32) void {
     chatRelayout(width);
     const anchor_top = if (anchor) |p| (if (p.index < app_state.g_chat_block_count) app_state.g_chat_layout_rects[p.index].top else null) else null;
     app_state.g_chat_scroll_y = chat_history.scrollAfterLayout(app_state.g_chat_content_h, viewport_h, old_y, chat_history.followBottom(false, false, app_state.g_chat_scrolled_up), anchor_top, if (anchor) |p| p.offset else 0);
+    if (app_state.g_chat_read_hold) app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, viewport_h, app_state.g_chat_top_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y);
     chatScrollStateChanged(viewport_h);
 }
 

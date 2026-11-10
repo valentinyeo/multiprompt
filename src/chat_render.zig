@@ -2649,6 +2649,11 @@ pub fn chatSetTopPad(new_pad: i32) void {
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
     app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
+    if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
+        var client: RECT = std.mem.zeroes(RECT);
+        chatViewClientRect(&client);
+        app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y);
+    }
 }
 
 pub fn chatTopPad() i32 {
@@ -5835,6 +5840,7 @@ pub fn chatReplyResolve() void {
             entry.show_older = true;
             entry.next = 0;
             app_state.g_chat_scrolled_up = true;
+            app_state.g_chat_read_hold = false;
             app_state.g_chat_scroll_bottom_pending = false;
             chatFileRequest(jump.identity);
             return;
@@ -6190,6 +6196,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].note_open = !app_state.g_chat_blocks[index].note_open;
                 app_state.g_chat_scrolled_up = true;
+                app_state.g_chat_read_hold = false;
                 chatImageReady();
                 return 0;
             }
@@ -6308,6 +6315,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].note_open = !app_state.g_chat_blocks[index].note_open;
                 app_state.g_chat_scrolled_up = true;
+                app_state.g_chat_read_hold = false;
                 chatImageReady();
                 return 0;
             }
