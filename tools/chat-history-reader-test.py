@@ -5760,6 +5760,11 @@ class MoveToTerminalTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+RESTART_NAMES = ('host_restart', 'host_restart_idle', 'host_restart_requested', 'host_restart_write',
+                 'host_rotate', 'host_nightly_due', 'host_nightly_mark', 'host_nightly_day',
+                 'host_published_runtime', 'HOST_RESTART_STALE')
+
+
 class RestartLiveChatTest(unittest.TestCase):
     sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef192'
     tmux = 'restart-fixture-chat'
@@ -5782,6 +5787,10 @@ class RestartLiveChatTest(unittest.TestCase):
         patch.object(reader, 'host_session_state', side_effect=self.state).start()
         patch.object(reader, 'host_start', side_effect=self.start).start()
         patch.object(reader, 'host_stop', side_effect=self.stop).start()
+
+    def need_restart(self):
+        missing = [name for name in RESTART_NAMES if not hasattr(reader, name)]
+        self.assertEqual(missing, [], 'the reader can restart a live chat on the newest version')
 
     def enable(self, **extra):
         config = dict(enabled=True, tmux=self.tmux, provider='claude', sid=self.sid)
@@ -5811,6 +5820,7 @@ class RestartLiveChatTest(unittest.TestCase):
         return dict(status='stopped')
 
     def test_an_idle_chat_is_restarted_once_the_host_reports_the_new_process(self):
+        self.need_restart()
         result = reader.host_restart('claude', self.sid)
         self.assertEqual(result['status'], 'restarted')
         self.assertEqual(result['generation'], reader.RUNTIME_GENERATION)
@@ -5818,6 +5828,7 @@ class RestartLiveChatTest(unittest.TestCase):
         self.assertEqual(self.calls, [], 'the host changes itself instead of being killed and respawned')
 
     def test_a_restart_that_has_not_reloaded_yet_says_it_is_still_restarting(self):
+        self.need_restart()
         self.rotated[0] = True
         with patch.object(reader, 'HOST_RESTART_WAIT', 0.05):
             result = reader.host_restart('claude', self.sid)
@@ -5825,6 +5836,7 @@ class RestartLiveChatTest(unittest.TestCase):
         self.assertTrue(reader.host_restart_requested('claude', self.sid))
 
     def test_a_busy_chat_waits_for_the_reply_to_end(self):
+        self.need_restart()
         self.busy.add(self.sid)
         result = reader.host_restart('claude', self.sid)
         self.assertEqual(result['status'], 'waiting')
@@ -5833,6 +5845,7 @@ class RestartLiveChatTest(unittest.TestCase):
         self.assertEqual(self.calls, [], 'a chat that is answering is never cut off')
 
     def test_a_chat_that_is_stopped_is_started_on_the_newest_version(self):
+        self.need_restart()
         self.owned.discard(self.sid)
         result = reader.host_restart('claude', self.sid)
         self.assertEqual(result['status'], 'restarted')
@@ -5840,17 +5853,20 @@ class RestartLiveChatTest(unittest.TestCase):
         self.assertEqual(self.calls, ['start'])
 
     def test_a_chat_without_a_host_is_left_alone(self):
+        self.need_restart()
         self.enable(enabled=False)
         self.assertEqual(reader.host_restart('claude', self.sid), dict(status='already', reason='not_hosted',
                                                                         generation=reader.RUNTIME_GENERATION, version='1.2.3'))
         self.assertEqual(self.calls, [])
 
     def test_a_chat_moved_to_a_terminal_is_not_restarted(self):
+        self.need_restart()
         reader.host_write(reader.host_paths('claude', self.sid)['owner'], dict(owner='terminal', pid=os.getpid(), at=time.time()))
         self.assertEqual(reader.host_restart('claude', self.sid)['reason'], 'host_handed_over')
         self.assertEqual(self.calls, [])
 
     def test_every_idle_live_chat_is_asked_to_restart(self):
+        self.need_restart()
         other = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef193'
         reader.host_write(reader.host_paths('codex', other)['config'],
                           dict(enabled=True, tmux='restart-codex-chat', provider='codex', sid=other))
@@ -5861,11 +5877,13 @@ class RestartLiveChatTest(unittest.TestCase):
         self.assertFalse(reader.host_restart_requested('codex', other))
 
     def test_every_idle_live_chat_leaves_a_busy_chat_to_finish_its_reply(self):
+        self.need_restart()
         self.busy.add(self.sid)
         result = reader.host_restart_idle()
         self.assertEqual((result['restarted'], result['waiting']), (0, 1))
 
     def test_the_reader_channel_answers_a_restart_request(self):
+        self.need_restart()
         incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(dict(id=11, op='host_restart', provider='claude', sid=self.sid, tmux=self.tmux)) + '\n').encode()), fileno=lambda: 57)
         output = io.StringIO()
         with patch.object(reader, 'host_restart', return_value=dict(status='restarted')) as restart, \
@@ -5878,6 +5896,7 @@ class RestartLiveChatTest(unittest.TestCase):
         restart.assert_called_once_with('claude', self.sid)
 
     def test_the_reader_channel_answers_restart_every_idle_chat(self):
+        self.need_restart()
         incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(dict(id=12, op='host_restart', all=True)) + '\n').encode()), fileno=lambda: 58)
         output = io.StringIO()
         with patch.object(reader, 'host_restart_idle', return_value=dict(status='ok', restarted=2)) as restart, \
@@ -5903,6 +5922,10 @@ class NightlyChatRestartTest(unittest.TestCase):
         sleep = time.sleep
         patch.object(reader.time, 'sleep', side_effect=lambda seconds: sleep(min(seconds, 0.01))).start()
 
+    def need_restart(self):
+        missing = [name for name in RESTART_NAMES if not hasattr(reader, name)]
+        self.assertEqual(missing, [], 'the reader can restart a live chat on the newest version')
+
     def at(self, *values):
         return time.mktime(tuple(values) + (0, 0, -1))
 
@@ -5912,6 +5935,7 @@ class NightlyChatRestartTest(unittest.TestCase):
         reader.host_state_write('claude', self.sid, state)
 
     def test_nightly_restart_is_due_once_after_four_in_the_morning(self):
+        self.need_restart()
         self.mark('2026-11-10')
         self.assertFalse(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 3, 30, 0)))
         self.assertTrue(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 4, 30, 0)))
@@ -5920,6 +5944,7 @@ class NightlyChatRestartTest(unittest.TestCase):
         self.assertTrue(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 12, 4, 30, 0)))
 
     def test_nightly_restart_can_be_switched_off_per_chat(self):
+        self.need_restart()
         config = reader.host_read(reader.host_paths('claude', self.sid)['config'])
         config['nightly'] = False
         reader.host_write(reader.host_paths('claude', self.sid)['config'], config)
@@ -5927,6 +5952,7 @@ class NightlyChatRestartTest(unittest.TestCase):
         self.assertFalse(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 4, 30, 0)))
 
     def test_a_restart_request_is_honoured_once_and_expires(self):
+        self.need_restart()
         now = self.at(2026, 11, 11, 12, 0, 0)
         self.assertFalse(reader.host_restart_requested('claude', self.sid, now=now))
         reader.host_restart_write('claude', self.sid, now=now)
@@ -5934,6 +5960,7 @@ class NightlyChatRestartTest(unittest.TestCase):
         self.assertFalse(reader.host_restart_requested('claude', self.sid, now=now + reader.HOST_RESTART_STALE + 1))
 
     def test_rotating_reloads_the_published_newest_runtime_in_place(self):
+        self.need_restart()
         runtime = self.home / '.multiprompt-runtime'
         runtime.mkdir()
         published = runtime / 'reader.py'
@@ -5953,6 +5980,7 @@ class NightlyChatRestartTest(unittest.TestCase):
         self.assertIsNone(session['agent'])
 
     def test_rotating_waits_instead_of_stopping_when_no_runtime_is_published(self):
+        self.need_restart()
         reader.host_restart_write('claude', self.sid)
         session = dict(pending={}, agent=types.SimpleNamespace(pid=4242), stop=False)
         with patch.object(reader, 'host_runtime_file', return_value=None), \
