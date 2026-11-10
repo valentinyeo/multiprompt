@@ -131,7 +131,8 @@ test('cached tails stop unsolicited backfill; requested older history retains ev
   assert.match(ready, /entry.before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(!has_messages\) entry.history.start else 0/);
   assert.match(ready, /const has_messages = for \(entry.history.blocks.items\)/);
   assert.match(ready, /if \(!disk and !history.more\) entry.loaded_ms/);
-  assert.match(ready, /if \(disk or entry.prepended or entry.before > 0\) @as\(u64, 0\)/);
+  assert.match(ready, /chatHistoryNextDelay\(disk, entry\.prepended, entry\.before,/);
+  assert.match(body(session, 'chatHistoryNextDelay'), /if \(disk or prepended or before > 0\) return 0/);
   assert.match(body(session, 'chatFileFetchThread'), /chat_history.History.decode/);
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
   const changelog = readChangelogEntry('IGSH-815').trim();

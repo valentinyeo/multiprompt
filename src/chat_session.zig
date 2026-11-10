@@ -685,6 +685,27 @@ fn chatFilePollInterval() u64 {
     return 500;
 }
 
+fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, delivery: bool, streaming: bool, unchanged: bool, background: bool) u64 {
+    if (disk or prepended or before > 0) return 0;
+    if (more) return 1000;
+    if (delivery) return 250;
+    if (streaming) return 0;
+    if (unchanged and background) return 4000;
+    return chatFilePollInterval();
+}
+
+test "an unchanged background chat waits four seconds and a live chat stays fast" {
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(true, false, 0, false, false, false, true, true));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, true, 0, false, false, false, false, false));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 1, false, false, false, false, false));
+    try std.testing.expectEqual(@as(u64, 1000), chatHistoryNextDelay(false, false, 0, true, false, false, false, false));
+    try std.testing.expectEqual(@as(u64, 250), chatHistoryNextDelay(false, false, 0, false, true, false, true, true));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 0, false, false, true, true, true));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true));
+    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, true, false));
+    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, false, true));
+}
+
 const ChatHistoryPush = struct { wire: std.ArrayList(u8), id: u32, read_us: u64 };
 
 fn chatHistoryStreamRelease(stream: *ChatHistoryStream) void {
@@ -1284,6 +1305,12 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     }
     chatPerf("parse", parse_start, wire.items.len);
     if (ok) {
+        if (!entry.staged and !entry.incremental and !entry.prepended and !entry.unchanged and entry.history.text.items.len > 0 and
+            std.mem.eql(u16, entry.history.text.items, history.text.items) and std.meta.eql(entry.history.status, history.status))
+        {
+            entry.unchanged = true;
+            history.revision = entry.history.revision;
+        }
         const changed = !entry.staged and history.revision != entry.history.revision;
         entry.cache_dirty = entry.cache_dirty or changed;
         var path_buf: [560]u8 = undefined;
@@ -1464,7 +1491,8 @@ pub fn chatFileOnReady() void {
                 entry.resync = false;
                 debugLog("[chat] resync completed");
             }
-            entry.next = GetTickCount64() + (if (disk or entry.prepended or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else if (entry.stream != null) @as(u64, 0) else chatFilePollInterval());
+            const live_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+            entry.next = GetTickCount64() + chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatDeliveryPending(entry.key.shell_id, false), entry.stream != null, entry.unchanged, entry.key.shell_id != live_id);
             if (belongs_to_active) {
                 active_changed = active_changed or !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
@@ -1485,6 +1513,10 @@ pub fn chatFileOnReady() void {
             }
             if (preview_index) |idx| {
                 if (!std.meta.eql(old_preview.?, @import("agent_second_line.zig").forShell(idx))) preview_changed = true;
+            }
+            if (entry.unchanged) {
+                var drop = history;
+                drop.deinit(std.heap.page_allocator);
             }
         } else if (disk) {
             entry.next = 0;
