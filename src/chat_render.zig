@@ -8437,12 +8437,16 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         const pill_cx = pill.left + @divTrunc(pill.right - pill.left, 2);
         const pill_cy = pill.top + @divTrunc(pill.bottom - pill.top, 2);
         try std.testing.expect(title_layout.has_icon);
+        try std.testing.expectEqual(title_layout.more.bottom - title_layout.more.top, title_layout.inbox.bottom - title_layout.inbox.top);
+        try std.testing.expect(title_layout.inbox.right <= title_layout.more.left);
+        try std.testing.expect(title_layout.inbox.left >= beside_right);
+        try std.testing.expect(@import("drawing.zig").chatTitleInboxHit(@divTrunc(title_layout.inbox.left + title_layout.inbox.right, 2), @divTrunc(title_layout.inbox.top + title_layout.inbox.bottom, 2)));
         try std.testing.expectEqual(fill, scrollProofColor(frame_pixels[@as(usize, @intCast(pill_cy)) * frame_w + @as(usize, @intCast(pill.right - uiScaled(8)))]));
         const outline = scrollProofColor(frame_pixels[@as(usize, @intCast(pill.top)) * frame_w + @as(usize, @intCast(pill_cx))]);
         try std.testing.expect(outline != bg and outline != fill);
 
         const left_band = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.top, pill.left - uiScaled(8), pill.bottom);
-        const right_band = floatProofInk(frame_pixels, frame_w, bg, beside_right, pill.top, title_layout.more.left - uiScaled(8), pill.bottom);
+        const right_band = floatProofInk(frame_pixels, frame_w, bg, beside_right, pill.top, title_layout.inbox.left - uiScaled(8), pill.bottom);
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));

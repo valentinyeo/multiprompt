@@ -743,6 +743,7 @@ pub var g_workspace_hover: ?u8 = null;
 pub var g_sidebar_hover: ?u32 = null;
 pub var g_room_hover: ?HitTarget = null;
 pub var g_inbox_button_hover: bool = false;
+pub var g_chat_title_inbox_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;
 

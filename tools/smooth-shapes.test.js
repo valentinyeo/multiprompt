@@ -34,8 +34,11 @@ test('ISSUE-444 raw curved shapes exist only in the shared smooth fallback', () 
 test('ISSUE-444 inbox background and glyph and Send button use smooth shapes', () => {
   const inbox = body(source('drawing.zig'), 'paintInboxButton');
   assert.doesNotMatch(inbox, /drawNativeLine|\bRoundRect\s*\(/);
-  assert.match(inbox, /canvas\.strokePolyline/);
+  assert.match(inbox, /paintInboxGlyph/);
   assert.match(inbox, /drawRoundRect/);
+  const glyph = body(source('drawing.zig'), 'paintInboxGlyph');
+  assert.doesNotMatch(glyph, /drawNativeLine|drawRoundRect|\bRoundRect\s*\(/);
+  assert.match(glyph, /canvas\.strokePolyline/);
   const send = body(source('window_layout.zig'), 'paintChatButton');
   assert.doesNotMatch(send, /\bRoundRect\s*\(/);
   assert.match(send, /smooth\.zig/);
