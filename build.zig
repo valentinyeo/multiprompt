@@ -668,6 +668,10 @@ pub fn build(b: *std.Build) void {
     instant_chat_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&instant_chat_tests.step);
     vps_test_step.dependOn(&instant_chat_tests.step);
+    const switch_anchor_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch-anchor.test.js" });
+    switch_anchor_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&switch_anchor_tests.step);
+    vps_test_step.dependOn(&switch_anchor_tests.step);
     const one_font_tests = b.addSystemCommand(&.{ "node", "--test", "tools/one-font.test.js", "tools/font-probe.test.js", "tools/chat-font-weight.test.js", "tools/file-picker-font-hook.test.js" });
     test_step.dependOn(&one_font_tests.step);
     vps_test_step.dependOn(&one_font_tests.step);

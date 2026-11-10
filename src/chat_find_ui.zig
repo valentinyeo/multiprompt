@@ -301,6 +301,7 @@ fn jump() void {
         }
         app_state.g_chat_scroll_y = std.math.clamp(render.chatFindY(i, position) - scaled(60), render.chatMinScroll(), render.chatMaxScroll());
         app_state.g_chat_scrolled_up = true;
+        app_state.g_chat_read_hold = false;
         app_state.g_chat_find_jump = false;
         invalidate();
         return;
