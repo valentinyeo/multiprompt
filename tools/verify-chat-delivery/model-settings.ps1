@@ -71,7 +71,7 @@ $plusGraphics = [Drawing.Graphics]::FromImage($plusShot)
 try { $plusGraphics.CopyFromScreen($plusBox.Left, $plusBox.Top, 0, 0, $plusShot.Size) } finally { $plusGraphics.Dispose() }
 $plusRows = [Collections.Generic.List[object]]::new()
 $plusGroups = @(
-    @{first='model_opus'; names=@('model_opus', 'model_sonnet', 'model_haiku')},
+    @{first='model_opus'; names=@('model_opus', 'model_sonnet', 'model_haiku', 'model_fable')},
     @{first='effort_low'; names=@('effort_low', 'effort_medium', 'effort_high')},
     @{first='mode_ask'; names=@('mode_ask', 'mode_edits', 'mode_plan', 'mode_bypass')}
 )

@@ -4163,6 +4163,7 @@ pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
             .opus => "Model: Opus",
             .sonnet => "Model: Sonnet",
             .haiku => "Model: Haiku",
+            .fable => "Model: Fable",
             .unknown => return,
         },
         .effort => |effort| switch (effort) {

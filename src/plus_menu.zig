@@ -16,14 +16,14 @@ const L = startup.L;
 const RGB = startup.RGB;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
+pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
 const ITEM_COUNT = std.meta.tags(Item).len;
 
 const Section = struct { title: ?[]const u8, items: []const Item };
 
 const sections = [_]Section{
     .{ .title = null, .items = &.{.attach} },
-    .{ .title = "Model", .items = &.{ .model_opus, .model_sonnet, .model_haiku } },
+    .{ .title = "Model", .items = &.{ .model_opus, .model_sonnet, .model_haiku, .model_fable } },
     .{ .title = "Effort", .items = &.{ .effort_low, .effort_medium, .effort_high } },
     .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass } },
 };
@@ -40,6 +40,7 @@ fn label(item: Item) []const u8 {
         .model_opus => "Opus",
         .model_sonnet => "Sonnet",
         .model_haiku => "Haiku",
+        .model_fable => "Fable",
         .effort_low => "Low",
         .effort_medium => "Medium",
         .effort_high => "High",
@@ -214,7 +215,7 @@ pub fn isOpen() bool {
 }
 
 fn modelFromStatus(text: []const u16) chat_live.Model {
-    inline for (.{ .{ "opus", chat_live.Model.opus }, .{ "sonnet", chat_live.Model.sonnet }, .{ "haiku", chat_live.Model.haiku } }) |entry| {
+    inline for (.{ .{ "opus", chat_live.Model.opus }, .{ "sonnet", chat_live.Model.sonnet }, .{ "haiku", chat_live.Model.haiku }, .{ "fable", chat_live.Model.fable } }) |entry| {
         const name = entry[0];
         if (text.len >= name.len) {
             var same = true;
@@ -240,12 +241,13 @@ fn snapshot(state: *State) void {
     const session = @import("chat_session.zig");
     const selected: chat_live.Settings = chat_live.settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
     if (session.chatSettingsEligible()) {
-        for ([_]Item{ .model_opus, .model_sonnet, .model_haiku, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
+        for ([_]Item{ .model_opus, .model_sonnet, .model_haiku, .model_fable, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
         const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
         const model = modelOf(selected, status);
         state.active[@intFromEnum(Item.model_opus)] = model == .opus;
         state.active[@intFromEnum(Item.model_sonnet)] = model == .sonnet;
         state.active[@intFromEnum(Item.model_haiku)] = model == .haiku;
+        state.active[@intFromEnum(Item.model_fable)] = model == .fable;
         state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
         state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
         state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
@@ -263,10 +265,12 @@ fn snapshot(state: *State) void {
 test "IGSH-1861 the model falls back to the transcript name and never guesses" {
     const opus = std.unicode.utf8ToUtf16LeStringLiteral("Opus 4.7");
     const raw = std.unicode.utf8ToUtf16LeStringLiteral("sonnet-4-5");
-    const other = std.unicode.utf8ToUtf16LeStringLiteral("Fable 1.0");
+    const fable = std.unicode.utf8ToUtf16LeStringLiteral("Fable 5.2");
+    const other = std.unicode.utf8ToUtf16LeStringLiteral("Mystery 1.0");
     const empty = std.unicode.utf8ToUtf16LeStringLiteral("");
     try std.testing.expectEqual(chat_live.Model.opus, modelOf(.{}, opus));
     try std.testing.expectEqual(chat_live.Model.sonnet, modelOf(.{}, raw));
+    try std.testing.expectEqual(chat_live.Model.fable, modelOf(.{}, fable));
     try std.testing.expectEqual(chat_live.Model.unknown, modelOf(.{}, other));
     try std.testing.expectEqual(chat_live.Model.unknown, modelOf(.{}, empty));
     try std.testing.expectEqual(chat_live.Model.haiku, modelOf(.{ .model = .haiku }, opus));
