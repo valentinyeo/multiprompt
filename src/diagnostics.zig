@@ -10,11 +10,18 @@ const MOVEFILE_REPLACE_EXISTING = @import("win32.zig").MOVEFILE_REPLACE_EXISTING
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const GetLocalTime = @import("win32.zig").GetLocalTime;
+const CreateFileW = @import("win32.zig").CreateFileW;
+const FILE_APPEND_DATA = @import("win32.zig").FILE_APPEND_DATA;
+const FILE_SHARE_READ = @import("win32.zig").FILE_SHARE_READ;
+const FILE_SHARE_WRITE = @import("win32.zig").FILE_SHARE_WRITE;
+const FILE_SHARE_DELETE = @import("win32.zig").FILE_SHARE_DELETE;
+const OPEN_ALWAYS = @import("win32.zig").OPEN_ALWAYS;
+const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
+const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const getInstanceName = @import("startup.zig").getInstanceName;
 const remoteHostForShell = @import("capacity.zig").remoteHostForShell;
 const tmuxHostLongLabel = @import("capacity.zig").tmuxHostLongLabel;
 const getSessionDir = @import("session.zig").getSessionDir;
-const win32OpenAppend = @import("file_io.zig").win32OpenAppend;
 const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const win32MakeDir = @import("file_io.zig").win32MakeDir;
@@ -91,13 +98,38 @@ pub fn syncLog(msg: []const u8) void {
     writeLogLine(msg);
 }
 
+var g_debug_log_file: ?HANDLE = null;
+var g_debug_log_writes: u32 = 0;
+const DEBUG_LOG_SIZE_CHECK_EVERY: u32 = 64;
+
+fn debugLogFile(path: []const u8) ?HANDLE {
+    if (g_debug_log_file) |kept| {
+        g_debug_log_writes +%= 1;
+        if (g_debug_log_writes % DEBUG_LOG_SIZE_CHECK_EVERY != 0) return kept;
+        var size: i64 = 0;
+        if (GetFileSizeEx(kept, &size) != 0 and size >= 0 and !logNeedsRotate(@intCast(size))) return kept;
+        _ = CloseHandle(kept);
+        g_debug_log_file = null;
+    }
+    const h = openAppendRotating(path) orelse return null;
+    g_debug_log_file = h;
+    return h;
+}
+
+fn openSharedAppend(path: []const u8) ?HANDLE {
+    var wide_buf: [520]u16 = undefined;
+    const wide = win32WidePath(&wide_buf, path) orelse return null;
+    const h = CreateFileW(wide.ptr, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    if (h == INVALID_HANDLE_VALUE_PTR) return null;
+    return h;
+}
+
 fn writeLogLine(msg: []const u8) void {
     while (!app_state.g_debug_log_mutex.tryLock()) Sleep(1);
     defer app_state.g_debug_log_mutex.unlock();
     var path_buf: [512]u8 = undefined;
     const path = getLogPath(&path_buf) orelse return;
-    const h = openAppendRotating(path) orelse return;
-    defer _ = CloseHandle(h);
+    const h = debugLogFile(path) orelse return;
     var st: SYSTEMTIME = undefined;
     GetLocalTime(&st);
     var timestamp_buf: [23]u8 = undefined;
@@ -402,7 +434,7 @@ pub fn openSessionAudit() ?HANDLE {
 }
 
 fn openAppendRotating(path: []const u8) ?HANDLE {
-    const h = win32OpenAppend(path) orelse return null;
+    const h = openSharedAppend(path) orelse return null;
     var size: i64 = 0;
     if (GetFileSizeEx(h, &size) != 0 and size >= 0 and logNeedsRotate(@intCast(size))) {
         _ = CloseHandle(h);
@@ -413,7 +445,7 @@ fn openAppendRotating(path: []const u8) ?HANDLE {
         const wide = win32WidePath(&wide_buf, path) orelse return null;
         const old_wide = win32WidePath(&old_wide_buf, old_path) orelse return null;
         _ = MoveFileExW(wide.ptr, old_wide.ptr, MOVEFILE_REPLACE_EXISTING);
-        return win32OpenAppend(path);
+        return openSharedAppend(path);
     }
     return h;
 }
