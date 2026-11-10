@@ -1,1 +1,1 @@
-The app uses less processor time and keeps your fans quieter while detailed logging is on.
+With detailed logging on, the app no longer reopens its log file for every line it writes.
