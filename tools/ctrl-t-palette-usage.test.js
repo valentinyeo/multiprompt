@@ -32,7 +32,7 @@ test("Alt+T starts only the configured program in a fresh workspace tmux session
   assert.match(chooser, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/,
     "a program that is not a Claude workload must still start through the typed tmux command");
   assert.match(spawnAt, /spawnShellWithSession\(\.tmux, session, null, null\)/);
-  assert.match(spawnAt, /ai_agent = if \(claude\) 1 else 0/);
+  assert.match(spawnAt, /if \(hosted\) \|provider\| \{[\s\S]*?app_state\.shells\[ns\]\.ai_agent = provider\.aiAgent\(\)/);
   assert.match(spawnAt, /program\.len > 0 and commandCreatesAgentWorkload\(program\)/);
 
   const build = functionBody("buildWorkspaceTmuxLaunchCmd", "buildWorkspaceTmuxSessionName");

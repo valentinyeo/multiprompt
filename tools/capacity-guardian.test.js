@@ -42,10 +42,10 @@ test("all known new-agent paths use the shared admission gate", () => {
 });
 
 test("neutral Alt+T shells skip admission while opt-in agents use it", () => {
-  const spawnBody = functionBody("spawnWorkspaceTmuxSession", "activeRemoteContextForCodexTmux");
+  const spawnBody = functionBody("spawnWorkspaceSessionAt", "workspaceFolderForNewChat");
   assert.match(spawnBody, /program\.len > 0 and commandCreatesAgentWorkload\(program\) and\s+!capacityAdmitNewAgent/);
   assert.match(spawnBody, /spawnShellWithSession\(\.tmux/);
-  assert.match(spawnBody, /ai_agent = if \(claude\) 1 else 0/);
+  assert.match(spawnBody, /if \(hosted\) \|provider\| \{[\s\S]*?app_state\.shells\[ns\]\.ai_agent = provider\.aiAgent\(\)/);
 });
 
 test("workspace busy counts are diagnostic and never an admission ceiling", () => {
