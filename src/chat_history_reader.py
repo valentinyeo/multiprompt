@@ -5584,6 +5584,7 @@ def start_message_worker(q, source, only_if_work=False):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            message_worker_wake(lock_path)
             return
     bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<message-worker>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
     child = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--message-worker', q['tmux'], q['provider'], q['sid']], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -5591,6 +5592,23 @@ def start_message_worker(q, source, only_if_work=False):
         child.stdin.write(base64.b64encode(source.encode()) + b'\n')
     finally:
         child.stdin.close()
+
+
+def message_worker_wake_path(lock_path):
+    return lock_path.with_suffix('.message-wake')
+
+
+def message_worker_wake(lock_path):
+    try:
+        fd = os.open(message_worker_wake_path(lock_path), os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        return
+    try:
+        os.write(fd, b'\0')
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def superseded_engine():
@@ -5644,7 +5662,14 @@ def message_worker(tmux, provider, sid):
         idle_since = time.time()
         head = None
         stalled_at = time.monotonic()
-        with selectors.DefaultSelector() as selector:
+        wake_path = message_worker_wake_path(lock_path)
+        try:
+            os.mkfifo(wake_path, 0o600)
+        except FileExistsError:
+            pass
+        wake = os.open(wake_path, os.O_RDWR | os.O_NONBLOCK)
+        with closing(os.fdopen(wake, 'rb', buffering=0)) as wake_file, selectors.DefaultSelector() as selector:
+            selector.register(wake_file, selectors.EVENT_READ)
             while True:
                 try:
                     if head is None:
@@ -5690,7 +5715,8 @@ def message_worker(tmux, provider, sid):
                             idle_since = time.time()
                         timeout = max(0.0, deadline - time.time()) if deadline is not None and not held else 1.0
                         timeout = min(timeout, 1.0)
-                    selector.select(timeout)
+                    if selector.select(timeout):
+                        wake_file.read(4096)
                 except MessageWorkerTimeout:
                     with closing(message_store_db(tmux)) as db, db:
                         db.execute('BEGIN IMMEDIATE')
@@ -6903,7 +6929,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 102
+RUNTIME_GENERATION = 103
 
 if __name__ == '__main__':
     import base64 as _base64
