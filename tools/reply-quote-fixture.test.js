@@ -166,6 +166,7 @@ const app_state = struct {
     var g_chat_blocks: [8]Block = @splat(.{});
     var g_chat_block_count: usize = 0;
     var g_chat_scrolled_up = false;
+    var g_chat_read_hold = true;
     var g_chat_scroll_bottom_pending = true;
 };
 var g_reply_jump: ?struct { identity: chat_transcript.Identity, quoted: []u16, before: u64, limit: usize } = null;
@@ -208,6 +209,7 @@ test "load older source, choose nearest preceding original, cancel across sessio
     try std.testing.expect(focused == null);
     try std.testing.expectEqual(@as(usize, 1), requests);
     try std.testing.expect(history_entry.show_older and history_entry.before == 100 and history_entry.next == 0);
+    try std.testing.expect(!app_state.g_chat_read_hold);
     chatReplyResolve();
     try std.testing.expectEqual(@as(usize, 1), requests);
     app_state.g_chat_blocks[0] = .{ .start = 29, .len = 13, .source_offset = 50 };
