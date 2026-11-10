@@ -6530,10 +6530,8 @@ def draft_response(q):
     elif host_pane_claimed(name):
         reason = "host_owns_chat"
     else:
-        target = "=" + name + ":"
-        opened = False
         try:
-            opened = prompt_rows_open(target)
+            target = "=" + name + ":"
             box = box_draft(target)
             if late_draft_echo(name, text):
                 pass
@@ -6548,8 +6546,6 @@ def draft_response(q):
                     draft_note(name, typed="")
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_draft_failed"
-        finally:
-            prompt_rows_close(target, opened)
     status = "error" if reason else "ok"
     return f"@mp\t{rid}\tdraft\t{status}\t{reason or '-'}\t0\n{END}\n"
 
