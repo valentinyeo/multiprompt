@@ -9,6 +9,8 @@ const start = source.indexOf('fn writeLogLine(');
 const logger = source.slice(start, source.indexOf('\n}', start) + 2);
 const lineStart = source.indexOf('fn buildDebugLine(');
 const lineBuilder = source.slice(lineStart, source.indexOf('\n}', lineStart) + 2);
+const keptStart = source.indexOf('var g_debug_log_file: ?HANDLE = null;');
+const keptHandle = keptStart < 0 ? '' : source.slice(keptStart, source.indexOf('\n}', source.indexOf('fn debugLogFile(', keptStart)) + 2);
 const mutexStart = source.indexOf('const SpinMutex = struct {');
 const mutex = source.slice(mutexStart, source.indexOf('\n};', mutexStart) + 3);
 
@@ -38,7 +40,11 @@ fn formatLogTimestamp(buf: []u8, _: SYSTEMTIME) ?[]const u8 {
     return buf[0..ts.len];
 }
 fn openAppendRotating(p: []const u8) ?HANDLE { return win32OpenAppend(p); }
+fn GetFileSizeEx(_: HANDLE, size: *i64) i32 { size.* = 0; return 1; }
+fn logNeedsRotate(_: u64) bool { return false; }
+${keptHandle}
 var opened: std.atomic.Value(bool) = .init(false);
+var opens: std.atomic.Value(u32) = .init(0);
 var attempts: std.atomic.Value(u32) = .init(0);
 var records: std.atomic.Value(u32) = .init(0);
 var ready: std.atomic.Value(u32) = .init(0);
@@ -48,6 +54,7 @@ fn getLogPath(_: *[512]u8) ?[]const u8 { return "debug.log"; }
 fn Sleep(_: u32) void { std.atomic.spinLoopHint(); }
 fn win32OpenAppend(_: []const u8) ?HANDLE {
     if (opened.swap(true, .acq_rel)) return null;
+    _ = opens.fetchAdd(1, .monotonic);
     for (0..10000) |_| std.atomic.spinLoopHint();
     return 1;
 }
@@ -71,6 +78,7 @@ test "concurrent exclusive appends retain every paint record" {
     for (threads) |thread| thread.join();
     try std.testing.expectEqual(@as(u32, 800), attempts.load(.acquire));
     try std.testing.expectEqual(attempts.load(.acquire), records.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 1), opens.load(.acquire));
 }
 `;
     const file = path.join(dir, 'test.zig');

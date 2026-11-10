@@ -6,9 +6,6 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const stubs = {
-  'app_state.zig': `const std = @import("std");
-pub var g_debug_log_mutex: std.Thread.Mutex = .{};
-`,
   'win32.zig': `pub const HANDLE = ?*anyopaque;
 pub const DWORD = u32;
 pub const BOOL = i32;
@@ -79,6 +76,10 @@ test('IGSH-1907 writing the debug log does not reopen the file for every line', 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-handle-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.copyFileSync(path.join(__dirname, '../src/diagnostics.zig'), path.join(dir, 'diagnostics.zig'));
+  const appState = fs.readFileSync(path.join(__dirname, '../src/app_state.zig'), 'utf8');
+  const mutexStart = appState.indexOf('pub const SpinMutex = struct {');
+  const mutex = appState.slice(mutexStart, appState.indexOf('\n};', mutexStart) + 3);
+  fs.writeFileSync(path.join(dir, 'app_state.zig'), `const std = @import("std");\n${mutex}\npub var g_debug_log_mutex: SpinMutex = .{};\n`);
   for (const [name, text] of Object.entries(stubs)) fs.writeFileSync(path.join(dir, name), text);
   const run = spawnSync(process.env.ZIG || 'zig', ['test', 'harness.zig'], {
     cwd: dir, encoding: 'utf8', timeout: 240000, maxBuffer: 16 * 1024 * 1024,
