@@ -285,6 +285,16 @@ pub fn inboxPublishesShell(shell: *const Shell) bool {
     return !shell.muted and !shell.inbox_excluded and (!shell.inbox_archived or shell.needs_attention);
 }
 
+pub fn unreadCount() u32 {
+    var count: u32 = 0;
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.needs_attention and inboxPublishesShell(shell) and
+            (!app_state.g_single_window or !app_state.g_ws_snoozed[shell.workspace])) count += 1;
+    }
+    return count;
+}
+
 pub fn toggleMuted(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     app_state.shells[idx].muted = !app_state.shells[idx].muted;
@@ -2251,4 +2261,28 @@ test "ISSUE-423 hidden selection and keyboard cycling follow visible split order
         try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
         app_state.g_unread_only = false;
     }
+}
+
+test "IGSH-1933 unread count skips muted, excluded and archived-read sessions" {
+    const prior_count = app_state.shell_count;
+    const prior_single = app_state.g_single_window;
+    const prior = app_state.shells[0..3].*;
+    defer {
+        app_state.shells[0..3].* = prior;
+        app_state.shell_count = prior_count;
+        app_state.g_single_window = prior_single;
+    }
+    app_state.g_single_window = false;
+    app_state.shell_count = 3;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[1] = empty_shell;
+    app_state.shells[2] = empty_shell;
+    app_state.shells[0].needs_attention = true;
+    app_state.shells[1].needs_attention = true;
+    app_state.shells[1].muted = true;
+    app_state.shells[2].needs_attention = true;
+    app_state.shells[2].inbox_archived = true;
+    try std.testing.expectEqual(@as(u32, 2), unreadCount());
+    app_state.shells[2].needs_attention = false;
+    try std.testing.expectEqual(@as(u32, 1), unreadCount());
 }

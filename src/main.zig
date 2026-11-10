@@ -1167,6 +1167,7 @@ const cycleSidebarStatusCard = @import("telemetry_panel.zig").cycleSidebarStatus
 const selectedChangelogTicket = @import("changelog.zig").selectedChangelogTicket;
 const firstChangelogSelection = @import("changelog.zig").firstChangelogSelection;
 const chatTitleLayout = @import("drawing.zig").chatTitleLayout;
+const chatTitleInboxHit = @import("drawing.zig").chatTitleInboxHit;
 const resetPaintBackbuffer = @import("drawing.zig").resetPaintBackbuffer;
 const ensurePaintBackbuffer = @import("drawing.zig").ensurePaintBackbuffer;
 const resetFontCache = @import("drawing.zig").resetFontCache;
@@ -1896,6 +1897,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (@import("chat_composer.zig").chatDictationClick(mx, my)) return 0;
+                if (chatTitleInboxHit(mx, my)) {
+                    openInbox(hwnd);
+                    return 0;
+                }
                 if (chatTitleLayout()) |title| {
                     const more = title.more;
                     if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
@@ -2348,7 +2353,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetCursor(app_state.g_cursor_sizewe);
                     return 1;
                 }
-                if ((app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(cursor_pt.x, cursor_pt.y) != 0) or inboxButtonHitTest(cursor_pt.x, cursor_pt.y)) {
+                if ((app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(cursor_pt.x, cursor_pt.y) != 0) or inboxButtonHitTest(cursor_pt.x, cursor_pt.y) or chatTitleInboxHit(cursor_pt.x, cursor_pt.y)) {
                     _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                     return 1;
                 }
@@ -2381,6 +2386,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (app_state.g_inbox_button_hover) {
                 app_state.g_inbox_button_hover = false;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (app_state.g_chat_title_inbox_hover) {
+                app_state.g_chat_title_inbox_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_chat_stop_hover) {
@@ -2449,6 +2458,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (hovered) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            }
+            const title_inbox_hover = chatViewOwnsInput() and chatTitleInboxHit(GET_X(lp), GET_Y(lp));
+            if (title_inbox_hover != app_state.g_chat_title_inbox_hover) {
+                app_state.g_chat_title_inbox_hover = title_inbox_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (title_inbox_hover) {
                 var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                 _ = TrackMouseEvent(&tracking);
             }
