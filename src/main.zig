@@ -1287,6 +1287,7 @@ comptime {
         _ = @import("vps.zig");
         _ = @import("chat_composer.zig");
         _ = @import("chat_mention.zig");
+        _ = @import("chat_names.zig");
         _ = @import("chat_capture.zig");
         _ = @import("console_snapshot.zig");
         _ = @import("chat_session.zig");

@@ -14,5 +14,6 @@
 - [Browser CLI selftest](browser/zsb-selftest.md)
 - [Keyboard shortcuts](operations/keyboard-shortcuts.md)
 - [Open a server runner](operations/spawn-multibot-session.md)
+- [Chats talk to each other](operations/chats-talk.md)
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for build and test instructions. Source and executable tests are authoritative when documentation differs.
