@@ -145,6 +145,82 @@ pub fn movedReply(body: []const u8) bool {
     return std.mem.indexOf(u8, body, "\"status\":\"moved\"") != null or std.mem.indexOf(u8, body, "\"status\":\"already\"") != null;
 }
 
+fn safeProvider(value: []const u8) bool {
+    for ([_][]const u8{ "claude", "codex", "pi", "hax", "cursor" }) |name| {
+        if (std.mem.eql(u8, value, name)) return true;
+    }
+    return false;
+}
+
+pub fn restartRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, tmux: []const u8) ?[]const u8 {
+    if (!safeSessionId(sid) or !safeName(tmux) or !safeProvider(provider)) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"host_restart\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"tmux\":\"{s}\"}}", .{ id, host, provider, sid, tmux }) catch null;
+}
+
+pub fn restartAllRequest(out: []u8, id: u32, host: u8) ?[]const u8 {
+    return std.fmt.bufPrint(out, "{{\"op\":\"host_restart\",\"id\":{d},\"host\":{d},\"all\":true}}", .{ id, host }) catch null;
+}
+
+pub fn restartedReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"restarted\"") != null;
+}
+
+pub fn restartWaitingReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"waiting\"") != null;
+}
+
+pub fn restartingReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"restarting\"") != null;
+}
+
+pub fn restartRefusedReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"refused\"") != null or std.mem.indexOf(u8, body, "\"status\":\"error\"") != null or std.mem.indexOf(u8, body, "\"status\":\"already\"") != null;
+}
+
+pub fn restartAllAnswered(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"ok\"") != null;
+}
+
+pub fn restartAllWaiting(body: []const u8) bool {
+    if (std.mem.indexOf(u8, body, "\"waiting\":") == null) return false;
+    return std.mem.indexOf(u8, body, "\"waiting\":0") == null;
+}
+
+pub fn restartAllNothing(body: []const u8) bool {
+    return restartAllAnswered(body) and std.mem.indexOf(u8, body, "\"restarted\":0") != null;
+}
+
+test "IGSH-1921 a restart asks the reader for one chat or for every idle chat" {
+    var out: [512]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":7,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
+        restartRequest(&out, 7, 1, "claude", sid, "live-abc") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"provider\":\"cursor\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
+        restartRequest(&out, 9, 0, "cursor", sid, "live-abc") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"all\":true}",
+        restartAllRequest(&out, 9, 0) orelse return error.TestUnexpectedResult);
+    try std.testing.expect(restartRequest(&out, 9, 0, "claude", "short", "live-abc") == null);
+    try std.testing.expect(restartRequest(&out, 9, 0, "claude", sid, "live-a;b") == null);
+    try std.testing.expect(restartRequest(&out, 9, 0, "bash", sid, "live-abc") == null);
+}
+
+test "IGSH-1921 a restart counts as done once the reader says the host changed" {
+    try std.testing.expect(restartedReply("{\"status\":\"restarted\",\"generation\":109}"));
+    try std.testing.expect(!restartedReply("{\"status\":\"waiting\",\"reason\":\"chat_busy\"}"));
+    try std.testing.expect(restartWaitingReply("{\"status\":\"waiting\",\"reason\":\"chat_busy\"}"));
+    try std.testing.expect(!restartWaitingReply("{\"status\":\"restarting\"}"));
+    try std.testing.expect(restartingReply("{\"status\":\"restarting\"}"));
+    try std.testing.expect(!restartingReply("{\"status\":\"restarted\"}"));
+    try std.testing.expect(restartRefusedReply("{\"status\":\"already\",\"reason\":\"not_hosted\"}"));
+    try std.testing.expect(!restartRefusedReply("{\"status\":\"restarted\"}"));
+    try std.testing.expect(!restartWaitingReply(""));
+    try std.testing.expect(restartAllAnswered("{\"status\":\"ok\",\"restarted\":2,\"waiting\":0}"));
+    try std.testing.expect(restartAllWaiting("{\"status\":\"ok\",\"restarted\":1,\"waiting\":1}"));
+    try std.testing.expect(!restartAllWaiting("{\"status\":\"ok\",\"restarted\":2,\"waiting\":0}"));
+    try std.testing.expect(restartAllNothing("{\"status\":\"ok\",\"restarted\":0,\"waiting\":0}"));
+    try std.testing.expect(!restartAllNothing("{\"status\":\"ok\",\"restarted\":1,\"waiting\":0}"));
+}
+
 test "IGSH-1653 synced named live chats restore their identity and chat view" {
     const Session = struct {
         claude_sid: [40]u8 = @splat(0),

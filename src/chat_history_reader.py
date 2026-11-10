@@ -2496,6 +2496,9 @@ HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', '
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
 HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
 HOST_IDLE_SECONDS = 1800
+HOST_NIGHTLY_HOUR = 4
+HOST_RESTART_STALE = 6 * 60 * 60
+HOST_RESTART_WAIT = 2.0
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
@@ -2622,6 +2625,7 @@ def host_paths(provider, sid):
     return dict(root=root, key=key, config=root / (key + ".config.json"), lock=root / (key + ".owner.lock"),
                 owner=root / (key + ".owner.json"), socket=host_socket_root() / (key + ".sock"),
                 state=root / (key + ".state.json"), backoff=root / (key + ".backoff"),
+                restart=root / (key + ".restart.json"),
                 log=root / (key + ".events.log"), errors=root / (key + ".stderr.log"))
 
 
@@ -4942,6 +4946,7 @@ def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0)
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
+    host_nightly_mark(provider, sid, session)
     if provider == "claude":
         session["settings"] = host_settings(provider, sid)
         session["starting_settings"] = dict(session["settings"])
@@ -4972,8 +4977,12 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 session["state"]["agent_pid"] = agent.pid
                 host_state_write(provider, sid, session["state"])
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+            idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
+            if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
+                if host_rotate(provider, sid, session, agent):
+                    return
             idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
-            if session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
+            if idle and idle_expired:
                 host_log(provider, sid, "idle_stop")
                 return
             for key, _ in selector.select(host_flush_timeout(session)):
@@ -5084,6 +5093,137 @@ def host_main(provider, sid):
         host_log(provider, sid, "stop")
 
 
+def host_nightly_day(now=None):
+    return time.strftime("%Y-%m-%d", time.localtime(time.time() if now is None else now))
+
+
+def host_nightly_mark(provider, sid, session):
+    if time.localtime().tm_hour < HOST_NIGHTLY_HOUR:
+        return
+    if session["state"].get("nightly_day") == host_nightly_day():
+        return
+    session["state"]["nightly_day"] = host_nightly_day()
+    host_state_write(provider, sid, session["state"])
+
+
+def host_nightly_due(provider, sid, now=None):
+    config = host_config(provider, sid) or {}
+    if config.get("nightly") is False:
+        return False
+    now = time.time() if now is None else now
+    if time.localtime(now).tm_hour < HOST_NIGHTLY_HOUR:
+        return False
+    return host_session_state(provider, sid).get("nightly_day") != host_nightly_day(now)
+
+
+def host_restart_requested(provider, sid, now=None):
+    saved = host_read(host_paths(provider, sid)["restart"])
+    if not isinstance(saved, dict) or type(saved.get("at")) not in (int, float):
+        return False
+    now = time.time() if now is None else now
+    return 0 <= now - saved["at"] <= HOST_RESTART_STALE
+
+
+def host_restart_write(provider, sid, now=None):
+    host_write(host_paths(provider, sid)["restart"], dict(at=time.time() if now is None else now))
+
+
+def host_restart_clear(provider, sid):
+    try:
+        host_paths(provider, sid)["restart"].unlink()
+    except OSError:
+        pass
+
+
+def host_version():
+    return dict(generation=RUNTIME_GENERATION, version=globals().get("MULTIBOT_APP_VERSION", ""))
+
+
+def host_published_runtime():
+    candidate = HOME / HOST_RUNTIME_TOOLS / "reader.py"
+    try:
+        if candidate.is_file():
+            return str(candidate)
+    except OSError:
+        pass
+    return host_runtime_file()
+
+
+def host_rotate(provider, sid, session, agent):
+    runtime = host_published_runtime()
+    if not runtime:
+        host_log(provider, sid, "rotate_unavailable")
+        host_restart_clear(provider, sid)
+        return False
+    host_restart_clear(provider, sid)
+    state = host_session_state(provider, sid)
+    state["nightly_day"] = host_nightly_day()
+    host_state_write(provider, sid, state)
+    host_flush(provider, sid, host_chat_name(provider, sid), session)
+    host_agent_stop(agent)
+    session["agent"] = None
+    host_log(provider, sid, "rotate", dict(runtime=runtime, generation=RUNTIME_GENERATION))
+    try:
+        os.execv(sys.executable, [sys.executable, "-u", runtime, "--agent-host", provider, sid])
+    except OSError:
+        host_log(provider, sid, "rotate_failed")
+    return True
+
+
+def host_restart(provider, sid, confirm=True):
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    if not host_enabled(provider, sid):
+        return dict(status="already", reason="not_hosted", **host_version())
+    if host_handed_over(provider, sid):
+        return dict(status="already", reason="host_handed_over", **host_version())
+    if not host_owned(provider, sid):
+        started = host_start(provider, sid)
+        status = "restarted" if started.get("status") in ("started", "already") else "error"
+        return dict(status=status, start=started.get("status"), reason=started.get("reason"), **host_version())
+    ping = host_request(provider, sid, dict(op="ping"), timeout=2)
+    if ping.get("status") == "ok" and (ping.get("inflight") is not None or ping.get("parked")):
+        host_restart_write(provider, sid)
+        host_log(provider, sid, "restart_waiting")
+        return dict(status="waiting", reason="chat_busy", **host_version())
+    before = host_session_state(provider, sid).get("started")
+    host_restart_write(provider, sid)
+    host_log(provider, sid, "restart_now")
+    if not confirm:
+        return dict(status="restarting", **host_version())
+    deadline = time.time() + HOST_RESTART_WAIT
+    while time.time() < deadline:
+        state = host_session_state(provider, sid)
+        if state.get("started") != before and host_owned(provider, sid):
+            return dict(status="restarted", **host_version())
+        time.sleep(0.1)
+    return dict(status="restarting", **host_version())
+
+
+def host_restart_idle():
+    restarted = waiting = skipped = errors = 0
+    try:
+        configs = sorted((HOME / ".local/state/multiprompt/agent-host").glob("*.config.json"))
+    except OSError:
+        configs = []
+    for path in configs:
+        config = host_read(path)
+        if not isinstance(config, dict) or config.get("enabled") is not True:
+            continue
+        provider, sid = config.get("provider"), config.get("sid")
+        if not host_identity(provider, sid) or not host_owned(provider, sid):
+            skipped += 1
+            continue
+        result = host_restart(provider, sid, confirm=False)
+        if result.get("status") in ("restarted", "restarting"):
+            restarted += 1
+        elif result.get("status") == "waiting":
+            waiting += 1
+        else:
+            errors += 1
+    return dict(status="ok", restarted=restarted, waiting=waiting, skipped=skipped, errors=errors, **host_version())
+
+
 def host_status(provider, sid):
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
@@ -5107,9 +5247,11 @@ def host_cli(argv):
         return dict(chats=host_chats())
     if len(argv) == 2 and argv[0] == "connect":
         return host_connect(argv[1])
-    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send"):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send", "restart"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
+    if command == "restart" and rest == ["idle"]:
+        return host_restart_idle()
     if len(rest) < 2:
         return dict(status="error", reason="missing_identity")
     provider, sid = rest[0], rest[1]
@@ -5175,6 +5317,8 @@ def host_cli(argv):
         return host_terminal(provider, sid, tmux)
     if command == "resume":
         return host_resume(provider, sid, tmux, folder, mode)
+    if command == "restart":
+        return host_restart(provider, sid)
     if command == "send":
         words = []
         index = 2
@@ -6916,6 +7060,10 @@ def serve_request(line, source, subscriptions, lock):
         if query.get("op") == "host_resume":
             serve_print(dict(id=rid, host_resume=host_resume(query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))))
             return
+        if query.get("op") == "host_restart":
+            result = host_restart_idle() if query.get("all") is True else host_restart(query.get("provider"), query.get("sid"))
+            serve_print(dict(id=rid, message_protocol=1, result=result))
+            return
         if query.get("op") == "events_subscribe":
             subscription = events_subscription(query)
             page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"])
@@ -7035,7 +7183,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 108
+RUNTIME_GENERATION = 110
 
 if __name__ == '__main__':
     import base64 as _base64
