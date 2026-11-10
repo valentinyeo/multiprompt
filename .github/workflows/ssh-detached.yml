@@ -1,0 +1,21 @@
+name: SSH helpers without consoles
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ssh-detached.yml'
+      - 'tools/ssh-detached/**'
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Real Windows OpenSSH runs detached with no console
+        shell: pwsh
+        run: ./tools/ssh-detached/proof.ps1

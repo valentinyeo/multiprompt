@@ -60,6 +60,8 @@ const TMUX_HOST_INNE = @import("app_state.zig").TMUX_HOST_INNE;
 const sshLoaderFailed = @import("console.zig").sshLoaderFailed;
 const sshSpawnFailed = @import("console.zig").sshSpawnFailed;
 const appendSshExe = @import("console.zig").appendSshExe;
+const SSH_HELPER_FLAGS = @import("console.zig").SSH_HELPER_FLAGS;
+const chat_transport = @import("chat_transport.zig");
 const tmuxSshTarget = @import("console.zig").tmuxSshTarget;
 const appendWideAscii = @import("console.zig").appendWideAscii;
 const asciiEqualsCI = @import("command_palette.zig").asciiEqualsCI;
@@ -163,9 +165,8 @@ pub fn startFaviconFetch(shell_idx: u32) void {
     si.hStdInput = null;
 
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    const CREATE_NO_WINDOW: DWORD = 0x08000000;
     app_state.g_favicon_fetching = true;
-    const ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 1, CREATE_NO_WINDOW, null, null, &si, &pi);
+    const ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 1, SSH_HELPER_FLAGS, null, null, &si, &pi);
     _ = CloseHandle(write_pipe);
 
     if (ok == 0) {
@@ -349,15 +350,15 @@ pub fn closeAllVpsPersistentChannels() void {
     for (0..app_state.g_vps_channels.len) |h| closeVpsChannelUnlocked(@intCast(h));
 }
 
+const VPS_CHANNEL_LOOP_SCRIPT = "while IFS= read -r _; do { " ++ VPS_PROBE_SCRIPT ++ VPS_TMUX_LIST_SCRIPT ++ "; } </dev/null; printf '@@ZS_END@@\\n'; done";
+const AC_SERVE_SCRIPT = "python3 ~/.local/share/zigshell/mp_complete.py --serve";
+
 fn buildVpsChannelLoopCommand(host: u8, buf: *[2048]u16) bool {
     var pos: usize = 0;
     if (!appendSshExe(buf, &pos)) return false;
     if (!appendWideAscii(buf, &pos, "-T -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=5 ")) return false;
     if (!appendWideAscii(buf, &pos, tmuxSshTarget(host))) return false;
-    if (!appendWideAscii(buf, &pos, " \"while IFS= read -r _; do { ")) return false;
-    if (!appendWideAscii(buf, &pos, VPS_PROBE_SCRIPT)) return false;
-    if (!appendWideAscii(buf, &pos, VPS_TMUX_LIST_SCRIPT)) return false;
-    if (!appendWideAscii(buf, &pos, "; } </dev/null; printf '@@ZS_END@@\\n'; done\"")) return false;
+    if (!appendWideAscii(buf, &pos, " \"" ++ VPS_CHANNEL_LOOP_SCRIPT ++ "\"")) return false;
     if (pos >= buf.len) return false;
     buf[pos] = 0;
     return true;
@@ -396,8 +397,7 @@ fn spawnPersistentChannelUnlocked(host: u8, ch: *VpsChannel, ac: bool) void {
     si.hStdOutput = child_stdout_write;
     si.hStdError = child_stdout_write;
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    const CREATE_NO_WINDOW: DWORD = 0x08000000;
-    const ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 1, CREATE_NO_WINDOW, null, null, &si, &pi);
+    const ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 1, SSH_HELPER_FLAGS, null, null, &si, &pi);
     _ = CloseHandle(child_stdin_read);
     _ = CloseHandle(child_stdout_write);
     if (ok == 0) {
@@ -448,7 +448,7 @@ fn buildAcChannelCommand(host: u8, buf: *[2048]u16) bool {
     if (!appendSshExe(buf, &pos)) return false;
     if (!appendWideAscii(buf, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 ")) return false;
     if (!appendWideAscii(buf, &pos, tmuxSshTarget(host))) return false;
-    if (!appendWideAscii(buf, &pos, " python3 ~/.local/share/zigshell/mp_complete.py --serve")) return false;
+    if (!appendWideAscii(buf, &pos, " " ++ AC_SERVE_SCRIPT)) return false;
     buf[pos] = 0;
     return true;
 }
@@ -464,6 +464,11 @@ pub fn fetchAcPersistent(host: u8, request: []const u8, buf: []u8) ?usize {
     defer if (app_state.g_ac_channels_close_pending.swap(false, .acq_rel)) {
         for (0..app_state.g_ac_channels.len) |h| closeAcChannelUnlocked(@intCast(h));
     };
+    if (app_state.g_shared_server_connection) {
+        if (app_state.g_ac_channels[host].alive) closeAcChannelUnlocked(host);
+        const n = sharedChannelRequest(&g_shared_ac_channels[host], host, AC_SERVE_SCRIPT, std.mem.trimEnd(u8, request, "\n"), buf, AC_SENTINEL) orelse return null;
+        return n + AC_SENTINEL.len;
+    }
     const ch = &app_state.g_ac_channels[host];
     if (!ch.alive) spawnAcChannelUnlocked(host);
     if (!ch.alive) return null;
@@ -477,6 +482,31 @@ pub fn fetchAcPersistent(host: u8, request: []const u8, buf: []u8) ?usize {
         return null;
     };
     return n + AC_SENTINEL.len;
+}
+
+var g_shared_poll_channels: [3]?*chat_transport.Channel = @splat(null);
+var g_shared_ac_channels: [3]?*chat_transport.Channel = @splat(null);
+
+fn sharedChannelRequest(slot: *?*chat_transport.Channel, host: u8, command: []const u8, request: []const u8, buf: []u8, sentinel: []const u8) ?usize {
+    if (slot.* == null) slot.* = chat_transport.openCommand(host, command);
+    const channel = slot.* orelse return null;
+    if (chat_transport.write(channel, request)) {
+        const deadline = GetTickCount64() + VPS_CHANNEL_READ_TIMEOUT_MS;
+        var total: usize = 0;
+        while (GetTickCount64() < deadline and total < buf.len) {
+            const n = chat_transport.read(channel, buf[total..], false) orelse break;
+            if (n == 0) {
+                Sleep(20);
+                continue;
+            }
+            total += n;
+            if (std.mem.indexOf(u8, buf[0..total], sentinel)) |idx| return idx;
+        }
+    }
+    chat_transport.close(channel);
+    slot.* = null;
+    debugLog2("shared-helper: request failed host=", tmuxHostLongLabel(host));
+    return null;
 }
 
 fn readVpsChannelUntilSentinel(h: HANDLE, buf: []u8, sentinel: []const u8) ?usize {
@@ -506,6 +536,10 @@ fn fetchHostPersistent(host: u8, buf: []u8) ?usize {
         for (0..app_state.g_vps_channels.len) |h| closeVpsChannelUnlocked(@intCast(h));
     };
 
+    if (app_state.g_shared_server_connection) {
+        if (app_state.g_vps_channels[host].alive) closeVpsChannelUnlocked(host);
+        return sharedChannelRequest(&g_shared_poll_channels[host], host, VPS_CHANNEL_LOOP_SCRIPT, "", buf, VPS_CHANNEL_SENTINEL);
+    }
     const ch = &app_state.g_vps_channels[host];
     if (!ch.alive) spawnVpsChannelUnlocked(host);
     if (!ch.alive) return null;
@@ -593,14 +627,13 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
     };
     cmd_buf[pos] = 0;
 
-    const CREATE_NO_WINDOW: DWORD = 0x08000000;
     const ok = CreateProcessW(
         null,
         @ptrCast(&cmd_buf),
         null,
         null,
         1,
-        CREATE_NO_WINDOW,
+        SSH_HELPER_FLAGS,
         null,
         null,
         &si,
@@ -822,7 +855,11 @@ fn parseHostOutputIntoCache(host: u8, buf: []const u8, cache_count: *u32) u32 {
     return added;
 }
 
+var g_poll_failures: [3]u8 = @splat(0);
+var g_poll_retry_at: [3]u64 = @splat(0);
+
 fn fetchHostIntoCache(host: u8, cmd_str: []const u8, cache_count: *u32) void {
+    if (host >= g_poll_retry_at.len or GetTickCount64() < g_poll_retry_at[host]) return;
     var buf: [131072]u8 = undefined;
     var total: usize = 0;
     var via_persistent = false;
@@ -834,12 +871,16 @@ fn fetchHostIntoCache(host: u8, cmd_str: []const u8, cache_count: *u32) void {
     }
     if (total == 0) {
         via_persistent = false;
-        total = sshOneShotCapture(cmd_str, &buf);
+        const result = sshOneShotCaptureInput(cmd_str, &buf, null, 20000);
+        if (result.success) total = result.len;
     }
     if (total == 0) {
+        g_poll_retry_at[host] = GetTickCount64() + @import("console.zig").tunnelRetryMs(g_poll_failures[host]);
+        if (g_poll_failures[host] < 4) g_poll_failures[host] += 1;
         debugLog2("fetchHostIntoCache: no output host=", tmuxHostLongLabel(host));
         return;
     }
+    g_poll_failures[host] = 0;
 
     const added = parseHostOutputIntoCache(host, buf[0..total], cache_count);
 

@@ -1220,6 +1220,8 @@ pub fn sshSpawnFailed() void {
     _ = resolveSshPath(true);
 }
 
+pub const SSH_HELPER_FLAGS: u32 = 0x00000008;
+
 pub fn appendSshExe(buf: anytype, pos: *usize) bool {
     if (@import("launch_cache.zig").pending or (app_state.g_main_hwnd != null and @import("win32.zig").GetCurrentThreadId() == GetWindowThreadProcessId(app_state.g_main_hwnd, null))) {
         if (!app_state.g_ssh_mutex.tryLock()) return false;
@@ -1381,7 +1383,7 @@ fn tunnelModeAfterFailure(mode: u32, failures: u8) u32 {
     return if (mode >= 3 or (mode == 2 and failures >= 2)) 0 else mode;
 }
 
-fn tunnelRetryMs(failures: u8) u64 {
+pub fn tunnelRetryMs(failures: u8) u64 {
     return switch (failures) {
         0 => 5000,
         1 => 15_000,
@@ -1471,8 +1473,7 @@ fn maintainTunnelKeeper(host: u8) void {
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    const CREATE_NO_WINDOW_FLAG: DWORD = 0x08000000;
-    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 0, CREATE_NO_WINDOW_FLAG, null, null, &si, &pi) == 0) {
+    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 0, SSH_HELPER_FLAGS, null, null, &si, &pi) == 0) {
         app_state.g_tunnel_relay_mode[host_idx].store(tunnelModeAfterFailure(mode, app_state.g_tunnel_keeper_failures[host_idx]), .release);
         sshSpawnFailed();
         debugLog2("tunnel-keeper: spawn failed host=", tmuxHostLongLabel(host));
