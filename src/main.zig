@@ -702,6 +702,8 @@ const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
 const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
+const SEARCH_CHAT_RESTART_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_OFFSET;
+const SEARCH_CHAT_RESTART_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_ALL_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -5379,6 +5381,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     @import("chat_session.zig").chatResync();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_CHAT_RESTART_OFFSET or target == SEARCH_CHAT_RESTART_ALL_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = @import("command_palette.zig").startRestartChat(target == SEARCH_CHAT_RESTART_ALL_OFFSET);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

@@ -5760,6 +5760,208 @@ class MoveToTerminalTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class RestartLiveChatTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef192'
+    tmux = 'restart-fixture-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MULTIBOT_APP_VERSION', '1.2.3', create=True).start()
+        self.enable()
+        self.owned = {self.sid}
+        self.busy = set()
+        self.started = [1.0]
+        self.rotated = [False]
+        self.calls = []
+        patch.object(reader, 'host_owned', side_effect=lambda provider, sid: sid in self.owned).start()
+        patch.object(reader, 'host_request', side_effect=self.ping).start()
+        patch.object(reader, 'host_session_state', side_effect=self.state).start()
+        patch.object(reader, 'host_start', side_effect=self.start).start()
+        patch.object(reader, 'host_stop', side_effect=self.stop).start()
+
+    def enable(self, **extra):
+        config = dict(enabled=True, tmux=self.tmux, provider='claude', sid=self.sid)
+        config.update(extra)
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], config)
+
+    def ping(self, provider, sid, payload, timeout=None):
+        if payload.get('op') == 'ping':
+            return dict(status='ok', inflight='msg-1' if sid in self.busy else None, parked=0)
+        return dict(status='ok')
+
+    def state(self, provider, sid):
+        if not self.rotated[0] and reader.host_restart_requested(provider, sid):
+            self.rotated[0] = True
+            self.started[0] += 1
+        return dict(started=self.started[0])
+
+    def start(self, provider, sid, source=None):
+        self.calls.append('start')
+        self.owned.add(sid)
+        self.started[0] += 1
+        return dict(status='started')
+
+    def stop(self, provider, sid, force=False):
+        self.calls.append('stop')
+        self.owned.discard(sid)
+        return dict(status='stopped')
+
+    def test_an_idle_chat_is_restarted_once_the_host_reports_the_new_process(self):
+        result = reader.host_restart('claude', self.sid)
+        self.assertEqual(result['status'], 'restarted')
+        self.assertEqual(result['generation'], reader.RUNTIME_GENERATION)
+        self.assertEqual(result['version'], '1.2.3')
+        self.assertEqual(self.calls, [], 'the host changes itself instead of being killed and respawned')
+
+    def test_a_restart_that_has_not_reloaded_yet_says_it_is_still_restarting(self):
+        self.rotated[0] = True
+        with patch.object(reader, 'HOST_RESTART_WAIT', 0.05):
+            result = reader.host_restart('claude', self.sid)
+        self.assertEqual(result['status'], 'restarting')
+        self.assertTrue(reader.host_restart_requested('claude', self.sid))
+
+    def test_a_busy_chat_waits_for_the_reply_to_end(self):
+        self.busy.add(self.sid)
+        result = reader.host_restart('claude', self.sid)
+        self.assertEqual(result['status'], 'waiting')
+        self.assertEqual(result['reason'], 'chat_busy')
+        self.assertTrue(reader.host_restart_requested('claude', self.sid))
+        self.assertEqual(self.calls, [], 'a chat that is answering is never cut off')
+
+    def test_a_chat_that_is_stopped_is_started_on_the_newest_version(self):
+        self.owned.discard(self.sid)
+        result = reader.host_restart('claude', self.sid)
+        self.assertEqual(result['status'], 'restarted')
+        self.assertEqual(result['start'], 'started')
+        self.assertEqual(self.calls, ['start'])
+
+    def test_a_chat_without_a_host_is_left_alone(self):
+        self.enable(enabled=False)
+        self.assertEqual(reader.host_restart('claude', self.sid), dict(status='already', reason='not_hosted',
+                                                                        generation=reader.RUNTIME_GENERATION, version='1.2.3'))
+        self.assertEqual(self.calls, [])
+
+    def test_a_chat_moved_to_a_terminal_is_not_restarted(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['owner'], dict(owner='terminal', pid=os.getpid(), at=time.time()))
+        self.assertEqual(reader.host_restart('claude', self.sid)['reason'], 'host_handed_over')
+        self.assertEqual(self.calls, [])
+
+    def test_every_idle_live_chat_is_asked_to_restart(self):
+        other = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef193'
+        reader.host_write(reader.host_paths('codex', other)['config'],
+                          dict(enabled=True, tmux='restart-codex-chat', provider='codex', sid=other))
+        result = reader.host_restart_idle()
+        self.assertEqual(result, dict(status='ok', restarted=1, waiting=0, skipped=1, errors=0,
+                                      generation=reader.RUNTIME_GENERATION, version='1.2.3'))
+        self.assertTrue(reader.host_restart_requested('claude', self.sid))
+        self.assertFalse(reader.host_restart_requested('codex', other))
+
+    def test_every_idle_live_chat_leaves_a_busy_chat_to_finish_its_reply(self):
+        self.busy.add(self.sid)
+        result = reader.host_restart_idle()
+        self.assertEqual((result['restarted'], result['waiting']), (0, 1))
+
+    def test_the_reader_channel_answers_a_restart_request(self):
+        incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(dict(id=11, op='host_restart', provider='claude', sid=self.sid, tmux=self.tmux)) + '\n').encode()), fileno=lambda: 57)
+        output = io.StringIO()
+        with patch.object(reader, 'host_restart', return_value=dict(status='restarted')) as restart, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+            reader.serve(reader.READER_SOURCE)
+        frame = json.loads(output.getvalue().splitlines()[0])
+        self.assertEqual(frame['id'], 11)
+        self.assertEqual(frame['message_protocol'], 1)
+        self.assertEqual(frame['result']['status'], 'restarted')
+        restart.assert_called_once_with('claude', self.sid)
+
+    def test_the_reader_channel_answers_restart_every_idle_chat(self):
+        incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(dict(id=12, op='host_restart', all=True)) + '\n').encode()), fileno=lambda: 58)
+        output = io.StringIO()
+        with patch.object(reader, 'host_restart_idle', return_value=dict(status='ok', restarted=2)) as restart, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+            reader.serve(reader.READER_SOURCE)
+        frame = json.loads(output.getvalue().splitlines()[0])
+        self.assertEqual(frame['result'], dict(status='ok', restarted=2))
+        restart.assert_called_once_with()
+
+
+class NightlyChatRestartTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef194'
+    tmux = 'nightly-fixture-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        reader.host_write(reader.host_paths('claude', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, provider='claude', sid=self.sid))
+        sleep = time.sleep
+        patch.object(reader.time, 'sleep', side_effect=lambda seconds: sleep(min(seconds, 0.01))).start()
+
+    def at(self, *values):
+        return time.mktime(tuple(values) + (0, 0, -1))
+
+    def mark(self, day):
+        state = reader.host_session_state('claude', self.sid)
+        state['nightly_day'] = day
+        reader.host_state_write('claude', self.sid, state)
+
+    def test_nightly_restart_is_due_once_after_four_in_the_morning(self):
+        self.mark('2026-11-10')
+        self.assertFalse(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 3, 30, 0)))
+        self.assertTrue(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 4, 30, 0)))
+        self.mark('2026-11-11')
+        self.assertFalse(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 4, 30, 0)))
+        self.assertTrue(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 12, 4, 30, 0)))
+
+    def test_nightly_restart_can_be_switched_off_per_chat(self):
+        config = reader.host_read(reader.host_paths('claude', self.sid)['config'])
+        config['nightly'] = False
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], config)
+        self.mark('2026-11-10')
+        self.assertFalse(reader.host_nightly_due('claude', self.sid, now=self.at(2026, 11, 11, 4, 30, 0)))
+
+    def test_a_restart_request_is_honoured_once_and_expires(self):
+        now = self.at(2026, 11, 11, 12, 0, 0)
+        self.assertFalse(reader.host_restart_requested('claude', self.sid, now=now))
+        reader.host_restart_write('claude', self.sid, now=now)
+        self.assertTrue(reader.host_restart_requested('claude', self.sid, now=now + 60))
+        self.assertFalse(reader.host_restart_requested('claude', self.sid, now=now + reader.HOST_RESTART_STALE + 1))
+
+    def test_rotating_reloads_the_published_newest_runtime_in_place(self):
+        runtime = self.home / '.multiprompt-runtime'
+        runtime.mkdir()
+        published = runtime / 'reader.py'
+        published.write_text('# newest reader\n')
+        reader.host_restart_write('claude', self.sid)
+        calls = []
+        agent = types.SimpleNamespace(pid=4242)
+        session = dict(pending={}, agent=agent, stop=False)
+        with patch.object(reader.os, 'execv', side_effect=lambda path, argv: calls.append((path, list(argv)))), \
+                patch.object(reader, 'host_agent_stop', side_effect=lambda stopped: calls.append(('stop', stopped))) as stop:
+            self.assertTrue(reader.host_rotate('claude', self.sid, session, agent))
+        self.assertEqual(calls[0], ('stop', agent))
+        self.assertEqual(calls[1][0], reader.sys.executable)
+        self.assertEqual(calls[1][1], [reader.sys.executable, '-u', str(published), '--agent-host', 'claude', self.sid])
+        self.assertFalse(reader.host_restart_requested('claude', self.sid))
+        self.assertEqual(reader.host_session_state('claude', self.sid)['nightly_day'], reader.host_nightly_day())
+        self.assertIsNone(session['agent'])
+
+    def test_rotating_waits_instead_of_stopping_when_no_runtime_is_published(self):
+        reader.host_restart_write('claude', self.sid)
+        session = dict(pending={}, agent=types.SimpleNamespace(pid=4242), stop=False)
+        with patch.object(reader, 'host_runtime_file', return_value=None), \
+                patch.object(reader.os, 'execv') as execv:
+            self.assertFalse(reader.host_rotate('claude', self.sid, session, session['agent']))
+        execv.assert_not_called()
+        self.assertIsNotNone(session['agent'])
+
+
 class HostPaneMarkTest(unittest.TestCase):
     sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef001'
     tmux = 'marked-chat'
