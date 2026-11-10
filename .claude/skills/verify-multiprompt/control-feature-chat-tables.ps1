@@ -1,4 +1,11 @@
 
+            function Test-TableTabChat([int]$index) {
+                $saved = Read-Session
+                if ($null -eq $saved -or $null -eq $saved.tabs) { return $false }
+                if ($index -lt 0 -or $index -ge @($saved.tabs).Count) { return $false }
+                $tab = @($saved.tabs)[$index]
+                return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv)
+            }
             $command = 'powershell -nop -c "''250c 2500 252c 2500 2510'',''2502 0041 2502 0042 2502'',''251c 2500 253c 2500 2524'',''2502 0031 2502 0032 2502'',''2514 2500 2534 2500 2518''|ForEach-Object{-join($_.Split('' '')|ForEach-Object{[char][Convert]::ToInt32($_,16)})}"'
             $command += ' && echo table-ready>"' + (Join-Path $scratch 'table-ready.txt') + '"'
             Type-Text $command
@@ -9,7 +16,7 @@
             $tableTab = (Read-Session).active_tab
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             Wait-Until { (Test-Path $log) -and ((Get-Content $log -Raw) -join '') -match 'CHAT_TABLE rows=1 columns=2 .*source=box' } 'formatted table built from real console output'
-            Wait-Until { (Read-Session).tabs[$tableTab].cv } 'Chat View preference persisted for table tab'
+            Wait-Until { Test-TableTabChat $tableTab } 'Chat View preference persisted for table tab'
             Snapshot 'before'
             $buildsBefore = @([regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
             $tabsBefore = @((Read-Session).tabs).Count
@@ -20,7 +27,7 @@
             Snapshot 'away'
             $awayLogLength = ((Get-Content $log -Raw) -join '').Length
             Press @(0x11, 0x10, 0x09) 'Ctrl+Shift+Tab: return to table Chat View'
-            Wait-Until { (Read-Session).active_tab -eq $tableTab -and (Read-Session).tabs[$tableTab].cv } 'original Chat View tab active again'
+            Wait-Until { (Read-Session).active_tab -eq $tableTab -and (Test-TableTabChat $tableTab) } 'original Chat View tab active again'
             Wait-Until { $text = (Get-Content $log -Raw) -join ''; $text.Length -gt $awayLogLength -and $text.Substring($awayLogLength) -match '\[switch\] chat painted in' } 'returned Chat View painted'
             Snapshot 'after'
             $buildsAfter = @([regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
@@ -41,14 +48,15 @@
             $wideScript = Join-Path $scratch 'wide-table.ps1'
             Set-Content -Path $wideScript -Encoding ascii -Value @'
 $rows = @(
-    @('Brain tag', 'Use for', 'Codex and Anthropic models', 'DeepSeek and Cursor models'),
-    @('brain-light', 'Tiny obvious fixes in one single file', 'Terra medium or Sonnet medium', '4.1 Flash low or Composer 2.5'),
-    @('brain-medium', 'Normal work and the default when unsure', 'Sol medium or Sonnet medium', '4.1 Flash high or Grok 4.7 medium'),
-    @('brain-hard', 'Hard bugs, security, money, many systems', 'Sol high or Opus or Sonnet high', 'Skip or Grok 4.7 high'),
-    @('brain-extra-hard', 'Rare account integrity or security money', 'Skip or Opus 5.5 medium or high', 'Skip on both providers')
+    @('Brain tag', 'Use for', 'Codex or Anthropic', 'DeepSeek or Cursor'),
+    @('brain-light', 'Tiny obvious fixes', 'Terra medium', '4.1 Flash low'),
+    @('brain-medium', 'Normal work and default', 'Sol medium', '4.1 Flash high'),
+    @('brain-hard', 'Hard bugs and money', 'Sol high', 'Grok 4.7 high'),
+    @('brain-max', 'Rare account money', 'Opus medium', 'Skip both')
 )
 $widths = @(0, 0, 0, 0)
 foreach ($row in $rows) { for ($i = 0; $i -lt 4; $i++) { $widths[$i] = [Math]::Max($widths[$i], $row[$i].Length) } }
+if ((($widths | Measure-Object -Sum).Sum + 17) -gt 96) { throw 'Wide table does not fit the 100 column console' }
 $h = [string][char]0x2500
 $v = [string][char]0x2502
 function Border([int]$left, [int]$middle, [int]$right) { [string][char]$left + (($widths | ForEach-Object { $h * ($_ + 2) }) -join [string][char]$middle) + [string][char]$right }
@@ -60,12 +68,12 @@ for ($r = 0; $r -lt $rows.Count; $r++) {
 Border 0x2514 0x2534 0x2518
 '@
             Press @(0x12, 0x43) 'Alt+C: back to the shell to print a wide table'
-            Wait-Until { -not (Read-Session).tabs[$tableTab].cv } 'table tab shows the shell'
+            Wait-Until { -not (Test-TableTabChat $tableTab) } 'table tab shows the shell'
             Type-Text ('powershell -nop -ExecutionPolicy Bypass -File "' + $wideScript + '" && echo wide-ready>"' + (Join-Path $scratch 'wide-ready.txt') + '"')
             Press @(0x0D) 'Enter: print the wide brain-tag table in CMD'
             Wait-Until { Test-Path (Join-Path $scratch 'wide-ready.txt') } 'real console wide table command completed'
             Press @(0x12, 0x43) 'Alt+C: Chat View with the wide table'
-            Wait-Until { (Read-Session).tabs[$tableTab].cv } 'table tab back in Chat View'
+            Wait-Until { Test-TableTabChat $tableTab } 'table tab back in Chat View'
             Wait-Until { ((Get-Content $log -Raw) -join '') -match 'CHAT_TABLE rows=4 columns=4 .*source=box' } 'wide table built from real console output'
             $wide = [regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=4 columns=4 header_bold=1 content_w=(\d+) view_w=(\d+) source=box')
             $wideLine = $wide[$wide.Count - 1]
