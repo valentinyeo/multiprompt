@@ -6413,6 +6413,33 @@ def restore_displaced_draft(name, target, displaced):
         pass
 
 
+PROMPT_ROWS = 24
+
+
+def prompt_rows_open(target):
+    try:
+        shown = subprocess.run(["tmux", "display-message", "-p", "-t", target, "#{window_height}"], capture_output=True, text=True, timeout=5).stdout.strip()
+        if not shown.isdigit() or int(shown) >= PROMPT_ROWS // 3:
+            return False
+        subprocess.run(["tmux", "resize-window", "-t", target, "-y", str(PROMPT_ROWS)], check=True, capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return False
+    for _ in range(8):
+        time.sleep(0.2)
+        if box_draft(target) is not None:
+            break
+    return True
+
+
+def prompt_rows_close(target, opened):
+    if not opened:
+        return
+    try:
+        subprocess.run(["tmux", "set-option", "-w", "-u", "-t", target, "window-size"], capture_output=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def send_response_preserve_draft(q):
     import uuid
     name, sid, text = q.get('tmux'), q.get('sid'), q.get('text')
@@ -6428,10 +6455,12 @@ def send_response_preserve_draft(q):
         subprocess.run(['tmux', 'load-buffer', '-b', buffer, '-'], input=payload.encode('utf-8'), check=True, capture_output=True, timeout=5)
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return dict(status='not_sent', reason='buffer_unavailable')
+    opened = False
     try:
         bound = resolve_tmux_agent('claude', name, require_bound=True)
         if not bound or bound[0] != sid:
             return dict(status='not_sent', reason='session_changed')
+        opened = prompt_rows_open(target)
         draft = box_draft(target)
         if draft is None:
             return dict(status='not_sent', reason='prompt_unavailable')
@@ -6482,6 +6511,7 @@ def send_response_preserve_draft(q):
             restore_displaced_draft(name, target, displaced)
         return dict(status='sent', reason=None)
     finally:
+        prompt_rows_close(target, opened)
         try:
             subprocess.run(['tmux', 'delete-buffer', '-b', buffer], capture_output=True, timeout=5, check=False)
         except (OSError, subprocess.SubprocessError):
@@ -7183,7 +7213,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 111
+RUNTIME_GENERATION = 112
 
 if __name__ == '__main__':
     import base64 as _base64

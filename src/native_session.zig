@@ -314,9 +314,13 @@ fn onOutput(bytes: [*c]const u8, length: usize, user: ?*anyopaque) callconv(.c) 
     emitInput(slot, bytes[0..length]);
 }
 
+pub fn reportableSize(rows: c_int, cols: c_int) bool {
+    return rows >= 8 and cols >= 20;
+}
+
 fn onResize(rows: c_int, cols: c_int, user: ?*anyopaque) callconv(.c) void {
     const slot: *Slot = @ptrCast(@alignCast(user orelse return));
-    if (!slot.live or rows < 1 or cols < 1) return;
+    if (!slot.live or !reportableSize(rows, cols)) return;
     slot.rows = rows;
     slot.cols = cols;
     const line = std.fmt.allocPrint(a, "{{\"size\":[{d},{d}]}}", .{ rows, cols }) catch return;
@@ -350,7 +354,11 @@ fn noteEnded(shell_id: u32) void {
     shell.disconnected = true;
     shell.activity = .idle;
     const now = w.GetTickCount64();
-    shell.ssh_reconnect.lost(now, now ^ shell.shell_id);
+    shell.ssh_reconnect.ended(now, now ^ shell.shell_id, now -| shell.spawn_tick);
+    if (shell.ssh_reconnect.gave_up) {
+        var buf: [96]u8 = undefined;
+        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&buf, "ssh-reconnect gave-up id={d} reason=channel-ends-at-once", .{shell_id}) catch "ssh-reconnect gave-up");
+    }
     @import("chat_send.zig").armSshReconnectTimerIfNeeded();
 }
 
@@ -368,7 +376,7 @@ pub fn ready(shell_id: u32, ok: bool) void {
         return;
     }
     shell.disconnected = false;
-    shell.ssh_reconnect.ok();
+    shell.ssh_reconnect.opened();
     shell.spawn_tick = w.GetTickCount64();
     if (idx == app_state.active_shell and !app_state.g_chat_active and shell.hwnd != null) {
         _ = @import("chat_composer.zig").showShellConsole(@intCast(idx), w.SW_SHOW, "native-session");
@@ -559,4 +567,12 @@ test "remote shell command keeps attach, create and resurrect text without ssh" 
     try std.testing.expectEqual(@as(u32, 0), app_state.g_pending_resurrect_len);
     const login = remoteShellCommand(&buf, .vps, null, 5, false) orelse return error.NoCommand;
     try std.testing.expect(std.mem.endsWith(u8, login, "exec ${SHELL:-bash} -l"));
+}
+
+test "IGSH-1923 a squeezed terminal never shrinks the remote session" {
+    try std.testing.expect(!reportableSize(1, 100));
+    try std.testing.expect(!reportableSize(7, 100));
+    try std.testing.expect(!reportableSize(30, 10));
+    try std.testing.expect(reportableSize(8, 20));
+    try std.testing.expect(reportableSize(29, 100));
 }
