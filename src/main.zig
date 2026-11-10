@@ -4550,6 +4550,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = @import("win32.zig").UpdateWindow(hwnd);
             if (app_state.g_chat_transcript_hwnd != null) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
             @import("settings_panel.zig").open(hwnd);
+            if (wp == 1) @import("settings_panel.zig").openServers();
             return 0;
         },
         WM_APP_SHORTCUTS_OPEN => {
@@ -5772,6 +5773,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_SETTINGS_OFFSET) {
                     _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
                     _ = PostMessageW(hwnd, @import("win32.zig").WM_APP_SETTINGS_OPEN, 0, 0);
+                    return 0;
+                }
+                if (target == app_state.SEARCH_SERVERS_OFFSET) {
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    _ = PostMessageW(hwnd, @import("win32.zig").WM_APP_SETTINGS_OPEN, 1, 0);
                     return 0;
                 }
                 if (target == SEARCH_QUIT_OFFSET) {

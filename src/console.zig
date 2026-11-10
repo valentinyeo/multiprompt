@@ -1200,6 +1200,7 @@ pub fn resolveSshPath(force: bool) bool {
         @memcpy(app_state.g_ssh_path[0..candidate.len], candidate);
         app_state.g_ssh_path_len = candidate.len;
         debugLog2("ssh: selected working executable: ", candidate);
+        loadSshConfig();
         return true;
     }
     debugLog("ssh: no working ssh.exe found");
@@ -1208,6 +1209,43 @@ pub fn resolveSshPath(force: bool) bool {
         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SSH_UNAVAILABLE, 0, 0);
     }
     return false;
+}
+
+fn loadSshConfig() void {
+    app_state.g_ssh_config_len = 0;
+    var config_buf: [520]u8 = undefined;
+    const config = @import("ssh_identity.zig").configFile(&config_buf) orelse return;
+    if (config.len >= app_state.g_ssh_config.len) return;
+    const file = win32OpenRead(config) orelse return;
+    _ = CloseHandle(file);
+    @memcpy(app_state.g_ssh_config[0..config.len], config);
+    app_state.g_ssh_config_len = config.len;
+    debugLog2("ssh: using Multibot key settings: ", config);
+}
+
+pub fn setSshConfig(path: ?[]const u8) void {
+    while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
+    defer app_state.g_ssh_mutex.unlock();
+    const value = path orelse "";
+    app_state.g_ssh_config_len = 0;
+    if (value.len >= app_state.g_ssh_config.len) return;
+    @memcpy(app_state.g_ssh_config[0..value.len], value);
+    app_state.g_ssh_config_len = value.len;
+}
+
+pub fn sshExePath(out: []u8) ?[]const u8 {
+    while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
+    defer app_state.g_ssh_mutex.unlock();
+    const path = app_state.g_ssh_path[0..app_state.g_ssh_path_len];
+    if (path.len == 0 or path.len > out.len) return null;
+    @memcpy(out[0..path.len], path);
+    return out[0..path.len];
+}
+
+pub fn sshExeOf(prefix: []const u8) []const u8 {
+    if (prefix.len < 2 or prefix[0] != '"') return std.mem.trim(u8, prefix, "\" ");
+    const end = std.mem.indexOfScalarPos(u8, prefix, 1, '"') orelse return prefix[1..];
+    return prefix[1..end];
 }
 
 pub fn sshLoaderFailed(proc: HANDLE) void {
@@ -1232,6 +1270,7 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
     defer app_state.g_ssh_mutex.unlock();
     const path = app_state.g_ssh_path[0..app_state.g_ssh_path_len];
     if (path.len == 0) return false;
+    const config = app_state.g_ssh_config[0..app_state.g_ssh_config_len];
     if (@TypeOf(buf[0]) == u16) {
         var wide: [520]u16 = undefined;
         const wpath = win32WidePath(&wide, path) orelse return false;
@@ -1242,9 +1281,19 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
         pos.* += wpath.len;
         buf[pos.*] = '"';
         pos.* += 1;
-        return appendWideAscii(buf, pos, " ");
+        if (!appendWideAscii(buf, pos, " ")) return false;
+        if (config.len == 0) return true;
+        var wide_config: [520]u16 = undefined;
+        const wconfig = win32WidePath(&wide_config, config) orelse return false;
+        if (!appendWideAscii(buf, pos, "-F \"")) return false;
+        if (pos.* + wconfig.len + 2 > buf.len) return false;
+        @memcpy(buf[pos.* .. pos.* + wconfig.len], wconfig);
+        pos.* += wconfig.len;
+        return appendWideAscii(buf, pos, "\" ");
     } else {
-        return appendAsciiBuf(buf, pos, "\"") and appendAsciiBuf(buf, pos, path) and appendAsciiBuf(buf, pos, "\" ");
+        if (!(appendAsciiBuf(buf, pos, "\"") and appendAsciiBuf(buf, pos, path) and appendAsciiBuf(buf, pos, "\" "))) return false;
+        if (config.len == 0) return true;
+        return appendAsciiBuf(buf, pos, "-F \"") and appendAsciiBuf(buf, pos, config) and appendAsciiBuf(buf, pos, "\" ");
     }
 }
 

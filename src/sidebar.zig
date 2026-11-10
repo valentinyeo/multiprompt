@@ -4776,6 +4776,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var color_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L(ui_words.workspace_color), -1, &color_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == app_state.SEARCH_SERVERS_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var servers_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.settings_servers), -1, &servers_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SETTINGS_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

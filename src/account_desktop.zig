@@ -980,7 +980,7 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host, re
     var ssh_len: usize = 0;
     if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
     const ssh = ssh_buf[0..ssh_len];
-    const path = std.mem.trim(u8, ssh, "\" ");
+    const path = @import("console.zig").sshExeOf(ssh);
     const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return error.SshUnavailable;
     const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
     var profile_buf: [512]u8 = undefined;
@@ -1049,7 +1049,7 @@ fn accountDeviceKeyError(reply: *LayoutReply, text: []const u8) void {
 }
 
 fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []const u8, job_kind: AccountJobKind) !void {
-    const exe = std.mem.trim(u8, ssh, "\" ");
+    const exe = @import("console.zig").sshExeOf(ssh);
     const dir = std.mem.lastIndexOfAny(u8, exe, "\\/") orelse return error.Process;
     var profile: [512]u8 = undefined;
     const n = GetEnvironmentVariableA("USERPROFILE", &profile, profile.len);

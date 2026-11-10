@@ -175,6 +175,7 @@ export const screen = {
   "SEARCH_REOPEN_OFFSET": "local",
   "SEARCH_RESTART_OFFSET": "local",
   "SEARCH_ROOM_ROW_OFFSET": "focus",
+  "SEARCH_SERVERS_OFFSET": "account",
   "SEARCH_SESSION_OVERVIEW_MENU_OFFSET": "menu",
   "SEARCH_SESSION_OVERVIEW_ROW_OFFSET": "focus",
   "SEARCH_SETTINGS_OFFSET": "window",

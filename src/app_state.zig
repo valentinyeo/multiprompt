@@ -2466,6 +2466,8 @@ pub const SSH_ERROR_MODE: DWORD = 0x0001 | 0x8000;
 
 pub var g_ssh_path: [520]u8 = undefined;
 pub var g_ssh_path_len: usize = 0;
+pub var g_ssh_config: [520]u8 = undefined;
+pub var g_ssh_config_len: usize = 0;
 pub var g_ssh_resolved = false;
 pub var g_ssh_mutex: SpinMutex = .{};
 pub var g_ssh_notice_sent = false;
@@ -4116,3 +4118,4 @@ pub var g_shell_double_click_pending: ?ShellDoubleClick = null;
 
 pub const SEARCH_SETTINGS_OFFSET: usize = 4002;
 pub const SEARCH_WORKSPACE_COLOR_OFFSET: usize = 4003;
+pub const SEARCH_SERVERS_OFFSET: usize = 4004;
