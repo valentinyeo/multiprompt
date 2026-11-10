@@ -47,7 +47,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
-` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8') + `\nconst settings_panel = struct { var window: HANDLE = null; var key_window: HANDLE = null; ${settingsOwnership} };\n`;
+` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8') + `\nconst settings_panel = struct { var window: HANDLE = null; var key_window: HANDLE = null; var servers_window: HANDLE = null; ${settingsOwnership} };\n`;
     const nonClientMessage = fs.readFileSync(path.join(root, 'src/win32.zig'), 'utf8').match(/^pub const WM_NCLBUTTONDOWN[^;]+;/m);
     assert.ok(nonClientMessage, 'native frame input message comes from the shipped Win32 declarations');
     fs.writeFileSync(path.join(dir, 'win32.zig'), nonClientMessage[0]);
