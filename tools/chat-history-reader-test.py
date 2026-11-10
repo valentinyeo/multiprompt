@@ -4891,7 +4891,7 @@ class FixtureLifecycleTest(unittest.TestCase):
                 seen[key] = '%s.%s' % (case.__name__, name)
 
         base = set(loader.getTestCaseNames(AgentHostTest))
-        self.assertEqual(len(base), 24)
+        self.assertEqual(len(base), 27)
         self.assertEqual(set(loader.getTestCaseNames(AgentHostStreamContractTest)), base)
         self.assertIsNot(AgentHostTest.setUp, AgentHostStreamContractTest.setUp)
         self.assertIsNot(AgentHostTest.enable, AgentHostStreamContractTest.enable)
@@ -5320,6 +5320,39 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         config = reader.host_read(reader.host_paths(self.provider, self.sid)['config'])
         self.assertEqual(config['permission_mode'], 'acceptEdits')
         self.assertEqual(config['tmux'], self.tmux)
+
+    def test_a_level_chosen_while_the_chat_is_stopped_is_saved_and_shown(self):
+        self.enable(permission_mode='plan')
+        reply = reader.host_reply(dict(provider=self.provider, sid=self.sid, op='set_permission_mode',
+                                       mode='bypassPermissions'))
+        self.assertEqual(reply['status'], 'ok')
+        self.assertEqual(reader.host_config(self.provider, self.sid)['permission_mode'], 'bypassPermissions')
+        self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'bypassPermissions')
+        events = reader.message_events_page(self.provider, self.sid, 0)['events']
+        self.assertEqual(events[-1]['event']['kind'], 'host.settings')
+        self.assertEqual(events[-1]['event']['payload']['mode'], 'bypassPermissions')
+        self.assertEqual(reader.host_reply(dict(provider=self.provider, sid=self.sid, op='set_permission_mode',
+                                               mode='yolo'))['reason'], 'invalid_permission_mode')
+
+    def test_a_chosen_level_survives_a_host_restart(self):
+        self.enable(permission_mode='plan')
+        state = reader.host_session_state(self.provider, self.sid)
+        state['mode'] = 'bypassPermissions'
+        reader.host_state_write(self.provider, self.sid, state)
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        args = self.agent_rows('start')[0]['args']
+        self.assertIn('--permission-mode', args)
+        self.assertEqual(args[args.index('--permission-mode') + 1], 'bypassPermissions')
+        self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'bypassPermissions')
+        self.assertEqual(reader.host_config(self.provider, self.sid)['permission_mode'], 'bypassPermissions')
+
+    def test_enabling_a_chat_again_keeps_the_level_the_user_chose(self):
+        self.enable(permission_mode='manual')
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux,
+                                         '--permission-mode', 'bypassPermissions'])['status'], 'enabled')
+        self.assertEqual(reader.host_config(self.provider, self.sid)['permission_mode'], 'manual')
 
     def test_host_starts_from_a_published_runtime_file(self):
         self.enable()
@@ -6388,8 +6421,8 @@ class AgentHostStreamFixture(AgentHostFixture):
         os.environ.pop('FAKE_CLAUDE_MODE', None)
         super().enable(mode, **extra)
 
-    def fake(self, mode):
-        self.enable(mode)
+    def fake(self, mode, **extra):
+        self.enable(mode, **extra)
         os.environ['FAKE_CLAUDE_MODE'] = mode
 
     def events(self, kind=None):
@@ -6505,6 +6538,16 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         resolved = [event for event in self.events('approval.resolved')
                     if event['payload'].get('request_id') == request_id]
         self.assertEqual(resolved[0]['payload'], dict(request_id=request_id, decision='accept', by='host'))
+
+    def test_bypass_mode_auto_accepts_a_helper_approval_without_a_reason(self):
+        self.session['state']['mode'] = 'bypassPermissions'
+        request_id = self.approval(tool='Edit', tool_use_id='toolu_helper')
+        self.assertEqual([event for event in self.events('approval.request')
+                          if event['payload'].get('request_id') == request_id], [])
+        self.assertEqual(self.session['parked'], {})
+        response = self.writes()[0]['response']['response']
+        self.assertEqual(response['behavior'], 'allow')
+        self.assertEqual(response['toolUseID'], 'toolu_helper')
 
     def test_accept_edits_mode_still_parks_shell_approvals(self):
         self.session['state']['mode'] = 'acceptEdits'
@@ -6723,7 +6766,7 @@ class AgentHostControlFixture(AgentHostStreamFixture):
 
 class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
     def test_an_approval_request_reaches_the_event_log_and_the_answer_runs_the_tool(self):
-        self.fake('approval')
+        self.fake('approval', permission_mode='manual')
         self.seed()
         self.dispatch()
         asked = self.wait_for(lambda: self.events('approval.request'))
@@ -6744,7 +6787,7 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertEqual(decisions[0]['toolUseID'], 'toolu_req')
 
     def test_the_answer_is_refused_once_the_host_is_gone(self):
-        self.fake('approval')
+        self.fake('approval', permission_mode='manual')
         self.seed()
         self.dispatch()
         asked = self.wait_for(lambda: self.events('approval.request'))

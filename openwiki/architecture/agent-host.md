@@ -55,6 +55,7 @@ under the 108-character limit a Unix socket path has, whatever the home director
 - `permission_mode` must be one of the CLI's own modes (`acceptEdits`, `auto`,
   `bypassPermissions`, `manual`, `dontAsk`, `plan`) and is passed as `--permission-mode <mode>`.
   Without it the CLI keeps its own default, so a tool that would prompt is denied.
+  A level the user picks in the chat is saved here and reused on the next start; `plan` stays one-time.
 - Tests point `command` at a fake executable.
 - Codex and Pi keep their own paths until their adapters exist.
 
@@ -164,8 +165,9 @@ python3 <reader> host handover <provider> <sid>
 ## Limits
 
 - One host per chat; no parallel agents inside one chat.
-- Permission prompts have no channel in print mode. The host passes the mode the config
-  gives it (`--permission-mode`), and anything that would still prompt is denied.
+- Permission prompts arrive through `--permission-prompt-tool stdio`. The host passes the mode the
+  config gives it (`--permission-mode`) and turns each prompt into an approval in the chat. In
+  Bypass it answers tool approvals itself; questions and plans still reach the user.
 - Editor and interactive-session state belongs to the agent CLI, not the app.
 - A crash between the stdin write and the accepted event leaves the message `sent` until the
   attempt deadline expires, after which the client may show it as failed and the user decides
