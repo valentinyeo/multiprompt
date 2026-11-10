@@ -33,3 +33,13 @@ test('a scroll check that changes nothing does not invalidate the main window', 
   assert.ok(notify > early, 'the pill invalidate runs only after the unchanged check');
   assert.match(fn, /before\.value == app_state\.g_chat_new_messages\.value/);
 });
+
+test('IGSH-1907 an empty message poll neither rewrites the outbox nor repaints the window', () => {
+  const fn = body(src('chat_send.zig'), 'fn chatMessageSyncFinish() void {');
+  const saves = [...fn.matchAll(/saveChatOutbox\(\)/g)].map((m) => m.index);
+  assert.equal(saves.length, 1, 'one outbox save per poll');
+  assert.match(fn, /if \(items\.len > 0 and !saveChatOutbox\(\)\)/, 'the save is skipped when the poll returned nothing');
+  const guard = fn.indexOf('if (items.len == 0) return;');
+  const notify = fn.lastIndexOf('chatOutboxChanged();');
+  assert.ok(guard > 0 && notify > guard, 'the outbox change notice runs only after the empty-poll return');
+});

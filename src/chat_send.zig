@@ -3725,7 +3725,7 @@ fn chatMessageSyncFinish() void {
         if (job.synced) applied_seq = json_reader.uintDefault(item, "seq", applied_seq);
     }
     if (native_rows.items.len > 0) history.history.upsertNativeRows(std.heap.page_allocator, native_rows.items, history.history.inode, 0) catch { history.message_next_tick = 0; return; };
-    if (!saveChatOutbox()) { history.message_next_tick = 0; return; }
+    if (items.len > 0 and !saveChatOutbox()) { history.message_next_tick = 0; return; }
     if (job.synced) history.message_seq = applied_seq;
     if (!job.synced) {
         _ = json_reader.copyString(parsed.value, "snapshot_id", &history.message_snapshot);
@@ -3742,7 +3742,7 @@ fn chatMessageSyncFinish() void {
         history.message_next_tick = 0;
     }
     if (native_changed) @import("chat_session.zig").chatFileRequestForDelivery(current, true);
-    _ = saveChatOutbox();
+    if (items.len == 0) return;
     chatOutboxChanged();
 }
 
