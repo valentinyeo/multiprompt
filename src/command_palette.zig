@@ -89,6 +89,7 @@ const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
 const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -517,7 +518,7 @@ pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -525,13 +526,14 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
     try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Claude in terminal", palettePrimaryLabel(SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Cursor chat", palettePrimaryLabel(SEARCH_NEW_CURSOR_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
     try std.testing.expectEqualStrings("Open session...", palettePrimaryLabel(SEARCH_OPEN_SESSION_MENU_OFFSET) orelse "");
     try std.testing.expectEqualStrings("More shells...", palettePrimaryLabel(SEARCH_SHELLS_MENU_OFFSET) orelse "");
@@ -686,6 +688,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) return "New Claude in terminal";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
+    if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) return "New Cursor chat";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
     if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
     if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
@@ -892,6 +895,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude session chat terminal tab agent",
         SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => "new claude in terminal shell old plain",
         SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
+        SEARCH_NEW_CURSOR_CHAT_OFFSET => "new cursor chat session agent cli",
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
         SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
@@ -1363,7 +1367,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
-    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_CURSOR_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
         target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
         target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
         (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
@@ -2149,6 +2153,8 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
     try std.testing.expect(!newTabOpensChatView(""));
     try std.testing.expect(!newTabOpensChatView("codex"));
     try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(newTabOpensChatView("cursor"));
+    try std.testing.expect(newTabOpensChatView("agent"));
     try std.testing.expect(!newTabOpensChatView("bash"));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
@@ -2170,8 +2176,8 @@ pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []c
 {
     const agent_host = @import("agent_host.zig");
     if (host_sid) |sid| {
-        if (!agent_host.eligible(program)) return null;
-        return agent_host.launchCommand(host_out, session, cwd, sid);
+        const provider = agent_host.hostedWorkspaceProvider(program) orelse return null;
+        return agent_host.launchCommandFor(host_out, provider, session, cwd, sid);
     }
     return buildWorkspaceTmuxLaunchCmd(command_out, session, cwd, program);
 }
@@ -2570,7 +2576,8 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
 
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
-    const host_sid: ?[]const u8 = if (!plain_claude and agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
+    const hosted = agent_host.hostedWorkspaceProvider(program);
+    const host_sid: ?[]const u8 = if (!plain_claude and hosted != null) agent_host.mintSessionId(&sid_buf) else null;
     if (!plain_claude and newTabOpensChatView(program) and host_sid == null) {
         g_start_fail = .launch_command;
         @import("diagnostics.zig").debugLog("[pick] new workspace session refused: session identity unavailable");
@@ -2612,10 +2619,14 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
 
     if (ok and app_state.shell_count > 0) {
         const ns: usize = app_state.shell_count - 1;
-        const claude = std.mem.startsWith(u8, program, "claude");
-        setShellName(&app_state.shells[ns], if (claude) "Claude" else "Terminal");
+        if (hosted) |provider| {
+            setShellName(&app_state.shells[ns], provider.label());
+            app_state.shells[ns].ai_agent = provider.aiAgent();
+        } else {
+            setShellName(&app_state.shells[ns], "Terminal");
+            app_state.shells[ns].ai_agent = 0;
+        }
         app_state.shells[ns].name_source = .default;
-        app_state.shells[ns].ai_agent = if (claude) 1 else 0;
         if (host_sid) |sid| {
             const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
             @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
@@ -2668,7 +2679,12 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
     if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
     const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    const reason = if (provider == .codex) "new Codex session" else "new Pi session";
+    const reason = switch (provider) {
+        .codex => "new Codex session",
+        .pi => "new Pi session",
+        .cursor => "new Cursor session",
+        .claude => "new Claude session",
+    };
     if (!capacityAdmitNewAgent(host, workspace, .user, reason)) return false;
 
     var sid_buf: [36]u8 = undefined;
@@ -2727,6 +2743,10 @@ pub fn spawnCodexTmuxSession() bool {
 
 pub fn spawnPiTmuxSession() bool {
     return spawnHostedChatSession(.pi);
+}
+
+pub fn spawnCursorTmuxSession() bool {
+    return spawnHostedChatSession(.cursor);
 }
 
 test "IGSH-1546 Codex and Pi chats are live chats that never type into a terminal" {
@@ -3412,6 +3432,12 @@ pub fn updateSearchResults() void {
             keywordsMatchAll("new pi chat session", app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_PI_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new cursor chat session agent cli", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CURSOR_CHAT_OFFSET;
             app_state.g_search_result_count += 1;
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and

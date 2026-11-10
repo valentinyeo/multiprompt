@@ -344,6 +344,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> New Claude in terminal", .b = "Start Claude the old way, typed into a terminal in this workspace folder", .header = false },
     .{ .a = "Ctrl+K -> New Codex chat", .b = "Start a Codex live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New Pi chat", .b = "Start a Pi live chat in this workspace folder, same chat view as Claude", .header = false },
+    .{ .a = "Ctrl+K -> New Cursor chat", .b = "Start a Cursor CLI live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },

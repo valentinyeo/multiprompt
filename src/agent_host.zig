@@ -7,6 +7,7 @@ pub const Provider = enum {
     claude,
     codex,
     pi,
+    cursor,
 
     pub fn wire(self: Provider) []const u8 {
         return @tagName(self);
@@ -17,6 +18,7 @@ pub const Provider = enum {
             .claude => "Claude",
             .codex => "Codex",
             .pi => "Pi",
+            .cursor => "Cursor",
         };
     }
 
@@ -25,12 +27,19 @@ pub const Provider = enum {
             .claude => 1,
             .codex => 2,
             .pi => 3,
+            .cursor => 7,
         };
     }
 };
 
+pub fn hostedWorkspaceProvider(program: []const u8) ?Provider {
+    if (std.mem.startsWith(u8, program, "claude")) return .claude;
+    if (std.mem.eql(u8, program, "cursor") or std.mem.eql(u8, program, "agent") or std.mem.startsWith(u8, program, "cursor ")) return .cursor;
+    return null;
+}
+
 pub fn eligible(program: []const u8) bool {
-    return ENABLED and std.mem.startsWith(u8, program, "claude");
+    return ENABLED and hostedWorkspaceProvider(program) != null;
 }
 
 pub fn formatSessionId(out: *[36]u8, random: *const [16]u8) []const u8 {
@@ -202,6 +211,8 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
     try std.testing.expect(eligible("claude-code"));
     try std.testing.expect(!eligible("codex"));
     try std.testing.expect(!eligible("pi"));
+    try std.testing.expect(eligible("cursor"));
+    try std.testing.expect(eligible("agent"));
     try std.testing.expect(!eligible(""));
     try std.testing.expect(!eligible("bash"));
 }
@@ -230,6 +241,10 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     try std.testing.expect(std.mem.indexOf(u8, pi, "permission-mode") == null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
     try std.testing.expect(launchCommandFor(&out, .pi, "live-abc", "~/projects", "bad") == null);
+    const cursor = launchCommandFor(&out, .cursor, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, cursor, "host enable cursor ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cursor, "host start cursor ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cursor, "permission-mode") == null);
     const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
     try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);
@@ -239,8 +254,10 @@ test "IGSH-1546 each provider maps to the agent kind its tab shows" {
     try std.testing.expectEqual(@as(u8, 1), Provider.claude.aiAgent());
     try std.testing.expectEqual(@as(u8, 2), Provider.codex.aiAgent());
     try std.testing.expectEqual(@as(u8, 3), Provider.pi.aiAgent());
+    try std.testing.expectEqual(@as(u8, 7), Provider.cursor.aiAgent());
     try std.testing.expectEqualStrings("Codex", Provider.codex.label());
     try std.testing.expectEqualStrings("pi", Provider.pi.wire());
+    try std.testing.expectEqualStrings("cursor", Provider.cursor.wire());
 }
 
 test "IGSH-1666 hosted resumes retain provider and host identity" {

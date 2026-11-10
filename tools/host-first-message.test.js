@@ -6,7 +6,7 @@ const read = (file) => fs.readFileSync(file, 'utf8');
 
 test('IGSH-1266 a hosted tab message is submitted to the host and never typed into the pane', () => {
   const send = read('src/chat_send.zig');
-  assert.match(send, /pub fn chatMessageGoesToHost\(kind: @import\("app_state\.zig"\)\.ShellKind, ai_agent: u8\) bool \{\s*return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3\);/,
+  assert.match(send, /pub fn chatMessageGoesToHost\(kind: @import\("app_state\.zig"\)\.ShellKind, ai_agent: u8\) bool \{\s*return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7\);/,
     'the host routing rule must be one named function');
   assert.match(send, /app_state\.g_chat_outbox\.items\[added\]\.message_v1 = true;/);
   const enqueue = send.slice(send.indexOf('fn chatEchoEnqueueForShell('), send.indexOf('fn chatEchoMarkNotSent('));

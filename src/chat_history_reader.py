@@ -2485,10 +2485,10 @@ def import_legacy_messages(db, sid, transcript, epoch):
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
-HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax')
+HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor')
 MESSAGE_WORKER_IDLE_SECONDS = 120
 MESSAGE_WORKER_STALL_SECONDS = 90
-HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax'}
+HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'hax', 'cursor': 'agent'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
@@ -3435,6 +3435,15 @@ def host_hax_argv(provider, sid, base):
     return ["python3", "-u", "-c", HOST_HAX_BRIDGE] + base + ([] if chosen else list(HOST_HAX_MODEL)) + resume
 
 
+def host_cursor_argv(provider, sid, base, mode=None):
+    command = base + ["-p", "--output-format", "stream-json", "--stream-partial-output",
+                      "--trust", "--force", "--append-system-prompt", HOST_APPEND_PROMPT]
+    native = host_session_state(provider, sid).get("native_session")
+    if isinstance(native, str) and native:
+        return command + ["--resume", native]
+    return command
+
+
 def host_model_name(value):
     if not isinstance(value, str):
         return ""
@@ -4259,6 +4268,23 @@ def host_agent_event(provider, sid, tmux, session, raw):
         HOST_ADAPTERS[provider]["event"](provider, sid, tmux, session, event)
 
 
+def host_cursor_event(provider, sid, tmux, session, event):
+    kind = event.get("type")
+    if kind == "thinking":
+        subtype = event.get("subtype")
+        block_id = session.get("cursor_think_id", "think")
+        if subtype == "delta" and isinstance(event.get("text"), str):
+            block = host_stream_block(session, block_id, "thinking", 0)
+            session["cursor_think_id"] = block["item"]
+            host_delta(session, block, event["text"])
+        elif subtype == "completed":
+            block = host_stream_block(session, session.get("cursor_think_id", block_id), "thinking", 0)
+            host_complete(provider, sid, tmux, session, block)
+            session.pop("cursor_think_id", None)
+        return
+    host_claude_event(provider, sid, tmux, session, event)
+
+
 def host_claude_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     inflight = session.get("inflight")
@@ -4844,6 +4870,9 @@ HOST_ADAPTERS = {
     "hax": dict(argv=host_hax_argv, open=host_hax_open, write=host_hax_write, event=host_hax_event,
                 answer=host_pi_answer, interrupt=host_hax_interrupt, set_mode=host_hax_set_mode,
                 binding="hax_bridge_prompt", provenance="hax_run_started"),
+    "cursor": dict(argv=host_cursor_argv, open=host_claude_open, write=host_claude_write, event=host_cursor_event,
+                   answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
+                   binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }
 
 
@@ -6958,7 +6987,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 104
+RUNTIME_GENERATION = 106
 
 if __name__ == '__main__':
     import base64 as _base64
