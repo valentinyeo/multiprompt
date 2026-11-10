@@ -41,7 +41,8 @@ test('keyboard hook feeds every key event to the badge state before any early re
 test('sidebar paint draws a jump badge on each avatar while Ctrl is held, numbered like Ctrl+1..9', () => {
   const sidebar = read('src/sidebar.zig');
   const console = read('src/console.zig');
-  assert.match(between(console, 'pub fn nthVisibleShell(', '\n}'), /isJumpRow\(row\)/, 'Ctrl+1..9 and the badges share one row rule');
+  assert.match(between(console, 'pub fn nthVisibleShell(', '\n}'), /if \(row\.kind != \.tab and row\.kind != \.inbox\) continue;/, 'Ctrl+1..9 counts session and inbox rows');
+  assert.match(between(sidebar, 'pub fn isJumpRow(', '\n}'), /return row\.kind == \.tab or row\.kind == \.inbox;/, 'the badges count the same rows as Ctrl+1..9');
   const paint = between(sidebar, 'pub fn paintSidebar(', 'const content_end_logical:');
   const loop = between(paint, 'for (0..row_count) |ri| {', 'RectVisible(hdc, &row_rc)');
   assert.match(paint, /const show_jump_badges = jumpBadgesVisible\(\);/);
