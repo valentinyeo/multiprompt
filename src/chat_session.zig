@@ -795,7 +795,7 @@ fn chatLiveStreamStopLocked() void {
         if (stream.channel.shared) |channel| transport.cancel(channel);
         stream.mutex.unlock();
     }
-    @import("chat_live.zig").release(stream.shell_id);
+    @import("chat_live.zig").park(stream.shell_id);
     chatLiveStreamRelease(stream);
 }
 
