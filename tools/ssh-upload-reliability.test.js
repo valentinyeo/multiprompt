@@ -114,6 +114,10 @@ test "stdin partial writes refresh inactivity after each successful write" {
   }
 });
 
+test('upload ssh starts detached so it gets no hidden console', () => {
+  assert.match(body('sshOneShotCaptureInput'), /CreateProcessW\(\s*null,\s*@ptrCast\(&cmd_buf\),\s*null,\s*null,\s*1,\s*SSH_HELPER_FLAGS,/);
+});
+
 test('server transfer reports real byte progress even after SSH has buffered all stdin', () => {
   const command = fs.readFileSync(path.join(root, 'src/chat_drop.zig'), 'utf8');
   assert.match(command, /dd bs=65536 status=progress <&3 > \$t\/data/);
