@@ -2787,6 +2787,7 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
             const shell = &app_state.shells[ns];
             shell.chat_view_on = true;
             const started = live.starting(shell.shell_id, host, host_sid.?);
+            if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, host_sid.?);
             if (app_state.active_shell == ns) {
                 if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
                 app_state.g_chat_screen_working = live.running(shell.shell_id);
@@ -2870,6 +2871,7 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
         const shell = &app_state.shells[ns];
         shell.chat_view_on = true;
         const started = live.starting(shell.shell_id, host, sid);
+        if (shell.native_terminal) @import("native_session.zig").launch(shell.shell_id, sid);
         if (app_state.active_shell == ns) {
             if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
             app_state.g_chat_screen_working = live.running(shell.shell_id);

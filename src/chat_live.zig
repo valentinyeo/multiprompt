@@ -571,6 +571,21 @@ pub fn starting(shell_id: u32, host: u8, sid: []const u8) bool {
     return true;
 }
 
+pub fn startFailed(shell_id: u32, sid: []const u8, text: []const u8) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    const live = slotFor(shell_id, sid) orelse return false;
+    const a = std.heap.page_allocator;
+    const item = live.itemFor(a, "chat-start", .tool) catch return false;
+    item.setText(a, text) catch return false;
+    item.done = true;
+    item.status = .failed;
+    live.state = .idle;
+    live.held = true;
+    live.touch();
+    return true;
+}
+
 pub fn begin(shell_id: u32, host: u8, sid: []const u8) u64 {
     if (shell_id == 0 or sid.len == 0 or sid.len >= MAX_ID) return 0;
     mutex.lock();

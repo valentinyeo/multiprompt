@@ -436,6 +436,76 @@ pub fn reconnect(idx: u32) bool {
     return true;
 }
 
+pub fn launch(shell_id: u32, sid: []const u8) void {
+    const slot = find(shell_id) orelse return;
+    if (sid.len == 0 or sid.len > 48 or slot.command_len == 0) return;
+    const command = a.dupe(u8, slot.command[0..slot.command_len]) catch return;
+    const owned_sid = a.dupe(u8, sid) catch {
+        a.free(command);
+        return;
+    };
+    const thread = std.Thread.spawn(.{}, launchWorker, .{ shell_id, slot.host, command, owned_sid }) catch {
+        a.free(command);
+        a.free(owned_sid);
+        _ = @import("chat_live.zig").startFailed(shell_id, sid, LAUNCH_FAILED);
+        return;
+    };
+    thread.detach();
+}
+
+const LAUNCH_FAILED = "This chat could not start on the server. Open a new chat to try again.";
+const LAUNCH_TIMEOUT_MS: u64 = 60_000;
+
+fn launchWorker(shell_id: u32, host: u8, command: []u8, sid: []u8) void {
+    defer a.free(command);
+    defer a.free(sid);
+    var output: [4096]u8 = undefined;
+    var total: usize = 0;
+    if (transport.openCommand(host, command)) |channel| {
+        if (transport.write(channel, "")) {
+            const deadline = w.GetTickCount64() + LAUNCH_TIMEOUT_MS;
+            while (w.GetTickCount64() < deadline and total < output.len) {
+                const n = transport.read(channel, output[total..], false) orelse break;
+                if (n == 0) {
+                    w.Sleep(50);
+                    continue;
+                }
+                total += n;
+            }
+        }
+        transport.close(channel);
+    }
+    if (launchStarted(output[0..total])) return;
+    @import("diagnostics.zig").debugLog2("live-chat start failed: ", output[0..@min(total, 400)]);
+    if (@import("chat_live.zig").startFailed(shell_id, sid, LAUNCH_FAILED)) {
+        if (app_state.g_main_hwnd) |main| _ = w.PostMessageW(main, w.WM_APP_CHAT_FILE_READY, 0, 0);
+    }
+}
+
+fn launchStarted(output: []const u8) bool {
+    const trimmed = std.mem.trim(u8, output, " \t\r\n");
+    const start = if (std.mem.lastIndexOfScalar(u8, trimmed, '\n')) |index| index + 1 else 0;
+    const parsed = std.json.parseFromSlice(std.json.Value, a, trimmed[start..], .{}) catch return false;
+    defer parsed.deinit();
+    const status = switch (parsed.value) {
+        .object => |object| object.get("status") orelse return false,
+        else => return false,
+    };
+    return switch (status) {
+        .string => |text| std.mem.eql(u8, text, "started") or std.mem.eql(u8, text, "already"),
+        else => false,
+    };
+}
+
+test "a live chat start counts only a started or already running host" {
+    try std.testing.expect(launchStarted("{\"status\":\"started\",\"pid\":7}\n"));
+    try std.testing.expect(launchStarted("noise\n{\"status\":\"already\",\"reason\":\"host_running\"}\n"));
+    try std.testing.expect(!launchStarted("{\"status\":\"error\",\"reason\":\"host_timeout\"}\n"));
+    try std.testing.expect(!launchStarted("{\"status\":\"refused\",\"reason\":\"host_disabled\"}"));
+    try std.testing.expect(!launchStarted(""));
+    try std.testing.expect(!launchStarted("Traceback (most recent call last):"));
+}
+
 pub fn restyle(shell_id: u32) void {
     const slot = find(shell_id) orelse return;
     if (slot.hwnd == null) return;
