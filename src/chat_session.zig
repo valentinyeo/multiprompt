@@ -283,6 +283,7 @@ pub fn chatFileIdentityForShell(idx: u32) chat_transcript.Identity {
     if (s.kind != .tmux and !chatBenchEnabled()) return .{};
     var key = chat_transcript.Identity.init(s.shell_id, s.tmux_host, s.ai_agent == 2 or (chatBenchEnabled() and std.mem.startsWith(u8, s.claude_sid[0..s.claude_sid_len], "codex-")), s.claude_sid[0..s.claude_sid_len], s.claude_cwd[0..s.claude_cwd_len]);
     key.pi = s.ai_agent == 3;
+    key.agent = s.ai_agent;
     if (s.tmux_session_len < key.tmux.len) @memcpy(key.tmux[0..s.tmux_session_len], s.tmux_session[0..s.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return .{};
     for (app_state.g_chat_histories.items) |entry| {

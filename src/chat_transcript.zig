@@ -8,12 +8,17 @@ pub const Identity = struct {
     host: u8 = 0,
     codex: bool = false,
     pi: bool = false,
+    agent: u8 = 0,
     sid: [40]u8 = @splat(0),
     tmux: [64]u8 = @splat(0),
     cwd: [192]u8 = @splat(0),
 
     pub fn provider(self: Identity) []const u8 {
-        return if (self.pi) "pi" else if (self.codex) "codex" else "claude";
+        if (self.pi) return "pi";
+        if (self.codex) return "codex";
+        const label = @import("workspaces.zig").aiAgentLabelValue(if (self.agent != 0) self.agent else 1);
+        if (std.mem.eql(u8, label, "none")) return "claude";
+        return label;
     }
 
     pub fn init(shell_id: u32, host: u8, codex: bool, sid: []const u8, cwd: []const u8) Identity {

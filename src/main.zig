@@ -724,6 +724,7 @@ const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -928,6 +929,7 @@ const spawnWorkspaceTmuxSession = @import("command_palette.zig").spawnWorkspaceT
 const spawnWorkspacePlainClaudeSession = @import("command_palette.zig").spawnWorkspacePlainClaudeSession;
 const spawnCodexTmuxSession = @import("command_palette.zig").spawnCodexTmuxSession;
 const spawnPiTmuxSession = @import("command_palette.zig").spawnPiTmuxSession;
+const spawnCursorTmuxSession = @import("command_palette.zig").spawnCursorTmuxSession;
 const spawnWorkspaceTerminalSession = @import("command_palette.zig").spawnWorkspaceTerminalSession;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const notifyTabCapReached = @import("console.zig").notifyTabCapReached;
@@ -6063,6 +6065,23 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (!spawned_pi) showActiveShellAfterOverlay();
                     _ = InvalidateRect(hwnd, null, 0);
                     if (spawned_pi) {
+                        app_state.g_refocus_remaining = 4;
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
+                    } else {
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    }
+                    return 0;
+                }
+                if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    applySearchSpawnContext(hwnd);
+                    const spawned_cursor = spawnCursorTmuxSession();
+                    applyPendingGroup();
+                    if (!spawned_cursor) showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    if (spawned_cursor) {
                         app_state.g_refocus_remaining = 4;
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
                     } else {

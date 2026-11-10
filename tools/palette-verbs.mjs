@@ -23,6 +23,7 @@ export const verbs = {
   "SEARCH_NEW_CLAUDE_TERMINAL_OFFSET": "open",
   "SEARCH_NEW_OFFSET": "open",
   "SEARCH_NEW_PI_CHAT_OFFSET": "open",
+  "SEARCH_NEW_CURSOR_CHAT_OFFSET": "open",
   "SEARCH_NEW_TERMINAL_OFFSET": "open",
   "SEARCH_RENAMEWIN_OFFSET": "workspace",
   "SEARCH_SHOW_ALL_OFFSET": "settings",
