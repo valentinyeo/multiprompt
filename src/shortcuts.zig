@@ -731,8 +731,17 @@ test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
     try std.testing.expect(sessionCloseShortcut(0x58, false, false, true, false) == null);
 }
 
+fn noteJumpBadgeKey(wp: WPARAM, lp: LPARAM) void {
+    const down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+    if (!down and wp != WM_KEYUP and wp != WM_SYSKEYUP) return;
+    const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
+    const key = @import("jump_badges.zig").classify(kb.vkCode, kb.scanCode, down) orelse return;
+    @import("sidebar.zig").applyJumpBadgeKey(key, isAltDown(kb.flags), key == .ctrl_down and !app_state.g_account_locked and foregroundIsOurs());
+}
+
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (nCode == HC_ACTION) @import("browser_pane.zig").syncBrowserHotkeys();
+    if (nCode == HC_ACTION) noteJumpBadgeKey(wp, lp);
     if (nCode == HC_ACTION and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         if (kb.vkCode == 0x54 and (isCtrlDown() or isAltDown(kb.flags)) and foregroundIsOurs()) {
