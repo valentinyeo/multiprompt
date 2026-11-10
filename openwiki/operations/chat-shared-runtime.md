@@ -119,7 +119,7 @@ That acceptance check requires post-release observation.
 
 Click the plus button left of the message box in a live Claude chat.
 The plus menu lists Attach file, Model, Effort and Permission level.
-Choose Model Opus, Sonnet, or Haiku.
+Choose Model Opus, Sonnet, Haiku, or Fable.
 Choose Effort Low, Medium, or High.
 Choose Permission level Ask, Accept edits, Plan, or Bypass.
 A check mark shows the current model, effort and permission level.

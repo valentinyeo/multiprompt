@@ -3397,7 +3397,7 @@ def host_agent_env(provider, sid):
         for key in HOST_CODEX_SECRETS:
             env.pop(key, None)
     if provider == 'claude' and config.get('model') in ('opus', 'sonnet', 'haiku', 'fable'):
-        for key in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+        for key in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL'):
             env.pop(key, None)
     tmux = config.get('tmux')
     if isinstance(tmux, str) and tmux:
@@ -3540,7 +3540,7 @@ def host_agent_start(provider, sid, mode=None):
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
         if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku", "fable"):
-            setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL; '
+            setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL; '
         source = host_reader_source()
         if not source:
             raise RuntimeError("owner_unavailable")

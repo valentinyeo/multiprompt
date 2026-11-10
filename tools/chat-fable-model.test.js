@@ -40,6 +40,8 @@ with tempfile.TemporaryDirectory() as directory:
     command = calls[-1]
     assert command.count('--model') == 1 and command[command.index('--model')+1] == 'fable', command
     assert r['host_model_name']('claude-fable-5-2') == 'fable'
+    with patch.dict(r['os'].environ, dict(ANTHROPIC_DEFAULT_FABLE_MODEL='remapped')):
+        assert 'ANTHROPIC_DEFAULT_FABLE_MODEL' not in r['host_agent_env'](provider, sid)
     assert r['host_model_name']('claude-fable-5-2[1m]') == 'fable'
 `;
   const result = spawnSync('python3', ['-'], { input: program, encoding: 'utf8', timeout: 60000 });

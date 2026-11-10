@@ -53,7 +53,8 @@ exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
 assert 'host_permission_mode' in r, 'reader reports the permission mode'
 assert r['host_model_name']('claude-opus-4-8[1m]') == 'opus'
 assert r['host_model_name']('sonnet') == 'sonnet'
-assert r['host_model_name']('fable-1') == ''
+assert r['host_model_name']('fable-1') == 'fable'
+assert r['host_model_name']('mystery-1') == ''
 with tempfile.TemporaryDirectory() as directory:
     r['HOME'] = Path(directory)
     provider, sid, tmux = 'claude', 'synthetic-mode', 'synthetic-chat'
