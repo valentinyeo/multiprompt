@@ -2494,6 +2494,7 @@ HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
+HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
 HOST_IDLE_SECONDS = 1800
 HOST_DELIVERY_TIMEOUT = 15
 HOST_STOP_GRACE = 5.0
@@ -3015,15 +3016,24 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") in ("set_model", "set_effort") and provider != "claude":
         return dict(status="refused", reason="unsupported_provider")
+    if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
+        return dict(status="refused", reason="unsupported_provider")
     if not host_owned(provider, sid):
         operation = query.get("op")
-        if operation not in ("set_model", "set_effort"):
+        if operation not in ("set_model", "set_effort", "set_permission_mode"):
             return dict(status="unavailable", reason="host_not_running")
-        key = "model" if operation == "set_model" else "effort"
-        allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
-        value = query.get(key)
-        if value not in allowed:
-            return dict(status="refused", reason="invalid_" + key)
+        mode = query.get("mode") if operation == "set_permission_mode" else None
+        if operation == "set_permission_mode":
+            if mode not in HOST_PERMISSION_MODES:
+                return dict(status="refused", reason="invalid_permission_mode")
+            key = "permission_mode"
+            value = mode
+        else:
+            key = "model" if operation == "set_model" else "effort"
+            allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
+            value = query.get(key)
+            if value not in allowed:
+                return dict(status="refused", reason="invalid_" + key)
         lock = host_lock(provider, sid)
         if lock is None:
             return dict(status="unavailable", reason="host_starting")
@@ -3035,6 +3045,10 @@ def host_reply(query):
                 return dict(status="refused", reason="host_disabled")
             config[key] = value
             host_write(host_paths(provider, sid)["config"], config)
+            if mode is not None:
+                state = host_session_state(provider, sid)
+                state["mode"] = mode
+                host_state_write(provider, sid, state)
             settings = host_settings(provider, sid)
             host_event(provider, sid, host_chat_name(provider, sid), dict(state={}),
                        "host.settings", dict(settings, applied=False, mode=host_permission_mode(provider, sid)))
@@ -3873,15 +3887,23 @@ def host_bypass_approvals(session):
 
 
 def host_auto_approve_safety(session, request, kind):
-    if kind != "approval" or not host_bypass_approvals(session):
-        return False
-    return bool(request.get("decision_reason"))
+    return kind == "approval" and host_bypass_approvals(session)
 
 
 def host_auto_approval_response(request):
     edited = request.get("input") if isinstance(request.get("input"), dict) else {}
     return dict(behavior="allow", updatedInput=edited, toolUseID=request.get("tool_use_id"),
                 decisionClassification="user_temporary")
+
+
+def host_save_permission_mode(provider, sid, mode):
+    if mode not in HOST_SAVED_PERMISSION_MODES:
+        return
+    config = host_config(provider, sid)
+    if config is None or config.get("permission_mode") == mode:
+        return
+    config["permission_mode"] = mode
+    host_write(host_paths(provider, sid)["config"], config)
 
 
 def host_save_default_permission_mode(provider, sid):
@@ -3993,6 +4015,7 @@ def host_set_mode(provider, sid, session, mode):
         return dict(status="error", reason="stdin_write_failed")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
+    host_save_permission_mode(provider, sid, mode)
     if "settings" in session:
         host_settings_event(provider, sid, host_chat_name(provider, sid), session)
     return dict(status="ok")
@@ -4974,8 +4997,12 @@ def host_main(provider, sid):
         server.bind(str(paths["socket"]))
         os.chmod(paths["socket"], 0o600)
         server.listen(8)
+        saved = state.get("mode")
+        mode = saved if saved in HOST_SAVED_PERMISSION_MODES else host_save_default_permission_mode(provider, sid)
+        if mode in HOST_SAVED_PERMISSION_MODES:
+            host_save_permission_mode(provider, sid, mode)
         try:
-            agent = host_agent_start(provider, sid)
+            agent = host_agent_start(provider, sid, mode)
             reason = "agent_not_found" if agent is None else None
         except (FileNotFoundError, NotADirectoryError, PermissionError) as error:
             reason = "cwd_unavailable" if not os.path.isdir(host_cwd(provider, sid)) else (
@@ -4987,7 +5014,6 @@ def host_main(provider, sid):
             return 5 if reason == "agent_not_found" else 4
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         state["agent_pid"] = agent.pid
-        mode = host_save_default_permission_mode(provider, sid)
         state["mode"] = mode if mode in HOST_PERMISSION_MODES else "default"
         host_state_write(provider, sid, state)
         session = dict(state=state, retry_generation=retry_generation)
@@ -5072,7 +5098,7 @@ def host_cli(argv):
             config["tmux"] = tmux
         if folder is not None:
             config["cwd"] = folder
-        if mode is not None:
+        if mode is not None and config.get("permission_mode") not in HOST_PERMISSION_MODES:
             config["permission_mode"] = mode
         host_write(paths["config"], config)
         if host_handed_over(provider, sid):
@@ -5102,6 +5128,9 @@ def host_cli(argv):
                 config["cwd"] = folder
             if mode is not None:
                 config["permission_mode"] = mode
+                state = host_session_state(provider, sid)
+                state["mode"] = mode
+                host_state_write(provider, sid, state)
             host_write(paths["config"], config)
         return host_start(provider, sid)
     if command == "adopt":
@@ -6929,7 +6958,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 103
+RUNTIME_GENERATION = 104
 
 if __name__ == '__main__':
     import base64 as _base64

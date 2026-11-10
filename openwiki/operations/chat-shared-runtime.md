@@ -122,8 +122,7 @@ The plus menu lists Attach file, Model, Effort and Permission level.
 Choose Model Opus, Sonnet, or Haiku.
 Choose Effort Low, Medium, or High.
 Choose Permission level Ask, Accept edits, Plan, or Bypass.
-A check mark shows the current model and effort.
-The permission rows carry no check mark because the desktop never receives the current mode.
+A check mark shows the current model, effort and permission level.
 The message box shows no model or effort text.
 Ctrl+K "Chat View: Plus Menu" opens the same menu from the keyboard.
 Ctrl+K still lists every model, effort and permission choice.
@@ -137,6 +136,17 @@ The `host.settings` payload includes `model`, `effort`, and `applied`.
 Empty values mean the default remains unchanged.
 Older clients can ignore this event and snapshot metadata.
 The paired Android request needs no phone picker.
+
+## Saved permission level
+
+The host accepts `set_permission_mode` requests.
+Ask, Accept edits and Bypass are saved with the chat, in its config and its state.
+The saved level is accepted while the host is stopped, so a late pick is not lost.
+A restart, a model change or a reconnect starts the agent in the saved level.
+Enabling a chat again never replaces a level the user already chose.
+Plan stays one-time: it lasts until the plan is settled, then the previous level returns.
+In Bypass the host approves tool requests itself, including helper agents' requests.
+Questions to the user and plan proposals still reach the chat.
 
 ## Limits
 
