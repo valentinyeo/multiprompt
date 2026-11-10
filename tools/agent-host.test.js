@@ -9,16 +9,18 @@ const read = (file) => fs.readFileSync(file, 'utf8');
 test('IGSH-1266 new Claude sessions start on the app owned host and typing a command start stays for other programs', () => {
   const host = read('src/agent_host.zig');
   assert.match(host, /pub const ENABLED = true;/);
-  assert.match(host, /pub fn eligible\(program: \[\]const u8\) bool \{\s*return ENABLED and std\.mem\.startsWith\(u8, program, "claude"\);/);
+  assert.match(host, /pub fn hostedWorkspaceProvider\(program: \[\]const u8\) \?Provider/);
+  assert.match(host, /pub fn eligible\(program: \[\]const u8\) bool \{\s*return ENABLED and hostedWorkspaceProvider\(program\) != null;/);
   assert.match(host, /try std\.testing\.expect\(!eligible\("codex"\)\);/);
   assert.match(host, /try std\.testing\.expect\(!eligible\("pi"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("cursor"\)\);/);
 
   const palette = read('src/command_palette.zig');
   const start = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
   const end = palette.indexOf('pub fn activeRemoteContextForCodexTmux(');
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
-  assert.match(body, /if \(!plain_claude and agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
+  assert.match(body, /const hosted = agent_host\.hostedWorkspaceProvider\(program\);\s*const host_sid: \?.* = if \(!plain_claude and hosted != null\) agent_host\.mintSessionId\(&sid_buf\) else null/s);
   assert.match(body, /pub fn spawnWorkspaceTmuxSession\(\) bool \{\s*return spawnWorkspaceSession\(true, false\);/, 'Ctrl+T always opens a live chat');
   assert.match(body, /pub fn spawnWorkspacePlainClaudeSession\(\) bool \{\s*return spawnWorkspaceSession\(true, true\);/, 'the old terminal Claude stays available from Ctrl+K');
   assert.match(body, /spawnWorkspaceSessionAt\(host, cwd_buf\[0\.\.cwd_len\], program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
@@ -35,7 +37,7 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   const commandEnd = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
   assert.ok(command >= 0 && commandEnd > command, 'workspaceLaunchCommand must exist');
   const choice = palette.slice(command, commandEnd);
-  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*if \(!agent_host\.eligible\(program\)\) return null;\s*return agent_host\.launchCommand\(host_out, session, cwd, sid\);/);
+  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid\);/);
   assert.match(choice, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/);
   assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
   assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, &host_buf, &command_buf\) == null\);/);
@@ -110,19 +112,21 @@ test('IGSH-1546 Codex and Pi chats start the same live chat host with their own 
   const palette = read('src/command_palette.zig');
   const send = read('src/chat_send.zig');
   const transcript = read('src/chat_transcript.zig');
-  assert.match(host, /pub const Provider = enum \{\s*claude,\s*codex,\s*pi,/);
+  assert.match(host, /pub const Provider = enum \{\s*claude,\s*codex,\s*pi,\s*cursor,/);
   assert.match(host, /pub fn launchCommandFor\(out: \[\]u8, provider: Provider,/);
   assert.match(palette, /pub fn spawnCodexTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.codex\);/);
   assert.match(palette, /pub fn spawnPiTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.pi\);/);
+  assert.match(palette, /pub fn spawnCursorTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.cursor\);/);
   assert.match(palette, /ai_agent = provider\.aiAgent\(\)/);
   const hosted = palette.slice(palette.indexOf('fn spawnHostedChatSession('), palette.indexOf('pub fn spawnCodexTmuxSession('));
   assert.match(hosted, /g_pending_chat_view = false;/);
   assert.match(hosted, /shell\.chat_view_on = true;/);
   assert.match(hosted, /live\.starting\(shell\.shell_id, host, sid\)/);
   assert.ok(!palette.includes('fn buildCodexTmuxSessionName('), 'Codex no longer types into a terminal');
-  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
+  assert.match(transcript, /if \(self\.pi\) return "pi";\s*if \(self\.codex\) return "codex";/);
+  assert.match(transcript, /aiAgentLabelValue/);
   assert.match(send, /\.provider = job\.key\.provider\(\), \.sid = /);
-  assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3\);/);
+  assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7\);/);
   assert.doesNotMatch(send, /if \(job\.key\.codex\) "codex" else "claude"/);
 });
 

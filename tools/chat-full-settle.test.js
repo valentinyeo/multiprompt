@@ -241,5 +241,7 @@ test('outbox tick owns full settlement completion and startup behind the switch'
 
 test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
   const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
-  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
+  assert.match(transcript, /if \(self\.pi\) return "pi";\s*if \(self\.codex\) return "codex";/);
+  assert.match(transcript, /aiAgentLabelValue/);
+  assert.match(transcript, /agent: u8 = 0/);
 });
