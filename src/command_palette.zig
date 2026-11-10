@@ -198,6 +198,8 @@ const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
 const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
+const SEARCH_CHAT_RESTART_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_OFFSET;
+const SEARCH_CHAT_RESTART_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_ALL_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -499,6 +501,21 @@ const MoveChatJob = struct {
     tmux_len: u8 = 0,
     cwd: [256]u8 = std.mem.zeroes([256]u8),
     cwd_len: u16 = 0,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+const RESTART_HOSTS = 3;
+const RestartChatJob = struct {
+    all: bool = false,
+    count: u8 = 0,
+    hosts: [RESTART_HOSTS]u8 = @splat(0),
+    ids: [RESTART_HOSTS]u32 = @splat(0),
+    provider: [8]u8 = std.mem.zeroes([8]u8),
+    provider_len: u8 = 0,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    tmux: [64]u8 = std.mem.zeroes([64]u8),
+    tmux_len: u8 = 0,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
@@ -948,6 +965,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
         SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
+        SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
+        SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
         SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
         SEARCH_CHAT_DICTATION_OFFSET => "chat view dictation microphone speech start stop ctrl d",
@@ -1387,7 +1406,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2353,6 +2372,132 @@ pub fn startMoveChat(tab: usize, target: u8) bool {
 
 pub fn canAdoptHostTab(ai_agent: u8, claude_sid_len: usize, tmux_len: usize, working: bool) bool {
     return ai_agent == 1 and claude_sid_len > 0 and tmux_len > 0 and !working;
+}
+
+pub fn canRestartChat(ai_agent: u8, sid_len: u32, tmux_len: u32) bool {
+    return ai_agent != 0 and sid_len > 0 and tmux_len > 0;
+}
+
+fn liveChatTab(tab: u32) bool {
+    if (tab >= app_state.shell_count) return false;
+    const shell = &app_state.shells[tab];
+    return canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len);
+}
+
+test "IGSH-1921 a live chat with a session and a chat name can restart" {
+    try std.testing.expect(canRestartChat(1, 36, 12));
+    try std.testing.expect(canRestartChat(7, 36, 12));
+    try std.testing.expect(!canRestartChat(0, 36, 12));
+    try std.testing.expect(!canRestartChat(1, 0, 12));
+    try std.testing.expect(!canRestartChat(1, 36, 0));
+}
+
+fn finishRestartChatJob(job: *RestartChatJob) void {
+    job.finished.store(true, .release);
+    std.heap.page_allocator.destroy(job);
+}
+
+fn restartChatNotice(text: []const u8) void {
+    const a = std.heap.page_allocator;
+    const notice = a.dupeZ(u8, text) catch return;
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+}
+
+fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
+    const agent_host = @import("agent_host.zig");
+    const waiting = if (job.all) agent_host.restartAllWaiting(body) else agent_host.restartWaitingReply(body);
+    const nothing = job.all and agent_host.restartAllNothing(body);
+    const restarted = if (job.all) agent_host.restartAllAnswered(body) and !waiting and !nothing else agent_host.restartedReply(body);
+    const restarting = !job.all and agent_host.restartingReply(body);
+    if (restarted) {
+        restartChatNotice(if (job.all) "Every idle live chat restarted on the newest version" else "Chat restarted on the newest version");
+    } else if (waiting) {
+        restartChatNotice(if (job.all) "Live chats restart when their replies end" else "Chat restarts when this reply ends");
+    } else if (restarting) {
+        restartChatNotice("Chat is restarting on the newest version");
+    } else if (nothing) {
+        restartChatNotice("No live chat was running to restart");
+    } else if (agent_host.restartRefusedReply(body)) {
+        restartChatNotice("Chat restart: this chat has no live host to restart");
+    }
+}
+
+fn restartChatThread(job: *RestartChatJob) void {
+    defer finishRestartChatJob(job);
+    const a = std.heap.page_allocator;
+    const agent_host = @import("agent_host.zig");
+    var buf: [512]u8 = undefined;
+    var answered = false;
+    if (job.all) {
+        for (job.hosts[0..job.count], job.ids[0..job.count]) |host_index, id| {
+            const request = agent_host.restartAllRequest(&buf, id, host_index) orelse continue;
+            var response: std.ArrayList(u8) = .empty;
+            defer response.deinit(a);
+            if (!@import("chat_session.zig").chatHistoryPersistent(host_index, id, request, 65536, &response, null)) continue;
+            answered = true;
+            restartChatReply(job, response.items);
+        }
+    } else {
+        const request = agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
+        var response: std.ArrayList(u8) = .empty;
+        defer response.deinit(a);
+        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) return;
+        answered = true;
+        restartChatReply(job, response.items);
+    }
+    if (!answered) restartChatNotice("Chat restart: the server did not answer");
+}
+
+pub fn startRestartChat(all: bool) bool {
+    const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
+    job.* = .{ .all = all };
+    if (all) {
+        for (0..app_state.shell_count) |i| {
+            if (job.count >= RESTART_HOSTS) break;
+            const shell = &app_state.shells[i];
+            if (!canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) continue;
+            var seen = false;
+            for (job.hosts[0..job.count]) |known| {
+                if (known == shell.tmux_host) seen = true;
+            }
+            if (seen) continue;
+            job.hosts[job.count] = shell.tmux_host;
+            job.ids[job.count] = shell.shell_id;
+            job.count += 1;
+        }
+        if (job.count == 0) {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        }
+    } else {
+        const tab = app_state.active_shell;
+        if (!liveChatTab(tab)) {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        }
+        const shell = &app_state.shells[tab];
+        const key = @import("chat_session.zig").chatFileIdentityForShell(tab);
+        const provider = key.provider();
+        if (provider.len > job.provider.len or key.sid[0] == 0 or key.tmux[0] == 0) {
+            std.heap.page_allocator.destroy(job);
+            return false;
+        }
+        job.count = 1;
+        job.hosts[0] = shell.tmux_host;
+        job.ids[0] = shell.shell_id;
+        job.provider_len = @intCast(provider.len);
+        @memcpy(job.provider[0..provider.len], provider);
+        job.sid_len = @intCast(@min(shell.claude_sid_len, 40));
+        @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
+        job.tmux_len = @intCast(@min(shell.tmux_session_len, 64));
+        @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    }
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, restartChatThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    return true;
 }
 
 pub fn adoptHostRequest(id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8, out: []u8) ?[]const u8 {
@@ -3911,6 +4056,21 @@ pub fn updateSearchResults() void {
         labelsMatchQuery(&[_][]const u8{ "Chat View: Resync chat", "reload refresh repair messages" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESYNC_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        liveChatTab(app_state.active_shell) and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Restart this chat on the newest version", "relaunch update latest version restart chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
 

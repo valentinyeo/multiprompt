@@ -275,6 +275,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+C in Chat View | Copy selected text. Right-click for more actions. |
 | Ctrl+A in Chat View | Select all transcript text (transcript focus; composer keeps its own Ctrl+A) |
 | Ctrl+K "Chat View: Resync chat" | Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending |
+| Ctrl+K "Chat View: Restart this chat on the newest version" | Stop and start this chat's agent on the newest version in the background; it keeps its name and history, and a chat that is mid-reply restarts when the reply ends |
+| Ctrl+K "Chat View: Restart every idle live chat" | Restart every running live chat on this server on the newest version; chats that are replying restart when their reply ends. Every live chat also restarts nightly at 04:00 local server time |
 | Ctrl+K "Chat View: More Menu" | Chat View: open the round three-dot menu next to the title as one grouped panel: Approve, Stop, Terminal, Rename, History, Waiting, Remind me, Archive, the current Model, End session and Remove from list; Up/Down/Enter or the mouse choose, Esc or a click outside closes |
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages including waiting ones, Enter opens the right-click options, Delete cancels a waiting message, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
