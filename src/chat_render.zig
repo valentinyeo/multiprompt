@@ -2672,9 +2672,12 @@ pub fn chatMinScroll() i32 {
 
 pub fn chatScrollStateChanged(viewport_h: i32) void {
     const had_messages = app_state.g_chat_new_messages.count() != 0;
+    const before = app_state.g_chat_new_messages;
+    const was_scrolled_up = app_state.g_chat_scrolled_up;
     app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
     app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
     if (!app_state.g_chat_scrolled_up) _ = @import("chat_session.zig").chatReadMark(true);
+    if (before.value == app_state.g_chat_new_messages.value and was_scrolled_up == app_state.g_chat_scrolled_up) return;
     chatNewMessagesChanged(had_messages);
 }
 
