@@ -62,6 +62,7 @@ if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; 
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
+if ($env:CHAT_SWITCH_REPLAY_PROOF -eq '1') { $plans = @(@{name='switch-replay'; mode='idle'; text='switching back resumes the live cursor'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -119,9 +120,9 @@ function Doctor([bool]$Chat = $false) {
         throw 'Doctor: visible UI Automation identity or fixed title missing'
     }
     $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
-    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $expectedShells } else { 1 }
+    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1' -or $env:CHAT_SWITCH_REPLAY_PROOF -eq '1') { $expectedShells } else { 1 }
     if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
-        ($expectedShells -eq 2 -and $env:CHAT_LIVE_DELIVERY_PROOF -ne '1' -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
+        ($expectedShells -eq 2 -and $env:CHAT_LIVE_DELIVERY_PROOF -ne '1' -and $env:CHAT_SWITCH_REPLAY_PROOF -ne '1' -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -545,6 +546,7 @@ foreach ($plan in $plans) {
     $isLiveDelivery = $plan.name -eq 'live-delivery'
     $isInstant = $plan.name -eq 'instant-chat'
     $isModel = $plan.name -eq 'model-settings'
+    $isSwitchReplay = $plan.name -eq 'switch-replay'
     $socketTemp = $null
     $hasTranscript = $isModel -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
@@ -571,6 +573,14 @@ foreach ($plan in $plans) {
         $standIn = $seed
         if ($isLiveDelivery) { $standIn.sessions = @('verify-agent', 'verify-background') }
         if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
+        if ($isSwitchReplay) {
+            $standIn.fake = $true
+            $standIn.sessions = @('switch-a', 'switch-b')
+            $standIn.panes = @{'switch-a'=4300; 'switch-b'=4301}
+            $standIn.sids = @{'switch-a'='a1b2c3d4-1929-4000-8000-00000000192a'; 'switch-b'='a1b2c3d4-1929-4000-8000-00000000192b'}
+            $standIn.procRoot = [IO.Path]::GetPathRoot($profile) + 'proc'
+            $standIn.home = "$profile/home"
+        }
         if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
             $cwd = 'C:/verify/work'
@@ -611,6 +621,7 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isSwitchReplay) { Shell-Run @('seed-many', '1') }
         if ($isRecovery) { Shell-Run @('recovery-init') } elseif ($isResync) { Shell-Run @('resync-init') }
         if ($isRecovery) {
             & $env:MP_VERIFY_PYTHON "$PSScriptRoot/recovery-provenance.py" "$caseDir/canonical-corpus-sha256.txt" "$caseDir/provenance.json"
@@ -628,6 +639,13 @@ foreach ($plan in $plans) {
         if ($isModel) { $savedSession.tabs[0].csid = $sid }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
+        if ($isSwitchReplay) {
+            $savedSession.tabs = @(
+                @{kind='tmux'; name='Switch A'; manual=$true; tmux_host=0; tmux_session='switch-a'; cv=$false; csid=$standIn.sids['switch-a']; claude_session=$true; ai_agent=1; pid=0},
+                @{kind='tmux'; name='Switch B'; manual=$true; tmux_host=0; tmux_session='switch-b'; cv=$true; csid=$standIn.sids['switch-b']; claude_session=$true; ai_agent=1; pid=0}
+            )
+            $expectedShells = 2
+        }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
             $expectedShells = 4
@@ -673,7 +691,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+        if ($isSwitchReplay) {
+            . "$PSScriptRoot/switch-replay.ps1"
+        } elseif ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
             . "$PSScriptRoot/working-live.ps1"
         } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
@@ -1448,7 +1468,10 @@ foreach ($plan in $plans) {
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
             if ($isHax) {
                 Copy-Item "$profile/home/.local/state/hax/sessions" "$caseDir/hax-sessions" -Recurse -Force
+            }
+            if ($isHax -or $isSwitchReplay) {
                 foreach ($pidValue in $standIn.panes.Values) { Remove-Item -LiteralPath "$($standIn.procRoot)/$pidValue" -Recurse -Force -ErrorAction SilentlyContinue }
+                if ($isSwitchReplay -and (Test-Path -LiteralPath $standIn.procRoot) -and -not (Get-ChildItem -LiteralPath $standIn.procRoot -Force)) { Remove-Item -LiteralPath $standIn.procRoot -Force }
             }
             if ($hasTranscript -and $procDir) {
                 Remove-Item -LiteralPath $procDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -1471,6 +1494,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_SWITCH_REPLAY_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-switch-replay-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-working-live-proof.mjs" $Evidence
     exit $LASTEXITCODE

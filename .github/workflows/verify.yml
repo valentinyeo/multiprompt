@@ -386,6 +386,7 @@ jobs:
       CHAT_INSTANT_PROOF: ${{ inputs.feature == 'chat-instant' && '1' || '' }}
       CHAT_MODEL_PROOF: ${{ inputs.feature == 'chat-model' && '1' || '' }}
       CHAT_WORKING_LIVE_PROOF: ${{ inputs.feature == 'chat-working-live' && '1' || '' }}
+      CHAT_SWITCH_REPLAY_PROOF: ${{ inputs.feature == 'chat-switch-replay' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
@@ -414,7 +415,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
       - name: Select instant chat driver
-        if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1'
+        if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_SWITCH_REPLAY_PROOF == '1'
         shell: pwsh
         run: Add-Content $env:GITHUB_ENV 'FEATURE=chat-delivery'
       - name: Keep LF line endings
@@ -453,6 +454,9 @@ jobs:
       - name: Check hosted working evidence contract
         if: env.CHAT_WORKING_LIVE_PROOF == '1'
         run: node --test tools/chat-working-live-proof.test.mjs
+      - name: Check switch-back replay evidence contract
+        if: env.CHAT_SWITCH_REPLAY_PROOF == '1'
+        run: node --test tools/chat-switch-replay-proof.test.mjs
       - name: Check unread divider contracts
         continue-on-error: true
         run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs

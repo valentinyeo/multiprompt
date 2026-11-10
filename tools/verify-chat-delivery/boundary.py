@@ -1153,7 +1153,7 @@ def reader_namespace():
         if state().get("name") == "reactions":
             install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
-        if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
+        if state().get("name") in ("instant-chat", "startup-failure", "working-live", "switch-replay"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
         if state().get("name") == "accepted-message":
@@ -1213,6 +1213,13 @@ def reader_namespace():
                 record("working-host.jsonl", stage="subscribed", sid=fixture.SID, provider=query.get("provider"))
 
         namespace["serve_request"] = working_request
+    if state().get("name") == "switch-replay":
+        fixture_path = Path(__file__).with_name("switch-host.py")
+        assert fixture_path.is_file(), "Switch replay fixture is missing"
+        spec = importlib.util.spec_from_file_location("switch_host", fixture_path)
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
     if state().get("name") == "startup-failure":
         original = namespace["serve_request"]
         sid = "a1b2c3d4-1593-4000-8000-000000001593"
