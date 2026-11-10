@@ -2423,6 +2423,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const row = rows_arr[ri];
             const y: i32 = row.y - app_state.g_sidebar_scroll;
             if (y + rowTotalHeight(row) <= 0 or y >= client_rc.bottom - sidebarStickyCardSpan()) continue;
+            const row_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + rowTotalHeight(row) };
+            if (@import("win32.zig").RectVisible(hdc, &row_rc) == 0) continue;
             if (row.kind == .room_header or row.kind == .room or row.kind == .room_new) {
                 paintRoomRow(hdc, column, y, row);
                 _ = SelectObject(hdc, font_title);
