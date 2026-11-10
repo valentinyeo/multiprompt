@@ -2393,6 +2393,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0;
                 if (card_hover != app_state.g_status_card_hover) {
                     app_state.g_status_card_hover = card_hover;
+                    @import("telemetry_panel.zig").syncUsageTelemetryCollector();
                     _ = InvalidateRect(hwnd, null, 0);
                     var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = if (card_hover) 3 else 0x80000001, .hwndTrack = hwnd, .dwHoverTime = 400 };
                     _ = TrackMouseEvent(&tracking);
@@ -3841,7 +3842,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         @import("win32.zig").WM_APP_PLUS_MENU_ACTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            const item: plus_menu.Item = std.meta.intToEnum(plus_menu.Item, wp) catch return 0;
+            const item: plus_menu.Item = blk: {
+                inline for (std.meta.fields(plus_menu.Item)) |field| {
+                    if (wp == field.value) break :blk @enumFromInt(field.value);
+                }
+                return 0;
+            };
             switch (item) {
                 .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
                 .model_opus, .model_sonnet, .model_haiku, .effort_low, .effort_medium, .effort_high => {
@@ -9031,6 +9037,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 }
 
 pub fn main(init: std.process.Init) void {
+    @import("idle_footprint.zig").setStartupSettled(false);
     launch_cache.begin();
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return;
     if (usage_telemetry_mode.isRequested(args)) {
@@ -9367,7 +9374,6 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .telemetry => {
             launch_cache.step(.telemetry);
-            if (std.Thread.spawn(.{}, ensureUsageTelemetryCollector, .{})) |thread| thread.detach() else |_| {}
             requestAiPaceRefresh();
         },
         .links => {
@@ -9543,9 +9549,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             if (app_state.active_shell < app_state.shell_count) {
                 const sid = app_state.shells[app_state.active_shell].shell_id;
                 @import("browser_pane.zig").armPinnedBrowserEntry(sid);
-                if (!app_state.g_chat_active or app_state.g_chat_browser_swap.shell_id != sid) @import("browser_pane.zig").consumePinnedBrowserEntry(sid);
             }
-            relaunchActiveRestoredBrowserPane();
             updateBrowserVisibility();
             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
                 armBrowserVisibilitySettle(20);
@@ -9581,6 +9585,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             if (crash_recorder.takeRestartNotice()) debugLog(crash_recorder.NOTICE_TEXT);
         },
         .done => {
+            @import("idle_footprint.zig").setStartupSettled(true);
             @import("room_frontend.zig").startupSettled();
             return true;
         },
