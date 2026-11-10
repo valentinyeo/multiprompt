@@ -3030,7 +3030,7 @@ def host_reply(query):
             value = mode
         else:
             key = "model" if operation == "set_model" else "effort"
-            allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
+            allowed = ("opus", "sonnet", "haiku", "fable") if key == "model" else ("low", "medium", "high")
             value = query.get(key)
             if value not in allowed:
                 return dict(status="refused", reason="invalid_" + key)
@@ -3396,7 +3396,7 @@ def host_agent_env(provider, sid):
     if provider == 'codex':
         for key in HOST_CODEX_SECRETS:
             env.pop(key, None)
-    if provider == 'claude' and config.get('model') in ('opus', 'sonnet', 'haiku'):
+    if provider == 'claude' and config.get('model') in ('opus', 'sonnet', 'haiku', 'fable'):
         for key in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
             env.pop(key, None)
     tmux = config.get('tmux')
@@ -3447,7 +3447,7 @@ def host_cursor_argv(provider, sid, base, mode=None):
 def host_model_name(value):
     if not isinstance(value, str):
         return ""
-    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku)(?:-[a-zA-Z0-9._-]+)?(?:\[[a-zA-Z0-9]+\])?", value)
+    match = re.fullmatch(r"(?:claude-)?(opus|sonnet|haiku|fable)(?:-[a-zA-Z0-9._-]+)?(?:\[[a-zA-Z0-9]+\])?", value)
     return match.group(1) if match else ""
 
 
@@ -3508,7 +3508,7 @@ def host_agent_start(provider, sid, mode=None):
     if provider == "claude":
         config = host_config(provider, sid) or {}
         overrides = {key: config[key] for key, values in
-                     (("model", ("opus", "sonnet", "haiku")), ("effort", ("low", "medium", "high")))
+                     (("model", ("opus", "sonnet", "haiku", "fable")), ("effort", ("low", "medium", "high")))
                      if config.get(key) in values}
         if overrides:
             filtered = base[:1]
@@ -3539,7 +3539,7 @@ def host_agent_start(provider, sid, mode=None):
         shell = ["/bin/sh", "-l", "-c"]
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
-        if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku"):
+        if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku", "fable"):
             setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL; '
         source = host_reader_source()
         if not source:
@@ -4135,7 +4135,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         if provider != "claude":
             return host_refuse("unsupported_provider")
         key = "model" if operation == "set_model" else "effort"
-        allowed = ("opus", "sonnet", "haiku") if key == "model" else ("low", "medium", "high")
+        allowed = ("opus", "sonnet", "haiku", "fable") if key == "model" else ("low", "medium", "high")
         value = request.get(key)
         if value not in allowed:
             return host_refuse("invalid_" + key)
@@ -7035,7 +7035,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 108
+RUNTIME_GENERATION = 109
 
 if __name__ == '__main__':
     import base64 as _base64

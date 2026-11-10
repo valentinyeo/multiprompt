@@ -14,7 +14,7 @@ pub const MAX_PAGE: usize = 4 * 1024 * 1024;
 pub const ItemKind = enum { text, thinking, tool, plan };
 pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
-pub const Model = enum { unknown, opus, sonnet, haiku };
+pub const Model = enum { unknown, opus, sonnet, haiku, fable };
 pub const Effort = enum { unknown, low, medium, high };
 pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
 pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };

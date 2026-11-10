@@ -643,6 +643,7 @@ const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET
 const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
 const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
 const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
 const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
 const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
 const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
@@ -3875,11 +3876,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             };
             switch (item) {
                 .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
-                .model_opus, .model_sonnet, .model_haiku, .effort_low, .effort_medium, .effort_high => {
+                .model_opus, .model_sonnet, .model_haiku, .model_fable, .effort_low, .effort_medium, .effort_high => {
                     const setting: @import("chat_live.zig").Setting = switch (item) {
                         .model_opus => .{ .model = .opus },
                         .model_sonnet => .{ .model = .sonnet },
                         .model_haiku => .{ .model = .haiku },
+                        .model_fable => .{ .model = .fable },
                         .effort_low => .{ .effort = .low },
                         .effort_medium => .{ .effort = .medium },
                         else => .{ .effort = .high },
@@ -5583,7 +5585,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (findGroupIdx(gid)) |gi| @import("rename.zig").runGroupPaletteAction(hwnd, gi, target - app_state.SEARCH_GROUPCTX_BASE);
                     return 0;
                 }
-                if (target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) {
+                if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = false;
                     clearSearchBackdrop();
@@ -5591,6 +5593,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         SEARCH_CHAT_MODEL_OPUS_OFFSET => .{ .model = .opus },
                         SEARCH_CHAT_MODEL_SONNET_OFFSET => .{ .model = .sonnet },
                         SEARCH_CHAT_MODEL_HAIKU_OFFSET => .{ .model = .haiku },
+                        SEARCH_CHAT_MODEL_FABLE_OFFSET => .{ .model = .fable },
                         SEARCH_CHAT_EFFORT_LOW_OFFSET => .{ .effort = .low },
                         SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => .{ .effort = .medium },
                         SEARCH_CHAT_EFFORT_HIGH_OFFSET => .{ .effort = .high },

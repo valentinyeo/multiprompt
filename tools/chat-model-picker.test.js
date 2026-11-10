@@ -15,7 +15,7 @@ test('host events and snapshots own settings, without optimistic updates', () =>
   assert.match(live, /seq < live\.settings_seq/);
   assert.match(read('src/chat_send.zig'), /host_settings/);
   assert.match(read('src/chat_send.zig'), /applySettingsSnapshot/);
-  assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku \}/);
+  assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable \}/);
   assert.match(live, /pub const Effort = enum \{ unknown, low, medium, high \}/);
   const send = read('src/chat_send.zig').split('pub fn chatSetLiveSetting')[1].split('\n}')[0];
   assert.match(send, /chatLiveReply\(line\)/);
@@ -24,7 +24,7 @@ test('host events and snapshots own settings, without optimistic updates', () =>
 
 test('all six settings are searchable, painted and dispatched', () => {
   const state = read('src/app_state.zig');
-  for (const [kind, values] of [['MODEL', ['OPUS', 'SONNET', 'HAIKU']], ['EFFORT', ['LOW', 'MEDIUM', 'HIGH']]]) {
+  for (const [kind, values] of [['MODEL', ['OPUS', 'SONNET', 'HAIKU', 'FABLE']], ['EFFORT', ['LOW', 'MEDIUM', 'HIGH']]]) {
     for (const value of values) {
       const id = `SEARCH_CHAT_${kind}_${value}_OFFSET`;
       const label = `Chat View: ${kind === 'MODEL' ? 'Model' : 'Effort'} ${value[0]}${value.slice(1).toLowerCase()}`;
