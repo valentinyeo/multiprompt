@@ -58,8 +58,12 @@ fn win32OpenAppend(_: []const u8) ?HANDLE {
     for (0..10000) |_| std.atomic.spinLoopHint();
     return 1;
 }
+var writing: std.atomic.Value(u32) = .init(0);
 fn win32WriteAll(_: HANDLE, bytes: []const u8) void {
-    if (std.mem.eql(u8, bytes, "2026-10-18 03:04:05.067 paint record\\n")) _ = records.fetchAdd(1, .monotonic);
+    const alone = writing.fetchAdd(1, .acq_rel) == 0;
+    for (0..1000) |_| std.atomic.spinLoopHint();
+    _ = writing.fetchSub(1, .acq_rel);
+    if (alone and std.mem.eql(u8, bytes, "2026-10-18 03:04:05.067 paint record\\n")) _ = records.fetchAdd(1, .monotonic);
 }
 fn CloseHandle(_: HANDLE) bool { opened.store(false, .release); return true; }
 fn writer() void {

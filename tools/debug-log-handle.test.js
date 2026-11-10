@@ -75,7 +75,7 @@ test "two hundred log lines reuse one open log file" {
 test('IGSH-1907 writing the debug log does not reopen the file for every line', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-handle-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.copyFileSync(path.join(__dirname, '../src/diagnostics.zig'), path.join(dir, 'diagnostics.zig'));
+  require('./zig-copy').copyZig(['diagnostics.zig'], dir);
   const appState = fs.readFileSync(path.join(__dirname, '../src/app_state.zig'), 'utf8');
   const mutexStart = appState.indexOf('pub const SpinMutex = struct {');
   const mutex = appState.slice(mutexStart, appState.indexOf('\n};', mutexStart) + 3);
