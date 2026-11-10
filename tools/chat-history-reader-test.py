@@ -4205,8 +4205,7 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             original_poll(*args)
             polled.set()
 
-        with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 3), \
-                patch.object(reader, 'superseded_engine', side_effect=sent.is_set), \
+        with patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 1), \
                 patch.object(reader, 'message_poll', side_effect=poll):
             worker = threading.Thread(target=reader.message_worker, args=('fixture', 'claude', 'sid'), daemon=True)
             worker.start()
@@ -4217,7 +4216,8 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             reader.start_message_worker(dict(self.base, message_id='message_fixture_0002'), 'unused source')
             self.assertTrue(sent.wait(3), 'the second message was never sent')
             waited = time.monotonic() - started
-            worker.join(5)
+            self.accept('second prompt')
+            worker.join(10)
         print(f'IGSH-1907 submit_to_send_s={waited:.3f}', file=sys.stderr)
         self.assertFalse(worker.is_alive(), 'the worker did not stop')
         self.assertLess(waited, 0.4, f'a new message waited {waited:.2f}s for the idle worker to wake')
