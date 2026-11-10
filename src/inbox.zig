@@ -2215,6 +2215,30 @@ test "Inbox J and K stop at the ends and gg and G jump to them" {
     try std.testing.expectEqual(@as(u32, 0), app_state.g_inbox_sel);
 }
 
+test "IGSH-1933 unread count skips muted, excluded and archived-read sessions" {
+    const prior_count = app_state.shell_count;
+    const prior_single = app_state.g_single_window;
+    const prior = app_state.shells[0..3].*;
+    defer {
+        app_state.shells[0..3].* = prior;
+        app_state.shell_count = prior_count;
+        app_state.g_single_window = prior_single;
+    }
+    app_state.g_single_window = false;
+    app_state.shell_count = 3;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[1] = empty_shell;
+    app_state.shells[2] = empty_shell;
+    app_state.shells[0].needs_attention = true;
+    app_state.shells[1].needs_attention = true;
+    app_state.shells[1].muted = true;
+    app_state.shells[2].needs_attention = true;
+    app_state.shells[2].inbox_archived = true;
+    try std.testing.expectEqual(@as(u32, 2), unreadCount());
+    app_state.shells[2].needs_attention = false;
+    try std.testing.expectEqual(@as(u32, 1), unreadCount());
+}
+
 test "ISSUE-423 hidden selection and keyboard cycling follow visible split order" {
     const previous_settings = app_state.g_layout_settings;
     const previous_tab = app_state.g_inbox_tab;
@@ -2261,28 +2285,4 @@ test "ISSUE-423 hidden selection and keyboard cycling follow visible split order
         try std.testing.expectEqual(builtins.ids[0], app_state.g_inbox_tab);
         app_state.g_unread_only = false;
     }
-}
-
-test "IGSH-1933 unread count skips muted, excluded and archived-read sessions" {
-    const prior_count = app_state.shell_count;
-    const prior_single = app_state.g_single_window;
-    const prior = app_state.shells[0..3].*;
-    defer {
-        app_state.shells[0..3].* = prior;
-        app_state.shell_count = prior_count;
-        app_state.g_single_window = prior_single;
-    }
-    app_state.g_single_window = false;
-    app_state.shell_count = 3;
-    app_state.shells[0] = empty_shell;
-    app_state.shells[1] = empty_shell;
-    app_state.shells[2] = empty_shell;
-    app_state.shells[0].needs_attention = true;
-    app_state.shells[1].needs_attention = true;
-    app_state.shells[1].muted = true;
-    app_state.shells[2].needs_attention = true;
-    app_state.shells[2].inbox_archived = true;
-    try std.testing.expectEqual(@as(u32, 2), unreadCount());
-    app_state.shells[2].needs_attention = false;
-    try std.testing.expectEqual(@as(u32, 1), unreadCount());
 }
