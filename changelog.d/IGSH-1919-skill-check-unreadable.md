@@ -1,0 +1,1 @@
+- Messages that mention a skill like /do now reach chats on other accounts' folders.

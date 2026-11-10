@@ -4359,7 +4359,14 @@ def host_skill_file(name, cwd=None):
     else:
         bases = [home] + ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else [])
         files = [f for b in bases for f in (b / "skills" / name / "SKILL.md", b / "commands" / (name + ".md"))]
-    return next((f for f in files if f.is_file()), None)
+    return next((f for f in files if host_readable_file(f)), None)
+
+
+def host_readable_file(path):
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def host_skill_user_only(path):
@@ -6987,7 +6994,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 106
+RUNTIME_GENERATION = 107
 
 if __name__ == '__main__':
     import base64 as _base64
