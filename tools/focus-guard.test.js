@@ -40,6 +40,7 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const settingsSource = fs.readFileSync(path.join(root, 'src/settings_panel.zig'), 'utf8');
     const settingsOwnership = settingsSource.slice(settingsSource.indexOf('pub fn ownsWindow('), settingsSource.indexOf('pub fn dialogMessage(')).replaceAll('w.', '');
     assert.match(settingsOwnership, /pub fn ownsWindow/);
+    assert.match(settingsOwnership, /servers_window != null and GetAncestor\(hwnd, 2\) == servers_window/, 'Settings owns the Servers modal focus boundary');
     assert.match(settingsOwnership, /pub fn ownsForeground/);
     const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
