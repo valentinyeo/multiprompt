@@ -9,3 +9,5 @@
 `src/computer/vendor/novnc/` contains noVNC 1.6.0 with local patches, under the MPL-2.0 and BSD licenses, including its bundled pako (MIT). Upstream notices and license texts are kept in that directory, and [src/computer/UPSTREAM.json](src/computer/UPSTREAM.json) records the source and patches.
 
 JavaScript dependencies are installed separately with npm; their packages include their respective licenses. Zig is a separately installed toolchain.
+
+`.claude/skills/improve/` is adapted from [shadcn/improve](https://github.com/shadcn/improve) 1.0.0, copyright shadcn, under the MIT license. The text is rewritten for this repository. The license is in [.claude/skills/improve/LICENSE.md](.claude/skills/improve/LICENSE.md).
