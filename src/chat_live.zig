@@ -600,14 +600,14 @@ pub fn begin(shell_id: u32, host: u8, sid: []const u8) u64 {
 }
 
 fn unpark(shell_id: u32, host: u8, sid: []const u8) ?*Live {
-    for (&parked) |*kept| {
-        if (!kept.used or kept.shell_id != shell_id or kept.host != host or !std.mem.eql(u8, kept.sidSlice(), sid)) continue;
+    for (&parked) |*held| {
+        if (!held.used or held.shell_id != shell_id or held.host != host or !std.mem.eql(u8, held.sidSlice(), sid)) continue;
         for (&slots) |*live| {
             if (live.used) continue;
-            live.* = kept.*;
+            live.* = held.*;
             live.parked_at = 0;
             live.touch();
-            kept.* = .{};
+            held.* = .{};
             return live;
         }
         return null;
@@ -621,12 +621,12 @@ pub fn park(shell_id: u32) void {
     for (&slots) |*live| {
         if (!live.used or live.shell_id != shell_id) continue;
         var target = &parked[0];
-        for (&parked) |*kept| {
-            if (!kept.used) {
-                target = kept;
+        for (&parked) |*held| {
+            if (!held.used) {
+                target = held;
                 break;
             }
-            if (kept.parked_at < target.parked_at) target = kept;
+            if (held.parked_at < target.parked_at) target = held;
         }
         if (target.used) target.deinit(std.heap.page_allocator);
         park_clock += 1;
@@ -645,8 +645,8 @@ pub fn release(shell_id: u32) void {
             live.* = .{};
         }
     }
-    for (&parked) |*kept| {
-        if (kept.used and kept.shell_id == shell_id) kept.deinit(std.heap.page_allocator);
+    for (&parked) |*held| {
+        if (held.used and held.shell_id == shell_id) held.deinit(std.heap.page_allocator);
     }
 }
 

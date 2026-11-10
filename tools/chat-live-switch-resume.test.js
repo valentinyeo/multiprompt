@@ -32,11 +32,11 @@ test('a switch back restores the parked live chat before it would start a fresh 
   assert.ok(restored < claim.indexOf('live.clear('), 'restore runs before a same-shell slot is cleared');
   assert.ok(restored < claim.indexOf('if (!live.used) return adopt('), 'restore runs before a fresh slot starts at seq zero');
   const unpark = body(live, 'unpark');
-  assert.match(unpark, /kept\.host != host/);
-  assert.match(unpark, /std\.mem\.eql\(u8, kept\.sidSlice\(\), sid\)/);
+  assert.match(unpark, /held\.host != host/);
+  assert.match(unpark, /std\.mem\.eql\(u8, held\.sidSlice\(\), sid\)/);
   assert.match(unpark, /live\.touch\(\)/, 'the restored chat redraws once');
   const park = body(live, 'park');
-  assert.match(park, /kept\.parked_at < target\.parked_at/, 'the oldest parked chat makes room');
+  assert.match(park, /held\.parked_at < target\.parked_at/, 'the oldest parked chat makes room');
   assert.match(park, /target\.deinit\(/, 'an evicted parked chat frees its items');
   assert.match(body(live, 'release'), /for \(&parked\)/, 'closing a chat also drops its parked state');
 });
