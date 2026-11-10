@@ -48,14 +48,15 @@
             $wideScript = Join-Path $scratch 'wide-table.ps1'
             Set-Content -Path $wideScript -Encoding ascii -Value @'
 $rows = @(
-    @('Brain tag', 'Use for', 'Codex and Anthropic models', 'DeepSeek and Cursor models'),
-    @('brain-light', 'Tiny obvious fixes in one single file', 'Terra medium or Sonnet medium', '4.1 Flash low or Composer 2.5'),
-    @('brain-medium', 'Normal work and the default when unsure', 'Sol medium or Sonnet medium', '4.1 Flash high or Grok 4.7 medium'),
-    @('brain-hard', 'Hard bugs, security, money, many systems', 'Sol high or Opus or Sonnet high', 'Skip or Grok 4.7 high'),
-    @('brain-extra-hard', 'Rare account integrity or security money', 'Skip or Opus 5.5 medium or high', 'Skip on both providers')
+    @('Brain tag', 'Use for', 'Codex or Anthropic', 'DeepSeek or Cursor'),
+    @('brain-light', 'Tiny obvious fixes', 'Terra medium', '4.1 Flash low'),
+    @('brain-medium', 'Normal work and default', 'Sol medium', '4.1 Flash high'),
+    @('brain-hard', 'Hard bugs and money', 'Sol high', 'Grok 4.7 high'),
+    @('brain-max', 'Rare account money', 'Opus medium', 'Skip both')
 )
 $widths = @(0, 0, 0, 0)
 foreach ($row in $rows) { for ($i = 0; $i -lt 4; $i++) { $widths[$i] = [Math]::Max($widths[$i], $row[$i].Length) } }
+if ((($widths | Measure-Object -Sum).Sum + 17) -gt 96) { throw 'Wide table does not fit the 100 column console' }
 $h = [string][char]0x2500
 $v = [string][char]0x2502
 function Border([int]$left, [int]$middle, [int]$right) { [string][char]$left + (($widths | ForEach-Object { $h * ($_ + 2) }) -join [string][char]$middle) + [string][char]$right }
