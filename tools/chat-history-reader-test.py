@@ -3978,6 +3978,7 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status('message_fixture_0001')['state'], 'accepted')
 
     def test_igsh_1828_legacy_recall_never_clears_a_console_draft(self):
+        self.assertTrue(callable(getattr(reader, 'message_recall', None)))
         with patch.object(reader, 'host_owned', return_value=False), \
                 patch.object(reader.subprocess, 'run') as run:
             result = reader.message_recall('claude', 'fixture', 'fixture',
@@ -7256,6 +7257,7 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
         active['accepted'] = True
         target = self.deliver('host_fixture_message_02')
         sibling = self.deliver('host_fixture_message_03')
+        self.assertIsInstance(target.get('recall_uuid'), str)
         self.assertEqual(str(uuid.UUID(target['recall_uuid'])), target['recall_uuid'])
         self.control(True)
         self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-1'), dict(status='ok'))
