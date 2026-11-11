@@ -17,7 +17,7 @@ const consoleSource = read('src/console.zig');
 const servers = read('src/ssh_servers.zig');
 const identity = read('src/ssh_identity.zig');
 
-test('IGSH-1928 every ssh launch prefix carries the app key settings once they are proven', () => {
+test('IGSH-1928 every ssh launch requires isolated app settings, including during startup', () => {
   const append = body(consoleSource, 'appendSshExe');
   const config = 'app_state.g_ssh_config[0..app_state.g_ssh_config_len]';
   assert.ok(append.includes(config), 'appendSshExe reads the app ssh settings file');
@@ -25,29 +25,43 @@ test('IGSH-1928 every ssh launch prefix carries the app key settings once they a
   assert.match(append, /appendAsciiBuf\(buf, pos, "-F \\""\) and appendAsciiBuf\(buf, pos, config\)/, 'narrow launch lines pass -F');
   assert.match(body(consoleSource, 'resolveSshPath'), /loadSshConfig\(\);\s*return true;/);
   assert.match(body(consoleSource, 'loadSshConfig'), /ssh_identity\.zig"\)\.configFile/);
+  assert.match(append, /if \(config\.len == 0\) return false;/);
+  assert.doesNotMatch(append, /if \(config\.len == 0\) return true;/);
+  assert.match(body(identity, 'configFile'), /"config-v2"/, 'never load a previous config that allowed agent fallback');
 });
 
 test('IGSH-1928 the app settings force the app key and turn every agent off', () => {
   const render = body(servers, 'renderConfig');
   assert.match(render, /IdentityFile \\"\{s\}\\"\\r\\n  IdentitiesOnly yes\\r\\n  IdentityAgent none\\r\\n/);
-  assert.match(render, /if \(!forced\(slot\)\) continue;/, 'servers not yet proven keep today\'s sign-in');
-  assert.ok(render.indexOf('IdentityAgent none') < render.indexOf('Host *'), 'user settings are included after the forced blocks so the app values win');
-  assert.match(render, /Include \\"\{s\}\\"\\r\\n  Include \\"\{s\}\\"/);
-  assert.match(body(servers, 'forced'), /slot\.status == \.connected or \(slot\.owned and listed\(slot\)\)/);
+  assert.doesNotMatch(render, /if \(!forced\(slot\)\) continue;/);
+  assert.match(render, /if \(listed\(slot\)\) \{[\s\S]*HostName/, 'imported hosts carry their resolved addresses without including user settings');
+  assert.match(render, /if \(listed\(slot\)\) key else "none"/, 'removed and empty aliases cannot restore old credentials');
+  assert.match(render, /" !\{s\}"/, 'each Include excludes managed aliases, since IdentityFile accumulates');
+  assert.match(render, /for \(\[_\]\[\]const u8\{ user, system \}\)/);
+  assert.match(render, /PreferredAuthentications publickey/);
 });
 
-test('IGSH-1928 a server switches only after a login with the app key alone', () => {
+test('IGSH-1928 migration proves the app key first and never asks an agent to install it', () => {
   const proof = body(servers, 'proofArgs');
   for (const option of ['-F none', '-i \\"{s}\\"', 'IdentitiesOnly=yes', 'IdentityAgent=none', 'BatchMode=yes', 'StrictHostKeyChecking=accept-new']) {
     assert.ok(proof.includes(option), option);
   }
   const check = body(identity, 'check');
   assert.ok(check.indexOf('keys.addCommand(a, public_key)') >= 0, 'the app key is installed over the working connection');
-  assert.ok(check.indexOf('keys.addCommand(a, public_key)') < check.indexOf('servers.proofArgs('), 'install happens before the proof');
+  assert.ok(check.indexOf('const existing = run(a, proof,') < check.indexOf('keys.addCommand(a, public_key)'), 'a working app key never depends on old credentials again');
+  assert.match(check, /if \(existing\.ok or slot\.owned\) \{[\s\S]*?finish\(i, existing\.ok,[\s\S]*?return;/);
+  assert.match(check, /IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes/);
+  assert.doesNotMatch(check, /sshPrefix\(/, 'bootstrap uses original config, not an already isolated alias');
   assert.match(check, /finish\(i, proven\.ok, servers\.failureReason\(proven\.text\)\)/);
   const publish = body(identity, 'publish');
   assert.ok(publish.indexOf('sameAddresses(') < publish.indexOf('console.setSshConfig(config)'), 'settings switch on only after ssh reads them back');
-  assert.match(publish, /if \(!any_forced\) \{\s*console\.setSshConfig\(null\);/);
+  assert.doesNotMatch(publish, /any_forced|servers\.forced/);
+  const worker = body(identity, 'worker');
+  assert.ok(worker.indexOf('seed(a, exe)') < worker.indexOf('publish(a, exe)'));
+  assert.ok(worker.indexOf('publish(a, exe)') < worker.indexOf('if (due) check(a, exe, i)'), 'regular connections are isolated before migration begins');
+  const remove = body(identity, 'remove');
+  assert.match(remove, /if \(servers\.listed\(slot\)\) blk:/, 'a transiently failed server still gets a revocation attempt');
+  assert.match(remove, /table\[i\] = \.\{ \.status = \.removed \};/, 'removed app-owned slots cannot reimport a legacy server on restart');
 });
 
 test('IGSH-1928 the app key lives in its own private folder, never in the user key', () => {
