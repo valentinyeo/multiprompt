@@ -6524,6 +6524,147 @@ class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
         self.assertEqual(self.events('text.delta'), [])
 
 
+class LiveSnapshotTest(HostEventStreamFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.db = reader.message_store_db(self.tmux)
+        self.addCleanup(self.db.close)
+        with self.db:
+            self.db.execute('INSERT INTO message_chats(provider,sid) VALUES (?,?)', (self.provider, self.sid))
+
+    def publish(self, kind, payload=None, item=None, turn='latest'):
+        with self.db:
+            return reader.message_event(self.db, self.provider, self.sid,
+                                        dict(v=1, sid=self.sid, turn=turn, kind=kind, at=1, item=item, payload=payload or {}))
+
+    def snapshot(self):
+        return reader.live_snapshot(self.provider, self.sid)['live_snapshot']
+
+    def test_cold_open_only_reads_the_saved_latest_turn_and_open_requests(self):
+        self.publish('host.settings', dict(model='sonnet', effort='high'))
+        for turn in range(100):
+            self.publish('turn.started', turn=str(turn))
+            for delta in range(10):
+                self.publish('text.delta', dict(text='old answer ' + str(delta)), item='old', turn=str(turn))
+            self.publish('approval.request', dict(request_id='old-' + str(turn)))
+            self.publish('approval.resolved', dict(request_id='old-' + str(turn)))
+            self.publish('turn.ended', dict(status='completed'), turn=str(turn))
+        self.publish('turn.started', dict(message_id='sent-latest', uuids=['native-latest']))
+        self.publish('text.delta', dict(text='newest answer'), item='answer')
+        head = self.publish('question.request', dict(request_id='open', questions=[]))
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['seq'], head)
+        self.assertLessEqual(len(snapshot['events']), 4)
+        self.assertEqual([event['payload']['text'] for event in snapshot['events'] if event['kind'] == 'text.delta'], ['', 'newest answer'])
+        self.assertEqual([event['payload']['request_id'] for event in snapshot['requests']], ['open'])
+        self.assertNotIn('old answer', json.dumps(snapshot))
+        with patch.object(reader, 'live_state_apply', side_effect=AssertionError('replayed saved events')):
+            self.assertEqual(self.snapshot(), snapshot)
+        legacy = reader.message_events_page(self.provider, self.sid, 0)
+        self.assertEqual(len(legacy['events']), reader.HOST_EVENTS_PAGE)
+        self.assertNotIn('live_snapshot', legacy)
+
+    def test_upgrade_materializes_only_the_latest_turn_and_latest_request_decisions(self):
+        self.publish('host.settings', dict(model='sonnet'))
+        for turn in range(20):
+            self.publish('turn.started', turn=str(turn))
+            self.publish('text.done', dict(text='past turn'), item='past', turn=str(turn))
+            self.publish('turn.ended', dict(status='completed'), turn=str(turn))
+        self.publish('approval.request', dict(request_id='answered'))
+        self.publish('approval.resolved', dict(request_id='answered'))
+        self.publish('question.request', dict(request_id='open', questions=[]))
+        self.publish('turn.started')
+        self.publish('text.done', dict(text='current'), item='current')
+        self.publish('turn.ended', dict(status='completed'))
+        expected = self.snapshot()
+        with self.db:
+            self.db.execute('DELETE FROM live_state')
+            self.db.execute('DELETE FROM live_cursors')
+        with patch.object(reader, 'live_state_apply', wraps=reader.live_state_apply) as apply:
+            rebuilt = self.snapshot()
+        self.assertEqual(rebuilt, expected)
+        self.assertLess(apply.call_count, 10)
+
+    def test_answered_plans_keep_their_text_without_reopening_the_card(self):
+        self.publish('turn.started')
+        self.publish('plan.proposed', dict(request_id='plan', markdown='The saved plan'))
+        self.assertEqual(len(self.snapshot()['requests']), 1)
+        self.publish('plan.resolved', dict(request_id='plan'))
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['requests'], [])
+        plans = [event for event in snapshot['events'] if event['kind'] == 'plan.snapshot']
+        self.assertEqual([event['payload']['markdown'] for event in plans], ['The saved plan'])
+        self.assertNotIn('plan.proposed', [event['kind'] for event in snapshot['events']])
+
+    def test_tool_labels_completion_and_repeated_text_do_not_grow_the_snapshot(self):
+        self.publish('turn.started')
+        for index in range(110):
+            item = 'tool-' + str(index)
+            self.publish('item.started', dict(title=item, input='not needed for display'), item=item)
+            self.publish('item.done', dict(status='failed', output='not needed for display'), item=item)
+        snapshot = self.snapshot()
+        self.assertEqual(len(snapshot['events']), 1 + 96 * 2)
+        self.assertEqual(len([event for event in snapshot['events'] if event['kind'] == 'item.started']), 96)
+        self.assertEqual(len([event for event in snapshot['events'] if event['kind'] == 'item.done']), 96)
+        self.assertNotIn('not needed for display', json.dumps(snapshot))
+        self.publish('turn.started', turn='next')
+        self.assertEqual(len(self.snapshot()['events']), 1)
+
+    def test_retention_waits_for_rollout_then_keeps_2000_events_per_chat_once_daily(self):
+        self.publish('turn.started')
+        self.publish('approval.request', dict(request_id='answered'))
+        self.publish('approval.resolved', dict(request_id='answered'))
+        self.publish('question.request', dict(request_id='still-open', questions=[]))
+        with self.db:
+            for index in range(2100):
+                reader.message_event(self.db, self.provider, self.sid,
+                                     dict(kind='text.delta', sid=self.sid, item='answer', payload=dict(text=str(index))))
+        expected = self.snapshot()
+        count = lambda: self.db.execute('SELECT COUNT(*) FROM message_events WHERE provider=? AND sid=?', (self.provider, self.sid)).fetchone()[0]
+        reader.message_events_trim(now=86400)
+        self.assertEqual(count(), 2104)
+        reader.message_store_path().with_suffix('.snapshot-retention').touch()
+        reader.message_events_trim(now=86400)
+        self.assertEqual(count(), 2000)
+        self.assertEqual(self.snapshot(), expected)
+        self.assertEqual([event['payload']['request_id'] for event in self.snapshot()['requests']], ['still-open'])
+        repaired = reader.message_events_page(self.provider, self.sid, 1, snapshot=True)
+        self.assertEqual(repaired['live_snapshot'], expected)
+        boundary = reader.message_events_floor(self.db, self.provider, self.sid)
+        self.assertNotIn('live_snapshot', reader.message_events_page(self.provider, self.sid, boundary, snapshot=True))
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            queue = reader.message_store_request(dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux, op='message_events', after=1))
+        self.assertTrue(queue['resync_required'])
+        self.assertEqual(queue['events'], [])
+        self.publish('text.done', dict(text='final'), item='answer')
+        reader.message_events_trim(now=86401)
+        self.assertEqual(count(), 2001)
+        reader.message_events_trim(now=2 * 86400)
+        self.assertEqual(count(), 2000)
+        self.assertEqual(self.snapshot()['seq'], expected['seq'] + 1)
+
+    def test_empty_snapshot_push_does_not_write_or_repeat_itself(self):
+        subscriptions = {1: dict(provider=self.provider, sid=self.sid, after=0, snapshot=True)}
+        self.snapshot()
+        before = self.db.execute('PRAGMA data_version').fetchone()[0]
+        with patch.object(reader, 'serve_print') as output:
+            reader.events_push(subscriptions)
+            reader.events_push(subscriptions)
+        output.assert_not_called()
+        self.assertEqual(self.db.execute('PRAGMA data_version').fetchone()[0], before)
+
+    def test_snapshot_cursor_covers_delivery_events_and_new_events_follow_it(self):
+        self.publish('turn.started')
+        with self.db:
+            head = reader.message_event(self.db, self.provider, self.sid, dict(reset_epoch=1))
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['seq'], head)
+        self.assertEqual(len(snapshot['events']), 1)
+        next_seq = self.publish('text.delta', dict(text='after snapshot'), item='answer')
+        page = reader.message_events_page(self.provider, self.sid, snapshot['seq'])
+        self.assertEqual([entry['seq'] for entry in page['events']], [next_seq])
+
+
 class ServeEventPushTest(unittest.TestCase):
     provider = 'claude'
     sid = 'serve-events-session'
@@ -6590,6 +6731,27 @@ class ServeEventPushTest(unittest.TestCase):
         self.assertEqual(pushed['result']['events'][0]['event']['payload']['text'], 'pushed')
         self.ask(dict(id=89, op='engine_info'))
         self.assertEqual(self.line()['id'], 89)
+
+    def test_snapshot_subscription_skips_the_backlog_then_pushes_only_new_events(self):
+        for index in range(20):
+            self.publish('old text ' + str(index))
+        head = self.publish('current text')
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0, snapshot=True))
+        reply = self.line()['result']
+        snapshot = reply['live_snapshot']
+        self.assertEqual(reply['events'], [])
+        self.assertEqual(reply['next_after'], head)
+        self.assertEqual(snapshot['seq'], head)
+        self.assertEqual([event['payload']['text'] for event in snapshot['events']], ['', 'current text'])
+        self.assertEqual(snapshot['requests'], [])
+        next_seq = self.publish('pushed once')
+        pushed = self.line()['result']
+        self.assertNotIn('live_snapshot', pushed)
+        self.assertEqual([entry['seq'] for entry in pushed['events']], [next_seq])
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=next_seq, snapshot=True))
+        resumed = self.line()['result']
+        self.assertEqual(resumed['events'], [])
+        self.assertNotIn('live_snapshot', resumed)
 
     def test_a_subscription_is_refused_for_an_unknown_chat_identity(self):
         self.ask(dict(id=88, op='events_subscribe', provider='claude', sid='bad sid', after=0))

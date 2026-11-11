@@ -2225,6 +2225,7 @@ def message_store_db(tmux):
             db.execute("ALTER TABLE shared_messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'human'")
         db.execute("CREATE INDEX IF NOT EXISTS shared_messages_chat ON shared_messages(provider,sid,position)")
         db.execute("CREATE TABLE IF NOT EXISTS message_events (provider TEXT NOT NULL, sid TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(provider,sid,seq))")
+        live_state_schema(db)
         db.execute("CREATE TABLE IF NOT EXISTS message_attempts (provider TEXT NOT NULL, sid TEXT NOT NULL, id TEXT NOT NULL, attempt TEXT NOT NULL, epoch INTEGER NOT NULL, text_sha256 TEXT NOT NULL, outcome TEXT NOT NULL, binding TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(provider,sid,id,attempt))")
         if 'binding' not in {row[1] for row in db.execute('PRAGMA table_info(message_attempts)')}:
             db.execute("ALTER TABLE message_attempts ADD COLUMN binding TEXT NOT NULL DEFAULT '{}'")
@@ -2262,7 +2263,122 @@ def message_event(db, provider, sid, message, emit=True):
     db.execute("UPDATE message_chats SET seq=seq+1 WHERE provider=? AND sid=?", (provider, sid))
     seq = db.execute("SELECT seq FROM message_chats WHERE provider=? AND sid=?", (provider, sid)).fetchone()[0]
     db.execute("INSERT INTO message_events VALUES (?,?,?,?)", (provider, sid, seq, json.dumps(message, separators=(',', ':'))))
+    live_state_sync(db, provider, sid)
     return seq
+
+
+def live_state_schema(db):
+    db.execute("CREATE TABLE IF NOT EXISTS live_state (provider TEXT NOT NULL, sid TEXT NOT NULL, slot TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(provider,sid,slot))")
+    db.execute("CREATE TABLE IF NOT EXISTS live_cursors (provider TEXT NOT NULL, sid TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(provider,sid))")
+    db.execute("CREATE TABLE IF NOT EXISTS message_event_retention (provider TEXT NOT NULL, sid TEXT NOT NULL, floor INTEGER NOT NULL, day INTEGER NOT NULL, PRIMARY KEY(provider,sid))")
+
+
+def live_state_apply(db, provider, sid, seq, event):
+    kind = event.get('kind')
+    payload = event.get('payload') or {}
+    scope = (provider, sid)
+
+    def save(slot, value):
+        db.execute('INSERT INTO live_state VALUES (?,?,?,?,?) ON CONFLICT(provider,sid,slot) DO UPDATE SET seq=excluded.seq,body=excluded.body',
+                   (*scope, slot, seq, json.dumps(value, ensure_ascii=False, separators=(',', ':'))))
+
+    def remove(slot):
+        db.execute('DELETE FROM live_state WHERE provider=? AND sid=? AND slot=?', (*scope, slot))
+
+    if kind == 'turn.started':
+        db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND (slot LIKE 'item:%' OR slot IN ('turn.started','turn.ended'))", scope)
+        save(kind, event)
+    elif kind in ('text.delta', 'text.done', 'thinking.delta', 'thinking.done', 'item.started', 'item.done', 'plan.proposed'):
+        item = event.get('item') or ('plan:' + payload.get('request_id', '') if kind == 'plan.proposed' else '')
+        slot = 'item:' + item
+        exists = db.execute('SELECT 1 FROM live_state WHERE provider=? AND sid=? AND slot=?', (*scope, slot + ':start')).fetchone()
+        if not exists:
+            if kind.startswith(('text.', 'thinking.')):
+                initial = dict(event, kind=kind.split('.')[0] + '.delta', payload=dict(text=''))
+            elif kind == 'plan.proposed':
+                initial = dict(event, kind='plan.snapshot')
+            else:
+                initial = dict(event, kind='item.started', payload={key: payload[key] for key in ('title', 'display_name', 'tool') if key in payload})
+            save(slot + ':start', initial)
+        if kind.startswith(('text.', 'thinking.')):
+            save(slot + ':body', event)
+        elif kind == 'item.done':
+            save(slot + ':body', dict(event, payload=dict(status=payload.get('status', ''))))
+        elif kind == 'item.started':
+            save(slot + ':start', dict(event, payload={key: payload[key] for key in ('title', 'display_name', 'tool') if key in payload}))
+            remove(slot + ':body')
+        elif kind == 'plan.proposed':
+            save(slot + ':start', dict(event, kind='plan.snapshot'))
+        if not exists:
+            db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND slot IN (SELECT substr(slot,1,length(slot)-6) || ':body' FROM live_state WHERE provider=? AND sid=? AND slot LIKE 'item:%:start' ORDER BY seq DESC LIMIT -1 OFFSET 96)", (*scope, *scope))
+            db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND slot IN (SELECT slot FROM live_state WHERE provider=? AND sid=? AND slot LIKE 'item:%:start' ORDER BY seq DESC LIMIT -1 OFFSET 96)", (*scope, *scope))
+    elif kind in ('turn.ended', 'host.settings', 'host.status'):
+        save(kind, event)
+    if kind in ('approval.request', 'question.request', 'plan.proposed'):
+        save('request:' + payload.get('request_id', ''), event)
+    elif kind in ('approval.resolved', 'question.resolved', 'plan.resolved'):
+        remove('request:' + payload.get('request_id', ''))
+
+
+def live_state_sync(db, provider, sid):
+    saved = db.execute('SELECT seq FROM live_cursors WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+    after = saved[0] if saved else 0
+    if saved is None:
+        start = db.execute("SELECT seq FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='turn.started' ORDER BY seq DESC LIMIT 1", (provider, sid)).fetchone()
+        rows = dict(db.execute('SELECT seq,body FROM message_events WHERE provider=? AND sid=? AND seq>=? ORDER BY seq', (provider, sid, start[0] if start else 0)))
+        rows.update(db.execute("SELECT MAX(seq),body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind') IN ('host.settings','host.status') GROUP BY json_extract(body,'$.kind')", (provider, sid)))
+        rows.update(db.execute("SELECT MAX(seq),body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind') IN ('approval.request','question.request','plan.proposed','approval.resolved','question.resolved','plan.resolved') GROUP BY json_extract(body,'$.payload.request_id')", (provider, sid)))
+        rows = sorted(rows.items())
+    else:
+        rows = db.execute('SELECT seq,body FROM message_events WHERE provider=? AND sid=? AND seq>? ORDER BY seq', (provider, sid, after))
+    for seq, body in rows:
+        live_state_apply(db, provider, sid, seq, json.loads(body))
+        after = seq
+    head = db.execute('SELECT seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+    after = max(after, head[0] if head else 0)
+    if saved is None or after != saved[0]:
+        db.execute('INSERT INTO live_cursors VALUES (?,?,?) ON CONFLICT(provider,sid) DO UPDATE SET seq=excluded.seq', (provider, sid, after))
+    return after
+
+
+def live_snapshot(provider, sid):
+    from contextlib import closing
+    path = message_store_path()
+    if not path.is_file():
+        return dict(live_snapshot=dict(seq=0, events=[], requests=[]), events=[], next_after=0)
+    with closing(sqlite3.connect(path, timeout=2)) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        live_state_schema(db)
+        after = live_state_sync(db, provider, sid)
+        events = [json.loads(body) for (body,) in db.execute("SELECT body FROM live_state WHERE provider=? AND sid=? AND slot NOT LIKE 'request:%' ORDER BY seq, slot LIKE '%:start' DESC", (provider, sid))]
+        requests = [json.loads(body) for (body,) in db.execute("SELECT body FROM live_state WHERE provider=? AND sid=? AND slot LIKE 'request:%' ORDER BY seq", (provider, sid))]
+        return dict(live_snapshot=dict(seq=after, events=events, requests=requests), events=[], next_after=after)
+
+
+def message_events_trim(now=None):
+    from contextlib import closing
+    path = message_store_path()
+    if not path.is_file() or not path.with_suffix('.snapshot-retention').is_file():
+        return
+    day = int(time.time() if now is None else now) // 86400
+    with closing(sqlite3.connect(path, timeout=2)) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        live_state_schema(db)
+        for provider, sid, head in db.execute('SELECT provider,sid,seq FROM message_chats').fetchall():
+            previous = db.execute('SELECT day FROM message_event_retention WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+            if previous and previous[0] >= day:
+                continue
+            live_state_sync(db, provider, sid)
+            floor = max(0, head - 2000)
+            db.execute('DELETE FROM message_events WHERE provider=? AND sid=? AND seq<=?', (provider, sid, floor))
+            db.execute('INSERT INTO message_event_retention VALUES (?,?,?,?) ON CONFLICT(provider,sid) DO UPDATE SET floor=excluded.floor,day=excluded.day', (provider, sid, floor, day))
+
+
+def message_events_floor(db, provider, sid):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_event_retention'").fetchone():
+        return 0
+    row = db.execute('SELECT floor FROM message_event_retention WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+    return row[0] if row else 0
 
 
 def message_events_rows(db, provider, sid, after):
@@ -2276,13 +2392,20 @@ def message_events_rows(db, provider, sid, after):
     return dict(events=events, next_after=events[-1]['seq'] if events else after)
 
 
-def message_events_page(provider, sid, after):
+def message_events_page(provider, sid, after, snapshot=False):
     from contextlib import closing
+    if snapshot and after == 0:
+        return live_snapshot(provider, sid)
     path = message_store_path()
     if not path.is_file():
         return dict(events=[], next_after=after)
     try:
         with closing(sqlite3.connect(path, timeout=2)) as db:
+            if snapshot:
+                db.execute('BEGIN')
+                if after < message_events_floor(db, provider, sid):
+                    db.rollback()
+                    return live_snapshot(provider, sid)
             return message_events_rows(db, provider, sid, after)
     except sqlite3.Error:
         return dict(events=[], next_after=after)
@@ -5732,6 +5855,8 @@ def message_store_transaction(q):
             after = q.get('after')
             if type(after) is not int or after < 0:
                 raise ValueError('invalid event cursor')
+            if after < message_events_floor(db, provider, sid):
+                return dict(epoch=epoch, seq=seq, events=[], next_after=after, resync_required=True)
             return dict(epoch=epoch, seq=seq, **message_events_rows(db, provider, sid, after))
         if op == 'message_snapshot':
             snapshot = q.get('snapshot_id')
@@ -5747,7 +5872,9 @@ def message_store_transaction(q):
                 items.extend(dict(attempt_receipt=json.loads(body)) for (body,) in db.execute("SELECT body FROM connector_facts WHERE provider=? AND sid=? AND json_extract(body,'$.kind') IN ('accepted','started') ORDER BY rowid", (provider, sid)))
                 if provider == "claude" and host_enabled(provider, sid):
                     settings = host_settings(provider, sid)
-                    last = db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='host.settings' ORDER BY seq DESC LIMIT 1", (provider, sid)).fetchone()
+                    last = db.execute("SELECT body FROM live_state WHERE provider=? AND sid=? AND slot='host.settings'", (provider, sid)).fetchone()
+                    if last is None:
+                        last = db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='host.settings' ORDER BY seq DESC LIMIT 1", (provider, sid)).fetchone()
                     payload = json.loads(last[0]).get("payload", {}) if last else {}
                     applied = (host_owned(provider, sid) and payload.get("applied") is True
                                and payload.get("effort") == settings["effort"]
@@ -6890,7 +7017,7 @@ SERVE_PRINT_LOCK = threading.Lock()
 
 def serve_print(value):
     with SERVE_PRINT_LOCK:
-        print(json.dumps(value, separators=(",", ":")), flush=True)
+        print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
 def events_wake():
@@ -6919,13 +7046,13 @@ def events_subscription(query):
         raise ValueError("invalid subscription")
     if type(after) is not int or after < 0:
         raise ValueError("invalid subscription cursor")
-    return dict(provider=provider, sid=sid, after=after)
+    return dict(provider=provider, sid=sid, after=after, snapshot=query.get('snapshot') is True)
 
 
 def events_push(subscriptions):
     for rid, subscription in list(subscriptions.items()):
-        page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"])
-        if not page["events"]:
+        page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"], snapshot=subscription.get('snapshot', False))
+        if not page["events"] and page['next_after'] == subscription['after']:
             continue
         subscription["after"] = page["next_after"]
         serve_print(dict(id=rid, message_protocol=1, result=page))
@@ -6952,16 +7079,27 @@ def serve_retire(interval=2.0):
 
 
 def serve_push(subscriptions, lock, wake):
-    while True:
-        if wake is None:
-            time.sleep(1.0)
-        else:
-            try:
-                os.read(wake, 65536)
-            except OSError:
-                return
-        with lock:
-            events_push(subscriptions)
+    import selectors
+    next_trim = 0
+    with selectors.DefaultSelector() as selector:
+        if wake is not None:
+            selector.register(wake, selectors.EVENT_READ)
+        while True:
+            if time.monotonic() >= next_trim:
+                try:
+                    message_events_trim()
+                except (OSError, ValueError, sqlite3.Error):
+                    pass
+                next_trim = time.monotonic() + 60
+            if wake is None:
+                time.sleep(1.0)
+            elif selector.select(timeout=60):
+                try:
+                    os.read(wake, 65536)
+                except OSError:
+                    return
+            with lock:
+                events_push(subscriptions)
 
 
 def ensure_runtime_tools():
@@ -7096,11 +7234,11 @@ def serve_request(line, source, subscriptions, lock):
             return
         if query.get("op") == "events_subscribe":
             subscription = events_subscription(query)
-            page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"])
-            subscription["after"] = page["next_after"]
             with lock:
+                page = message_events_page(subscription['provider'], subscription['sid'], subscription['after'], snapshot=subscription['snapshot'])
+                subscription['after'] = page['next_after']
                 subscriptions[rid] = subscription
-            serve_print(dict(id=rid, message_protocol=1, result=page))
+                serve_print(dict(id=rid, message_protocol=1, result=page))
             return
         if query.get("op") == "events_unsubscribe":
             with lock:
@@ -7213,7 +7351,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 112
+RUNTIME_GENERATION = 113
 
 if __name__ == '__main__':
     import base64 as _base64

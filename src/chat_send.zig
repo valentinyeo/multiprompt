@@ -3673,7 +3673,7 @@ fn chatMessageSyncFinish() void {
     var parsed = json_reader.parse(std.heap.page_allocator, job.response.items) catch return;
     defer parsed.deinit();
     const epoch = json_reader.uintDefault(parsed.value, "epoch", 0);
-    if (job.synced and epoch != job.epoch) {
+    if (job.synced and (epoch != job.epoch or json_reader.boolTrue(parsed.value, "resync_required"))) {
         history.message_synced = false;
         history.message_snapshot = @splat(0);
         history.message_cursor = 0;

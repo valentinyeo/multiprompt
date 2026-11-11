@@ -48,6 +48,30 @@
 - Runtime errors return history error frames.
 - They never execute older code instead.
 
+## Saved live state (IGSH-1872)
+
+- Generation 113 adds opt-in `events_subscribe` with `snapshot: true`.
+- A cold cursor receives `result.live_snapshot` with `seq`, `events`, and `requests`.
+- `events` holds the current turn, up to 96 live items, and host settings and status.
+- `requests` holds only open approvals, questions, and plans.
+- `plan.snapshot` supplies plan text without reopening its card.
+- The client replaces live state atomically, then resumes events after `seq`.
+- Legacy subscriptions keep their existing response shape.
+- Older servers ignore the opt-in field and keep replaying events.
+- Saved state and event cursors commit with each event.
+- An upgraded store reconstructs only the latest turn and request decisions, not every past turn.
+
+Daily retention is disabled until all clients support snapshot recovery.
+Android compatibility is tracked at https://app.hypertask.ai/detail/project-2060/1937.
+The per-account opt-in marker is `store.snapshot-retention`, beside `store.sqlite3` in the shared-message directory.
+Do not enable it before the paired Android release and cross-client proof.
+With the marker present, each reader checks maintenance every minute.
+A transaction keeps the last 2,000 events per chat once per UTC day, after saving current state.
+Canonical messages, connector facts, and transcripts remain intact.
+A pruned live cursor receives a fresh snapshot.
+A pruned queue cursor receives `resync_required: true`; clients must discard the replica and fetch `message_snapshot`.
+Removing the marker stops future cleanup but cannot restore deleted events.
+
 ## Hosted chats and other tools
 
 - New live chats have no parking terminal or idle sleep process.

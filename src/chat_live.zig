@@ -282,9 +282,9 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.request.openWith(.question, strOf(payload, "request_id"), strOf(payload, "tool"));
         self.prompt = promptOf(payload);
         self.answer_lens = @splat(0);
-    } else if (std.mem.eql(u8, kind, "plan.proposed")) {
+    } else if (std.mem.eql(u8, kind, "plan.proposed") or std.mem.eql(u8, kind, "plan.snapshot")) {
         const request_id = strOf(payload, "request_id");
-        self.request.openWith(.plan, request_id, strOf(payload, "title"));
+        if (std.mem.eql(u8, kind, "plan.proposed")) self.request.openWith(.plan, request_id, strOf(payload, "title"));
         var key_buf: [MAX_ID]u8 = undefined;
         const key = if (item_id.len > 0) item_id else std.fmt.bufPrint(&key_buf, "plan:{s}", .{request_id}) catch request_id;
         const target = try self.itemFor(a, key, .plan);
@@ -424,7 +424,7 @@ fn finish(out: *std.ArrayList(u8), a: std.mem.Allocator) ![]u8 {
 pub fn subscribeLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, after: u64) ![]u8 {
     var out = try openLine(a, id, "events_subscribe", provider, sid);
     errdefer out.deinit(a);
-    const tail = try std.fmt.allocPrint(a, ",\"after\":{d}", .{after});
+    const tail = try std.fmt.allocPrint(a, ",\"after\":{d},\"snapshot\":true", .{after});
     defer a.free(tail);
     try out.appendSlice(a, tail);
     return finish(&out, a);
@@ -660,6 +660,9 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
     const parsed = std.json.parseFromSlice(std.json.Value, arena.allocator(), page, .{}) catch return false;
     var root = parsed.value;
     if (fieldOf(root, "result")) |result| root = result;
+    if (fieldOf(root, "live_snapshot")) |snapshot| {
+        return applySnapshot(live, std.heap.page_allocator, snapshot) catch false;
+    }
     const events_value = fieldOf(root, "events") orelse return false;
     const events = switch (events_value) {
         .array => |array| array.items,
@@ -672,8 +675,42 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
         const applied = applyValue(live, std.heap.page_allocator, seq, event) catch false;
         changed = changed or applied;
     }
+    if (intOf(root, "next_after")) |after| live.after = @max(live.after, after);
     if (changed) live.touch();
     return changed;
+}
+
+fn applySnapshot(live: *Live, a: std.mem.Allocator, snapshot: std.json.Value) !bool {
+    const after = intOf(snapshot, "seq") orelse return false;
+    if (after < live.after) return false;
+    var next = Live{ .used = live.used, .shell_id = live.shell_id, .host = live.host, .sid = live.sid, .sid_len = live.sid_len };
+    defer next.deinit(a);
+    var seq: u64 = 0;
+    for ([_][]const u8{ "events", "requests" }) |key| {
+        const value = fieldOf(snapshot, key) orelse return false;
+        const events = switch (value) {
+            .array => |array| array.items,
+            else => return false,
+        };
+        for (events) |event| {
+            seq += 1;
+            _ = try applyValue(&next, a, seq, event);
+        }
+    }
+    next.after = after;
+    next.card_dismissed = true;
+    next.settings_seq = if (next.settings_known) after else 0;
+    if (live.settings_seq > next.settings_seq) {
+        next.settings = live.settings;
+        next.settings_seq = live.settings_seq;
+        next.settings_known = live.settings_known;
+    }
+    next.revision = live.revision;
+    next.touch();
+    live.deinit(a);
+    live.* = next;
+    next = .{};
+    return true;
 }
 
 pub fn applySettingsSnapshot(shell_id: u32, sid: []const u8, seq: u64, payload: std.json.Value) bool {
@@ -1307,12 +1344,62 @@ test "D1 an unknown kind changes nothing" {
     try std.testing.expectEqual(@as(u64, 0), live.after);
 }
 
+test "IGSH-1872 a cold snapshot atomically installs the current turn without answered cards" {
+    const shell_id = 187201;
+    const sid = "snapshot-session";
+    _ = begin(shell_id, 0, sid);
+    defer release(shell_id);
+    const page =
+        "{\"result\":{\"live_snapshot\":{\"seq\":40000,\"events\":[" ++
+        "{\"kind\":\"turn.started\",\"turn\":\"current\",\"payload\":{\"message_id\":\"sent\"}}," ++
+        "{\"kind\":\"text.done\",\"item\":\"answer\",\"payload\":{\"text\":\"latest answer\"}}," ++
+        "{\"kind\":\"plan.snapshot\",\"payload\":{\"request_id\":\"answered\",\"markdown\":\"Saved plan\"}}," ++
+        "{\"kind\":\"turn.ended\",\"payload\":{\"status\":\"completed\"}}],\"requests\":[]},\"events\":[],\"next_after\":40000}}";
+    try std.testing.expect(applyPage(shell_id, sid, page));
+    {
+        mutex.lock();
+        defer mutex.unlock();
+        const live = slotFor(shell_id, sid).?;
+        try std.testing.expectEqual(@as(u64, 40000), live.after);
+        try std.testing.expectEqual(State.idle, live.state);
+        try std.testing.expect(!live.request.open);
+        try std.testing.expect(live.card_dismissed);
+        try std.testing.expectEqual(@as(usize, 2), live.items.items.len);
+        try std.testing.expectEqualStrings("latest answer", live.items.items[0].text.items);
+        try std.testing.expectEqualStrings("Saved plan", live.items.items[1].text.items);
+    }
+    try std.testing.expect(applyPage(shell_id, sid, "{\"events\":[{\"seq\":40001,\"event\":{\"kind\":\"approval.request\",\"payload\":{\"request_id\":\"new\",\"title\":\"Run command\"}}}],\"next_after\":40001}"));
+    try std.testing.expect(!applyPage(shell_id, sid, page));
+    mutex.lock();
+    defer mutex.unlock();
+    const live = slotFor(shell_id, sid).?;
+    try std.testing.expectEqualStrings("new", live.request.idSlice());
+    try std.testing.expectEqual(@as(u64, 40001), live.after);
+}
+
+test "IGSH-1872 open cards are installed separately and malformed snapshots preserve the old state" {
+    const shell_id = 187202;
+    const sid = "snapshot-open";
+    _ = begin(shell_id, 0, sid);
+    defer release(shell_id);
+    const page = "{\"live_snapshot\":{\"seq\":90,\"events\":[{\"kind\":\"turn.started\",\"turn\":\"t\"}],\"requests\":[{\"kind\":\"approval.request\",\"payload\":{\"request_id\":\"open\",\"title\":\"Read file\"}}]}}";
+    try std.testing.expect(applyPage(shell_id, sid, page));
+    try std.testing.expect(!applyPage(shell_id, sid, "{\"live_snapshot\":{\"seq\":91,\"events\":[{\"kind\":\"text.done\",\"item\":\"bad\",\"payload\":{\"text\":\"partial\"}}],\"requests\":null}}"));
+    try std.testing.expect(!applyPage(shell_id, sid, "{\"events\":[{\"seq\":91,\"event\":{\"kind\":\"future.event\"}}],\"next_after\":91}"));
+    mutex.lock();
+    defer mutex.unlock();
+    const live = slotFor(shell_id, sid).?;
+    try std.testing.expectEqualStrings("open", live.request.idSlice());
+    try std.testing.expectEqual(@as(usize, 0), live.items.items.len);
+    try std.testing.expectEqual(@as(u64, 91), live.after);
+}
+
 test "D1 the subscribe line carries the replay cursor on the existing channel" {
     const a = std.testing.allocator;
     const line = try subscribeLine(a, 88, "claude", "a1b2c3d4-0000-1111-2222-333344445555", 1420);
     defer a.free(line);
     try std.testing.expectEqualStrings(
-        "{\"id\":88,\"op\":\"events_subscribe\",\"provider\":\"claude\",\"sid\":\"a1b2c3d4-0000-1111-2222-333344445555\",\"after\":1420}",
+        "{\"id\":88,\"op\":\"events_subscribe\",\"provider\":\"claude\",\"sid\":\"a1b2c3d4-0000-1111-2222-333344445555\",\"after\":1420,\"snapshot\":true}",
         line,
     );
     const stop = try unsubscribeLine(a, 88, "claude", "a1b2c3d4-0000-1111-2222-333344445555", 1420);
@@ -1380,7 +1467,7 @@ test "Codex and Pi live requests retain the selected provider" {
     for ([_][]const u8{ "codex", "pi" }) |provider| {
         const subscribe = try subscribeLine(a, 7, provider, "sid", 42);
         defer a.free(subscribe);
-        const expected_subscribe = try std.fmt.allocPrint(a, "{{\"id\":7,\"op\":\"events_subscribe\",\"provider\":\"{s}\",\"sid\":\"sid\",\"after\":42}}", .{provider});
+        const expected_subscribe = try std.fmt.allocPrint(a, "{{\"id\":7,\"op\":\"events_subscribe\",\"provider\":\"{s}\",\"sid\":\"sid\",\"after\":42,\"snapshot\":true}}", .{provider});
         defer a.free(expected_subscribe);
         try std.testing.expectEqualStrings(expected_subscribe, subscribe);
         const approval = try approvalReplyLine(a, 7, provider, "sid", "req", .accept);
