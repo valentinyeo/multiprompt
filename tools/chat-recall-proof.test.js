@@ -84,6 +84,10 @@ print('WINDOWS_RECALL_DISPATCH_OK')
 test('IGSH-1828 recall proof accepts a kept answer and two targeted recalls', () => {
   const boundary = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/boundary.py'), 'utf8');
   assert.match(boundary, /state\(\)\.get\("name"\) in \("accepted-message", "recall-handed"\)/);
+  const handed = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/recall-handed.ps1'), 'utf8');
+  assert.equal(handed.includes('$raw = Read-Shared "$state/recall-agent.jsonl"'), true);
+  assert.equal(handed.includes("($raw -split '\\r?\\n')"), true);
+  assert.equal(handed.includes('ConvertFrom-Json -InputObject $line'), true);
   const adapter = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/sitecustomize.py'), 'utf8');
   assert.match(adapter, /os\.name == "nt" and \(os\.environ\.get\("CHAT_MODEL_PROOF"\) == "1" or os\.environ\.get\("CHAT_RECALL_PROOF"\) == "1"\)/);
   const verify = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
