@@ -9,6 +9,13 @@ using System.Text;
 using System.Threading;
 public static class ChatSwitchObserver {
     public static int SidebarHeaderHeight;
+    public static int SidebarSectionHeight;
+    public static int SidebarRowHeight;
+    public static int SidebarRowY(int target) {
+        if (target < 0 || target > 4 || SidebarSectionHeight <= 0 || SidebarRowHeight <= 0)
+            throw new InvalidOperationException("Sidebar fixture geometry unavailable");
+        return 8 + SidebarHeaderHeight + SidebarSectionHeight + SidebarRowHeight * target + SidebarRowHeight / 2;
+    }
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
@@ -82,7 +89,7 @@ public static class ChatSwitchObserver {
         Input[] inputs = target >= 0 ? new Input[2] : null;
         if (target >= 0) {
             if (GetDpiForWindow(owner) != 96) throw new InvalidOperationException("Sidebar fixture requires 96 DPI");
-            var point = new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 };
+            var point = new Point { X = 100, Y = SidebarRowY(target) };
             if (!ClientToScreen(owner, ref point) || WindowFromPoint(point) != owner || !SetCursorPos(point.X, point.Y))
                 throw new InvalidOperationException("Sidebar row is not in the owned foreground window");
             inputs[0].Data.Mouse = new Mouse { Flags = 2 };

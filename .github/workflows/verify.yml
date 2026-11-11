@@ -648,6 +648,8 @@ jobs:
       - name: Check measured chat shape contracts
         if: env.FEATURE == 'chat-switch-speed'
         run: |
+          node --test tools/chat-shape-switch.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Native chat switch geometry contracts failed' }
           python tools/verify-chat-delivery/chat-shapes-test.py
           if ($LASTEXITCODE -ne 0) { throw 'Chat shape generator contracts failed' }
           python tools/verify-chat-delivery/chat-switch-evidence-test.py
