@@ -51,6 +51,38 @@ test('release stamps preserve plain Unicode and quoted product lines; exact stam
   assert.equal(classifyTrees(base, stamp.files, ['src/main.zig', 'src/changelog.zig', name]), 'STAMP');
 });
 
+test('pending fragment tickets stamp from the shared title catalog', async () => {
+  const { stampTree } = await import('./version-stamp.mjs');
+  const { ticketLine, ticketRecord } = await import('./ticket-titles.mjs');
+  const catalog = JSON.parse(fs.readFileSync(path.join(root, 'tools/ticket-titles.json'), 'utf8'));
+  const fixture = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
+  assert.deepEqual(catalog, fixture);
+  const names = fs.readdirSync(path.join(root, 'changelog.d')).filter(name => name !== 'README.md');
+  const files = {
+    'src/main.zig': fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8'),
+    'src/changelog.zig': fs.readFileSync(path.join(root, 'src/changelog.zig'), 'utf8'),
+  };
+  const ids = [];
+  for (const name of names) {
+    const id = /^([A-Z][A-Z0-9]*-\d+)-/.exec(name)[1];
+    if (!ids.includes(id)) ids.push(id);
+    ticketRecord(id, catalog[id]);
+    files[`changelog.d/${name}`] = fs.readFileSync(path.join(root, 'changelog.d', name), 'utf8');
+  }
+  if (ids.length) {
+    const gap = { ...catalog };
+    delete gap[ids[0]];
+    assert.throws(() => stampTree(files, undefined, gap), new RegExp(`Missing or invalid title for ${ids[0]}`));
+    const stamp = stampTree(files);
+    for (const id of ids) {
+      const text = ticketLine(ticketRecord(id, catalog[id]));
+      const escaped = text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
+      assert.ok(stamp.files['src/changelog.zig'].includes(`.text = "${escaped}", .ticket = "${id}"`), id);
+    }
+  }
+  console.log('HYCI-270 fragment titles ready');
+});
+
 test('existing CI version check enforces fragments for code but preserves generated stamps', () => {
   const script = fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8');
   assert.match(script, /if \(kind === 'CODE'\) checkFragments\(base, head, changed\);/);
