@@ -197,6 +197,7 @@ const unregisterShellExitWait = @import("workspaces.zig").unregisterShellExitWai
 const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
 const requestRemoteTmuxPaneRedraw = @import("archive.zig").requestRemoteTmuxPaneRedraw;
 const fetchTmuxSessions = @import("vps.zig").fetchTmuxSessions;
+const shared_alerts = @import("shared_alerts.zig");
 const sshOneShotCapture = @import("vps.zig").sshOneShotCapture;
 const buildSessionOverviewRows = @import("archive.zig").buildSessionOverviewRows;
 const parkMainWindowBeforeActiveShellRemoval = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval;
@@ -1466,8 +1467,21 @@ pub fn tunnelKeeperAlive(host_idx: usize) bool {
     return GetExitCodeProcess(proc, &exit_code) != 0 and exit_code == STILL_ACTIVE;
 }
 
+fn stopTunnelKeeper(host: u8) void {
+    const host_idx: usize = host;
+    const proc = app_state.g_tunnel_keeper_processes[host_idx] orelse return;
+    app_state.g_tunnel_keeper_processes[host_idx] = null;
+    _ = TerminateProcess(proc, 0);
+    _ = CloseHandle(proc);
+    debugLog2("tunnel-keeper: stopped for the shared link host=", tmuxHostLongLabel(host));
+}
+
 fn maintainTunnelKeeper(host: u8) void {
     if (app_state.g_app_closing or app_state.g_tunnel_job == null or app_state.g_tunnel_inbound_port == 0) return;
+    if (app_state.g_shared_server_connection) {
+        stopTunnelKeeper(host);
+        return;
+    }
     const host_idx: usize = host;
     const now = GetTickCount64();
     if (tunnelKeeperAlive(host_idx)) {
@@ -1542,12 +1556,27 @@ fn maintainTunnelKeeper(host: u8) void {
 }
 
 pub fn maintainTunnelKeepers() void {
+    maintainSharedAlerts();
     maintainTunnelKeeper(TMUX_HOST_DE);
     maintainTunnelKeeper(TMUX_HOST_UK);
     maintainTunnelKeeper(TMUX_HOST_INNE);
 }
 
+fn maintainSharedAlerts() void {
+    if (!app_state.g_shared_server_connection or app_state.g_app_closing or app_state.g_tunnel_inbound_port == 0) {
+        shared_alerts.stop();
+        return;
+    }
+    var id_buf: [80]u8 = undefined;
+    const name = tunnelSocketId(&id_buf) orelse {
+        shared_alerts.stop();
+        return;
+    };
+    shared_alerts.start(name);
+}
+
 pub fn closeTunnelKeepers() void {
+    shared_alerts.stop();
     if (app_state.g_tunnel_job != null) {
         _ = CloseHandle(app_state.g_tunnel_job);
         app_state.g_tunnel_job = null;
