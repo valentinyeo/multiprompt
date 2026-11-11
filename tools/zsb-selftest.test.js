@@ -10,7 +10,7 @@ const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwM
 
 async function runSelftest(failure) {
   const calls = [];
-  let page, input = '', clicked = false, closed = false, placeholder = false, buildAttempts = 0, tabLists = 0;
+  let page, input = '', clicked = false, closed = false, placeholder = false, buildAttempts = 0, tabLists = 0, typeCalls = 0;
   const server = net.createServer(socket => {
     let wire = '';
     socket.on('data', chunk => {
@@ -57,7 +57,9 @@ async function runSelftest(failure) {
         case 'type':
           assert.deepEqual(args.slice(1, 4), ['--tab', '42', '#zsb-input']);
           assert.equal(args[4], page.marker);
-          input = failure === 'type' || !page.built ? 'wrong input' : args[4];
+          typeCalls++;
+          input = failure === 'type' || !page.built ? 'wrong input'
+            : failure === 'type-retry' && typeCalls === 1 ? '' : args[4];
           result = { typed: true };
           break;
         case 'click':
@@ -164,6 +166,16 @@ test('selftest exercises the real wrapper transport and reports the visible host
   assert.equal(result.calls.at(-2)[0], 'close-tab');
   assert.equal(result.buildAttempts, 1);
   assert.deepEqual(result.calls.slice(0, 4).map(args => args[0]), ['open', 'tabs', 'eval', 'tabs']);
+});
+
+test('selftest retries the type step once when the first keystrokes do not land', async () => {
+  const result = await runSelftest('type-retry');
+  assert.equal(result.code, 0, JSON.stringify(result.summary));
+  assert.equal(result.summary.steps.type.pass, true);
+  const typed = result.calls.filter(args => args[0] === 'type');
+  assert.equal(typed.length, 2, 'exactly one retry after the first value did not land');
+  assert.deepEqual(typed[0], typed[1]);
+  assert.equal(result.closed, true);
 });
 
 test('selftest keeps an initially empty pane usable while removing only its own test tab', async () => {
