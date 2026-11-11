@@ -878,27 +878,6 @@ pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
     return if (lo < rects.len) .{ .index = lo, .offset = scroll_y - rects[lo].top } else null;
 }
 
-pub const BottomPin = struct { index: usize, gap: i32 };
-pub fn bottomPin(rects: anytype, scroll_y: i32, viewport_h: i32) ?BottomPin {
-    if (rects.len == 0) return null;
-    const edge = scroll_y + viewport_h;
-    var lo: usize = 0;
-    var hi: usize = rects.len;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        if (rects[mid].top < edge) lo = mid + 1 else hi = mid;
-    }
-    if (lo == 0) return null;
-    const index = lo - 1;
-    return .{ .index = index, .gap = edge - rects[index].bottom };
-}
-
-pub fn pinScroll(rects: anytype, pin: ?BottomPin, viewport_h: i32, fallback: i32) i32 {
-    const held = pin orelse return fallback;
-    if (held.index >= rects.len) return fallback;
-    return rects[held.index].bottom + held.gap - viewport_h;
-}
-
 pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
     return force or pending or !scrolled_up;
 }
@@ -906,14 +885,13 @@ pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
 pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bottom: bool, anchor_top: ?i32, offset: i32) i32 {
     const bottom = content_h - viewport_h;
     if (follow_bottom) return bottom;
-    const anchored_y = if (anchor_top != null) old_y else 0;
-    return std.math.clamp(if (anchor_top) |top| top + offset else old_y, @min(0, bottom, anchored_y), @max(0, bottom, anchored_y));
+    return std.math.clamp(if (anchor_top) |top| top + offset else old_y, @min(0, bottom), @max(0, bottom));
 }
 
-pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32, anchor: ?i32) i32 {
+pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32) i32 {
     const bottom = content_h - viewport_h;
-    if (boundary.index == null or boundary.unknown) return anchor orelse bottom;
-    return @max(0, divider_y - top_pad);
+    if (bottom <= 0 or boundary.index == null or boundary.unknown) return bottom;
+    return std.math.clamp(divider_y - top_pad, 0, bottom);
 }
 
 pub const MISSING_RETRY_MS: u64 = 60_000;

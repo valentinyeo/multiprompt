@@ -14,8 +14,7 @@ function anchorContract(source) {
 
 test('IGSH-814 anchors on stable message identity and never guesses from offsets', () => {
   const history = read('src/chat_history.zig');
-  const start = history.indexOf('pub fn unreadBoundary');
-  const boundary = history.slice(start, history.indexOf('\n}', start) + 2);
+  const boundary = history.slice(history.indexOf('pub fn unreadBoundary'), history.indexOf('test "IGSH-814'));
   anchorContract(boundary);
   assert.doesNotMatch(boundary, /source_offset|stamp_ms|\.start/);
   assert.throws(() => anchorContract(boundary.replace('if (marker == 0 or blocks.len == 0) return .{};', '')));
@@ -55,14 +54,14 @@ test('IGSH-814 leave, bottom and send lifecycle preserve anchors until live hist
   assert.match(model, /!disk and !history.more\) read_ready = foregroundIsOurs\(\)/);
   assert.match(model, /const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready/);
   assert.match(model, /!app_state.g_chat_active or app_state.g_chat_read_open_pending or \(bottom and app_state.g_chat_read_hold\)/);
-  assert.match(model, /app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count;\s+app_state.g_chat_read_open_pending = false;/);
+  assert.match(model, /app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells\[app_state.active_shell\].last_read_message_id != 0;\s+app_state.g_chat_read_open_pending = false;/);
   assert.match(read('src/chat_send.zig'), /g_chat_read_hold = false;/);
   assert.match(read('src/chat_render.zig'), /app_state.g_chat_read_hold = false;\s+app_state.g_chat_scroll_y = new_y;/);
   assert.match(model, /if \(!refreshed and !restore_read\) return/);
   assert.match(model, /restore_read or \(!app_state.g_chat_read_open_pending and !previous_boundary.unknown and app_state.g_chat_read_boundary.unknown\)/);
   assert.match(model, /read <= previous\.\?/);
   assert.match(read('src/chat_composer.zig'), /chatReadMark\(false\)/);
-  assert.match(read('src/console.zig'), /if \(idx != prev\) \{\s+const timing_started = switch_timing.start\(\);\s+defer switch_timing.record\(\.read_marker, timing_started\);\s+_ = @import\("chat_session.zig"\).chatReadMark\(false\)/);
+  assert.match(read('src/console.zig'), /if \(idx != prev\) _ = @import\("chat_session.zig"\).chatReadMark\(false\)/);
   assert.match(read('src/main.zig'), /chatReadMark\(false\);\s+logSessionAudit\("WM_CLOSE/);
   assert.match(read('src/chat_send.zig'), /g_chat_read_open_pending = false;\s+app_state.g_chat_read_hold = false;\s+app_state.g_chat_read_open_ready = true;\s+_ = @import\("chat_session.zig"\).chatReadMark\(true\)/);
   const render = read('src/chat_render.zig');
