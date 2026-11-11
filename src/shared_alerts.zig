@@ -154,7 +154,7 @@ fn pumpThread(host: u8) void {
         }
         const channel = transport.openCommand(host, pumpCommand()) orelse {
             failures +|= 1;
-            w.Sleep(retryMs(failures));
+            w.Sleep(@intCast(retryMs(failures)));
             continue;
         };
         if (runChannel(channel)) {
@@ -163,7 +163,7 @@ fn pumpThread(host: u8) void {
             failures +|= 1;
         }
         transport.close(channel);
-        if (!g_stop.load(.acquire)) w.Sleep(retryMs(failures));
+        if (!g_stop.load(.acquire)) w.Sleep(@intCast(retryMs(failures)));
     }
 }
 
@@ -284,9 +284,9 @@ fn sendFrame(channel: *transport.Channel, kind: []const u8, id: u32, payload: []
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(a);
     buf.appendSlice(a, head) catch return false;
-    const start = buf.items.len;
-    buf.resize(a, start + encoded_len) catch return false;
-    _ = std.base64.standard.Encoder.encode(buf.items[start..], payload);
+    const offset = buf.items.len;
+    buf.resize(a, offset + encoded_len) catch return false;
+    _ = std.base64.standard.Encoder.encode(buf.items[offset..], payload);
     return transport.write(channel, buf.items);
 }
 

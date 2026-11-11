@@ -84,6 +84,10 @@ function frame(line) {
   return { id: match[1], body: Buffer.from(match[2], 'base64') };
 }
 
+test('the shared link pump ships with the app', () => {
+  assert.ok(fs.existsSync(pump), 'src/notify_link.py carries alerts over the shared server connection');
+});
+
 test('an alert arrives over the shared link and the reply returns to the caller', async () => {
   const name = 'mp-test-' + process.pid + '-' + Math.random().toString(16).slice(2, 10);
   const socketPath = path.join(socketDir, name + '.sock');
