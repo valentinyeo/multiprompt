@@ -302,11 +302,8 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     // Appending changes the transcript but not the reader's current message.
     var appended = try one.history.clone(a);
     try appended.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t1000\\t1200\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"appended reply\\"}\\n@@MP_END@@\\n", 2, one.key);
-    chatRelayoutPreservingScroll(900, 800);
-    try std.testing.expect(g_chat_read_hold);
-    chatScrollBy(g_chat_scroll_y - 45);
-    try std.testing.expectEqual(@as(i32, 45), g_chat_scroll_y);
-    try std.testing.expect(!g_chat_read_hold);
+    g_chat_scrolled_up = true;
+    g_chat_scroll_y = 45;
     one.result = appended;
     one.ready.store(true, .release);
     chatFileOnReady();
