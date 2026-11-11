@@ -211,10 +211,25 @@ function soak() {
   console.log('IGSH-1892 soak pass');
 }
 
+function soakAudit() {
+  const text = readFileSync(new URL('./soak.log', import.meta.url), 'utf8');
+  const calls = [...text.matchAll(/^soak n=(\d+) elapsed=(\d+)s window=(\d+)$/gm)];
+  const summary = text.match(/^calls=(\d+) minutes=([0-9.]+)$/m);
+  const windows = new Set(calls.map((match) => match[3]));
+  const lastElapsed = calls.length ? Number(calls[calls.length - 1][2]) : 0;
+  if (!summary || !text.includes('IGSH-1892 soak pass') || calls.length < 2 || windows.size !== 1 || windows.has('0') || Number(summary[1]) !== calls.length || Number(summary[2]) < 15 || lastElapsed < 840) {
+    console.error(`IGSH-1892 soak fail: lines=${calls.length} windows=${[...windows].join(',')} last=${lastElapsed}`);
+    process.exit(1);
+  }
+  console.log(`calls=${summary[1]} minutes=${summary[2]} window=${[...windows][0]}`);
+  console.log('IGSH-1892 soak pass');
+}
+
 if (mode === 'identity') identity();
 else if (mode === 'probe') probe();
 else if (mode === 'recover') recover();
 else if (mode === 'soak') soak();
+else if (mode === 'soak-audit') soakAudit();
 else {
   console.error('usage: live-check.mjs identity|probe|recover|soak');
   process.exit(2);
