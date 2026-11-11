@@ -61,7 +61,7 @@ test("every pane re-entry path re-runs the overlay-aware visibility pass or park
     assert.match(body, /updateBrowserVisibility\(\);/, `${name} must re-run overlay-aware visibility`);
   }
   const zsb = functionBody("handleZsbBindRequest");
-  assert.match(zsb, /launchBrowserForShellFromRequest\(ti\);/, "zsb bind relaunch goes through the gated launcher (issue: as a request)");
+  assert.match(zsb, /launchBrowserForAgentRequest\(ti\);/, "zsb bind relaunch goes through the agent request launcher (issue: as a request, never a user launch)");
   const park = functionBody("parkBrowserForMonitorTransition");
   assert.match(park, /parkBrowserWindow\(bh\);/, "a monitor transition parks the active pane");
   const open = functionBody("openInbox");

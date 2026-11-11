@@ -32,6 +32,38 @@ test('live chat journey runs the shipped selftest and verifies every step and th
   assert.match(native, /return Start\(exe, directory, stdout, stderr, arguments, false\)/);
 });
 
+test('live chat journey holds agent calls on a background chat without touching the user view', () => {
+  const root = path.join(__dirname, '../.claude/skills/verify-multiprompt');
+  const driver = fs.readFileSync(path.join(root, 'control-feature-live-chat-pane.ps1'), 'utf8');
+  assert.match(driver, /\$env:AGENT_SOAK_SECONDS/);
+  assert.match(driver, /AGENT_SOAK_SECONDS must be a whole number of seconds/);
+  assert.match(driver, /Invoke-Zsb @\('status'\) \$script:liveChatPort \('soak-status-' \+ \$soakRounds\) -Session \$two\.tmux/);
+  assert.match(driver, /\$soakStatus\.pane -cne 'open' -or \$soakStatus\.windowId -ne \$soakHiddenWindow/);
+  assert.match(driver, /change the hidden chat pane|changed the hidden chat pane/);
+  assert.match(driver, /switched the visible tab/);
+  assert.match(driver, /switchToShell:/);
+  assert.match(driver, /if \(-not \[VerifyNative\]::PaneVisible\(\$script:window\)\) \{ throw \('Agent call '/);
+  assert.match(driver, /Save-Json \$soakEvidence 'chat-two-background-soak\.json'/);
+  assert.doesNotMatch(driver.slice(driver.indexOf('$soakTimer = [Diagnostics.Stopwatch]::StartNew()'), driver.indexOf("Snapshot 'chat-two-background-soak'")), /Press |Type-Text |ClickClient/);
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /AGENT_SOAK_SECONDS: \$\{\{ matrix\.feature == 'live-chat-pane' && '1200' \|\| '' \}\}/);
+  assert.match(workflow, /timeout-minutes: \$\{\{ inputs\.long_chat_proof && 50 \|\|/, 'the twenty minute soak needs the long proof job timeout');
+  assert.match(workflow, /timeout-minutes: \$\{\{ env\.FEATURE == 'live-chat-pane' && 60 \|\| 30 \}\}/);
+  const docs = fs.readFileSync(path.join(root, 'features/live-chat-pane.md'), 'utf8');
+  assert.match(docs, /`chat-two-background-soak`/);
+  assert.match(docs, /every 30 seconds for `AGENT_SOAK_SECONDS`/);
+});
+
+test('live chat journey reads published state before the first agent call on a chat', () => {
+  const driver = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/control-feature-live-chat-pane.ps1'), 'utf8');
+  assert.match(driver, /\$twoBefore = Read-BrowserPaneFor \$two\.shellId/);
+  assert.match(driver, /\$oneBefore = Read-BrowserPaneFor \$one\.shellId/);
+  assert.doesNotMatch(driver, /\$(one|two)Before = Invoke-Zsb/, 'an agent call opens the pane, so it can never answer that the pane is closed');
+  assert.doesNotMatch(driver, /did not report its own closed pane/);
+  const docs = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/features/live-chat-pane.md'), 'utf8');
+  assert.match(docs, /expects a closed pane only before the first call on that chat/);
+});
+
 test('live chat routing preserves the shared workspace default and uses the real browser setup', () => {
   const root = path.join(__dirname, '../.claude/skills/verify-multiprompt');
   const control = fs.readFileSync(path.join(root, 'control.ps1'), 'utf8');
