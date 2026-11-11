@@ -28,6 +28,16 @@ Scope: Keep the agent browser pane open while an agent is attached, and reopen a
 - Read-only device access reported both Windows devices offline. No running release identity, missing-pane recovery, suspended-pane recovery or 15-minute availability can be observed in this state.
 - Live gates remain UNREACHABLE. Hand back for a future connected-device verification attempt, not Done. No restart, replacement, local build or local test was attempted.
 
+## Recheck, 2026-11-11 07:03 UTC
+
+- Re-read the current description and comments; scope remains unchanged. Assignment was confirmed and the ticket moved to Doing for verification.
+- PR 897 remains merged at ea17331f2e5873fa7cccbdc97ab151471b757587. Latest published release remains v0.28.1666.
+- Re-read both GitHub-hosted run results: 42963786529 and 42963786536 completed successfully on bde95cf882aea6c58dbc70737632bc401a3f9fd2.
+- Real status and open calls both returned `empty_reply`. Independent device listing confirmed both Windows devices disconnected.
+- Recovery and 15-minute availability gates remain UNREACHABLE, not PASS. No local tests/builds, restart, user browser changes, or additional implementation PR.
+- Existing BlockedBy ticket IGSH-1935 is Done, so it is not the remaining blocker. Device connectivity is required before the live gates can be observed.
+- Retry-loop friction was added to existing feedback: https://app.hypertask.ai/detail/project-12057/613.
+
 ## Resume
 
 When Windows access is available, verify the running release, open an owned browser pane through the normal agent entry point, verify 15 minutes of availability, then verify recovery after closure. Preserve the unrelated user's browser tabs and application process. Do not mark this ticket Done from CI evidence alone.
