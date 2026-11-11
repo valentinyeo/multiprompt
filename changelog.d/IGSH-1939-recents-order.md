@@ -1,0 +1,3 @@
+- Recents puts the chat you opened or sent to last on top.
+- A bot reply no longer moves a chat in the sidebar.
+- Pinned keeps the order you drag it into.

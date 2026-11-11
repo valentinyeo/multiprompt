@@ -311,6 +311,7 @@
   "IGSH-1934": "Messages to all sessions reach every chat",
   "IGSH-1935": "Agent browser calls fail on a tab you are not looking at",
   "IGSH-1938": "Browser calls lose replies between connected servers",
+  "IGSH-1939": "Recents puts the chat you used last on top",
   "IGSH-1940": "Opening a chat shows only the newest reply for a long time",
   "IGSH-212": "zsb: type sends multi-line text into chat composers (newlines fire as Enter)",
   "IGSH-221": "zsb: cdp cannot hold a session across calls, so Profiler/Tracing brackets around a reload are impossible",

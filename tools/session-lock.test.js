@@ -59,11 +59,12 @@ test("empty workspace closes atomically and can be absorbed again", () => {
 });
 
 test("custom groups stay stable and sort pinned members before recent members", () => {
-  const sort = bodyOf("fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {");
-  assert.match(sort, /tmp\.is_group and !b\.is_group/,
+  const blocks = bodyOf("fn sidebarBlockBefore(a: SidebarBlock, b: SidebarBlock) bool {");
+  assert.match(blocks, /if \(a\.is_group != b\.is_group\) return a\.is_group;/,
     "custom groups should remain above ungrouped sections");
-  assert.match(sort, /tmp\.is_group and b\.is_group and tmp\.pos < b\.pos/,
+  assert.match(blocks, /if \(a\.is_group\) return a\.pos < b\.pos;/,
     "group blocks should not jump with tab activity");
+  const sort = bodyOf("fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {");
   assert.match(sort, /@intFromEnum\(tm_tier\) > @intFromEnum\(bm_tier\)/,
     "pinned members should sort before recent members inside their group");
   assert.doesNotMatch(sort, /tier == \.locked/);

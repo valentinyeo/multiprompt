@@ -433,34 +433,6 @@ const lineLooksLikeAiWorking = @import("shell_poll.zig").lineLooksLikeAiWorking;
 const lineLooksLikeGenericTmuxStatusPreview = @import("shell_poll.zig").lineLooksLikeGenericTmuxStatusPreview;
 const shellProcessAliveForRead = @import("shell_poll.zig").shellProcessAliveForRead;
 
-pub fn stickyFind(sid: u32) ?u32 {
-    var i: u32 = 0;
-    while (i < app_state.g_sticky_n) : (i += 1) if (app_state.g_sticky[i].sid == sid) return i;
-    return null;
-}
-pub fn stickyAddFromShell(idx: u32) void {
-    if (stickyFind(app_state.shells[idx].shell_id) != null) return;
-    if (app_state.g_sticky_n >= MAX_SHELLS) return;
-    app_state.g_sticky[app_state.g_sticky_n] = .{
-        .sid = app_state.shells[idx].shell_id,
-        .att = app_state.shells[idx].needs_attention,
-        .active = app_state.shells[idx].activity == .active,
-        .la = app_state.shells[idx].last_active,
-    };
-    app_state.g_sticky_n += 1;
-}
-pub fn stickyResetToShell(idx: u32) void {
-    app_state.g_sticky_n = 0;
-    stickyAddFromShell(idx);
-}
-pub fn stickyRemove(sid: u32) void {
-    if (stickyFind(sid)) |i| {
-        var j = i;
-        while (j + 1 < app_state.g_sticky_n) : (j += 1) app_state.g_sticky[j] = app_state.g_sticky[j + 1];
-        app_state.g_sticky_n -= 1;
-    }
-}
-
 pub fn findGroupIdx(gid: u32) ?u32 {
     if (gid == 0) return null;
     for (0..app_state.group_count) |gi| {
@@ -775,7 +747,6 @@ pub fn markShellUnread(idx: usize) void {
     if (app_state.shells[idx].inbox_archived) logUnarchive(idx, "explicit mark unread");
     app_state.shells[idx].inbox_archived = false;
     app_state.shells[idx].last_active = nowFileTime();
-    stickyRemove(app_state.shells[idx].shell_id);
     publishInboxState();
     saveSession();
     invalidateSidebar();
@@ -1242,21 +1213,9 @@ pub fn applyPendingGroup() void {
     saveSession();
 }
 
-inline fn effAtt(i: usize) bool {
-    if (app_state.shells[i].needs_attention) return true;
-    if (stickyFind(app_state.shells[i].shell_id)) |k| return app_state.g_sticky[k].att;
-    return app_state.shells[i].needs_attention;
-}
-
-inline fn effActive(i: usize) bool {
-    if (app_state.shells[i].activity == .active) return true;
-    if (stickyFind(app_state.shells[i].shell_id)) |k| return app_state.g_sticky[k].active;
-    return app_state.shells[i].activity == .active;
-}
-
-inline fn effLa(i: usize) u64 {
-    if (stickyFind(app_state.shells[i].shell_id)) |k| return app_state.g_sticky[k].la;
-    return app_state.shells[i].last_active;
+inline fn sidebarUseKey(i: usize) u64 {
+    const viewed_ms = frequent.unixMs(app_state.shells[i].last_viewed / 10_000);
+    return @max(viewed_ms, app_state.shells[i].last_used);
 }
 
 pub inline fn effPinnedTop(i: usize) bool {
@@ -1270,9 +1229,9 @@ fn sortShellsByRecency(ids: []usize) void {
         var jj = ii;
         while (jj > 0) : (jj -= 1) {
             const prev = ids[jj - 1];
-            const tmp_la = effLa(tmp);
-            const prev_la = effLa(prev);
-            if (tmp_la < prev_la or (tmp_la == prev_la and tmp > prev)) break;
+            const tmp_used = sidebarUseKey(tmp);
+            const prev_used = sidebarUseKey(prev);
+            if (tmp_used < prev_used or (tmp_used == prev_used and tmp > prev)) break;
             ids[jj] = prev;
         }
         ids[jj] = tmp;
@@ -1314,18 +1273,27 @@ pub fn toggleSidebarSectionCollapsed(tier: SidebarTier) void {
     invalidateSidebar();
 }
 
+const SidebarBlock = struct {
+    tier: SidebarTier,
+    used: u64,
+    pos: u32,
+    payload: u32,
+    is_group: bool,
+    muted: bool,
+};
+
+fn sidebarBlockBefore(a: SidebarBlock, b: SidebarBlock) bool {
+    if (a.is_group != b.is_group) return a.is_group;
+    if (a.is_group) return a.pos < b.pos;
+    if (a.tier != b.tier) return @intFromEnum(a.tier) > @intFromEnum(b.tier);
+    if (a.tier == .pinned) return a.pos < b.pos;
+    if (a.muted != b.muted) return !a.muted;
+    if (a.used != b.used) return a.used > b.used;
+    return a.pos < b.pos;
+}
+
 fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
-    const Block = struct {
-        tier: SidebarTier,
-        att: bool,
-        is_active: bool,
-        la: u64,
-        pos: u32,
-        payload: u32,
-        is_group: bool,
-        muted: bool,
-    };
-    var blocks: [MAX_SHELLS]Block = undefined;
+    var blocks: [MAX_SHELLS]SidebarBlock = undefined;
     var bc: u32 = 0;
     var seen_gids: [MAX_GROUPS]u32 = [_]u32{0} ** MAX_GROUPS;
     var sgc: u32 = 0;
@@ -1338,9 +1306,7 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
             if (bc < MAX_SHELLS) {
                 blocks[bc] = .{
                     .tier = shellSidebarTier(i),
-                    .att = effAtt(i),
-                    .is_active = effActive(i),
-                    .la = effLa(i),
+                    .used = sidebarUseKey(i),
                     .pos = @intCast(i),
                     .payload = @intCast(i),
                     .is_group = false,
@@ -1360,9 +1326,6 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
                 seen_gids[sgc] = gid;
                 sgc += 1;
                 const gidx = findGroupIdx(gid) orelse continue;
-                var g_att: bool = false;
-                var g_is_active: bool = false;
-                var g_la: u64 = 0;
                 var g_pass: u32 = 0;
                 var g_muted: bool = true;
                 for (0..app_state.shell_count) |j| {
@@ -1371,15 +1334,11 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
                     if (tabPassesUnreadFilter(j)) {
                         g_pass += 1;
                     }
-                    if (effAtt(j)) g_att = true;
-                    if (effActive(j)) g_is_active = true;
                     if (!app_state.shells[j].muted) g_muted = false;
-                    const j_la = effLa(j);
-                    if (j_la > g_la) g_la = j_la;
                 }
                 if (g_pass == 0) continue;
                 if (bc < MAX_SHELLS) {
-                    blocks[bc] = .{ .tier = .recent, .att = g_att, .is_active = g_is_active, .la = g_la, .pos = @intCast(gidx), .payload = @intCast(gidx), .is_group = true, .muted = g_muted };
+                    blocks[bc] = .{ .tier = .recent, .used = 0, .pos = @intCast(gidx), .payload = @intCast(gidx), .is_group = true, .muted = g_muted };
                     bc += 1;
                 }
             }
@@ -1392,17 +1351,7 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
             const tmp = blocks[ii];
             var jj: i32 = @as(i32, @intCast(ii)) - 1;
             while (jj >= 0) {
-                const b = blocks[@intCast(jj)];
-                const before: bool =
-                    (tmp.is_group and !b.is_group) or
-                    (tmp.is_group and b.is_group and tmp.pos < b.pos) or
-                    (!tmp.is_group and !b.is_group and @intFromEnum(tmp.tier) > @intFromEnum(b.tier)) or
-                    (!tmp.is_group and !b.is_group and tmp.tier == b.tier and !tmp.muted and b.muted) or
-                    (!tmp.is_group and !b.is_group and tmp.tier == b.tier and tmp.muted == b.muted and ((tmp.att and !b.att) or
-                        (tmp.att == b.att and tmp.is_active and !b.is_active) or
-                        (tmp.att == b.att and tmp.is_active == b.is_active and tmp.la > b.la) or
-                        (tmp.att == b.att and tmp.is_active == b.is_active and tmp.la == b.la and tmp.pos < b.pos)));
-                if (!before) break;
+                if (!sidebarBlockBefore(tmp, blocks[@intCast(jj)])) break;
                 blocks[@intCast(jj + 1)] = blocks[@intCast(jj)];
                 jj -= 1;
             }
@@ -1437,16 +1386,14 @@ fn buildSortedOrder(out: *[MAX_SHELLS]u32, out_n: *u32) void {
                     var jj: i32 = @as(i32, @intCast(ii)) - 1;
                     while (jj >= 0) {
                         const bm = mbrs[@intCast(jj)];
-                        const tm_key = effLa(tm);
-                        const bm_key = effLa(bm);
+                        const tm_key = sidebarUseKey(tm);
+                        const bm_key = sidebarUseKey(bm);
                         const tm_tier = shellSidebarTier(tm);
                         const bm_tier = shellSidebarTier(bm);
                         const before: bool =
                             (@intFromEnum(tm_tier) > @intFromEnum(bm_tier)) or
-                            (tm_tier == bm_tier and effAtt(tm) and !effAtt(bm)) or
-                            (tm_tier == bm_tier and effAtt(tm) == effAtt(bm) and effActive(tm) and !effActive(bm)) or
-                            (tm_tier == bm_tier and effAtt(tm) == effAtt(bm) and effActive(tm) == effActive(bm) and tm_key > bm_key) or
-                            (tm_tier == bm_tier and effAtt(tm) == effAtt(bm) and effActive(tm) == effActive(bm) and tm_key == bm_key and tm < bm);
+                            (tm_tier == bm_tier and tm_key > bm_key) or
+                            (tm_tier == bm_tier and tm_key == bm_key and tm < bm);
                         if (!before) break;
                         mbrs[@intCast(jj + 1)] = mbrs[@intCast(jj)];
                         jj -= 1;
@@ -5516,7 +5463,6 @@ test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the 
     const saved_collapsed = app_state.g_sidebar_collapsed;
     const saved_inbox = app_state.g_inbox_row_count;
     const saved_recents = app_state.g_recents_section_collapsed;
-    const saved_sticky = app_state.g_sticky_n;
     const saved_snoozed = app_state.g_ws_snoozed;
     defer {
         app_state.g_starred_workspace = saved_starred;
@@ -5528,7 +5474,6 @@ test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the 
         app_state.g_sidebar_collapsed = saved_collapsed;
         app_state.g_inbox_row_count = saved_inbox;
         app_state.g_recents_section_collapsed = saved_recents;
-        app_state.g_sticky_n = saved_sticky;
         app_state.g_ws_snoozed = saved_snoozed;
     }
     app_state.g_starred_workspace = true;
@@ -5536,7 +5481,6 @@ test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the 
     app_state.g_sidebar_collapsed = false;
     app_state.g_inbox_row_count = 0;
     app_state.g_recents_section_collapsed = false;
-    app_state.g_sticky_n = 0;
     app_state.g_ws_snoozed = @splat(false);
     app_state.shell_count = 4;
     app_state.group_count = 1;
@@ -5549,10 +5493,10 @@ test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the 
     }
     app_state.shells[0].starred_group_id = 41;
     app_state.shells[1].starred_group_id = 41;
-    app_state.shells[0].last_active = 10;
-    app_state.shells[1].last_active = 20;
-    app_state.shells[2].last_active = 30;
-    app_state.shells[3].last_active = 40;
+    app_state.shells[0].last_used = 10;
+    app_state.shells[1].last_used = 20;
+    app_state.shells[2].last_used = 30;
+    app_state.shells[3].last_used = 40;
     var rows: [MAX_ROWS]Row = undefined;
     try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);

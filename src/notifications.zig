@@ -24,7 +24,6 @@ const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const playNotificationSound = @import("startup.zig").playNotificationSound;
 const RGB = @import("startup.zig").RGB;
 const empty_shell = @import("app_state.zig").empty_shell;
-const stickyRemove = @import("sidebar.zig").stickyRemove;
 const readArchiveContent = @import("sidebar.zig").readArchiveContent;
 const archiveHasNewContent = @import("sidebar.zig").archiveHasNewContent;
 const logUnarchive = @import("sidebar.zig").logUnarchive;
@@ -1348,7 +1347,7 @@ fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
     const was_active = app_state.shells[i].activity == .active;
     if (!active and !std.mem.startsWith(u8, raw, "DONE:")) {
         const explicit_prompt = std.mem.startsWith(u8, raw, "NOTIFICATION:");
-        if (dotTargetsTab(i) and (explicit_prompt or (!app_state.shells[i].hook_capable and app_state.shells[i].claude_sid_len == 0)) and setBlueDot(i, .notification, false)) stickyRemove(app_state.shells[i].shell_id);
+        if (dotTargetsTab(i) and (explicit_prompt or (!app_state.shells[i].hook_capable and app_state.shells[i].claude_sid_len == 0))) _ = setBlueDot(i, .notification, false);
         recordShellDiagEvent(i, "notification", raw);
         publishInboxState();
         saveSession();
@@ -1361,7 +1360,6 @@ fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
         app_state.shells[i].last_active_event = GetTickCount64();
         if (app_state.shells[i].inbox_archived and app_state.shells[i].archive_time != 0) app_state.shells[i].archive_active = nowFileTime();
         app_state.shells[i].needs_attention = false;
-        stickyRemove(app_state.shells[i].shell_id);
         recordShellDiagEvent(i, "ACTIVE", raw);
         startSpinnerTimerIfNeeded();
         if (etaActiveStartsNewRequest(was_active, app_state.shells[i].eta_active_start_tick)) {
@@ -1392,7 +1390,6 @@ fn applyShellEvent(i: usize, active: bool, raw: []const u8) void {
                 app_state.shells[i].deferred_done = true;
             } else if (setBlueDot(i, .hook_done, true)) {
                 if (app_state.shells[i].inbox_archived) logUnarchive(i, "DONE with new console output");
-                stickyRemove(app_state.shells[i].shell_id);
             }
         }
         recordShellDiagEvent(i, "DONE", raw);

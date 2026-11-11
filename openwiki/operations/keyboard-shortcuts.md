@@ -252,7 +252,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K / right-click tab -&gt; Close all disconnected sessions | Close disconnected sessions, including pinned sessions. Keep live sessions. |
 | Ctrl / Shift+click tabs, then drag | Select tabs and move them together |
 | Drag tab onto a group | Move it there without changing pin state |
-| Drag tab: Pinned / Recents | Change its order inside the group or ungrouped list |
+| Drag tab: Pinned / Recents | Pinned keeps your drag order; Recents follows the chat you opened or sent to last |
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |

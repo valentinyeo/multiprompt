@@ -360,7 +360,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K / right-click tab -> Close all disconnected sessions", .b = "Close disconnected sessions, including pinned sessions. Keep live sessions.", .header = false },
     .{ .a = "Ctrl / Shift+click tabs, then drag", .b = "Select tabs and move them together", .header = false },
     .{ .a = "Drag tab onto a group", .b = "Move it there without changing pin state", .header = false },
-    .{ .a = "Drag tab: Pinned / Recents", .b = "Change its order inside the group or ungrouped list", .header = false },
+    .{ .a = "Drag tab: Pinned / Recents", .b = "Pinned keeps your drag order; Recents follows the chat you opened or sent to last", .header = false },
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped Pinned or Recents", .header = false },
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
     .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reattach / mute / close / move / group)", .header = false },
