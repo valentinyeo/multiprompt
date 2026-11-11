@@ -410,7 +410,7 @@ jobs:
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
-      AGENT_SOAK_SECONDS: ${{ matrix.feature == 'live-chat-pane' && '120' || '' }}
+      AGENT_SOAK_SECONDS: ${{ matrix.feature == 'live-chat-pane' && '1200' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
