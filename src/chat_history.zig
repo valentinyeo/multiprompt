@@ -878,6 +878,27 @@ pub fn scrollAnchor(rects: anytype, scroll_y: i32) ?Anchor {
     return if (lo < rects.len) .{ .index = lo, .offset = scroll_y - rects[lo].top } else null;
 }
 
+pub const BottomPin = struct { index: usize, gap: i32 };
+pub fn bottomPin(rects: anytype, scroll_y: i32, viewport_h: i32) ?BottomPin {
+    if (rects.len == 0) return null;
+    const edge = scroll_y + viewport_h;
+    var lo: usize = 0;
+    var hi: usize = rects.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (rects[mid].top < edge) lo = mid + 1 else hi = mid;
+    }
+    if (lo == 0) return null;
+    const index = lo - 1;
+    return .{ .index = index, .gap = edge - rects[index].bottom };
+}
+
+pub fn pinScroll(rects: anytype, pin: ?BottomPin, viewport_h: i32, fallback: i32) i32 {
+    const held = pin orelse return fallback;
+    if (held.index >= rects.len) return fallback;
+    return rects[held.index].bottom + held.gap - viewport_h;
+}
+
 pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
     return force or pending or !scrolled_up;
 }

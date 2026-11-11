@@ -51,6 +51,8 @@ const app_state = struct {
   var g_chat_batch_divider_y: i32 = 0;
   var has_unread = true;
   var tail_h: i32 = 0;
+  var grow: i32 = 0;
+  var grow_at: usize = 0;
   var next_blocks: ?usize = null;
   var g_chat_read_open_pending = false;
   var g_chat_read_open_ready = false;
@@ -99,8 +101,9 @@ fn chatRelayout(_: i32) void {
       app_state.g_chat_read_divider_y = y;
       y += DIVIDER_H;
     }
-    app_state.g_chat_layout_rects[i] = .{ .top = y, .bottom = y + BLOCK_H };
-    y += BLOCK_H;
+    const h = BLOCK_H + if (i == app_state.grow_at) app_state.grow else 0;
+    app_state.g_chat_layout_rects[i] = .{ .top = y, .bottom = y + h };
+    y += h;
   }
   app_state.g_chat_content_h = y + app_state.tail_h;
   app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
@@ -111,6 +114,8 @@ ${scroll.replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewCl
 fn openTab(blocks: usize, unread: bool) void {
   app_state.has_unread = unread;
   app_state.tail_h = 0;
+  app_state.grow = 0;
+  app_state.grow_at = 0;
   app_state.g_chat_top_pad = 20;
   app_state.g_chat_content_h = 0;
   app_state.g_chat_block_count = blocks;
@@ -181,6 +186,15 @@ test "IGSH-1924 caught-up stays on its newest message through tail changes" {
   chatSetTopPad(82);
   try std.testing.expectEqual(first + 62, app_state.g_chat_scroll_y);
 }
+test "IGSH-1924 caught-up reflow keeps the newest block still" {
+  openTab(40, false);
+  const before = app_state.g_chat_layout_rects[39].bottom - app_state.g_chat_scroll_y;
+  app_state.grow_at = 37;
+  app_state.grow = 250;
+  refreshChatTranscript(false);
+  try std.testing.expectEqual(before, app_state.g_chat_layout_rects[39].bottom - app_state.g_chat_scroll_y);
+  app_state.grow = 0;
+}
 test "IGSH-1924 short caught-up chat stays still with live additions" {
   openTab(1, false);
   const first = app_state.g_chat_content_h - 600;
@@ -232,7 +246,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 8 tests passed/);
+  assert.match(result.stderr, /All 9 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {
