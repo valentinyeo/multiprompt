@@ -1430,7 +1430,7 @@ test('held cancellation stays callable within GitHub manual input limits', () =>
   const recallCall = workflow.match(/^  workflow_call:\n([^]*?)(?=^  [a-z_]+:)/m)[1];
   assert.match(recallCall, /      chat_recall_proof:\n        required: false\n        default: false\n        type: boolean/);
   const recall = read('.github/workflows/recall-handed.yml');
-  assert.match(recall, /feature: chat-delivery\n      chat_recall_proof: true\n      tag: \$\{\{ inputs.tag \}\}/);
+  assert.match(recall, /feature: chat-delivery\n      chat_recall_proof: true\n      tag: \$\{\{ inputs.tag \|\| 'v0\.28\.1677' \}\}/);
 });
 
 
