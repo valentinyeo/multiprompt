@@ -885,13 +885,14 @@ pub fn followBottom(force: bool, pending: bool, scrolled_up: bool) bool {
 pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bottom: bool, anchor_top: ?i32, offset: i32) i32 {
     const bottom = content_h - viewport_h;
     if (follow_bottom) return bottom;
-    return std.math.clamp(if (anchor_top) |top| top + offset else old_y, @min(0, bottom), @max(0, bottom));
+    const anchored_y = if (anchor_top != null) old_y else 0;
+    return std.math.clamp(if (anchor_top) |top| top + offset else old_y, @min(0, bottom, anchored_y), @max(0, bottom, anchored_y));
 }
 
-pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32) i32 {
+pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32, anchor: ?i32) i32 {
     const bottom = content_h - viewport_h;
-    if (bottom <= 0 or boundary.index == null or boundary.unknown) return bottom;
-    return std.math.clamp(divider_y - top_pad, 0, bottom);
+    if (boundary.index == null or boundary.unknown) return anchor orelse bottom;
+    return @max(0, divider_y - top_pad);
 }
 
 pub const MISSING_RETRY_MS: u64 = 60_000;

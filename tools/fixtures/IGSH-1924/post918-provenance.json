@@ -1,0 +1,9 @@
+{
+  "revision": "e2b4ad1f5",
+  "priorFix": "https://github.com/valentinyeo/multiprompt/pull/918",
+  "files": {
+    "post918-scroll.txt": "src/chat_session.zig:refreshChatTranscript and chatRelayoutPreservingScroll",
+    "post918-open-scroll.txt": "src/chat_history.zig:openScroll",
+    "post918-render-scroll.txt": "src/chat_render.zig:chatSetTopPad, chatMaxScroll, chatMinScroll and chatJumpToNewest"
+  }
+}
