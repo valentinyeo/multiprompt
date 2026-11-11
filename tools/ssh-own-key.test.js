@@ -32,7 +32,7 @@ test('IGSH-1928 the app settings force the app key and turn every agent off', ()
   assert.match(render, /IdentityFile \\"\{s\}\\"\\r\\n  IdentitiesOnly yes\\r\\n  IdentityAgent none\\r\\n/);
   assert.match(render, /if \(!forced\(slot\)\) continue;/, 'servers not yet proven keep today\'s sign-in');
   assert.ok(render.indexOf('IdentityAgent none') < render.indexOf('Host *'), 'user settings are included after the forced blocks so the app values win');
-  assert.match(render, /Include \\"\{s\}\\"\\r\\n  Include \\"\{s\}\\"/);
+  assert.ok(render.includes(' !{s}'), 'both includes exclude servers already using the app key');
   assert.match(body(servers, 'forced'), /slot\.status == \.connected or \(slot\.owned and listed\(slot\)\)/);
 });
 
@@ -43,11 +43,30 @@ test('IGSH-1928 a server switches only after a login with the app key alone', ()
   }
   const check = body(identity, 'check');
   assert.ok(check.indexOf('keys.addCommand(a, public_key)') >= 0, 'the app key is installed over the working connection');
-  assert.ok(check.indexOf('keys.addCommand(a, public_key)') < check.indexOf('servers.proofArgs('), 'install happens before the proof');
+  assert.ok(check.indexOf('servers.proofArgs(') < check.indexOf('keys.addCommand(a, public_key)'), 'try the app key before any old sign-in');
+  assert.match(check, /if \(existing\.ok or slot\.owned\) \{[\s\S]*?return;/);
+  assert.ok(check.includes('-o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes'), 'bootstrap never contacts an agent');
   assert.match(check, /finish\(i, proven\.ok, servers\.failureReason\(proven\.text\)\)/);
   const publish = body(identity, 'publish');
   assert.ok(publish.indexOf('sameAddresses(') < publish.indexOf('console.setSshConfig(config)'), 'settings switch on only after ssh reads them back');
   assert.match(publish, /if \(!any_forced\) \{\s*console\.setSshConfig\(null\);/);
+});
+
+test('IGSH-1928 failed server retries run from the existing timer without waiting on a worker', () => {
+  assert.match(read('src/main.zig'), /if \(wp == TIMER_UPDATE_CHECK\) \{\s*updateCardPoll\(\);\s*@import\("ssh_identity\.zig"\)\.retry\(\);/);
+  const retry = body(identity, 'retry');
+  assert.match(retry, /if \(!started\.load\(\.acquire\) or running\.load\(\.acquire\)\) return;/);
+  assert.match(retry, /if \(!lock\.tryLock\(\)\) return;/);
+  assert.match(retry, /servers\.needsMigration\(slot, now\)/);
+  assert.match(retry, /lock\.unlock\(\);\s*if \(due\) _ = launch\(\.startup\);/);
+  assert.match(body(identity, 'launch'), /if \(running\.swap\(true, \.acq_rel\)\)/);
+  assert.match(body(identity, 'worker'), /servers\.needsMigration\(table\[i\], now\)/);
+});
+
+test('IGSH-1928 removed app-owned servers stay removed after restart', () => {
+  assert.match(body(identity, 'remove'), /table\[i\] = \.\{ \.status = \.removed \};/);
+  assert.match(body(identity, 'seed'), /if \(!empty\) continue;/);
+  assert.match(body(identity, 'seed'), /const empty = table\[i\]\.status == \.empty;/);
 });
 
 test('IGSH-1928 the app key lives in its own private folder, never in the user key', () => {

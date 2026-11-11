@@ -353,14 +353,6 @@ fn check(a: std.mem.Allocator, exe: []const u8, i: usize) void {
             table[i].port = resolved.port;
         }
         lock.unlock();
-        const add = keys.addCommand(a, public_key) catch return;
-        const remote = escaped(a, add) catch return;
-        const install = std.fmt.allocPrint(a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ prefix, aliases[i], remote }) catch return;
-        const installed = run(a, install, 30000) catch Output{ .ok = false, .text = "" };
-        if (!installed.ok) {
-            finish(i, false, servers.failureReason(installed.text));
-            return;
-        }
     }
     var key_buf: [520]u8 = undefined;
     const key = keyFile(&key_buf) orelse return;
@@ -369,6 +361,19 @@ fn check(a: std.mem.Allocator, exe: []const u8, i: usize) void {
         return;
     };
     const proof = std.fmt.allocPrint(a, "\"{s}\" {s}", .{ exe, args }) catch return;
+    const existing = run(a, proof, 30000) catch Output{ .ok = false, .text = "" };
+    if (existing.ok or slot.owned) {
+        finish(i, existing.ok, servers.failureReason(existing.text));
+        return;
+    }
+    const add = keys.addCommand(a, public_key) catch return;
+    const remote = escaped(a, add) catch return;
+    const install = std.fmt.allocPrint(a, "{s}-o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ prefix, aliases[i], remote }) catch return;
+    const installed = run(a, install, 30000) catch Output{ .ok = false, .text = "" };
+    if (!installed.ok) {
+        finish(i, false, servers.failureReason(installed.text));
+        return;
+    }
     const proven = run(a, proof, 30000) catch Output{ .ok = false, .text = "" };
     finish(i, proven.ok, servers.failureReason(proven.text));
 }
@@ -399,7 +404,7 @@ fn remove(a: std.mem.Allocator, i: usize) void {
         reached = output.ok;
     }
     acquire();
-    table[i] = if (slot.owned) .{} else .{ .status = .removed };
+    table[i] = .{ .status = .removed };
     lock.unlock();
     setMessage(if (reached) "Removed. Multibot's key is off that server." else "Removed here. The server was not reachable, so its key stays there.");
 }
@@ -489,6 +494,16 @@ fn launch(job: Job) bool {
 pub fn start() void {
     if (started.swap(true, .acq_rel)) return;
     _ = launch(.startup);
+}
+
+pub fn retry() void {
+    if (!started.load(.acquire) or running.load(.acquire)) return;
+    if (!lock.tryLock()) return;
+    const now = nowSeconds();
+    var due = false;
+    for (table) |slot| due = due or servers.needsMigration(slot, now);
+    lock.unlock();
+    if (due) _ = launch(.startup);
 }
 
 pub fn checkServer(i: usize) void {
