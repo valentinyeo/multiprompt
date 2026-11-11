@@ -80,6 +80,7 @@ const buildSessionDirFilePath = @import("browser_pane.zig").buildSessionDirFileP
 const bridgeExePath = @import("browser_pane.zig").bridgeExePath;
 const startBrowserWindowResolve = @import("browser_pane.zig").startBrowserWindowResolve;
 const launchBrowserForShellFromRequest = @import("browser_pane.zig").launchBrowserForShellFromRequest;
+const clearFailedBrowserPaneForRequest = @import("browser_pane.zig").clearFailedBrowserPaneForRequest;
 const browserPaneAgentAttached = @import("browser_pane.zig").browserPaneAgentAttached;
 const webView2OwnsShell = @import("browser_pane.zig").webView2OwnsShell;
 const openWebView2Tab = @import("browser_pane.zig").openWebView2Tab;
@@ -949,6 +950,7 @@ pub fn handleZsbBindRequest() void {
         const pane_missing = app_state.shells[ti].browser_hwnd == null or IsWindow(app_state.shells[ti].browser_hwnd) == 0;
         const agent_needs_pane = browserPaneAgentAttached(ti) or zsbShellRecentlyDriven(ti, 60_000);
         if (pane_missing and (app_state.shells[ti].browser_enabled or app_state.shells[ti].browser_suspended or agent_needs_pane)) {
+            _ = clearFailedBrowserPaneForRequest(ti);
             app_state.shells[ti].browser_enabled = true;
             app_state.shells[ti].browser_suspended = false;
             app_state.shells[ti].browser_hwnd = null;

@@ -29,3 +29,33 @@ test("IGSH-1892 zsb relaunches a missing pane for attached sessions", () => {
   assert.match(bridge, /launchBrowserForShellFromRequest\(ti\)/);
   assert.match(bridge, /last_active_event = now/);
 });
+
+function paneFunctionBody(name) {
+  const start = browserPane.indexOf(`fn ${name}(`);
+  assert.notEqual(start, -1, `${name} must exist`);
+  const end = browserPane.indexOf("\nfn ", start + 1);
+  assert.notEqual(end, -1, `could not find the end of ${name}`);
+  return browserPane.slice(start, end);
+}
+
+test("IGSH-1935 an agent request clears a pane the app gave up on", () => {
+  const bridge = fs.readFileSync(path.join(root, "src/browser_bridge.zig"), "utf8");
+  const bind = bridge.slice(bridge.indexOf("fn handleZsbBindRequest("), bridge.indexOf("fn scanPaneWinCandidates("));
+  assert.match(bind, /clearFailedBrowserPaneForRequest\(ti\)/, "the bind request, not only the Retry button, must clear the latch");
+  assert.ok(bind.indexOf("clearFailedBrowserPaneForRequest(ti)") < bind.indexOf("launchBrowserForShellFromRequest(ti)"));
+  const clear = paneFunctionBody("clearFailedBrowserPaneForRequest");
+  assert.match(clear, /if \(!app_state\.shells\[idx\]\.browser_open_failed\) return false;/, "only a failed pane is cleared");
+  assert.match(clear, /resetBrowserConnection\(&app_state\.shells\[idx\]\);/);
+  assert.match(clear, /app_state\.shells\[idx\]\.browser_enabled = true;/);
+  assert.doesNotMatch(clear, /launchBrowserForShell\(/, "clearing never launches a user pane");
+});
+
+test("IGSH-1935 a reopened pane for a hidden tab stays a request launch", () => {
+  const launch = paneFunctionBody("launchBrowserForShellEx");
+  assert.match(launch, /browser_launch_tick != 0 or app_state\.shells\[idx\]\.browser_open_failed\) return;/, "only the request path clears the latch before launching");
+  assert.match(launch, /shellExecuteEdgeUrl\(nonce_url, true, /, "a request launch is off screen");
+  const adopt = paneFunctionBody("adoptBrowserTick");
+  assert.match(adopt, /if \(target == app_state\.active_shell\) \{/, "only the visible tab gets repositioned and focused");
+  assert.doesNotMatch(adopt, /switchToWorkspace|switchToShell|focusActiveShell/, "an adopted hidden pane never changes workspace or focus");
+  assert.match(adopt, /dockBrowserWindow\(target, ctx\.found_hwnd, foreground_launch\);/);
+});
