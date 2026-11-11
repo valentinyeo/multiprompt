@@ -93,6 +93,16 @@ The wrapper also runs four hosted terminal queue checks: desktop and Android, ea
 
 The artifact contains `cancel-held-{held,cancelled}-{light,amoled,edgegray}.png`, matching `-transcript.bmp` crops, and `cancel-held/cancel-held-<stage>-<theme>-frame.json` viewport and stability observations. Compare the two runs and retain the existing outbox, transcript, input, Doctor and cleanup evidence. An independent reviewer must inspect the images. The current oracle checks cancellation behavior and the original screenshots; it does not measure these themed pixels or assert the absence of status labels. A green run is not visual proof. The intended old-release visual control is the visible Cancelled label or resulting spacing, but this must be established from the artifact, not inferred from a setup failure. The SSH/tmux and agent are synthetic; no real network or agent is tested.
 
+### Handed-off recall (IGSH-1828)
+
+The terminal queue journey above cancels a message before the host receives it. This journey uses the published executable and the production host. A local stand-in accepts three messages, stays silent, and answers `cancel_async_message` with `cancelled:true`. It is not a live Claude account.
+
+```sh
+gh workflow run recall-handed.yml --ref <branch> -f tag=v0.28.1677
+```
+
+The driver sends three messages, cancels the middle one from its menu, then presses Up and Delete on the last one. The stand-in must record those two targeted recalls and answer only the remaining message. The answered message must no longer offer Cancel. Evidence is `verify-chat-delivery`, including `recall-handed/recall-agent.jsonl` and `recall-handed-*.png`.
+
 ## Gotchas
 
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
