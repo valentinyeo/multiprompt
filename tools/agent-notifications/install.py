@@ -201,6 +201,11 @@ def install(with_eta=False):
             wrapper = HOME / ".local/bin/mp-eta"
             write(wrapper, f'#!/bin/sh\nexec "{python}" "{script}" "$@"\n')
             wrapper.chmod(0o755)
+    if os.name != "nt":
+        write(DEST / "broadcast.py", (BASE / "broadcast.py").read_text(encoding="utf-8"))
+        wrapper = HOME / ".local/bin/cc-broadcast"
+        write(wrapper, f'#!/bin/sh\nexec "{python}" "$HOME/.local/share/zigshell/broadcast.py" "$@"\n')
+        wrapper.chmod(0o755)
     def command(agent, event):
         return f'"{python}" "{helper}" {agent} {event}'
 

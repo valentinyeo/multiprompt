@@ -53,6 +53,16 @@ class WaitTest(unittest.TestCase):
         self.assertFalse(any("C-u" in call or "C-k" in call for call in sent))
         self.assertEqual(fake.drafts, [""])
 
+    def test_dim_placeholder_text_is_not_treated_as_a_draft(self):
+        placeholder = "\u2500" * 20 + "\n  \u276f \x1b[2mTry \"fix typecheck errors\"\n\x1b[0m" + "\u2500" * 20 + "\n"
+        with patch.object(broadcast, "run", return_value=placeholder):
+            self.assertEqual(broadcast.draft("%1"), "")
+
+    def test_real_typing_in_the_box_is_a_draft(self):
+        typed = "\u2500" * 20 + "\n  \u276f please check the build\n" + "\u2500" * 20 + "\n"
+        with patch.object(broadcast, "run", return_value=typed):
+            self.assertEqual(broadcast.draft("%1"), "pleasecheckthebuild")
+
     def test_a_full_box_is_left_alone(self):
         fake = FakeTmux(["half typed answer"])
         with patch.object(broadcast, "run", fake):

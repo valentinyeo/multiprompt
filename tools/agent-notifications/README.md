@@ -230,10 +230,26 @@ and the epoch second it was recorded. Entries older than 24 hours are pruned and
 kept. It is best effort, like the estimate bookkeeping: a missing or unwritable state directory
 never changes delivery.
 
+## Message every session (cc-broadcast)
+
+`cc-broadcast "one line"` sends the same line to every live session on the
+server it runs on: tmux tabs are typed into, and hosted Live Chats are reached
+through the app's own send command (`reader.py host send`), so a chat with no
+terminal window still gets it. A box that already holds typed text is never
+cleared or overwritten: the message waits for the box to clear and, if it stays
+occupied, that session is reported as left alone. The report prints one line per
+session with the outcome, then a summary count; the command exits nonzero when
+any live session was not delivered.
+
+Flags: `--dry-run` reports without sending, `--include-self` also messages the
+session that runs it, `--from NAME` labels the message with another name, and
+`--wait SECONDS` sets how long to wait for a typed-in box (default 20).
+
 ## Verification
 
 ```sh
 python3 -m unittest test_watcher.py
+python3 -m unittest test_broadcast.py
 python3 -m unittest test_install.py
 ```
 

@@ -412,6 +412,9 @@ jobs:
       - name: Test notification relay
         if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
         run: python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v
+      - name: Test session broadcast
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        run: python3 -m unittest tools/agent-notifications/test_broadcast.py -v
       - name: Test release version
         if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
         run: node --test tools/release-version.test.mjs

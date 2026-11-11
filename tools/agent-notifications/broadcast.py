@@ -51,12 +51,12 @@ def tty_of(pid):
 
 def draft(pane):
     raw = tmux("capture-pane", "-e", "-p", "-t", pane, "-S", "-60") or ""
-    lines = [DIM.sub("", ANSI.sub("", line)) for line in raw.splitlines()]
-    rules = [index for index, line in enumerate(lines) if line.startswith(BOX_RULE)]
+    lines = ANSI.sub("", DIM.sub("", raw)).splitlines()
+    rules = [index for index, line in enumerate(lines) if line.strip().startswith(BOX_RULE)]
     if len(rules) < 2:
         return ""
     box = lines[rules[-2] + 1:rules[-1]]
-    text = " ".join(line.lstrip(PROMPT).strip() for line in box)
+    text = " ".join(line.strip().lstrip(PROMPT).strip() for line in box)
     return "".join(text.split())
 
 
