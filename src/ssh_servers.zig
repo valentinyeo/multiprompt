@@ -43,10 +43,6 @@ pub fn listed(slot: Slot) bool {
     return slot.status != .empty and slot.status != .removed;
 }
 
-pub fn forced(slot: Slot) bool {
-    return slot.status == .connected or (slot.owned and listed(slot));
-}
-
 pub fn needsMigration(slot: Slot, now: u64) bool {
     if (slot.owned) return false;
     return slot.status == .needs_setup or (slot.status == .failed and now >= slot.tried + retry_seconds);
@@ -115,24 +111,31 @@ pub fn renderConfig(a: Allocator, key_path: []const u8, user_config: []const u8,
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
     for (table, aliases) |slot, alias| {
-        if (!forced(slot)) continue;
         if (!hosts.validHostname(alias)) return error.InvalidHosts;
         const head = try std.fmt.allocPrint(a, "Host {s}\r\n", .{alias});
         defer a.free(head);
         try out.appendSlice(a, head);
-        if (slot.owned) {
+        if (listed(slot)) {
             if (!hosts.validHostname(slot.hostname.get()) or !hosts.validUser(slot.user.get()) or slot.port == 0) return error.InvalidHosts;
             const address = try std.fmt.allocPrint(a, "  HostName {s}\r\n  User {s}\r\n  Port {d}\r\n", .{ slot.hostname.get(), slot.user.get(), slot.port });
             defer a.free(address);
             try out.appendSlice(a, address);
         }
-        const identity = try std.fmt.allocPrint(a, "  IdentityFile \"{s}\"\r\n  IdentitiesOnly yes\r\n  IdentityAgent none\r\n", .{key});
+        const identity = try std.fmt.allocPrint(a, "  IdentityFile \"{s}\"\r\n  IdentitiesOnly yes\r\n  IdentityAgent none\r\n  PreferredAuthentications publickey\r\n", .{if (listed(slot)) key else "none"});
         defer a.free(identity);
         try out.appendSlice(a, identity);
     }
-    const tail = try std.fmt.allocPrint(a, "Host *\r\n  Include \"{s}\"\r\n  Include \"{s}\"\r\n", .{ user, system });
-    defer a.free(tail);
-    try out.appendSlice(a, tail);
+    for ([_][]const u8{ user, system }) |config| {
+        try out.appendSlice(a, "Host *");
+        for (aliases) |alias| {
+            const exclusion = try std.fmt.allocPrint(a, " !{s}", .{alias});
+            defer a.free(exclusion);
+            try out.appendSlice(a, exclusion);
+        }
+        const include = try std.fmt.allocPrint(a, "\r\n  Include \"{s}\"\r\n", .{config});
+        defer a.free(include);
+        try out.appendSlice(a, include);
+    }
     return out.toOwnedSlice(a);
 }
 
@@ -185,27 +188,83 @@ pub fn parseDraft(address: []const u8, user: []const u8, port_text: []const u8) 
 const fake_key = "ssh-ed25519 AAAA";
 const test_aliases = [_][]const u8{ "remote-1", "remote-2", "remote-3" };
 
-test "IGSH-1928 config forces the app key only on proven or app-owned servers" {
+test "IGSH-1928 config isolates every listed server and excludes inherited identities" {
     const a = std.testing.allocator;
     var table: Table = @splat(.{});
-    table[0].status = .connected;
-    table[1].status = .needs_setup;
-    table[2].status = .needs_setup;
+    for (&table, 0..) |*slot, i| {
+        slot.status = ([_]Status{ .connected, .failed, .needs_setup })[i];
+        slot.hostname.set("example.invalid");
+        slot.user.set("deploy");
+        slot.port = 2222;
+    }
     table[2].owned = true;
-    table[2].hostname.set("example.invalid");
-    table[2].user.set("deploy");
-    table[2].port = 2222;
-    const config = try renderConfig(a, "C:\\Users\\Example User\\AppData\\Roaming\\ZigShell\\ssh-key\\multibot_ed25519", "~/.ssh/config", "C:\\ProgramData\\ssh\\ssh_config", &test_aliases, &table);
+    const config = try renderConfig(a, "C:\\Users\\Example User\\key", "~/.ssh/config", "C:\\ProgramData\\ssh\\ssh_config", &test_aliases, &table);
     defer a.free(config);
-    try std.testing.expectEqualStrings(
-        "Host remote-1\r\n" ++
-            "  IdentityFile \"C:/Users/Example User/AppData/Roaming/ZigShell/ssh-key/multibot_ed25519\"\r\n  IdentitiesOnly yes\r\n  IdentityAgent none\r\n" ++
-            "Host remote-3\r\n  HostName example.invalid\r\n  User deploy\r\n  Port 2222\r\n" ++
-            "  IdentityFile \"C:/Users/Example User/AppData/Roaming/ZigShell/ssh-key/multibot_ed25519\"\r\n  IdentitiesOnly yes\r\n  IdentityAgent none\r\n" ++
-            "Host *\r\n  Include \"~/.ssh/config\"\r\n  Include \"C:/ProgramData/ssh/ssh_config\"\r\n",
-        config,
-    );
-    try std.testing.expect(std.mem.indexOf(u8, config, "Host remote-2") == null);
+    for (test_aliases) |alias| {
+        const block = try std.fmt.allocPrint(a, "Host {s}\r\n  HostName example.invalid\r\n  User deploy\r\n  Port 2222\r\n  IdentityFile \"C:/Users/Example User/key\"\r\n  IdentitiesOnly yes\r\n  IdentityAgent none\r\n  PreferredAuthentications publickey\r\n", .{alias});
+        defer a.free(block);
+        try std.testing.expect(std.mem.indexOf(u8, config, block) != null);
+    }
+    try std.testing.expect(std.mem.endsWith(u8, config, "Host * !remote-1 !remote-2 !remote-3\r\n  Include \"~/.ssh/config\"\r\n" ++
+        "Host * !remote-1 !remote-2 !remote-3\r\n  Include \"C:/ProgramData/ssh/ssh_config\"\r\n"));
+}
+
+test "IGSH-1928 real OpenSSH never inherits keys or agents for managed aliases in any state" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try tmp.dir.realPathFileAlloc(io, ".", a);
+    defer a.free(base);
+    const user_config = try std.fmt.allocPrint(a, "{s}/user.conf", .{base});
+    defer a.free(user_config);
+    const system_config = try std.fmt.allocPrint(a, "{s}/system.conf", .{base});
+    defer a.free(system_config);
+    const app_config = try std.fmt.allocPrint(a, "{s}/app.conf", .{base});
+    defer a.free(app_config);
+    try tmp.dir.writeFile(io, .{ .sub_path = "user.conf", .data = "Host remote-1\n  HostName old.example.invalid\n  IdentityFile legacy-host-key\n" ++
+        "Host *\n  IdentityFile legacy-wildcard-key\n  IdentityAgent legacy-agent\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "system.conf", .data = "Host *\n  IdentityFile legacy-system-key\n" });
+    var table: Table = @splat(.{});
+    table[0].hostname.set("example.invalid");
+    table[0].user.set("deploy");
+    table[0].port = 2222;
+    for ([_]Status{ .connected, .failed, .needs_setup, .removed, .empty }) |status| {
+        table[0].status = status;
+        const config = try renderConfig(a, "multibot-test-key", user_config, system_config, &test_aliases, &table);
+        defer a.free(config);
+        try tmp.dir.writeFile(io, .{ .sub_path = "app.conf", .data = config });
+        const result = try std.process.run(a, io, .{ .argv = &.{ "ssh", "-F", app_config, "-G", "remote-1" } });
+        defer a.free(result.stdout);
+        defer a.free(result.stderr);
+        if (result.term != .exited or result.term.exited != 0) std.debug.print("{s}", .{result.stderr});
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+        try std.testing.expect(std.mem.indexOf(u8, result.stdout, "identitiesonly yes") != null);
+        try std.testing.expect(std.mem.indexOf(u8, result.stdout, "identityagent none") != null);
+        try std.testing.expect(std.mem.indexOf(u8, result.stdout, "preferredauthentications publickey") != null);
+        try std.testing.expect(std.mem.indexOf(u8, result.stdout, "legacy-") == null);
+        var lines = std.mem.tokenizeAny(u8, result.stdout, "\r\n");
+        var identities: usize = 0;
+        while (lines.next()) |line| {
+            if (!std.mem.startsWith(u8, line, "identityfile ")) continue;
+            identities += 1;
+            try std.testing.expectEqualStrings(if (listed(table[0])) "identityfile multibot-test-key" else "identityfile none", line);
+        }
+        try std.testing.expectEqual(@as(usize, 1), identities);
+        if (listed(table[0])) {
+            try std.testing.expect(std.mem.indexOf(u8, result.stdout, "hostname example.invalid") != null);
+            try std.testing.expect(std.mem.indexOf(u8, result.stdout, "user deploy") != null);
+            try std.testing.expect(std.mem.indexOf(u8, result.stdout, "port 2222") != null);
+        }
+    }
+    const control = try std.process.run(a, io, .{ .argv = &.{ "ssh", "-F", app_config, "-G", "unrelated.example.invalid" } });
+    defer a.free(control.stdout);
+    defer a.free(control.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, control.term);
+    try std.testing.expect(std.mem.indexOf(u8, control.stdout, "identityfile legacy-wildcard-key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, control.stdout, "identityfile legacy-system-key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, control.stdout, "identityagent legacy-agent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, control.stdout, "multibot-test-key") == null);
 }
 
 test "IGSH-1928 config refuses paths ssh would misread" {
