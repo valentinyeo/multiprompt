@@ -72,14 +72,15 @@ function zsb(args, timeoutSec) {
   const timeoutMs = Math.ceil((timeoutSec + 5) * 1000);
   const env = { ...process.env, TMUX: '', ZSB_SESSION: session, ZSB_TIMEOUT: String(timeoutSec) };
   let last;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
       return run('zsb', args, timeoutMs, env);
     } catch (error) {
       last = error;
       const text = `${error.stdout ?? ''}\n${error.stderr ?? ''}`;
-      if (attempt === 2 || !/empty_reply|reply_timeout/.test(text)) throw error;
+      if (attempt === 4 || !/empty_reply|reply_timeout/.test(text)) throw error;
       console.log(`retry ${args[0]} after ${text.includes('empty_reply') ? 'empty_reply' : 'reply_timeout'}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
     }
   }
   throw last;
