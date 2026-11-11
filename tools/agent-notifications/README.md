@@ -203,6 +203,14 @@ pane, then use the existing reverse SSH tunnel on localhost:19548. They never us
 tmux's ambient session or infer identity from a project folder. Outside tmux they
 do nothing. Names containing protocol delimiters are rejected.
 
+With **Remote Tabs: Share One Server Connection** on, the app does not open a
+separate alert-only ssh. One channel of the shared connection runs
+`src/notify_link.py` on the server: it owns this laptop's socket in
+`/tmp/mp-notify-<uid>/` (or localhost:19548 when the relay is not installed) and
+carries the same bytes both ways, so hooks and `multiprompt-browser` behave as
+they do over the reverse tunnel. A host with chats open therefore needs one ssh,
+not two. With the switch off the tunnel keeper ssh is unchanged.
+
 Local Windows hooks require inherited `ZIGSHELL_SHELL_ID` and
 `ZIGSHELL_NOTIFY_PORT`. For existing clients that address local notifications by
 tab name, the dispatcher resolves a unique live inbox row and refuses ambiguous
