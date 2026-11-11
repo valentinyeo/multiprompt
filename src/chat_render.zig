@@ -6409,7 +6409,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 0x21 => chatScrollBy(page),
                 0x22 => chatScrollBy(-page),
                 0x24 => chatScrollBy(app_state.g_chat_content_h),
-                0x23 => chatScrollBy(-app_state.g_chat_content_h),
+                0x23 => chatJumpToNewest(),
                 else => return DefWindowProcW(hwnd, msg, wp, lp),
             }
             return 0;

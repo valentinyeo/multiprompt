@@ -252,6 +252,7 @@ test('IGSH-1924 the first fix still jumps on short unread and caught-up chats', 
 
 test('IGSH-1924 legacy and caught-up tabs also hold their initial reading position', () => {
   assert.match(session, /g_chat_read_hold = app_state.active_shell < app_state.shell_count;/);
+  assert.match(render, /0x23 => chatJumpToNewest\(\)/);
 });
 
 test('IGSH-1924 the warm pass runs while the open chat streams', () => {
