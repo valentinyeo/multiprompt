@@ -367,7 +367,7 @@ jobs:
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
-    timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
+    timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || matrix.feature == 'live-chat-pane' && 75 || 30 }}
     continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) }}
     strategy:
       fail-fast: false
@@ -410,6 +410,7 @@ jobs:
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
+      AGENT_SOAK_SECONDS: ${{ matrix.feature == 'live-chat-pane' && '120' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -1021,6 +1022,7 @@ jobs:
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Verify real native browser journey
         if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar' || env.FEATURE == 'live-chat-pane'
+        timeout-minutes: ${{ env.FEATURE == 'live-chat-pane' && 60 || 30 }}
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"

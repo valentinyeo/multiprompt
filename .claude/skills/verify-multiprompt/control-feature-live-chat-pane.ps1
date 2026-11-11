@@ -207,6 +207,57 @@ try {
     if (@($oneKeptTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $oneOtherWant }).Count -ne 1) { throw ('The ' + $one.tmux + ' chat lost its own page after the other chat opened one') }
     if (@($oneKeptTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $twoWant }).Count -ne 0) { throw ('The ' + $one.tmux + ' chat shows the other chat page') }
     Snapshot 'chat-one-keeps-page'
+    $soakSeconds = 0
+    if ($env:AGENT_SOAK_SECONDS -and $env:AGENT_SOAK_SECONDS -ne '0') {
+        if ($env:AGENT_SOAK_SECONDS -notmatch '^[0-9]{1,4}$') { throw 'AGENT_SOAK_SECONDS must be a whole number of seconds' }
+        $soakSeconds = [int]$env:AGENT_SOAK_SECONDS
+        if ($soakSeconds -lt 60) { throw 'AGENT_SOAK_SECONDS must be at least 60' }
+    }
+    if ($soakSeconds -gt 0) {
+        $soakWant = ([string]$two.page).TrimEnd('/')
+        $soakHiddenWindow = $twoStatus.windowId
+        $soakVisibleWindow = $oneStatus.windowId
+        $soakActive = [int](Read-Session).active_tab
+        if ($soakActive -ne $one.index) { throw 'The agent soak must start with the first chat selected' }
+        $soakHiddenBefore = Read-BrowserPaneFor $two.shellId
+        $soakVisibleBefore = Read-BrowserPaneFor $one.shellId
+        if ($soakHiddenBefore.browser_state -ne 'connected' -or $soakHiddenBefore.browser_window_id -ne $soakHiddenWindow) { throw 'The hidden chat has no connected pane to hold' }
+        if ($soakVisibleBefore.browser_state -ne 'connected' -or $soakVisibleBefore.browser_window_id -ne $soakVisibleWindow) { throw 'The visible chat has no connected pane to hold' }
+        if (-not [VerifyNative]::PaneVisible($script:window)) { throw 'The visible chat pane is not visible before the agent soak' }
+        $soakLogOffset = (Read-SharedText $log).Length
+        $soakRounds = 0
+        $soakTabChecks = 0
+        $soakTimer = [Diagnostics.Stopwatch]::StartNew()
+        while ($soakTimer.Elapsed.TotalSeconds -lt $soakSeconds) {
+            $soakRounds++
+            $soakStatus = Invoke-Zsb @('status') $script:liveChatPort ('soak-status-' + $soakRounds) -Session $two.tmux
+            if ($soakStatus.session -cne $two.tmux) { throw ('Soak call ' + $soakRounds + ' answered for another session: ' + (ConvertTo-Json -InputObject $soakStatus -Compress)) }
+            if ($soakStatus.pane -cne 'open' -or $soakStatus.windowId -ne $soakHiddenWindow) { throw ('Soak call ' + $soakRounds + ' lost the hidden chat pane: ' + (ConvertTo-Json -InputObject $soakStatus -Compress)) }
+            if ($soakRounds % 4 -eq 0) {
+                $soakTabs = Invoke-Zsb @('tabs') $script:liveChatPort ('soak-tabs-' + $soakRounds) -Session $two.tmux
+                if (@($soakTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $soakWant }).Count -ne 1) { throw ('Soak call ' + $soakRounds + ' lost the hidden chat page') }
+                $soakTabChecks++
+            }
+            if ([int](Read-Session).active_tab -ne $soakActive) { throw ('Agent call ' + $soakRounds + ' switched the visible tab') }
+            Assert-Foreground
+            $soakHiddenPane = Read-BrowserPaneFor $two.shellId
+            $soakVisiblePane = Read-BrowserPaneFor $one.shellId
+            if ($soakHiddenPane.browser_state -ne 'connected' -or $soakHiddenPane.browser_window_id -ne $soakHiddenWindow) { throw ('Agent call ' + $soakRounds + ' changed the hidden chat pane') }
+            if ($soakVisiblePane.browser_window_id -ne $soakVisibleWindow) { throw ('Agent call ' + $soakRounds + ' changed the visible chat pane') }
+            if (-not [VerifyNative]::PaneVisible($script:window)) { throw ('Agent call ' + $soakRounds + ' hid the visible chat pane') }
+            $soakLeft = $soakSeconds - $soakTimer.Elapsed.TotalSeconds
+            if ($soakLeft -gt 0) { Start-Sleep -Milliseconds ([int]([math]::Min(30, $soakLeft) * 1000)) }
+        }
+        $soakTimer.Stop()
+        $soakTrace = Read-SharedText $log
+        $soakSwitches = @([regex]::Matches($soakTrace.Substring([math]::Min($soakLogOffset, $soakTrace.Length)), 'switchToShell:')).Count
+        if ($soakSwitches -ne 0) { throw ('The agent soak switched the visible session ' + $soakSwitches + ' times') }
+        if ($soakTabChecks -lt 1) { throw 'The agent soak never read the hidden chat tab list' }
+        $soakEvidence = @{ seconds = [math]::Round($soakTimer.Elapsed.TotalSeconds, 1); calls = $soakRounds; tabChecks = $soakTabChecks; session = $two.tmux; hiddenWindowId = $soakHiddenWindow; visibleWindowId = $soakVisibleWindow; activeTab = $soakActive; sessionSwitches = 0; input = 'agent zsb status and tabs only; no keyboard or mouse' }
+        Save-Json $soakEvidence 'chat-two-background-soak.json'
+        $result.checks += @{ name = 'chat-two-background-soak'; seconds = $soakEvidence.seconds; calls = $soakRounds; tabChecks = $soakTabChecks; hiddenSession = $two.tmux; hiddenWindowId = $soakHiddenWindow; visibleWindowId = $soakVisibleWindow; sessionSwitches = 0 }
+        Snapshot 'chat-two-background-soak'
+    }
     Snapshot 'after'
     $result.checks += @{ name = 'chats-keep-their-own-pages'; first = $one.tmux; second = $two.tmux; firstStatusAfter = $oneKept; firstWindowId = $oneStatus.windowId; secondWindowId = $twoStatus.windowId; firstPage = $one.page; secondPage = $two.page }
     Save-Json (Read-BrowserPaneFor $one.shellId) 'pane-chat-one.json'

@@ -10,6 +10,7 @@ A live chat is a tmux tab named `live-*`. This journey binds two tabs to those n
 - `chat-two-isolation`: the second chat keeps its pane closed while the first opens pages.
 - `chat-two-own-page`: the second chat opens its own background pane and page.
 - `chats-keep-their-own-pages`: both chats retain separate windows and pages. Neither chat lists the other's pages.
+- `chat-two-background-soak`: hold agent calls on the background chat for the requested soak and keep its pane, its page, the selected tab and the visible pane unchanged.
 
 ## How to get to it (user POV)
 
@@ -28,6 +29,7 @@ Preconditions match [Session open](session-open.md) and [Browser switch speed](b
 - **Isolation.** Before opening chat two, require its published pane stays closed with connection id zero.
 - **Chat two.** Open its page in the background. Require a distinct window id and matching chat name. Require its tab list excludes both first-chat URLs.
 - **Keep pages.** Read both chats' state without switching. Require chat one retains its original window and second page, and excludes chat two's page.
+- **Background soak.** With chat one still selected and chat two never viewed, run `status` on chat two's token every 30 seconds for `AGENT_SOAK_SECONDS`, and `tabs` every fourth call. Require every call to answer for chat two with the same open window, its page still in that pane, the selected tab unchanged, the app still foreground, the visible pane still visible, and no `switchToShell` line in the retained debug trace. No keyboard or mouse input during the soak. `verify.yml` sets the soak for this journey: 20 minutes when dispatched, and a shorter stand-in when the harness sets `AGENT_SOAK_SECONDS` itself.
 - **Evidence.** Inspect before/action/after screenshots, `chat-one-selftest.json`, selftest output, per-command request/reply pairs, both pane JSON files, session snapshots and `result.json`.
 
 ## Gotchas
@@ -38,3 +40,4 @@ Preconditions match [Session open](session-open.md) and [Browser switch speed](b
 - The wrapper runs from Git Bash's executable directory so its native Python subprocesses resolve Git Bash rather than the Windows subsystem launcher.
 - Background pane ownership uses app-published state and extension tab lists. Screenshots do not prove a background pane is visible.
 - Inspect screenshots and cleanup before accepting a passing run.
+- The soak drives only chat two's token. It proves the app keeps a background pane across repeated agent calls with the human's tab untouched; it does not claim the owner's desktop or a real hosted agent.
