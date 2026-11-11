@@ -12,8 +12,8 @@ function Get-ReleaseAsset($Release, [string]$Name) {
     $null = Get-ReleaseVersion $Release.tag_name
     $assets = @($Release.assets | Where-Object { $_.name -ceq $Name })
     if ($assets.Count -ne 1) { throw 'Missing or duplicate release asset' }
-    $expected = "https://github.com/valentinyeo/multiprompt/releases/download/$($Release.tag_name)/$Name"
-    if ($assets[0].browser_download_url -cne $expected) { throw 'Untrusted asset URL' }
+    $expected = @('multiprompt', 'multibot') | ForEach-Object { "https://github.com/valentinyeo/$_/releases/download/$($Release.tag_name)/$Name" }
+    if ($expected -cnotcontains $assets[0].browser_download_url) { throw 'Untrusted asset URL' }
     return $assets[0]
 }
 

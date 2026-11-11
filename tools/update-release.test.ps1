@@ -448,6 +448,27 @@ try {
         $script:release.assets[0].browser_download_url = 'https://example.com/untrusted.exe'
         Refuses { Save-Update $target '1.9.0' 'x64' } 'External asset URL accepted'
         Select-Release 'v1.10.0'
+        foreach ($asset in $script:release.assets) {
+            $asset.browser_download_url = $asset.browser_download_url.Replace('/multiprompt/', '/multibot/')
+            Assert ((Get-ReleaseAsset $script:release $asset.name) -eq $asset) 'Renamed repository asset was refused'
+        }
+        Assert (Save-Update $target '1.9.0' 'x64') 'Renamed repository could not stage a signed update'
+        Assert ((Get-FileHash $target).Hash -eq $oldHash) 'Renamed repository replaced installation in background'
+        $asset = $script:release.assets[0]
+        $trusted = $asset.browser_download_url
+        foreach ($url in @(
+            $trusted.Replace('/valentinyeo/', '/untrusted/'),
+            $trusted.Replace('/multibot/', '/multibot-evil/'),
+            $trusted.Replace('github.com/', 'github.com.evil.example/'),
+            $trusted.Replace('/v1.10.0/', '/v1.9.0/'),
+            $trusted + '?redirect=evil',
+            $trusted.Replace('https://', 'http://')
+        )) {
+            $asset.browser_download_url = $url
+            Refuses { Get-ReleaseAsset $script:release $asset.name } 'Repository migration widened asset trust'
+        }
+        Passed 'renamed repository signed update and URL allowlist'
+        Select-Release 'v1.10.0'
         Assert (-not (Save-Update $target '2.0.0' 'x64')) 'Downgrade staged'
         Assert (-not (Save-Update $target '1.10.0' 'x64')) 'Equal release staged'
         Assert (Save-Update $target '1.9.0' 'x64') 'Verified update was not staged'

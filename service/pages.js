@@ -64,7 +64,7 @@ async function passkeyGet(o) {
 `;
 
 function signin({ next, google, mail }) {
-  const body = `<header><b>multiprompt</b><span class="sp"></span></header>
+  const body = `<header><b>Multibot</b><span class="sp"></span></header>
 <main data-page="signin" data-methods="${['passkey', mail && 'email', google && 'google'].filter(Boolean).join(',')}"><div class="tile narrow">
 <h1>Sign in</h1><p>${mail ? 'Use a passkey, or get a sign-in link by email.' : 'Use a passkey.'}</p>
 <div class="stack"><button id="pk" type="button">Sign in with a passkey <span aria-hidden="true">&#8594;</span></button></div>
@@ -98,11 +98,11 @@ const g = $('#google'); if (g) g.onclick = async () => {
   try { const r = await call('/api/auth/sign-in/social', { method: 'POST', body: JSON.stringify({ provider: 'google', callbackURL: next }) }); location.href = r.url; }
   catch (err) { note(msg, 'Google sign-in failed: ' + err.message, true); } };
 `;
-  return shell('multiprompt sign-in', body, script);
+  return shell('Multibot sign-in', body, script);
 }
 
 function dash({ email }) {
-  const body = `<header><b>multiprompt</b><span class="sp"></span><span class="who">${esc(email)}</span><button id="out" class="ghost small" type="button" style="color:#f4f4f4">Sign out</button></header>
+  const body = `<header><b>Multibot</b><span class="sp"></span><span class="who">${esc(email)}</span><button id="out" class="ghost small" type="button" style="color:#f4f4f4">Sign out</button></header>
 <main data-page="dash"><h1>Dashboard</h1><p>Signed in as <b>${esc(email)}</b>.</p>
 <section class="tile"><h2>AI usage</h2><div id="usage" class="scroll"><p>Loading...</p></div></section>
 <section class="tile"><h2>Devices</h2><div id="devices" class="scroll"><p>Loading...</p></div></section>
@@ -161,16 +161,16 @@ $('#out').onclick = async () => { try { await call('/api/auth/sign-out', { metho
 if (new URLSearchParams(location.search).get('passkey') === 'add') { $('#pk-tile').scrollIntoView(); history.replaceState(null, '', '/'); addPasskey(true); }
 usage(); devices(); layout(); passkeys();
 `;
-  return shell('multiprompt dashboard', body, script);
+  return shell('Multibot dashboard', body, script);
 }
 
 export const appPage = (kind, opts) => kind === 'dash' ? dash(opts) : signin(opts);
 
 export function confirmPage(email, name, redirect) {
-  const body = `<header><b>multiprompt</b><span class="sp"></span><span class="who">${esc(email)}</span></header>
+  const body = `<header><b>Multibot</b><span class="sp"></span><span class="who">${esc(email)}</span></header>
 <main data-page="authorize"><div class="tile narrow"><h1>Sign in this device?</h1>
-<p><b>${esc(name)}</b> wants to sign in to multiprompt as <b>${esc(email)}</b>. Only continue if you just started this from the app.</p>
+<p><b>${esc(name)}</b> wants to sign in to Multibot as <b>${esc(email)}</b>. Only continue if you just started this from the app.</p>
 <form method="post"><div class="row"><button type="submit">Allow <span aria-hidden="true">&#8594;</span></button></div></form>
 <p class="note">The app receives a one-time code at ${esc(redirect.split('?')[0])}.</p></div></main>`;
-  return shell('multiprompt: approve device', body);
+  return shell('Multibot: approve device', body);
 }

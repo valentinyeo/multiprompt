@@ -2,14 +2,14 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://multiprompt.dev',
+  site: 'https://docs.multibot.sh',
   integrations: [
     starlight({
-      title: 'multiprompt',
+      title: 'Multibot',
       description: 'Run, monitor, and prompt multiple AI agents from one lightweight Windows workspace.',
       logo: {
         src: './src/assets/logo.svg',
-        alt: 'multiprompt',
+        alt: 'Multibot',
       },
       social: [
         {

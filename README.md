@@ -1,10 +1,10 @@
-# multiprompt
+# Multibot
 
 A lean Windows workspace for prompting, watching and coordinating many AI agent sessions at once. Written in Zig.
 
-multiprompt does not draw a terminal. Each tab hosts a real native console window (cmd, PowerShell, ssh, tmux) in the right pane, and the left sidebar keeps every session organized: which agent is working, which one is waiting for you, and which one finished.
+Multibot does not draw a terminal. Each tab hosts a real native console window (cmd, PowerShell, ssh, tmux) in the right pane, and the left sidebar keeps every session organized: which agent is working, which one is waiting for you, and which one finished.
 
-Website: https://multiprompt.dev
+Website: https://multibot.sh · [Docs](https://docs.multibot.sh/docs/)
 
 ## Shipping
 
@@ -18,9 +18,9 @@ Windows Terminal costs about 30 to 50 MB per window. A raw console costs 2 to 3 
 
 | | RAM |
 |---|---|
-| multiprompt itself | about 1 MB |
+| Multibot itself | about 1 MB |
 | Each shell | 2 to 3 MB |
-| 10 shells in multiprompt | 25 to 30 MB |
+| 10 shells in Multibot | 25 to 30 MB |
 | 10 tabs in Windows Terminal | 300 to 500 MB |
 
 ## Features
