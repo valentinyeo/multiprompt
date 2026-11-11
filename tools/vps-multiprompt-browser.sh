@@ -376,8 +376,13 @@ def read_page():
 def type_input():
     request("type", "--tab", tab_id, "#zsb-input", marker)
     value = request("eval", "document.getElementById('zsb-input').value", "--tab", tab_id)
-    if value != marker:
-        raise ValueError("input value did not match typed text")
+    if value == marker:
+        return
+    focused = request("eval", "(document.activeElement && (document.activeElement.id || document.activeElement.tagName)) || 'none'", "--tab", tab_id)
+    request("type", "--tab", tab_id, "#zsb-input", marker)
+    retried = request("eval", "document.getElementById('zsb-input').value", "--tab", tab_id)
+    if retried != marker:
+        raise ValueError(f"input value did not match typed text: first={value!r} focused={focused!r} retried={retried!r}")
 
 
 def click_button():

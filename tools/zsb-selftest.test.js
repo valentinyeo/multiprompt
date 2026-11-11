@@ -92,6 +92,8 @@ async function runSelftest(failure) {
             }
           } else if (args[1] === "document.getElementById('zsb-input').value") {
             result = input;
+          } else if (args[1].startsWith('(document.activeElement')) {
+            result = 'zsb-input';
           } else {
             assert.equal(args[1], "document.getElementById('zsb-result').textContent");
             result = clicked ? 'clicked' : 'not clicked';
