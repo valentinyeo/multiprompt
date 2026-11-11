@@ -58,7 +58,7 @@ test('IGSH-1507 a rejected Google sign-in page turns the controlled pane into a 
   assert.ok(worker.indexOf('WaitForSingleObject(job.process, 15_000)') < worker.indexOf('CreateProcessW('),
     'the actual controlled process must exit before starting plain Chrome');
   assert.match(worker, /WaitForSingleObject\(pi\.hProcess, 250\)/, 'the reservation must outlive plain Chrome');
-  const launch = functionBody(pane, 'launchBrowserForShellEx');
+  const launch = functionBody(pane, 'launchBrowserForShellMode');
   assert.match(launch, /browserSigninProfileBusy\(launch_engine, launch_profile\)/, 'same-profile relaunch must be blocked');
   assert.match(body, /browser_enabled = false;/, 'the pane must not relaunch the controlled browser straight away');
   const hook = pane.slice(pane.indexOf('fn offerPlainSigninForRejectedPage('), pane.indexOf('fn offerPlainSigninForRejectedPage(') + 400);

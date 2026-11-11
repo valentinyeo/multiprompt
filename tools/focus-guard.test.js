@@ -117,9 +117,9 @@ function functionSlice(text, name, next) {
 
 function auditAgentWake(text) {
   const bind = functionSlice(text, 'handleZsbBindRequest', 'scanPaneWinCandidates');
-  assert.match(bind, /launchBrowserForShellFromRequest\(ti\)/, 'a zsb wake is a request, not a user launch');
+  assert.match(bind, /launchBrowserForAgentRequest\(ti\)/, 'a zsb wake is an agent request, not a user launch');
   assert.doesNotMatch(bind, /launchBrowserForShell\(ti\)/);
-  const launch = functionSlice(text, 'launchBrowserForShellEx', 'enumCloseStrayZspane');
+  const launch = functionSlice(text, 'launchBrowserForShellMode', 'enumCloseStrayZspane');
   assert.match(launch, /g_browser_adopt_foreground_launch = user_initiated and/, 'only a user launch may reclaim foreground after docking');
   assert.match(launch, /!user_initiated and isolatedBrowserHasLivePane\(idx\) and\s+requestInactivePaneWindow\(idx, nonce_url\)/);
   assert.match(launch, /if \(!user_initiated\) lockForegroundForRequestLaunch\(\);/);
@@ -153,7 +153,7 @@ test('issue: title reads of browser and other app windows never wait on that app
 
 test('issue: agent wakes never foreground, never refocus, never block the UI thread; foreground mutations fail', () => {
   auditAgentWake(source);
-  assert.throws(() => auditAgentWake(source.replace('launchBrowserForShellFromRequest(ti)', 'launchBrowserForShell(ti)')));
+  assert.throws(() => auditAgentWake(source.replace('launchBrowserForAgentRequest(ti)', 'launchBrowserForShell(ti)')));
   assert.throws(() => auditAgentWake(source.replace('startBrowserWindowResolve(idx);\n    } else {', 'if (resolveBrowserWindowIdForShell(shells[idx].shell_id)) |wid| bindBrowserWindowIdForShell(idx, wid);\n    } else {')));
 });
 

@@ -38,6 +38,30 @@ pub fn passiveBrowserLaunchAllowed(shell_idx: u32) bool {
     return true;
 }
 
+pub fn agentRequestBrowserLaunchAllowed(shell_idx: u32) bool {
+    if (!g_startup_settled) return false;
+    if (shell_idx >= app_state.shell_count) return false;
+    return app_state.shells[shell_idx].browser_enabled;
+}
+
+test "an agent browser request opens its own pane while the chat view is open" {
+    g_startup_settled = true;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 1;
+    app_state.shells[0].browser_enabled = true;
+    app_state.shells[0].browser_pin_entry_pending = false;
+    try std.testing.expect(!passiveBrowserLaunchAllowed(0));
+    try std.testing.expect(agentRequestBrowserLaunchAllowed(0));
+    app_state.shells[0].browser_enabled = false;
+    try std.testing.expect(!agentRequestBrowserLaunchAllowed(0));
+    try std.testing.expect(!agentRequestBrowserLaunchAllowed(1));
+    app_state.shells[0].browser_enabled = true;
+    g_startup_settled = false;
+    try std.testing.expect(!agentRequestBrowserLaunchAllowed(0));
+    g_startup_settled = true;
+    app_state.g_chat_active = false;
+}
+
 test "startup and chat view block passive browser launch until intent" {
     g_startup_settled = false;
     app_state.g_chat_active = true;

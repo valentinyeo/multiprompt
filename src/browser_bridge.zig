@@ -80,6 +80,7 @@ const buildSessionDirFilePath = @import("browser_pane.zig").buildSessionDirFileP
 const bridgeExePath = @import("browser_pane.zig").bridgeExePath;
 const startBrowserWindowResolve = @import("browser_pane.zig").startBrowserWindowResolve;
 const launchBrowserForShellFromRequest = @import("browser_pane.zig").launchBrowserForShellFromRequest;
+const launchBrowserForAgentRequest = @import("browser_pane.zig").launchBrowserForAgentRequest;
 const clearFailedBrowserPaneForRequest = @import("browser_pane.zig").clearFailedBrowserPaneForRequest;
 const browserPaneAgentAttached = @import("browser_pane.zig").browserPaneAgentAttached;
 const webView2OwnsShell = @import("browser_pane.zig").webView2OwnsShell;
@@ -958,7 +959,7 @@ pub fn handleZsbBindRequest() void {
             app_state.shells[ti].browser_window_id = 0;
             const launch_pending = app_state.g_browser_adopt_target_idx == ti and GetTickCount64() < app_state.g_browser_adopt_deadline;
             if (!launch_pending) {
-                launchBrowserForShellFromRequest(ti);
+                launchBrowserForAgentRequest(ti);
                 saveSession();
             }
             found = true;

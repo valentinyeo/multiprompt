@@ -3380,12 +3380,18 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
     }
 }
 
+pub const BrowserLaunchMode = enum { user, passive, agent_request };
+
 pub fn launchBrowserForShell(idx: u32) void {
-    launchBrowserForShellEx(idx, true);
+    launchBrowserForShellMode(idx, .user);
 }
 
 pub fn launchBrowserForShellFromRequest(idx: u32) void {
-    launchBrowserForShellEx(idx, false);
+    launchBrowserForShellMode(idx, .passive);
+}
+
+pub fn launchBrowserForAgentRequest(idx: u32) void {
+    launchBrowserForShellMode(idx, .agent_request);
 }
 
 pub fn clearFailedBrowserPaneForRequest(idx: u32) bool {
@@ -3453,10 +3459,19 @@ fn unlockForegroundAfterRequestLaunch() void {
     app_state.g_browser_adopt_fg_locked = false;
 }
 
-fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
+fn launchBrowserForShellMode(idx: u32, mode: BrowserLaunchMode) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_launch, timing_started);
-    if (!user_initiated and !@import("idle_footprint.zig").passiveBrowserLaunchAllowed(idx)) return;
+    switch (mode) {
+        .user => {},
+        .passive => {
+            if (!@import("idle_footprint.zig").passiveBrowserLaunchAllowed(idx)) return;
+        },
+        .agent_request => {
+            if (!@import("idle_footprint.zig").agentRequestBrowserLaunchAllowed(idx)) return;
+        },
+    }
+    const user_initiated = mode == .user;
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx) or @import("computer_pane.zig").chosenFor(idx)) return;
     const launch_engine = app_state.g_browser_engine;
     var launch_profile_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;
