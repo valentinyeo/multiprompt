@@ -27,7 +27,7 @@ Description=Multiprompt release check on the test laptop
 [Service]
 Type=oneshot
 Environment=PATH=$PATH
-Environment=LAPTOP_CHECK_AGENT=$agent
+Environment="LAPTOP_CHECK_AGENT=$agent"
 ExecStart=/usr/bin/env node $repo/tools/laptop-check/run.mjs --host $host
 UNIT
 cat > "$HOME/.config/systemd/user/$unit.timer" <<UNIT
