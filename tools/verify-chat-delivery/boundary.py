@@ -1156,8 +1156,10 @@ def reader_namespace():
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
-        if state().get("name") == "accepted-message":
+        if state().get("name") in ("accepted-message", "recall-handed"):
             import threading
+
+            worker_name = 'recall' if state().get('name') == 'recall-handed' else 'accepted'
 
             def start_worker(query, source, only_if_work=False):
                 if source is None:
@@ -1165,27 +1167,27 @@ def reader_namespace():
                 request = dict(message_protocol=1, tmux=query['tmux'], provider=query['provider'], sid=query['sid'])
 
                 def work():
-                    lock_path = ROOT / 'accepted-message-worker.lock'
+                    lock_path = ROOT / (worker_name + '-message-worker.lock')
                     with lock_path.open('a') as lock:
                         try:
                             locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
                         except BlockingIOError:
                             return
-                        record('accepted-worker.jsonl', stage='started', request=request)
+                        record(worker_name + '-worker.jsonl', stage='started', request=request)
                         while True:
                             try:
                                 namespace['message_poll'](request['tmux'], request['provider'], request['sid'])
                                 result = namespace['message_store_request'](dict(request, op='message_dispatch'))
                                 if result.get('message') is not None:
-                                    record('accepted-worker.jsonl', stage='dispatch', result=result)
+                                    record(worker_name + '-worker.jsonl', stage='dispatch', result=result)
                             except Exception as error:
-                                record('accepted-worker-errors.jsonl', error=repr(error))
+                                record(worker_name + '-worker-errors.jsonl', error=repr(error))
                             time.sleep(0.25)
 
                 threading.Thread(target=work, daemon=True).start()
 
             namespace['start_message_worker'] = start_worker
-            record('accepted-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
+            record(worker_name + '-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
     if state().get("name") == "working-live":
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"

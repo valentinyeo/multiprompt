@@ -459,6 +459,9 @@ jobs:
       - name: Check hosted working evidence contract
         if: env.CHAT_WORKING_LIVE_PROOF == '1'
         run: node --test tools/chat-working-live-proof.test.mjs
+      - name: Check handed recall evidence contract
+        if: env.CHAT_RECALL_PROOF == '1'
+        run: node --test tools/chat-recall-proof.test.js
       - name: Check unread divider contracts
         continue-on-error: true
         run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs

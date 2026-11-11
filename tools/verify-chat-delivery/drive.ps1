@@ -1436,7 +1436,7 @@ foreach ($plan in $plans) {
         try {
             if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$caseDir/debug.log"; Get-Content "$caseDir/debug.log" | Add-Content "$Evidence/debug.log" }
             if (Test-Path $state) { Copy-Item $state "$caseDir/stand-in" -Recurse -Force }
-            if ($isModel -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
+            if (($isModel -or $isRecall) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
             foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl')) {
                 $source = "$caseDir/stand-in/$file"
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
