@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: How to diagnose common multiprompt failures.
+description: How to diagnose common Multibot failures.
 ---
 
 ## Stuck Spinner
@@ -58,13 +58,13 @@ This usually means the Edge pane exists but visibility or positioning did not se
 Actions:
 
 1. Switch away and back.
-2. Resize the multiprompt window.
+2. Resize the Multibot window.
 3. Use `Ctrl+Shift+O` to reconnect.
 4. If reproducible, inspect browser visibility timers and pane binding files.
 
-## Edge Border Masks Leak Outside multiprompt
+## Edge Border Masks Leak Outside Multibot
 
-Masks must be hidden when multiprompt is not foreground, minimized, or covered by modal overlays. They must also hide for changelog, inbox, Ctrl+K, and URL picker overlays.
+Masks must be hidden when Multibot is not foreground, minimized, or covered by modal overlays. They must also hide for changelog, inbox, Ctrl+K, and URL picker overlays.
 
 If masks appear over other apps, inspect `updateBrowserVisibility`, `hideBrowserEdgeMasks`, and overlay gates.
 

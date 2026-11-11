@@ -198,6 +198,13 @@ export default {
     const url = new URL(request.url);
     const reply = (value, status) => url.pathname === '/v1/layout' ? layoutResponse(request, value, status) : json(value, status);
     try {
+      const canonical = env.BROWSER_ORIGIN_REDIRECTS && JSON.parse(env.BROWSER_ORIGIN_REDIRECTS)[url.origin];
+      if (canonical && request.method === 'GET' && url.pathname === '/' && !url.searchParams.has('passkey')) {
+        const target = new URL(canonical);
+        target.pathname = url.pathname;
+        target.search = url.search;
+        return redirectTo(target.href, 302);
+      }
       const db = env.DB;
       let instance;
       const auth = () => instance ||= makeAuth(env, url.origin);

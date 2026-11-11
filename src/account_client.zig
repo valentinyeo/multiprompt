@@ -4,7 +4,7 @@ const auth = @import("sync_auth.zig");
 const a = std.heap.page_allocator;
 const H = ?*anyopaque;
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
-pub const origin = "https://account.multiprompt.dev";
+pub const origin = "https://account.multibot.sh";
 extern "winhttp" fn WinHttpOpen([*:0]const u16, u32, ?[*:0]const u16, ?[*:0]const u16, u32) callconv(.winapi) H;
 extern "winhttp" fn WinHttpSetTimeouts(H, i32, i32, i32, i32) callconv(.winapi) i32;
 extern "winhttp" fn WinHttpConnect(H, [*:0]const u16, u16, u32) callconv(.winapi) H;
@@ -85,7 +85,7 @@ pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []
     const session = WinHttpOpen(L("multiprompt-account"), 0, null, null, 0) orelse return error.Network;
     defer _ = WinHttpCloseHandle(session);
     _ = WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000);
-    const connection = WinHttpConnect(session, L("account.multiprompt.dev"), 443, 0) orelse return error.Network;
+    const connection = WinHttpConnect(session, L("account.multibot.sh"), 443, 0) orelse return error.Network;
     defer _ = WinHttpCloseHandle(connection);
     const mw = try std.unicode.utf8ToUtf16LeAllocZ(a, method);
     defer a.free(mw);

@@ -3057,11 +3057,11 @@ pub fn runVaultFlowProcess() void {
         return;
     }
 
-    const email = loadSignedInEmail() orelse (std.heap.page_allocator.dupe(u8, "your multiprompt account") catch return);
+    const email = loadSignedInEmail() orelse (std.heap.page_allocator.dupe(u8, "your Multibot account") catch return);
     defer std.heap.page_allocator.free(email);
 
     switch (fetchVault(access_token)) {
-        .network_error => showSyncMessage("Could not reach multiprompt sync. Check your connection and try again.", true),
+        .network_error => showSyncMessage("Could not reach Multibot sync. Check your connection and try again.", true),
         .unauthorized => handleRejectedSyncToken(),
         .not_found => runVaultCreateFlow(access_token, email),
         .found => |found| {
@@ -3127,7 +3127,7 @@ fn syncSignOut() void {
 
 fn showSyncStatus() void {
     if (!hasMultipromptLogin()) {
-        showSyncMessage("Not signed in to multiprompt sync.", false);
+        showSyncMessage("Not signed in to Multibot sync.", false);
         return;
     }
     const email = loadSignedInEmail();

@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, createHash } from 'node:crypto';
 import worker, { hash, validateLayout, safeNext, validateUsage } from '../worker.js';
 
 let mf, db, hostClient;
@@ -1764,4 +1764,101 @@ test('IGSH-1890 Favorites groups sync between desktops and stay hidden from clie
   assert.deepEqual(after.layout.tabs.map(tab => tab.starred_group), ['Hypertask', 'Multi Bot']);
   const rejected = await request('/v1/layout', { method: 'PUT', headers: desktop, body: JSON.stringify({ base_revision: after.revision, layout: { ...after.layout, tabs: [{ ...after.layout.tabs[0], starred_group: 'x'.repeat(65) }, after.layout.tabs[1]] } }) });
   assert.equal(rejected.status, 400);
+});
+
+const oldAccount = 'https://account.multiprompt.dev';
+const newAccount = 'https://account.multibot.sh';
+const oldDash = 'https://dash.multiprompt.dev';
+const newDash = 'https://dash.multibot.sh';
+const redirects = { [oldAccount]: newAccount, [oldDash]: newDash };
+
+test('domain migration keeps cookies, passkeys, dashboards and device grants on both origins', async () => {
+  const mail = [];
+  const mf = new Miniflare(convertV4MiniflareOptions({
+    outboundService: async request => {
+      assert.equal(request.url, 'https://api.resend.com/emails');
+      mail.push(await request.json());
+      return new Response('{"id":"test"}');
+    },
+    modules: true,
+    scriptPath: new URL('../.build/worker.js', import.meta.url).pathname,
+    compatibilityDate: '2026-10-09',
+    compatibilityFlags: ['nodejs_compat'],
+    d1Databases: ['DB'],
+    bindings: {
+      ACCOUNT_EMAIL: 'owner@example.com',
+      ALLOWED_EMAILS: 'owner@example.com',
+      ...JSON.parse(readFileSync(new URL('../multibot-domains.json', import.meta.url), 'utf8')).vars,
+      BETTER_AUTH_SECRET: 'test-only-value-'.repeat(3),
+      RESEND_API_KEY: 'test-only-key'
+    }
+  }));
+  try {
+    const db = await mf.getD1Database('DB');
+    for (const sql of readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').split(';').filter(s => s.trim())) await db.prepare(sql).run();
+    for (const account of [oldAccount, newAccount]) {
+      const domain = new URL(account).hostname.slice('account.'.length);
+      const dash = account === oldAccount ? oldDash : newDash;
+      const post = (value, headers = {}) => ({ method: 'POST', headers: { Origin: account, 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(value), redirect: 'manual' });
+      const sent = await mf.dispatchFetch(account + '/api/auth/email-otp/send-verification-otp', post({ email: 'owner@example.com', type: 'sign-in' }));
+      assert.equal(sent.status, 200);
+      const otp = mail.at(-1).subject.match(/^(\d{6}) /)[1];
+      const signedIn = await mf.dispatchFetch(account + '/api/auth/sign-in/email-otp', post({ email: 'owner@example.com', otp }));
+      assert.equal(signedIn.status, 200);
+      const cookies = signedIn.headers.getSetCookie();
+      assert.ok(cookies.some(cookie => cookie.includes('session_token=') && cookie.toLowerCase().includes('domain=' + domain)));
+      assert.ok(cookies.every(cookie => !cookie.toLowerCase().includes('domain=' + (domain === 'multibot.sh' ? 'multiprompt.dev' : 'multibot.sh'))));
+      const cookie = cookies.map(value => value.split(';')[0]).filter(value => !value.endsWith('=')).join('; ');
+      const options = await mf.dispatchFetch(account + '/api/auth/passkey/generate-register-options', { headers: { Origin: account, Cookie: cookie } });
+      assert.equal(options.status, 200);
+      assert.equal((await options.json()).rp.id, domain);
+      const authentication = await mf.dispatchFetch(account + '/api/auth/passkey/generate-authenticate-options', { headers: { Origin: account } });
+      assert.equal(authentication.status, 200);
+      assert.equal((await authentication.json()).rpId, domain);
+      const dashboard = await mf.dispatchFetch(dash + '/?passkey=add', { headers: { Cookie: cookie }, redirect: 'manual' });
+      assert.equal(dashboard.status, 200);
+      assert.match(await dashboard.text(), /data-page="dash"/);
+      const verifier = 'x'.repeat(64);
+      const challenge = createHash('sha256').update(verifier).digest('base64url');
+      const query = new URLSearchParams({ redirect_uri: 'http://127.0.0.1:43210/callback', state: 's'.repeat(43), code_challenge: challenge, code_challenge_method: 'S256' });
+      const approval = await mf.dispatchFetch(account + '/login?' + query, { headers: { Cookie: cookie }, redirect: 'manual' });
+      assert.equal(approval.status, 200);
+      assert.match(await approval.text(), /approve device/i);
+      const authorized = await mf.dispatchFetch(account + '/login?' + query, post({}, { Cookie: cookie }));
+      assert.equal(authorized.status, 303);
+      const code = new URL(authorized.headers.get('Location')).searchParams.get('code');
+      const otherAccount = account === oldAccount ? newAccount : oldAccount;
+      const exchanged = await mf.dispatchFetch(otherAccount + '/oauth/token', post({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: query.get('redirect_uri') }));
+      assert.equal(exchanged.status, 200);
+      const token = await exchanged.json();
+      const refreshed = await mf.dispatchFetch(account + '/oauth/token', post({ grant_type: 'refresh_token', refresh_token: token.refresh_token }));
+      assert.equal(refreshed.status, 200);
+      const rotated = await refreshed.json();
+      const me = await mf.dispatchFetch(otherAccount + '/v1/me', { headers: { Authorization: 'Bearer ' + rotated.access_token } });
+      assert.equal(me.status, 200);
+      assert.equal((await me.json()).account, 'owner@example.com');
+      const unauthorized = await mf.dispatchFetch(account + '/v1/me', { redirect: 'manual' });
+      assert.equal(unauthorized.status, 401);
+    }
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM "user"').first()).n, 1);
+    for (const [from, to] of Object.entries(redirects)) {
+      const response = await mf.dispatchFetch(from + '/?source=old', { redirect: 'manual' });
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.get('Location'), to + '/?source=old');
+      const signin = await mf.dispatchFetch(from + '/signin', { redirect: 'manual' });
+      assert.equal(signin.status, 200);
+      assert.match(await signin.text(), /data-page="signin"/);
+      const refresh = await mf.dispatchFetch(from + '/oauth/token', { method: 'POST', body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'x'.repeat(43) }), redirect: 'manual' });
+      assert.equal(refresh.status, 400);
+      assert.equal(refresh.headers.get('Location'), null);
+      const api = await mf.dispatchFetch(from + '/v1/layout', { redirect: 'manual' });
+      assert.equal(api.status, 401);
+      assert.equal(api.headers.get('Location'), null);
+    }
+    const newPage = await mf.dispatchFetch(newAccount + '/', { redirect: 'manual' });
+    assert.equal(newPage.status, 200);
+    assert.match(await newPage.text(), /Multibot sign-in/);
+  } finally {
+    await mf.dispose();
+  }
 });

@@ -5,7 +5,7 @@ description: Native Edge/Chrome pane behavior and command-line browser control.
 
 ## Browser Pane Model
 
-multiprompt docks a native Microsoft Edge or Google Chrome window beside the shell. The selected browser stays native: profile, tabs, extensions, cookies, password managers, and page behavior are not reimplemented by multiprompt.
+Multibot docks a native Microsoft Edge or Google Chrome window beside the shell. The selected browser stays native: profile, tabs, extensions, cookies, password managers, and page behavior are not reimplemented by multiprompt.
 
 Use `Ctrl+K → Browser Engine` to switch every pane globally. Edge uses
 `%LOCALAPPDATA%\ZigShell\EdgeUserData`; Chrome uses the separate
@@ -14,7 +14,7 @@ not leak between engines. The switch closes all old-engine pane windows before
 the active pane relaunches, and future focus, navigation, screenshots, and theme
 commands follow the selected engine.
 
-multiprompt owns:
+Multibot owns:
 
 - pane visibility
 - pane geometry
@@ -24,16 +24,16 @@ multiprompt owns:
 - URL state persistence
 - isolated-profile Chromium theme selection
 
-multiprompt does not own Chromium internals.
+Multibot does not own Chromium internals.
 
 ## Theme Synchronization
 
-The selected isolated Edge or Chrome profile follows the active multiprompt theme. Dark, Mid,
-Light, AMOLED, Edge Grey, multiprompt, and Dev Blue each have a matching browser
+The selected isolated Edge or Chrome profile follows the active Multibot theme. Dark, Mid,
+Light, AMOLED, Edge Grey, Multibot, and Dev Blue each have a matching browser
 theme for the browser frame, tab strip, toolbar, bookmarks, and new-tab surface.
 
 Choose **System** in `Ctrl+K → Themes…` to follow the Windows app appearance.
-The preference remains System across restarts, while multiprompt resolves it to
+The preference remains System across restarts, while Multibot resolves it to
 Light or Dark whenever Windows changes and updates the app, native consoles,
 browser masks, and selected isolated profile together. Choosing a named theme keeps
 that palette fixed instead. Windows can omit the appearance broadcast, so
@@ -46,16 +46,16 @@ dark mode. Site content continues to use its own settings and CSS.
 
 The selected theme package is loaded when the isolated Chromium process starts.
 Changing the app theme closes only that dedicated profile's normal windows;
-multiprompt's pane self-heal immediately reopens the selected browser with the
+Multibot's pane self-heal immediately reopens the selected browser with the
 new package. Ordinary browser profiles remain running and untouched.
 
 ## Border Masks
 
-Chromium draws non-client frame areas that can appear as grey borders. multiprompt covers those areas with narrow mask windows that match the active multiprompt theme.
+Chromium draws non-client frame areas that can appear as grey borders. Multibot covers those areas with narrow mask windows that match the active Multibot theme.
 
 Rules:
 
-- Masks must stay inside multiprompt’s window.
+- Masks must stay inside Multibot’s window.
 - Masks must hide when overlays are open.
 - Masks must not cover changelog, inbox, Ctrl+K, or URL picker overlays.
 - AMOLED theme should use black masks.
@@ -166,13 +166,13 @@ It must never steal a pane from another active agent just because a browser exis
 
 ## Binding Files
 
-multiprompt publishes local binding files under the compatibility path `%APPDATA%\ZigShell`, including:
+Multibot publishes local binding files under the compatibility path `%APPDATA%\ZigShell`, including:
 
 - `panewin-<tmux-session>.txt`
 - `panewin-zss-<shell-id>.txt`
 - `browserwin-<shell-id>.txt`
 
-The remote VPS shim uses these identities to route browser commands back to the owning multiprompt tab.
+The remote VPS shim uses these identities to route browser commands back to the owning Multibot tab.
 
 `End tmux session` removes the owning tab's browser binding files as part of teardown. A plain tab close does not kill the remote tmux session; use `End tmux session` when the remote session and its browser routing should both be destroyed.
 

@@ -13,15 +13,15 @@ export const mailConfigured = env => Boolean((env.EMAIL && typeof env.EMAIL.send
 export const infraKey = env => (env.BETTER_AUTH_API_KEY || '').trim();
 export const googleConfigured = env => Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 export const sendCode = (env, email, otp) => sendMail(env, email,
-  `${otp} is your multiprompt sign-in code`,
-  `Your multiprompt sign-in code is ${otp}\n\nIt expires in 5 minutes. If you did not try to sign in, ignore this email.`,
-  { template: 'sign-in-otp', variables: { otpCode: otp, userEmail: email, appName: 'multiprompt', expirationMinutes: '5' } });
+  `${otp} is your Multibot sign-in code`,
+  `Your Multibot sign-in code is ${otp}\n\nIt expires in 5 minutes. If you did not try to sign in, ignore this email.`,
+  { template: 'sign-in-otp', variables: { otpCode: otp, userEmail: email, appName: 'Multibot', expirationMinutes: '5' } });
 export const sendLink = (env, email, url) => sendMail(env, email,
-  'Your multiprompt sign-in link',
-  `Open this link to sign in to multiprompt:\n\n${url}\n\nIt works once and expires in 5 minutes. If you did not try to sign in, ignore this email.`,
-  { template: 'magic-link', variables: { magicLink: url, userEmail: email, appName: 'multiprompt', expirationMinutes: '5' } });
+  'Your Multibot sign-in link',
+  `Open this link to sign in to Multibot:\n\n${url}\n\nIt works once and expires in 5 minutes. If you did not try to sign in, ignore this email.`,
+  { template: 'magic-link', variables: { magicLink: url, userEmail: email, appName: 'Multibot', expirationMinutes: '5' } });
 async function sendMail(env, email, subject, text, infra) {
-  const from = env.EMAIL_FROM || 'multiprompt <login@example.com>';
+  const from = env.EMAIL_FROM || 'Multibot <login@example.com>';
   if (env.EMAIL && typeof env.EMAIL.send === 'function') {
     await env.EMAIL.send({ to: email, from, subject, text });
     return;
@@ -44,10 +44,14 @@ async function sendMail(env, email, subject, text, infra) {
 }
 
 export function makeAuth(env, origin) {
+  const host = new URL(origin).hostname;
+  const legacy = env.LEGACY_AUTH_DOMAIN && (host === env.LEGACY_AUTH_DOMAIN || host.endsWith('.' + env.LEGACY_AUTH_DOMAIN));
+  const cookieDomain = legacy ? env.LEGACY_AUTH_DOMAIN : env.COOKIE_DOMAIN;
+  const rpID = legacy ? env.LEGACY_AUTH_DOMAIN : env.RP_ID;
   const google = googleConfigured(env)
     ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, prompt: 'select_account' } } : {};
   return betterAuth({
-    appName: 'multiprompt',
+    appName: 'Multibot',
     database: env.DB,
     baseURL: origin,
     basePath: '/api/auth',
@@ -56,7 +60,7 @@ export function makeAuth(env, origin) {
     emailAndPassword: { enabled: false },
     socialProviders: google,
     session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24, freshAge: 60 * 15 },
-    advanced: env.COOKIE_DOMAIN ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } } : {},
+    advanced: cookieDomain ? { crossSubDomainCookies: { enabled: true, domain: cookieDomain } } : {},
     databaseHooks: {
       user: { create: { before: async user => {
         if (!isAllowed(env, user.email)) throw new APIError('FORBIDDEN', { message: 'account_not_allowed' });
@@ -78,7 +82,7 @@ export function makeAuth(env, origin) {
           await sendLink(env, email, url);
         }
       }),
-      passkey({ rpID: env.RP_ID, rpName: 'multiprompt', origin: origins(env) }),
+      passkey({ rpID, rpName: 'Multibot', origin: origins(env) }),
       ...(infraKey(env) ? [dash({ apiKey: infraKey(env) })] : [])
     ]
   });

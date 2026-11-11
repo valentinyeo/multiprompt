@@ -1,0 +1,10 @@
+{
+  "domains": ["account.multibot.sh", "dash.multibot.sh"],
+  "vars": {
+    "AUTH_ORIGINS": "https://account.multibot.sh,https://dash.multibot.sh,https://account.multiprompt.dev,https://dash.multiprompt.dev",
+    "COOKIE_DOMAIN": "multibot.sh",
+    "RP_ID": "multibot.sh",
+    "LEGACY_AUTH_DOMAIN": "multiprompt.dev",
+    "BROWSER_ORIGIN_REDIRECTS": "{\"https://account.multiprompt.dev\":\"https://account.multibot.sh\",\"https://dash.multiprompt.dev\":\"https://dash.multibot.sh\"}"
+  }
+}
