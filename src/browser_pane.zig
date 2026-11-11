@@ -3127,6 +3127,7 @@ fn browserRectMatchesTarget(rect: RECT, x: i32, y: i32, w: i32, h: i32) bool {
 }
 
 fn browserWindowNeedsPosition(hwnd: HANDLE, x: i32, y: i32, w: i32, h: i32) bool {
+    if (IsWindowVisible(hwnd) == 0) return true;
     var current: RECT = std.mem.zeroes(RECT);
     if (GetWindowRect(hwnd, &current) == 0) return true;
     return !browserRectMatchesTarget(current, x, y, w, h);
@@ -3137,6 +3138,25 @@ test "settle positioning is idempotent once Chromium reaches its dock" {
     try std.testing.expect(browserRectMatchesTarget(target, 586, 119, 474, 589));
     try std.testing.expect(!browserRectMatchesTarget(target, 585, 119, 474, 589));
     try std.testing.expect(!browserRectMatchesTarget(target, 586, 119, 475, 589));
+}
+
+test "IGSH-1941 hidden pane at its dock still needs the show operation" {
+    const win = @import("win32.zig");
+    const hwnd = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L("STATIC"), null, WS_POPUP, 80, 40, 300, 100, null, null, null, null);
+    try std.testing.expect(hwnd != null);
+    defer _ = win.DestroyWindow(hwnd);
+    var rect: RECT = undefined;
+    try std.testing.expect(GetWindowRect(hwnd, &rect) != 0);
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    try std.testing.expect(browserRectMatchesTarget(rect, rect.left, rect.top, width, height));
+    try std.testing.expect(browserWindowNeedsPosition(hwnd, rect.left, rect.top, width, height));
+    const reveal: UINT = SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+    try std.testing.expect(SetWindowPos(hwnd, null, rect.left, rect.top, width, height, reveal) != 0);
+    try std.testing.expect(IsWindowVisible(hwnd) != 0);
+    try std.testing.expect(!browserWindowNeedsPosition(hwnd, rect.left, rect.top, width, height));
+    _ = ShowWindow(hwnd, SW_HIDE);
+    try std.testing.expect(browserWindowNeedsPosition(hwnd, rect.left, rect.top, width, height));
 }
 
 const BrowserDockGuardAction = enum { none, restore, reposition };
