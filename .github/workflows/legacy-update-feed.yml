@@ -1,0 +1,84 @@
+name: Legacy update feed
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/legacy-update-feed.yml'
+      - '.github/workflows/release.yml'
+      - 'tools/legacy-update-*'
+      - 'tools/fixtures/HYCI-253/**'
+      - 'src/release_signing_public_key.txt'
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: Seed the new source with the last signed legacy release
+        type: boolean
+        default: false
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - run: node --test tools/legacy-update-feed.test.mjs
+
+  old-client:
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Prove the released updater still accepts signed updates
+        shell: powershell
+        run: ./tools/legacy-update-proof.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: legacy-update-proof
+          path: ${{ runner.temp }}/legacy-update-proof/proof.json
+          if-no-files-found: warn
+
+  mirror:
+    if: (github.repository == 'valentinyeo/multiprompt' && github.event_name != 'pull_request') || (github.repository == 'valentinyeo/multibot' && github.event_name == 'workflow_dispatch' && inputs.bootstrap)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Mirror signed updates when the new source exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_FEED_BOOTSTRAP: ${{ inputs.bootstrap || false }}
+        run: |
+          if [ "$GITHUB_REPOSITORY" = 'valentinyeo/multibot' ]; then
+            node tools/legacy-update-feed.mjs
+            exit
+          fi
+          status=$(curl -sS -o "$RUNNER_TEMP/multibot-repository.json" -w '%{http_code}' https://api.github.com/repos/valentinyeo/multibot)
+          case "$status" in
+            200) node tools/legacy-update-feed.mjs ;;
+            404) echo 'New source not created yet; existing update origin remains unchanged' ;;
+            *) echo "Cannot check new source: HTTP $status" >&2; exit 1 ;;
+          esac
