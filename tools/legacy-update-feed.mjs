@@ -55,7 +55,40 @@ export function assertLegacyOrigin(repository, workflow) {
   if (repository.full_name !== legacyRepository || repository.archived !== false || workflow.state !== 'active') throw new Error('Permanent legacy update repository or workflow is unavailable; restore it before releasing');
 }
 
-const command = (file, args) => execFileSync(file, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim();
+const command = (file, args, env = process.env) => execFileSync(file, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env }).trim();
+let publicConfig;
+const publicEnv = () => {
+  publicConfig ??= fs.mkdtempSync(path.join(os.tmpdir(), 'gh-public-'));
+  const env = { ...process.env };
+  delete env.GH_TOKEN;
+  delete env.GITHUB_TOKEN;
+  delete env.GH_ENTERPRISE_TOKEN;
+  env.GH_CONFIG_DIR = publicConfig;
+  return env;
+};
+
+export function usesPublicCredential(route, current = process.env.GITHUB_REPOSITORY) {
+  if (typeof route !== 'string' || !current) return false;
+  const name = route.split('?')[0];
+  return name.startsWith('repos/') && name !== `repos/${current}` && !name.startsWith(`repos/${current}/`);
+}
+
+export function crossRepoFetchArgs(origin, tag) {
+  version(tag);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(origin)) throw new Error('Invalid fetch target');
+  return ['-c', 'credential.helper=', '-c', 'http.https://github.com/.extraheader=', 'fetch', '--no-tags', `https://github.com/${origin}.git`, `refs/tags/${tag}`];
+}
+
+function defaultGh(args) {
+  const route = args.find(part => typeof part === 'string' && part.startsWith('repos/'));
+  return command('gh', args, usesPublicCredential(route) ? publicEnv() : process.env);
+}
+
+function defaultGit(args) {
+  const cross = args.includes('http.https://github.com/.extraheader=');
+  return command('git', args, cross ? publicEnv() : process.env);
+}
+
 const downloadAsset = async asset => {
   const response = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(60000) });
   if (!response.ok) throw new Error(`Download failed: ${asset.name} (${response.status})`);
@@ -64,7 +97,7 @@ const downloadAsset = async asset => {
   return bytes;
 };
 
-export async function mirrorRelease({ gh = args => command('gh', args), git = args => command('git', args), download = downloadAsset, rawKey = Buffer.from(fs.readFileSync('src/release_signing_public_key.txt', 'utf8').trim(), 'base64'), bootstrap = process.env.LEGACY_FEED_BOOTSTRAP === 'true' } = {}) {
+export async function mirrorRelease({ gh = defaultGh, git = defaultGit, download = downloadAsset, rawKey = Buffer.from(fs.readFileSync('src/release_signing_public_key.txt', 'utf8').trim(), 'base64'), bootstrap = process.env.LEGACY_FEED_BOOTSTRAP === 'true' } = {}) {
   const destination = process.env.GITHUB_REPOSITORY;
   if (destination !== legacyRepository && !(bootstrap && destination === sourceRepository)) throw new Error('Run only in the permanent legacy repository, or explicitly bootstrap the new source');
   const origin = destination === legacyRepository ? sourceRepository : legacyRepository;
@@ -97,7 +130,7 @@ export async function mirrorRelease({ gh = args => command('gh', args), git = ar
       }
       fs.writeFileSync(path.join(directory, name), bytes);
     }
-    git(['fetch', '--no-tags', `https://github.com/${origin}.git`, `refs/tags/${source.tag_name}`]);
+    git(crossRepoFetchArgs(origin, source.tag_name));
     const sha = git(['rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
     if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid release commit');
     git(['push', 'origin', `${sha}:refs/tags/${source.tag_name}`]);
@@ -121,7 +154,7 @@ export async function mirrorRelease({ gh = args => command('gh', args), git = ar
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv[2] === '--check-origin') {
-    const api = route => JSON.parse(command('gh', ['api', `repos/${legacyRepository}${route}`]));
+    const api = route => JSON.parse(defaultGh(['api', `repos/${legacyRepository}${route}`]));
     assertLegacyOrigin(api(''), api('/actions/workflows/legacy-update-feed.yml'));
     console.log('LEGACY_UPDATE_ORIGIN_ACTIVE');
   } else {

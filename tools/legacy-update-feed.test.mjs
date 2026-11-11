@@ -17,8 +17,19 @@ test('release preparation keeps the permanent legacy origin', () => {
 });
 
 if (feedReady) {
-  const { assertLegacyOrigin, legacyRepository, mirrorRelease, newer, releaseAssets, signedFiles, sourceRepository } = await import('./legacy-update-feed.mjs');
+  const { assertLegacyOrigin, crossRepoFetchArgs, legacyRepository, mirrorRelease, newer, releaseAssets, signedFiles, sourceRepository, usesPublicCredential } = await import('./legacy-update-feed.mjs');
   process.env.GITHUB_REPOSITORY = legacyRepository;
+
+  test('cross-repository reads stay public and same-repository reads stay authenticated', () => {
+    assert.equal(usesPublicCredential('repos/valentinyeo/multibot/releases/latest', legacyRepository), true);
+    assert.equal(usesPublicCredential('repos/valentinyeo/multiprompt/releases/latest', legacyRepository), false);
+    assert.equal(usesPublicCredential('repos/valentinyeo/multiprompt/releases?per_page=100', legacyRepository), false);
+    assert.equal(usesPublicCredential('repos/valentinyeo/multiprompt/actions/workflows/legacy-update-feed.yml', sourceRepository), true);
+    assert.equal(usesPublicCredential('repos/valentinyeo/multiprompt', sourceRepository), true);
+    assert.equal(usesPublicCredential('repos/valentinyeo/multiprompt', legacyRepository), false);
+    assert.throws(() => crossRepoFetchArgs('https://evil.example/repo', 'v1.2.4'));
+    assert.deepEqual(crossRepoFetchArgs(sourceRepository, 'v1.2.4').slice(0, 4), ['-c', 'credential.helper=', '-c', 'http.https://github.com/.extraheader=']);
+  });
 
   function fixture(repository = sourceRepository, tag = 'v1.2.4') {
     const bytes = new Map(names.map(name => [name, Buffer.from(name === 'release-notes.json' ? JSON.stringify({ version: tag.slice(1) }) : `MPVERSION=${tag.slice(1)};${name}`)]));
@@ -62,6 +73,7 @@ if (feedReady) {
     const state = harness();
     assert.equal(await publish(state), `LEGACY_UPDATE_PUBLISHED v1.2.4 ${sha}`);
     assert.deepEqual(state.uploaded, state.source.bytes);
+    assert.deepEqual(state.calls.find(call => call[1] === '-c'), ['git', ...crossRepoFetchArgs(sourceRepository, 'v1.2.4')]);
     assert.deepEqual(state.calls.find(call => call[0] === 'git' && call[1] === 'push'), ['git', 'push', 'origin', `${sha}:refs/tags/v1.2.4`]);
     const create = state.calls.find(call => call[1] === 'release' && call[2] === 'create');
     assert.ok(create.includes('--draft'));

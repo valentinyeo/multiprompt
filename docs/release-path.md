@@ -26,7 +26,10 @@ workflow still needs to publish releases.
 The new repository runs the existing signed release pipeline. After the first
 new release, `legacy-update-feed.yml` copies verified release bytes back to
 the old repository every fifteen minutes. Its repository-scoped GitHub token
-publishes as `github-actions[bot]`, which older clients require. It imports the
+publishes as `github-actions[bot]`, which older clients require. Reads of the
+other public repository omit that token and the checkout authorization header.
+Sending the workflow token hides the other repository, because the token cannot
+leave its own repository. It imports the
 release tag's commit, checks the original Ed25519 signature and every asset's
 checksum, and publishes a draft only after all files pass. It never re-signs
 or overwrites a published release. A retry can complete its own partial draft.
