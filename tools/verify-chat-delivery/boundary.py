@@ -1150,36 +1150,6 @@ def reader_namespace():
                     return child
 
             namespace["subprocess"] = WorkerDiagnostics()
-        if state().get("name") == "recall-handed":
-            import threading
-
-            def start_recall_worker(query, source, only_if_work=False):
-                if source is None:
-                    return
-                request = dict(message_protocol=1, tmux=query["tmux"], provider=query["provider"], sid=query["sid"])
-
-                def work():
-                    lock_path = ROOT / "recall-message-worker.lock"
-                    with lock_path.open("a") as lock:
-                        try:
-                            locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
-                        except BlockingIOError:
-                            return
-                        record("recall-worker.jsonl", stage="started", request=request)
-                        while True:
-                            try:
-                                namespace["message_poll"](request["tmux"], request["provider"], request["sid"])
-                                result = namespace["message_store_request"](dict(request, op="message_dispatch"))
-                                if result.get("message") is not None:
-                                    record("recall-worker.jsonl", stage="dispatch", state=result["message"].get("state"), receipt=result["message"].get("receipt"))
-                            except Exception as error:
-                                record("recall-worker-errors.jsonl", error=repr(error))
-                            time.sleep(0.25)
-
-                threading.Thread(target=work, daemon=True).start()
-
-            namespace["start_message_worker"] = start_recall_worker
-            record("recall-boundary.jsonl", notification="poll fallback", worker="in-process production host dispatch")
         if state().get("name") == "reactions":
             install_reaction_tmux(namespace)
             install_reaction_worker(namespace)

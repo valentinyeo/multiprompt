@@ -36,6 +36,7 @@ import ast, pathlib, sys, tempfile, types
 source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
 branch = next(node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.If)
               and 'accepted-message' in ast.unparse(node.test))
+assert 'recall-handed' in ast.unparse(branch.test)
 class StopWorker(BaseException):
     pass
 def stop(_):
@@ -82,7 +83,7 @@ print('WINDOWS_RECALL_DISPATCH_OK')
 
 test('IGSH-1828 recall proof accepts a kept answer and two targeted recalls', () => {
   const boundary = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/boundary.py'), 'utf8');
-  assert.match(boundary, /if state\(\)\.get\("name"\) == "recall-handed":[\s\S]*?namespace\["start_message_worker"\] = start_recall_worker/);
+  assert.match(boundary, /state\(\)\.get\("name"\) in \("accepted-message", "recall-handed"\)/);
   const adapter = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/sitecustomize.py'), 'utf8');
   assert.match(adapter, /os\.name == "nt" and \(os\.environ\.get\("CHAT_MODEL_PROOF"\) == "1" or os\.environ\.get\("CHAT_RECALL_PROOF"\) == "1"\)/);
   const verify = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
