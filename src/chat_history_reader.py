@@ -1084,27 +1084,34 @@ def asks_question(raw, agent):
 def read_tail(source, size, agent, captured=None, fill=True):
     fill = fill and ISSUE_631_TAIL_FILLS_SHOWN_BUDGET
     base, end, data = read_window(source, size, captured=captured)
-    if not ISSUE_358_TAIL_STARTS_AT_QUESTION or not base or (not data and not fill) or any(asks_question(raw, agent) for raw in data.splitlines()):
+    if (not ISSUE_358_TAIL_STARTS_AT_QUESTION or not base or (not data and not fill) or
+            (not fill and any(asks_question(raw, agent) for raw in data.splitlines()))):
         return base, end, data
     start, _, older = read_window(source, base, QUESTION_SCAN_BYTES - TAIL_BYTES, captured)
+    held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(load_line(raw), agent, base))
+    fill = fill and held < TAIL_BYTES // 2
     shown = 0
     offset = base
-    if fill:
-        held = sum(len(wire_row(row)) + 1 for raw in data.splitlines() for row in conversation_rows(load_line(raw), agent, base))
-        fill = fill and held < TAIL_BYTES // 2
-        fill_at = base
+    fits_at = base
+    question_at = None
     for raw in reversed(older.splitlines(keepends=True)):
         offset -= len(raw)
         messages = conversation_rows(load_line(raw), agent, offset)
         shown += sum(len(wire_row(row)) + 1 for row in messages)
         if shown > TAIL_BYTES:
             break
-        if any(row["role"] == "user" for row in messages):
+        question = any(row["role"] == "user" for row in messages)
+        if fill:
+            if held + shown <= TAIL_BYTES:
+                fits_at = offset
+                if question:
+                    question_at = offset
+        elif question:
             return offset, end, older[offset - start:] + data
-        if fill and held + shown <= TAIL_BYTES:
-            fill_at = offset
-    if fill:
-        return fill_at, end, older[fill_at - start:] + data
+    if question_at is not None:
+        return question_at, end, older[question_at - start:] + data
+    if fits_at != base:
+        return fits_at, end, older[fits_at - start:] + data
     return base, end, data
 
 

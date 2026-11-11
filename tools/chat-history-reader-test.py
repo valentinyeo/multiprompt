@@ -1675,6 +1675,29 @@ class HistoryReaderTest(unittest.TestCase):
                 with patch.object(reader, 'ISSUE_631_TAIL_FILLS_SHOWN_BUDGET', False):
                     self.assertNotIn('REPLY-631-b', reader.response(dict(self.query)))
 
+    def test_igsh1940_first_page_carries_recent_turns_behind_a_metadata_block(self):
+        turns = [row for i in range(40) for row in (
+            dict(type='user', message=dict(role='user', content=f'QUESTION-1940-{i}')),
+            self.event(f'ANSWER-1940-{i}'))]
+        metadata = dict(type='attachment', attachment=dict(type='file', content='m' * (reader.TAIL_BYTES + 90000)))
+        self.write(*turns[:-2], metadata, *turns[-2:])
+        self.assertGreater(self.path.stat().st_size, reader.TAIL_BYTES)
+        cold = dict(self.query)
+        wire = reader.response(dict(cold))
+        fields = wire.splitlines()[0].split('\t')
+        rows = [json.loads(line) for line in wire.splitlines()[1:-1]]
+        self.assertEqual(fields[13], 'tail')
+        texts = [row['text'] for row in rows if row['role'] in ('user', 'assistant')]
+        self.assertEqual(texts[-1], 'ANSWER-1940-39')
+        self.assertIn('QUESTION-1940-0', texts)
+        self.assertGreaterEqual(len(texts), 40)
+        costs = [len(row.encode('utf-8')) + 1 for row in wire.splitlines()[1:-1]]
+        self.assertLessEqual(sum(costs), reader.TAIL_BYTES + max(costs))
+        with patch.object(reader, 'ISSUE_631_TAIL_FILLS_SHOWN_BUDGET', False):
+            control = reader.response(dict(cold))
+            self.assertNotIn('QUESTION-1940-0', control)
+            self.assertIn('ANSWER-1940-39', control)
+
     def test_shrunken_source_during_scroll_resets_to_tail_instead_of_retrying_stale_page_forever(self):
         self.write(self.event('x' * (reader.TAIL_BYTES + 100)), self.event('old latest'))
         self.read()
