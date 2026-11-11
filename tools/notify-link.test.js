@@ -139,6 +139,15 @@ test('a plain completion alert needs no reply and the pump closes the caller', a
   }
 });
 
+test('each connected server flushes only its own browser replies', () => {
+  const alertsPath = path.join(root, 'src/shared_alerts.zig');
+  assert.equal(fs.existsSync(alertsPath), true);
+  const alerts = fs.readFileSync(alertsPath, 'utf8');
+  assert.doesNotMatch(alerts, /var g_slots:/);
+  assert.match(alerts, /fn flushSlots\(channel: \*transport\.Channel, host: u8, generation: u32\) void/);
+  assert.match(alerts, /claimSlot\(host, generation, frame\.id\)/);
+});
+
 test('two connected servers keep the same call id and their own reply', async () => {
   const leftName = 'mp-test-' + process.pid + '-a-' + Math.random().toString(16).slice(2, 10);
   const rightName = 'mp-test-' + process.pid + '-b-' + Math.random().toString(16).slice(2, 10);

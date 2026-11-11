@@ -178,16 +178,22 @@ test('each server keeps a 32 call waiting limit', () => {
 });
 
 test('the app owns each reply by its server connection', () => {
-  const zig = fs.readFileSync(path.join(root, 'src/alert_slots.zig'), 'utf8');
-  const alerts = fs.readFileSync(path.join(root, 'src/shared_alerts.zig'), 'utf8');
-  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  const slotsPath = path.join(root, 'src/alert_slots.zig');
+  const alertsPath = path.join(root, 'src/shared_alerts.zig');
+  const buildPath = path.join(root, 'build.zig');
+  assert.equal(fs.existsSync(alertsPath), true);
+  assert.equal(fs.existsSync(buildPath), true);
+  const alerts = fs.readFileSync(alertsPath, 'utf8');
+  const build = fs.readFileSync(buildPath, 'utf8');
+  assert.doesNotMatch(alerts, /var g_slots:/);
+  assert.match(alerts, /fn flushSlots\(channel: \*transport\.Channel, host: u8, generation: u32\) void/);
+  assert.equal(fs.existsSync(slotsPath), true);
+  const zig = fs.readFileSync(slotsPath, 'utf8');
   assert.match(zig, /pub const slots_per_host = 32;/);
   assert.match(zig, /self\.generation\[host\] != generation/);
   assert.match(zig, /fn bump\(self: \*Table, host: u8\) u32/);
-  assert.doesNotMatch(alerts, /var g_slots:/);
   assert.match(alerts, /defer endChannel\(host, generation\)/);
   assert.match(alerts, /return g_table\.takeReady\(host, generation\)/);
-  assert.match(alerts, /fn flushSlots\(channel: \*transport\.Channel, host: u8, generation: u32\) void/);
   assert.match(build, /src\/alert_slots\.zig/);
   assert.match(build, /vps_test_step\.dependOn\(&run_alert_slot_tests\.step\)/);
   assert.match(build, /test_step\.dependOn\(&run_alert_slot_tests\.step\)/);
