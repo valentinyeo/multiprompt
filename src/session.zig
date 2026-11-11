@@ -696,6 +696,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + setting.len], setting);
         pos += setting.len;
     }
+    if (app_state.g_shared_server_connection and pos + 36 < json_buf.len) {
+        const setting = ",\"shared_server_connection\":true";
+        @memcpy(json_buf[pos .. pos + setting.len], setting);
+        pos += setting.len;
+    }
     if (!app_state.g_external_browser_links and pos + 36 < json_buf.len) {
         const setting = ",\"external_browser_links\":false";
         @memcpy(json_buf[pos .. pos + setting.len], setting);
@@ -1603,6 +1608,7 @@ pub fn prepareStartupRestore() bool {
 
 fn startupRestoreWorker(path_buf: [512]u8, len: usize) void {
     _ = @import("console.zig").resolveSshPath(false);
+    @import("ssh_identity.zig").start();
     startup_bytes = if (len == 0) null else readSessionBytes(path_buf[0..len]);
     if (startup_bytes) |bytes| {
         startup_parsed = json_reader.parse(std.heap.page_allocator, bytes) catch null;
@@ -1791,6 +1797,7 @@ pub fn restoreSession() u32 {
     app_state.g_igsh354_paste_focus = !json_reader.boolFalse(json, "igsh354_paste_focus");
     app_state.g_voice_always_listen = !json_reader.boolFalse(json, "voice_always_listen");
     app_state.g_external_browser_links = !json_reader.boolFalse(json, "external_browser_links");
+    app_state.g_shared_server_connection = json_reader.boolTrue(json, "shared_server_connection");
     if (json_reader.boolFalse(json, "eta_numbers")) app_state.g_eta_numbers_on = false;
     if (json_reader.boolFalse(json, "eta_progress")) app_state.g_eta_progress_on = false;
     const voice_speed = json_reader.string(json_reader.field(json, "voice_speed")) orelse "";

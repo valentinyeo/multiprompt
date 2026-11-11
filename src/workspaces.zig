@@ -1101,6 +1101,7 @@ pub fn syncInProcessWorkspacesToRegistry() void {
     syncCurrentWorkspaceToRegistry();
     upsertMySlotEntries();
     writeWorkspaceRegistryFile();
+    @import("chat_names.zig").publishIfChanged();
 }
 
 pub fn removeMyHostedEntriesAndSave() void {

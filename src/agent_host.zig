@@ -7,6 +7,7 @@ pub const Provider = enum {
     claude,
     codex,
     pi,
+    cursor,
 
     pub fn wire(self: Provider) []const u8 {
         return @tagName(self);
@@ -17,6 +18,7 @@ pub const Provider = enum {
             .claude => "Claude",
             .codex => "Codex",
             .pi => "Pi",
+            .cursor => "Cursor",
         };
     }
 
@@ -25,12 +27,19 @@ pub const Provider = enum {
             .claude => 1,
             .codex => 2,
             .pi => 3,
+            .cursor => 7,
         };
     }
 };
 
+pub fn hostedWorkspaceProvider(program: []const u8) ?Provider {
+    if (std.mem.startsWith(u8, program, "claude")) return .claude;
+    if (std.mem.eql(u8, program, "cursor") or std.mem.eql(u8, program, "agent") or std.mem.startsWith(u8, program, "cursor ")) return .cursor;
+    return null;
+}
+
 pub fn eligible(program: []const u8) bool {
-    return ENABLED and std.mem.startsWith(u8, program, "claude");
+    return ENABLED and hostedWorkspaceProvider(program) != null;
 }
 
 pub fn formatSessionId(out: *[36]u8, random: *const [16]u8) []const u8 {
@@ -113,12 +122,12 @@ pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd:
     if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid)) return null;
     const mode = if (provider == .claude) " --permission-mode bypassPermissions" else "";
     const name = provider.wire();
-    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start {s} {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, name, sid, session, cwd, mode, READER, name, sid, session }) catch null;
+    return std.fmt.bufPrint(out, "python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1 && python3 {s} host start {s} {s}", .{ READER, name, sid, session, cwd, mode, READER, name, sid }) catch null;
 }
 
 pub fn resumeCommandFor(out: []u8, provider: Provider, session: []const u8, sid: []const u8) ?[]const u8 {
     if (!safeName(session) or !safeSessionId(sid)) return null;
-    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c ~ 'python3 {s} host start {s} {s} --tmux {s} >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t {s}", .{ session, READER, provider.wire(), sid, session, session }) catch null;
+    return std.fmt.bufPrint(out, "python3 {s} host start {s} {s} --tmux {s}", .{ READER, provider.wire(), sid, session }) catch null;
 }
 
 pub const MoveTarget = enum { terminal, chat };
@@ -134,6 +143,82 @@ pub fn moveRequest(out: []u8, target: MoveTarget, id: u32, host: u8, sid: []cons
 
 pub fn movedReply(body: []const u8) bool {
     return std.mem.indexOf(u8, body, "\"status\":\"moved\"") != null or std.mem.indexOf(u8, body, "\"status\":\"already\"") != null;
+}
+
+fn safeProvider(value: []const u8) bool {
+    for ([_][]const u8{ "claude", "codex", "pi", "hax", "cursor" }) |name| {
+        if (std.mem.eql(u8, value, name)) return true;
+    }
+    return false;
+}
+
+pub fn restartRequest(out: []u8, id: u32, host: u8, provider: []const u8, sid: []const u8, tmux: []const u8) ?[]const u8 {
+    if (!safeSessionId(sid) or !safeName(tmux) or !safeProvider(provider)) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"host_restart\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"tmux\":\"{s}\"}}", .{ id, host, provider, sid, tmux }) catch null;
+}
+
+pub fn restartAllRequest(out: []u8, id: u32, host: u8) ?[]const u8 {
+    return std.fmt.bufPrint(out, "{{\"op\":\"host_restart\",\"id\":{d},\"host\":{d},\"all\":true}}", .{ id, host }) catch null;
+}
+
+pub fn restartedReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"restarted\"") != null;
+}
+
+pub fn restartWaitingReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"waiting\"") != null;
+}
+
+pub fn restartingReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"restarting\"") != null;
+}
+
+pub fn restartRefusedReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"refused\"") != null or std.mem.indexOf(u8, body, "\"status\":\"error\"") != null or std.mem.indexOf(u8, body, "\"status\":\"already\"") != null;
+}
+
+pub fn restartAllAnswered(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"ok\"") != null;
+}
+
+pub fn restartAllWaiting(body: []const u8) bool {
+    if (std.mem.indexOf(u8, body, "\"waiting\":") == null) return false;
+    return std.mem.indexOf(u8, body, "\"waiting\":0") == null;
+}
+
+pub fn restartAllNothing(body: []const u8) bool {
+    return restartAllAnswered(body) and std.mem.indexOf(u8, body, "\"restarted\":0") != null;
+}
+
+test "IGSH-1921 a restart asks the reader for one chat or for every idle chat" {
+    var out: [512]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":7,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
+        restartRequest(&out, 7, 1, "claude", sid, "live-abc") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"provider\":\"cursor\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"live-abc\"}",
+        restartRequest(&out, 9, 0, "cursor", sid, "live-abc") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_restart\",\"id\":9,\"host\":0,\"all\":true}",
+        restartAllRequest(&out, 9, 0) orelse return error.TestUnexpectedResult);
+    try std.testing.expect(restartRequest(&out, 9, 0, "claude", "short", "live-abc") == null);
+    try std.testing.expect(restartRequest(&out, 9, 0, "claude", sid, "live-a;b") == null);
+    try std.testing.expect(restartRequest(&out, 9, 0, "bash", sid, "live-abc") == null);
+}
+
+test "IGSH-1921 a restart counts as done once the reader says the host changed" {
+    try std.testing.expect(restartedReply("{\"status\":\"restarted\",\"generation\":109}"));
+    try std.testing.expect(!restartedReply("{\"status\":\"waiting\",\"reason\":\"chat_busy\"}"));
+    try std.testing.expect(restartWaitingReply("{\"status\":\"waiting\",\"reason\":\"chat_busy\"}"));
+    try std.testing.expect(!restartWaitingReply("{\"status\":\"restarting\"}"));
+    try std.testing.expect(restartingReply("{\"status\":\"restarting\"}"));
+    try std.testing.expect(!restartingReply("{\"status\":\"restarted\"}"));
+    try std.testing.expect(restartRefusedReply("{\"status\":\"already\",\"reason\":\"not_hosted\"}"));
+    try std.testing.expect(!restartRefusedReply("{\"status\":\"restarted\"}"));
+    try std.testing.expect(!restartWaitingReply(""));
+    try std.testing.expect(restartAllAnswered("{\"status\":\"ok\",\"restarted\":2,\"waiting\":0}"));
+    try std.testing.expect(restartAllWaiting("{\"status\":\"ok\",\"restarted\":1,\"waiting\":1}"));
+    try std.testing.expect(!restartAllWaiting("{\"status\":\"ok\",\"restarted\":2,\"waiting\":0}"));
+    try std.testing.expect(restartAllNothing("{\"status\":\"ok\",\"restarted\":0,\"waiting\":0}"));
+    try std.testing.expect(!restartAllNothing("{\"status\":\"ok\",\"restarted\":1,\"waiting\":0}"));
 }
 
 test "IGSH-1653 synced named live chats restore their identity and chat view" {
@@ -202,6 +287,8 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
     try std.testing.expect(eligible("claude-code"));
     try std.testing.expect(!eligible("codex"));
     try std.testing.expect(!eligible("pi"));
+    try std.testing.expect(eligible("cursor"));
+    try std.testing.expect(eligible("agent"));
     try std.testing.expect(!eligible(""));
     try std.testing.expect(!eligible("bash"));
 }
@@ -209,7 +296,7 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
 test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude under it" {
     var out: [1024]u8 = undefined;
     const command = launchCommand(&out, "live-abc", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("tmux new-session -d -s live-abc -c ~ 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc", command);
+    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff", command);
     try std.testing.expect(std.mem.indexOf(u8, command, "handover") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "claude --session-id") == null);
@@ -223,13 +310,17 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     var out: [1024]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
     const codex = launchCommandFor(&out, .codex, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("tmux new-session -d -s live-abc -c ~ 'python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc", codex);
+    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff", codex);
     const pi = launchCommandFor(&out, .pi, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, pi, "host enable pi ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "permission-mode") == null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
     try std.testing.expect(launchCommandFor(&out, .pi, "live-abc", "~/projects", "bad") == null);
+    const cursor = launchCommandFor(&out, .cursor, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, cursor, "host enable cursor ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cursor, "host start cursor ffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cursor, "permission-mode") == null);
     const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
     try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);
@@ -239,8 +330,10 @@ test "IGSH-1546 each provider maps to the agent kind its tab shows" {
     try std.testing.expectEqual(@as(u8, 1), Provider.claude.aiAgent());
     try std.testing.expectEqual(@as(u8, 2), Provider.codex.aiAgent());
     try std.testing.expectEqual(@as(u8, 3), Provider.pi.aiAgent());
+    try std.testing.expectEqual(@as(u8, 7), Provider.cursor.aiAgent());
     try std.testing.expectEqualStrings("Codex", Provider.codex.label());
     try std.testing.expectEqualStrings("pi", Provider.pi.wire());
+    try std.testing.expectEqualStrings("cursor", Provider.cursor.wire());
 }
 
 test "IGSH-1666 hosted resumes retain provider and host identity" {

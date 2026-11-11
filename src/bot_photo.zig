@@ -1,6 +1,7 @@
 const std = @import("std");
 const w = @import("win32.zig");
 const state = @import("app_state.zig");
+const smooth = @import("smooth.zig");
 const Key = @import("bot_photo_key.zig").Key;
 const W = std.unicode.utf8ToUtf16LeStringLiteral;
 const H = w.HANDLE;
@@ -21,15 +22,13 @@ extern "gdiplus" fn GdipSetInterpolationMode(H, i32) callconv(.winapi) i32;
 extern "gdiplus" fn GdipSetPixelOffsetMode(H, i32) callconv(.winapi) i32;
 extern "gdiplus" fn GdipDrawImageRectRectI(H, H, i32, i32, i32, i32, i32, i32, i32, i32, i32, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.winapi) i32;
 extern "gdiplus" fn GdipDrawImageRectI(H, H, i32, i32, i32, i32) callconv(.winapi) i32;
+extern "gdi32" fn GdiAlphaBlend(H, i32, i32, i32, i32, H, i32, i32, i32, i32, w.BLENDFUNCTION) callconv(.winapi) w.BOOL;
 extern "gdiplus" fn GdipSaveImageToFile(H, [*:0]const u16, *const w.GUID, ?*anyopaque) callconv(.winapi) i32;
-extern "gdiplus" fn GdipCreatePath(i32, *H) callconv(.winapi) i32;
-extern "gdiplus" fn GdipAddPathEllipseI(H, i32, i32, i32, i32) callconv(.winapi) i32;
-extern "gdiplus" fn GdipSetClipPath(H, H, i32) callconv(.winapi) i32;
-extern "gdiplus" fn GdipDeletePath(H) callconv(.winapi) i32;
 const png_encoder = w.GUID{ .Data1 = 0x557cf406, .Data2 = 0x1a04, .Data3 = 0x11d3, .Data4 = .{ 0x9a, 0x73, 0, 0, 0xf8, 0x1e, 0xf3, 0x2e } };
 const png_format = w.GUID{ .Data1 = 0xb96b3caf, .Data2 = 0x0728, .Data3 = 0x11d3, .Data4 = .{ 0x9d, 0x7b, 0, 0, 0xf8, 0x1e, 0xf3, 0x2e } };
 const jpeg_format = w.GUID{ .Data1 = 0xb96b3cae, .Data2 = 0x0728, .Data3 = 0x11d3, .Data4 = .{ 0x9d, 0x7b, 0, 0, 0xf8, 0x1e, 0xf3, 0x2e } };
-const Entry = struct { key: [32]u8 = @splat(0), used: bool = false, image: H = null, age: u64 = 0 };
+const Variant = struct { width: i32 = 0, height: i32 = 0, background: u64 = 0, pixels: ?[]u32 = null, age: u64 = 0 };
+const Entry = struct { key: [32]u8 = @splat(0), used: bool = false, image: H = null, age: u64 = 0, variants: [6]Variant = @splat(.{}) };
 var cache: [64]Entry = @splat(.{});
 var clock: u64 = 0;
 var token: usize = 0;
@@ -170,11 +169,14 @@ fn unlock(mutex: H) void {
     _ = w.CloseHandle(mutex);
 }
 
+fn release(entry: *Entry) void {
+    if (entry.used and entry.image != null) _ = GdipDisposeImage(entry.image);
+    for (&entry.variants) |*variant| if (variant.pixels) |pixels| std.heap.page_allocator.free(pixels);
+    entry.* = .{};
+}
+
 fn invalidate(digest: [32]u8) void {
-    for (&cache) |*entry| if (entry.used and std.mem.eql(u8, &entry.key, &digest)) {
-        if (entry.image != null) _ = GdipDisposeImage(entry.image);
-        entry.* = .{};
-    };
+    for (&cache) |*entry| if (entry.used and std.mem.eql(u8, &entry.key, &digest)) release(entry);
 }
 
 pub fn import(digest: [32]u8, source: [*:0]const u16) bool {
@@ -304,7 +306,7 @@ pub fn draw(shell: *const state.Shell, hdc: H, rc: w.RECT) bool {
     if (entry == null) {
         var oldest = &cache[0];
         for (&cache) |*item| { if (!item.used) { oldest = item; break; } if (item.age < oldest.age) oldest = item; }
-        if (oldest.used and oldest.image != null) _ = GdipDisposeImage(oldest.image);
+        release(oldest);
         var target_buf: [768]u16 = undefined;
         const image: H = if (pathFor(digest, &target_buf)) |path| decode(path.ptr) orelse null else null;
         oldest.* = .{ .used = true, .key = digest, .image = image };
@@ -313,24 +315,69 @@ pub fn draw(shell: *const state.Shell, hdc: H, rc: w.RECT) bool {
     const item = entry.?;
     item.age = clock;
     if (item.image == null) return false;
-    var graphics: H = null;
-    if (GdipCreateFromHDC(hdc, &graphics) != 0 or graphics == null) return false;
-    defer _ = GdipDeleteGraphics(graphics);
-    var clip: H = null;
-    if (GdipCreatePath(0, &clip) != 0 or clip == null) return false;
-    defer _ = GdipDeletePath(clip);
     const width = rc.right - rc.left;
     const height = rc.bottom - rc.top;
-    if (GdipAddPathEllipseI(clip, rc.left, rc.top, width, height) != 0 or GdipSetClipPath(graphics, clip, 0) != 0) return false;
+    if (width <= 0 or height <= 0) return false;
+    const samples = 4;
+    const surface = w.CreateCompatibleDC(hdc);
+    if (surface == null) return false;
+    defer _ = w.DeleteDC(surface);
+    const info = w.BITMAPINFO{ .header = .{ .width = width * samples, .height = -height * samples } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(surface, &info, 0, &bits, null, 0);
+    if (bitmap == null or bits == null) return false;
+    defer _ = w.DeleteObject(bitmap);
+    const old = w.SelectObject(surface, bitmap);
+    defer _ = w.SelectObject(surface, old);
+    if (w.BitBlt(surface, 0, 0, width, height, hdc, rc.left, rc.top, w.GDI_SRCCOPY) == 0) return false;
+    _ = w.GdiFlush();
+    const pixels: [*]u32 = @ptrCast(@alignCast(bits.?));
+    const stride: usize = @intCast(width * samples);
+    const rows: usize = @intCast(height * samples);
+    const len = stride * rows;
+    const visible_w: usize = @intCast(width);
+    const visible_h: usize = @intCast(height);
+    var hasher = std.hash.Wyhash.init(0);
+    for (0..visible_h) |row| hasher.update(std.mem.sliceAsBytes(pixels[row * stride ..][0..visible_w]));
+    const background = hasher.final();
+    var slot = &item.variants[0];
+    for (&item.variants) |*variant| {
+        if (variant.pixels != null and variant.width == width and variant.height == height and variant.background == background) {
+            variant.age = clock;
+            for (0..visible_h) |row| @memcpy(pixels[row * stride ..][0..visible_w], variant.pixels.?[row * visible_w ..][0..visible_w]);
+            return GdiAlphaBlend(hdc, rc.left, rc.top, width, height, surface, 0, 0, width, height, .{}) != 0;
+        }
+        if (variant.age < slot.age) slot = variant;
+    }
+    var y = rows;
+    while (y > 0) {
+        y -= 1;
+        var x = stride;
+        while (x > 0) {
+            x -= 1;
+            pixels[y * stride + x] = pixels[(y / samples) * stride + x / samples];
+        }
+    }
+    var graphics: H = null;
+    if (GdipCreateFromHDC(surface, &graphics) != 0 or graphics == null) return false;
     _ = GdipSetInterpolationMode(graphics, 7);
-    return GdipDrawImageRectI(graphics, item.image, rc.left, rc.top, width, height) == 0;
+    _ = GdipSetPixelOffsetMode(graphics, 4);
+    const drawn = GdipDrawImageRectI(graphics, item.image, 0, 0, width * samples, height * samples) == 0;
+    _ = GdipDeleteGraphics(graphics);
+    if (!drawn) return false;
+    _ = w.GdiFlush();
+    smooth.resolveRounded(pixels[0..len], @intCast(width), @intCast(height), samples, .{ .x = 0, .y = 0, .width = @floatFromInt(width * samples), .height = @floatFromInt(height * samples), .radius = @as(f32, @floatFromInt(@min(width, height) * samples)) / 2 });
+    if (slot.pixels) |old_pixels| std.heap.page_allocator.free(old_pixels);
+    slot.* = .{};
+    if (std.heap.page_allocator.alloc(u32, visible_w * visible_h)) |copy| {
+        for (0..visible_h) |row| @memcpy(copy[row * visible_w ..][0..visible_w], pixels[row * stride ..][0..visible_w]);
+        slot.* = .{ .width = width, .height = height, .background = background, .pixels = copy, .age = clock };
+    } else |_| {}
+    return GdiAlphaBlend(hdc, rc.left, rc.top, width, height, surface, 0, 0, width, height, .{}) != 0;
 }
 
 pub fn shutdown() void {
-    for (&cache) |*entry| {
-        if (entry.used and entry.image != null) _ = GdipDisposeImage(entry.image);
-        entry.* = .{};
-    }
+    for (&cache) |*entry| release(entry);
     if (token != 0) GdiplusShutdown(token);
     token = 0;
 }

@@ -121,7 +121,9 @@ fn pollFonts() void {
     .replaceAll('@import("inbox.zig").', '')
     .replaceAll('@import("focus.zig").', '')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
-    .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole');
+    .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole')
+    .replaceAll('@import("native_session.zig").restyle', 'nativeRestyle')
+    .replaceAll('@import("native_session.zig")', 'NativeSession');
   const fontConstants = read('fonts.zig').split('\n').filter(line => /^pub const (?:SHELL_FACE|SHELL_WEIGHT|MONO_FACE|MONO_SEMIBOLD) =/.test(line)).join('\n');
   return prelude + `\n${shellIds}\nconst font_policy = struct { ${fontConstants} };\n` + production + tests;
 }
@@ -169,7 +171,18 @@ const Shell = struct {
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
     favorite: bool = false, inbox_excluded: bool = false, muted: bool = false,
+    native_terminal: bool = false, console_inflight: bool = false,
 };
+fn nativeRestyle(_: u32) void {}
+const NativeSession = struct {
+    fn alive(_: u32) bool { return true; }
+    fn connect(_: u32) bool { return true; }
+    fn ready(_: u32, _: bool) void {}
+    fn ensureWindow(_: u32) bool { return false; }
+};
+comptime {
+    _ = NativeSession.alive(0);
+}
 const empty_shell: Shell = .{};
 const MAX_SHELLS = 8;
 const LOOK_UNIFIED = true;
@@ -652,6 +665,10 @@ test "registration failure cannot masquerade as the shell font and mintty bypass
     try std.testing.expectEqual(g_font_gen, shells[0].font_gen);
 }
 `;
+
+test('native terminal font sync does not attach a console', () => {
+  assert.match(fn(consoleSource, 'fontSyncShell'), /if \(app_state\.shells\[i\]\.native_terminal\)/);
+});
 
 test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
   assert.match(fn(chat, 'closeChatView'), /chatHistoryStreamsKeep\(0\)/);

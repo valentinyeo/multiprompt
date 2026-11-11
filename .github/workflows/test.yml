@@ -52,7 +52,7 @@ jobs:
   test:
     name: test-windows (${{ matrix.group }})
     runs-on: windows-latest
-    timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
+    timeout-minutes: ${{ matrix.group == 1 && 15 || matrix.group == 3 && 15 || 10 }}
     strategy:
       fail-fast: false
       matrix:
@@ -226,6 +226,9 @@ jobs:
         run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs
       - name: Verify responsive startup ordering and original regression controls
         run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js
+      - name: Test the test laptop release check
+        if: steps.paths.outputs.heavy == 'true'
+        run: node --test tools/laptop-check/run.test.js
       - name: Test the chat view shows one row per message id
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/chat-message-rows.test.js
@@ -409,6 +412,9 @@ jobs:
       - name: Test notification relay
         if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
         run: python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v
+      - name: Test session broadcast
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        run: python3 -m unittest tools/agent-notifications/broadcast-test.py -v
       - name: Test release version
         if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
         run: node --test tools/release-version.test.mjs

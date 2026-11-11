@@ -432,6 +432,7 @@ pub const Shell = struct {
     eta_first_est_s: u32 = 0,
     eta_active_start_tick: u64 = 0,
     ssh_reconnect: @import("ssh_reconnect.zig").State = .{},
+    native_terminal: bool = false,
 };
 
 pub const BrowserNavigationIntent = enum { background, select_preserve_focus, select_and_focus };
@@ -645,6 +646,7 @@ pub var g_browser_dragging: bool = false;
 pub const BROWSER_SUSPEND_DEFAULT_MIN: u32 = 15;
 pub const BROWSER_SUSPEND_SAVING_MIN: u32 = 5;
 pub var g_external_browser_links: bool = true;
+pub var g_shared_server_connection: bool = false;
 pub var g_browser_autosuspend: bool = true;
 pub var g_browser_suspend_min: u32 = BROWSER_SUSPEND_DEFAULT_MIN;
 pub const BROWSER_FREEZE_PARK_MS_AC: u64 = 120_000;
@@ -741,6 +743,7 @@ pub var g_workspace_hover: ?u8 = null;
 pub var g_sidebar_hover: ?u32 = null;
 pub var g_room_hover: ?HitTarget = null;
 pub var g_inbox_button_hover: bool = false;
+pub var g_chat_title_inbox_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;
 
@@ -1449,6 +1452,7 @@ pub const SEARCH_OPENALL_HOST_UK_OFFSET: usize = 5005;
 pub const SEARCH_OPENALL_HOST_INNE_OFFSET: usize = 5006;
 pub const SEARCH_NEW_CLAUDE_CHAT_OFFSET: usize = 5100;
 pub const SEARCH_NEW_PI_CHAT_OFFSET: usize = 5101;
+pub const SEARCH_NEW_CURSOR_CHAT_OFFSET: usize = 5108;
 pub const SEARCH_NEW_TERMINAL_OFFSET: usize = 5102;
 pub const SEARCH_OPEN_SESSION_MENU_OFFSET: usize = 5103;
 pub const SEARCH_SHELLS_MENU_OFFSET: usize = 5104;
@@ -1511,6 +1515,7 @@ pub const SEARCH_BROWSER_INSTRUCT_OFFSET: usize = 6237;
 pub const SEARCH_BROWSER_FOCUS_URL_OFFSET: usize = 6238;
 pub const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET: usize = 6239;
 pub const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET: usize = 6378;
+pub const SEARCH_SHARED_SERVER_CONNECTION_OFFSET: usize = 6388;
 pub const SEARCH_BROWSER_AUTOSUSPEND_OFFSET: usize = 6240;
 pub const SEARCH_CHANGELOG_OFFSET: usize = 6241;
 pub const SEARCH_BROWSER_BACK_OFFSET: usize = 6242;
@@ -1599,6 +1604,9 @@ pub const SEARCH_CHAT_NEWEST_OFFSET: usize = 6465;
 pub const SEARCH_CHAT_MORE_MENU_OFFSET: usize = 6466;
 pub const SEARCH_CHAT_RESYNC_OFFSET: usize = 6493;
 pub const SEARCH_CHAT_SELECTION_MENU_OFFSET: usize = 6494;
+pub const SEARCH_CHAT_EXPAND_TABLE_OFFSET: usize = 6495;
+pub const SEARCH_CHAT_RESTART_OFFSET: usize = 6496;
+pub const SEARCH_CHAT_RESTART_ALL_OFFSET: usize = 6497;
 pub const SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362;
 pub const SEARCH_CHAT_COPY_SELECTION_OFFSET: usize = 6363;
 pub const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET: usize = 6469;
@@ -1609,6 +1617,7 @@ pub const SEARCH_CHAT_MODE_MANUAL_OFFSET: usize = 12001;
 pub const SEARCH_CHAT_MODE_EDITS_OFFSET: usize = 12002;
 pub const SEARCH_CHAT_MODE_BYPASS_OFFSET: usize = 12009;
 pub const SEARCH_CHAT_PLUS_MENU_OFFSET: usize = 12010;
+pub const SEARCH_CHAT_MODEL_FABLE_OFFSET: usize = 12011;
 pub const SEARCH_CHAT_QUEUE_SEND_OFFSET: usize = 6365;
 pub const SEARCH_CHAT_RESET_OFFSET: usize = 6394;
 pub const SEARCH_CHAT_TAB_URL_OFFSET: usize = 6384;
@@ -2458,6 +2467,8 @@ pub const SSH_ERROR_MODE: DWORD = 0x0001 | 0x8000;
 
 pub var g_ssh_path: [520]u8 = undefined;
 pub var g_ssh_path_len: usize = 0;
+pub var g_ssh_config: [520]u8 = undefined;
+pub var g_ssh_config_len: usize = 0;
 pub var g_ssh_resolved = false;
 pub var g_ssh_mutex: SpinMutex = .{};
 pub var g_ssh_notice_sent = false;
@@ -2610,7 +2621,7 @@ pub const VPS_PROBE_SCRIPT =
     "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; " ++
     "printf '\\n'; ";
-pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null";
+pub const VPS_TMUX_LIST_SCRIPT = "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host list --tmux-format 2>/dev/null; true";
 
 pub var g_vps_poll_leader_mutex: HANDLE = null;
 pub var g_vps_poll_is_leader: bool = false;
@@ -4108,3 +4119,4 @@ pub var g_shell_double_click_pending: ?ShellDoubleClick = null;
 
 pub const SEARCH_SETTINGS_OFFSET: usize = 4002;
 pub const SEARCH_WORKSPACE_COLOR_OFFSET: usize = 4003;
+pub const SEARCH_SERVERS_OFFSET: usize = 4004;

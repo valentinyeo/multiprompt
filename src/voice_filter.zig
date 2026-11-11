@@ -58,7 +58,7 @@ pub fn isClaudeChrome(raw: []const u16) bool {
         starts(body, "plan mode") or starts(body, "shells ") or starts(body, "agents ") or
         starts(body, "tokens ") or starts(body, "cost "))) or
         (line[0] == 0x23F5 and (contains(body, "bypass permissions") or contains(body, "accept edits") or contains(body, "plan mode"))) or
-        ((starts(body, "Opus ") or starts(body, "Sonnet ") or starts(body, "Haiku ")) and
+        ((starts(body, "Opus ") or starts(body, "Sonnet ") or starts(body, "Haiku ") or starts(body, "Fable ")) and
             (contains(body, " | ") or contains(body, " · ") or contains(body, " tokens") or contains(body, "$")))) return true;
 
     if ((starts(body, "Ran ") or starts(body, "Running ")) and contains(body, "shell command")) return true;

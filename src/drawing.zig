@@ -73,8 +73,8 @@ const paletteAnchoredBesideBrowser = @import("browser_pane.zig").paletteAnchored
 const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
 const voiceStatusLabel = @import("voice.zig").voiceStatusLabel;
-const inboxPublishesShell = @import("inbox.zig").inboxPublishesShell;
 const inboxRelTime = @import("inbox.zig").inboxRelTime;
+const inboxUnreadCount = @import("inbox.zig").unreadCount;
 
 pub fn drawAscii(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void {
     var buf: [128]u16 = undefined;
@@ -287,7 +287,7 @@ pub fn searchOverlayW() i32 {
 }
 
 pub fn searchFooterH() i32 {
-    return uiScaled(44);
+    return uiScaled(12);
 }
 
 pub fn searchOverlayOy(win_h: i32, overlay_h: i32) i32 {
@@ -632,6 +632,7 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
 pub const ChatTitleLayout = struct {
     pill: RECT,
     more: RECT,
+    inbox: RECT,
     icon: RECT,
     has_icon: bool,
     text: RECT,
@@ -678,7 +679,8 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const margin = uiScaled(12);
     var layout: ChatTitleLayout = std.mem.zeroes(ChatTitleLayout);
     layout.more = .{ .left = column.right - margin - pill_h, .top = pill_top, .right = column.right - margin, .bottom = pill_top + pill_h };
-    var right_limit = layout.more.left - margin;
+    layout.inbox = .{ .left = layout.more.left - margin - pill_h, .top = pill_top, .right = layout.more.left - margin, .bottom = pill_top + pill_h };
+    var right_limit = layout.inbox.left - margin;
     const now = GetTickCount64();
     const meta = chatTitleMetaText(now);
     layout.meta = meta;
@@ -687,7 +689,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         const width = @min(meta_w, @divTrunc((column.right - column.left) * 2, 5));
         const meta_h = pill_h - uiScaled(4);
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
-        layout.meta_pill = .{ .left = layout.more.left - margin - width, .top = top, .right = layout.more.left - margin, .bottom = top + meta_h };
+        layout.meta_pill = .{ .left = layout.inbox.left - margin - width, .top = top, .right = layout.inbox.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
         layout.meta_warn = app_state.g_cap_msg_until > now;
         right_limit = layout.meta_pill.left - margin;
@@ -707,6 +709,69 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     layout.icon = .{ .left = layout.pill.left + uiScaled(8), .top = icon_top, .right = layout.pill.left + uiScaled(8) + icon_size, .bottom = icon_top + icon_size };
     layout.text = .{ .left = layout.pill.left + pad + icon_w, .top = pill_top, .right = layout.pill.right - pad, .bottom = pill_top + pill_h };
     return layout;
+}
+
+pub fn chatTitleInboxHit(x: i32, y: i32) bool {
+    const layout = chatTitleLayout() orelse return false;
+    const r = layout.inbox;
+    return x >= r.left and x < r.right and y >= r.top and y < r.bottom;
+}
+
+pub fn chatTitleInboxTooltip() ?RECT {
+    const layout = chatTitleLayout() orelse return null;
+    const pad = uiScaled(10);
+    const width = measureTitleText(uiFontSubtitle(), std.mem.span(L("Inbox"))) + pad * 2;
+    const height = uiScaled(26);
+    const cx = @divTrunc(layout.inbox.left + layout.inbox.right, 2);
+    const top = layout.inbox.bottom + uiScaled(6);
+    return RECT{ .left = cx - @divTrunc(width, 2), .top = top, .right = cx - @divTrunc(width, 2) + width, .bottom = top + height };
+}
+
+fn paintInboxGlyph(hdc: HANDLE, r: RECT, glyph: u32) void {
+    var canvas = smooth.Canvas.init(hdc);
+    defer canvas.deinit();
+    const width: f32 = @floatFromInt(@max(1, uiScaled(2)));
+    const cx = @divTrunc(r.left + r.right, 2);
+    const cy = @divTrunc(r.top + r.bottom, 2);
+    canvas.strokePolyline(&.{
+        .{ .x = cx - uiScaled(7), .y = cy - uiScaled(4) },
+        .{ .x = cx + uiScaled(7), .y = cy - uiScaled(4) },
+        .{ .x = cx + uiScaled(7), .y = cy + uiScaled(5) },
+        .{ .x = cx - uiScaled(7), .y = cy + uiScaled(5) },
+        .{ .x = cx - uiScaled(7), .y = cy - uiScaled(4) },
+    }, glyph, width);
+    canvas.strokePolyline(&.{
+        .{ .x = cx - uiScaled(4), .y = cy + uiScaled(1) },
+        .{ .x = cx - uiScaled(2), .y = cy + uiScaled(3) },
+        .{ .x = cx + uiScaled(2), .y = cy + uiScaled(3) },
+        .{ .x = cx + uiScaled(4), .y = cy + uiScaled(1) },
+    }, glyph, width);
+}
+
+fn paintTitleInboxButton(hdc: HANDLE, r: RECT, border: u32, fill: u32, edge: i32) void {
+    const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
+    const radius = @divTrunc(r.bottom - r.top, 2);
+    const bg = if (app_state.g_chat_title_inbox_hover) tintColor(fill, customColorOr("accent", RGB(80, 150, 255)), 2, 8) else fill;
+    fillRoundRectAA(hdc, r, radius, border);
+    fillRoundRectAA(hdc, .{ .left = r.left + edge, .top = r.top + edge, .right = r.right - edge, .bottom = r.bottom - edge }, radius - edge, bg);
+    paintInboxGlyph(hdc, r, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
+    if (inboxUnreadCount() > 0) {
+        drawAttentionDot(hdc, r.right - uiScaled(2), r.top + uiScaled(2), uiScaled(3), customColorOr("attention", RGB(60, 120, 220)));
+    }
+}
+
+fn paintTitleInboxTooltip(hdc: HANDLE) void {
+    const r = chatTitleInboxTooltip() orelse return;
+    const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
+    const window_layout = @import("window_layout.zig");
+    fillRoundRectAA(hdc, r, uiScaled(6), window_layout.chatSurfaceBorderColor());
+    const edge = window_layout.chatSurfaceBorderW();
+    fillRoundRectAA(hdc, .{ .left = r.left + edge, .top = r.top + edge, .right = r.right - edge, .bottom = r.bottom - edge }, uiScaled(6) - edge, app_state.g_chat_input_color);
+    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SetBkMode(hdc, TRANSPARENT);
+    _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
+    var text = r;
+    drawAscii(hdc, "Inbox", &text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 fn paintMoreButton(hdc: HANDLE, more: RECT, border: u32, fill: u32, edge: i32) void {
@@ -752,7 +817,9 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         var text = layout.text;
         _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
+    paintTitleInboxButton(hdc, layout.inbox, border, fill, edge);
     paintMoreButton(hdc, layout.more, border, fill, edge);
+    if (app_state.g_chat_title_inbox_hover) paintTitleInboxTooltip(hdc);
     if (layout.meta.len > 0) {
         const meta_r = layout.meta_pill;
         fillRoundRectAA(hdc, meta_r, @divTrunc(meta_r.bottom - meta_r.top, 2), border);
@@ -1016,8 +1083,6 @@ pub fn paintInboxButtonTooltip(hdc: HANDLE, in_overlay: bool) void {
 }
 
 pub fn paintInboxButton(hdc: HANDLE, in_overlay: bool) void {
-    var canvas = smooth.Canvas.init(hdc);
-    defer canvas.deinit();
     const r = inboxButtonRect(in_overlay);
     const bg = if (in_overlay) themeConsoleBg() else themeSidebarBg();
     const button_bg = tintColor(bg, customColorOr("accent", RGB(80, 150, 255)), if (app_state.g_inbox_button_hover) 2 else 1, if (app_state.g_inbox_button_hover) 8 else 16);
@@ -1031,29 +1096,9 @@ pub fn paintInboxButton(hdc: HANDLE, in_overlay: bool) void {
     _ = DeleteObject(brush);
     _ = DeleteObject(pen);
 
-    const glyph = customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225));
-    const width: f32 = @floatFromInt(@max(1, uiScaled(2)));
-    const cx = @divTrunc(r.left + r.right, 2);
-    const cy = @divTrunc(r.top + r.bottom, 2);
-    canvas.strokePolyline(&.{
-        .{ .x = cx - uiScaled(7), .y = cy - uiScaled(4) },
-        .{ .x = cx + uiScaled(7), .y = cy - uiScaled(4) },
-        .{ .x = cx + uiScaled(7), .y = cy + uiScaled(5) },
-        .{ .x = cx - uiScaled(7), .y = cy + uiScaled(5) },
-        .{ .x = cx - uiScaled(7), .y = cy - uiScaled(4) },
-    }, glyph, width);
-    canvas.strokePolyline(&.{
-        .{ .x = cx - uiScaled(4), .y = cy + uiScaled(1) },
-        .{ .x = cx - uiScaled(2), .y = cy + uiScaled(3) },
-        .{ .x = cx + uiScaled(2), .y = cy + uiScaled(3) },
-        .{ .x = cx + uiScaled(4), .y = cy + uiScaled(1) },
-    }, glyph, width);
+    paintInboxGlyph(hdc, r, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
 
-    var count: u32 = 0;
-    for (0..app_state.shell_count) |i| {
-        if (app_state.shells[i].needs_attention and !app_state.shells[i].muted and inboxPublishesShell(&app_state.shells[i]) and
-            (!app_state.g_single_window or !app_state.g_ws_snoozed[app_state.shells[i].workspace])) count += 1;
-    }
+    const count = inboxUnreadCount();
     if (count > 0) {
         const blue = customColorOr("attention", RGB(60, 120, 220));
         const radius = uiScaled(if (count < 10) @as(i32, 7) else 9);

@@ -173,20 +173,24 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const frequent = @import("frequent.zig");
+const MAX_SHELLS = 8;
 const MAX_ROWS = 8;
+const SidebarTier = enum { recent, pinned };
 const LOOK_UNIFIED = false;
 const DEV_TOP_PAD = 0;
 const GROUP_HEADER_H = 24;
-const Row = struct { kind: enum { header, tab, inbox }, gidx: u32, shell_idx: u32, y: i32 };
+const Row = struct { kind: enum { section, header, tab, inbox }, gidx: u32, shell_idx: u32, section_tier: SidebarTier = .recent, y: i32 };
 const InboxRow = struct { ws: u32, favorite: bool };
 pub var local_favorite = true;
 pub const app_state = struct {
     const MAX_SESSION_ROWS = 8;
     var g_starred_workspace = true;
     var g_single_window = true;
+    var g_sidebar_collapsed = false;
+    var g_recents_section_collapsed = false;
     var g_active_workspace: u8 = 0;
     var shell_count: u32 = 1;
-    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0, pinned_top: bool = false, starred_pinned_top: bool = false }{.{}};
+    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0, pinned_top: bool = false, starred_pinned_top: bool = false, last_active: u64 = 0 }{.{}};
     var group_count: u32 = 0;
     var groups = [_]struct { id: u32, collapsed: bool }{.{ .id = 17, .collapsed = false }};
     var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
@@ -195,6 +199,9 @@ pub const app_state = struct {
     var g_inbox_row_count: u32 = 3;
     var g_inbox_rows = [_]InboxRow{ .{ .ws = 0, .favorite = true }, .{ .ws = 1, .favorite = true }, .{ .ws = 1, .favorite = false } };
 };
+inline fn effLa(i: usize) u64 { return app_state.shells[i].last_active; }
+fn sidebarHasVisibleSessions() bool { return true; }
+fn sidebarSectionCollapsed(tier: SidebarTier) bool { return tier == .recent and app_state.g_recents_section_collapsed; }
 fn groupHeaderHeight() i32 { return GROUP_HEADER_H; }
 fn sectionHeaderHeight() i32 { return GROUP_HEADER_H; }
 fn wsStripHeight() i32 { return 40; }
@@ -202,11 +209,13 @@ fn tabRowH() i32 { return 32; }
 ${production}
 test "IGSH-457 Starred mirrors local and other-account window favorites after star and unstar" {
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 2), layoutRowsInner(&rows));
-    try std.testing.expectEqual(.tab, rows[0].kind);
+    try std.testing.expectEqual(@as(u32, 3), layoutRowsInner(&rows));
+    try std.testing.expectEqual(.section, rows[0].kind);
     try std.testing.expectEqual(@as(i32, 92), rows[0].y);
-    try std.testing.expectEqual(.inbox, rows[1].kind);
-    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(.tab, rows[1].kind);
+    try std.testing.expectEqual(@as(i32, 116), rows[1].y);
+    try std.testing.expectEqual(.inbox, rows[2].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
     local_favorite = false;
     app_state.g_inbox_rows[1].favorite = false;
     try std.testing.expectEqual(@as(u32, 0), layoutRowsInner(&rows));

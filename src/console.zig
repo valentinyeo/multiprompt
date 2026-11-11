@@ -840,6 +840,11 @@ pub fn fontSyncMarkAllStale(hwnd: HANDLE, reason: []const u8) void {
 
 pub fn fontSyncActiveNow() void {
     if (app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.shells[app_state.active_shell].native_terminal) {
+        @import("native_session.zig").restyle(app_state.shells[app_state.active_shell].shell_id);
+        app_state.shells[app_state.active_shell].font_gen = app_state.g_font_gen;
+        return;
+    }
     if (shellProcessAliveForRead(app_state.active_shell)) {
         _ = normalizeConsoleFont(app_state.active_shell, app_state.shells[app_state.active_shell].pid);
     }
@@ -847,6 +852,11 @@ pub fn fontSyncActiveNow() void {
 
 pub fn fontSyncShell(i: usize) bool {
     if (i >= app_state.shell_count) return false;
+    if (app_state.shells[i].native_terminal) {
+        @import("native_session.zig").restyle(app_state.shells[i].shell_id);
+        app_state.shells[i].font_gen = app_state.g_font_gen;
+        return false;
+    }
     if (app_state.shells[i].hwnd == null or !shellProcessAliveForRead(i)) {
         app_state.shells[i].font_gen = app_state.g_font_gen;
         return false;
@@ -1190,6 +1200,7 @@ pub fn resolveSshPath(force: bool) bool {
         @memcpy(app_state.g_ssh_path[0..candidate.len], candidate);
         app_state.g_ssh_path_len = candidate.len;
         debugLog2("ssh: selected working executable: ", candidate);
+        loadSshConfig();
         return true;
     }
     debugLog("ssh: no working ssh.exe found");
@@ -1198,6 +1209,43 @@ pub fn resolveSshPath(force: bool) bool {
         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SSH_UNAVAILABLE, 0, 0);
     }
     return false;
+}
+
+fn loadSshConfig() void {
+    app_state.g_ssh_config_len = 0;
+    var config_buf: [520]u8 = undefined;
+    const config = @import("ssh_identity.zig").configFile(&config_buf) orelse return;
+    if (config.len >= app_state.g_ssh_config.len) return;
+    const file = win32OpenRead(config) orelse return;
+    _ = CloseHandle(file);
+    @memcpy(app_state.g_ssh_config[0..config.len], config);
+    app_state.g_ssh_config_len = config.len;
+    debugLog2("ssh: using Multibot key settings: ", config);
+}
+
+pub fn setSshConfig(path: ?[]const u8) void {
+    while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
+    defer app_state.g_ssh_mutex.unlock();
+    const value = path orelse "";
+    app_state.g_ssh_config_len = 0;
+    if (value.len >= app_state.g_ssh_config.len) return;
+    @memcpy(app_state.g_ssh_config[0..value.len], value);
+    app_state.g_ssh_config_len = value.len;
+}
+
+pub fn sshExePath(out: []u8) ?[]const u8 {
+    while (!app_state.g_ssh_mutex.tryLock()) Sleep(1);
+    defer app_state.g_ssh_mutex.unlock();
+    const path = app_state.g_ssh_path[0..app_state.g_ssh_path_len];
+    if (path.len == 0 or path.len > out.len) return null;
+    @memcpy(out[0..path.len], path);
+    return out[0..path.len];
+}
+
+pub fn sshExeOf(prefix: []const u8) []const u8 {
+    if (prefix.len < 2 or prefix[0] != '"') return std.mem.trim(u8, prefix, "\" ");
+    const end = std.mem.indexOfScalarPos(u8, prefix, 1, '"') orelse return prefix[1..];
+    return prefix[1..end];
 }
 
 pub fn sshLoaderFailed(proc: HANDLE) void {
@@ -1210,6 +1258,8 @@ pub fn sshSpawnFailed() void {
     _ = resolveSshPath(true);
 }
 
+pub const SSH_HELPER_FLAGS: u32 = 0x00000008;
+
 pub fn appendSshExe(buf: anytype, pos: *usize) bool {
     if (@import("launch_cache.zig").pending or (app_state.g_main_hwnd != null and @import("win32.zig").GetCurrentThreadId() == GetWindowThreadProcessId(app_state.g_main_hwnd, null))) {
         if (!app_state.g_ssh_mutex.tryLock()) return false;
@@ -1220,6 +1270,7 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
     defer app_state.g_ssh_mutex.unlock();
     const path = app_state.g_ssh_path[0..app_state.g_ssh_path_len];
     if (path.len == 0) return false;
+    const config = app_state.g_ssh_config[0..app_state.g_ssh_config_len];
     if (@TypeOf(buf[0]) == u16) {
         var wide: [520]u16 = undefined;
         const wpath = win32WidePath(&wide, path) orelse return false;
@@ -1230,9 +1281,19 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
         pos.* += wpath.len;
         buf[pos.*] = '"';
         pos.* += 1;
-        return appendWideAscii(buf, pos, " ");
+        if (!appendWideAscii(buf, pos, " ")) return false;
+        if (config.len == 0) return true;
+        var wide_config: [520]u16 = undefined;
+        const wconfig = win32WidePath(&wide_config, config) orelse return false;
+        if (!appendWideAscii(buf, pos, "-F \"")) return false;
+        if (pos.* + wconfig.len + 2 > buf.len) return false;
+        @memcpy(buf[pos.* .. pos.* + wconfig.len], wconfig);
+        pos.* += wconfig.len;
+        return appendWideAscii(buf, pos, "\" ");
     } else {
-        return appendAsciiBuf(buf, pos, "\"") and appendAsciiBuf(buf, pos, path) and appendAsciiBuf(buf, pos, "\" ");
+        if (!(appendAsciiBuf(buf, pos, "\"") and appendAsciiBuf(buf, pos, path) and appendAsciiBuf(buf, pos, "\" "))) return false;
+        if (config.len == 0) return true;
+        return appendAsciiBuf(buf, pos, "-F \"") and appendAsciiBuf(buf, pos, config) and appendAsciiBuf(buf, pos, "\" ");
     }
 }
 
@@ -1371,7 +1432,7 @@ fn tunnelModeAfterFailure(mode: u32, failures: u8) u32 {
     return if (mode >= 3 or (mode == 2 and failures >= 2)) 0 else mode;
 }
 
-fn tunnelRetryMs(failures: u8) u64 {
+pub fn tunnelRetryMs(failures: u8) u64 {
     return switch (failures) {
         0 => 5000,
         1 => 15_000,
@@ -1461,8 +1522,7 @@ fn maintainTunnelKeeper(host: u8) void {
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    const CREATE_NO_WINDOW_FLAG: DWORD = 0x08000000;
-    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 0, CREATE_NO_WINDOW_FLAG, null, null, &si, &pi) == 0) {
+    if (CreateProcessW(null, @ptrCast(&cmd), null, null, 0, SSH_HELPER_FLAGS, null, null, &si, &pi) == 0) {
         app_state.g_tunnel_relay_mode[host_idx].store(tunnelModeAfterFailure(mode, app_state.g_tunnel_keeper_failures[host_idx]), .release);
         sshSpawnFailed();
         debugLog2("tunnel-keeper: spawn failed host=", tmuxHostLongLabel(host));
@@ -1805,6 +1865,93 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
     return spawnShellWithSession(.tmux, session, null, null);
 }
 
+fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {
+    const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
+    const native = @import("native_session.zig");
+    const opened = native.open(kind, tmux_session, shell_id, false) orelse return false;
+    app_state.shells[idx] = .{
+        .console_inflight = true,
+        .native_terminal = true,
+        .chat_id = app_state.g_pending_chat_id,
+        .hwnd = opened.hwnd,
+        .process = null,
+        .pid = 0,
+        .kind = kind,
+        .name = std.mem.zeroes([64]u16),
+        .name_len = 0,
+        .name_source = .default,
+        .notified = false,
+        .activity = .idle,
+        .working_since_ms = 0,
+        .needs_attention = false,
+        .last_title = std.mem.zeroes([256]u16),
+        .last_title_len = 0,
+        .tmux_session = std.mem.zeroes([64]u8),
+        .tmux_session_len = 0,
+        .muted = false,
+        .favorite = app_state.g_starred_workspace and app_state.g_pending_new_tab_group != 0,
+        .inbox_excluded = false,
+        .keep_alive = false,
+        .cached_cwd = std.mem.zeroes([512]u8),
+        .cached_cwd_len = 0,
+        .ram_mb = 0,
+        .tmux_detect_streak = 0,
+        .claude_session = false,
+        .wait_handle = null,
+        .shell_id = shell_id,
+        .title_id = title_id,
+        .favicon_hicon = null,
+        .favicon_path = std.mem.zeroes([512]u8),
+        .group_id = 0,
+        .selected = false,
+        .favicon_path_len = 0,
+        .tmux_host = opened.host,
+        .spawn_tick = GetTickCount64(),
+        .ssh_reconnect = .{
+            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .creating_session = creating_session,
+        },
+        .full_width = false,
+        .browser_split_permille = BROWSER_SPLIT_DEFAULT_PERMILLE,
+        .last_active = 0,
+    };
+    if (tmux_session) |session| {
+        const session_len: u32 = @intCast(@min(session.len, app_state.shells[idx].tmux_session.len - 1));
+        if (session_len > 0) {
+            @memcpy(app_state.shells[idx].tmux_session[0..session_len], session[0..session_len]);
+            app_state.shells[idx].tmux_session_len = session_len;
+        }
+    }
+    if (app_state.g_pending_tmux_identity) |identity| {
+        @memcpy(app_state.shells[idx].tmux_identity[0..identity.len], identity);
+        app_state.shells[idx].tmux_identity_len = @intCast(identity.len);
+    }
+    setDefaultName(&app_state.shells[idx], kind, shell_id);
+    app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], pending_chat_view);
+    if (background_workspace) |workspace| {
+        app_state.shells[idx].workspace = workspace;
+    } else if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
+    app_state.shells[idx].font_gen = app_state.g_font_gen;
+    app_state.shell_count += 1;
+    if (!app_state.g_restoring) {
+        if (tmux_session) |session| {
+            @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
+            app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+        }
+    }
+    if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
+    if (app_state.shells[idx].chat_view_on or app_state.g_chat_active) {
+        app_state.shells[idx].console_inflight = false;
+    } else if (!native.connect(shell_id)) native.ready(shell_id, false);
+    registerShellExitWait(idx);
+    if (!app_state.g_restoring and background_workspace == null) {
+        if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(idx) else switchToShell(idx);
+        requestShellRefocus(20, 12);
+        saveSession();
+    }
+    return true;
+}
+
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
     if (app_state.g_account_locked) return false;
     const pending_chat_view = app_state.g_pending_chat_view;
@@ -1825,6 +1972,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     const shell_id = app_state.allocateShellId() orelse return false;
     const title_id = app_state.allocateConsoleTitleId() orelse return false;
     const idx = app_state.shell_count;
+    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
@@ -1881,7 +2029,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         setEnvironmentAscii(L("COLORTERM"), SSH_COLORTERM);
     }
 
-    const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying;
+    const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying or
+        (kind == .tmux and tmux_session != null and @import("chat_view.zig").isLive(tmux_session.?));
     if (asynchronous) {
         const job = std.heap.page_allocator.create(StartupShell) catch return false;
         const environment = @import("win32.zig").GetEnvironmentStringsW() orelse {
@@ -2035,6 +2184,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     if (app_state.g_account_locked) return false;
     if (idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return false;
+    if (app_state.shells[idx].native_terminal) return @import("native_session.zig").reconnect(idx);
     if (idx == app_state.active_shell) {
         app_state.g_front_period.selected = null;
         @import("main.zig").sessionFrontChanged();
@@ -2315,7 +2465,34 @@ pub fn markSshTabDisconnected(idx: u32) void {
     if (chatBenchEnabled() or idx >= app_state.shell_count or app_state.shells[idx].console_inflight) return;
     const k = app_state.shells[idx].kind;
     if (k != .vps and k != .vps2 and k != .tmux) return;
+    if (k == .tmux and app_state.shells[idx].chat_view_on and @import("chat_view.zig").isLive(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len])) {
+        const shell = &app_state.shells[idx];
+        var code: DWORD = 0;
+        if (shell.process != null and GetExitCodeProcess(shell.process, &code) != 0 and code != STILL_ACTIVE) {
+            unregisterShellExitWait(idx);
+            _ = CloseHandle(shell.process);
+            shell.process = null;
+            shell.pid = 0;
+            shell.hwnd = null;
+        }
+        shell.disconnected = false;
+        shell.ssh_reconnect = .{};
+        return;
+    }
     if (app_state.shells[idx].ssh_reconnect.phase == .closed) return;
+    if (app_state.shells[idx].native_terminal) {
+        const state_changed = !app_state.shells[idx].disconnected;
+        @import("native_session.zig").dropChannel(app_state.shells[idx].shell_id);
+        app_state.shells[idx].activity = .idle;
+        app_state.shells[idx].needs_attention = false;
+        app_state.shells[idx].disconnected = true;
+        @import("chat_send.zig").sshReconnectArm(idx, "link-exit");
+        debugLog("markSshTabDisconnected: preserving native terminal for automatic reconnect");
+        armSshReconnectTimerIfNeeded();
+        if (state_changed) @import("drawing.zig").invalidateReconnectContent(idx);
+        saveSession();
+        return;
+    }
     const state_changed = !app_state.shells[idx].disconnected;
     var exit_code: DWORD = 0;
     if (app_state.shells[idx].process != null and GetExitCodeProcess(app_state.shells[idx].process, &exit_code) != 0 and exit_code != STILL_ACTIVE) {
@@ -2508,6 +2685,11 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
 
     app_state.shells[idx].ssh_reconnect.close();
     closeBrowserForShell(idx);
+    if (app_state.shells[idx].native_terminal) {
+        @import("native_session.zig").close(app_state.shells[idx].shell_id);
+        app_state.shells[idx].hwnd = null;
+        app_state.shells[idx].native_terminal = false;
+    }
     if (app_state.shells[idx].hwnd != null) _ = ShowWindow(app_state.shells[idx].hwnd, SW_HIDE);
     unregisterShellExitWait(idx);
     if (app_state.shells[idx].favicon_hicon) |h| {
@@ -2695,7 +2877,7 @@ pub fn switchToShell(idx: u32) void {
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }
     chatAcClose();
-    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and isRemoteShellKind(app_state.shells[idx].kind)) {
+    if (idx < app_state.shell_count and app_state.shells[idx].hwnd == null and !app_state.shells[idx].native_terminal and isRemoteShellKind(app_state.shells[idx].kind) and !@import("chat_view.zig").isLive(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len])) {
         if (!app_state.shells[idx].disconnected) markSshTabDisconnected(idx);
         armSshReconnectTimerIfNeeded();
     }

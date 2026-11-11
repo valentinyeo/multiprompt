@@ -122,19 +122,12 @@ test('publish precedes start; failed start retries with permission mode', async 
   assert.equal(f.layout.tabs.length, 1);
 });
 
-test('tmux creation failure leaves a retryable claim', async () => {
+test('visible chats never create a parking pane, even without a tmux server', async () => {
   const f = await fixture();
-  const tmux = f.opts.tmux;
-  let fail = true;
-  f.opts.tmux = args => {
-    if (args[0] === 'new-session' && fail) { fail = false; return { status: 1, stderr: 'private-key' }; }
-    return tmux(args);
-  };
-  const first = await f.invoke();
-  assert.equal(first.code, 1);
-  assert.doesNotMatch(first.err, /private-key/);
-  assert.equal((await f.invoke([], { workspace: 'Other' })).code, 1);
+  f.opts.tmux = args => { assert.equal(args[0], 'has-session'); return { status: 1 }; };
   assert.equal((await f.invoke()).code, 0);
+  assert.equal((await f.invoke()).code, 0);
+  assert.equal(f.layout.tabs.length, 1);
 });
 
 test('headless repeats stay undiscoverable; visible mode promotes the same chat and task', async () => {
@@ -157,7 +150,7 @@ test('headless repeats stay undiscoverable; visible mode promotes the same chat 
   assert.equal((await f.invoke(options)).code, 1);
   assert.equal((await f.invoke(['--group', 'Other'])).code, 1);
   assert.equal(f.layout.tabs[0].group, 'Runners');
-  assert.ok(f.calls.some(call => call.includes('@mp_host_sid')));
+  assert.ok(!f.calls.some(call => call.includes('@mp_host_sid') || call.includes('new-session')));
 });
 
 test('invalid modes and groups refuse before any host setup', async () => {
@@ -196,19 +189,11 @@ test('task text travels through protocol, not command arguments', async () => {
   assert.ok(!JSON.stringify(f.calls).includes('private-key'));
 });
 
-test('lost tmux reply accepts only the claimed parking pane', async () => {
-  for (const foreign of [false, true]) {
-    const f = await fixture();
-    const tmux = f.opts.tmux;
-    f.opts.tmux = args => {
-      const result = tmux(args);
-      if (args[0] === 'new-session') return { status: 1 };
-      if (foreign && args[0] === 'display-message') return { status: 0, stdout: 'sleep|/work|foreign' };
-      return result;
-    };
-    assert.equal((await f.invoke()).code, foreign ? 1 : 0);
-    assert.equal(f.layout.tabs.length, foreign ? 0 : 1);
-  }
+test('a foreign terminal name collision is refused without creating anything', async () => {
+  const f = await fixture();
+  f.opts.tmux = args => { assert.equal(args[0], 'has-session'); return { status: 0 }; };
+  assert.equal((await f.invoke()).code, 1);
+  assert.equal(f.layout.tabs.length, 0);
 });
 
 test('failed dispatch and malformed submit do not report success', async () => {

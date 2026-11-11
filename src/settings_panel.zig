@@ -8,6 +8,8 @@ const files = @import("file_io.zig");
 const L = @import("startup.zig").L;
 const words = @import("ui_words.zon");
 const a = std.heap.page_allocator;
+const identity = @import("ssh_identity.zig");
+const ssh_servers = @import("ssh_servers.zig");
 
 extern "user32" fn IsDialogMessageW(w.HANDLE, *w.MSG) callconv(w.WINAPI) w.BOOL;
 extern "user32" fn GetKeyState(i32) callconv(w.WINAPI) i16;
@@ -24,6 +26,7 @@ pub const Control = enum(u16) {
     terminal,
     dictation,
     upload,
+    servers,
     release_notes,
 };
 
@@ -187,7 +190,7 @@ fn contentGeometry() ContentGeometry {
     const extra = if (stacked) s(40) else @as(i32, 0);
     const look = w.RECT{ .left = 0, .right = width, .top = s(24), .bottom = s(168) + extra };
     const colors = w.RECT{ .left = 0, .right = width, .top = look.bottom + s(44), .bottom = look.bottom + s(44) + s(@as(i32, @intCast(state.g_lws_count)) * 80) };
-    const keys = w.RECT{ .left = 0, .right = width, .top = colors.bottom + s(44), .bottom = colors.bottom + s(148) };
+    const keys = w.RECT{ .left = 0, .right = width, .top = colors.bottom + s(44), .bottom = colors.bottom + s(200) };
     const about = w.RECT{ .left = 0, .right = width, .top = keys.bottom + s(44), .bottom = keys.bottom + s(148) };
     return .{ .stacked = stacked, .look = look, .colors = colors, .keys = keys, .about = about };
 }
@@ -211,8 +214,8 @@ fn controlRect(control: Control) w.RECT {
             break :blk .{ .left = left, .right = left + cell, .top = top, .bottom = top + s(32) };
         },
         .terminal => .{ .left = right - s(40), .right = right, .top = g.look.top + s(110) + extra, .bottom = g.look.top + s(132) + extra },
-        .dictation, .upload => blk: {
-            const top = g.keys.top + (if (control == .dictation) @as(i32, 0) else s(52));
+        .dictation, .upload, .servers => blk: {
+            const top = g.keys.top + (if (control == .dictation) @as(i32, 0) else if (control == .upload) s(52) else s(104));
             break :blk .{ .left = s(16), .right = right, .top = top + s(4), .bottom = top + s(48) };
         },
         .release_notes => .{ .left = s(16), .right = right, .top = g.about.top + s(4), .bottom = g.about.top + s(48) },
@@ -229,6 +232,7 @@ fn label(control: Control) w.LPCWSTR {
         .terminal => L(words.settings_terminal_details),
         .dictation => L(words.settings_dictation_key),
         .upload => L(words.settings_upload_key),
+        .servers => L(words.settings_servers),
         .release_notes => L(words.settings_release_notes),
     };
 }
@@ -247,7 +251,7 @@ pub fn isOpen() bool {
 }
 
 pub fn ownsWindow(hwnd: w.HANDLE) bool {
-    return window != null and hwnd != null and (w.GetAncestor(hwnd, 2) == window or (key_window != null and w.GetAncestor(hwnd, 2) == key_window));
+    return window != null and hwnd != null and (w.GetAncestor(hwnd, 2) == window or (key_window != null and w.GetAncestor(hwnd, 2) == key_window) or (servers_window != null and w.GetAncestor(hwnd, 2) == servers_window));
 }
 
 pub fn ownsForeground() bool {
@@ -255,7 +259,7 @@ pub fn ownsForeground() bool {
 }
 
 pub fn dialogMessage(message: *w.MSG) bool {
-    return window != null and IsDialogMessageW(if (key_window != null) key_window else window, message) != 0;
+    return window != null and IsDialogMessageW(if (servers_window != null) servers_window else if (key_window != null) key_window else window, message) != 0;
 }
 
 fn uploadPath(out: []u8) ?[]const u8 {
@@ -487,6 +491,230 @@ fn openKey(control: Control) void {
     _ = @import("focus.zig").SetFocus(key_edit);
 }
 
+const server_test_id: u16 = 300;
+const server_remove_id: u16 = 310;
+const server_add_id: u16 = 320;
+const server_copy_id: u16 = 321;
+var servers_window: w.HANDLE = null;
+var server_rows: [ssh_servers.slot_count]w.HANDLE = @splat(null);
+var server_tests: [ssh_servers.slot_count]w.HANDLE = @splat(null);
+var server_removes: [ssh_servers.slot_count]w.HANDLE = @splat(null);
+var server_fields: [4]w.HANDLE = @splat(null);
+var server_paste: w.HANDLE = null;
+var server_add: w.HANDLE = null;
+var server_status: w.HANDLE = null;
+var server_paste_requested = false;
+
+fn setText(hwnd: w.HANDLE, value: []const u8) void {
+    if (hwnd == null) return;
+    var wide: [1100:0]u16 = @splat(0);
+    const n = std.unicode.utf8ToUtf16Le(wide[0..1099], value) catch 0;
+    wide[n] = 0;
+    var current: [1100]u16 = undefined;
+    const len = w.GetWindowTextW(hwnd, &current, current.len);
+    if (len >= 0 and @as(usize, @intCast(len)) == n and std.mem.eql(u16, current[0..n], wide[0..n])) return;
+    _ = w.SetWindowTextW(hwnd, &wide);
+}
+
+fn fieldText(hwnd: w.HANDLE, out: []u8) []const u8 {
+    var wide: [300]u16 = undefined;
+    const len = w.GetWindowTextW(hwnd, &wide, wide.len);
+    if (len <= 0) return "";
+    const n = std.unicode.utf16LeToUtf8(out, wide[0..@intCast(len)]) catch return "";
+    return out[0..n];
+}
+
+fn refreshServers() void {
+    if (servers_window == null) return;
+    var view: identity.View = .{};
+    identity.view(&view);
+    var any = false;
+    for (view.table) |slot| any = any or ssh_servers.listed(slot);
+    for (view.table, 0..) |slot, i| {
+        const shown = ssh_servers.listed(slot);
+        var status_buf: [300]u8 = undefined;
+        var line_buf: [900]u8 = undefined;
+        const status = ssh_servers.statusText(&status_buf, slot, view.checking == i);
+        const line = std.fmt.bufPrint(&line_buf, "{s}   {s}@{s}:{d}   {s}", .{ slot.name.get(), slot.user.get(), slot.hostname.get(), slot.port, status }) catch "";
+        setText(server_rows[i], if (shown) line else if (i == 0 and !any) words.settings_servers_empty else "");
+        _ = @import("focus.zig").ShowWindow(server_tests[i], if (shown) 5 else 0);
+        _ = @import("focus.zig").ShowWindow(server_removes[i], if (shown) 5 else 0);
+        _ = EnableWindow(server_tests[i], @intFromBool(!view.busy));
+        _ = EnableWindow(server_removes[i], @intFromBool(!view.busy));
+    }
+    _ = EnableWindow(server_add, @intFromBool(!view.busy));
+    setText(server_status, view.message.get());
+    setText(server_paste, view.paste[0..view.paste_len]);
+    if (view.paste_len == 0 and !view.busy and !server_paste_requested) {
+        server_paste_requested = true;
+        identity.loadPaste();
+    }
+}
+
+fn addServerFromForm() void {
+    var name_buf: [600]u8 = undefined;
+    var address_buf: [600]u8 = undefined;
+    var user_buf: [600]u8 = undefined;
+    var port_buf: [600]u8 = undefined;
+    if (identity.addServer(fieldText(server_fields[0], &name_buf), fieldText(server_fields[1], &address_buf), fieldText(server_fields[2], &user_buf), fieldText(server_fields[3], &port_buf))) {
+        for (server_fields) |field| _ = w.SetWindowTextW(field, L(""));
+    }
+}
+
+fn copyPasteLine() void {
+    var view: identity.View = .{};
+    identity.view(&view);
+    if (view.paste_len == 0) return;
+    var wide: [1100]u16 = undefined;
+    const n = std.unicode.utf8ToUtf16Le(&wide, view.paste[0..view.paste_len]) catch return;
+    if (@import("clipboard.zig").setUnicodeClipboardTextWithRetry(wide[0..n])) setText(server_status, words.settings_servers_copied);
+}
+
+fn confirmRemove(slot_index: usize) void {
+    var view: identity.View = .{};
+    identity.view(&view);
+    const slot = view.table[slot_index];
+    if (!ssh_servers.listed(slot)) return;
+    const text = std.fmt.allocPrint(a, "Remove {s} ({s})?\nMultibot takes its own key off that server.", .{ slot.name.get(), slot.hostname.get() }) catch return;
+    defer a.free(text);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
+    defer a.free(wide);
+    if (@import("dialog.zig").show(servers_window, wide.ptr, L(words.settings_servers_remove_title), &.{
+        .{ .label = L(words.action_cancel), .result = 7 },
+        .{ .label = L(words.settings_servers_remove), .result = 6, .destructive = true },
+    }, 0) != 6) return;
+    identity.removeServer(slot_index);
+}
+
+fn closeServers() void {
+    if (servers_window == null) return;
+    const current = servers_window;
+    _ = w.KillTimer(current, 1);
+    servers_window = null;
+    server_rows = @splat(null);
+    server_tests = @splat(null);
+    server_removes = @splat(null);
+    server_fields = @splat(null);
+    server_paste = null;
+    server_add = null;
+    server_status = null;
+    _ = EnableWindow(window, 1);
+    _ = w.DestroyWindow(current);
+    _ = @import("focus.zig").SetForegroundWindow(window);
+    _ = @import("focus.zig").SetFocus(children[index(.servers)]);
+}
+
+fn serversProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+    const prior_action = state.g_focus_user_action_tick;
+    defer state.g_focus_user_action_tick = prior_action;
+    state.g_focus_user_action_tick = if (@import("focus.zig").foregroundIsOurs()) state.g_focus_input_tick else 0;
+    switch (message) {
+        w.WM_COMMAND => {
+            const id: u16 = @truncate(wp);
+            const notification: u16 = @truncate(wp >> 16);
+            if (notification != 0) return 0;
+            if (id == 2) {
+                closeServers();
+                return 0;
+            }
+            if (id == 1 or id == server_add_id) addServerFromForm();
+            if (id == server_copy_id) copyPasteLine();
+            if (id >= server_test_id and id < server_test_id + ssh_servers.slot_count) identity.checkServer(id - server_test_id);
+            if (id >= server_remove_id and id < server_remove_id + ssh_servers.slot_count) confirmRemove(id - server_remove_id);
+            refreshServers();
+            return 0;
+        },
+        0x0113 => {
+            if (wp == 1) refreshServers();
+            return 0;
+        },
+        state.WM_CLOSE => {
+            closeServers();
+            return 0;
+        },
+        w.WM_PAINT => {
+            var ps = std.mem.zeroes(w.PAINTSTRUCT);
+            const hdc = w.BeginPaint(hwnd, &ps);
+            const rc = client(hwnd);
+            const brush = w.CreateSolidBrush(tokens.ReaderPanel);
+            _ = w.FillRect(hdc, &rc, brush);
+            _ = w.DeleteObject(brush);
+            paintText(hdc, words.settings_servers, .{ .left = s(24), .right = rc.right - s(24), .top = s(16), .bottom = s(52) }, 1, tokens.ReaderForeground, 0);
+            paintText(hdc, words.settings_servers_add, .{ .left = s(24), .right = rc.right - s(24), .top = s(200), .bottom = s(220) }, 2, tokens.ReaderHint, 0);
+            paintText(hdc, words.settings_servers_paste, .{ .left = s(24), .right = rc.right - s(24), .top = s(308), .bottom = s(328) }, 2, tokens.ReaderHint, 0);
+            _ = w.EndPaint(hwnd, &ps);
+            return 0;
+        },
+        0x0133, 0x0138 => {
+            const hdc: w.HANDLE = @ptrFromInt(wp);
+            _ = w.SetTextColor(hdc, tokens.ReaderForeground);
+            _ = w.SetBkColor(hdc, tokens.ReaderControl);
+            return @bitCast(@as(usize, @intFromPtr(edit_brush)));
+        },
+        else => return w.DefWindowProcW(hwnd, message, wp, lp),
+    }
+}
+
+fn serverChild(class: w.LPCWSTR, text: w.LPCWSTR, style: u32, x: i32, y: i32, width: i32, height: i32, id: u16) w.HANDLE {
+    const child = w.CreateWindowExW(0, class, text, 0x40000000 | 0x10000000 | style, x, y, width, height, servers_window, @ptrFromInt(id), w.GetModuleHandleW(null), null);
+    if (child != null) _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
+    return child;
+}
+
+pub fn openServers() void {
+    if (window == null or servers_window != null or key_window != null) return;
+    const instance = w.GetModuleHandleW(null);
+    var wc = std.mem.zeroes(w.WNDCLASSEXW);
+    wc.cbSize = @sizeOf(w.WNDCLASSEXW);
+    wc.hInstance = instance;
+    wc.hCursor = w.LoadCursorW(null, @ptrFromInt(32512));
+    wc.lpszClassName = L("MultipromptSettingsServers");
+    wc.lpfnWndProc = serversProc;
+    _ = w.RegisterClassExW(&wc);
+    const bounds = client(window);
+    const width = @min(s(560), bounds.right);
+    const height = @min(s(470), bounds.bottom);
+    var origin = w.POINT{ .x = @divTrunc(bounds.right - width, 2), .y = @divTrunc(bounds.bottom - height, 2) };
+    _ = w.ClientToScreen(window, &origin);
+    servers_window = w.CreateWindowExW(0x10000 | 0x80, L("MultipromptSettingsServers"), L(words.settings_servers), 0x80000000 | 0x02000000, origin.x, origin.y, width, height, window, null, instance, null);
+    if (servers_window == null) return;
+    const tab: u32 = 0x00010000;
+    for (0..ssh_servers.slot_count) |i| {
+        const top = s(60) + s(@as(i32, @intCast(i)) * 44);
+        server_rows[i] = serverChild(L("STATIC"), L(""), 0x200 | 0x4000, s(24), top, width - s(232), s(32), 0);
+        server_tests[i] = serverChild(L("BUTTON"), L(words.settings_servers_test), tab, width - s(200), top, s(80), s(32), server_test_id + @as(u16, @intCast(i)));
+        server_removes[i] = serverChild(L("BUTTON"), L(words.settings_servers_remove), tab, width - s(112), top, s(88), s(32), server_remove_id + @as(u16, @intCast(i)));
+    }
+    const half = @divTrunc(width - s(60), 2);
+    const cues = [_][]const u8{ words.settings_servers_name, words.settings_servers_address, words.settings_servers_user, words.settings_servers_port };
+    const boxes = [_][4]i32{
+        .{ s(24), s(224), half, s(30) },
+        .{ s(36) + half, s(224), half, s(30) },
+        .{ s(24), s(262), half, s(30) },
+        .{ s(36) + half, s(262), half - s(96), s(30) },
+    };
+    for (boxes, 0..) |box, i| {
+        server_fields[i] = serverChild(L("EDIT"), L(""), tab | 0x80, box[0], box[1], box[2], box[3], 330 + @as(u16, @intCast(i)));
+        var cue: [64:0]u16 = @splat(0);
+        const n = std.unicode.utf8ToUtf16Le(cue[0..63], cues[i]) catch 0;
+        cue[n] = 0;
+        _ = w.SendMessageW(server_fields[i], 0x1501, 1, @bitCast(@intFromPtr(&cue)));
+    }
+    server_add = serverChild(L("BUTTON"), L(words.settings_servers_add_button), tab | 1, width - s(108), s(262), s(84), s(30), server_add_id);
+    server_paste = serverChild(L("EDIT"), L(""), tab | 0x80 | 0x800, s(24), s(332), width - s(144), s(30), 334);
+    _ = serverChild(L("BUTTON"), L(words.settings_servers_copy), tab, width - s(108), s(332), s(84), s(30), server_copy_id);
+    server_status = serverChild(L("STATIC"), L(""), 0, s(24), s(374), width - s(48), s(24), 0);
+    _ = serverChild(L("BUTTON"), L(words.settings_close), tab, width - s(108), height - s(52), s(84), s(36), 2);
+    server_paste_requested = false;
+    identity.start();
+    refreshServers();
+    _ = w.SetTimer(servers_window, 1, 400, null);
+    _ = EnableWindow(window, 0);
+    _ = @import("focus.zig").ShowWindow(servers_window, 5);
+    _ = @import("focus.zig").SetForegroundWindow(servers_window);
+    _ = @import("focus.zig").SetFocus(server_fields[1]);
+}
+
 fn paintText(hdc: w.HANDLE, value: []const u8, rect_value: w.RECT, font: usize, color: u32, flags: u32) void {
     var rect = rect_value;
     const old = w.SelectObject(hdc, fonts[font]);
@@ -544,7 +772,7 @@ fn paintContent(hdc: w.HANDLE) void {
     paintText(hdc, @import("main.zig").APP_VERSION, lineRect(g.about.top + s(52), s(52)), 0, tokens.ReaderHint, w.DT_RIGHT);
     const separator = w.CreateSolidBrush(tokens.ReaderOutline);
     defer _ = w.DeleteObject(separator);
-    for ([_]i32{ g.look.top + s(48), g.look.top + s(96) + extra, g.keys.top + s(52), g.about.top + s(52) }) |top| {
+    for ([_]i32{ g.look.top + s(48), g.look.top + s(96) + extra, g.keys.top + s(52), g.keys.top + s(104), g.about.top + s(52) }) |top| {
         const line = lineRect(top, @max(1, s(1)));
         _ = w.FillRect(hdc, &line, separator);
     }
@@ -654,9 +882,9 @@ fn drawControl(item: *const DrawItem) void {
         smooth.fillEllipse(item.hdc, .{ .left = left, .right = left + thumb_size, .top = s(3), .bottom = s(3) + thumb_size }, if (on) tokens.ReaderPanel else tokens.ReaderHint);
         return;
     }
-    if (control == .dictation or control == .upload or control == .release_notes) {
-        paintText(item.hdc, if (control == .dictation) words.settings_dictation_key else if (control == .upload) words.settings_upload_key else words.settings_release_notes, rc, 0, tokens.ReaderForeground, 0);
-        paintText(item.hdc, if (control == .release_notes) ">" else words.settings_set_indicator, rc, 0, tokens.ReaderHint, w.DT_RIGHT);
+    if (control == .dictation or control == .upload or control == .servers or control == .release_notes) {
+        paintText(item.hdc, if (control == .dictation) words.settings_dictation_key else if (control == .upload) words.settings_upload_key else if (control == .servers) words.settings_servers else words.settings_release_notes, rc, 0, tokens.ReaderForeground, 0);
+        paintText(item.hdc, if (control == .release_notes or control == .servers) ">" else words.settings_set_indicator, rc, 0, tokens.ReaderHint, w.DT_RIGHT);
     } else {
         if (control == .close or selected or (item.state & 0x11) != 0) smooth.fillRoundRect(item.hdc, rc, s(16), tokens.ReaderRaised);
         var buffer: [40]u8 = undefined;
@@ -720,8 +948,9 @@ fn dispatch(control: Control) void {
             if (window == null) _ = @import("focus.zig").PostMessageW(target, w.WM_APP_CHANGELOG_OPEN, 0, 0);
         },
         .dictation, .upload => openKey(control),
+        .servers => openServers(),
     }
-    if (window != null and key_window == null) _ = @import("focus.zig").SetFocus(children[index(control)]);
+    if (window != null and key_window == null and servers_window == null) _ = @import("focus.zig").SetFocus(children[index(control)]);
     for (children) |child| {
         if (child != null) _ = w.InvalidateRect(child, null, 1);
     }
@@ -977,6 +1206,7 @@ pub fn close() void {
     if (window == null) return;
     @import("diagnostics.zig").debugLog("[settings] close");
     if (key_window != null) closeKey();
+    if (servers_window != null) closeServers();
     const target = owner;
     const focus = previous_focus;
     const current = window;

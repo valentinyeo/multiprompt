@@ -83,8 +83,13 @@ test('Inbox blocks chat opening before any window or view mutation', () => {
   assert.match(fn(source, 'overlayOpen'), /g_inbox_active/);
 });
 
+test('remote tab connects its shared terminal when Chat View shows the console', () => {
+  assert.match(fn(source, 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);
+});
+
 function harness(text) {
-  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n');
+  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n')
+    .replaceAll('@import("native_session.zig")', 'NativeSession');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -100,7 +105,14 @@ const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { workspace: u32 = 0, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false };
+const Shell = struct { workspace: u32 = 0, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false, native_terminal: bool = false, console_inflight: bool = false };
+const NativeSession = struct {
+    fn alive(_: u32) bool { return true; }
+    fn connect(_: u32) bool { return true; }
+    fn ready(_: u32, _: bool) void {}
+    fn ensureWindow(_: u32) bool { return false; }
+};
+comptime { _ = NativeSession.alive(0); }
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;

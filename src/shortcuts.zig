@@ -344,6 +344,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> New Claude in terminal", .b = "Start Claude the old way, typed into a terminal in this workspace folder", .header = false },
     .{ .a = "Ctrl+K -> New Codex chat", .b = "Start a Codex live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New Pi chat", .b = "Start a Pi live chat in this workspace folder, same chat view as Claude", .header = false },
+    .{ .a = "Ctrl+K -> New Cursor chat", .b = "Start a Cursor CLI live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },
@@ -376,12 +377,16 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Expand table\"", .b = "Open the table on screen full size over a dimmed window; also its Expand button on hover. Wheel, Shift+wheel and arrow keys scroll; Esc, the X or a click outside closes", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
     .{ .a = "Enter in the selection menu / Ctrl+K \"Chat View: Add selection to chat\"", .b = "Open selection actions. Enter adds text. Esc dismisses.", .header = false },
     .{ .a = "Ctrl+C in Chat View", .b = "Copy selected text. Right-click for more actions.", .header = false },
     .{ .a = "Ctrl+A in Chat View", .b = "Select all transcript text (transcript focus; composer keeps its own Ctrl+A)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Resync chat\"", .b = "Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Restart this chat on the newest version\"", .b = "Stop and start this chat's agent on the newest version in the background; it keeps its name and history, and a chat that is mid-reply restarts when the reply ends", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Restart every idle live chat\"", .b = "Restart every running live chat on this server on the newest version; chats that are replying restart when their reply ends. Every live chat also restarts nightly at 04:00 local server time", .header = false },
     .{ .a = "Ctrl+K \"Chat View: More Menu\"", .b = "Chat View: open the round three-dot menu next to the title as one grouped panel: Approve, Stop, Terminal, Rename, History, Waiting, Remind me, Archive, the current Model, End session and Remove from list; Up/Down/Enter or the mouse choose, Esc or a click outside closes", .header = false },
+    .{ .a = "Inbox icon in the chat header", .b = "Click the envelope left of the three dots to open the Inbox, same as Alt+I; a blue dot shows while Inbox items wait", .header = false },
     .{ .a = "Up / Down / Enter in Chat View", .b = "Up in an empty message box focuses the newest message; Up/Down move between messages including waiting ones, Enter opens the right-click options, Delete cancels a waiting message, Esc or typing returns to the box", .header = false },
     .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
@@ -391,7 +396,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
     .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
-    .{ .a = "Ctrl+K \"Chat View: Model Opus / Sonnet / Haiku\"", .b = "Choose the model for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Model Opus / Sonnet / Haiku / Fable\"", .b = "Choose the model for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Effort Low / Medium / High\"", .b = "Choose the effort for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
     .{ .a = "1 or Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Approve the pending permission once", .header = false },
     .{ .a = "2 or Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Always allow the pending permission this session", .header = false },
@@ -434,11 +439,13 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Crash Reports: Open Folder", .b = "Open the folder with crash reports saved after a crash (the app also reopens itself)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Hibernate Browser Panes Now", .b = "Immediately hibernate every parked, unpinned browser pane", .header = false },
     .{ .a = "Ctrl+K -> External Browser Links When Pane Off", .b = "Toggle desktop browser for HTTP(S) links when the session pane is off (default on)", .header = false },
+    .{ .a = "Ctrl+K -> Remote Tabs: Share One Server Connection", .b = "Toggle one shared connection per server for new remote tabs, no hidden console per tab (default off; open tabs switch on next launch)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's dedicated browser profile", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
     .{ .a = "Ctrl+, / Ctrl+K -> Settings", .b = "Open Settings; Escape closes the panel", .header = false },
+    .{ .a = "Ctrl+K -> Servers", .b = "Add, test and remove the servers Multibot signs in to with its own key", .header = false },
     .{ .a = "Ctrl+K -> Changelog", .b = "what changed in each version", .header = false },
     .{ .a = "(agent-reported) Session ETA countdown", .b = "Sidebar row shows time left + a progress line; toggle either from Ctrl+K \u{2192} ETA Countdown Numbers / ETA Progress Line", .header = false },
     .{ .a = "Ctrl+K \u{2192} Estimate Accuracy", .b = "See how each agent's time estimates compare to how long tasks actually took", .header = false },
@@ -726,8 +733,17 @@ test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
     try std.testing.expect(sessionCloseShortcut(0x58, false, false, true, false) == null);
 }
 
+fn noteJumpBadgeKey(wp: WPARAM, lp: LPARAM) void {
+    const down = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+    if (!down and wp != WM_KEYUP and wp != WM_SYSKEYUP) return;
+    const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
+    const key = @import("jump_badges.zig").classify(kb.vkCode, kb.scanCode, down) orelse return;
+    @import("sidebar.zig").applyJumpBadgeKey(key, isAltDown(kb.flags), key == .ctrl_down and !app_state.g_account_locked and foregroundIsOurs());
+}
+
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (nCode == HC_ACTION) @import("browser_pane.zig").syncBrowserHotkeys();
+    if (nCode == HC_ACTION) noteJumpBadgeKey(wp, lp);
     if (nCode == HC_ACTION and (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN)) {
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         if (kb.vkCode == 0x54 and (isCtrlDown() or isAltDown(kb.flags)) and foregroundIsOurs()) {
@@ -783,6 +799,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (key_up) computer_consumed_keys[kb.vkCode] = false;
             return 1;
         }
+        if (@import("chat_table_overlay.zig").ownsForeground()) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         if (key_down and kb.vkCode == 0x57) {
             var log_buf: [160]u8 = undefined;
             debugLog(std.fmt.bufPrint(&log_buf, "[session-close] ctrl={} shift={} alt={} win={} ours={} flags={X}", .{
@@ -814,7 +831,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     } else if (message == WM_APP_BROWSER_TOGGLE) {
                         argument = if (kb.vkCode == 0x41 and shift) 2 else 1;
                     }
-                    @import("computer_pane.zig").revoke();
+                    @import("computer_pane.zig").revoke("app shortcut");
                     app_state.g_sysmenu_pending = false;
                     if (PostMessageW(app_state.g_main_hwnd, message, argument, if (message == WM_APP_BROWSER_TOGGLE) @intCast(kb.time) else 0) != 0) {
                         computer_consumed_keys[kb.vkCode] = true;

@@ -4,6 +4,7 @@ const chat_options = @import("chat_options.zig");
 const chat_permission = @import("chat_permission.zig");
 
 pub const MAX_LIVE: usize = 4;
+pub const MAX_PARKED: usize = 16;
 pub const MAX_ITEMS: usize = 96;
 pub const MAX_ID: usize = 96;
 pub const MAX_LABEL: usize = 192;
@@ -14,7 +15,7 @@ pub const MAX_PAGE: usize = 4 * 1024 * 1024;
 pub const ItemKind = enum { text, thinking, tool, plan };
 pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
-pub const Model = enum { unknown, opus, sonnet, haiku };
+pub const Model = enum { unknown, opus, sonnet, haiku, fable };
 pub const Effort = enum { unknown, low, medium, high };
 pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
 pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
@@ -116,6 +117,7 @@ pub const Live = struct {
     settings_known: bool = false,
     ended: ItemStatus = .ok,
     revision: u64 = 0,
+    parked_at: u64 = 0,
     card_dismissed: bool = false,
     held: bool = false,
     reply_in_history: bool = false,
@@ -524,6 +526,8 @@ pub const Lock = struct {
 
 pub var mutex: Lock = .{};
 var slots: [MAX_LIVE]Live = @splat(.{});
+var parked: [MAX_PARKED]Live = @splat(.{});
+var park_clock: u64 = 0;
 
 fn slotFor(shell_id: u32, sid: []const u8) ?*Live {
     for (&slots) |*live| {
@@ -536,6 +540,7 @@ fn claim(shell_id: u32, host: u8, sid: []const u8) ?*Live {
     if (slotFor(shell_id, sid)) |found| {
         if (found.host == host) return found;
     }
+    if (unpark(shell_id, host, sid)) |restored| return restored;
     for (&slots) |*live| {
         if (live.used and live.shell_id == shell_id) {
             live.clear(std.heap.page_allocator);
@@ -571,12 +576,64 @@ pub fn starting(shell_id: u32, host: u8, sid: []const u8) bool {
     return true;
 }
 
+pub fn startFailed(shell_id: u32, sid: []const u8, text: []const u8) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    const live = slotFor(shell_id, sid) orelse return false;
+    const a = std.heap.page_allocator;
+    const item = live.itemFor(a, "chat-start", .tool) catch return false;
+    item.setText(a, text) catch return false;
+    item.done = true;
+    item.status = .failed;
+    live.state = .idle;
+    live.held = true;
+    live.touch();
+    return true;
+}
+
 pub fn begin(shell_id: u32, host: u8, sid: []const u8) u64 {
     if (shell_id == 0 or sid.len == 0 or sid.len >= MAX_ID) return 0;
     mutex.lock();
     defer mutex.unlock();
     const live = claim(shell_id, host, sid) orelse return 0;
     return live.after;
+}
+
+fn unpark(shell_id: u32, host: u8, sid: []const u8) ?*Live {
+    for (&parked) |*kept| {
+        if (!kept.used or kept.shell_id != shell_id or kept.host != host or !std.mem.eql(u8, kept.sidSlice(), sid)) continue;
+        for (&slots) |*live| {
+            if (live.used) continue;
+            live.* = kept.*;
+            live.parked_at = 0;
+            live.touch();
+            kept.* = .{};
+            return live;
+        }
+        return null;
+    }
+    return null;
+}
+
+pub fn park(shell_id: u32) void {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        var target = &parked[0];
+        for (&parked) |*kept| {
+            if (!kept.used) {
+                target = kept;
+                break;
+            }
+            if (kept.parked_at < target.parked_at) target = kept;
+        }
+        if (target.used) target.deinit(std.heap.page_allocator);
+        park_clock += 1;
+        target.* = live.*;
+        target.parked_at = park_clock;
+        live.* = .{};
+    }
 }
 
 pub fn release(shell_id: u32) void {
@@ -587,6 +644,9 @@ pub fn release(shell_id: u32) void {
             live.deinit(std.heap.page_allocator);
             live.* = .{};
         }
+    }
+    for (&parked) |*kept| {
+        if (kept.used and kept.shell_id == shell_id) kept.deinit(std.heap.page_allocator);
     }
 }
 
@@ -1070,6 +1130,42 @@ test "D1 a reconnect replays from the last seen seq and skips what it already ha
     const tail = tailFor(99, &text, 0, &blocks, &.{});
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hello"), text[0..tail.text_len]);
+}
+
+test "IGSH-1929 switching away and back resumes the live chat where it stopped" {
+    const first = "11111111-2222-3333-4444-192900000001";
+    const second = "11111111-2222-3333-4444-192900000002";
+    defer release(1929);
+    defer release(1930);
+    try std.testing.expectEqual(@as(u64, 0), begin(1929, 0, first));
+    try std.testing.expect(applyPage(1929, first, "{\"result\":{\"events\":[" ++
+        "{\"seq\":41,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t9\"}}," ++
+        "{\"seq\":42,\"event\":{\"kind\":\"text.delta\",\"item\":\"reply\",\"payload\":{\"text\":\"Still working\"}}}]}}"));
+    park(1929);
+    try std.testing.expect(!attached(1929));
+    try std.testing.expectEqual(@as(u64, 0), begin(1930, 0, second));
+    park(1930);
+    try std.testing.expectEqual(@as(u64, 42), begin(1929, 0, first));
+    try std.testing.expect(running(1929));
+    try std.testing.expect(!applyPage(1929, first, "{\"result\":{\"events\":[{\"seq\":41,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t9\"}}]}}"));
+    var text: [64]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    const tail = tailFor(1929, &text, 0, &blocks, &.{});
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Still working"), text[0..tail.text_len]);
+}
+
+test "IGSH-1929 the oldest parked live chat makes room and replays from the start" {
+    const sid = "11111111-2222-3333-4444-192900000003";
+    defer for (0..MAX_PARKED + 1) |i| release(@intCast(19300 + i));
+    for (0..MAX_PARKED + 1) |i| {
+        const shell_id: u32 = @intCast(19300 + i);
+        _ = begin(shell_id, 0, sid);
+        try std.testing.expect(applyPage(shell_id, sid, "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"turn.ended\"}}]}}"));
+        park(shell_id);
+    }
+    try std.testing.expectEqual(@as(u64, 0), begin(19300, 0, sid));
+    release(19300);
+    try std.testing.expectEqual(@as(u64, 5), begin(19301, 0, sid));
 }
 
 test "D1 thinking and text deltas keep their arrival order" {

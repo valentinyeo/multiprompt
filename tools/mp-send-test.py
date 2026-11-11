@@ -49,14 +49,17 @@ class MpSendTest(unittest.TestCase):
 
     def test_IGSH_1266_send_inserts_one_message_through_the_shared_store(self):
         done = self.run_send("claude", SID, "check the build", "--tmux", "mp-test-send")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         token = done.stdout.strip()
         self.assertRegex(token, r"\Amp-[0-9a-f]{32}\Z")
         rows = self.rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], token)
         self.assertEqual(rows[0][1:4], ("claude", SID, "check the build"))
+        self.assertEqual(rows[0][4:6], ("failed", "session_unavailable"))
         self.assertEqual(rows[0][6], 1)
+        with sqlite3.connect(self.store()) as db:
+            self.assertEqual(db.execute("SELECT origin FROM shared_messages WHERE id=?", (token,)).fetchone(), ("agent",))
 
     def test_IGSH_1266_wait_reports_the_final_state_for_a_session_with_no_agent(self):
         done = self.run_send("claude", SID, "hello", "--tmux", "mp-test-nobody", "--wait", "--timeout", "20")
@@ -69,8 +72,8 @@ class MpSendTest(unittest.TestCase):
     def test_IGSH_1266_second_run_with_the_same_id_adds_no_second_message(self):
         first = self.run_send("claude", SID, "hello", "--tmux", "mp-test-once", "--id", "mp-0123456789abcdef0123")
         second = self.run_send("claude", SID, "hello", "--tmux", "mp-test-once", "--id", "mp-0123456789abcdef0123")
-        self.assertEqual(first.returncode, 0, first.stderr)
-        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(first.returncode, 3, first.stderr)
+        self.assertEqual(second.returncode, 3, second.stderr)
         self.assertEqual(first.stdout, second.stdout)
         self.assertEqual(len(self.rows()), 1)
 
@@ -80,7 +83,7 @@ class MpSendTest(unittest.TestCase):
             db.execute("INSERT OR REPLACE INTO message_locators VALUES (?,?,?)", ("claude", SID, "mp-test-binding"))
             db.commit()
         done = self.run_send("claude", SID, "second")
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(len(self.rows()), 2)
 
     def test_IGSH_1266_unknown_binding_fails_without_touching_the_store(self):

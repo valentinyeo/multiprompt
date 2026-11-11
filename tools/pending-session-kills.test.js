@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,16 +16,22 @@ function between(source, start, end) {
 function native(source, files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-close-'));
   try {
-    for (const file of files) {
-      const source = read(`src/${file}`);
-      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
-      fs.writeFileSync(path.join(dir, file), file === 'json_reader.zig' ? source.replace(/^test "[^\n]+" \{[\s\S]*?^\}\n/gm, '') : source);
+    const copied = copyZig(files, dir);
+    if (copied.includes('json_reader.zig')) {
+      const file = path.join(dir, 'json_reader.zig');
+      fs.writeFileSync(file, read(file).replace(/^test "[^\n]+" \{[\s\S]*?^\}\n/gm, ''));
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+
+test('IGSH-1759 live restore connects by name and does not park on sleep', () => {
+  const identity = read('src/tmux_identity.zig');
+  assert.match(identity, /host connect /);
+  assert.doesNotMatch(identity, /exec sleep infinity/);
+});
 
 test('IGSH-1516 offline end survives stale account layout and rejects an unaccepted end', () => {
   const archive = read('src/archive.zig');

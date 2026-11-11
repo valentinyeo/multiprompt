@@ -20,7 +20,11 @@ server runtime and every client.
 - At most one host process per chat.
 - At most one owner per chat at a time: the host (app) or a terminal (`claude --resume`).
 - The store stays the source of truth for messages; the host only adds a delivery
-  transport. `shared_messages`, `message_attempts` and `message_events` keep their shape.
+  transport. `shared_messages`, `message_attempts` and `message_events` keep their shape,
+  except `shared_messages.origin` (`human` or `agent`), added by IGSH-1900.
+- `origin` says who wrote a message. The desktop and the phone submit `human`;
+  `mp-send` and `host send` submit `agent`. A client shows only `human` rows as the
+  person's own message, so an agent message that fails never turns into his unsent draft.
 
 ## State directory
 
@@ -51,6 +55,7 @@ under the 108-character limit a Unix socket path has, whatever the home director
 - `permission_mode` must be one of the CLI's own modes (`acceptEdits`, `auto`,
   `bypassPermissions`, `manual`, `dontAsk`, `plan`) and is passed as `--permission-mode <mode>`.
   Without it the CLI keeps its own default, so a tool that would prompt is denied.
+  A level the user picks in the chat is saved here and reused on the next start; `plan` stays one-time.
 - Tests point `command` at a fake executable.
 - Codex and Pi keep their own paths until their adapters exist.
 
@@ -69,7 +74,7 @@ under the 108-character limit a Unix socket path has, whatever the home director
   `attempt_prepare` with binding
   `{"v":1,"mode":"stream_json_user_line","host":<pid>,"session":<sid>}`. After a successful
   stdin write and flush it records the message id in `state.json` and calls `attempt_finish(sent)`.
-- **idle stop**: no in-flight message and no delivery request for 300 s. The host closes
+- **idle stop**: no in-flight message and no delivery request for 1800 s. The host closes
   stdin, waits up to 5 s, kills, unlinks the socket, removes `owner.json`, releases the lock.
 - **crash restart**: the next delivery request finds no socket, starts a host (which takes
   the stale lock), and retries once. Repeated requests for an id already written in the same
@@ -119,6 +124,8 @@ one user line `reply with the word ok`:
 Run from the selected runtime file (`src/chat_history_reader.py`):
 
 ```
+python3 <reader> host list
+python3 <reader> host connect <name>
 python3 <reader> host start <provider> <sid> [--tmux NAME] [--permission-mode MODE]
 python3 <reader> host stop <provider> <sid>
 python3 <reader> host status <provider> <sid>
@@ -158,8 +165,9 @@ python3 <reader> host handover <provider> <sid>
 ## Limits
 
 - One host per chat; no parallel agents inside one chat.
-- Permission prompts have no channel in print mode. The host passes the mode the config
-  gives it (`--permission-mode`), and anything that would still prompt is denied.
+- Permission prompts arrive through `--permission-prompt-tool stdio`. The host passes the mode the
+  config gives it (`--permission-mode`) and turns each prompt into an approval in the chat. In
+  Bypass it answers tool approvals itself; questions and plans still reach the user.
 - Editor and interactive-session state belongs to the agent CLI, not the app.
 - A crash between the stdin write and the accepted event leaves the message `sent` until the
   attempt deadline expires, after which the client may show it as failed and the user decides

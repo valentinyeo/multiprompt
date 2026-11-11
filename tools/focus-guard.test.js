@@ -40,6 +40,7 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const settingsSource = fs.readFileSync(path.join(root, 'src/settings_panel.zig'), 'utf8');
     const settingsOwnership = settingsSource.slice(settingsSource.indexOf('pub fn ownsWindow('), settingsSource.indexOf('pub fn dialogMessage(')).replaceAll('w.', '');
     assert.match(settingsOwnership, /pub fn ownsWindow/);
+    assert.match(settingsOwnership, /servers_window != null and GetAncestor\(hwnd, 2\) == servers_window/, 'Settings owns the Servers modal focus boundary');
     assert.match(settingsOwnership, /pub fn ownsForeground/);
     const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -47,7 +48,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
-` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8') + `\nconst settings_panel = struct { var window: HANDLE = null; var key_window: HANDLE = null; ${settingsOwnership} };\n`;
+` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8') + `\nconst settings_panel = struct { var window: HANDLE = null; var key_window: HANDLE = null; var servers_window: HANDLE = null; ${settingsOwnership} };\n`;
     const nonClientMessage = fs.readFileSync(path.join(root, 'src/win32.zig'), 'utf8').match(/^pub const WM_NCLBUTTONDOWN[^;]+;/m);
     assert.ok(nonClientMessage, 'native frame input message comes from the shipped Win32 declarations');
     fs.writeFileSync(path.join(dir, 'win32.zig'), nonClientMessage[0]);
@@ -158,7 +159,7 @@ test('issue: agent wakes never foreground, never refocus, never block the UI thr
 
 function auditFocusTrace(focus, composer, main, diagnostics) {
   assert.match(composer, /msg == WM_KILLFOCUS[^]*?hwnd == app_state.g_chat_composer_hwnd[^]*?focusTrace\(\.composer_killfocus, @ptrFromInt\(wp\), 0\)/);
-  assert.match(main, /WM_ACTIVATEAPP =>[^]*?if \(wp == 0\) \{\s*computer\.revoke\(\);\s*@import\("diagnostics.zig"\).focusTrace\(\.activateapp_inactive, GetForegroundWindow\(\), 0\)/);
+  assert.match(main, /WM_ACTIVATEAPP =>[^]*?if \(wp == 0\) \{\s*computer\.revoke\("app deactivated"\);\s*@import\("diagnostics.zig"\).focusTrace\(\.activateapp_inactive, GetForegroundWindow\(\), 0\)/);
   assert.match(main, /if \(active == 0\) @import\("diagnostics.zig"\).focusTrace\(\.activate_inactive, @ptrFromInt/);
   assert.match(focus, /fn focusGuardAt[^]*?focusTrace\(\.allowed, target, caller\)[^]*?focusTrace\(\.activation_refocus, target, caller\)[^]*?focusTrace\(\.blocked, target, caller\)/);
   const wrappers = focus.slice(focus.indexOf('fn SetForegroundWindow('), focus.indexOf('pub fn SetWindowPos('));

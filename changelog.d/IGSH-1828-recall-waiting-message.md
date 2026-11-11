@@ -1,2 +1,2 @@
-Cancel takes back a waiting message even after the bot has received it, so the bot does not answer that message.
+Cancel takes back an unread waiting message from hosted Claude, even after it has arrived.
 Up then Delete does the same.

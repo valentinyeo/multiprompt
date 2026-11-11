@@ -767,6 +767,7 @@ fn accountDeleteToken() void {
 }
 fn accountLock() void {
     @import("room_frontend.zig").setAccount(null);
+    g_applied_layout.forget(std.heap.page_allocator);
     if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
@@ -979,7 +980,7 @@ fn accountSyncHosts(a: std.mem.Allocator, remote: []const account_hosts.Host, re
     var ssh_len: usize = 0;
     if (!@import("console.zig").appendSshExe(&ssh_buf, &ssh_len)) return error.SshUnavailable;
     const ssh = ssh_buf[0..ssh_len];
-    const path = std.mem.trim(u8, ssh, "\" ");
+    const path = @import("console.zig").sshExeOf(ssh);
     const dir = std.mem.lastIndexOfAny(u8, path, "\\/") orelse return error.SshUnavailable;
     const keygen = try std.fmt.allocPrint(a, "\"{s}\\ssh-keygen.exe\"", .{path[0..dir]});
     var profile_buf: [512]u8 = undefined;
@@ -1048,7 +1049,7 @@ fn accountDeviceKeyError(reply: *LayoutReply, text: []const u8) void {
 }
 
 fn accountPublishDeviceKey(a: std.mem.Allocator, ssh: []const u8, access: []const u8, job_kind: AccountJobKind) !void {
-    const exe = std.mem.trim(u8, ssh, "\" ");
+    const exe = @import("console.zig").sshExeOf(ssh);
     const dir = std.mem.lastIndexOfAny(u8, exe, "\\/") orelse return error.Process;
     var profile: [512]u8 = undefined;
     const n = GetEnvironmentVariableA("USERPROFILE", &profile, profile.len);
@@ -1921,6 +1922,7 @@ pub fn resumeStartupReply() void {
     if (reply != 0) handleLayoutReply(reply);
 }
 
+var g_applied_layout: account_layout.AppliedLayout = .{};
 pub fn handleLayoutReply(lp: LPARAM) void {
     if (lp != 0 and @import("launch_cache.zig").pending) {
         const reply: *LayoutReply = @ptrFromInt(@as(usize, @bitCast(lp)));
@@ -2162,13 +2164,14 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
             break :blk to_apply;
         };
-    } else {
+    } else if (g_applied_layout.changed(bytes)) {
         app_state.g_account_locked = false;
         applyServerLayout(to_apply) catch {
             accountSyncFailed(true);
             if (app_state.active_shell < app_state.shell_count) switchToShell(app_state.active_shell);
             return;
         };
+        g_applied_layout.remember(a, bytes);
     }
     const final_target = session_layout.parse(alloc, to_apply) catch return;
     defer final_target.deinit();

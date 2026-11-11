@@ -24,7 +24,8 @@ test('Inbox exclusion survives save, restore, reconnect, workspace moves, and ta
 
 test('excluded tabs leave Inbox, badge, and cached auto-advance without losing sidebar attention', () => {
   assert.match(slice('fn publishInboxStateNow()', 'fn deleteInboxStateFile'), /if \(!inboxPublishesShell\(&shells\[i\]\)\) continue/);
-  assert.match(slice('fn paintInboxButton(', 'fn paintWorkspaceStrip('), /needs_attention and !shells\[i\]\.muted and inboxPublishesShell\(&shells\[i\]\)/);
+  assert.match(slice('fn paintInboxButton(', 'fn paintWorkspaceStrip('), /inboxUnreadCount\(\)/);
+  assert.match(slice('fn unreadCount()', 'fn toggleMuted('), /needs_attention and inboxPublishesShell\(shell\)/);
   assert.match(slice('fn inboxRowVisible(', 'fn inboxListTop('), /shells\[idx\]\.inbox_excluded\) return false/);
   assert.match(slice('fn toggleInboxExcluded(', 'fn publishInboxStateNow()'), /publishInboxStateNow\(\);\s*loadInboxModel\(\)/);
   assert.doesNotMatch(slice('fn toggleInboxExcluded(', 'fn publishInboxStateNow()'), /needs_attention\s*=|activity\s*=|eta_deadline_tick\s*=/);

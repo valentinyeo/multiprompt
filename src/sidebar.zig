@@ -165,6 +165,7 @@ const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_I
 const SEARCH_BROWSER_FOCUS_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_URL_OFFSET;
 const SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
 const SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET = @import("app_state.zig").SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+const SEARCH_SHARED_SERVER_CONNECTION_OFFSET = @import("app_state.zig").SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
 const SEARCH_BROWSER_AUTOSUSPEND_OFFSET = @import("app_state.zig").SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
 const SEARCH_CHANGELOG_OFFSET = @import("app_state.zig").SEARCH_CHANGELOG_OFFSET;
 const SEARCH_BROWSER_BACK_OFFSET = @import("app_state.zig").SEARCH_BROWSER_BACK_OFFSET;
@@ -191,6 +192,7 @@ const SEARCH_CHAT_VIEW_OFFSET = @import("app_state.zig").SEARCH_CHAT_VIEW_OFFSET
 const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_OPUS_OFFSET;
 const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
 const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
 const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
 const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
 const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
@@ -248,10 +250,13 @@ const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
 const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
+const SEARCH_CHAT_RESTART_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_OFFSET;
+const SEARCH_CHAT_RESTART_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_ALL_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
 const SEARCH_CHAT_SELECTION_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECTION_MENU_OFFSET;
+const SEARCH_CHAT_EXPAND_TABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_EXPAND_TABLE_OFFSET;
 const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET = @import("app_state.zig").SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
 const SEARCH_CHAT_SELECT_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_SELECT_ALL_OFFSET;
 const SEARCH_CHAT_AC_OFFSET = @import("app_state.zig").SEARCH_CHAT_AC_OFFSET;
@@ -273,6 +278,7 @@ const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_CURSOR_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CURSOR_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
 const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
@@ -1257,6 +1263,22 @@ pub inline fn effPinnedTop(i: usize) bool {
     return if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top else app_state.shells[i].pinned_top;
 }
 
+fn sortShellsByRecency(ids: []usize) void {
+    var ii: usize = 1;
+    while (ii < ids.len) : (ii += 1) {
+        const tmp = ids[ii];
+        var jj = ii;
+        while (jj > 0) : (jj -= 1) {
+            const prev = ids[jj - 1];
+            const tmp_la = effLa(tmp);
+            const prev_la = effLa(prev);
+            if (tmp_la < prev_la or (tmp_la == prev_la and tmp > prev)) break;
+            ids[jj] = prev;
+        }
+        ids[jj] = tmp;
+    }
+}
+
 pub fn setPinnedTop(i: usize, pinned: bool) void {
     if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top = pinned else app_state.shells[i].pinned_top = pinned;
 }
@@ -1467,6 +1489,7 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
+        const starred_section_headers = !app_state.g_sidebar_collapsed and sidebarHasVisibleSessions();
         for (0..app_state.shell_count) |i| {
             if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
             if (count >= app_state.MAX_SESSION_ROWS) return count;
@@ -1482,20 +1505,47 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
             count += 1;
             y += groupHeaderHeight();
             if (app_state.groups[gi].collapsed) continue;
+            var members: [MAX_SHELLS]usize = undefined;
+            var member_count: usize = 0;
             for (0..app_state.shell_count) |i| {
                 if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid or effPinnedTop(i)) continue;
+                if (member_count < MAX_SHELLS) {
+                    members[member_count] = i;
+                    member_count += 1;
+                }
+            }
+            sortShellsByRecency(members[0..member_count]);
+            for (members[0..member_count]) |i| {
                 if (count >= app_state.MAX_SESSION_ROWS) return count;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gi), .shell_idx = @intCast(i), .y = y };
                 count += 1;
                 y += tabRowH();
             }
         }
+        var ungrouped: [MAX_SHELLS]usize = undefined;
+        var ungrouped_count: usize = 0;
         for (0..app_state.shell_count) |i| {
             if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
+            if (ungrouped_count < MAX_SHELLS) {
+                ungrouped[ungrouped_count] = i;
+                ungrouped_count += 1;
+            }
+        }
+        sortShellsByRecency(ungrouped[0..ungrouped_count]);
+        const recents_collapsed = starred_section_headers and ungrouped_count > 0 and sidebarSectionCollapsed(.recent);
+        if (starred_section_headers and ungrouped_count > 0) {
             if (count >= app_state.MAX_SESSION_ROWS) return count;
-            out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+            out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = .recent, .y = y };
             count += 1;
-            y += tabRowH();
+            y += sectionHeaderHeight();
+        }
+        if (!recents_collapsed) {
+            for (ungrouped[0..ungrouped_count]) |i| {
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
+                out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+                count += 1;
+                y += tabRowH();
+            }
         }
         for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |row, i| {
             if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) continue;
@@ -1977,6 +2027,30 @@ pub fn tabRowForShell(shell_idx: u32) ?Row {
     return null;
 }
 
+pub fn groupNameRect(gidx: u32) ?RECT {
+    if (app_state.g_sidebar_collapsed) return null;
+    var rows: [MAX_ROWS]Row = undefined;
+    const n = layoutRows(&rows);
+    var hdr_y: ?i32 = null;
+    for (0..n) |ri| {
+        if (rows[ri].kind == .header and rows[ri].gidx == gidx) {
+            hdr_y = rows[ri].y;
+            break;
+        }
+    }
+    const base_y = hdr_y orelse return null;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    const column = @import("window_layout.zig").activePaneRects(client).sidebar;
+    const y = base_y - app_state.g_sidebar_scroll;
+    return .{
+        .left = column.left + uiScaled(12),
+        .top = y + uiScaled(12),
+        .right = column.right - uiScaled(8),
+        .bottom = y + uiScaled(42),
+    };
+}
+
 fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: i32) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138)));
@@ -2093,6 +2167,80 @@ fn paletteSessionView(target: usize) ?PaletteSessionView {
     return null;
 }
 
+pub fn isJumpRow(row: Row) bool {
+    return row.kind == .tab or row.kind == .inbox;
+}
+
+fn rowAvatarRect(row: Row, column: RECT, y: i32) RECT {
+    if (row.tile) {
+        const size = uiScaled(56);
+        const left = row.x + @divTrunc(row.width - size, 2);
+        const top = y + uiScaled(8);
+        return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    }
+    if (app_state.g_sidebar_collapsed) {
+        var bottom = y + tabRowH();
+        if (chatDraftHasForShell(row.shell_idx)) bottom -= uiScaled(14);
+        const size = @min(uiScaled(28), bottom - y);
+        const left = @divTrunc(SIDEBAR_W() - 1 - size, 2);
+        const top = @divTrunc(y + bottom - size, 2);
+        return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    }
+    const size = uiScaled(36);
+    const left = column.left + uiScaled(12);
+    const top = y + @divTrunc(tabRowH() - size, 2);
+    return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+}
+
+fn jumpBadgeRect(avatar_rect: RECT) RECT {
+    const r = @import("jump_badges.zig").badgeRect(avatar_rect.left, avatar_rect.top, uiScaled);
+    return .{ .left = r.left, .top = r.top, .right = r.right, .bottom = r.bottom };
+}
+
+fn jumpBadgesVisible() bool {
+    return @import("jump_badges.zig").state.shown and @import("focus.zig").isCtrlDown();
+}
+
+fn drawJumpBadge(hdc: HANDLE, avatar_rect: RECT, digit: u32) void {
+    var rc = jumpBadgeRect(avatar_rect);
+    @import("smooth.zig").fillEllipse(hdc, rc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    const old_font = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    const old_color = SetTextColor(hdc, themeSidebarBg());
+    const text = [1]u16{@intCast('0' + digit)};
+    _ = DrawTextW(hdc, &text, 1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = SetTextColor(hdc, old_color);
+    _ = SelectObject(hdc, old_font);
+}
+
+pub fn applyJumpBadgeKey(key: @import("jump_badges.zig").Key, alt: bool, may_show: bool) void {
+    const jump_badges = @import("jump_badges.zig");
+    const was = jump_badges.state.shown;
+    jump_badges.state = jump_badges.next(jump_badges.state, key, alt, may_show);
+    if (jump_badges.state.shown != was) invalidateJumpBadges();
+}
+
+fn invalidateJumpBadges() void {
+    if (app_state.g_main_hwnd == null or app_state.g_hide_sidebar or app_state.g_inbox_active or app_state.g_all_sessions_active) return;
+    var client_rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client_rc);
+    const column = @import("window_layout.zig").activePaneRects(client_rc).sidebar;
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRows(&rows);
+    var slot: u32 = 0;
+    for (rows[0..count]) |row| {
+        if (!isJumpRow(row)) continue;
+        slot += 1;
+        if (slot > 9) break;
+        if (row.kind != .tab) continue;
+        var rc = jumpBadgeRect(rowAvatarRect(row, column, row.y - app_state.g_sidebar_scroll));
+        rc.left -= 1;
+        rc.top -= 1;
+        rc.right += 1;
+        rc.bottom += 1;
+        _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+    }
+}
+
 fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
     const badge = @import("star_badge_geometry.zig");
     const g = badge.geometry(rect.right, rect.bottom, uiScaled);
@@ -2103,7 +2251,7 @@ fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry
     smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) { .disconnected => RGB(255, 145, 55), .unread => RGB(137, 180, 248), .favorite => RGB(240, 196, 75) });
 }
 
-fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
+fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rect: RECT) void {
     const shell = &app_state.shells[index];
     const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) RGB(200, 200, 200) else RGB(138, 138, 138);
     var right = column.right - uiScaled(12);
@@ -2120,11 +2268,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
             right = stamp.left - uiScaled(6);
         }
     }
-    const size = uiScaled(36);
-    const left = column.left + uiScaled(12);
-    const top = y + @divTrunc(tabRowH() - size, 2);
     const avatar = @import("bot_avatar.zig");
-    const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     const appearance = avatar.forShell(shell);
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
@@ -2153,9 +2297,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
 
 fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     const shell = &app_state.shells[row.shell_idx];
-    const size = uiScaled(56);
-    const left = row.x + @divTrunc(row.width - size, 2);
-    const top = y + uiScaled(8);
+    const avatar_rect = rowAvatarRect(row, std.mem.zeroes(RECT), y);
     if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) {
         const brush = CreateSolidBrush(if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58));
         const pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(154, 154, 154) else RGB(138, 138, 138));
@@ -2170,10 +2312,9 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), RGB(53, 53, 53));
     }
     const avatar = @import("bot_avatar.zig");
-    const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
+        debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
@@ -2182,7 +2323,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     }
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
-    var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
+    var name = RECT{ .left = row.x + uiScaled(4), .top = avatar_rect.bottom + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
     if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
@@ -2348,10 +2489,16 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         const sidebar_clip = @import("win32.zig").SaveDC(hdc);
         _ = @import("win32.zig").IntersectClipRect(hdc, 0, 0, SIDEBAR_W(), @max(0, client_rc.bottom - sidebarStickyCardSpan()));
+        const show_jump_badges = jumpBadgesVisible();
+        var jump_slot: u32 = 0;
         for (0..row_count) |ri| {
             const row = rows_arr[ri];
+            if (isJumpRow(row)) jump_slot += 1;
+            const jump_digit: ?u32 = if (show_jump_badges and isJumpRow(row) and jump_slot <= 9) jump_slot else null;
             const y: i32 = row.y - app_state.g_sidebar_scroll;
             if (y + rowTotalHeight(row) <= 0 or y >= client_rc.bottom - sidebarStickyCardSpan()) continue;
+            const row_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + rowTotalHeight(row) };
+            if (@import("win32.zig").RectVisible(hdc, &row_rc) == 0) continue;
             if (row.kind == .room_header or row.kind == .room or row.kind == .room_new) {
                 paintRoomRow(hdc, column, y, row);
                 _ = SelectObject(hdc, font_title);
@@ -2403,6 +2550,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const i: usize = row.shell_idx;
             if (row.tile) {
                 paintPinnedBot(hdc, row, y);
+                if (jump_digit) |digit| drawJumpBadge(hdc, rowAvatarRect(row, column, y), digit);
                 continue;
             }
 
@@ -2454,22 +2602,19 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (app_state.drag_active and i != app_state.drag_src) {}
 
             if (!app_state.g_sidebar_collapsed) {
-                paintChatSidebarRow(hdc, column, y, @intCast(i));
+                paintChatSidebarRow(hdc, column, y, @intCast(i), rowAvatarRect(row, column, y));
             } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };
                 if (chatDraftHasForShell(@intCast(i))) kind_rc.bottom -= uiScaled(14);
-                const size = @min(uiScaled(28), kind_rc.bottom - kind_rc.top);
-                const left = @divTrunc(kind_rc.left + kind_rc.right - size, 2);
-                const top = @divTrunc(kind_rc.top + kind_rc.bottom - size, 2);
-                const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+                const avatar_rect = rowAvatarRect(row, column, y);
                 const photo_drawn = @import("bot_photo.zig").draw(&app_state.shells[i], hdc, avatar_rect);
                 if (app_state.shells[i].ai_agent != 0 or app_state.shells[i].tmux_session_len > 0 or photo_drawn) {
                     const avatar = @import("bot_avatar.zig");
                     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
                         var log: [120]u8 = undefined;
-                        debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, left, top, left + size, top + size }) catch "[photo-proof] unavailable");
+                        debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
                     }
                     if (!photo_drawn) avatar.draw(hdc, avatar_rect, avatar.forShell(&app_state.shells[i]));
                 } else {
@@ -2488,6 +2633,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     drawRobotMarker(hdc, avatar_rect, marker, background);
                 }
             }
+            if (jump_digit) |digit| drawJumpBadge(hdc, rowAvatarRect(row, column, y), digit);
         }
 
         const content_end_logical: i32 = if (row_count == 0) 0 else (rows_arr[row_count - 1].y + rowTotalHeight(rows_arr[row_count - 1]));
@@ -2584,8 +2730,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const overlay_radius: i32 = uiScaled(8);
         @import("dialog.zig").dim(hdc, win_w, win_h);
 
-        drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, overlay_radius);
-
         const overlay_border_col = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(200, 200, 200) else RGB(0x2E, 0x2E, 0x2E));
         const border_br = CreateSolidBrush(overlay_border_col);
         const border_pen = CreatePen(0, 1, overlay_border_col);
@@ -2617,7 +2761,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(4), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
         _ = SelectObject(hdc, palette_font);
-        var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
+        var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(32), .bottom = oy + uiScaled(56) };
         if (app_state.g_search_len == 0) {
             _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(160, 160, 160) else RGB(100, 100, 100)));
             const placeholder = if (app_state.g_search_ws_sort_mode)
@@ -2699,24 +2843,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
             var recent_rc = RECT{ .left = ox + uiScaled(28), .top = oy + uiScaled(64), .right = ox + overlay_w - uiScaled(24), .bottom = oy + input_h };
             _ = DrawTextW(hdc, L("RECENT SESSIONS"), -1, &recent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         }
-        var esc_rc = RECT{ .left = ox + overlay_w - uiScaled(56), .top = oy + uiScaled(24), .right = ox + overlay_w - uiScaled(24), .bottom = oy + uiScaled(48) };
-        @import("palette_text.zig").keycap(hdc, L("Esc"), &esc_rc);
-        const footer_y = oy + overlay_h - @import("drawing.zig").searchFooterH();
-        const divider = RECT{ .left = ox + uiScaled(16), .top = footer_y, .right = ox + overlay_w - uiScaled(16), .bottom = footer_y + 1 };
-        const divider_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
-        _ = FillRect(hdc, &divider, divider_br);
-        _ = DeleteObject(divider_br);
-        _ = SelectObject(hdc, palette_hint_font);
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));
-        var footer_rc = RECT{ .left = ox + uiScaled(24), .top = footer_y + 1, .right = ox + overlay_w - uiScaled(24), .bottom = oy + overlay_h };
-        @import("palette_text.zig").footer(hdc, &footer_rc);
-
         {
             if (app_state.g_search_rename_input_mode) {
                 _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(95, 95, 95) else RGB(155, 155, 155)));
                 _ = SelectObject(hdc, palette_hint_font);
                 var rename_hint_rc = RECT{ .left = ox + 12, .top = oy + input_h, .right = ox + overlay_w - 12, .bottom = oy + input_h + row_h };
-                _ = paletteDrawText(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs Multi Bot, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                _ = paletteDrawText(hdc, L("Saving syncs Multi Bot, tmux, and agent."), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             } else if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) {
                 _ = SetTextColor(hdc, customColorOr("hint", RGB(100, 100, 100)));
                 _ = SelectObject(hdc, palette_hint_font);
@@ -2737,12 +2869,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_tools = result_idx == SEARCH_CHAT_TOOL_STEPS_OFFSET;
                     const is_chat_newest = result_idx == SEARCH_CHAT_NEWEST_OFFSET;
                     const is_chat_resync = result_idx == SEARCH_CHAT_RESYNC_OFFSET;
+                    const is_chat_restart = result_idx == SEARCH_CHAT_RESTART_OFFSET;
+                    const is_chat_restart_all = result_idx == SEARCH_CHAT_RESTART_ALL_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
                     const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
                     const is_chat_copy_sel = result_idx == SEARCH_CHAT_COPY_SELECTION_OFFSET;
                     const is_chat_selection_menu = result_idx == SEARCH_CHAT_SELECTION_MENU_OFFSET;
+                    const is_chat_expand_table = result_idx == SEARCH_CHAT_EXPAND_TABLE_OFFSET;
                     const is_chat_select_all = result_idx == SEARCH_CHAT_SELECT_ALL_OFFSET;
                     const is_chat_focus_messages = result_idx == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
                     const is_chat_ac = result_idx == SEARCH_CHAT_AC_OFFSET;
@@ -2755,8 +2890,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
-                    const is_chat_setting = result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET;
-                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued;
+                    const is_chat_setting = (result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or result_idx == SEARCH_CHAT_MODEL_FABLE_OFFSET;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued or is_chat_restart or is_chat_restart_all;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -2841,7 +2976,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_usage_login = is_usage_login_primary or is_usage_login_inne;
                     const is_endtmux = result_idx == SEARCH_END_TMUX_OFFSET;
                     const is_reopen = result_idx == SEARCH_REOPEN_OFFSET;
-                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
+                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_CURSOR_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
                     const is_pick_repo_row = result_idx >= SEARCH_PICK_REPO_ROW_OFFSET and result_idx < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS;
                     const is_pick_repo_back = result_idx == SEARCH_PICK_REPO_BACK_OFFSET;
                     const is_urlpick = result_idx == SEARCH_URLPICK_OFFSET;
@@ -2864,6 +2999,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_browser_focus_url = result_idx == SEARCH_BROWSER_FOCUS_URL_OFFSET;
                     const is_browser_focus_toggle = result_idx == SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET;
                     const is_external_browser_links = result_idx == SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
+                    const is_shared_server_connection = result_idx == SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
                     const is_browser_autosuspend = result_idx == SEARCH_BROWSER_AUTOSUSPEND_OFFSET;
                     const is_keepawake = result_idx == SEARCH_KEEPAWAKE_OFFSET;
                     const is_hibernate_now = result_idx == SEARCH_HIBERNATE_NOW_OFFSET;
@@ -2897,7 +3033,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_snippet_back = result_idx == SEARCH_SNIPPET_BACK_OFFSET;
                     const is_snippet = result_idx >= SEARCH_SNIPPET_OFFSET and result_idx < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS;
                     const is_snippet_action = is_snippets_menu or is_snippet_create or is_snippet_back or is_snippet;
-                    const is_newwin = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_font_bigger and !is_font_smaller and !is_font_reset and !is_customcmd_edit and !is_customcmd_reload and !is_archive and !is_unarchive_hidden and !is_unarchive_unattached and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_chat_view and !is_chat_stop and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_history and !is_browser_mode and !is_browser_engine and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_ui_bigger and !is_ui_smaller and !is_ui_reset and !is_restart and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEWWIN_OFFSET;
+                    const is_newwin = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_font_bigger and !is_font_smaller and !is_font_reset and !is_customcmd_edit and !is_customcmd_reload and !is_archive and !is_unarchive_hidden and !is_unarchive_unattached and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_chat_view and !is_chat_stop and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_shared_server_connection and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_history and !is_browser_mode and !is_browser_engine and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_ui_bigger and !is_ui_smaller and !is_ui_reset and !is_restart and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEWWIN_OFFSET;
                     const is_openall = !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_unarchive_hidden and !is_unarchive_unattached and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_pin_top and !is_endtmux and !is_browser_shoturl and !is_shell_diag and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_OPENALL_OFFSET;
                     const is_theme_back = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_shell_diag and result_idx == SEARCH_THEME_BACK_OFFSET;
                     const is_theme_menu = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_shell_diag and result_idx == SEARCH_THEME_MENU_OFFSET;
@@ -2905,8 +3041,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_theme_dev_edit = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_shell_diag and result_idx == SEARCH_THEME_DEV_EDIT_OFFSET;
                     const is_theme_dev_reload = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_shell_diag and result_idx == SEARCH_THEME_DEV_RELOAD_OFFSET;
                     const is_sound_toggle = !is_snippet_action and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_endtmux and !is_browser_shoturl and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_shell_diag and result_idx == SEARCH_SOUND_OFFSET;
-                    const is_new_shell = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_pin_top and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEW_OFFSET;
-                    const is_tmux_inactive = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_archive and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_new_shell and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_TMUX_OFFSET;
+                    const is_new_shell = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_usage_companion and !is_usage_coach and !is_usage_login and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_shared_server_connection and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_pin_top and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_NEW_OFFSET;
+                    const is_tmux_inactive = !is_crash_cmd and !is_ws_snooze and !is_ws_snoozed and !is_ws_snoozed_row and !is_skill_action and !is_snippet_action and !is_sync_signout and !is_sync_status and !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and !is_workspace_delete_menu and !is_workspaces_menu and !is_quit and !is_fullwidth and !is_shortcuts and !is_closewin and !is_reconnect and !is_browser_history and !is_newwin and !is_openall and !is_theme_back and !is_theme_menu and !is_theme_choice and !is_theme_dev_edit and !is_theme_dev_reload and !is_sound_toggle and !is_archive and !is_endtmux and !is_remind_me and !is_reminders_menu and !is_remind_preset and !is_codex_tmux and !is_reopen and !is_urlpick and !is_closetab and !is_mutetab and !is_favorite and !is_keepalive and !is_pin_top and !is_browser_toggle and !is_browser_url and !is_browser_instruct and !is_browser_focus_url and !is_browser_focus_toggle and !is_external_browser_links and !is_shared_server_connection and !is_browser_autosuspend and !is_keepawake and !is_hibernate_now and !is_close_all_browser_panes and !is_browser_mode and !is_browser_shoturl and !is_zsb_rebind and !is_shell_diag and !is_new_shell and !is_voice_mode_on and !is_voice_mode_off and !is_eta_numbers and !is_eta_progress and !is_eta_accuracy and !is_chat_view_mode_everywhere and !is_chat_view_mode_nowhere and !is_voice_stop and !is_voice_always_on and !is_voice_always_off and !is_voice_speed_100 and !is_voice_speed_125 and !is_voice_speed_140 and !is_voice_speed_150 and !is_voice_replay and !is_voice_previous and !is_voice_next and !is_inbox_exclude and !is_ladder and result_idx >= SEARCH_TMUX_OFFSET;
                     const is_archived = is_renamewin and result_idx >= SEARCH_ARCHIVED_OFFSET and result_idx < SEARCH_ARCHIVED_OFFSET + 64;
                     const is_reminder_row = is_renamewin and result_idx >= SEARCH_REMINDER_ROW_OFFSET and result_idx < SEARCH_REMINDER_ROW_OFFSET + 64;
                     const is_customcmd = is_renamewin and !is_ws_snoozed_row and !is_archived and !is_reminder_row and result_idx >= SEARCH_CUSTOMCMD_OFFSET;
@@ -2949,11 +3085,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
                         var rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        if (result_idx == SEARCH_TABCTX_END_TMUX) {
-                            _ = SelectObject(hdc, palette_hint_font);
-                            var hint = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                        }
                     } else if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3511,9 +3642,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var usage_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L(ui_words.global_usage_servers), -1, &usage_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, palette_hint_font);
-                        var hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+G"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ladder) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3719,11 +3847,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var find_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync or is_chat_restart or is_chat_restart_all) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_restart) L("Chat View: Restart this chat on the newest version") else if (is_chat_restart_all) L("Chat View: Restart every idle live chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3745,6 +3873,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var selection_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L(ui_words.palette_chat_selection_menu), -1, &selection_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    } else if (is_chat_expand_table) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var expand_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.palette_chat_expand_table), -1, &expand_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy_sel) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3963,6 +4096,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const ns_label: [*:0]const u16 = switch (result_idx) {
                             SEARCH_NEW_CLAUDE_CHAT_OFFSET => L("New Claude session"),
                             SEARCH_NEW_PI_CHAT_OFFSET => L("New Pi chat"),
+                            SEARCH_NEW_CURSOR_CHAT_OFFSET => L("New Cursor chat"),
                             SEARCH_NEW_TERMINAL_OFFSET => L("New terminal"),
                             SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => L("New Claude in terminal"),
                             SEARCH_OPEN_SESSION_MENU_OFFSET => L("Open session\u{2026}"),
@@ -4056,6 +4190,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             SEARCH_CHAT_MODEL_OPUS_OFFSET => L("Chat View: Model Opus"),
                             SEARCH_CHAT_MODEL_SONNET_OFFSET => L("Chat View: Model Sonnet"),
                             SEARCH_CHAT_MODEL_HAIKU_OFFSET => L("Chat View: Model Haiku"),
+                            SEARCH_CHAT_MODEL_FABLE_OFFSET => L("Chat View: Model Fable"),
                             SEARCH_CHAT_EFFORT_LOW_OFFSET => L("Chat View: Effort Low"),
                             SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => L("Chat View: Effort Medium"),
                             SEARCH_CHAT_EFFORT_HIGH_OFFSET => L("Chat View: Effort High"),
@@ -4213,6 +4348,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         links_rc.left = ox + overlay_w - 60;
                         links_rc.right = ox + overlay_w - 8;
                         _ = DrawTextW(hdc, if (app_state.g_external_browser_links) L("on") else L("off"), -1, &links_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_shared_server_connection) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var shared_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 60, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Remote Tabs: Share One Server Connection"), -1, &shared_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        shared_rc.left = ox + overlay_w - 60;
+                        shared_rc.right = ox + overlay_w - 8;
+                        _ = DrawTextW(hdc, if (app_state.g_shared_server_connection) L("on") else L("off"), -1, &shared_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_autosuspend) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4556,13 +4700,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
                             const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_VIEW) L("Alt+C") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
-                            if (tc_shortcut) |tc_hint| {
-                                _ = SelectObject(hdc, palette_hint_font);
-                                _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                                var tc_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                                _ = DrawTextW(hdc, tc_hint, -1, &tc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                            } else if (result_idx == SEARCH_TABCTX_WSMOVE) {
+                            if (result_idx == SEARCH_TABCTX_WSMOVE) {
                                 _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                                 var tc_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4638,6 +4776,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var color_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L(ui_words.workspace_color), -1, &color_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == app_state.SEARCH_SERVERS_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var servers_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.settings_servers), -1, &servers_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SETTINGS_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -5142,13 +5285,15 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
         app_state.shells[i].favorite = i != 2;
     }
     app_state.shells[3].inbox_excluded = true;
+    app_state.g_recents_section_collapsed = false;
     for ([_]bool{ true, false, true }) |favorite| {
         app_state.shells[0].favorite = favorite;
         app_state.shells[1].favorite = favorite;
         var rows: [MAX_ROWS]Row = undefined;
         const count = layoutRows(&rows);
-        try std.testing.expectEqual(@as(u32, if (favorite) 3 else 1), count);
-        var expected: u32 = 0;
+        try std.testing.expectEqual(@as(u32, if (favorite) 4 else 2), count);
+        try std.testing.expectEqual(.section, rows[0].kind);
+        var expected: u32 = 1;
         for (0..4) |i| {
             const shell = app_state.shells[i];
             const in_favorites = @import("workspace_view.zig").splitMatches(frequent.favorites_split, shell.workspace, shell.favorite);
@@ -5162,11 +5307,11 @@ test "IGSH-457 Starred sidebar shows every starred session live without moving s
     }
     app_state.shells[0].inbox_archived = true;
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
-    app_state.shells[0].needs_attention = true;
     try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    app_state.shells[0].needs_attention = true;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     app_state.g_ws_snoozed[1] = true;
-    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
 test "IGSH-719 a muted or Inbox-excluded starred session stays in Favorites in its group" {
@@ -5275,13 +5420,16 @@ test "IGSH-556 Favorites and home grouping keep independent memberships and grou
     try std.testing.expect(!groupInCurrentWorkspace(home));
     try std.testing.expect(groupInCurrentWorkspace(starred));
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(starred, app_state.groups[rows[0].gidx].id);
     try std.testing.expectEqual(.tab, rows[1].kind);
     try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    try std.testing.expectEqual(.section, rows[2].kind);
+    try std.testing.expectEqual(.tab, rows[3].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[3].shell_idx);
     app_state.groups[findGroupIdx(starred).?].collapsed = true;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
     try std.testing.expect(isTabHidden(0));
     app_state.g_starred_workspace = false;
     try std.testing.expect(!groupInCurrentWorkspace(starred));
@@ -5334,13 +5482,14 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     try std.testing.expect(!app_state.shells[1].pinned_top);
     var rows: [MAX_ROWS]Row = undefined;
     const count = layoutRows(&rows);
-    try std.testing.expectEqual(@as(u32, 4), count);
+    try std.testing.expectEqual(@as(u32, 5), count);
     try std.testing.expect(rows[0].tile);
     try std.testing.expectEqual(@as(u32, 1), rows[0].shell_idx);
     try std.testing.expectEqual(uiScaled(96), rowTotalHeight(rows[0]));
     try std.testing.expect(rows[1].kind == .header);
-    try std.testing.expect(!rows[2].tile);
-    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(.section, rows[2].kind);
+    try std.testing.expect(!rows[3].tile);
+    try std.testing.expectEqual(@as(u32, 0), rows[3].shell_idx);
     try std.testing.expect(rows[0].y < rows[1].y);
     app_state.g_starred_workspace = false;
     try std.testing.expect(effPinnedTop(0));
@@ -5349,12 +5498,78 @@ test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin
     setPinnedTop(1, false);
     app_state.groups[0].collapsed = false;
     const unpinned = layoutRows(&rows);
-    try std.testing.expectEqual(@as(u32, 4), unpinned);
+    try std.testing.expectEqual(@as(u32, 5), unpinned);
     try std.testing.expect(rows[0].kind == .header);
     try std.testing.expect(!rows[1].tile);
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     try std.testing.expectEqual(@as(u32, 17), app_state.shells[1].starred_group_id);
     try std.testing.expect(app_state.shells[0].pinned_top);
+}
+
+test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the groups" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_group = app_state.groups[0];
+    const saved_shells = app_state.shells[0..4].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    const saved_recents = app_state.g_recents_section_collapsed;
+    const saved_sticky = app_state.g_sticky_n;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    defer {
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.groups[0] = saved_group;
+        app_state.shells[0..4].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+        app_state.g_recents_section_collapsed = saved_recents;
+        app_state.g_sticky_n = saved_sticky;
+        app_state.g_ws_snoozed = saved_snoozed;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_single_window = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_sticky_n = 0;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.shell_count = 4;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 41, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 0 };
+    for (0..4) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(4200 + i);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].starred_group_id = 41;
+    app_state.shells[1].starred_group_id = 41;
+    app_state.shells[0].last_active = 10;
+    app_state.shells[1].last_active = 20;
+    app_state.shells[2].last_active = 30;
+    app_state.shells[3].last_active = 40;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(.section, rows[3].kind);
+    try std.testing.expectEqual(SidebarTier.recent, rows[3].section_tier);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+    app_state.groups[0].collapsed = true;
+    try std.testing.expectEqual(@as(u32, 4), layoutRows(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
+    try std.testing.expectEqual(.section, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 3), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[3].shell_idx);
+    app_state.g_recents_section_collapsed = true;
+    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

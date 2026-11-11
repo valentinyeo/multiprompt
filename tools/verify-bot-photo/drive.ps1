@@ -42,6 +42,7 @@ public static class PhotoDialogOwner {
 }
 '@
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+$dpi = if ($env:CAPTION_DPI) { [int]$env:CAPTION_DPI } else { 96 }
 $profile = Join-Path $env:RUNNER_TEMP ("bot-photo-" + [guid]::NewGuid().ToString('N'))
 $settings = Join-Path $profile 'roaming/ZigShell'
 $env:APPDATA = Join-Path $profile 'roaming'
@@ -54,7 +55,7 @@ $env:IGSH_246 = '0'
 $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
 New-Item -ItemType Directory -Force $settings, $env:LOCALAPPDATA, $env:USERPROFILE, (Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:USERPROFILE 'Documents') | Out-Null
 $checks = [Collections.Generic.List[object]]::new()
-$result = @{ feature='bot-photo'; version=$ExpectedVersion; sha256=$ExpectedHash; status='failed'; checks=$checks; cleanup='pending'; error=$null }
+$result = @{ feature='bot-photo'; version=$ExpectedVersion; sha256=$ExpectedHash; status='failed'; checks=$checks; dpi=$dpi; edges=[ordered]@{}; cleanup='pending'; error=$null }
 $job = $null
 $app = $null
 $main = [IntPtr]::Zero
@@ -230,9 +231,42 @@ function Assert-Avatar([string]$Surface, [int]$Index, [string]$Name, [bool]$Tall
         $centerOk = if ($Tall) { $green.R -gt 150 -and $green.G -gt 150 -and $green.B -lt 100 -and $blue.R -gt 120 -and $blue.B -gt 120 -and $blue.G -lt 100 } else { $green.G -gt 140 -and $green.R -lt 100 -and $blue.B -gt 120 -and $blue.R -lt 100 }
         $cornerIsPhoto = if ($Tall) { $corner.R -gt 150 -and $corner.G -gt 150 -and $corner.B -lt 100 } else { $corner.G -gt 140 -and $corner.R -lt 100 }
         $bitmap.Save((Join-Path $Evidence "$Name.png"))
+        Save-Zoom $bitmap "$Name-zoom"
         Check "$Name-circle-center" $centerOk
         Check "$Name-circle-corner" (-not $cornerIsPhoto)
+        $blends = Edge-Blends $bitmap $green $corner
+        $result.edges[$Name] = @{ size=$size; blends=$blends }
+        if ($Surface -eq 'expanded') { Check "$Name-size-at-dpi" ($size -eq [int](36 * $dpi / 96)) }
+        Check "$Name-smooth-edge" ($blends -ge [Math]::Max(4, [int]($size / 8)))
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Edge-Blends([Drawing.Bitmap]$Bitmap, [Drawing.Color]$Photo, [Drawing.Color]$Back) {
+    $dr = [double]$Photo.R - $Back.R; $dg = [double]$Photo.G - $Back.G; $db = [double]$Photo.B - $Back.B
+    $span = $dr * $dr + $dg * $dg + $db * $db
+    if ($span -lt 3000) { return 0 }
+    $half = [int]($Bitmap.Width / 2) - 1
+    $inset = 2
+    $count = 0
+    for ($y = $inset; $y -lt $half; $y++) {
+        for ($x = $inset; $x -lt $half; $x++) {
+            $p = $Bitmap.GetPixel($x, $y)
+            $vr = [double]$p.R - $Back.R; $vg = [double]$p.G - $Back.G; $vb = [double]$p.B - $Back.B
+            $t = ($vr * $dr + $vg * $dg + $vb * $db) / $span
+            $er = $vr - $t * $dr; $eg = $vg - $t * $dg; $eb = $vb - $t * $db
+            if ($t -gt 0.15 -and $t -lt 0.85 -and ($er * $er + $eg * $eg + $eb * $eb) -lt 1600) { $count++ }
+        }
+    }
+    return $count
+}
+function Save-Zoom([Drawing.Bitmap]$Bitmap, [string]$Name) {
+    $zoom = [Drawing.Bitmap]::new($Bitmap.Width * 8, $Bitmap.Height * 8)
+    $graphics = [Drawing.Graphics]::FromImage($zoom)
+    try {
+        $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+        $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::Half
+        $graphics.DrawImage($Bitmap, 0, 0, $zoom.Width, $zoom.Height)
+        $zoom.Save((Join-Path $Evidence "$Name.png"))
+    } finally { $graphics.Dispose(); $zoom.Dispose() }
 }
 function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool]$Generated = $false) {
     $index = Index-For $Id
@@ -344,6 +378,10 @@ function Stop-App {
     $job.Dispose(); $script:job = $null
 }
 try {
+    if ($dpi -ne 96) {
+        Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/title-bar-native.cs"
+        [CaptionProof]::SetDpi($dpi)
+    }
     Check 'binary-sha256' ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -eq $ExpectedHash.ToLowerInvariant())
     Check 'embedded-version' ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;"))
     $tabs = @(@{kind='cmd'; name='Photo Alpha'; manual=$true; workspace=0}, @{kind='cmd'; name='Photo Beta'; manual=$true; workspace=0})
@@ -527,6 +565,7 @@ try {
         $result.cleanup += $switchStopped.ActiveProcesses
         $switchJob.Dispose()
     }
+    if ($dpi -ne 96) { try { [CaptionProof]::RestoreDpi() } catch { $result.status = 'failed'; $result.dpiCleanupError = $_.Exception.Message } }
     if (Test-Path (Join-Path $settings 'session.json')) { Copy-Item (Join-Path $settings 'session.json') (Join-Path $Evidence 'session.json') }
     if (Test-Path (Join-Path $settings 'debug.log')) { Copy-Item (Join-Path $settings 'debug.log') (Join-Path $Evidence 'debug.log') }
     Save $result (Join-Path $Evidence 'result.json')

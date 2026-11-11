@@ -14,6 +14,7 @@ const prelude = String.raw`
 const transport = struct {
     const Channel = opaque {};
     fn shutdown() void {}
+    fn respawn(_: u8) void {}
     fn close(_: *Channel) void { terminations += 1; closes += 3; }
     fn write(channel: *Channel, line: []const u8) bool {
         var written: u32 = 0;
@@ -228,6 +229,11 @@ test "shutdown during a fetch blocks new spawns and fallback and defers handle c
 }
 `;
 
+test('IGSH-1903 failed history requests respawn the shared transport', () => {
+  assert.match(body('chatHistoryPersistent'), /transport\.respawn\(host\)/);
+  assert.match(require('fs').readFileSync('src/chat_transport.zig', 'utf8'), /pub fn respawn\(index: u8\)/);
+});
+
 test('persistent history production transport: reuse, framing, timeout, fallback, backoff and shutdown', () => {
   assert.match(body('chatHistoryPersistent'), /transport\.read/);
   const start = source.indexOf('const ChatHistoryChannel = struct {');
@@ -399,5 +405,8 @@ test "wrong stream identity closes without publishing rows" {
 
 test('IGSH-1546 the chat identity names its provider for codex and pi chats', () => {
   const transcript = fs.readFileSync('src/chat_transcript.zig', 'utf8');
-  assert.match(transcript, /pub fn provider\(self: Identity\) \[\]const u8 \{\s*return if \(self\.pi\) "pi" else if \(self\.codex\) "codex" else "claude";/);
+  assert.match(transcript, /if \(self\.pi\) return "pi";\s*if \(self\.codex\) return "codex";/);
+  assert.match(transcript, /fn providerAgentLabel\(agent: u8\)/);
+  assert.match(transcript, /7 => "cursor"/);
+  assert.match(transcript, /agent: u8 = 0/);
 });

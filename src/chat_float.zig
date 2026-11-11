@@ -45,7 +45,11 @@ pub fn collectHoles(out: *HoleList) void {
     if (drawing.chatTitleLayout()) |title| {
         out.add(title.pill, @divTrunc(title.pill.bottom - title.pill.top, 2));
         out.addFloating(title.more, @divTrunc(title.more.bottom - title.more.top, 2));
+        out.addFloating(title.inbox, @divTrunc(title.inbox.bottom - title.inbox.top, 2));
         if (title.meta.len > 0) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
+    }
+    if (app_state.g_chat_title_inbox_hover) {
+        if (drawing.chatTitleInboxTooltip()) |tip| out.addFloating(tip, drawing.uiScaled(6));
     }
     if (chat_composer.chatNewMessagesRect()) |pill| out.addFloating(pill, drawing.uiScaled(13));
 }

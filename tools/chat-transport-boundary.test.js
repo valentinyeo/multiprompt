@@ -1,12 +1,12 @@
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 
 const script = String.raw`
-import ast, base64, json, pathlib, queue, signal, subprocess, sys, tempfile, threading, types
+import ast, base64, json, pathlib, queue, signal, subprocess, sys, tempfile, threading, time, types
 root = pathlib.Path(sys.argv[1])
 source = (root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8')
 adapter = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'transport_reader')
@@ -36,6 +36,11 @@ def serve_reader():
             while not Path(__file__).with_suffix('.release').exists(): time.sleep(0.01)
         print(json.dumps(dict(id=value['id'],value=value.get('value'),watch='--watch' in sys.argv)),flush=True)
 def watch_reader(): serve_reader()
+def terminal_reader():
+    Path(__file__).with_suffix('.terminal').write_text('open', encoding='utf-8')
+    for line in sys.stdin.buffer:
+        if not line:
+            break
 '''
 with tempfile.TemporaryDirectory() as folder:
     fixture = pathlib.Path(folder) / 'fixture_boundary.py'
@@ -54,9 +59,11 @@ with tempfile.TemporaryDirectory() as folder:
         value = replies.get(timeout=15)
         assert value is not None, child.stderr.read().decode() + ''.join(file.read_text(encoding='utf-8') for file in pathlib.Path(folder).glob('reader-*.stderr.log'))
         return value
-    def send(channel, value, watch=False):
-        child.stdin.write((json.dumps(dict(channel=channel, data=json.dumps(value), watch=watch)) + '\n').encode())
+    opened = set()
+    def send(channel, value, watch=False, terminal=False):
+        child.stdin.write((json.dumps(dict(channel=channel, data=value if terminal else json.dumps(value), watch=watch, terminal=terminal, open=channel not in opened)) + '\n').encode())
         child.stdin.flush()
+        opened.add(channel)
     def page(channel):
         value = next_reply()
         assert value['channel'] == channel, value
@@ -78,8 +85,18 @@ with tempfile.TemporaryDirectory() as folder:
         assert page(2) == dict(id=8, value=text, watch=False)
         send(3, dict(id=9, exit=True))
         assert next_reply() == dict(channel=3, closed=True)
+        send(3, dict(id=10, value='must not reopen'))
+        assert next_reply() == dict(channel=3, closed=True)
         send(2, dict(id=10, value='survived'))
         assert page(2)['value'] == 'survived'
+        send(4, '{"command":"true","size":[24,80]}', terminal=True)
+        marker = fixture.with_suffix('.terminal')
+        deadline = time.time() + 5
+        while not marker.exists():
+            assert time.time() < deadline, 'terminal channel did not start terminal_reader'
+            time.sleep(0.05)
+        send(2, dict(id=12, value='after-terminal'))
+        assert page(2)['value'] == 'after-terminal'
         child.stdin.close()
         assert child.wait(timeout=15) == 0, child.stderr.read().decode()
         assert not child.stderr.read(), 'adapter wrote errors'
@@ -93,8 +110,16 @@ print('TRANSPORT_BOUNDARY_PASS')
 test('Windows-safe fake host preserves real logical channel routing and reader bootstraps', () => {
   const source = fs.readFileSync(path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'utf8');
   assert.match(source, /def transport_reader\(/);
+  assert.match(source, /def terminal_reader\(/);
   assert.match(source, /entry = "transport_reader"/);
-  assert.match(source, /entry = "watch_reader" if value\.get\("watch"\) else "serve_reader"/);
-  const result = execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 45000 });
-  assert.match(result, /TRANSPORT_BOUNDARY_PASS/);
+  assert.match(source, /entry = "terminal_reader" if value\.get\("terminal"\) else "watch_reader" if value\.get\("watch"\) else "serve_reader"/);
+  const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  assert.match(transport, /fn rejectTerminal\(channel: \*Channel\) bool/);
+  const result = spawnSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 45000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && !result.stderr.includes('AssertionError')) {
+    throw new Error(`transport boundary execution failed: ${result.stderr}`);
+  }
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /TRANSPORT_BOUNDARY_PASS/);
 });

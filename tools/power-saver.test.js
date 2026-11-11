@@ -79,7 +79,7 @@ test("persistent per-host VPS channel falls back to the one-shot path on any fai
     app,
     /if \(host < g_vps_channels\.len\) \{\s+if \(fetchHostPersistent\(host, &buf\)\) \|n\| \{/
   );
-  assert.match(app, /if \(total == 0\) \{\s+via_persistent = false;\s+total = sshOneShotCapture\(cmd_str, &buf\);/);
+  assert.match(app, /if \(total == 0\) \{\s+via_persistent = false;\s+const result = sshOneShotCaptureInput\(cmd_str, &buf, null, 20000\);\s+if \(result\.success\) total = result\.len;/);
   assert.match(app, /fn closeAllVpsPersistentChannels\(\) void \{/);
 });
 
