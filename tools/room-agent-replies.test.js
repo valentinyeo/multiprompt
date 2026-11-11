@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 
 const program = String.raw`
-import importlib.util, json, sys, tempfile, uuid
+import importlib.util, json, sys, tempfile, time, uuid
 from pathlib import Path
 from unittest.mock import patch
 root = Path.cwd()
@@ -64,9 +64,15 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         first, second = post('First room question'), post('Second room question')
         a, b = bridge.execute(first), bridge.execute(second)
         assert bridge.execute(first) == a
-        bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
+        deadline = time.monotonic() + 20
         for delivery, text in [(a['deliveries'][0], first['text']), (b['deliveries'][0], second['text'])]:
-            saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=delivery['id']))
+            while True:
+                bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
+                saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=delivery['id']))
+                if saved['message'] is not None:
+                    break
+                assert time.monotonic() < deadline, 'stored room message timeout: ' + delivery['id']
+                time.sleep(0.05)
             assert saved['message']['text'] == text
         logs = []
         state = {}
