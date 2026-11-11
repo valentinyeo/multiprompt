@@ -25,6 +25,7 @@ if ($env:CHAT_REPLY_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Re
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
 if ($env:CHAT_NOTES_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Session notes proof requires chat-delivery' }
 if ($env:CHAT_REACTIONS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reactions proof requires chat-delivery' }
+if ($env:CHAT_RECALL_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Handed recall proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1' -and $Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
 if ($env:CHAT_REPLY_PROOF -eq '1' -or $env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1' -or $env:CHAT_NOTES_PROOF -eq '1') {
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
@@ -64,6 +65,7 @@ if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='i
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
+if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
 $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
@@ -545,8 +547,9 @@ foreach ($plan in $plans) {
     $isLiveDelivery = $plan.name -eq 'live-delivery'
     $isInstant = $plan.name -eq 'instant-chat'
     $isModel = $plan.name -eq 'model-settings'
+    $isRecall = $plan.name -eq 'recall-handed'
     $socketTemp = $null
-    $hasTranscript = $isModel -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -559,7 +562,7 @@ foreach ($plan in $plans) {
         $env:USERPROFILE = "$profile/home"
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
-        if ($isModel) {
+        if ($isModel -or $isRecall) {
             $socketTemp = Join-Path ([IO.Path]::GetPathRoot($profile)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
             New-Item -ItemType Directory $socketTemp | Out-Null
             $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
@@ -625,7 +628,7 @@ foreach ($plan in $plans) {
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
-        if ($isModel) { $savedSession.tabs[0].csid = $sid }
+        if ($isModel -or $isRecall) { $savedSession.tabs[0].csid = $sid }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
@@ -679,6 +682,8 @@ foreach ($plan in $plans) {
             . "$PSScriptRoot/startup-failure.ps1"
         } elseif ($isModel) {
             . "$PSScriptRoot/model-settings.ps1"
+        } elseif ($isRecall) {
+            . "$PSScriptRoot/recall-handed.ps1"
         } elseif ($isInstant) {
             . "$PSScriptRoot/instant-chat.ps1"
         } elseif ($isResync) {
@@ -1489,6 +1494,10 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 }
 if ($env:CHAT_CANCEL_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-cancel-proof.cjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_RECALL_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-recall-proof.cjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') {

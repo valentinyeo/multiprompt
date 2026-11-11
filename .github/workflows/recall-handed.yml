@@ -1,0 +1,20 @@
+name: Handed message recall
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published desktop release to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ui:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_recall_proof: true
+      tag: ${{ inputs.tag }}

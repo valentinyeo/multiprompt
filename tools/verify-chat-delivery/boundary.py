@@ -1540,6 +1540,17 @@ def serve_reader():
         record("model-host-start.jsonl", result=started)
         if started.get("status") not in ("started", "already"):
             raise RuntimeError("Production host failed to start: " + str(started))
+    if state().get("name") == "recall-handed":
+        import hashlib
+        sid = state()["sid"]
+        record("recall-reader.jsonl", inner_sha256=hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest(), generation=namespace.get("RUNTIME_GENERATION"))
+        paths = namespace["host_paths"]("claude", sid)
+        if not paths["config"].exists():
+            namespace["host_write"](paths["config"], dict(enabled=True, tmux="verify-agent", command=[sys.executable, str(Path(__file__).with_name("recall-agent.py"))]))
+        started = namespace["host_start"]("claude", sid, namespace["READER_SOURCE"])
+        record("recall-host-start.jsonl", result=started)
+        if started.get("status") not in ("started", "already"):
+            raise RuntimeError("Production host failed to start: " + str(started))
     namespace["serve"](namespace["READER_SOURCE"])
 
 
