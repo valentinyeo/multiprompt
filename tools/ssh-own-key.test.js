@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const read = file => {
   try { return fs.readFileSync(path.join(__dirname, '..', file), 'utf8'); } catch { return ''; }
 };
@@ -25,9 +26,23 @@ test('IGSH-1928 every ssh launch requires isolated app settings, including durin
   assert.match(append, /appendAsciiBuf\(buf, pos, "-F \\""\) and appendAsciiBuf\(buf, pos, config\)/, 'narrow launch lines pass -F');
   assert.match(body(consoleSource, 'resolveSshPath'), /loadSshConfig\(\);\s*return true;/);
   assert.match(body(consoleSource, 'loadSshConfig'), /ssh_identity\.zig"\)\.configFile/);
-  assert.match(append, /if \(config\.len == 0\) return false;/);
-  assert.doesNotMatch(append, /if \(config\.len == 0\) return true;/);
+  assert.match(append, /if \(config\.len == 0\) return appendWideAscii\(buf, pos, ssh_unconfigured_options\);/);
+  assert.match(append, /if \(config\.len == 0\) return appendAsciiBuf\(buf, pos, ssh_unconfigured_options\);/);
+  assert.doesNotMatch(append, /if \(config\.len == 0\) return (?:true|false);/);
   assert.match(body(identity, 'configFile'), /"config-v2"/, 'never load a previous config that allowed agent fallback');
+});
+
+test('IGSH-1928 missing app settings never offer a default key, agent or password', () => {
+  const match = consoleSource.match(/const ssh_unconfigured_options = "([^"\r\n]+)";/);
+  assert.ok(match, 'the startup prefix has explicit isolated options');
+  const result = spawnSync('ssh', [...match[1].trim().split(/\s+/), '-G', 'unconfigured.example.invalid'], { encoding: 'utf8', timeout: 10000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const values = name => result.stdout.split(/\r?\n/).filter(line => line.startsWith(`${name} `)).map(line => line.slice(name.length + 1));
+  assert.deepEqual(values('identityfile'), ['none']);
+  assert.deepEqual(values('identityagent'), ['none']);
+  assert.deepEqual(values('identitiesonly'), ['yes']);
+  assert.deepEqual(values('preferredauthentications'), ['publickey']);
 });
 
 test('IGSH-1928 the app settings force the app key and turn every agent off', () => {

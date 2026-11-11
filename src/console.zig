@@ -1260,6 +1260,7 @@ pub fn sshSpawnFailed() void {
 }
 
 pub const SSH_HELPER_FLAGS: u32 = 0x00000008;
+const ssh_unconfigured_options = "-F none -o IdentityFile=none -o IdentityAgent=none -o IdentitiesOnly=yes -o PreferredAuthentications=publickey ";
 
 pub fn appendSshExe(buf: anytype, pos: *usize) bool {
     if (@import("launch_cache.zig").pending or (app_state.g_main_hwnd != null and @import("win32.zig").GetCurrentThreadId() == GetWindowThreadProcessId(app_state.g_main_hwnd, null))) {
@@ -1272,7 +1273,6 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
     const path = app_state.g_ssh_path[0..app_state.g_ssh_path_len];
     if (path.len == 0) return false;
     const config = app_state.g_ssh_config[0..app_state.g_ssh_config_len];
-    if (config.len == 0) return false;
     if (@TypeOf(buf[0]) == u16) {
         var wide: [520]u16 = undefined;
         const wpath = win32WidePath(&wide, path) orelse return false;
@@ -1284,6 +1284,7 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
         buf[pos.*] = '"';
         pos.* += 1;
         if (!appendWideAscii(buf, pos, " ")) return false;
+        if (config.len == 0) return appendWideAscii(buf, pos, ssh_unconfigured_options);
         var wide_config: [520]u16 = undefined;
         const wconfig = win32WidePath(&wide_config, config) orelse return false;
         if (!appendWideAscii(buf, pos, "-F \"")) return false;
@@ -1293,6 +1294,7 @@ pub fn appendSshExe(buf: anytype, pos: *usize) bool {
         return appendWideAscii(buf, pos, "\" ");
     } else {
         if (!(appendAsciiBuf(buf, pos, "\"") and appendAsciiBuf(buf, pos, path) and appendAsciiBuf(buf, pos, "\" "))) return false;
+        if (config.len == 0) return appendAsciiBuf(buf, pos, ssh_unconfigured_options);
         return appendAsciiBuf(buf, pos, "-F \"") and appendAsciiBuf(buf, pos, config) and appendAsciiBuf(buf, pos, "\" ");
     }
 }
