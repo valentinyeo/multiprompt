@@ -29,6 +29,7 @@ def board(*args):
     if args[:2] == ('task', 'list'):
         return dict(success=True, tasks=tasks.copy())
     if args[:2] == ('task', 'create'):
+        assert args[args.index('--labels') + 1] == 'Multiprompt,brain-medium'
         task = dict(ticketNumber='IGSH-' + str(len(tasks) + 1), title=args[args.index('--title') + 1], section='Todo')
         tasks.append(task)
         return dict(success=True, task=task)
@@ -122,4 +123,59 @@ print('CI_RECEIPT_BEHAVIOR_OK')
   const result = spawnSync('python3', ['-c', code], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /CI_RECEIPT_BEHAVIOR_OK/);
+});
+
+test('default board calls use the session-scoped write guard', () => {
+  const code = `
+import importlib.util, json
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('triage', ${JSON.stringify(script)})
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+with patch.dict(m.os.environ, {}, clear=True), patch.object(m, 'command', return_value=json.dumps(dict(success=True))) as command:
+    m.board('task', 'get', 'IGSH-1')
+    assert command.call_args.args[0] == ['vcc', 'task', 'get', 'IGSH-1', '--json']
+    m.activity('IGSH-1', 'receipt')
+    assert command.call_args.args[0] == ['vcc', 'activity', 'add', 'IGSH-1', 'receipt']
+print('SESSION_GUARD_OK')
+`;
+  const result = spawnSync('python3', ['-c', code], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /SESSION_GUARD_OK/);
+});
+
+test('installer refuses invalid credentials before changing the installation', () => {
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crash-install-'));
+  try {
+    const bin = path.join(home, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'board'), '#!/bin/sh\nexit 4\n', { mode: 0o755 });
+    const env = { ...process.env, HOME: home, CLOUDFLARE_ACCOUNT_ID: 'test', SHIP_SESSION_NAME: 'Crash Reporter', CRASH_BOARD_COMMAND: path.join(bin, 'board'), CRASH_GH_COMMAND: 'gh' };
+    const result = spawnSync('bash', [path.resolve(__dirname, 'install-crash-report-tickets.sh')], { env, encoding: 'utf8' });
+    assert.equal(result.status, 4, result.stdout + result.stderr);
+    assert.equal(fs.existsSync(path.join(home, '.config')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('installed timer keeps the validated session identity without storing a token', () => {
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crash-install-'));
+  try {
+    const bin = path.join(home, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'board'), '#!/bin/sh\n[ "$*" = "context --json" ]\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const env = { ...process.env, HOME: home, PATH: bin + path.delimiter + process.env.PATH, CLOUDFLARE_ACCOUNT_ID: 'test', SHIP_SESSION_NAME: 'Crash Reporter', CRASH_BOARD_COMMAND: path.join(bin, 'board'), CRASH_GH_COMMAND: 'gh', HT_TOKEN: 'not-for-storage' };
+    const result = spawnSync('bash', [path.resolve(__dirname, 'install-crash-report-tickets.sh')], { env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const config = fs.readFileSync(path.join(home, '.config/multiprompt/crash-report-tickets.env'), 'utf8');
+    assert.match(config, /^SHIP_SESSION_NAME="Crash Reporter"$/m);
+    assert.ok(!config.includes('not-for-storage'));
+    assert.equal(fs.statSync(path.join(home, '.config/multiprompt/crash-report-tickets.env')).mode & 0o777, 0o600);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

@@ -16,14 +16,14 @@ def command(args):
 
 
 def board(*args):
-    value = json.loads(command([os.environ.get('CRASH_BOARD_COMMAND', 'ceo-ht'), *args, '--json']))
+    value = json.loads(command([os.environ.get('CRASH_BOARD_COMMAND', 'vcc'), *args, '--json']))
     if value.get('success') is not True:
         raise RuntimeError('Board operation failed')
     return value
 
 
 def activity(ticket, text):
-    command([os.environ.get('CRASH_BOARD_COMMAND', 'ceo-ht'), 'activity', 'add', ticket, text])
+    command([os.environ.get('CRASH_BOARD_COMMAND', 'vcc'), 'activity', 'add', ticket, text])
 
 
 def signature(row):
@@ -94,7 +94,7 @@ def triage(rows, path):
         if entry is None:
             task = find_ticket(title)
             if task is None:
-                created = board('task', 'create', '--project', '2060', '--section', 'Todo', '--labels', 'Multiprompt', '--priority', 'high', '--title', title, '--description', '<h2>Problem</h2><ul><li>Multiprompt stopped responding.</li><li>The saved report arrived automatically.</li></ul><h2>Fix</h2><p>Find and fix this recorded freeze.</p><h2>Done when</h2><p>The recorded freeze cannot happen again.</p><h2>Risk</h2><p>A wrong fix leaves the freeze unchanged.</p><h2>Decision</h2><p>None.</p>')
+                created = board('task', 'create', '--project', '2060', '--section', 'Todo', '--labels', 'Multiprompt,brain-medium', '--priority', 'high', '--title', title, '--description', '<h2>Problem</h2><ul><li>Multiprompt stopped responding.</li><li>The saved report arrived automatically.</li></ul><h2>Fix</h2><p>Find and fix this recorded freeze.</p><h2>Done when</h2><p>The recorded freeze cannot happen again.</p><h2>Risk</h2><p>A wrong fix leaves the freeze unchanged.</p><h2>Decision</h2><p>None.</p>')
                 task = (created.get('tasks') or [created.get('task')])[0]
             ticket = task['ticketNumber']
             entry = {'ticket': ticket, 'receipts': []}

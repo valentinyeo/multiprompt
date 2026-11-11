@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-: "${CLOUDFLARE_ACCOUNT_ID:?required}" "${CEO_AGENT:?required}" "${CRASH_BOARD_COMMAND:?required}" "${CRASH_GH_COMMAND:?required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?required}" "${SHIP_SESSION_NAME:?required}" "${CRASH_BOARD_COMMAND:?required}" "${CRASH_GH_COMMAND:?required}"
+"$CRASH_BOARD_COMMAND" context --json >/dev/null
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 install -d "$HOME/.local/share/multiprompt-crash-tickets" "$HOME/.config/multiprompt" "$HOME/.config/systemd/user"
 for file in crash-report-tickets.py crash-reports.py; do
@@ -15,7 +16,7 @@ from pathlib import Path
 path = Path.home() / '.config/multiprompt/crash-report-tickets.env'
 path.touch(mode=0o600, exist_ok=True)
 path.chmod(0o600)
-path.write_text('\n'.join(name + '=' + json.dumps(os.environ[name]) for name in ('CLOUDFLARE_ACCOUNT_ID', 'CEO_AGENT', 'CRASH_BOARD_COMMAND', 'CRASH_GH_COMMAND', 'CRASH_CI_RUN') if os.environ.get(name)) + '\n')
+path.write_text('\n'.join(name + '=' + json.dumps(os.environ[name]) for name in ('CLOUDFLARE_ACCOUNT_ID', 'CEO_AGENT', 'SHIP_SESSION_NAME', 'CRASH_BOARD_COMMAND', 'CRASH_GH_COMMAND', 'CRASH_CI_RUN') if os.environ.get(name)) + '\n')
 PY
 systemctl --user daemon-reload
 systemctl --user enable --now crash-report-tickets.timer
