@@ -2648,11 +2648,12 @@ pub fn chatSetTopPad(new_pad: i32) void {
     if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
-    app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
+    const old_scroll_y = app_state.g_chat_scroll_y;
+    app_state.g_chat_scroll_y = std.math.clamp(old_scroll_y, chatMinScroll(), chatMaxScroll());
     if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
         var client: RECT = std.mem.zeroes(RECT);
         chatViewClientRect(&client);
-        app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y);
+        app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, old_scroll_y + delta);
     }
 }
 
@@ -2665,21 +2666,21 @@ pub fn chatMaxScroll() i32 {
     if (app_state.g_chat_transcript_hwnd == null) return 0;
     var client_rc: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client_rc);
-    return @max(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top));
+    return @max(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top), app_state.g_chat_scroll_y);
 }
 
 pub fn chatMinScroll() i32 {
     if (app_state.g_chat_transcript_hwnd == null) return 0;
     var client_rc: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client_rc);
-    return @min(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top));
+    return @min(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top), app_state.g_chat_scroll_y);
 }
 
 pub fn chatScrollStateChanged(viewport_h: i32) void {
     const had_messages = app_state.g_chat_new_messages.count() != 0;
     const before = app_state.g_chat_new_messages;
     const was_scrolled_up = app_state.g_chat_scrolled_up;
-    app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
+    app_state.g_chat_scrolled_up = @abs(app_state.g_chat_scroll_y - (app_state.g_chat_content_h - viewport_h)) > uiScaled(4);
     app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
     if (!app_state.g_chat_scrolled_up) _ = @import("chat_session.zig").chatReadMark(true);
     if (before.value == app_state.g_chat_new_messages.value and was_scrolled_up == app_state.g_chat_scrolled_up) return;
@@ -2687,10 +2688,11 @@ pub fn chatScrollStateChanged(viewport_h: i32) void {
 }
 
 pub fn chatJumpToNewest() void {
-    chatScrollBy(-app_state.g_chat_content_h);
     if (app_state.g_chat_transcript_hwnd == null) return;
+    app_state.g_chat_read_hold = false;
     var client: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client);
+    chatScrollBy(app_state.g_chat_scroll_y - (app_state.g_chat_content_h - (client.bottom - client.top)));
     chatScrollStateChanged(client.bottom - client.top);
 }
 

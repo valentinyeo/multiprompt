@@ -54,7 +54,7 @@ test('IGSH-814 leave, bottom and send lifecycle preserve anchors until live hist
   assert.match(model, /!disk and !history.more\) read_ready = foregroundIsOurs\(\)/);
   assert.match(model, /const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready/);
   assert.match(model, /!app_state.g_chat_active or app_state.g_chat_read_open_pending or \(bottom and app_state.g_chat_read_hold\)/);
-  assert.match(model, /app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells\[app_state.active_shell\].last_read_message_id != 0;\s+app_state.g_chat_read_open_pending = false;/);
+  assert.match(model, /app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count;\s+app_state.g_chat_read_open_pending = false;/);
   assert.match(read('src/chat_send.zig'), /g_chat_read_hold = false;/);
   assert.match(read('src/chat_render.zig'), /app_state.g_chat_read_hold = false;\s+app_state.g_chat_scroll_y = new_y;/);
   assert.match(model, /if \(!refreshed and !restore_read\) return/);
