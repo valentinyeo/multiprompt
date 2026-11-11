@@ -1,33 +1,31 @@
-# IGSH-1892 proof gates
+# Gates: IGSH-1892 agent browser pane
 
-Scope: Keep the agent browser pane open while an agent is attached; reopen it on the next browser call if closed. Prove 15 minutes of real browser interaction without a drop. Continue merged PR 897, no second PR.
+OWNS: .unlazy/IGSH-1892/**
 
-- [x] Read current ticket/comments and confirm Runner 3 ownership.
-- [x] Revalidate published fix and GitHub-hosted checks.
-- [ ] Prove next-call recovery on this runner's own pane.
-- [ ] Prove 15 minutes of attached-agent browser use without a drop.
-- [ ] Record live evidence and move Done only when both behavioral gates pass.
+Scope: Keep the agent browser pane open while an agent is attached. If it closes, reopen it on the next browser call. Done only after this runner drives its own pane for 15 minutes without a drop and a closed pane reopens on the next call.
 
-## Constraints
+- [ ] G1: The desktop process in memory matches a published release that contains the pane lifecycle fix and the reply-ownership fix.
+  CHECK: node .unlazy/IGSH-1892/live-check.mjs identity
+  EXPECT: IGSH-1892 identity pass
+  EVIDENCE: pending
 
-No helpers, local builds/tests, user app restart, binary replacement, or unrelated tab changes. Shared checkout untouched. Resume: tmux attach -t ht-or-runner-3 (Cursor Grok RUNNER 3).
+- [ ] G2: A closed pane on ht-or-runner-3 reopens on the next browser call and answers a page read.
+  CHECK: node .unlazy/IGSH-1892/live-check.mjs recover
+  EXPECT: IGSH-1892 recover pass
+  EVIDENCE: pending
 
-## Plan
+- [ ] G3: This runner drives its own pane for 15 minutes without a dropped browser call.
+  CHECK: node .unlazy/IGSH-1892/live-check.mjs soak
+  EXPECT: IGSH-1892 soak pass
+  EVIDENCE: pending
 
-Prior runners confirmed current v0.28.1668 but intermittent bridge timeouts. Inspect routing and real bridge responses before repeating selftest. Distinguish pane lifecycle from bridge transport failures. Any unresolved gate stays unmet.
+- [ ] G4: Live evidence is pushed and the ticket moves to Done only after the other gates pass.
+  EVIDENCE: pending
 
-## Evidence: 2026-11-11 09:49–09:53 UTC
+## Recovery observation 2026-11-11
 
-- Current description requires both 15 minutes without a drop and next-call closed-pane recovery. Original PR remains merged: https://github.com/valentinyeo/multiprompt/pull/897 at ea17331f2e5873fa7cccbdc97ab151471b757587. No new PR or source changes.
-- Hosted test https://github.com/valentinyeo/multiprompt/actions/runs/42963786529 and release https://github.com/valentinyeo/multiprompt/actions/runs/42963786536 both re-read: completed, success, source bde95cf882aea6c58dbc70737632bc401a3f9fd2.
-- Read-only process inspection confirms running executable SHA256 b1e40c3d5395e5b3d93a150798850b1e5b0890def0f307eebd1bf9367ee67347, matching the published x64 asset for https://github.com/valentinyeo/multiprompt/releases/tag/v0.28.1668 . Main process 3044 started 09:25:01 UTC; child process 9028 started 09:31:30 UTC. Neither restarted or replaced.
-- Initial pane-info returned no_tab for this exact runner session. Workspace inventory confirmed no existing terminal tab for it. Supported background session-open created only this runner's tab 20005; open about:blank succeeded and pane-info returned shell_id=20005, windowId=1813543429, active=false, visible=false. This proves initial opening, not recovery after closure.
-- Actual tabs call failed reply_timeout after 15.015 seconds. Status failed after 5.003 seconds. Supported reset subsequently succeeded for windowId=1813543429, tabs=1, extensionVersion=1.0.90, reloadScheduled=false. The next tabs call again failed reply_timeout after 15.010 seconds. Stopped repeated attempts after this supported recovery failed.
-- Important distinction: read-only desktop debug log at 09:52:42–09:52:44 reports this exact shell/window frozen=false and busy=true throughout. Thus the observed command failure happens with the pane alive and not frozen. Do not repeat old-release, missing-pane or automatic-hibernation diagnoses without new evidence. No controlled pane closure was attempted while the transport was unreliable.
-- Existing BlockedBy IGSH-1935 is Done; this is not an open-ticket wait. Live recovery and 15-minute interaction gates remain unmet. Board 2060 has no QA column; AI Review retains unfinished verification.
-- CLI comment-discovery feedback filed: https://app.hypertask.ai/detail/project-15/9060 .
-- No local tests/builds, helpers, app restarts, executable replacement, foreground changes, selftest pages, or unrelated-tab edits. Own blank browser pane remains available for the next verifier.
+Running process is v0.28.1673, started 2026-11-11T11:56:57Z, SHA256 8760865105733cf8a14c1d864e8f26e9b3bbded59c2e6f9d321c7d5519d84e9c, same hash as the installed multiprompt.exe. That release is after the reply-ownership fix.
 
-## Handoff
+Own session ht-or-runner-3, shell 20216, was closed: pane-info returned windowId 0. The next call, `zsb open https://example.com/`, returned ok. pane-info then returned windowId 1813544135. tabs showed Example Domain at https://example.com/ as the target tab. eval returned https://example.com/. Extension 1.0.90.
 
-2 gates met; 3 unmet; 0 abandoned. Establish reliable replies on the live, unfrozen runner-owned pane before another soak or selftest. Then prove controlled closure/next-call recovery and 15 minutes of real browser use. No Done claim from CI, initial opening, or successful reset alone.
+A 15-minute soak is running as node pid 2924477, log `.unlazy/IGSH-1892/soak.log`. First call passed at elapsed 1s on window 1813544135.
