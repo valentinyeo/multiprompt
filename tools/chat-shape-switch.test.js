@@ -213,7 +213,8 @@ test('IGSH-1040 shape timing clicks the owned sidebar row instead of a keyboard 
   assert.ok(observer.includes('"idle" : "sidebar-click"'));
   assert.ok(observer.includes('WindowFromPoint(point) != owner'));
   assert.ok(observer.includes('GetDpiForWindow(owner) != 96'));
-  assert.ok(observer.includes('new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 }'));
+  assert.ok(observer.includes('new Point { X = 100, Y = SidebarRowY(target) }'));
+  assert.ok(observer.includes('SidebarSectionHeight + SidebarRowHeight * target + SidebarRowHeight / 2'));
   assert.ok(observer.includes('new Mouse { Flags = 2 }'));
   assert.ok(observer.includes('new Mouse { Flags = 4 }'));
   assert.doesNotMatch(observer.slice(observer.indexOf('if (target >= 0) {'), observer.indexOf('long position = offset;')), /Keyboard =/);
@@ -223,4 +224,47 @@ test('IGSH-1040 shape timing clicks the owned sidebar row instead of a keyboard 
   assert.ok(control.includes("[ChatSwitchObserver]::SidebarHeaderHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 0 } else { 52 }"));
   assert.match(read('src/workspace_switcher.zig'), /pub fn headerHeight\(\)[^]*?scale\(52\)/);
   assert.match(read('src/sidebar.zig'), /var y:[^;]*workspace_switcher\.zig[^;]*headerHeight\(\)/);
+});
+
+test('HYCI-288 expanded sidebar dimensions follow the native layout', () => {
+  assert.match(read('src/sidebar.zig'), /fn sectionHeaderHeight\(\)[^]*?else uiScaled\(42\)/);
+  assert.match(read('src/browser_pane.zig'), /pub fn tabRowH\(\)[^]*?LOOK_UNIFIED and !app_state\.g_sidebar_collapsed\) 58/);
+  assert.ok(control.includes("[ChatSwitchObserver]::SidebarSectionHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 24 } else { 42 }"));
+  assert.ok(control.includes("[ChatSwitchObserver]::SidebarRowHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 38 } else { 58 }"));
+});
+
+test('HYCI-288 native clicks land inside all five intended rows for current and baseline layouts', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const source = path.join(__dirname, 'verify-chat-delivery/chat-switch-observer.cs').replaceAll("'", "''");
+  const setup = control.split('\n').filter(line => /\[ChatSwitchObserver\]::Sidebar(?:Header|Section|Row)Height =/.test(line)).join('\n');
+  assert.equal(setup.split('\n').length, 3);
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path '${source}'
+foreach ($tag in @('', 'v0.28.946')) {
+  $env:RELEASE_TAG = $tag
+  ${setup}
+  $top = if ($tag) { 32 } else { 102 }
+  $height = if ($tag) { 38 } else { 58 }
+  foreach ($target in 0..4) {
+    $y = [ChatSwitchObserver]::SidebarRowY($target)
+    $start = $top + $height * $target
+    if ($y -lt $start -or $y -ge ($start + $height)) { throw "Wrong target row: $tag/$target/$y" }
+    if ($y -ne ($start + [int]($height / 2))) { throw 'Click missed the row center' }
+  }
+}
+$env:RELEASE_TAG = ''
+${setup}
+$regressedY = 8 + 52 + 24 + 38 + 19
+if ($regressedY -ge 160 -and $regressedY -lt 218) { throw 'Regression control unexpectedly hit row one' }
+if ([ChatSwitchObserver]::SidebarRowY(1) -eq $regressedY) { throw 'Outdated row geometry accepted' }
+foreach ($target in @(-1, 5)) {
+  $refused = $false
+  try { [void][ChatSwitchObserver]::SidebarRowY($target) } catch { $refused = $true }
+  if (-not $refused) { throw 'Out-of-fixture target accepted' }
+}
+'CHAT_SIDEBAR_ROWS_PROVEN'
+`], { encoding: 'utf8', timeout: 30000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /CHAT_SIDEBAR_ROWS_PROVEN/);
 });
