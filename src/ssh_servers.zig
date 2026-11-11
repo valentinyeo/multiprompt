@@ -237,6 +237,31 @@ test "IGSH-1928 real OpenSSH isolates proven keys while preserving unproven fall
     try tmp.dir.writeFile(io, .{ .sub_path = "user.conf", .data = "Host remote-1\n  HostName old.example.invalid\n  IdentityFile legacy-host-key\n" ++
         "Host *\n  IdentityFile legacy-wildcard-key\n  IdentityAgent legacy-agent\n" });
     try tmp.dir.writeFile(io, .{ .sub_path = "system.conf", .data = "Host *\n  IdentityFile legacy-system-key\n" });
+    const lockConfig = struct {
+        fn apply(alloc: Allocator, io: std.Io, path: []const u8) !void {
+            if (@import("builtin").os.tag != .windows) return;
+            const who = try std.process.run(alloc, io, .{ .argv = &.{ "whoami" } });
+            defer alloc.free(who.stdout);
+            defer alloc.free(who.stderr);
+            if (who.term != .exited or who.term.exited != 0) return error.Permission;
+            const user = std.mem.trim(u8, who.stdout, " \t\r\n");
+            const grant = try std.fmt.allocPrint(alloc, "{s}:(F)", .{user});
+            defer alloc.free(grant);
+            const granted = try std.process.run(alloc, io, .{ .argv = &.{ "icacls", path, "/grant:r", grant } });
+            defer alloc.free(granted.stdout);
+            defer alloc.free(granted.stderr);
+            if (granted.term != .exited or granted.term.exited != 0) return error.Permission;
+            const removed = try std.process.run(alloc, io, .{ .argv = &.{ "icacls", path, "/inheritance:r" } });
+            defer alloc.free(removed.stdout);
+            defer alloc.free(removed.stderr);
+            if (removed.term != .exited or removed.term.exited != 0) return error.Permission;
+            const stripped = try std.process.run(alloc, io, .{ .argv = &.{ "icacls", path, "/remove", "NT AUTHORITY\\Authenticated Users" } });
+            defer alloc.free(stripped.stdout);
+            defer alloc.free(stripped.stderr);
+        }
+    };
+    try lockConfig.apply(a, io, user_config);
+    try lockConfig.apply(a, io, system_config);
     var table: Table = @splat(.{});
     table[0].hostname.set("example.invalid");
     table[0].user.set("deploy");
@@ -248,6 +273,7 @@ test "IGSH-1928 real OpenSSH isolates proven keys while preserving unproven fall
             const config = try renderConfig(a, "multibot-test-key", user_config, system_config, &test_aliases, &table);
             defer a.free(config);
             try tmp.dir.writeFile(io, .{ .sub_path = "app.conf", .data = config });
+            try lockConfig.apply(a, io, app_config);
             const result = try std.process.run(a, io, .{ .argv = &.{ "ssh", "-F", app_config, "-G", "remote-1" } });
             defer a.free(result.stdout);
             defer a.free(result.stderr);
