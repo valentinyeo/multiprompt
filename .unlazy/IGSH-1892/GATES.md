@@ -38,6 +38,18 @@ No helpers, local builds or tests, application restarts, replacement binaries, o
 - Repeated Hypertask description truncation feedback added to existing https://app.hypertask.ai/detail/project-12057/387.
 - Gate count: 2 met, 3 unmet, 0 abandoned. Not Done.
 
+## Evidence: 2026-11-11 09:55–10:01 UTC
+
+- Current description and five people comments reread; current assignment confirmed Runner 9 alone. Existing PR 897 remains merged; no second implementation PR. Moved Doing during verification.
+- Earlier relaunch blocker is obsolete. Read-only executable SHA256 is now b1e40c3d5395e5b3d93a150798850b1e5b0890def0f307eebd1bf9367ee67347, exactly matching the published x64 asset at https://github.com/valentinyeo/multiprompt/releases/tag/v0.28.1668 . Existing app processes were not restarted or replaced.
+- Hosted test https://github.com/valentinyeo/multiprompt/actions/runs/42963786529 and publication https://github.com/valentinyeo/multiprompt/actions/runs/42963786536 revalidated completed/success at bde95cf882aea6c58dbc70737632bc401a3f9fd2.
+- Used the repository browser wrapper with explicit ZSB_SESSION=ht-or-runner-9. Initial pane-info returned own tab shell_id=20002, active=false, visible=false, windowId=0. open about:blank timed out after 15.009 seconds, but the pane subsequently existed.
+- Supported reset with ZSB_TIMEOUT=40 succeeded, reporting windowId=1813543451, tabs=1, extensionVersion=1.0.90, reloadScheduled=false. The next tabs call succeeded and returned the own blank target tab 1813543452. This proves initial opening and limited transport availability, not recovery after a controlled closure or sustained browser use.
+- Actual page read via eval on that exact target then failed reply_timeout after 40.007 seconds. Longer deadlines therefore do not resolve the interaction failure. Stopped retries; did not close a pane whose transport was unreliable, and did not claim a soak.
+- Read-only desktop logs prove dispatch reached the native bridge: reset at 09:57:12.737, tabs at 09:57:27.761, eval at 09:57:47.384, all for window 1813543451. Subsequent state logs through 09:59:12 report own shell=20002, window=1813543451, frozen=false, busy=true. The observed timeout is not evidence of automatic pane hibernation; investigate command/reply transport instead.
+- Existing linked IGSH-1935 is Done, not an open dependency. No local builds/tests, helpers, binary replacement, application restart, foreground action, selftest page, controlled closure, or unrelated-tab edit. Own blank pane remains for further verification.
+- Gate count remains 2 met, 3 unmet, 0 abandoned. No Done claim.
+
 ## Remaining
 
-After the normal in-app relaunch occurs with user consent, verify the running release identity, next-call recovery, and 15 minutes of attached-agent availability. The update is already prepared; do not repeatedly download it, replace the executable, or infer that the newer fixes fail from the old process. Preserve user tabs and foreground focus. Hand back in AI Review for the unfinished live proof, not a claim of completion.
+Diagnose why an actual eval times out after 40 seconds even though reset and tabs return successfully on the same live, unfrozen pane. Establish reliable page interaction, then prove controlled closure/next-call recovery and 15 minutes of real attached-agent browser use. The running release is current; do not repeat the old-release or missing-pane diagnosis. Preserve user tabs and foreground focus. Hand back in AI Review for unfinished live proof, not completion. Resume: tmux attach -t ht-or-runner-9 (Cursor Grok RUNNER 9).
