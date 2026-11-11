@@ -3151,7 +3151,8 @@ test "IGSH-1941 hidden pane at its dock still needs the show operation" {
     const height = rect.bottom - rect.top;
     try std.testing.expect(browserRectMatchesTarget(rect, rect.left, rect.top, width, height));
     try std.testing.expect(browserWindowNeedsPosition(hwnd, rect.left, rect.top, width, height));
-    try std.testing.expect(SetWindowPos(hwnd, null, rect.left, rect.top, width, height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW) != 0);
+    const reveal: UINT = SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+    try std.testing.expect(SetWindowPos(hwnd, null, rect.left, rect.top, width, height, reveal) != 0);
     try std.testing.expect(IsWindowVisible(hwnd) != 0);
     try std.testing.expect(!browserWindowNeedsPosition(hwnd, rect.left, rect.top, width, height));
     _ = ShowWindow(hwnd, SW_HIDE);
