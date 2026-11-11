@@ -1153,6 +1153,7 @@ test "delivery: IGSH-1828 Cancel and Delete take back a handed-off waiting messa
     g_chat_outbox.items[0].message_v1 = true;
     g_chat_outbox.items[0].write_started = true;
     @memcpy(g_chat_outbox.items[0].message_phase[0..4], "sent");
+    @memcpy(g_chat_outbox.items[0].message_sid[0..1], "s");
     chatEchoRemove(id);
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
