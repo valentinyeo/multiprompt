@@ -3388,6 +3388,20 @@ pub fn launchBrowserForShellFromRequest(idx: u32) void {
     launchBrowserForShellEx(idx, false);
 }
 
+pub fn clearFailedBrowserPaneForRequest(idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    if (!app_state.shells[idx].browser_open_failed) return false;
+    resetBrowserConnection(&app_state.shells[idx]);
+    app_state.shells[idx].browser_enabled = true;
+    removePaneShellKeyFileForShell(idx);
+    deleteBrowserWindowIdFile(app_state.shells[idx].shell_id);
+    publishInboxState();
+    invalidateSidebar();
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    debugLog("browser: an agent request clears a failed pane");
+    return true;
+}
+
 fn browserBeaconUrl(buf: []u8, nonce: []const u8) []const u8 {
     return std.fmt.bufPrint(
         buf,
