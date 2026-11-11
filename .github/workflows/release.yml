@@ -40,6 +40,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Require the permanent old-client update origin
+        if: github.repository == 'valentinyeo/multibot'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/legacy-update-feed.mjs --check-origin
       - name: Resolve release version and commit
         id: version
         env:
