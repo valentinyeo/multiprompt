@@ -34,7 +34,7 @@ if os.name == "nt":
 
     builtins.open = io.open = shared_open
 
-if os.name == "nt" and os.environ.get("CHAT_MODEL_PROOF") == "1":
+if os.name == "nt" and (os.environ.get("CHAT_MODEL_PROOF") == "1" or os.environ.get("CHAT_RECALL_PROOF") == "1"):
     import select
     import selectors
     import socket

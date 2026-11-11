@@ -3,7 +3,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { run } = require('./chat-recall-proof.cjs');
 
 function fixture(mutate) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'recall-proof-'));
@@ -31,6 +30,9 @@ function fixture(mutate) {
 }
 
 test('IGSH-1828 recall proof accepts a kept answer and two targeted recalls', () => {
+  const adapter = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/sitecustomize.py'), 'utf8');
+  assert.match(adapter, /os\.name == "nt" and \(os\.environ\.get\("CHAT_MODEL_PROOF"\) == "1" or os\.environ\.get\("CHAT_RECALL_PROOF"\) == "1"\)/);
+  const { run } = require('./chat-recall-proof.cjs');
   const passed = run(fixture());
   assert.equal(passed.status, 'passed');
   const answered = fixture((root, dir, rows) => {
