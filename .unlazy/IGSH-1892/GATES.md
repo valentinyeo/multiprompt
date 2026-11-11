@@ -38,6 +38,18 @@ Scope: Keep the agent browser pane open while an agent is attached, and reopen a
 - Existing BlockedBy ticket IGSH-1935 is Done, so it is not the remaining blocker. Device connectivity is required before the live gates can be observed.
 - Retry-loop friction was added to existing feedback: https://app.hypertask.ai/detail/project-12057/613.
 
+## Recheck, 2026-11-11 09:38 UTC
+
+- Confirmed Runner 1 ownership, reread the complete current description through `vcc --json task get`, and moved to Doing. Scope remains unchanged. No second implementation PR.
+- Published release is v0.28.1668. Hosted test run 42963786529 and publication run 42963786536 both remain successful on bde95cf882aea6c58dbc70737632bc401a3f9fd2.
+- Windows is now reachable. Read-only inspection found PID 3044, started at 09:25:01 UTC. Its executable SHA256 is b1e40c3d5395e5b3d93a150798850b1e5b0890def0f307eebd1bf9367ee67347, exactly matching GitHub's v0.28.1668 x64 release asset digest. The older-process blocker no longer applies. This run did not restart or replace the application.
+- Installed `zsb` pane-info and open both timed out after 15 seconds. The repository wrapper then returned no_tab for this exact session. Workspace inspection confirmed no desktop tab bound to ht-or-runner-1.
+- Requested one background desktop tab bound to this already-running runner session, without starting another agent or changing unrelated tabs. Although session-open timed out, subsequent pane-info confirmed RUNNER 1, shell_id=20004, active=false, visible=false, windowId=0.
+- Repository-wrapper open about:blank returned ok. Subsequent pane-info showed windowId=1813543251. This proves pane creation, not next-call recovery after closure or sustained browser interaction.
+- Status initially timed out after five seconds. The first selftest produced no result and was stopped after 191 seconds. A normal reset request timed out after ten seconds, but subsequent status reported tunnel=up, pane=open with the same window ID.
+- A second selftest with an explicit 45-second deadline failed with reply_timeout after 45.042 seconds and warned cleanup may be incomplete. No successful interaction sequence or 15-minute agent-use soak was obtained. Recovery and availability gates remain unmet; do not claim Done.
+- No source changes, local builds/tests, foreground changes, executable replacement, application restart, or new implementation PR. Only this ticket's proof ledger changed.
+
 ## Resume
 
-When Windows access is available, verify the running release, open an owned browser pane through the normal agent entry point, verify 15 minutes of availability, then verify recovery after closure. Preserve the unrelated user's browser tabs and application process. Do not mark this ticket Done from CI evidence alone.
+Use the repository browser wrapper for the exact ht-or-runner-1 desktop tab (shell_id=20004). First establish a successful selftest; inspect any leftover selftest tabs before cleanup and preserve user tabs. Then verify next-call recovery after closure and at least 15 minutes of real browser interaction. Preserve application process and foreground focus. Do not repeat the obsolete offline-device or old-release diagnosis, or mark Done from CI/pane creation alone.
