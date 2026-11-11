@@ -59,14 +59,14 @@ test('IGSH-672 a workspace that is not opted in launches and routes to the share
   assert.ok(body(own, 'command').includes('if (value.len == 0) "\\\"\\\"" else value'));
   const file = body(pane, 'writeBrowserWindowIdFile');
   assert.match(file, /if \(own_token\.len > 0\) std\.fmt\.bufPrint\(&numbuf, "\{d\}\\n\{s\}\\n", \.\{ wid, own_token \}\) else std\.fmt\.bufPrint\(&numbuf, "\{d\}\\n", \.\{wid\}\)/);
-  assert.match(body(pane, 'launchBrowserForShellMode'), /browser_profile_token = std\.mem\.zeroes\(\[32\]u8\);/);
+  assert.match(body(pane, 'launchBrowserForShellEx'), /browser_profile_token = std\.mem\.zeroes\(\[32\]u8\);/);
   const native = bridge.slice(bridge.indexOf('g_profile_token = if (is_legacy_host)'), bridge.indexOf('var pipe_name_buf: [128]u8 = undefined;'));
   assert.match(native, /if \(own_profile\.nativeParentToken\(allocator, &g_native_own_profile\) catch null\) \|own\| g_profile_token = own;/);
   assert.match(body(own, 'tokenFromPath'), /return null;/);
 });
 
 test('IGSH-672 an opted-in pane keeps its own browser for launch, reuse, commands and restore', () => {
-  const launch = body(pane, 'launchBrowserForShellMode');
+  const launch = body(pane, 'launchBrowserForShellEx');
   const assignment = '@memcpy(app_state.shells[idx].browser_profile_token[0..launch_profile.len], launch_profile);';
   assert.ok(launch.indexOf(assignment) >= 0);
   assert.ok(launch.indexOf('browserSigninProfileBusy(launch_engine, launch_profile)') < launch.indexOf(assignment));

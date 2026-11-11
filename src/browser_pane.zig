@@ -3383,15 +3383,15 @@ pub fn finishBrowserDock(job: *BrowserDockJob) void {
 pub const BrowserLaunchMode = enum { user, passive, agent_request };
 
 pub fn launchBrowserForShell(idx: u32) void {
-    launchBrowserForShellMode(idx, .user);
+    launchBrowserForShellEx(idx, .user);
 }
 
 pub fn launchBrowserForShellFromRequest(idx: u32) void {
-    launchBrowserForShellMode(idx, .passive);
+    launchBrowserForShellEx(idx, .passive);
 }
 
 pub fn launchBrowserForAgentRequest(idx: u32) void {
-    launchBrowserForShellMode(idx, .agent_request);
+    launchBrowserForShellEx(idx, .agent_request);
 }
 
 pub fn clearFailedBrowserPaneForRequest(idx: u32) bool {
@@ -3459,7 +3459,7 @@ fn unlockForegroundAfterRequestLaunch() void {
     app_state.g_browser_adopt_fg_locked = false;
 }
 
-fn launchBrowserForShellMode(idx: u32, mode: BrowserLaunchMode) void {
+fn launchBrowserForShellEx(idx: u32, mode: BrowserLaunchMode) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_launch, timing_started);
     switch (mode) {

@@ -51,7 +51,7 @@ test("IGSH-1935 an agent request clears a pane the app gave up on", () => {
 });
 
 test("IGSH-1935 a reopened pane for a hidden tab stays a request launch", () => {
-  const launch = paneFunctionBody("launchBrowserForShellMode");
+  const launch = paneFunctionBody("launchBrowserForShellEx");
   assert.match(launch, /browser_launch_tick != 0 or app_state\.shells\[idx\]\.browser_open_failed\) return;/, "only the request path clears the latch before launching");
   assert.match(launch, /shellExecuteEdgeUrl\(nonce_url, true, /, "a request launch is off screen");
   const adopt = paneFunctionBody("adoptBrowserTick");
@@ -67,10 +67,10 @@ test("IGSH-1935 an agent request opens its pane while the chat view is open", ()
   assert.doesNotMatch(allowed, /g_chat_active/, "an agent request is not blocked by the open chat view");
   assert.match(allowed, /if \(!g_startup_settled\) return false;/);
   assert.match(allowed, /return app_state\.shells\[shell_idx\]\.browser_enabled;/);
-  const launch = paneFunctionBody("launchBrowserForShellMode");
+  const launch = paneFunctionBody("launchBrowserForShellEx");
   assert.match(launch, /\.agent_request => \{/);
   assert.match(launch, /agentRequestBrowserLaunchAllowed\(idx\)/);
   assert.match(launch, /const user_initiated = mode == \.user;/, "an agent launch never takes the user path");
   assert.match(launch, /shellExecuteEdgeUrl\(nonce_url, true, /, "an agent launch stays off screen");
-  assert.match(browserPane, /pub fn launchBrowserForAgentRequest\(idx: u32\) void \{\s*launchBrowserForShellMode\(idx, \.agent_request\);\s*\}/);
+  assert.match(browserPane, /pub fn launchBrowserForAgentRequest\(idx: u32\) void \{\s*launchBrowserForShellEx\(idx, \.agent_request\);\s*\}/);
 });

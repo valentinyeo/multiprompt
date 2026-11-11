@@ -49,8 +49,8 @@ function state() {
   };
 }
 
-function launchDecision(source, app_state, idx, computer = false, signinBusy = false, user_initiated = false, notices = [], name = 'launchBrowserForShellMode') {
-  const launch = body(source, name)
+function launchDecision(source, app_state, idx, computer = false, signinBusy = false, user_initiated = false, notices = []) {
+  const launch = body(source, 'launchBrowserForShellEx')
     .replaceAll('@import("computer_pane.zig").chosenFor', 'computerChosenFor')
     .replace('var launch_profile_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;', 'const launch_profile_buf = [];')
     .replace('ownProfileTokenForLaunch(idx, &launch_profile_buf) orelse ""', 'ownProfileTokenForLaunch(idx)');
@@ -115,7 +115,7 @@ test('an own-profile launch cannot overwrite a pending shared-profile adoption o
   assert.equal(launchDecision(pane, app, 1), undefined);
   app.g_browser_adopt_target_idx = 0xFFFFFFFF;
   assert.equal(launchDecision(pane, app, 1), 'proceed');
-  assert.equal(launchDecision(before, { ...app, g_browser_adopt_target_idx: 0 }, 1, false, false, false, [], 'launchBrowserForShellEx'), 'proceed');
+  assert.equal(launchDecision(before, { ...app, g_browser_adopt_target_idx: 0 }, 1), 'proceed');
   assert.match(body(pane, 'adoptBrowserTick'), /defer updateBrowserVisibility\(\);/);
 });
 

@@ -119,7 +119,7 @@ function auditAgentWake(text) {
   const bind = functionSlice(text, 'handleZsbBindRequest', 'scanPaneWinCandidates');
   assert.match(bind, /launchBrowserForAgentRequest\(ti\)/, 'a zsb wake is an agent request, not a user launch');
   assert.doesNotMatch(bind, /launchBrowserForShell\(ti\)/);
-  const launch = functionSlice(text, 'launchBrowserForShellMode', 'enumCloseStrayZspane');
+  const launch = functionSlice(text, 'launchBrowserForShellEx', 'enumCloseStrayZspane');
   assert.match(launch, /g_browser_adopt_foreground_launch = user_initiated and/, 'only a user launch may reclaim foreground after docking');
   assert.match(launch, /!user_initiated and isolatedBrowserHasLivePane\(idx\) and\s+requestInactivePaneWindow\(idx, nonce_url\)/);
   assert.match(launch, /if \(!user_initiated\) lockForegroundForRequestLaunch\(\);/);

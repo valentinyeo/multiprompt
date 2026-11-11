@@ -329,7 +329,7 @@ test('QPC tracing is debug-gated, thread-local and emits exactly one aggregate l
   assert.match(timing, /active = previous;/);
   assert.match(consoleSource, /pub fn switchToShell\(idx: u32\) void \{\s+var timing: switch_timing.Trace = .\{\};\s+const timing_previous = switch_timing.begin\(&timing\);\s+defer switch_timing.finish\(&timing, timing_previous, idx\);/);
   for (const step of ['console_shown', 'focus', 'reposition']) assert.ok(consoleSource.includes(`defer switch_timing.record(.${step}, timing_started);`));
-  for (const [fn, step] of [['hideActiveBrowser', 'hide_prev_browser'], ['parkStrayBrowserPanes', 'park'], ['updateBrowserVisibility', 'browser_visible'], ['armBrowserVisibilitySettle', 'arm_settle'], ['positionActiveBrowser', 'position'], ['setBrowserWindowPosAsync', 'browser_swp'], ['showBrowserWindowAsync', 'browser_show'], ['spawnBrowserCliHidden', 'browser_launch'], ['launchBrowserForShellMode', 'browser_launch'], ['wakeBrowserPaneFromFreeze', 'browser_wake']]) {
+  for (const [fn, step] of [['hideActiveBrowser', 'hide_prev_browser'], ['parkStrayBrowserPanes', 'park'], ['updateBrowserVisibility', 'browser_visible'], ['armBrowserVisibilitySettle', 'arm_settle'], ['positionActiveBrowser', 'position'], ['setBrowserWindowPosAsync', 'browser_swp'], ['showBrowserWindowAsync', 'browser_show'], ['spawnBrowserCliHidden', 'browser_launch'], ['launchBrowserForShellEx', 'browser_launch'], ['wakeBrowserPaneFromFreeze', 'browser_wake']]) {
     assert.match(browser, new RegExp(`fn ${fn}\\([^\\n]*\\) void \\{\\s+const timing_started = switch_timing.start\\(\\);\\s+defer switch_timing.record\\(\\.${step}, timing_started\\);`));
   }
   assert.match(timing, /switch-timing: to=\{d\} total_us=\{d\}/);
@@ -481,7 +481,7 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(app, /win32WriteAll\(h, "1\\n"\)/);
   assert.match(app, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\)/);
   assert.match(app, /browser_frozen != job.frozen\) return;/);
-  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:inputs.long_chat_proof && \d+ \|\| )?(?:matrix.feature == '(?:pane-layout|chat-switch-speed|live-chat-pane)' && \d+ \|\| )*matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
+  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:inputs.long_chat_proof && \d+ \|\| )?(?:matrix.feature == '(?:pane-layout|chat-switch-speed)' && \d+ \|\| )*matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
   assert.ok(timeout);
   const sets = source.match(/\$modes = @\(([^\n]+)\)/)[1].match(/'[^']+'/g).filter(mode => mode.includes('frozen_')).length;
   const samples = Number(source.match(/Contains\('frozen_'\)\) \{ (\d+) \}/)[1]);

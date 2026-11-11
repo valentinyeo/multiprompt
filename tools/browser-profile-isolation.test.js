@@ -80,7 +80,7 @@ test("selected isolated Chromium and ordinary Edge cannot share the native comma
 
 test("native Chrome own-profile adoption uses the opening budget and retains timeout cleanup", () => {
   const pane = fs.readFileSync(path.join(__dirname, '..', 'src', 'browser_pane.zig'), 'utf8');
-  const launch = pane.slice(pane.indexOf('fn launchBrowserForShellMode('), pane.indexOf('\npub fn enumCloseStrayZspane('));
+  const launch = pane.slice(pane.indexOf('fn launchBrowserForShellEx('), pane.indexOf('\npub fn enumCloseStrayZspane('));
   assert.match(launch, /app_state\.g_browser_adopt_deadline = if \(app_state\.shells\[idx\]\.browser_native and app_state\.g_browser_engine == \.chrome and browserProfileToken\(idx\)\.len > 0\)\s+now \+ BROWSER_PLACEHOLDER_NOT_OPEN_MS\s+else\s+now \+ 6000;/,
     "only native Chrome own profiles must use the pane opening budget instead of six seconds");
   assert.match(launch, /SetTimer\(app_state\.g_main_hwnd, TIMER_BROWSER_ADOPT, 150, null\)/);

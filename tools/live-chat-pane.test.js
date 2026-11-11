@@ -47,7 +47,7 @@ test('live chat journey holds agent calls on a background chat without touching 
   assert.doesNotMatch(driver.slice(driver.indexOf('$soakTimer = [Diagnostics.Stopwatch]::StartNew()'), driver.indexOf("Snapshot 'chat-two-background-soak'")), /Press |Type-Text |ClickClient/);
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   assert.match(workflow, /AGENT_SOAK_SECONDS: \$\{\{ matrix\.feature == 'live-chat-pane' && '1200' \|\| '' \}\}/);
-  assert.match(workflow, /matrix\.feature == 'live-chat-pane' && 75/);
+  assert.match(workflow, /timeout-minutes: \$\{\{ inputs\.long_chat_proof && 50 \|\|/, 'the twenty minute soak needs the long proof job timeout');
   assert.match(workflow, /timeout-minutes: \$\{\{ env\.FEATURE == 'live-chat-pane' && 60 \|\| 30 \}\}/);
   const docs = fs.readFileSync(path.join(root, 'features/live-chat-pane.md'), 'utf8');
   assert.match(docs, /`chat-two-background-soak`/);
