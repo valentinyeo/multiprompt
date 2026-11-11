@@ -1,5 +1,8 @@
 function Recall-Events {
-    @(Read-Shared "$state/recall-agent.jsonl" -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+    $raw = Read-Shared "$state/recall-agent.jsonl"
+    @(foreach ($line in ($raw -split '\r?\n')) {
+        if ($line.Trim()) { ConvertFrom-Json -InputObject $line }
+    })
 }
 function Recall-Count([string]$Event, [string]$Text, [bool]$Cancelled = $false) {
     $rows = @(Recall-Events | Where-Object { $_.event -eq $Event -and $_.text -eq $Text })
