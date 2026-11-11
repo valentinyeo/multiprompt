@@ -31,4 +31,3 @@ Prior runners confirmed current v0.28.1668 but intermittent bridge timeouts. Ins
 ## Handoff
 
 2 gates met; 3 unmet; 0 abandoned. Establish reliable replies on the live, unfrozen runner-owned pane before another soak or selftest. Then prove controlled closure/next-call recovery and 15 minutes of real browser use. No Done claim from CI, initial opening, or successful reset alone.
-
