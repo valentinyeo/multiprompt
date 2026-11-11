@@ -54,6 +54,16 @@ test('live chat journey holds agent calls on a background chat without touching 
   assert.match(docs, /every 30 seconds for `AGENT_SOAK_SECONDS`/);
 });
 
+test('live chat journey reads published state before the first agent call on a chat', () => {
+  const driver = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/control-feature-live-chat-pane.ps1'), 'utf8');
+  assert.match(driver, /\$twoBefore = Read-BrowserPaneFor \$two\.shellId/);
+  assert.match(driver, /\$oneBefore = Read-BrowserPaneFor \$one\.shellId/);
+  assert.doesNotMatch(driver, /\$(one|two)Before = Invoke-Zsb/, 'an agent call opens the pane, so it can never answer that the pane is closed');
+  assert.doesNotMatch(driver, /did not report its own closed pane/);
+  const docs = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/features/live-chat-pane.md'), 'utf8');
+  assert.match(docs, /expects a closed pane only before the first call on that chat/);
+});
+
 test('live chat routing preserves the shared workspace default and uses the real browser setup', () => {
   const root = path.join(__dirname, '../.claude/skills/verify-multiprompt');
   const control = fs.readFileSync(path.join(root, 'control.ps1'), 'utf8');

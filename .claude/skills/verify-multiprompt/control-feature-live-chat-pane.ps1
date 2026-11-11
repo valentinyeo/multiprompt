@@ -108,13 +108,13 @@ try {
     }
     & $selectChat $two
     Wait-Until { -not [VerifyNative]::PaneVisible($script:window) } ($two.name + ' shows no browser pane yet') 20
-    $twoBefore = Invoke-Zsb @('status') $script:liveChatPort 'chat-two-status-before' -Session $two.tmux
-    if ($twoBefore.session -cne $two.tmux -or $twoBefore.pane -cne 'closed') { throw ('zsb status from the ' + $two.tmux + ' chat did not report its own closed pane: ' + (ConvertTo-Json -InputObject $twoBefore -Compress)) }
+    $twoBefore = Read-BrowserPaneFor $two.shellId
+    if ($twoBefore.browser_state -ne 'closed' -or $twoBefore.browser_window_id -ne 0) { throw ('The ' + $two.tmux + ' chat holds a browser pane before any agent call: ' + (ConvertTo-Json -InputObject $twoBefore -Compress)) }
     Snapshot 'chat-two-without-page'
     & $selectChat $one
     Wait-Until { -not [VerifyNative]::PaneVisible($script:window) } ($one.name + ' shows no browser pane yet') 20
-    $oneBefore = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-before' -Session $one.tmux
-    if ($oneBefore.session -cne $one.tmux -or $oneBefore.pane -cne 'closed') { throw ('zsb status from the ' + $one.tmux + ' chat did not report its own closed pane: ' + (ConvertTo-Json -InputObject $oneBefore -Compress)) }
+    $oneBefore = Read-BrowserPaneFor $one.shellId
+    if ($oneBefore.browser_state -ne 'closed' -or $oneBefore.browser_window_id -ne 0) { throw ('The ' + $one.tmux + ' chat holds a browser pane before any agent call: ' + (ConvertTo-Json -InputObject $oneBefore -Compress)) }
     Snapshot 'action'
     $selftestEnvironment = @{}
     foreach ($name in @('ZSB_SESSION', 'ZSB_PORT', 'TMUX', 'PATH', 'MULTIPROMP_NOTIFY_RELAY_TOKEN')) {
