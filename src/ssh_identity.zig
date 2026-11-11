@@ -72,7 +72,7 @@ fn dataPath(buf: []u8, name: []const u8) ?[]const u8 {
 }
 
 pub fn configFile(buf: []u8) ?[]const u8 {
-    return dataPath(buf, "config-v2");
+    return dataPath(buf, "config");
 }
 
 fn envPath(buf: []u8, name: [*:0]const u8, tail: []const u8) ?[]const u8 {
@@ -240,8 +240,15 @@ fn publish(a: std.mem.Allocator, exe: []const u8) void {
     var next_w_buf: [520]u16 = undefined;
     const config_w = files.win32WidePath(&config_w_buf, config) orelse return;
     const next_w = files.win32WidePath(&next_w_buf, next) orelse return;
+    var any_forced = false;
+    for (snapshot) |slot| any_forced = any_forced or servers.forced(slot);
+    if (!any_forced) {
+        console.setSshConfig(null);
+        _ = w.DeleteFileW(config_w.ptr);
+        return;
+    }
     const rendered = servers.renderConfig(a, key, "~/.ssh/config", system_config, &aliases, &snapshot) catch {
-        debugLog("ssh-key: config not rendered, server connections paused");
+        debugLog("ssh-key: config not rendered, using default ssh settings");
         console.setSshConfig(null);
         _ = w.DeleteFileW(config_w.ptr);
         return;
@@ -250,7 +257,7 @@ fn publish(a: std.mem.Allocator, exe: []const u8) void {
     const probe = std.fmt.allocPrint(a, "\"{s}\" -F \"{s}\" -G {s}", .{ exe, next, aliases[0] }) catch return;
     const checked = run(a, probe, 5000) catch Output{ .ok = false, .text = "" };
     if (!checked.ok or !sameAddresses(a, exe, next, &snapshot) or w.MoveFileExW(next_w.ptr, config_w.ptr, 1 | 8) == 0) {
-        debugLog("ssh-key: config check failed, server connections paused");
+        debugLog("ssh-key: config check failed, using default ssh settings");
         console.setSshConfig(null);
         _ = w.DeleteFileW(config_w.ptr);
         _ = w.DeleteFileW(next_w.ptr);
@@ -271,13 +278,13 @@ fn sameAddresses(a: std.mem.Allocator, exe: []const u8, config: []const u8, snap
     return true;
 }
 
-fn seed(a: std.mem.Allocator, exe: []const u8) void {
+fn seed(a: std.mem.Allocator, prefix: []const u8) void {
     for (aliases, 0..) |alias, i| {
         acquire();
         const empty = table[i].status == .empty;
         lock.unlock();
         if (!empty) continue;
-        const command = std.fmt.allocPrint(a, "\"{s}\" -G {s}", .{ exe, alias }) catch continue;
+        const command = std.fmt.allocPrint(a, "{s}-G {s}", .{ prefix, alias }) catch continue;
         const output = run(a, command, 5000) catch continue;
         if (!output.ok) continue;
         const resolved = hosts.parseSshConfig(output.text) orelse continue;
@@ -322,11 +329,15 @@ fn check(a: std.mem.Allocator, exe: []const u8, i: usize) void {
         finish(i, false, "could not create the key");
         return;
     };
+    const prefix = sshPrefix(a) catch {
+        finish(i, false, "ssh is not installed");
+        return;
+    };
     var hostname = slot.hostname.get();
     var user = slot.user.get();
     var port = slot.port;
     if (!slot.owned) {
-        const command = std.fmt.allocPrint(a, "\"{s}\" -G {s}", .{ exe, aliases[i] }) catch return;
+        const command = std.fmt.allocPrint(a, "{s}-G {s}", .{ prefix, aliases[i] }) catch return;
         const output = run(a, command, 5000) catch Output{ .ok = false, .text = "" };
         const resolved = hosts.parseSshConfig(output.text) orelse {
             finish(i, false, "address not found");
@@ -342,6 +353,14 @@ fn check(a: std.mem.Allocator, exe: []const u8, i: usize) void {
             table[i].port = resolved.port;
         }
         lock.unlock();
+        const add = keys.addCommand(a, public_key) catch return;
+        const remote = escaped(a, add) catch return;
+        const install = std.fmt.allocPrint(a, "{s}-o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ prefix, aliases[i], remote }) catch return;
+        const installed = run(a, install, 30000) catch Output{ .ok = false, .text = "" };
+        if (!installed.ok) {
+            finish(i, false, servers.failureReason(installed.text));
+            return;
+        }
     }
     var key_buf: [520]u8 = undefined;
     const key = keyFile(&key_buf) orelse return;
@@ -350,19 +369,6 @@ fn check(a: std.mem.Allocator, exe: []const u8, i: usize) void {
         return;
     };
     const proof = std.fmt.allocPrint(a, "\"{s}\" {s}", .{ exe, args }) catch return;
-    const existing = run(a, proof, 30000) catch Output{ .ok = false, .text = "" };
-    if (existing.ok or slot.owned) {
-        finish(i, existing.ok, servers.failureReason(existing.text));
-        return;
-    }
-    const add = keys.addCommand(a, public_key) catch return;
-    const remote = escaped(a, add) catch return;
-    const install = std.fmt.allocPrint(a, "\"{s}\" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 {s} \"{s}\"", .{ exe, aliases[i], remote }) catch return;
-    const installed = run(a, install, 30000) catch Output{ .ok = false, .text = "" };
-    if (!installed.ok) {
-        finish(i, false, servers.failureReason(installed.text));
-        return;
-    }
     const proven = run(a, proof, 30000) catch Output{ .ok = false, .text = "" };
     finish(i, proven.ok, servers.failureReason(proven.text));
 }
@@ -378,7 +384,7 @@ fn remove(a: std.mem.Allocator, i: usize) void {
         lock.unlock();
     }
     var reached = false;
-    if (servers.listed(slot)) blk: {
+    if (slot.status == .connected) blk: {
         var key_buf: [520]u8 = undefined;
         const key = keyFile(&key_buf) orelse break :blk;
         const public_path = std.fmt.allocPrint(a, "{s}.pub", .{key}) catch break :blk;
@@ -393,7 +399,7 @@ fn remove(a: std.mem.Allocator, i: usize) void {
         reached = output.ok;
     }
     acquire();
-    table[i] = .{ .status = .removed };
+    table[i] = if (slot.owned) .{} else .{ .status = .removed };
     lock.unlock();
     setMessage(if (reached) "Removed. Multibot's key is off that server." else "Removed here. The server was not reachable, so its key stays there.");
 }
@@ -428,13 +434,8 @@ fn worker(job: Job) void {
     lock.unlock();
     switch (job) {
         .startup => {
-            _ = ensureKey(a, exe) catch {
-                console.setSshConfig(null);
-                setMessage("Could not create Multibot's key.");
-                return;
-            };
-            seed(a, exe);
-            publish(a, exe);
+            const prefix = sshPrefix(a) catch return;
+            seed(a, prefix);
             const now = nowSeconds();
             for (0..servers.slot_count) |i| {
                 acquire();
