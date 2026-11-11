@@ -17,8 +17,8 @@ Scope: Keep the agent browser pane open while an agent is attached. If it closes
   EXPECT: IGSH-1892 soak pass
   EVIDENCE: automatic-evidence=v1; definition-sha256=126d2adb10fdfa4bdbb93459d14a065ff98b4b8cdb26452f740a210466647377; exit=0; EXPECT=matched; output-sha256=e4b517d8503495971345aaa91e16f5317cf50d68bfe01f5ad5b51f067fb2359c; output-bytes=61; shell=/bin/sh; cwd=/home/valentin/projects/mp-runner-3-1892; path=40375c739e86/57 entries
 
-- [ ] G4: Live evidence is pushed and the ticket moves to Done only after the other gates pass.
-  EVIDENCE: pending
+- [x] G4: Live evidence is pushed and the ticket moves to Done only after the other gates pass.
+  EVIDENCE: Pushed https://github.com/valentinyeo/multiprompt/commit/51b0e0967c7f9875fc96b769cd10c27582e66d63 and moved IGSH-1892 to Done. Done comment 389178.
 
 ## Recovery observation 2026-11-11
 
