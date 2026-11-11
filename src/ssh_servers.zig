@@ -4,7 +4,7 @@ const keys = @import("account_keys.zig");
 const Allocator = std.mem.Allocator;
 
 pub const slot_count = 3;
-pub const retry_seconds: u64 = 6 * 60 * 60;
+pub const retry_seconds: u64 = 60;
 
 pub const Status = enum { empty, needs_setup, connected, failed, removed };
 
@@ -48,8 +48,11 @@ pub fn forced(slot: Slot) bool {
 }
 
 pub fn needsMigration(slot: Slot, now: u64) bool {
-    if (slot.owned) return false;
-    return slot.status == .needs_setup or (slot.status == .failed and now >= slot.tried + retry_seconds);
+    return switch (slot.status) {
+        .needs_setup => !slot.owned,
+        .failed => now -| slot.tried >= retry_seconds,
+        .empty, .connected, .removed => false,
+    };
 }
 
 pub fn freeSlot(table: *const Table) ?usize {
@@ -326,15 +329,23 @@ test "IGSH-1928 server table survives a save and reload" {
     try std.testing.expectEqual(Status.empty, decode("v2\n")[0].status);
 }
 
-test "IGSH-1928 migration retries failed servers only after a pause and never touches app-owned ones" {
-    var slot: Slot = .{ .status = .failed, .tried = 1000 };
-    try std.testing.expect(!needsMigration(slot, 1000 + retry_seconds - 1));
-    try std.testing.expect(needsMigration(slot, 1000 + retry_seconds));
-    slot.status = .needs_setup;
-    try std.testing.expect(needsMigration(slot, 0));
-    slot.owned = true;
-    try std.testing.expect(!needsMigration(slot, 0));
-    try std.testing.expect(!needsMigration(.{ .status = .connected }, 0));
+test "IGSH-1928 failed imported and app-owned servers retry after one minute" {
+    for ([_]bool{ false, true }) |owned| {
+        var slot: Slot = .{ .status = .failed, .owned = owned, .tried = 1000 };
+        try std.testing.expect(!needsMigration(slot, 999));
+        try std.testing.expect(!needsMigration(slot, 1059));
+        try std.testing.expect(needsMigration(slot, 1060));
+        slot.tried = 1060;
+        try std.testing.expect(!needsMigration(slot, 1119));
+        try std.testing.expect(needsMigration(slot, 1120));
+        slot.tried = std.math.maxInt(u64);
+        try std.testing.expect(!needsMigration(slot, 1060));
+        try std.testing.expect(!needsMigration(slot, std.math.maxInt(u64)));
+        for ([_]Status{ .empty, .connected, .removed }) |status| {
+            try std.testing.expect(!needsMigration(.{ .status = status, .owned = owned }, 1060));
+        }
+        try std.testing.expectEqual(!owned, needsMigration(.{ .status = .needs_setup, .owned = owned }, 0));
+    }
 }
 
 test "IGSH-1928 proof signs in with the app key alone" {

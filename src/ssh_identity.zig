@@ -496,6 +496,16 @@ pub fn start() void {
     _ = launch(.startup);
 }
 
+pub fn retry() void {
+    if (!started.load(.acquire) or running.load(.acquire)) return;
+    if (!lock.tryLock()) return;
+    const now = nowSeconds();
+    var due = false;
+    for (table) |slot| due = due or servers.needsMigration(slot, now);
+    lock.unlock();
+    if (due) _ = launch(.startup);
+}
+
 pub fn checkServer(i: usize) void {
     if (i >= servers.slot_count) return;
     _ = launch(.{ .check = i });
