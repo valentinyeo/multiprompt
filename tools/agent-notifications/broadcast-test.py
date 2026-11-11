@@ -7,9 +7,15 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("broadcast", ROOT / "tools/agent-notifications/broadcast.py")
-broadcast = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(broadcast)
+MODULE = ROOT / "tools/agent-notifications/broadcast.py"
+
+
+def load():
+    assert MODULE.is_file(), "tools/agent-notifications/broadcast.py is missing"
+    spec = importlib.util.spec_from_file_location("broadcast", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def boxed(text):
@@ -39,13 +45,16 @@ class FakeTmux:
 
 
 class WaitTest(unittest.TestCase):
+    def setUp(self):
+        self.broadcast = load()
+
     def test_message_waits_for_the_box_to_clear_and_never_clears_it(self):
         fake = FakeTmux(["half typed answer", "half typed answer", ""])
-        with patch.object(broadcast, "run", fake):
-            waited = broadcast.wait_for_clear("%1", 5.0, step=0.0)
+        with patch.object(self.broadcast, "run", fake):
+            waited = self.broadcast.wait_for_clear("%1", 5.0, step=0.0)
             self.assertIsNotNone(waited)
             self.assertGreaterEqual(waited, 0.0)
-            self.assertTrue(broadcast.type_into("%1", "[broadcast] hello"))
+            self.assertTrue(self.broadcast.type_into("%1", "[broadcast] hello"))
         sent = fake.send_keys()
         literals = [call for call in sent if "-l" in call]
         self.assertEqual(len(literals), 1)
@@ -55,73 +64,79 @@ class WaitTest(unittest.TestCase):
 
     def test_dim_placeholder_text_is_not_treated_as_a_draft(self):
         placeholder = "\u2500" * 20 + "\n  \u276f \x1b[2mTry \"fix typecheck errors\"\n\x1b[0m" + "\u2500" * 20 + "\n"
-        with patch.object(broadcast, "run", return_value=placeholder):
-            self.assertEqual(broadcast.draft("%1"), "")
+        with patch.object(self.broadcast, "run", return_value=placeholder):
+            self.assertEqual(self.broadcast.draft("%1"), "")
 
     def test_real_typing_in_the_box_is_a_draft(self):
         typed = "\u2500" * 20 + "\n  \u276f please check the build\n" + "\u2500" * 20 + "\n"
-        with patch.object(broadcast, "run", return_value=typed):
-            self.assertEqual(broadcast.draft("%1"), "pleasecheckthebuild")
+        with patch.object(self.broadcast, "run", return_value=typed):
+            self.assertEqual(self.broadcast.draft("%1"), "pleasecheckthebuild")
 
     def test_a_full_box_is_left_alone(self):
         fake = FakeTmux(["half typed answer"])
-        with patch.object(broadcast, "run", fake):
-            self.assertIsNone(broadcast.wait_for_clear("%1", 0.0, step=0.0))
+        with patch.object(self.broadcast, "run", fake):
+            self.assertIsNone(self.broadcast.wait_for_clear("%1", 0.0, step=0.0))
         self.assertEqual(fake.send_keys(), [])
 
 
 class TargetsTest(unittest.TestCase):
+    def setUp(self):
+        self.broadcast = load()
+
     def test_a_session_seen_twice_is_listed_once(self):
         sessions = [dict(kind="interactive", sessionId="sid-1", name="triage", pid=10)]
         chats = {"sid-1": dict(sid="sid-1", name="term-abc", visible=True)}
-        with patch.object(broadcast, "panes", return_value={"pts/1": dict(pane="%1", name="triage")}), \
-             patch.object(broadcast, "tty_of", return_value="pts/1"), \
-             patch.object(broadcast, "host_chats", return_value=chats), \
-             patch.object(broadcast, "host_processes", return_value={sid: "claude" for sid in chats}), \
-             patch.object(broadcast, "claude_sessions", return_value=sessions):
-            rows = broadcast.targets()
+        with patch.object(self.broadcast, "panes", return_value={"pts/1": dict(pane="%1", name="triage")}), \
+             patch.object(self.broadcast, "tty_of", return_value="pts/1"), \
+             patch.object(self.broadcast, "host_chats", return_value=chats), \
+             patch.object(self.broadcast, "host_processes", return_value={sid: "claude" for sid in chats}), \
+             patch.object(self.broadcast, "claude_sessions", return_value=sessions):
+            rows = self.broadcast.targets()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["channel"], "terminal")
 
     def test_a_chat_with_no_terminal_is_a_chat_target(self):
         sessions = [dict(kind="interactive", sessionId="sid-2", name="Pecunia", pid=None)]
         chats = {"sid-2": dict(sid="sid-2", name="live-abc", visible=True)}
-        with patch.object(broadcast, "panes", return_value={}), \
-             patch.object(broadcast, "tty_of", return_value="?"), \
-             patch.object(broadcast, "host_chats", return_value=chats), \
-             patch.object(broadcast, "host_processes", return_value={sid: "claude" for sid in chats}), \
-             patch.object(broadcast, "claude_sessions", return_value=sessions):
-            rows = broadcast.targets()
+        with patch.object(self.broadcast, "panes", return_value={}), \
+             patch.object(self.broadcast, "tty_of", return_value="?"), \
+             patch.object(self.broadcast, "host_chats", return_value=chats), \
+             patch.object(self.broadcast, "host_processes", return_value={sid: "claude" for sid in chats}), \
+             patch.object(self.broadcast, "claude_sessions", return_value=sessions):
+            rows = self.broadcast.targets()
         self.assertEqual([(row["name"], row["channel"]) for row in rows], [("Pecunia", "chat")])
 
     def test_a_chat_with_no_running_host_is_not_a_target(self):
         chats = {"sid-3": dict(sid="sid-3", name="live-old", visible=True)}
-        with patch.object(broadcast, "panes", return_value={}), \
-             patch.object(broadcast, "host_chats", return_value=chats), \
-             patch.object(broadcast, "host_processes", return_value={}), \
-             patch.object(broadcast, "claude_sessions", return_value=[]):
-            self.assertEqual(broadcast.targets(), [])
+        with patch.object(self.broadcast, "panes", return_value={}), \
+             patch.object(self.broadcast, "host_chats", return_value=chats), \
+             patch.object(self.broadcast, "host_processes", return_value={}), \
+             patch.object(self.broadcast, "claude_sessions", return_value=[]):
+            self.assertEqual(self.broadcast.targets(), [])
 
     def test_a_live_chat_outside_the_agent_list_is_a_target(self):
         chats = {"sid-4": dict(sid="sid-4", name="live-abc")}
-        with patch.object(broadcast, "panes", return_value={}), \
-             patch.object(broadcast, "host_chats", return_value=chats), \
-             patch.object(broadcast, "host_processes", return_value={"sid-4": "claude"}), \
-             patch.object(broadcast, "claude_sessions", return_value=[]):
-            rows = broadcast.targets()
+        with patch.object(self.broadcast, "panes", return_value={}), \
+             patch.object(self.broadcast, "host_chats", return_value=chats), \
+             patch.object(self.broadcast, "host_processes", return_value={"sid-4": "claude"}), \
+             patch.object(self.broadcast, "claude_sessions", return_value=[]):
+            rows = self.broadcast.targets()
         self.assertEqual([(row["name"], row["channel"], row["provider"]) for row in rows],
                          [("live-abc", "chat", "claude")])
 
 
 class MainTest(unittest.TestCase):
+    def setUp(self):
+        self.broadcast = load()
+
     def run_main(self, rows, dry=False):
         output = io.StringIO()
-        with patch.object(broadcast, "targets", return_value=rows), \
-             patch.object(broadcast, "host_send", return_value="queued") as host, \
-             patch.object(broadcast, "draft", return_value=""), \
-             patch.object(broadcast, "type_into", return_value=True) as typed, \
+        with patch.object(self.broadcast, "targets", return_value=rows), \
+             patch.object(self.broadcast, "host_send", return_value="queued") as host, \
+             patch.object(self.broadcast, "draft", return_value=""), \
+             patch.object(self.broadcast, "type_into", return_value=True) as typed, \
              redirect_stdout(output):
-            code = broadcast.main(["hello"] + (["--dry-run"] if dry else []))
+            code = self.broadcast.main(["hello"] + (["--dry-run"] if dry else []))
         return code, output.getvalue(), host, typed
 
     def test_a_live_chat_goes_through_the_host_send_command(self):
@@ -156,3 +171,7 @@ class MainTest(unittest.TestCase):
         code, output, host, typed = self.run_main(rows)
         self.assertIn("orphan [none] no terminal and no chat", output)
         self.assertEqual(code, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

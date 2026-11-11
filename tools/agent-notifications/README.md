@@ -249,7 +249,7 @@ session that runs it, `--from NAME` labels the message with another name, and
 
 ```sh
 python3 -m unittest test_watcher.py
-python3 -m unittest test_broadcast.py
+python3 -m unittest broadcast-test.py
 python3 -m unittest test_install.py
 ```
 
