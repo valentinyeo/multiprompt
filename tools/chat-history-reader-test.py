@@ -3938,6 +3938,71 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.request('reset', reset_id='reset_fixture_0001')
         self.assertEqual(self.request('dismiss', message_id='message_fixture_0003', text='before reset')['message']['state'], 'cancelled')
 
+    def test_igsh_1828_dismiss_takes_back_one_handed_off_message_and_keeps_the_others(self):
+        self.submit('message_fixture_0001', 'KEEP_ONE')
+        self.submit('message_fixture_0002', 'CANCEL_TARGET')
+        self.submit('message_fixture_0003', 'KEEP_THREE')
+        self.request('dispatch')
+        db = reader.message_store_db('fixture')
+        with db:
+            db.execute("UPDATE shared_messages SET state='sent' WHERE id='message_fixture_0002'")
+        db.close()
+        self.assertEqual(self.status('message_fixture_0001')['state'], 'sent')
+        self.assertEqual(self.status('message_fixture_0002')['state'], 'sent')
+        self.assertEqual(self.status('message_fixture_0003')['state'], 'queued')
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request', return_value=dict(status='ok')) as recall:
+            try:
+                result = self.request('dismiss', message_id='message_fixture_0002', text='CANCEL_TARGET')
+            except ValueError as error:
+                self.fail('a handed-off waiting message must be taken back: %s' % error)
+        self.assertEqual(result['message']['state'], 'cancelled')
+        self.assertEqual(recall.call_args.args[2]['op'], 'recall')
+        self.assertEqual(recall.call_args.args[2]['id'], 'message_fixture_0002')
+        self.assertEqual(self.status('message_fixture_0001')['state'], 'sent')
+        self.assertEqual(self.status('message_fixture_0003')['state'], 'queued')
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request', return_value=dict(status='refused', reason='not_waiting')):
+            with self.assertRaises(ValueError):
+                self.request('dismiss', message_id='message_fixture_0001', text='KEEP_ONE')
+        self.assertEqual(self.status('message_fixture_0001')['state'], 'sent')
+        db = reader.message_store_db('fixture')
+        with db:
+            db.execute("UPDATE shared_messages SET state='accepted' WHERE id='message_fixture_0001'")
+        db.close()
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request') as recall:
+            with self.assertRaises(ValueError):
+                self.request('dismiss', message_id='message_fixture_0001', text='KEEP_ONE')
+        self.assertEqual(recall.call_count, 0)
+        self.assertEqual(self.status('message_fixture_0001')['state'], 'accepted')
+
+    def test_igsh_1828_legacy_recall_never_clears_a_console_draft(self):
+        self.assertTrue(callable(getattr(reader, 'message_recall', None)))
+        with patch.object(reader, 'host_owned', return_value=False), \
+                patch.object(reader.subprocess, 'run') as run:
+            result = reader.message_recall('claude', 'fixture', 'fixture',
+                                           'message_fixture_0001', 'attempt-1', 'same text as draft')
+        self.assertEqual(result['status'], 'refused')
+        run.assert_not_called()
+
+    def test_igsh_1828_read_receipt_during_recall_wins_over_cancellation(self):
+        self.submit('message_fixture_0001', 'CANCEL_TARGET')
+        self.request('dispatch')
+
+        def receipt(*args):
+            db = reader.message_store_db('fixture')
+            with db:
+                db.execute("UPDATE shared_messages SET state='accepted' WHERE id='message_fixture_0001'")
+            db.close()
+            return dict(status='ok')
+
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request', side_effect=receipt):
+            with self.assertRaises(ValueError):
+                self.request('dismiss', message_id='message_fixture_0001')
+        self.assertEqual(self.status('message_fixture_0001')['state'], 'accepted')
+
     def test_global_id_replay_across_tmux_locators(self):
         first = self.submit()
         self.request('dispatch')
@@ -7148,6 +7213,99 @@ class AgentHostControlTest(AgentHostControlFixture, unittest.TestCase):
         self.assertTrue([row for row in self.host_events('idle_stop')])
 
 
+
+
+class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
+    def deliver(self, token):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute('INSERT OR IGNORE INTO message_chats(provider,sid) VALUES (?,?)', (self.provider, self.sid))
+            db.execute("INSERT INTO shared_messages(id,provider,sid,text,position,attempt,state,epoch,created) VALUES (?,?,?,?,?,?,'sent',0,?)",
+                       (token, self.provider, self.sid, token, len(self.session['sends']) + 1, 'attempt-1', time.time()))
+        db.close()
+        self.session['turn'] = None if not self.session['sends'] else self.session['turn']
+        result = self.reply(op='deliver', id=token, attempt='attempt-1', epoch=0, text=token)
+        self.assertEqual(result['status'], 'sent')
+        return self.session['sends'][-1]
+
+    def control(self, cancelled, subtype='success', before=None):
+        read_fd, write_fd = os.pipe()
+        stdout = os.fdopen(read_fd, 'rb')
+        self.addCleanup(stdout.close)
+        self.addCleanup(os.close, write_fd)
+        output = self.agent_input
+
+        class Input:
+            def write(inner, data):
+                output.write(data)
+                frame = json.loads(data)
+                if frame.get('type') == 'control_request':
+                    if before is not None:
+                        before()
+                    response = dict(type='control_response', response=dict(
+                        request_id=frame['request_id'], subtype=subtype,
+                        response=dict(cancelled=cancelled)))
+                    os.write(write_fd, (json.dumps(response) + '\n').encode())
+
+            def flush(inner):
+                pass
+
+        self.session['agent'] = types.SimpleNamespace(stdin=Input(), stdout=stdout)
+
+    def test_cancel_acknowledgement_removes_only_the_matching_waiting_message(self):
+        active = self.deliver('host_fixture_message_01')
+        active['accepted'] = True
+        target = self.deliver('host_fixture_message_02')
+        sibling = self.deliver('host_fixture_message_03')
+        self.assertIsInstance(target.get('recall_uuid'), str)
+        self.assertEqual(str(uuid.UUID(target['recall_uuid'])), target['recall_uuid'])
+        self.control(True)
+        self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-1'), dict(status='ok'))
+        self.assertEqual(self.session['sends'], [active, sibling])
+        self.assertIs(self.session['inflight'], active)
+        requests = [frame['request'] for frame in self.writes() if frame['type'] == 'control_request']
+        self.assertEqual(requests, [dict(subtype='cancel_async_message', message_uuid=target['recall_uuid'])])
+        self.assertFalse(self.session['interrupted'])
+        state = reader.host_session_state(self.provider, self.sid)
+        self.assertTrue(state['written'][target['id']]['recalled'])
+        self.assertEqual(state['sends'], [active['id'], sibling['id']])
+        self.assertEqual(self.session['control_wait'], {})
+
+    def test_read_or_refused_messages_stay_and_never_interrupt_the_bot(self):
+        target = self.deliver('host_fixture_message_01')
+        for cancelled, subtype in ((False, 'success'), (True, 'error')):
+            self.control(cancelled, subtype)
+            self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-1')['status'], 'refused')
+            self.assertEqual(self.session['sends'], [target])
+            self.assertFalse(self.session['interrupted'])
+        target['accepted'] = True
+        previous = self.writes()
+        self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-1')['reason'], 'already_read')
+        self.assertEqual(self.writes(), previous)
+
+    def test_a_missing_acknowledgement_does_not_claim_cancellation(self):
+        target = self.deliver('host_fixture_message_01')
+        self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-1')['status'], 'refused')
+        self.assertEqual(self.session['sends'], [target])
+        self.assertEqual(self.session['control_wait'], {})
+        self.assertFalse(self.session['interrupted'])
+
+    def test_a_read_race_or_wrong_attempt_cannot_remove_the_message(self):
+        target = self.deliver('host_fixture_message_01')
+        self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-2')['reason'], 'already_read')
+        self.control(True, before=lambda: target.update(accepted=True))
+        self.assertEqual(self.reply(op='recall', id=target['id'], attempt='attempt-1')['reason'], 'already_read')
+        self.assertEqual(self.session['sends'], [target])
+
+    def test_an_unsupported_provider_never_substitutes_an_interrupt(self):
+        target = self.deliver('host_fixture_message_01')
+        previous = self.writes()
+        for provider in ('codex', 'pi', 'hax', 'cursor'):
+            result = reader.host_handle_request(provider, self.sid, self.tmux, self.session,
+                                                dict(op='recall', id=target['id'], attempt='attempt-1'))
+            self.assertEqual(result['reason'], 'recall_unavailable')
+        self.assertEqual(self.writes(), previous)
+        self.assertEqual(self.session['sends'], [target])
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):

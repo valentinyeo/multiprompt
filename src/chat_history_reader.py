@@ -3643,7 +3643,8 @@ def host_session_state(provider, sid):
 def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
-                   thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None)
+                   thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
+                   control_wait={})
 
 
 def host_db(provider, sid, tmux, session):
@@ -3878,6 +3879,43 @@ def host_control_request(session, request):
     import uuid
     return host_control_send(session, dict(type="control_request", request_id="host-" + uuid.uuid4().hex,
                                            request=request))
+
+
+def host_control_call(provider, sid, tmux, session, request, timeout=2):
+    import selectors
+    import uuid
+    request_id = "host-" + uuid.uuid4().hex
+    waits = session.setdefault("control_wait", {})
+    waiter = dict(response=None)
+    waits[request_id] = waiter
+    try:
+        if not host_control_send(session, dict(type="control_request", request_id=request_id, request=request)):
+            return None
+        agent = session.get("agent")
+        stdout = getattr(agent, "stdout", None) if agent is not None else None
+        if stdout is None:
+            return None
+        deadline = time.monotonic() + timeout
+        with selectors.DefaultSelector() as selector:
+            selector.register(stdout, selectors.EVENT_READ)
+            while waiter["response"] is None and time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    break
+                try:
+                    chunk = stdout.read1(65536)
+                except (AttributeError, OSError, ValueError):
+                    try:
+                        chunk = os.read(stdout.fileno(), 65536)
+                    except (OSError, ValueError, AttributeError):
+                        chunk = b""
+                if not host_agent_read(provider, sid, tmux, session, chunk):
+                    break
+        return waiter["response"]
+    except (OSError, ValueError):
+        return None
+    finally:
+        waits.pop(request_id, None)
 
 
 def host_questions(request):
@@ -4151,6 +4189,12 @@ def host_handle_request(provider, sid, tmux, session, request):
         session["settings"][key] = value
         host_settings_event(provider, sid, tmux, session)
         return dict(status="ok")
+    if operation == "recall":
+        token, attempt = request.get("id"), request.get("attempt")
+        if (not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{16,80}", token) is None
+                or not isinstance(attempt, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", attempt)):
+            return host_refuse("invalid_message")
+        return host_recall(provider, sid, tmux, session, token, attempt)
     if operation == "set_permission_mode":
         if request.get("mode") not in HOST_PERMISSION_MODES:
             return host_refuse("invalid_permission_mode")
@@ -4221,7 +4265,8 @@ def host_handle_request(provider, sid, tmux, session, request):
     session["state"]["turns"] = session["state"].get("turns", 0) + 1
     entry = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False,
                  turn="t-" + str(session["state"]["turns"]),
-                 sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), uuid=None)
+                 sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), uuid=None,
+                 recall_uuid=session.pop("pending_recall_uuid", None))
     if room_scope is not None:
         entry["room_scope"] = room_scope
         written[token]["room_scope"] = room_scope
@@ -4335,6 +4380,10 @@ def host_claude_event(provider, sid, tmux, session, event):
         return
     if kind == "control_response":
         response = event.get("response") if isinstance(event.get("response"), dict) else {}
+        request_id = response.get("request_id") if isinstance(response.get("request_id"), str) else event.get("request_id")
+        waiter = (session.get("control_wait") or {}).get(request_id) if isinstance(request_id, str) else None
+        if isinstance(waiter, dict):
+            waiter["response"] = response
         host_log(provider, sid, "control_response", dict(request_id=response.get("request_id"),
                                                          subtype=response.get("subtype")))
         return
@@ -4395,7 +4444,21 @@ def host_claude_lead_skill(text, cwd=None):
 def host_claude_write(provider, sid, session, token, text):
     config = host_config(provider, sid)
     text = host_claude_lead_skill(text, config.get("cwd") if isinstance(config, dict) else None)
-    return host_control_send(session, dict(type="user", message=dict(role="user", content=[dict(type="text", text=text)])))
+    import uuid
+    session["pending_recall_uuid"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "multibot:" + token))
+    return host_control_send(session, dict(type="user", uuid=session["pending_recall_uuid"],
+                                           message=dict(role="user", content=[dict(type="text", text=text)])))
+
+
+def host_claude_recall(provider, sid, tmux, session, entry):
+    uuid = entry.get("recall_uuid")
+    if not isinstance(uuid, str) or not uuid:
+        return host_refuse("recall_unavailable")
+    response = host_control_call(provider, sid, tmux, session, dict(subtype="cancel_async_message", message_uuid=uuid))
+    body = response.get("response") if isinstance(response, dict) else None
+    if not isinstance(response, dict) or response.get("subtype") != "success" or not isinstance(body, dict) or body.get("cancelled") is not True:
+        return host_refuse("not_waiting")
+    return dict(status="ok")
 
 
 def host_turn_end(provider, sid, tmux, session, payload, detail):
@@ -4870,7 +4933,7 @@ def host_hax_set_mode(provider, sid, session, mode):
 
 HOST_ADAPTERS = {
     "claude": dict(argv=host_claude_argv, open=host_claude_open, write=host_claude_write, event=host_claude_event,
-                   answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
+                   answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode, recall=host_claude_recall,
                    binding="stream_json_user_line", provenance="stream_json_turn_start"),
     "codex": dict(argv=host_codex_argv, open=host_codex_open, write=host_codex_write, event=host_codex_event,
                   answer=host_codex_answer, interrupt=host_codex_interrupt, set_mode=host_codex_set_mode,
@@ -4885,6 +4948,34 @@ HOST_ADAPTERS = {
                    answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
                    binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }
+
+
+def host_recall(provider, sid, tmux, session, token, attempt):
+    entry = next((item for item in session.get("sends") or []
+                  if item.get("id") == token and item.get("attempt") == attempt and not item.get("accepted")), None)
+    if entry is None:
+        return host_refuse("already_read")
+    recall = HOST_ADAPTERS[provider].get("recall")
+    if recall is None:
+        return host_refuse("recall_unavailable")
+    reply = recall(provider, sid, tmux, session, entry)
+    if not isinstance(reply, dict) or reply.get("status") != "ok":
+        return reply if isinstance(reply, dict) else host_refuse("recall_failed")
+    if entry.get("accepted") or entry not in session["sends"]:
+        return host_refuse("already_read")
+    session["sends"].remove(entry)
+    inflight = session.get("inflight")
+    if isinstance(inflight, dict) and inflight.get("id") == entry["id"]:
+        session["inflight"] = None
+        session["turn"] = None
+    recorded = host_written(session["state"]).get(token)
+    if isinstance(recorded, dict):
+        recorded["recalled"] = True
+    session["state"]["inflight"] = session.get("inflight")
+    session["state"]["sends"] = [item["id"] for item in session["sends"]]
+    host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "recalled", dict(id=token, attempt=attempt))
+    return dict(status="ok")
 
 
 def host_agent_read(provider, sid, tmux, session, chunk):
@@ -5464,6 +5555,13 @@ def host_dispatch_start(provider, sid):
                 reason=started.get("reason"), permanent=started.get("permanent", False))
 
 
+def message_recall(provider, sid, tmux, token, attempt, text):
+    if host_owned(provider, sid):
+        reply = host_request(provider, sid, dict(op='recall', id=token, attempt=attempt))
+        return reply if isinstance(reply, dict) else dict(status='error', reason='invalid_reply')
+    return dict(status='refused', reason='recall_unavailable')
+
+
 def message_store_request(q):
     import fcntl
     provider, sid, tmux = q.get('provider'), q.get('sid'), q.get('tmux')
@@ -5585,11 +5683,31 @@ def message_store_transaction(q):
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
             if row[9] != epoch:
                 return dict(message=dict(message_row(row), state='cancelled'), epoch=epoch, seq=seq)
-            aged = row[6] == 'sent' and time.time() - float(row[10]) >= 600
-            if row[6] in ('queued', 'failed') or aged:
+            if row[6] in ('queued', 'failed'):
                 db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND state=?", (token, epoch, row[6]))
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
+            elif row[6] == 'sent':
+                attempt, text = row[5], row[3]
+                db.commit()
+                try:
+                    recall = message_recall(provider, sid, tmux, token, attempt, text)
+                except Exception:
+                    recall = dict(status='refused', reason='recall_failed')
+                db.execute('BEGIN IMMEDIATE')
+                fresh = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
+                if fresh and fresh[6] == 'cancelled':
+                    row = fresh
+                elif (fresh and fresh[9] == epoch and fresh[5] == attempt and fresh[6] == 'sent'
+                        and isinstance(recall, dict) and recall.get('status') == 'ok'):
+                    changed = db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND attempt=? AND state='sent'", (token, epoch, attempt)).rowcount
+                    row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+                    if changed:
+                        seq = message_event(db, provider, sid, message_row(row))
+                    elif not row or row[6] != 'cancelled':
+                        raise ValueError('message already handed off')
+                else:
+                    raise ValueError('message already handed off')
             elif row[6] != 'cancelled':
                 raise ValueError('message already handed off')
             return dict(message=message_row(row), epoch=epoch, seq=seq)
@@ -7213,7 +7331,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 112
+RUNTIME_GENERATION = 113
 
 if __name__ == '__main__':
     import base64 as _base64

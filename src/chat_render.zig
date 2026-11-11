@@ -8671,7 +8671,7 @@ test "IGSH-1810 live messages stay faded until their own receipt and failures st
         entry.channel_pending = true;
         try std.testing.expect(!entry.removable());
         entry.channel_pending = false;
-        try std.testing.expectEqual(!std.mem.eql(u8, phase, "sent"), entry.removable());
+        try std.testing.expect(entry.removable());
     }
     for ([_][]const u8{ "accepted", "started" }) |phase| {
         entry.message_phase = @splat(0);
@@ -8687,6 +8687,24 @@ test "IGSH-1810 live messages stay faded until their own receipt and failures st
     }
     entry = .{};
     try std.testing.expect(!entry.waiting());
+}
+
+
+test "IGSH-1828 a handed-off waiting message can be cancelled from the menu and with Delete" {
+    var entry: ChatOutboxEntry = .{ .message_v1 = true, .state = .queued };
+    for ([_][]const u8{ "queued", "sent", "failed" }) |phase| {
+        entry.message_phase = @splat(0);
+        @memcpy(entry.message_phase[0..phase.len], phase);
+        entry.channel_pending = false;
+        try std.testing.expect(entry.waiting());
+        try std.testing.expect(entry.removable());
+    }
+    for ([_][]const u8{ "accepted", "started" }) |phase| {
+        entry.message_phase = @splat(0);
+        @memcpy(entry.message_phase[0..phase.len], phase);
+        try std.testing.expect(!entry.waiting());
+        try std.testing.expect(!entry.removable());
+    }
 }
 
 

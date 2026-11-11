@@ -3263,7 +3263,7 @@ pub const ChatOutboxEntry = struct {
         if (self.channel_pending) return false;
         if (self.state == .not_sent) return true;
         const phase = std.mem.sliceTo(&self.message_phase, 0);
-        return self.state == .queued and (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed"));
+        return self.state == .queued and (phase.len == 0 or std.mem.eql(u8, phase, "queued") or std.mem.eql(u8, phase, "failed") or std.mem.eql(u8, phase, "sent"));
     }
 };
 
