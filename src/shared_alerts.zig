@@ -5,10 +5,10 @@ const transport = @import("chat_transport.zig");
 const diagnostics = @import("diagnostics.zig");
 const htons = @import("notifications.zig").htons;
 const crash_recorder = @import("crash_recorder.zig");
+const slots = @import("alert_slots.zig");
 
 const a = std.heap.page_allocator;
-const HOSTS = 3;
-const SLOTS = 32;
+const HOSTS = slots.hosts;
 const MAX_REPLY = 20 * 1024 * 1024;
 const MAX_FRAME = 1024 * 1024;
 const MAX_REQUEST = 65536;
@@ -24,12 +24,6 @@ comptime {
     if (COMMAND_HEAD.len + encoded + COMMAND_TAIL.len + 96 > COMMAND_CAP) @compileError("notify_link.py no longer fits one ssh channel command");
 }
 
-const Slot = struct {
-    id: u32 = 0,
-    done: bool = false,
-    payload: ?[]u8 = null,
-};
-
 const Frame = struct {
     kind: u8,
     id: u32,
@@ -39,8 +33,17 @@ const Frame = struct {
 var g_started: [HOSTS]bool = @splat(false);
 var g_started_mutex: state.SpinMutex = .{};
 var g_stop: std.atomic.Value(bool) = .init(false);
-var g_slots: [SLOTS]Slot = @splat(Slot{});
+var g_table: slots.Table = undefined;
+var g_table_ready = false;
 var g_slot_mutex: state.SpinMutex = .{};
+
+fn lockTable() void {
+    while (!g_slot_mutex.tryLock()) w.Sleep(1);
+    if (!g_table_ready) {
+        g_table = slots.Table.empty();
+        g_table_ready = true;
+    }
+}
 var g_command: [COMMAND_CAP]u8 = undefined;
 var g_command_len: usize = 0;
 var g_name: [96]u8 = undefined;
@@ -157,7 +160,7 @@ fn pumpThread(host: u8) void {
             w.Sleep(@intCast(retryMs(failures)));
             continue;
         };
-        if (runChannel(channel)) {
+        if (runChannel(host, channel)) {
             failures = 0;
         } else {
             failures +|= 1;
@@ -167,8 +170,10 @@ fn pumpThread(host: u8) void {
     }
 }
 
-fn runChannel(channel: *transport.Channel) bool {
-    if (!transport.write(channel, "open")) return false;
+fn runChannel(host: u8, channel: *transport.Channel) bool {
+    const generation = beginChannel(host);
+    defer endChannel(host, generation);
+    if (generation == 0 or !transport.write(channel, "open")) return false;
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);
     var chunk: [8192]u8 = undefined;
@@ -177,20 +182,20 @@ fn runChannel(channel: *transport.Channel) bool {
         if (n > 0) {
             frame.appendSlice(a, chunk[0..n]) catch return false;
             while (std.mem.indexOfScalar(u8, frame.items, '\n')) |end| {
-                const keep = handleLine(frame.items[0..end]);
+                const keep = handleLine(host, generation, frame.items[0..end]);
                 std.mem.copyForwards(u8, frame.items, frame.items[end + 1 ..]);
                 frame.items.len -= end + 1;
                 if (!keep) return false;
             }
             if (frame.items.len > MAX_FRAME) return false;
         }
-        flushSlots(channel);
+        flushSlots(channel, host, generation);
         w.Sleep(20);
     }
     return true;
 }
 
-fn handleLine(line: []const u8) bool {
+fn handleLine(host: u8, generation: u32, line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "rdy ")) {
         diagnostics.debugLog2("alert-link ready host=", line[4..]);
         return true;
@@ -208,72 +213,67 @@ fn handleLine(line: []const u8) bool {
         a.free(bytes);
         return true;
     };
-    if (!claimSlot(frame.id)) {
+    if (!claimSlot(host, generation, frame.id)) {
         a.free(bytes);
         return true;
     }
-    const thread = std.Thread.spawn(.{}, forwardThread, .{frame.id, bytes}) catch {
+    const thread = std.Thread.spawn(.{}, forwardThread, .{ host, generation, frame.id, bytes }) catch {
         a.free(bytes);
-        releaseSlot(frame.id);
+        releaseSlot(host, generation, frame.id);
         return true;
     };
     thread.detach();
     return true;
 }
 
-fn claimSlot(id: u32) bool {
-    while (!g_slot_mutex.tryLock()) w.Sleep(1);
+fn beginChannel(host: u8) u32 {
+    lockTable();
     defer g_slot_mutex.unlock();
-    for (&g_slots) |*slot| {
-        if (slot.id == id) return true;
-    }
-    for (&g_slots) |*slot| {
-        if (slot.id != 0) continue;
-        slot.* = .{ .id = id };
-        return true;
-    }
-    return false;
+    return g_table.begin(a, host);
 }
 
-fn releaseSlot(id: u32) void {
-    while (!g_slot_mutex.tryLock()) w.Sleep(1);
+fn endChannel(host: u8, generation: u32) void {
+    lockTable();
     defer g_slot_mutex.unlock();
-    for (&g_slots) |*slot| {
-        if (slot.id != id) continue;
-        if (slot.payload) |bytes| a.free(bytes);
-        slot.* = .{};
-        return;
-    }
+    g_table.end(a, host, generation);
 }
 
-fn finishSlot(id: u32, payload: ?[]u8) void {
-    while (!g_slot_mutex.tryLock()) w.Sleep(1);
+fn claimSlot(host: u8, generation: u32, id: u32) bool {
+    lockTable();
     defer g_slot_mutex.unlock();
-    for (&g_slots) |*slot| {
-        if (slot.id != id) continue;
-        slot.payload = payload;
-        slot.done = true;
-        return;
-    }
-    if (payload) |bytes| a.free(bytes);
+    return g_table.claim(host, generation, id);
 }
 
-fn flushSlots(channel: *transport.Channel) void {
-    while (!g_slot_mutex.tryLock()) w.Sleep(1);
+fn releaseSlot(host: u8, generation: u32, id: u32) void {
+    lockTable();
     defer g_slot_mutex.unlock();
-    for (&g_slots) |*slot| {
-        if (slot.id == 0 or !slot.done) continue;
-        if (slot.payload) |bytes| {
+    g_table.release(a, host, generation, id);
+}
+
+fn finishSlot(host: u8, generation: u32, id: u32, payload: ?[]u8) void {
+    lockTable();
+    defer g_slot_mutex.unlock();
+    g_table.finish(a, host, generation, id, payload);
+}
+
+fn takeReady(host: u8, generation: u32) ?slots.Ready {
+    lockTable();
+    defer g_slot_mutex.unlock();
+    return g_table.takeReady(host, generation);
+}
+
+fn flushSlots(channel: *transport.Channel, host: u8, generation: u32) void {
+    while (takeReady(host, generation)) |ready| {
+        if (ready.payload) |bytes| {
+            defer a.free(bytes);
             var offset: usize = 0;
             while (offset < bytes.len) {
                 const end = @min(offset + CHUNK, bytes.len);
-                _ = sendFrame(channel, "a", slot.id, bytes[offset..end]);
+                _ = sendFrame(channel, "a", ready.id, bytes[offset..end]);
                 offset = end;
             }
-            a.free(bytes);
         }
-        _ = sendFrame(channel, "x", slot.id, "");
-        slot.* = .{};
+        _ = sendFrame(channel, "x", ready.id, "");
     }
 }
 
@@ -290,15 +290,15 @@ fn sendFrame(channel: *transport.Channel, kind: []const u8, id: u32, payload: []
     return transport.write(channel, buf.items);
 }
 
-fn forwardThread(id: u32, data: []u8) void {
+fn forwardThread(host: u8, generation: u32, id: u32, data: []u8) void {
     crash_recorder.guardThread();
     defer a.free(data);
     const port = state.g_tunnel_inbound_port;
     if (port == 0) {
-        finishSlot(id, null);
+        finishSlot(host, generation, id, null);
         return;
     }
-    finishSlot(id, loopback(port, data));
+    finishSlot(host, generation, id, loopback(port, data));
 }
 
 fn loopback(port: u16, data: []const u8) ?[]u8 {
