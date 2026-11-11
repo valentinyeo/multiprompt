@@ -99,10 +99,6 @@ const ShellKind = @import("app_state.zig").ShellKind;
 const BROWSER_SPLIT_DEFAULT_PERMILLE = @import("app_state.zig").BROWSER_SPLIT_DEFAULT_PERMILLE;
 const empty_shell = @import("app_state.zig").empty_shell;
 const MAX_SHELLS = @import("app_state.zig").MAX_SHELLS;
-const stickyFind = @import("sidebar.zig").stickyFind;
-const stickyAddFromShell = @import("sidebar.zig").stickyAddFromShell;
-const stickyResetToShell = @import("sidebar.zig").stickyResetToShell;
-const stickyRemove = @import("sidebar.zig").stickyRemove;
 const setWideAscii = @import("themes.zig").setWideAscii;
 const ensureDevThemeInitialized = @import("themes.zig").ensureDevThemeInitialized;
 const devThemeOn = @import("themes.zig").devThemeOn;
@@ -2656,8 +2652,6 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     const background = closing_in_background;
     if (!background) commitRename();
 
-    stickyRemove(app_state.shells[idx].shell_id);
-
     const closing_active = (app_state.active_shell == idx);
     const snoozed_close = app_state.g_single_window and app_state.g_ws_snoozed[app_state.shells[idx].workspace];
     var close_same_workspace_remaining = false;
@@ -2986,11 +2980,6 @@ pub fn switchToShell(idx: u32) void {
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or !app_state.shells[idx].browser_native) hideBrowserEdgeMasks();
     if (idx < app_state.shell_count) {
         app_state.shells[idx].notified = false;
-        if (app_state.g_skip_view_bump) {
-            stickyAddFromShell(idx);
-        } else if (idx != prev or stickyFind(app_state.shells[idx].shell_id) == null) {
-            stickyResetToShell(idx);
-        }
         app_state.shells[idx].needs_attention = false;
         if (!app_state.g_restoring and !app_state.g_skip_view_bump) app_state.shells[idx].last_viewed = nowFileTime();
     }

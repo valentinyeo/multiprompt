@@ -41,7 +41,6 @@ const STILL_ACTIVE = @import("win32.zig").STILL_ACTIVE;
 const ShellKind = @import("app_state.zig").ShellKind;
 const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
 const Shell = @import("app_state.zig").Shell;
-const stickyRemove = @import("sidebar.zig").stickyRemove;
 const archiveHasNewContentSnapshot = @import("sidebar.zig").archiveHasNewContentSnapshot;
 const logUnarchive = @import("sidebar.zig").logUnarchive;
 const setBlueDot = @import("sidebar.zig").setBlueDot;
@@ -1755,7 +1754,6 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
         app_state.shells[i].deferred_done = false;
         if (dotTargetsTab(i) and setBlueDot(i, .hook_done, true)) {
             if (app_state.shells[i].inbox_archived) logUnarchive(i, "deferred DONE");
-            stickyRemove(app_state.shells[i].shell_id);
             missed_done_recovered.* = true;
             changed = true;
         }
@@ -1790,7 +1788,6 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
         app_state.shells[i].hidden_idle_streak = 0;
         logUnarchive(i, "idle watchdog with new output");
         app_state.shells[i].last_done_time = nowFileTime();
-        stickyRemove(app_state.shells[i].shell_id);
         recordShellDiagEvent(i, "DONE hidden-idle watchdog", "");
         stopSpinnerTimerIfIdle();
         endShellEtaRequest(i);

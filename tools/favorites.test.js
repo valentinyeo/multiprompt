@@ -199,7 +199,7 @@ pub const app_state = struct {
     var g_inbox_row_count: u32 = 3;
     var g_inbox_rows = [_]InboxRow{ .{ .ws = 0, .favorite = true }, .{ .ws = 1, .favorite = true }, .{ .ws = 1, .favorite = false } };
 };
-inline fn effLa(i: usize) u64 { return app_state.shells[i].last_active; }
+inline fn sidebarUseKey(i: usize) u64 { return app_state.shells[i].last_active; }
 fn sidebarHasVisibleSessions() bool { return true; }
 fn sidebarSectionCollapsed(tier: SidebarTier) bool { return tier == .recent and app_state.g_recents_section_collapsed; }
 fn groupHeaderHeight() i32 { return GROUP_HEADER_H; }
