@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -49,4 +50,39 @@ test('the setup script installs a ten minute timer that runs the runner and can 
   assert.match(source, /systemctl --user enable --now/);
   assert.match(source, /tools\/laptop-check\/run\.mjs/);
   assert.doesNotMatch(source, /push|commit/);
+});
+
+test('the setup script keeps a runner name that contains a space', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'laptop-check-setup-'));
+  try {
+    const bin = path.join(dir, 'bin');
+    const home = path.join(dir, 'home');
+    const repo = path.join(dir, 'repo');
+    fs.mkdirSync(bin);
+    fs.mkdirSync(home);
+    fs.mkdirSync(repo);
+    fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'lh'), '#!/bin/sh\n[ "$1" = machines ] && echo laptop2\nexit 0\n', { mode: 0o755 });
+    const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'check', GIT_AUTHOR_EMAIL: 'check@example.com', GIT_COMMITTER_NAME: 'check', GIT_COMMITTER_EMAIL: 'check@example.com' };
+    const git = (...args) => execFileSync('git', args, { env: gitEnv });
+    git('init', '-q', repo);
+    git('-C', repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+    git('-C', repo, 'branch', '-q', '-M', 'master');
+    git('-C', repo, 'remote', 'add', 'origin', repo);
+
+    const result = spawnSync('bash', [setupScript], {
+      encoding: 'utf8',
+      timeout: 120000,
+      env: {
+        ...process.env, HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        LAPTOP_CHECK_REPO: repo, LAPTOP_CHECK_HOST: 'laptop2', LAPTOP_CHECK_AGENT: 'RUNNER 14',
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const unit = fs.readFileSync(path.join(home, '.config/systemd/user/multiprompt-laptop-check.service'), 'utf8');
+    assert.match(unit, /^Environment="LAPTOP_CHECK_AGENT=RUNNER 14"$/m);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
