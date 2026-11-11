@@ -139,6 +139,75 @@ test('a plain completion alert needs no reply and the pump closes the caller', a
   }
 });
 
+test('each connected server flushes only its own browser replies', () => {
+  const alertsPath = path.join(root, 'src/shared_alerts.zig');
+  assert.equal(fs.existsSync(alertsPath), true);
+  const alerts = fs.readFileSync(alertsPath, 'utf8');
+  assert.doesNotMatch(alerts, /var g_slots:/);
+  assert.match(alerts, /fn flushSlots\(channel: \*transport\.Channel, host: u8, generation: u32\) void/);
+  assert.match(alerts, /claimSlot\(host, generation, frame\.id\)/);
+});
+
+test('two connected servers keep the same call id and their own reply', async () => {
+  const leftName = 'mp-test-' + process.pid + '-a-' + Math.random().toString(16).slice(2, 10);
+  const rightName = 'mp-test-' + process.pid + '-b-' + Math.random().toString(16).slice(2, 10);
+  const left = startPump({ relay: true, name: leftName });
+  const right = startPump({ relay: true, name: rightName });
+  try {
+    const leftReady = await left.next();
+    const rightReady = await right.next();
+    const leftCaller = await connect(leftReady.split(' ')[2]);
+    const rightCaller = await connect(rightReady.split(' ')[2]);
+    const leftReply = collect(leftCaller);
+    const rightReply = collect(rightCaller);
+    leftCaller.write('LEFT\n');
+    rightCaller.write('RIGHT\n');
+    const leftUp = frame(await left.next());
+    const rightUp = frame(await right.next());
+    assert.equal(leftUp.id, '1');
+    assert.equal(rightUp.id, leftUp.id, 'each server starts its own call numbers');
+    assert.equal(leftUp.body.toString(), 'LEFT\n');
+    assert.equal(rightUp.body.toString(), 'RIGHT\n');
+    left.child.stdin.write('a ' + leftUp.id + ' ' + Buffer.from('left-reply').toString('base64') + '\n');
+    right.child.stdin.write('a ' + rightUp.id + ' ' + Buffer.from('right-reply').toString('base64') + '\n');
+    left.child.stdin.write('x ' + leftUp.id + '\n');
+    right.child.stdin.write('x ' + rightUp.id + '\n');
+    assert.equal((await leftReply).toString(), 'left-reply');
+    assert.equal((await rightReply).toString(), 'right-reply');
+  } finally {
+    left.stop();
+    right.stop();
+  }
+});
+
+test('one server can finish a later call before an earlier one', async () => {
+  const name = 'mp-test-' + process.pid + '-order-' + Math.random().toString(16).slice(2, 10);
+  const link = startPump({ relay: true, name });
+  try {
+    const ready = await link.next();
+    const socketPath = ready.split(' ')[2];
+    const first = await connect(socketPath);
+    const second = await connect(socketPath);
+    const firstReply = collect(first);
+    const secondReply = collect(second);
+    first.write('ONE\n');
+    second.write('TWO\n');
+    const ups = [frame(await link.next()), frame(await link.next())];
+    const byBody = new Map(ups.map(up => [up.body.toString(), up.id]));
+    assert.equal(byBody.size, 2);
+    const secondId = byBody.get('TWO\n');
+    const firstId = byBody.get('ONE\n');
+    link.child.stdin.write('a ' + secondId + ' ' + Buffer.from('two-reply').toString('base64') + '\n');
+    link.child.stdin.write('x ' + secondId + '\n');
+    link.child.stdin.write('a ' + firstId + ' ' + Buffer.from('one-reply').toString('base64') + '\n');
+    link.child.stdin.write('x ' + firstId + '\n');
+    assert.equal((await firstReply).toString(), 'one-reply');
+    assert.equal((await secondReply).toString(), 'two-reply');
+  } finally {
+    link.stop();
+  }
+});
+
 test('without the relay the link takes the old localhost port', async t => {
   const probe = net.createServer();
   const busy = await new Promise(resolve => {

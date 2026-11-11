@@ -578,6 +578,14 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(link_detect_tests).step);
+    const alert_slot_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/alert_slots.zig"),
+        .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
+        .optimize = .Debug,
+    }) });
+    const run_alert_slot_tests = b.addRunArtifact(alert_slot_tests);
+    test_step.dependOn(&run_alert_slot_tests.step);
+    vps_test_step.dependOn(&run_alert_slot_tests.step);
     const workspace_snooze_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/workspace_snooze.zig"),
         .target = target,
