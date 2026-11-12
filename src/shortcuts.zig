@@ -76,7 +76,6 @@ const WM_APP_CHANGELOG_CONFIRM = @import("win32.zig").WM_APP_CHANGELOG_CONFIRM;
 const WM_APP_BROWSER_BACK = @import("win32.zig").WM_APP_BROWSER_BACK;
 const WM_APP_BROWSER_FORWARD = @import("win32.zig").WM_APP_BROWSER_FORWARD;
 const WM_APP_DICTATION_TOGGLE = @import("win32.zig").WM_APP_DICTATION_TOGGLE;
-const WM_APP_CLOSE_SESSION = @import("win32.zig").WM_APP_CLOSE_SESSION;
 const WM_APP_SNIPPETS_OPEN = @import("win32.zig").WM_APP_SNIPPETS_OPEN;
 const WM_APP_ALL_SESSIONS_KEY = @import("win32.zig").WM_APP_ALL_SESSIONS_KEY;
 const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OPEN;
@@ -249,8 +248,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+S", .b = "Favorite or unfavorite this session", .header = false },
     .{ .a = "Ctrl+Tab / Ctrl+Shift+Tab", .b = "Next / previous tab", .header = false },
     .{ .a = "Ctrl+1 ... 9", .b = "Open session 1-9 in this workspace, pinned first", .header = false },
-    .{ .a = "Ctrl+W", .b = "Quit the app; keep server agents and saved chats", .header = false },
-    .{ .a = "Ctrl+Shift+W", .b = "Delete the active chat; stop its agent and keep its history", .header = false },
+    .{ .a = "Ctrl+Shift+W", .b = "Quit the app; keep server agents and saved chats", .header = false },
+    .{ .a = "Ctrl+K -> Delete", .b = "Delete the active chat; stop its agent and keep its history", .header = false },
     .{ .a = "Ctrl+K -> Copy chat ID", .b = "Copy the chosen chat identity", .header = false },
     .{ .a = "Ctrl+K -> Hide from sidebar", .b = "Hide a chat without stopping its server agent", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (sidebar + inbox)", .header = false },
@@ -717,16 +716,16 @@ test "IGSH-1087 private typing bypasses chat and shell shortcuts except delibera
     try std.testing.expectEqual(@as(?u32, null), computerAppMessage(0x4B, true, true, false, false));
 }
 
-pub const SessionCloseAction = enum { quit, delete };
+pub const SessionCloseAction = enum { quit };
 
 pub fn sessionCloseShortcut(vk: u32, ctrl: bool, shift: bool, alt: bool, win: bool) ?SessionCloseAction {
-    if (vk != 0x57 or !ctrl or alt or win) return null;
-    return if (shift) .delete else .quit;
+    if (vk != 0x57 or !ctrl or !shift or alt or win) return null;
+    return .quit;
 }
 
-test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
-    try std.testing.expectEqual(SessionCloseAction.quit, sessionCloseShortcut(0x57, true, false, false, false).?);
-    try std.testing.expectEqual(SessionCloseAction.delete, sessionCloseShortcut(0x57, true, true, false, false).?);
+test "IGSH-1965 Ctrl+Shift+W quits and Ctrl+W is left for the browser pane" {
+    try std.testing.expectEqual(SessionCloseAction.quit, sessionCloseShortcut(0x57, true, true, false, false).?);
+    try std.testing.expect(sessionCloseShortcut(0x57, true, false, false, false) == null);
     try std.testing.expect(sessionCloseShortcut(0x57, false, false, false, false) == null);
     try std.testing.expect(sessionCloseShortcut(0x57, true, true, true, false) == null);
     try std.testing.expect(sessionCloseShortcut(0x57, true, false, false, true) == null);
@@ -810,7 +809,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (sessionCloseShortcut(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags), app_state.g_win_held)) |action| {
                 switch (action) {
                     .quit => _ = PostMessageW(app_state.g_main_hwnd, WM_APP_QUIT_ALL, 1, 0),
-                    .delete => _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CLOSE_SESSION, 0, 0),
                 }
                 return 1;
             }

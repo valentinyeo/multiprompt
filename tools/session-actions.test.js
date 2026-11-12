@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
-test('Ctrl+W starts an app-wide quit without ending a session', () => {
+test('Ctrl+Shift+W starts an app-wide quit without ending a session', () => {
   const shortcuts = read('src/shortcuts.zig');
   const route = shortcuts.match(/\.quit =>([^\n]+)/);
   assert.ok(route);
@@ -22,12 +22,15 @@ test('Ctrl+W starts an app-wide quit without ending a session', () => {
   assert.doesNotMatch(all, /endTmuxSession|killRemoteTmuxSession|closeShell/);
 });
 
-test('Ctrl+Shift+W uses the existing immediate session-end action', () => {
+test('Ctrl+W is left for the browser pane and only Ctrl+Shift+W quits', () => {
   const shortcuts = read('src/shortcuts.zig');
-  const route = shortcuts.match(/\.delete =>([^\n]+)/);
-  assert.ok(route);
-  assert.match(route[1], /WM_APP_CLOSE_SESSION, 0, 0/);
-  assert.doesNotMatch(route[1], /ARM|confirm|deadline/);
+  const fn = shortcuts.slice(shortcuts.indexOf('pub fn sessionCloseShortcut('), shortcuts.indexOf('test "IGSH-1965'));
+  assert.match(fn, /!shift/);
+  assert.doesNotMatch(shortcuts, /\.delete =>/);
+  assert.match(shortcuts, /\.a = "Ctrl\+Shift\+W", \.b = "Quit the app/);
+  assert.doesNotMatch(shortcuts, /\.a = "Ctrl\+W",/);
+  const drive = read('tools/verify-session-actions/drive.ps1');
+  assert.match(drive, /Check 'ctrl-w-does-not-quit'/);
 });
 
 test('Alt+X no longer has an archive binding or shortcut row', () => {

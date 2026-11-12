@@ -3921,8 +3921,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L("End tmux session"), -1, &et_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
-                        var et_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Ctrl+Shift+W"), -1, &et_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ws_snooze or is_ws_snoozed or is_ws_snoozed_row) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4074,8 +4072,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L("Close Tab"), -1, &ct_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        var ct_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Ctrl+W"), -1, &ct_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_inbox_exclude) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
