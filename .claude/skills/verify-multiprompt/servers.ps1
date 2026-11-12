@@ -29,6 +29,12 @@ function Servers-Control([string]$Id, [string]$Name = '') {
 function Servers-Click([string]$Id, [string]$Name = '') {
     Assert-Foreground
     $element = Servers-Control $Id $Name
+    if ((Servers-Window 'MultipromptSettings') -ne [IntPtr]::Zero) {
+        for ($attempt = 0; $attempt -lt 16 -and -not $element.Current.HasKeyboardFocus; $attempt++) {
+            Press @(0x09) ('Tab: bring Settings control into view: ' + $Name)
+        }
+        if (-not $element.Current.HasKeyboardFocus) { throw "Settings control did not receive keyboard focus: $Name" }
+    }
     if (-not $element.Current.IsEnabled -or $element.Current.IsOffscreen) { throw 'Servers control is not usable' }
     $rect = New-Object VerifyNative+Rect
     $handle = [IntPtr]$element.Current.NativeWindowHandle
