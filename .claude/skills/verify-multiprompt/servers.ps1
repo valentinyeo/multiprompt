@@ -110,8 +110,10 @@ try {
     $pasteProcess.StartInfo.EnvironmentVariables['HOME'] = $serverRoot.Replace('\', '/')
     [void]$pasteProcess.Start()
     try {
-        $pasteProcess.StandardInput.WriteLine($paste)
-        $pasteProcess.StandardInput.Close()
+        $pasteBytes = [Text.Encoding]::UTF8.GetBytes($paste + "`n")
+        $pasteStream = $pasteProcess.StandardInput.BaseStream
+        $pasteStream.Write($pasteBytes, 0, $pasteBytes.Length)
+        $pasteStream.Close()
         if (-not $pasteProcess.WaitForExit(10000)) { $pasteProcess.Kill(); throw 'One-time paste timed out' }
         if ($pasteProcess.ExitCode -ne 0) { throw 'One-time paste failed' }
     } finally { $pasteProcess.Dispose() }
