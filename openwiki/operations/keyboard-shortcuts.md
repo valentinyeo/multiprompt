@@ -96,7 +96,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Win+Shift+Left/Right: Move the window to the adjacent monitor, preserving maximized state (v0.28.235 — natively these targeted the conhost child and did nothing)
 - Ctrl+K → "Sort Workspaces": drag rows by their ≡ handle (or Ctrl+Up/Down) to reorder the workspace pills; Enter switches to a pill; order persists (registry + session + inbox)
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
-- Ctrl+W: Close the active tab/session (both modes; reverted in v0.28.219 — .215's workspace-close granularity was wrong). Workspace close = Ctrl+K 'Close Workspace' (non-destructive, reopenable via Open Workspace); app close = Ctrl+K 'Quit ZigShell'
+- Ctrl+Shift+W: Quit the app (IGSH-1965). Ctrl+W is left for the browser pane, where it closes the tab.
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
 - F2: Rename the visible session name. With the sidebar open, edit its tab. With the sidebar collapsed or hidden, edit the top title. In Inbox, edit the selected row.
 - Enter saves, Esc cancels, and leaving the name saves.
@@ -121,8 +121,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Quit the app; keep server agents and saved chats |
-| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+Shift+W | Quit the app; keep server agents and saved chats |
+| Ctrl+K -&gt; Delete | Delete the active chat; stop its agent and keep its history |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
 | Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |

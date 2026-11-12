@@ -216,7 +216,10 @@ try {
     Start-App
     Shot 'before'
     Press @(0x11,0x57)
-    [void](Wait-For 'Ctrl+W quits' { $app.HasExited })
+    Start-Sleep -Milliseconds 1500
+    Check 'ctrl-w-does-not-quit' (!$app.HasExited)
+    Press @(0x11,0x10,0x57)
+    [void](Wait-For 'Ctrl+Shift+W quits' { $app.HasExited })
     Check 'quit-keeps-both-server-agents' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
     Stop-AppJob
     Start-App
@@ -228,7 +231,7 @@ try {
     $localId=[Windows.Forms.Clipboard]::GetText()
     Check 'local-chat-id-minted' ($localId -match '^session:#[0-9a-f]{16}$' -and $localId -ne 'session:#0000000000000000')
     [void](Wait-For 'local chat id saved' { $s=Session; $tab=@($s.tabs | Where-Object { $_.kind -eq 'cmd' }); $tab.Count -eq 1 -and $tab[0].chat_id -gt 0 })
-    Press @(0x11,0x57)
+    Press @(0x11,0x10,0x57)
     [void](Wait-For 'local ID restart quits' { $app.HasExited })
     Stop-AppJob
     Start-App
@@ -276,8 +279,8 @@ try {
     [void](Wait-For 'context Delete removes captured Beta' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Beta' }).Count -eq 0 -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 1 })
     Shot 'context-delete-beta'
     Focus
-    Press @(0x11,0x10,0x57)
-    [void](Wait-For 'one Ctrl+Shift+W stops Alpha' { $servers[0].process.HasExited })
+    Palette 'end tmux session' 7112
+    [void](Wait-For 'one Ctrl+K Delete stops Alpha' { $servers[0].process.HasExited })
     [void](Wait-For 'Alpha removed' { $s=Session; $s -and @($s.tabs | Where-Object { $_.name -eq 'Alpha' }).Count -eq 0 })
     $requests=@(Get-Content (Join-Path $env:MP_VERIFY_STATE 'end-requests.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
     foreach ($name in $names) { Check ('one-stop-request-'+$name) (@($requests | Where-Object { $_.session -eq $name }).Count -eq 1) }
