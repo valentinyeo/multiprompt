@@ -61,7 +61,10 @@ try {
     if (-not (Test-Path $bash)) { throw 'Git Bash is required for the disposable POSIX server home' }
     $serverScript = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-servers/server.py')).Path
     $serverProcess = Start-Process -FilePath (Get-Command python.exe).Source -ArgumentList @(('"' + $serverScript + '"'), ('"' + $serverRoot + '"'), ('"' + $bash + '"')) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Evidence 'server.stdout.log') -RedirectStandardError (Join-Path $Evidence 'server.stderr.log')
-    Wait-Until { Test-Path (Join-Path $serverRoot 'port.txt') } 'disposable loopback SSH protocol server' 30
+    Wait-Until {
+        $portPath = Join-Path $serverRoot 'port.txt'
+        (Test-Path $portPath) -and [IO.File]::ReadAllText($portPath) -match '^\d{1,5}$'
+    } 'disposable loopback SSH protocol server port' 30
     $port = (Get-Content (Join-Path $serverRoot 'port.txt') -Raw).Trim()
     if ($port -notmatch '^\d{1,5}$') { throw 'Invalid disposable server port' }
 
