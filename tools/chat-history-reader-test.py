@@ -6262,6 +6262,94 @@ class EmptyHostedChatTest(unittest.TestCase):
         self.assertEqual(wire.splitlines()[0].split('\t')[3], 'missing')
 
 
+class IGSH_2272_ClearFollowsSessionTest(unittest.TestCase):
+    sid = '11111111-2222-4333-8444-555555555555'
+    cleared = '99999999-8888-4777-8666-555555555555'
+    tmux = 'cleared-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        self.cwd = self.home / 'work' / 'demo'
+        self.cwd.mkdir(parents=True)
+        self.folder = self.home / '.claude/projects' / str(self.cwd).replace('/', '-')
+        self.folder.mkdir(parents=True)
+        reader.host_write(reader.host_paths('claude', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.cwd)))
+
+    def transcript(self, session, text):
+        event = dict(type='user', sessionId=session, cwd=str(self.cwd), uuid='u-' + session[:4],
+                     timestamp='2026-11-13T00:00:00Z', message=dict(role='user', content=text))
+        path = self.folder / (session + '.jsonl')
+        path.write_text(json.dumps(event) + '\n')
+        return path
+
+    def native(self, session):
+        reader.host_write(reader.host_paths('claude', self.sid)['state'], dict(native_session=session))
+
+    def wire(self):
+        return reader.response(dict(id=3, sid=self.sid, tmux=self.tmux, cwd=str(self.cwd), codex=False,
+                                    cached_sid='', inode=0, offset=0))
+
+    def test_history_shows_the_session_started_by_clear(self):
+        self.transcript(self.sid, 'asked before clear')
+        self.transcript(self.cleared, 'asked after clear')
+        self.native(self.cleared)
+        wire = self.wire()
+        self.assertEqual(wire.splitlines()[0].split('\t')[4], self.sid)
+        self.assertIn('asked after clear', wire)
+        self.assertNotIn('asked before clear', wire)
+
+    def test_history_is_empty_until_the_cleared_session_has_a_transcript(self):
+        self.transcript(self.sid, 'asked before clear')
+        self.native(self.cleared)
+        wire = self.wire()
+        self.assertNotIn('asked before clear', wire)
+        self.assertEqual(wire.splitlines()[0].split('\t')[3], 'ok')
+
+    def test_history_is_unchanged_while_the_native_session_is_the_chat_session(self):
+        self.transcript(self.sid, 'asked in the first session')
+        self.native(self.sid)
+        self.assertIn('asked in the first session', self.wire())
+
+    def argv(self):
+        return reader.host_claude_argv('claude', self.sid, ['claude'])
+
+    def test_restart_resumes_the_session_started_by_clear(self):
+        self.transcript(self.sid, 'asked before clear')
+        self.transcript(self.cleared, 'asked after clear')
+        self.native(self.cleared)
+        self.assertEqual(self.argv()[-2:], ['--resume', self.cleared])
+
+    def test_restart_before_any_message_after_clear_starts_the_cleared_session(self):
+        self.transcript(self.sid, 'asked before clear')
+        self.native(self.cleared)
+        self.assertEqual(self.argv()[-2:], ['--session-id', self.cleared])
+
+    def test_restart_keeps_resuming_the_chat_session_without_a_clear(self):
+        self.transcript(self.sid, 'asked in the first session')
+        self.native(self.sid)
+        self.assertEqual(self.argv()[-2:], ['--resume', self.sid])
+        reader.host_write(reader.host_paths('claude', self.sid)['state'], dict())
+        self.assertEqual(self.argv()[-2:], ['--resume', self.sid])
+
+    def test_moving_to_a_terminal_resumes_the_session_started_by_clear(self):
+        self.native(self.cleared)
+        self.assertEqual(reader.host_terminal_command('claude', self.sid), 'claude --resume ' + self.cleared)
+
+    def test_sent_message_proof_accepts_the_cleared_transcript(self):
+        path = self.transcript(self.cleared, 'asked after clear')
+        raw = path.read_bytes()
+        with path.open('rb') as source:
+            identity = reader._consumed_identity(source, self.sid, path.stat().st_ino, 0,
+                                                 hashlib.sha256(raw).hexdigest(), 'asked after clear')
+        self.assertEqual(identity[0], self.sid)
+
+
 class AgentHostReviewTest(AgentHostFixture, unittest.TestCase):
     second = 'host_fixture_message_02'
 
