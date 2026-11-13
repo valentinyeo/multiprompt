@@ -50,5 +50,6 @@ test("A click under the pointer keeps its row in place until the pointer leaves 
   assert.match(move, /freezeSidebarOrder\(\)/, "entering the sidebar freezes the order");
   assert.match(move, /thawSidebarOrder\(\)/, "leaving the sidebar releases it");
   const leave = block(main, "0x02A3 => {", "WM_MOUSEMOVE => {");
+  assert.match(leave, /GetCursorPos\(&leave_pt\)/, "a leave message with the pointer still over the sidebar must not reorder");
   assert.match(leave, /thawSidebarOrder\(\)/, "pointer leaving the window releases the order");
 });
