@@ -327,6 +327,9 @@ pub fn build(b: *std.Build) void {
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js", "tools/workspace-colors.test.js", "tools/account-bot-photos.test.js", "tools/account-picture-proof.test.js" }).step);
     const live_resume_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-switch-resume.test.js" });
+    const composer_paint_bound_tests = b.addSystemCommand(&.{ "node", "--test", "tools/composer-paint-bound.test.js" });
+    test_step.dependOn(&composer_paint_bound_tests.step);
+    vps_test_step.dependOn(&composer_paint_bound_tests.step);
     test_step.dependOn(&live_resume_tests.step);
     vps_test_step.dependOn(&live_resume_tests.step);
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
