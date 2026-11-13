@@ -1548,7 +1548,7 @@ def _consumed_identity(source, sid, inode, offset, digest, text):
         if not raw.endswith(b"\n") or hashlib.sha256(raw).hexdigest() != digest:
             return None
         event = load_line(raw)
-        if (not isinstance(event, dict) or event.get("sessionId", sid) != sid or
+        if (not isinstance(event, dict) or event.get("sessionId", sid) not in (sid, Path(source.name).stem) or
                 event.get("type") not in ("user", "attachment") or event.get("isSidechain")):
             return None
         if not any(row["role"] == "user" and row["text"].replace("\r", "").rstrip(" ") == text.replace("\r", "").rstrip(" ")
@@ -1623,6 +1623,14 @@ def resolve_response_path(q, source=None, as_owner=False):
         path = conversation_path(agent, sid, cwd) if sid and not follow else None
     except PermissionError:
         path, denied = None, True
+    if agent == "claude" and sid and host_dispatch_switch(agent, sid):
+        followed = host_claude_session(agent, sid)
+        if followed != sid:
+            try:
+                moved = conversation_path(agent, followed, cwd)
+            except PermissionError:
+                moved = None
+            return (agent, sid, moved, None) if moved is not None else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
     if agent == "codex" and sid and host_dispatch_switch(agent, sid):
         native = host_session_state(agent, sid).get("native_session")
         try:
@@ -3209,12 +3217,12 @@ def host_pane_agent(tmux, sid):
         bound = resolve_tmux_agent('claude', tmux, require_bound=True)
     except (OSError, ValueError):
         return False
-    return bool(bound) and bound[0] == sid
+    return bool(bound) and bound[0] in (sid, host_claude_session('claude', sid))
 
 
 def host_terminal_command(provider, sid):
     config = host_config(provider, sid) or {}
-    parts = [host_binary_name(provider), '--resume', sid]
+    parts = [host_binary_name(provider), '--resume', host_claude_session(provider, sid) if provider == 'claude' else sid]
     mode = config.get('permission_mode')
     if mode in HOST_PERMISSION_MODES:
         parts += ['--permission-mode', mode]
@@ -3387,6 +3395,11 @@ def host_state_write(provider, sid, state):
     host_write(host_paths(provider, sid)["state"], state)
 
 
+def host_claude_session(provider, sid):
+    native = host_session_state(provider, sid).get("native_session")
+    return native if isinstance(native, str) and SESSION_ID.fullmatch(native) else sid
+
+
 def host_transcript_exists(provider, sid):
     try:
         return conversation_path(provider, sid, host_cwd(provider, sid)) is not None
@@ -3428,7 +3441,8 @@ def host_claude_argv(provider, sid, base, mode=None):
                 "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages", "--permission-prompt-tool", "stdio"]
     command += ["--append-system-prompt", HOST_APPEND_PROMPT]
-    return command + (["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid])
+    target = host_claude_session(provider, sid)
+    return command + (["--resume", target] if host_transcript_exists(provider, target) else ["--session-id", target])
 
 
 def host_codex_argv(provider, sid, base):
@@ -3560,7 +3574,7 @@ def host_agent_start(provider, sid, mode=None):
                  'sys.exit(74 if n["conversation_path"](*sys.argv[1:]) is not None else 0)')
         try:
             probe = subprocess.run(prefix + shell + [setup + 'cd "$1" || exit 72; command -v "$2" >/dev/null || exit 73; exec python3 -c "$3" "$4" "$5" "$1"',
-                                                     "agent-preflight", cwd, command[0], check, provider, sid],
+                                                     "agent-preflight", cwd, command[0], check, provider, host_claude_session(provider, sid) if provider == "claude" else sid],
                                    input=source, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    env=env, timeout=10)
         except (OSError, subprocess.SubprocessError):
@@ -3568,7 +3582,7 @@ def host_agent_start(provider, sid, mode=None):
         if probe.returncode not in (0, 74):
             raise RuntimeError({72: "cwd_unavailable", 73: "agent_not_found"}.get(probe.returncode, "owner_unavailable"))
         if provider == "claude":
-            command[-2:] = ["--resume" if probe.returncode == 74 else "--session-id", sid]
+            command[-2:] = ["--resume" if probe.returncode == 74 else "--session-id", host_claude_session(provider, sid)]
         command = prefix + shell + [setup + 'cd "$1" || exit 72; shift; exec "$@"', "agent-start", cwd] + command
         try:
             return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -7338,7 +7352,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 114
+RUNTIME_GENERATION = 115
 
 if __name__ == '__main__':
     import base64 as _base64
