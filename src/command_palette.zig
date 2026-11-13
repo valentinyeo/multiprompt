@@ -138,6 +138,10 @@ const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL
 const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
 const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
 const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
+const SEARCH_CHAT_MODEL_SOL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SOL_OFFSET;
+const SEARCH_CHAT_MODEL_TERRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_TERRA_OFFSET;
+const SEARCH_CHAT_MODEL_LUNA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_LUNA_OFFSET;
+const SEARCH_CHAT_MODEL_ASTRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_ASTRA_OFFSET;
 const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
 const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
 const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
@@ -932,6 +936,10 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_MODEL_SONNET_OFFSET => "chat view: model sonnet",
         SEARCH_CHAT_MODEL_HAIKU_OFFSET => "chat view: model haiku",
         SEARCH_CHAT_MODEL_FABLE_OFFSET => "chat view: model fable",
+        SEARCH_CHAT_MODEL_SOL_OFFSET => "chat view: model sol",
+        SEARCH_CHAT_MODEL_TERRA_OFFSET => "chat view: model terra",
+        SEARCH_CHAT_MODEL_LUNA_OFFSET => "chat view: model luna",
+        SEARCH_CHAT_MODEL_ASTRA_OFFSET => "chat view: model astra",
         SEARCH_CHAT_EFFORT_LOW_OFFSET => "chat view: effort low",
         SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => "chat view: effort medium",
         SEARCH_CHAT_EFFORT_HIGH_OFFSET => "chat view: effort high",
@@ -1382,7 +1390,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
-    if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET) return 7;
+    if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
     if (target == app_state.SEARCH_SERVERS_OFFSET) return 3;
@@ -4981,7 +4989,25 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_OFFSET;
             app_state.g_search_result_count += 1;
         }
-        if (@import("chat_session.zig").chatSettingsEligible()) {
+        if (@import("chat_session.zig").chatSettingsEligible() and @import("chat_session.zig").chatSettingsCodex()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sol", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SOL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Terra", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_TERRA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Luna", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_LUNA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Astra", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_ASTRA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (@import("chat_session.zig").chatSettingsEligible() and !@import("chat_session.zig").chatSettingsCodex()) {
             if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Opus", app_state.g_search_buf[0..app_state.g_search_len]))) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_OPUS_OFFSET;
                 app_state.g_search_result_count += 1;

@@ -784,7 +784,12 @@ var g_chat_live_stream: ?*ChatLiveStream = null;
 pub fn chatSettingsEligible() bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or !@import("room_frontend.zig").privateActionsAllowed()) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return std.mem.eql(u8, key.provider(), "claude") and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
+    return (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
+}
+
+pub fn chatSettingsCodex() bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    return std.mem.eql(u8, chatFileIdentityForShell(app_state.active_shell).provider(), "codex");
 }
 
 pub fn chatSettingsPending(shell_id: u32) bool {
@@ -793,7 +798,7 @@ pub fn chatSettingsPending(shell_id: u32) bool {
     const stream = g_chat_live_stream orelse return false;
     if (app_state.active_shell >= app_state.shell_count) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return stream.shell_id == shell_id and key.shell_id == shell_id and std.mem.eql(u8, key.provider(), "claude") and std.mem.eql(u8, stream.provider, key.provider()) and stream.pending_settings.pending();
+    return stream.shell_id == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) and std.mem.eql(u8, stream.provider, key.provider()) and stream.pending_settings.pending();
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
@@ -986,7 +991,7 @@ pub fn chatLiveWrite(line: []const u8) bool {
     if (stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
     if (setting) {
         const key = chatFileIdentityForShell(app_state.active_shell);
-        if (stream.shell_id != key.shell_id or stream.host != key.host or !std.mem.eql(u8, key.provider(), "claude") or !std.mem.eql(u8, stream.provider, key.provider()) or !std.mem.eql(u8, stream.sid[0..stream.sid_len], std.mem.sliceTo(&key.sid, 0))) return false;
+        if (stream.shell_id != key.shell_id or stream.host != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) or !std.mem.eql(u8, stream.provider, key.provider()) or !std.mem.eql(u8, stream.sid[0..stream.sid_len], std.mem.sliceTo(&key.sid, 0))) return false;
     }
     while (!stream.mutex.tryLock()) Sleep(1);
     defer stream.mutex.unlock();

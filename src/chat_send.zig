@@ -3711,7 +3711,7 @@ fn chatMessageSyncFinish() void {
     const items = json_reader.array(json_reader.field(parsed.value, if (job.synced) "events" else "items"));
     for (items) |item| {
         const event = if (job.synced) json_reader.field(item, "event") else item;
-        const snapshot_settings = if (job.synced or !std.mem.eql(u8, job.key.provider(), "claude")) std.json.Value{ .null = {} } else json_reader.field(item, "host_settings");
+        const snapshot_settings = if (job.synced or !(std.mem.eql(u8, job.key.provider(), "claude") or std.mem.eql(u8, job.key.provider(), "codex"))) std.json.Value{ .null = {} } else json_reader.field(item, "host_settings");
         if (snapshot_settings != .null) {
             if (@import("chat_live.zig").applySettingsSnapshot(job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), json_reader.uintDefault(parsed.value, "seq", 0), snapshot_settings) and idx == app_state.active_shell and app_state.g_chat_active) {
                 @import("chat_composer.zig").layoutChatControls();
@@ -4185,6 +4185,10 @@ pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
             .sonnet => "Model: Sonnet",
             .haiku => "Model: Haiku",
             .fable => "Model: Fable",
+            .sol => "Model: Sol",
+            .terra => "Model: Terra",
+            .luna => "Model: Luna",
+            .astra => "Model: Astra",
             .unknown => return,
         },
         .effort => |effort| switch (effort) {
@@ -4201,7 +4205,7 @@ pub fn chatSetLiveSetting(setting: @import("chat_live.zig").Setting) bool {
     if (!@import("chat_session.zig").chatSettingsEligible()) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
     const live = @import("chat_live.zig");
-    const line = live.settingLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, std.mem.sliceTo(&key.sid, 0), setting) catch return false;
+    const line = live.settingLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, key.provider(), std.mem.sliceTo(&key.sid, 0), setting) catch return false;
     return chatLiveReply(line);
 }
 

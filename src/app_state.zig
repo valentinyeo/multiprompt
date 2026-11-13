@@ -1615,6 +1615,14 @@ pub const SEARCH_CHAT_MODE_EDITS_OFFSET: usize = 12002;
 pub const SEARCH_CHAT_MODE_BYPASS_OFFSET: usize = 12009;
 pub const SEARCH_CHAT_PLUS_MENU_OFFSET: usize = 12010;
 pub const SEARCH_CHAT_MODEL_FABLE_OFFSET: usize = 12011;
+pub const SEARCH_CHAT_MODEL_SOL_OFFSET: usize = 12012;
+pub const SEARCH_CHAT_MODEL_TERRA_OFFSET: usize = 12013;
+pub const SEARCH_CHAT_MODEL_LUNA_OFFSET: usize = 12014;
+pub const SEARCH_CHAT_MODEL_ASTRA_OFFSET: usize = 12015;
+
+pub fn isChatSettingOffset(target: usize) bool {
+    return (target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or (target >= SEARCH_CHAT_MODEL_FABLE_OFFSET and target <= SEARCH_CHAT_MODEL_ASTRA_OFFSET);
+}
 pub const SEARCH_CHAT_QUEUE_SEND_OFFSET: usize = 6365;
 pub const SEARCH_CHAT_RESET_OFFSET: usize = 6394;
 pub const SEARCH_CHAT_TAB_URL_OFFSET: usize = 6384;
