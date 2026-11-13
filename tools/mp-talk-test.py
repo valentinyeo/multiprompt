@@ -15,6 +15,8 @@ ALPHA = "aaaaaaaa-1111-2222-3333-444444444444"
 BETA = "bbbbbbbb-1111-2222-3333-444444444444"
 GAMMA = "cccccccc-1111-2222-3333-444444444444"
 DEAD = "dddddddd-1111-2222-3333-444444444444"
+PI = "eeeeeeee-1111-2222-3333-444444444444"
+CODEX = "ffffffff-1111-2222-3333-444444444444"
 
 
 class ChatsTalkTest(unittest.TestCase):
@@ -29,22 +31,25 @@ class ChatsTalkTest(unittest.TestCase):
         tmux = self.bin / "tmux"
         tmux.write_text("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then printf 'live-alpha\\nlive-beta\\nlive-gamma\\nlive-dead\\n'; exit 0; fi\nexit 1\n")
         tmux.chmod(0o755)
+        self.bin.joinpath("tmux").write_text("#!/bin/sh\nif [ \"$1\" = list-sessions ]; then printf 'live-alpha\\nlive-beta\\nlive-gamma\\nlive-dead\\nlive-pi\\nlive-codex\\n'; exit 0; fi\nexit 1\n")
         self.chat("k1", "live-alpha", ALPHA, os.getpid(), busy=False)
         self.chat("k2", "live-beta", BETA, os.getpid(), busy=True)
         self.chat("k3", "live-gamma", GAMMA, os.getpid(), busy=False)
         self.chat("k4", "live-dead", DEAD, 2 ** 22 + 12345, busy=False)
-        self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-dead": "Gone Chat"})
+        self.chat("k5", "live-pi", PI, os.getpid(), busy=False, provider="pi", cwd="/work/pi")
+        self.chat("k6", "live-codex", CODEX, os.getpid(), busy=False, provider="codex", cwd="/work/codex")
+        self.publish({"live-alpha": "Alpha Lead", "live-beta": "Beta Runner", "live-dead": "Gone Chat", "live-pi": "Pi Helper", "live-codex": "Codex Helper"})
 
-    def chat(self, key, tmux, sid, pid, busy):
-        (self.host / (key + ".config.json")).write_text(json.dumps(dict(cwd="/work/" + tmux, enabled=True, permission_mode="bypassPermissions", tmux=tmux)))
-        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=sid, pid=pid, provider="claude", started=1.0, inflight={"id": "x"} if busy else None)))
+    def chat(self, key, tmux, sid, pid, busy, provider="claude", cwd=None):
+        (self.host / (key + ".config.json")).write_text(json.dumps(dict(cwd=cwd or "/work/" + tmux, enabled=True, permission_mode="bypassPermissions", tmux=tmux)))
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=sid, pid=pid, provider=provider, started=1.0, inflight={"id": "x"} if busy else None)))
 
     def publish(self, names):
         path = self.home / ".local/state/multiprompt/chat-names.json"
         path.write_text(json.dumps({tmux: dict(name=name, at=1.0, sid=None) for tmux, name in names.items()}))
 
     def env(self, **extra):
-        base = dict(os.environ, HOME=str(self.home), MULTIPROMPT_READER_SOURCE=str(READER), PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
+        base = dict(os.environ, HOME=str(self.home), MULTIPROMPT_READER_SOURCE=str(READER), PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""), CLAUDE_CONFIG_DIR="", PI_CODING_AGENT_SESSION_DIR="")
         for name in ("MULTIPROMPT_RUNTIME_DIR", "MULTIPROMPT_TAB", "TMUX_PANE"):
             base.pop(name, None)
         base.update(extra)
@@ -64,7 +69,7 @@ class ChatsTalkTest(unittest.TestCase):
         done = self.run_tool(MP_SESSIONS, "--json")
         self.assertEqual(done.returncode, 0, done.stderr)
         chats = {chat["tmux"]: chat for chat in json.loads(done.stdout)}
-        self.assertEqual(sorted(chats), ["live-alpha", "live-beta", "live-gamma"])
+        self.assertEqual(sorted(chats), ["live-alpha", "live-beta", "live-codex", "live-gamma", "live-pi"])
         self.assertEqual(chats["live-alpha"]["name"], "Alpha Lead")
         self.assertEqual(chats["live-alpha"]["sid"], ALPHA)
         self.assertEqual(chats["live-alpha"]["provider"], "claude")
@@ -128,6 +133,81 @@ class ChatsTalkTest(unittest.TestCase):
         done = self.run_tool(MP_SEND, "claude", ALPHA, "plain", "--tmux", "live-alpha")
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(self.rows(), [("claude", ALPHA, "plain")])
+
+    def write_lines(self, path, lines):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+
+    def transcripts(self):
+        folder = "".join(c if c.isalnum() else "-" for c in "/work/live-alpha")
+        self.write_lines(self.home / ".claude/projects" / folder / (ALPHA + ".jsonl"), [
+            {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "question"}},
+            {"type": "assistant", "uuid": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "old claude answer"}]}},
+            {"type": "assistant", "uuid": "a2", "message": {"role": "assistant", "content": [{"type": "text", "text": "newest claude answer"}]}},
+            {"type": "user", "uuid": "u2", "message": {"role": "user", "content": "follow up"}},
+        ])
+        self.write_lines(self.home / ".pi/agent/sessions/--work-pi--" / ("2026-01-01T00-00-00_" + PI + ".jsonl"), [
+            {"type": "session", "id": PI, "cwd": "/work/pi"},
+            {"type": "message", "id": "p1", "message": {"role": "assistant", "content": [{"type": "text", "text": "pi says hello"}]}},
+        ])
+        self.write_lines(self.home / ".codex/sessions/2026/01/01" / ("rollout-2026-01-01T00-00-00-" + CODEX + ".jsonl"), [
+            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "codex says hello"}]}},
+        ])
+
+    def test_IGSH_2279_a_pi_chat_and_a_codex_chat_are_in_the_roster(self):
+        done = self.run_tool(MP_SESSIONS, "--json")
+        chats = {chat["tmux"]: chat for chat in json.loads(done.stdout)}
+        self.assertEqual(chats["live-pi"]["provider"], "pi")
+        self.assertEqual(chats["live-pi"]["name"], "Pi Helper")
+        self.assertEqual(chats["live-pi"]["cwd"], "/work/pi")
+        self.assertEqual(chats["live-codex"]["provider"], "codex")
+
+    def test_IGSH_2279_a_pi_chat_lists_every_open_chat_with_the_same_tool(self):
+        done = self.run_tool(MP_SEND, "list", "--json", MULTIPROMPT_TAB="live-pi")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(sorted(chat["tmux"] for chat in json.loads(done.stdout)), ["live-alpha", "live-beta", "live-codex", "live-gamma", "live-pi"])
+        self.assertIn("Alpha Lead", self.run_tool(MP_SEND, "list").stdout)
+
+    def test_IGSH_2279_a_codex_chat_messages_a_claude_chat_and_a_claude_chat_messages_pi(self):
+        done = self.run_tool(MP_SEND, "--to", "alpha lead", "ping", MULTIPROMPT_TAB="live-codex")
+        self.assertEqual(done.returncode, 3, done.stderr)
+        done = self.run_tool(MP_SEND, "--to", "pi helper", "pong", MULTIPROMPT_TAB="live-alpha")
+        self.assertEqual(done.returncode, 3, done.stderr)
+        self.assertEqual(self.rows(), [("claude", ALPHA, "From Codex Helper: ping"), ("pi", PI, "From Alpha Lead: pong")])
+
+    def test_IGSH_2279_read_gives_the_last_answer_of_a_claude_chat(self):
+        self.transcripts()
+        done = self.run_tool(MP_SEND, "read", "alpha lead", MULTIPROMPT_TAB="live-codex")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "newest claude answer")
+
+    def test_IGSH_2279_read_gives_the_last_answer_of_a_pi_and_a_codex_chat(self):
+        self.transcripts()
+        self.assertEqual(self.run_tool(MP_SEND, "read", "pi helper", MULTIPROMPT_TAB="live-alpha").stdout.strip(), "pi says hello")
+        self.assertEqual(self.run_tool(MP_SEND, "read", "codex helper", MULTIPROMPT_TAB="live-pi").stdout.strip(), "codex says hello")
+
+    def test_IGSH_2279_read_says_so_when_a_chat_has_no_answer_yet(self):
+        done = self.run_tool(MP_SEND, "read", "beta runner", MULTIPROMPT_TAB="live-alpha")
+        self.assertEqual(done.returncode, 3)
+        self.assertIn("no answer yet", done.stderr)
+
+    def test_IGSH_2279_a_chat_stops_getting_messages_past_the_cap_per_minute(self):
+        for number in range(6):
+            done = self.run_tool(MP_SEND, "--to", "alpha lead", "m" + str(number), MULTIPROMPT_TAB="live-gamma")
+            self.assertEqual(done.returncode, 3, done.stderr)
+        done = self.run_tool(MP_SEND, "--to", "alpha lead", "one too many", MULTIPROMPT_TAB="live-beta")
+        self.assertEqual(done.returncode, 5)
+        self.assertIn("slow down", done.stderr)
+        self.assertEqual(len(self.rows()), 6)
+
+    def test_IGSH_2279_one_sender_is_capped_across_all_chats(self):
+        targets = ["alpha lead", "pi helper", "codex helper", "beta runner"]
+        for number in range(12):
+            done = self.run_tool(MP_SEND, "--to", targets[number % 4], "m" + str(number), MULTIPROMPT_TAB="live-gamma")
+            self.assertEqual(done.returncode, 3, done.stderr)
+        done = self.run_tool(MP_SEND, "--to", "alpha lead", "again", MULTIPROMPT_TAB="live-gamma")
+        self.assertEqual(done.returncode, 5, done.stderr)
+        self.assertEqual(len(self.rows()), 12)
 
     def test_IGSH_1865_reader_stores_names_the_desktop_publishes(self):
         script = (

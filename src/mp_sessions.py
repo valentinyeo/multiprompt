@@ -14,23 +14,16 @@ def load_send():
     return module
 
 
-def table(chats):
-    rows = [("NAME", "PROVIDER", "STATE", "TMUX", "SID", "CWD")]
-    for chat in chats:
-        rows.append((chat["name"] or "(no name yet)", chat["provider"], chat["state"], chat["tmux"], chat["sid"], chat["cwd"] or ""))
-    widths = [max(len(row[i]) for row in rows) for i in range(5)]
-    return "\n".join("  ".join(row[i].ljust(widths[i]) for i in range(5)) + "  " + row[5] for row in rows)
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="mp-sessions", description="List the live chats on this server by the name shown in the desktop app.")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    chats = load_send().live_chats()
+    send = load_send()
+    chats = send.live_chats()
     if args.json:
         print(json.dumps(chats, separators=(",", ":")))
     else:
-        print(table(chats))
+        print(send.table(chats))
     return 0
 
 
