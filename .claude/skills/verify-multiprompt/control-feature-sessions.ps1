@@ -164,8 +164,8 @@
                 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active after search proof'
             }
 
-            Palette 'new claude in terminal'
-            Press @(0x0D) 'Enter: New Claude in terminal'
+            Palette 'new terminal'
+            Press @(0x0D) 'Enter: New terminal'
             Snapshot 'terminal-picker-cancel'
             Press @(0x1B) 'Esc: cancel repository picker'
             Press @(0x1B) 'Esc: close palette'
@@ -190,8 +190,8 @@
             Press @(0x0D) 'Enter: return to the seeded third-server session'
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal session'
 
-            Palette 'new claude in terminal'
-            Press @(0x0D) 'Enter: New Claude in terminal'
+            Palette 'new terminal'
+            Press @(0x0D) 'Enter: New terminal'
             Type-Text 'beta'
             Snapshot 'terminal-beta-picker'
             Press @(0x0D) 'Enter: select beta terminal'
