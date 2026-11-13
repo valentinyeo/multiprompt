@@ -18,7 +18,6 @@ $configPath = if (Test-Path -LiteralPath $localConfig) {
     $exampleConfig
 }
 $snapshotPath = Join-Path $env:APPDATA 'ZigShell\usage-telemetry.json'
-$collectorPath = Join-Path $repoRoot 'zig-out\bin\multiprompt.exe'
 
 function Resolve-LocalPath([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
@@ -306,27 +305,18 @@ function Get-ClaudeAccountAssessment($Account, $Snapshot) {
     }
 }
 
-function Request-TelemetryRefresh([bool]$RestartExisting) {
-    if (-not (Test-Path -LiteralPath $collectorPath)) { return $false }
-    if ($RestartExisting) {
-        $expectedDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($collectorPath))
-        Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -like 'multiprompt*.exe' -and
-            ($_.Name -like 'multiprompt-telemetry*.exe' -or
-             $_.CommandLine -match '^\s*(?:"[^"]+"|\S+)\s+"?--usage-telemetry"?(?:\s|$)')
-        } | ForEach-Object {
-            try {
-                if (-not $_.ExecutablePath -or
-                    [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($_.ExecutablePath)) -ne $expectedDirectory) { return }
-                $collector = Get-Process -Id $_.ProcessId -ErrorAction Stop
-                Stop-Process -Id $collector.Id -Force
-                $collector.WaitForExit(5000)
-            } catch {
-            }
-        }
+function Request-TelemetryRefresh {
+    try {
+        $refresh = [System.Threading.EventWaitHandle]::OpenExisting('Local\MultipromptUsageTelemetryRefresh')
+    } catch {
+        return $false
     }
-    Start-Process -FilePath $collectorPath -ArgumentList '--usage-telemetry' -WorkingDirectory (Split-Path -Parent $collectorPath) -WindowStyle Hidden
-    return $true
+    try {
+        $refresh.Set() | Out-Null
+        return $true
+    } finally {
+        $refresh.Dispose()
+    }
 }
 
 if ($LoadFunctionsOnly) { return }
@@ -360,8 +350,8 @@ foreach ($account in $claudeAccounts) {
 if ($affected.Count -eq 0) {
     Write-Host 'All Claude telemetry accounts already have a current login.' -ForegroundColor Green
     $credentialChanged = @($claudeAccounts | Where-Object { Test-CredentialNewerThanTelemetry $_ $snapshot }).Count -gt 0
-    Request-TelemetryRefresh -RestartExisting $credentialChanged | Out-Null
     if ($credentialChanged) {
+        Request-TelemetryRefresh | Out-Null
         Write-Host 'A newer Claude login was found; refreshing the native telemetry collector once.' -ForegroundColor Cyan
     }
     Read-Host 'Press Enter to close'
@@ -475,8 +465,7 @@ try {
     $env:CLAUDE_CONFIG_DIR = $originalConfigDir
 }
 
-$restartExisting = @($results | Where-Object { $_.Success -and ($_.LoginAttempted -or $_.CredentialChanged) }).Count -gt 0
-$refreshRequested = Request-TelemetryRefresh -RestartExisting $restartExisting
+$refreshRequested = Request-TelemetryRefresh
 if ($refreshRequested) {
     Write-Host ''
     Write-Host 'Refreshing the native telemetry snapshot...' -ForegroundColor Cyan

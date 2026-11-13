@@ -305,8 +305,6 @@
   ["app_state.zig", "const ChangelogLayout"],
   ["app_state.zig", "const UsageLoginAccount"],
   ["telemetry_panel.zig", "fn showUsageAccountLogin"],
-  ["app_state.zig", "var g_usage_launch_mutex"],
-  ["telemetry_panel.zig", "fn ensureUsageTelemetryCollector"],
   ["app_state.zig", "const LADDER_REFRESH_MS"],
   ["telemetry_panel.zig", "fn ladderUnixToFileTime"],
   ["app_state.zig", "var g_paint_mem_dc"],

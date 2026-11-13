@@ -7,8 +7,8 @@ zig build -Dtarget=aarch64-windows -Doptimize=ReleaseSmall --prefix zig-out-arm6
 ```
 
 The output includes ARM64 versions of `multiprompt.exe`, `multiprompt-dev.exe`,
-and `zigshell-bridge.exe`. Telemetry is included in the main executable and
-runs headlessly with `--usage-telemetry`; there is no telemetry file to copy.
+and `zigshell-bridge.exe`. Telemetry is included in the main executable and runs on a background
+worker inside it; there is no telemetry file to copy.
 Keep the main executable and browser bridge together. A portable archive should retain the `zig-out/bin`
 layout, include the extension's runtime JavaScript and theme manifests, and
 include the telemetry reconnect script and example configuration under

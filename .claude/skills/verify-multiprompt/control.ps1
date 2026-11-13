@@ -144,7 +144,7 @@ try {
     if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
     $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -eq 'status-card') {
-        $usageCollector = [Threading.Mutex]::new($false, 'Local\MultipromptUsageTelemetryLaunch')
+        $usageCollector = [Threading.Mutex]::new($false, 'Local\MultipromptUsageTelemetry')
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $usageRoot | Out-Null
         Copy-Item (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-908/usage-telemetry.json') (Join-Path $usageRoot 'usage-telemetry.json')

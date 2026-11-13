@@ -1,5 +1,5 @@
 const std = @import("std");
-const mode = @import("usage_telemetry_mode.zig");
+const plan = @import("usage_worker_plan.zig");
 
 const c = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
@@ -107,59 +107,103 @@ const HttpResponse = struct {
     body: []u8,
 };
 
-pub fn main(init: std.process.Init) !void {
-    const stop_event = c.CreateEventW(null, c.TRUE, c.FALSE, mode.STOP_EVENT_NAME);
-    if (stop_event == null) return error.CreateEventFailed;
-    defer _ = c.CloseHandle(stop_event);
-    const mutex = c.CreateMutexW(null, c.TRUE, mode.MUTEX_NAME);
-    if (mutex == null) return error.CreateMutexFailed;
-    defer _ = c.CloseHandle(mutex);
-    if (c.GetLastError() == c.ERROR_ALREADY_EXISTS) {
-        if (c.OpenEventW(c.EVENT_MODIFY_STATE, c.FALSE, L("Local\\MultipromptUsageTelemetryRefresh"))) |event| {
-            _ = c.SetEvent(event);
-            _ = c.CloseHandle(event);
-        }
-        return;
-    }
+const MUTEX_NAME = L("Local\\MultipromptUsageTelemetry");
+const REFRESH_EVENT_NAME = L("Local\\MultipromptUsageTelemetryRefresh");
 
+var g_allocator: std.mem.Allocator = std.heap.page_allocator;
+var g_io: ?std.Io = null;
+var g_wanted = std.atomic.Value(bool).init(false);
+var g_running = std.atomic.Value(bool).init(false);
+var g_wake: std.atomic.Value(?*anyopaque) = std.atomic.Value(?*anyopaque).init(null);
+
+pub fn bind(allocator: std.mem.Allocator, io: std.Io) void {
+    g_allocator = allocator;
+    g_io = io;
+}
+
+pub fn sync(wanted: bool) void {
+    g_wanted.store(wanted, .seq_cst);
+    switch (plan.decide(wanted, g_running.load(.seq_cst))) {
+        .start => startWorker(),
+        .stop => wakeWorker(),
+        .none => {},
+    }
+}
+
+pub fn shutdown() void {
+    g_wanted.store(false, .seq_cst);
+    wakeWorker();
+}
+
+fn wakeEvent() ?*anyopaque {
+    if (g_wake.load(.acquire)) |event| return event;
+    const created = c.CreateEventW(null, c.FALSE, c.FALSE, null) orelse return null;
+    if (g_wake.cmpxchgStrong(null, created, .acq_rel, .acquire)) |existing| {
+        _ = c.CloseHandle(created);
+        return existing;
+    }
+    return created;
+}
+
+fn wakeWorker() void {
+    if (g_wake.load(.acquire)) |event| _ = c.SetEvent(event);
+}
+
+fn startWorker() void {
+    if (g_io == null or wakeEvent() == null) return;
+    if (g_running.cmpxchgStrong(false, true, .seq_cst, .seq_cst) != null) return;
+    const thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, workerMain, .{}) catch {
+        g_running.store(false, .seq_cst);
+        return;
+    };
+    thread.detach();
+}
+
+fn workerMain() void {
+    while (true) {
+        const ended = runWorker();
+        g_running.store(false, .seq_cst);
+        if (!ended or !g_wanted.load(.seq_cst)) return;
+        if (g_running.cmpxchgStrong(false, true, .seq_cst, .seq_cst) != null) return;
+    }
+}
+
+fn runWorker() bool {
+    const io = g_io orelse return false;
+    const wake = g_wake.load(.acquire) orelse return false;
+    const mutex = c.CreateMutexW(null, c.TRUE, MUTEX_NAME) orelse return false;
+    defer _ = c.CloseHandle(mutex);
+    if (c.GetLastError() == c.ERROR_ALREADY_EXISTS) return false;
     defer _ = c.ReleaseMutex(mutex);
-    const stop_thread = c.CreateThread(null, 0, stopCollectorOnRequest, stop_event, 0, null);
-    if (stop_thread == null) return error.CreateThreadFailed;
-    _ = c.CloseHandle(stop_thread);
-    const refresh_event = c.CreateEventW(null, c.FALSE, c.FALSE, L("Local\\MultipromptUsageTelemetryRefresh"));
-    if (refresh_event == null) return error.CreateEventFailed;
+    const refresh_event = c.CreateEventW(null, c.FALSE, c.FALSE, REFRESH_EVENT_NAME) orelse return false;
     defer _ = c.CloseHandle(refresh_event);
 
-    var runtime = Runtime{ .allocator = init.gpa, .io = init.io };
-    try initPaths(&runtime);
-    try loadConfig(&runtime);
-    loadCachedSnapshot(&runtime);
-    loadLegacyProviderCache(&runtime);
+    const runtime = g_allocator.create(Runtime) catch return false;
+    defer g_allocator.destroy(runtime);
+    runtime.* = Runtime{ .allocator = g_allocator, .io = io };
+    initPaths(runtime) catch return false;
+    loadConfig(runtime) catch return false;
+    loadCachedSnapshot(runtime);
+    loadLegacyProviderCache(runtime);
 
-    while (true) {
+    while (g_wanted.load(.seq_cst)) {
         const idle_ms = idleMs();
         const battery = isOnBatteryOrSaver();
-        const skip_refresh = idle_ms > 5 * 60_000;
-        const wait_ms: u32 = if (skip_refresh) 5 * 60_000 else if (battery) 60_000 else 15_000;
         g_battery_refresh_multiplier = if (battery) 4 else 1;
-        if (!skip_refresh) {
-            if (refreshDueAccounts(&runtime)) {
-                saveDailyStates(&runtime) catch {};
-                writeSnapshot(&runtime) catch {};
+        if (!plan.skipRefresh(idle_ms)) {
+            if (refreshDueAccounts(runtime)) {
+                saveDailyStates(runtime) catch {};
+                writeSnapshot(runtime) catch {};
             }
         }
-        const wait_result = c.WaitForSingleObject(refresh_event, wait_ms);
+        if (!g_wanted.load(.seq_cst)) break;
+        var handles = [2]?*anyopaque{ refresh_event, wake };
+        const wait_result = c.WaitForMultipleObjects(handles.len, &handles, c.FALSE, plan.pollWaitMs(idle_ms, battery));
         if (wait_result == c.WAIT_OBJECT_0) {
             for (runtime.accounts[0..runtime.account_count]) |*account| account.next_refresh_ms = 0;
         }
     }
-}
-
-fn stopCollectorOnRequest(event: ?*anyopaque) callconv(.winapi) c.DWORD {
-    if (c.WaitForSingleObject(event, c.INFINITE) == c.WAIT_OBJECT_0) {
-        _ = c.TerminateProcess(c.GetCurrentProcess(), 0);
-    }
-    return 0;
+    return true;
 }
 
 var g_battery_refresh_multiplier: i64 = 1;

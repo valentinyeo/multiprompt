@@ -46,22 +46,16 @@ const HANDLE = ?*anyopaque;
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
 var g_chat_fetch_mutex: HANDLE = null;
 var g_chat_fetch_busy = false;
-var g_usage_launch_mutex: HANDLE = null;
 var selected: usize = 0;
 var owner: ?usize = null;
-var launch_refs: usize = 0;
-var spawned: usize = 0;
-var last_error: u32 = 0;
-var collector_running = false;
-const usage_telemetry_mode = struct { fn isRunning() bool { return collector_running; } };
-const Slot = struct { worker: HANDLE = null, busy: bool = false, launch: HANDLE = null, requested: HANDLE = null, served: HANDLE = null, seen: HANDLE = null };
+const Slot = struct { worker: HANDLE = null, busy: bool = false, requested: HANDLE = null, served: HANDLE = null, seen: HANDLE = null };
 var slots: [6]Slot = @splat(.{});
 fn select(i: usize) void {
-    slots[selected].worker = g_chat_fetch_mutex; slots[selected].busy = g_chat_fetch_busy; slots[selected].launch = g_usage_launch_mutex;
+    slots[selected].worker = g_chat_fetch_mutex; slots[selected].busy = g_chat_fetch_busy;
     selected = i;
     const slot = slots[i];
     g_chat_fetch_mutex = slot.worker; g_main_hwnd = @ptrFromInt(i + 1);
-    g_chat_fetch_busy = slot.busy; g_usage_launch_mutex = slot.launch;
+    g_chat_fetch_busy = slot.busy;
 }
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var scheduler_tick: u64 = 100;
@@ -89,10 +83,6 @@ const TestWin = struct {
 };
 fn CreateMutexW(_: ?*anyopaque, _: i32, name: [*:0]const u16) HANDLE {
     const text = std.mem.span(name);
-    if (std.mem.endsWith(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Launch"))) {
-        last_error = if (launch_refs > 0) 183 else 0;
-        launch_refs += 1; return @ptrFromInt(3);
-    }
     std.debug.assert(std.mem.eql(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("Local\\\\MultipromptChatTranscriptWorker")));
     return @ptrFromInt(1);
 }
@@ -102,17 +92,7 @@ fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
     owner = selected; return 0;
 }
 fn ReleaseMutex(_: HANDLE) i32 { std.debug.assert(owner.? == selected); owner = null; return 1; }
-fn CloseHandle(h: HANDLE) i32 {
-    if (h == @as(HANDLE, @ptrFromInt(3))) launch_refs -= 1;
-    return 1;
-}
-fn GetLastError() u32 { return last_error; }
-fn GetModuleFileNameW(_: HANDLE, out: []u16, _: usize) u32 { out[0] = 'm'; out[1] = 0; return 1; }
-const SW_HIDE = 0;
-fn ShellExecuteW(_: HANDLE, _: [*:0]const u16, _: [*:0]const u16, flag: [*:0]const u16, _: HANDLE, _: i32) HANDLE {
-    std.debug.assert(std.mem.eql(u16, std.mem.span(flag), std.unicode.utf8ToUtf16LeStringLiteral("--usage-telemetry")));
-    spawned += 1; return @ptrFromInt(64);
-}
+fn CloseHandle(_: HANDLE) i32 { return 1; }
 `;
 const scheduleChecks = `
 test "one worker across six windows gives pending windows turns before reacquiring even in the same tick" {
@@ -140,12 +120,6 @@ test "one worker across six windows gives pending windows turns before reacquiri
     chatFetchRelease();
     try std.testing.expect(owner == null);
 }
-test "simultaneous window startup launches just one child before its collector mutex exists" {
-    for (0..6) |i| { select(i); ensureUsageTelemetryCollector(); }
-    try std.testing.expectEqual(@as(usize, 1), spawned);
-    for (0..6) |i| { select(i); ensureUsageTelemetryCollector(); }
-    try std.testing.expectEqual(@as(usize, 1), spawned);
-}
 `;
 
 function schedulingFunctions() {
@@ -153,20 +127,11 @@ function schedulingFunctions() {
   return (turn + ['chatFetchOldest', 'chatFetchAcquire', 'chatFetchRelease'].map(n => body(source, n)).join('\n')).replaceAll('@import("win32.zig")', 'TestWin');
 }
 
-test('production cross-window scheduling and telemetry launch reservation execute with nonblocking Win32 ownership', () => {
-  const code = scheduling + schedulingFunctions() + body(source, 'ensureUsageTelemetryCollector') + scheduleChecks;
+test('production cross-window scheduling executes with nonblocking Win32 ownership', () => {
+  const code = scheduling + schedulingFunctions() + scheduleChecks;
   const result = run(code);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
-test('singleton startup oracle rejects the actual 706 check-then-spawn race', () => {
-  const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
-  assert.equal(old.status, 0);
-  const code = scheduling + schedulingFunctions() + body(old.stdout, 'ensureUsageTelemetryCollector') + scheduleChecks;
-  const result = run(code);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /expected 1, found 6/);
-});
-
 const layout = `
 const std = @import("std");
 const CHAT_OUTBOX_MAX_PER_KEY = 20;

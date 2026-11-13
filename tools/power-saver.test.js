@@ -117,8 +117,13 @@ test("EcoQoS throttles hidden idle tabs and lifts it the moment they become rele
 test("usage telemetry companion self-throttles on idle and battery using OS signals only", () => {
   assert.match(telemetry, /fn isOnBatteryOrSaver\(\) bool \{/);
   assert.match(telemetry, /fn idleMs\(\) i64 \{/);
-  assert.match(telemetry, /const skip_refresh = idle_ms > 5 \* 60_000;/);
-  assert.match(telemetry, /const wait_ms: u32 = if \(skip_refresh\) 5 \* 60_000 else if \(battery\) 60_000 else 15_000;/);
+  const plan = fs.readFileSync(path.join(root, "src", "usage_worker_plan.zig"), "utf8");
+  assert.match(plan, /pub const IDLE_SKIP_MS: i64 = 5 \* 60_000;/);
+  assert.match(plan, /pub const IDLE_WAIT_MS: u32 = 5 \* 60_000;/);
+  assert.match(plan, /pub const BATTERY_WAIT_MS: u32 = 60_000;/);
+  assert.match(plan, /pub const ACTIVE_WAIT_MS: u32 = 15_000;/);
+  assert.match(telemetry, /plan\.skipRefresh\(idle_ms\)/);
+  assert.match(telemetry, /plan\.pollWaitMs\(idle_ms, battery\)/);
   assert.match(telemetry, /g_battery_refresh_multiplier = if \(battery\) 4 else 1;/);
   assert.match(telemetry, /account\.next_refresh_ms = nowMs\(\) \+ REFRESH_MS \* g_battery_refresh_multiplier;/);
   assert.match(telemetry, /if \(wait_result == c\.WAIT_OBJECT_0\) \{\s+for \(runtime\.accounts\[0\.\.runtime\.account_count\]\) \|\*account\| account\.next_refresh_ms = 0;/);

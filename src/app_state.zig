@@ -3658,8 +3658,6 @@ pub const ChangelogHit = union(enum) { outside, inside, close, row: ChangelogSel
 
 pub const UsageLoginAccount = enum { primary, secondary };
 
-pub var g_usage_launch_mutex: HANDLE = null;
-
 pub const LADDER_REFRESH_MS: u64 = 180_000;
 pub const LADDER_VALID_MS: u64 = 15 * 60_000;
 pub const LADDER_MAX_AGE_SECS: f64 = 1800;
