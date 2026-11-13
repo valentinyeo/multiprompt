@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
+const fetchWhy = /^var g_chat_fetch_why[^\n]*$/m.exec(source)[0];
 function body(name, text = source) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -134,7 +135,8 @@ fn chatLiveStreamStop() void {}
 fn chatHistoryStreamStart(_: chat_transcript.Identity, _: u32, _: chat_history.History) ?*ChatHistoryStream { @panic("foreground reservation must precede stream start"); }
 fn chatBenchEnabled() bool { return false; }
 fn SetEvent(_: HANDLE) i32 { return 1; }
-const ChatHistoryEntry = struct { stream: ?*ChatHistoryStream = null, push_pending: bool = false, key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
+const ChatHistoryEntry = struct { stream: ?*ChatHistoryStream = null, push_pending: bool = false, key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, quiet: u16 = 0, history: chat_history.History = .{} };
+${fetchWhy}
 var cached_entry: ChatHistoryEntry = .{};
 var g_chat_active = true;
 var active_shell: u32 = 0;

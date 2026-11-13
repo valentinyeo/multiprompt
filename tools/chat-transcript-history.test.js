@@ -205,6 +205,7 @@ fn chatSelectionClear() void {}
 fn chatEchoMatchActive() void {}
 fn chatFilePollInterval() u64 { return 2000; }
 fn chatDeliveryPending(_: u32, _: bool) bool { return false; }
+fn chatPollingPending(_: u32) bool { return false; }
 fn chatFileRequest(key: chat_transcript.Identity) void {
     if (chatHistoryEntry(key)) |e| if (chat_history.retryDue(e.pending, GetTickCount64(), e.next)) { e.pending = true; request_count += 1; };
 }
@@ -234,7 +235,7 @@ fn chatRelayout(_: i32) void {
 }
 `;
 const entry = src.slice(src.indexOf('const ChatHistoryEntry = struct {'), src.indexOf('\n};', src.indexOf('const ChatHistoryEntry = struct {')) + 3);
-const functions = ['chatTableRefresh', 'chatReceivedBlocks', 'chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatHistoryNextDelay', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy', 'chatScrollStateChanged', 'chatLoadSaved'];
+const functions = ['chatTableRefresh', 'chatReceivedBlocks', 'chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatQuietBackoff', 'chatHistoryNextDelay', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy', 'chatScrollStateChanged', 'chatLoadSaved'];
 const acceptance = `
 test "cache-first switch-back, stale completion and failure preserve complete messages" {
     const a = std.heap.page_allocator;
@@ -693,6 +694,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
 function runMetadataHarness(text, extra = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-metadata-'));
   const support = `
+${/^var g_chat_fetch_why[^\n]*$/m.exec(src)[0]}
 var g_chat_file_request_id: u32 = 0;
 const LASTINPUTINFO = struct { cbSize: u32, dwTime: u32 };
 fn IsIconic(_: HANDLE) i32 { return 0; }
