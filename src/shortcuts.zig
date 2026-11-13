@@ -389,6 +389,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Model Opus / Sonnet / Haiku / Fable\"", .b = "Choose the model for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Model Sol / Terra / Luna / Astra\"", .b = "Choose the model for the next message in a live Codex chat; the plus menu has the same choices", .header = false },
+    .{ .a = "Ctrl+K \"Pi Model...\" / /model in a Pi chat", .b = "Pick any model Pi lists for this chat; the choice applies to the next message, and the chat menu's Model row opens the same list", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Effort Low / Medium / High\"", .b = "Choose the effort for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
     .{ .a = "1 or Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Approve the pending permission once", .header = false },
     .{ .a = "2 or Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Always allow the pending permission this session", .header = false },

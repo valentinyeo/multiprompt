@@ -795,6 +795,11 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
+const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
+const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
+const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
+const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
+const pi_models = @import("pi_models.zig");
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
@@ -3910,6 +3915,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
                 },
                 @intFromEnum(more_menu.Item.archive) => archiveActiveTab(),
+                @intFromEnum(more_menu.Item.model) => @import("chat_send.zig").chatPiModelPicker(),
                 @intFromEnum(more_menu.Item.end_session) => if (tmux) endActiveTmuxSession(),
                 @intFromEnum(more_menu.Item.remove) => closeNonTmuxTabAt(shell),
                 else => {},
@@ -3997,6 +4003,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("chat_send.zig").chatModeFinish(lp);
             return 0;
         },
+        app_state.WM_APP_PI_MODEL_RESULT => {
+            @import("chat_send.zig").chatPiModelFinish(lp);
+            return 0;
+        },
         WM_APP_CHAT_COPY_SELECTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatCopySelection();
@@ -4023,6 +4033,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CHAT_AC_READY => {
             chatAcOnFetchDone(@intCast(wp), @intCast(lp));
+            return 0;
+        },
+        WM_APP_PI_MODELS_READY => {
+            if (app_state.g_search_active and app_state.g_search_pi_models_mode) {
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             return 0;
         },
         WM_APP_CHAT_SEND => {
@@ -4325,6 +4342,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_group_move_mode = false;
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
+            app_state.g_search_pi_models_mode = false;
             app_state.g_search_tabctx_mode = false;
             app_state.g_workspace_color_target = null;
             app_state.g_bot_look_mode = .none;
@@ -4391,6 +4409,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_group_move_mode = false;
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
+            app_state.g_search_pi_models_mode = false;
             app_state.g_search_tabctx_mode = false;
             app_state.g_workspace_color_target = null;
             app_state.g_bot_look_mode = .none;
@@ -4716,6 +4735,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_scroll = 0;
                 app_state.g_search_workspace_delete_confirm = null;
                 app_state.g_search_snippet_delete_confirm = null;
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
+            } else if (app_state.g_search_pi_models_mode) {
+                app_state.g_search_pi_models_mode = false;
+                app_state.g_search_sel = 0;
+                app_state.g_search_scroll = 0;
                 updateSearchResults();
                 _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_skills_mode) {
@@ -5513,6 +5538,45 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     if (was_inbox and app_state.g_inbox_active) closeInbox(hwnd) else showActiveShellAfterOverlay();
                     chatAcOpenBrowse();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_PI_MODELS_MENU_OFFSET) {
+                    const host = pi_models.hostForShell(app_state.active_shell) orelse {
+                        showHeaderNoticeAscii("Model choice needs a Pi chat on a server", 4000, true);
+                        return 0;
+                    };
+                    pi_models.ensure(host);
+                    app_state.g_search_pi_models_mode = true;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 1;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    if (!pi_models.ready()) showHeaderNoticeAscii("Asking Pi for its model list...", 4000, false);
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_PI_MODELS_BACK_OFFSET) {
+                    app_state.g_search_pi_models_mode = false;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS) {
+                    const model_idx = target - SEARCH_PI_MODEL_ROW_OFFSET;
+                    const was_from_inbox = app_state.g_search_from_inbox;
+                    app_state.g_search_active = false;
+                    app_state.g_search_pi_models_mode = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_search_spawn_ws = 0xFF;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    if (was_from_inbox and app_state.g_inbox_active) closeInbox(hwnd) else showActiveShellAfterOverlay();
+                    if (!app_state.g_chat_active) toggleChatView();
+                    if (!@import("chat_send.zig").chatPiModelSelect(@intCast(model_idx))) showHeaderNoticeAscii("Could not switch the model yet", 4000, true);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -9966,6 +10030,7 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_ws_move_mode = false;
     app_state.g_search_group_move_mode = false;
     app_state.g_search_skills_mode = false;
+    app_state.g_search_pi_models_mode = false;
     app_state.g_search_tabctx_mode = false;
     app_state.g_search_groupctx_mode = false;
     app_state.g_search_remind_input_mode = false;

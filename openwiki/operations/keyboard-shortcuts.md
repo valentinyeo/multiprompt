@@ -278,6 +278,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
 | Ctrl+K "Chat View: Model Opus / Sonnet / Haiku / Fable" | Choose the model for the next message in a live Claude chat; the plus menu has the same choices |
 | Ctrl+K "Chat View: Model Sol / Terra / Luna / Astra" | Choose the model for the next message in a live Codex chat; the plus menu has the same choices |
+| Ctrl+K "Pi Model..." / /model in a Pi chat | Pick any model Pi lists for this chat; the choice applies to the next message, and the chat menu's Model row opens the same list |
 | Ctrl+K "Chat View: Effort Low / Medium / High" | Choose the effort for the next message in a live Claude chat; the plus menu has the same choices |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |

@@ -346,6 +346,11 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
+const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
+const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
+const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
+const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
+const pi_models = @import("pi_models.zig");
 const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
@@ -2761,6 +2766,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 L("Search groups for this session...")
             else if (app_state.g_search_skills_mode)
                 L("Search skills...")
+            else if (app_state.g_search_pi_models_mode)
+                L("Search Pi models...")
             else if (app_state.g_search_pick_repo_mode)
                 if (app_state.g_search_pick_repo_folder_mode) L("Set workspace folder...") else L("Pick a repo...")
             else if (app_state.g_search_openall_host_mode)
@@ -2837,6 +2844,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_skills_menu = result_idx == SEARCH_SKILLS_MENU_OFFSET;
                     const is_skills_back = result_idx == SEARCH_SKILLS_BACK_OFFSET;
                     const is_skill_row = result_idx >= SEARCH_SKILL_ROW_OFFSET and result_idx < SEARCH_SKILL_ROW_OFFSET + MAX_PALETTE_SKILLS;
+                    const is_pi_models_menu = result_idx == SEARCH_PI_MODELS_MENU_OFFSET;
+                    const is_pi_models_back = result_idx == SEARCH_PI_MODELS_BACK_OFFSET;
+                    const is_pi_model_row = result_idx >= SEARCH_PI_MODEL_ROW_OFFSET and result_idx < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS;
                     const is_chat_reply = result_idx == SEARCH_CHAT_REPLY_OFFSET;
                     const is_clean_chat = result_idx == SEARCH_CLEAN_CHAT_OFFSET;
                     const is_chat_todo = result_idx == SEARCH_CHAT_TODO_OFFSET;
@@ -3901,6 +3911,28 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var skills_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_skills_back) L("main") else L("Chat View"), -1, &skills_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_pi_models_menu or is_pi_models_back) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var pi_menu_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, if (is_pi_models_back) L("Back") else L("Pi Model..."), -1, &pi_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
+                        var pi_menu_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, if (is_pi_models_back) L("main") else L("Chat View"), -1, &pi_menu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_pi_model_row) {
+                        const model_index = result_idx - SEARCH_PI_MODEL_ROW_OFFSET;
+                        if (model_index < pi_models.models().len) {
+                            const model = pi_models.models()[model_index];
+                            _ = SelectObject(hdc, palette_font);
+                            _ = SetTextColor(hdc, primary_color);
+                            var model_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 175, .bottom = ry + row_h };
+                            drawAscii(hdc, model.nameText(), &model_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            _ = SelectObject(hdc, palette_hint_font);
+                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
+                            var model_hint_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            drawAscii(hdc, if (model.providerText().len > 0) model.providerText() else model.detailText(), &model_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        }
                     } else if (is_skill_row) {
                         const skill_idx = result_idx - SEARCH_SKILL_ROW_OFFSET;
                         if (skill_idx < app_state.g_palette_skills.len) {

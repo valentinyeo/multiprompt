@@ -3075,12 +3075,14 @@ def host_reply(query):
     provider, sid = query.get("provider"), query.get("sid")
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
-    if query.get("op") == "set_effort" and provider != "claude":
+    if query.get("op") == "set_effort" and provider not in ("claude",):
         return dict(status="refused", reason="unsupported_provider")
-    if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES:
+    if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
+    if not host_owned(provider, sid) and query.get("op") == "set_model" and provider == "pi":
+        return dict(status="unavailable", reason="host_not_running")
     if not host_owned(provider, sid):
         operation = query.get("op")
         if operation not in ("set_model", "set_effort", "set_permission_mode"):
@@ -3487,8 +3489,20 @@ def host_codex_argv(provider, sid, base):
     return base + ["app-server"]
 
 
+PI_MODEL_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,159}")
+
+
+def host_pi_choice(provider, sid):
+    config = host_config(provider, sid) or {}
+    chosen_provider = config.get("model_provider")
+    chosen_model = config.get("model")
+    if isinstance(chosen_provider, str) and isinstance(chosen_model, str) and PI_MODEL_PART.fullmatch(chosen_provider) and PI_MODEL_PART.fullmatch(chosen_model):
+        return ["--provider", chosen_provider, "--model", chosen_model]
+    return list(HOST_PI_MODEL)
+
+
 def host_pi_argv(provider, sid, base):
-    return base + ["--mode", "rpc", *HOST_PI_MODEL, "--session-id", sid, "--append-system-prompt", HOST_APPEND_PROMPT]
+    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), "--session-id", sid, "--append-system-prompt", HOST_APPEND_PROMPT]
 
 
 def host_hax_argv(provider, sid, base):
@@ -4246,6 +4260,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["answer"](provider, sid, tmux, session, request)
     if operation == "interrupt":
         return adapter["interrupt"](provider, sid, session)
+    if operation == "set_model" and provider == "pi":
+        return host_pi_set_model(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
         if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
@@ -4878,6 +4894,9 @@ def host_pi_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     if kind == "response":
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if event.get("command") == "set_model":
+            host_log(provider, sid, "pi_set_model_reply", dict(success=event.get("success") is not False))
+            return
         if event.get("command") != "prompt" or not isinstance(event.get("id"), str):
             return
         if event.get("success") is False:
@@ -4941,6 +4960,25 @@ def host_pi_interrupt(provider, sid, session):
 
 def host_pi_set_mode(provider, sid, session, mode):
     return host_refuse("pi_always_full_access")
+
+
+def host_pi_set_model(provider, sid, tmux, session, request):
+    model_provider = request.get("provider_name")
+    model = request.get("model")
+    if not isinstance(model_provider, str) or PI_MODEL_PART.fullmatch(model_provider) is None:
+        return host_refuse("invalid_model")
+    if not isinstance(model, str) or PI_MODEL_PART.fullmatch(model) is None:
+        return host_refuse("invalid_model")
+    if not host_control_send(session, dict(type="set_model", provider=model_provider, modelId=model)):
+        return dict(status="error", reason="stdin_write_failed")
+    config = host_config(provider, sid)
+    if config is not None:
+        config["model_provider"] = model_provider
+        config["model"] = model
+        host_write(host_paths(provider, sid)["config"], config)
+    session["pi_model"] = dict(provider=model_provider, model=model)
+    host_log(provider, sid, "pi_set_model", dict(provider=model_provider, model=model))
+    return dict(status="ok")
 
 
 def host_hax_open(provider, sid, tmux, session):

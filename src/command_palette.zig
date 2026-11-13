@@ -288,6 +288,11 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
+const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
+const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
+const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
+const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
+const pi_models = @import("pi_models.zig");
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const CustomCmd = @import("app_state.zig").CustomCmd;
 const MAX_PALETTE_USAGE = @import("app_state.zig").MAX_PALETTE_USAGE;
@@ -826,7 +831,14 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         if (idx >= app_state.g_palette_skills.len) return null;
         return app_state.g_palette_skills[idx].name;
     }
+    if (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS) {
+        const model_idx = target - SEARCH_PI_MODEL_ROW_OFFSET;
+        if (model_idx >= pi_models.models().len) return null;
+        return pi_models.models()[model_idx].nameText();
+    }
     return switch (target) {
+        SEARCH_PI_MODELS_MENU_OFFSET => "Pi Model...",
+        SEARCH_PI_MODELS_BACK_OFFSET => "Back",
         SEARCH_WSMOVE_NEW_OFFSET => "move to new workspace",
         SEARCH_GROUPMOVE_NEW_OFFSET => "new group",
         SEARCH_GROUPMOVE_NONE_OFFSET => "no group",
@@ -1389,6 +1401,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target == SEARCH_PI_MODELS_MENU_OFFSET or target == SEARCH_PI_MODELS_BACK_OFFSET or (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS)) return 7;
     if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
@@ -3115,6 +3128,25 @@ pub fn updateSearchResults() void {
         return;
     }
 
+    if (app_state.g_search_pi_models_mode) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODELS_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        const available = pi_models.models();
+        const limit = @min(available.len, MAX_PI_MODELS);
+        for (available[0..limit], 0..) |model, mi| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (app_state.g_search_len > 0 and
+                !asciiContainsQueryInsensitive(model.nameText(), app_state.g_search_buf[0..app_state.g_search_len]) and
+                !asciiContainsQueryInsensitive(model.providerText(), app_state.g_search_buf[0..app_state.g_search_len]) and
+                !asciiContainsQueryInsensitive(model.detailText(), app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODEL_ROW_OFFSET + mi;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
     if (app_state.g_search_skills_mode) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SKILLS_BACK_OFFSET;
         app_state.g_search_result_count += 1;
@@ -4060,6 +4092,20 @@ pub fn updateSearchResults() void {
         labelsMatchQuery(&[_][]const u8{ "chat view insert command or skill", "browse commands", "browse skills", "ctrl slash", "autocomplete" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_AC_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        app_state.active_shell < app_state.shell_count and
+        pi_models.isPiAgent(app_state.shells[app_state.active_shell].ai_agent) and
+        labelsMatchQuery(&[_][]const u8{
+            "pi model",
+            "change model",
+            "pick model",
+            "switch model",
+            "model list",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODELS_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
