@@ -1016,6 +1016,17 @@ const WNDENUMPROC = *const fn (HANDLE, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn EnumWindows(WNDENUMPROC, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn SendMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
 pub extern "user32" fn PostMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) BOOL;
+
+var g_chat_file_ready_pending = std.atomic.Value(bool).init(false);
+
+pub fn postChatFileReady(hwnd: HANDLE) void {
+    if (g_chat_file_ready_pending.swap(true, .acq_rel)) return;
+    if (PostMessageW(hwnd, WM_APP_CHAT_FILE_READY, 0, 0) == 0) g_chat_file_ready_pending.store(false, .release);
+}
+
+pub fn chatFileReadyDelivered() void {
+    g_chat_file_ready_pending.store(false, .release);
+}
 pub extern "user32" fn SendMessageTimeoutW(HANDLE, UINT, WPARAM, LPARAM, UINT, UINT, ?*usize) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CallWindowProcW(isize, HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CreatePopupMenu() callconv(WINAPI) HANDLE;
