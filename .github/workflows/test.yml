@@ -931,7 +931,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
+    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance, idle-budget]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -946,6 +946,8 @@ jobs:
           UPDATE_SOURCE: ${{ needs.test-update-source.result }}
           SPEED: ${{ needs.switch-performance.result }}
           RED_RUN: ${{ needs.check-red-run.result }}
+          IDLE: ${{ needs.idle-budget.result }}
+          EVENT: ${{ github.event_name }}
         run: |
           require_jobs() {
             for result in "$@"; do
@@ -964,4 +966,5 @@ jobs:
             if require_jobs success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED"
+          if [ "$EVENT" != pull_request ] && [ "$IDLE" = skipped ]; then IDLE=success; fi
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED" "$IDLE"

@@ -30,8 +30,8 @@ var g_counts: Counts = @splat(0);
 var g_timers: [TIMER_SLOTS]u32 = @splat(0);
 var g_input_epoch: u32 = 0;
 var g_window: IdleWindow = .{};
-var g_published_window_ms: u32 = 0;
-var g_published_delta: Counts = @splat(0);
+var g_published_report: IdleReport = .{};
+var g_report_lock: u32 = 0;
 var g_ring: [LOG_RING_SLOTS]u64 = @splat(0);
 var g_ring_next: usize = 0;
 var g_ring_epoch: u32 = 0;
@@ -116,16 +116,15 @@ pub const IdleWindow = struct {
 
 pub fn tick(now_ms: u64, idle_ms: u64) void {
     g_window.update(now_ms, idle_ms, snapshot());
-    const report = g_window.report();
-    const window_ms: u32 = @intCast(@min(report.window_ms, std.math.maxInt(u32)));
-    @atomicStore(u32, &g_published_window_ms, window_ms, .release);
-    for (report.delta, 0..) |value, i| @atomicStore(u32, &g_published_delta[i], value, .monotonic);
+    lock(&g_report_lock);
+    defer unlock(&g_report_lock);
+    g_published_report = g_window.report();
 }
 
 pub fn lastIdle() IdleReport {
-    var out: IdleReport = .{ .window_ms = @atomicLoad(u32, &g_published_window_ms, .acquire) };
-    for (&out.delta, 0..) |*slot, i| slot.* = @atomicLoad(u32, &g_published_delta[i], .monotonic);
-    return out;
+    lock(&g_report_lock);
+    defer unlock(&g_report_lock);
+    return g_published_report;
 }
 
 pub fn perMinuteTenths(delta: u32, window_ms: u64) u64 {
@@ -175,18 +174,18 @@ pub fn hashLine(msg: []const u8) u64 {
     return if (hash == 0) 1 else hash;
 }
 
-fn ringLock() void {
-    while (@cmpxchgWeak(u32, &g_ring_lock, 0, 1, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+fn lock(guard: *u32) void {
+    while (@cmpxchgWeak(u32, guard, 0, 1, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
 }
 
-fn ringUnlock() void {
-    @atomicStore(u32, &g_ring_lock, 0, .release);
+fn unlock(guard: *u32) void {
+    @atomicStore(u32, guard, 0, .release);
 }
 
 pub fn logFirstTime(msg: []const u8) bool {
     const hash = hashLine(msg);
-    ringLock();
-    defer ringUnlock();
+    lock(&g_ring_lock);
+    defer unlock(&g_ring_lock);
     const epoch = @atomicLoad(u32, &g_input_epoch, .monotonic);
     if (epoch != g_ring_epoch) {
         g_ring_epoch = epoch;
@@ -206,8 +205,8 @@ pub fn resetForTest() void {
     g_timers = @splat(0);
     g_input_epoch = 0;
     g_window = .{};
-    g_published_window_ms = 0;
-    g_published_delta = @splat(0);
+    g_published_report = .{};
+    g_report_lock = 0;
     g_ring = @splat(0);
     g_ring_next = 0;
     g_ring_epoch = 0;
@@ -321,6 +320,30 @@ test "the log ring forgets its oldest line when full" {
         try std.testing.expect(logFirstTime(line));
     }
     try std.testing.expect(logFirstTime("line 0"));
+}
+
+test "watchdog readers receive the duration and counts from one publication" {
+    resetForTest();
+    tick(100_000, 61_000);
+    const Publisher = struct {
+        fn run(done: *std.atomic.Value(bool)) void {
+            for (1..10_001) |i| {
+                bump(.server_fetch);
+                tick(100_000 + i * 60_000, 61_000 + i * 60_000);
+            }
+            done.store(true, .release);
+        }
+    };
+    var done = std.atomic.Value(bool).init(false);
+    const publisher = try std.Thread.spawn(.{}, Publisher.run, .{&done});
+    defer publisher.join();
+    while (!done.load(.acquire)) {
+        const report = lastIdle();
+        try std.testing.expectEqual(report.window_ms / 60_000, @as(u64, report.delta[@intFromEnum(Source.server_fetch)]));
+    }
+    const final = lastIdle();
+    try std.testing.expectEqual(@as(u64, 600_000_000), final.window_ms);
+    try std.testing.expectEqual(@as(u32, 10_000), final.delta[@intFromEnum(Source.server_fetch)]);
 }
 
 test "tick publishes the last idle window for the watchdog" {

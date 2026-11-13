@@ -78,6 +78,14 @@ test "blocked SSH writes leave incoming data and other channels usable with boun
 }
 `;
 
+test('production SSH transport counts nonterminal requests before sending', () => {
+  const source = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  const write = source.slice(source.indexOf('pub fn write('), source.indexOf('\npub fn read('));
+  assert.match(write, /if \(!channel\.terminal\) idle_budget\.bump\(\.server_fetch\);/);
+  assert.ok(write.indexOf('if (channel.ended or !host.running) return false;') < write.indexOf('idle_budget.bump(.server_fetch)'));
+  assert.ok(write.indexOf('idle_budget.bump(.server_fetch)') < write.indexOf('packet(host,'));
+});
+
 test('production SSH writer releases the host mutex and isolates input overflow', () => {
   const file = path.join(root, 'src/chat_transport.zig');
   assert.ok(fs.existsSync(file), 'shared SSH transport exists');

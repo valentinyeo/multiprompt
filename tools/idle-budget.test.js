@@ -14,7 +14,7 @@ async function load() {
 function dump(tickMs, extra = {}) {
   return {
     tick_ms: tickMs,
-    idle_ms: 120000,
+    idle_ms: tickMs + 120000,
     deep_idle: 0,
     server_fetch: 0,
     thread_spawn: 0,
@@ -49,6 +49,15 @@ test('master-like counters from the ticket fail on the named sources', async () 
   for (const name of ['server_fetch', 'thread_spawn', 'invalidate', 'log_line']) assert.ok(sources.includes(name), name);
   const message = result.failures.find(f => f.source === 'server_fetch').message;
   assert.match(message, /^server_fetch is over budget: 960 in 300 s \(192\.0 per minute\), budget 0$/);
+});
+
+test('the captured Windows baseline fails with 41 server checks over five idle minutes', async () => {
+  const captured = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/SOFT-1975/idle-before-fix.json'), 'utf8'));
+  const result = await run(captured.before, captured.after);
+  assert.equal(result.ok, false);
+  assert.equal(result.windowMs, 302797);
+  assert.deepEqual(result.failures.map(row => row.source), ['server_fetch', 'timer 36', 'timer 172']);
+  assert.equal(result.failures[0].observed, 41);
 });
 
 test('one fetch is already over a zero budget', async () => {
@@ -149,6 +158,68 @@ test('the command line exits 1 on a failure and 0 on a pass', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('missing, malformed and reset counters cannot pass as zero work', async () => {
+  for (const key of ['tick_ms', 'idle_ms', 'deep_idle', 'server_fetch', 'thread_spawn', 'invalidate', 'timer_fire', 'log_line', 'process_spawn', 'timers']) {
+    const after = dump(400000);
+    delete after[key];
+    assert.equal((await run(dump(100000), after)).ok, false, `missing ${key}`);
+  }
+  for (const value of [-1, null, '0', 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal((await run(dump(100000), dump(400000, { server_fetch: value }))).ok, false, String(value));
+  }
+  for (const key of ['server_fetch', 'thread_spawn', 'invalidate', 'timer_fire', 'log_line', 'process_spawn']) {
+    const result = await run(dump(100000, { [key]: 10 }), dump(400000));
+    assert.equal(result.ok, false, `reset ${key}`);
+    assert.match(result.failures[0].message, /decreased/);
+  }
+  assert.equal((await run(null, dump(400000))).ok, false);
+});
+
+test('input during settling or measurement invalidates the idle window', async () => {
+  const recentInput = await run(dump(100000, { idle_ms: 1000 }), dump(400000));
+  assert.equal(recentInput.ok, false);
+  const interrupted = await run(dump(100000), dump(400000, { idle_ms: 120000 }));
+  assert.equal(interrupted.ok, false);
+  assert.equal(interrupted.failures[0].source, 'input');
+});
+
+test('malformed or decreasing timer counters cannot hide wakes', async () => {
+  for (const timers of [[], null, { '-1': 1 }, { '256': 1 }, { '01': 1 }, { '2': -1 }, { '2': '1' }, { '2': null }]) {
+    assert.equal((await run(dump(100000), dump(400000, { timers }))).ok, false, JSON.stringify(timers));
+  }
+  const reset = await run(dump(100000, { timers: { 2: 5 } }), dump(400000, { timers: { 2: 1 } }));
+  assert.equal(reset.ok, false);
+  assert.match(reset.failures[0].message, /timer 2 decreased/);
+});
+
+test('Windows PowerShell UTF-8 counter files are accepted', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'idle-budget-bom-'));
+  try {
+    const before = path.join(dir, 'before.json');
+    const after = path.join(dir, 'after.json');
+    fs.writeFileSync(before, '\uFEFF' + JSON.stringify(dump(100000)));
+    fs.writeFileSync(after, '\uFEFF' + JSON.stringify(dump(400000)));
+    const result = spawnSync(process.execPath, [path.join(__dirname, 'idle-budget.mjs'), before, after], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /IDLE BUDGET PASSED/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('every pull request runs the gate and the aggregate requires its result', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/test.yml'), 'utf8');
+  const idle = workflow.split('\n  idle-budget:\n')[1].split(/\n  [\w-]+:\n/)[0];
+  assert.match(idle, /if: github\.event_name == 'pull_request'\n/);
+  assert.match(idle, /tools\/idle-budget\.ps1 -Exe zig-out\/bin\/multiprompt\.exe/);
+  const aggregate = workflow.split('\n  test-result:\n')[1];
+  assert.match(aggregate, /needs: \[[^\n]*\bidle-budget\]/);
+  assert.match(aggregate, /IDLE: \$\{\{ needs\.idle-budget\.result \}\}/);
+  assert.match(aggregate, /if \[ "\$EVENT" != pull_request \] && \[ "\$IDLE" = skipped \]; then IDLE=success; fi/);
+  assert.match(aggregate, /require_jobs "\$WINDOWS"[^\n]* "\$IDLE"/);
+  assert.match(aggregate, /\[ "\$result" = success \] \|\| return 1/);
 });
 
 test('the budget file matches the ticket', async () => {
