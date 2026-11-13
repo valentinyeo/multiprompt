@@ -47,6 +47,9 @@ A saved sid selects exactly `~/.claude/projects/<encoded cwd>/<sid>.jsonl`
 named tmux pane's live agent descendant and Claude's
 `~/.claude/sessions/<pid>.json` map; the existing cwd-based discovery fallback
 remains for harnesses without that map. No unscoped active tmux session is used.
+A hosted live chat keeps its own sid on the wire but reads the host's native
+session when Claude's `/clear` starts a new one (SOFT-2272), so the chat shows
+its new replies instead of freezing on the cleared conversation.
 
 Cold loads seek to the last 512 KiB and align to complete JSONL records.
 Subsequent reads seek to the cached offset and parse only the changed suffix,

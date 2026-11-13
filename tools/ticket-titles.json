@@ -317,6 +317,7 @@
   "IGSH-1965": "Ctrl+Shift+W quits the app; Ctrl+W closes browser tabs",
   "IGSH-1967": "Usage meter runs inside Multibot, not as a second hidden copy",
   "IGSH-1973": "Multibot keeps the processor busy while idle",
+  "IGSH-2272": "Check /clear works in live chats",
   "IGSH-212": "zsb: type sends multi-line text into chat composers (newlines fire as Enter)",
   "IGSH-221": "zsb: cdp cannot hold a session across calls, so Profiler/Tracing brackets around a reload are impossible",
   "IGSH-224": "Per-workspace isolated browser profiles and independent bookmarks",
