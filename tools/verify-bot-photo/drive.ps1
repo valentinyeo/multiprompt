@@ -215,7 +215,7 @@ function Shot([string]$Name) {
 }
 function Assets { @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'ZigShell/bot-avatars') -Filter '*.png' -ErrorAction SilentlyContinue) }
 function Assert-Avatar([string]$Surface, [int]$Index, [string]$Name, [bool]$Tall = $false) {
-    $pattern = "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
+    $pattern = if ($Surface -eq 'palette') { "\[palette-avatar\] target=$Index [^\r\n]*rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)" } else { "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)" }
     $match = Wait-For "$Surface avatar coordinates" { $matches = [regex]::Matches((Log), $pattern); if ($matches.Count -gt 0) { $matches[$matches.Count-1] } }
     $x = [int]$match.Groups[1].Value; $y = [int]$match.Groups[2].Value
     $size = [int]$match.Groups[3].Value - $x
@@ -283,7 +283,7 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool
         Press @(0x12, 0x43)
         [void](Wait-For 'chat title visible' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['cv'] -and $saved.cv })
     }
-    Press @(0x11, 0x4b); Query 'pin to top' 6293; Press @(0x0d)
+    Press @(0x11, 0x4b); Query 'pin to top' '(7113|6293)'; Press @(0x0d)
     [void](Wait-For 'Starred tile pinned' { $saved = @((State).tabs)[(Index-For $Id)]; $saved.PSObject.Properties['starred_pinned_top'] -and $saved.starred_pinned_top })
     Shot "$Name-starred-header"
     if ($Generated) { Assert-Generated $index "$Name-starred" 'pinned' } else { Assert-Avatar 'pinned' $index "$Name-starred" $Tall }
@@ -299,7 +299,14 @@ function Assert-AllFaces([string]$Id, [string]$Name, [bool]$Tall = $false, [bool
     } catch { $failures += $_.Exception.Message }
     Press @(0x1b)
     [void](Wait-For 'Inbox closed' { $s = Get-Content (Join-Path $settings 'inbox-default.json') -Raw | ConvertFrom-Json; -not $s.inbox_active })
-    Press @(0x11, 0x4b); Query 'unpin from top' 6293; Press @(0x0d)
+    Press @(0x11, 0x4b)
+    Query ([string]$tab.name) ([string]$index)
+    Shot "$Name-palette-window"
+    try {
+        if ($Generated) { Assert-Generated $index "$Name-palette" 'palette' } else { Assert-Avatar 'palette' $index "$Name-palette" $Tall }
+    } catch { $failures += $_.Exception.Message }
+    Press @(0x1b)
+    Press @(0x11, 0x4b); Query 'unpin from top' '(7113|6293)'; Press @(0x0d)
     Press @(0x12, 0x32)
     [void](Wait-For 'home workspace' { -not (State).starred_view })
     if (-not $wasChat) {
@@ -320,7 +327,7 @@ function Capture-Avatar([int]$Index, [string]$Name) {
     return (Get-FileHash (Join-Path $Evidence "$Name.png") -Algorithm SHA256).Hash
 }
 function Assert-Generated([int]$Index, [string]$Name, [string]$Surface = 'expanded') {
-    $pattern = "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)"
+    $pattern = if ($Surface -eq 'palette') { "\[palette-avatar\] target=$Index [^\r\n]*rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)" } else { "\[photo-proof\] $Surface target=$Index rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)" }
     $match = Wait-For 'generated avatar coordinates' { $found = [regex]::Matches((Log), $pattern); if ($found.Count -gt 0) { $found[$found.Count-1] } }
     $x = [int]$match.Groups[1].Value; $y = [int]$match.Groups[2].Value
     $size = [int]$match.Groups[3].Value - $x
@@ -530,7 +537,7 @@ try {
     Assert-Avatar 'expanded' $firstIndex 'restored-local-photo' $true
     Assert-Avatar 'expanded' $secondIndex 'restored-other-local-photo'
     Shot 'after-restart'
-    Focus; Press @(0x11, 0x4b); Query 'renamed alpha' $firstIndex; Press @(0x0d)
+    Focus; Press @(0x11, 0x4b); Query 'alpha' $firstIndex; Press @(0x0d)
     Look 'bot face' 'square dots' 7147
     Check 'face-change-keeps-photo' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $replacementHash)
     Look 'bot face' 'reset to show' 7194

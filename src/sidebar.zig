@@ -2012,13 +2012,14 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: 
 const PaletteSessionView = struct {
     appearance: @import("bot_avatar.zig").Appearance,
     favorite: bool,
+    photo_key: ?[32]u8 = null,
 };
 
 fn paletteShellView(index: usize) ?PaletteSessionView {
     if (index >= app_state.shell_count or index >= app_state.shells.len) return null;
     const shell = &app_state.shells[index];
     if (shell.tmux_session_len > shell.tmux_session.len or shell.name_len > shell.name.len) return null;
-    return .{ .appearance = @import("bot_avatar.zig").forShell(shell), .favorite = shell.favorite };
+    return .{ .appearance = @import("bot_avatar.zig").forShell(shell), .favorite = shell.favorite, .photo_key = @import("bot_photo.zig").key(shell) };
 }
 
 fn paletteNamedSession(name: []const u8, workspace: u8, favorite: bool) PaletteSessionView {
@@ -2048,7 +2049,9 @@ fn paletteRemoteSession(host: u8, name: []const u8, workspace: u8, favorite: boo
             if (paletteShellView(index)) |view| return view;
         }
     }
-    return paletteNamedSession(name, workspace, favorite);
+    var view = paletteNamedSession(name, workspace, favorite);
+    view.photo_key = (@import("bot_photo_key.zig").Key{ .remote = .{ .host = host, .session = name } }).digest();
+    return view;
 }
 
 fn paletteReminderView(index: usize, fallback: u8) ?PaletteSessionView {
@@ -2109,6 +2112,7 @@ fn paletteSessionView(target: usize) ?PaletteSessionView {
             if (row.workspace < app_state.g_lws_count) row.workspace else paletteOtherWorkspace()
         else
             row.workspace;
+        if (row.session_len == 0) return paletteNamedSession(name, ws, row.snapshot_favorite);
         return paletteRemoteSession(row.host, name, ws, row.snapshot_favorite, row.kind == .vps_only or (row.kind == .reminder and row.session_len > 0));
     }
     return null;
@@ -3019,7 +3023,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var log: [192]u8 = undefined;
                             debugLog(std.fmt.bufPrint(&log, "[palette-avatar] target={d} face={d} color={d} favorite={d} rect={d},{d},{d},{d}", .{ result_idx, view.appearance.face, view.appearance.color, @intFromBool(view.favorite), x, y, x + size, y + size }) catch "[palette-avatar] unavailable");
                         }
-                        @import("bot_avatar.zig").draw(hdc, avatar_rc, view.appearance);
+                        const photo_drawn = if (view.photo_key) |key| @import("bot_photo.zig").drawKey(key, hdc, avatar_rc) else false;
+                        if (!photo_drawn) @import("bot_avatar.zig").draw(hdc, avatar_rc, view.appearance);
                         if (view.favorite and !app_state.g_starred_workspace) drawRobotMarker(hdc, avatar_rc, .favorite, row_color);
                     }
 
