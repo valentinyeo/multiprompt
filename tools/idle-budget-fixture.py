@@ -18,8 +18,8 @@ document = dict(name='idle-budget', fake=True, mode='idle', suggestion='', sessi
 (state / 'state.json').write_text(json.dumps(document), encoding='utf-8')
 env = dict(os.environ, MP_VERIFY_STATE=str(state))
 subprocess.run([sys.executable, str(Path(__file__).parent / 'verify-chat-delivery' / 'boundary.py'), 'shell', 'seed-many', '40'], env=env, check=True)
-seed = dict(active_tab=0, single_window=True, chat_active=True,
-            tabs=[dict(shell_id=i + 1, kind='tmux', name=name, manual=True, tmux_host=hosts[i], tmux_session=name, cv=True, pid=0) for i, name in enumerate(names)])
+seed = dict(active_tab=0, single_window=True, chat_active=True, shared_server_connection=True,
+            tabs=[dict(shell_id=i + 1, kind='tmux', name=name, manual=True, tmux_host=hosts[i], tmux_session=name, cv=True) for i, name in enumerate(names)])
 snapshot = dict(active=1, chat=True, single_window=True, sort_auto=False,
                 rows=[dict(id=i + 1, name=[ord(c) for c in name], kind=3) for i, name in enumerate(names)])
 (settings / 'session.json').write_text(json.dumps(seed), encoding='utf-8')

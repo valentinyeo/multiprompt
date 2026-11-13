@@ -228,3 +228,9 @@ test('the budget file matches the ticket', async () => {
   assert.equal(budget.window_seconds, 300);
   for (const name of ['server_fetch', 'thread_spawn', 'invalidate', 'log_line']) assert.equal(budget.sources[name], 0, name);
 });
+
+test('the idle fixture runs the way the laptop runs, with the shared server connection on', () => {
+  const fixture = fs.readFileSync(path.join(__dirname, 'idle-budget-fixture.py'), 'utf8');
+  assert.match(fixture, /shared_server_connection=True/);
+  assert.doesNotMatch(fixture, /pid=0/);
+});
