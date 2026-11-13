@@ -1,1 +1,1 @@
-The / menu in a chat that runs as another server account now lists that account's skills.
+Chats that run as another server account now list that account skills in the command menu.
