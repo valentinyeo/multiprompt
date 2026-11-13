@@ -368,3 +368,20 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
   assert.equal(release1038.changes[fragmentIndex], actualFragment);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', history.map(item => item.tag === 'v0.28.1048' ? { ...item, sha: 'wrong' } : item), [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]), /reviewed release commit does not match/);
 });
+
+test('a board 2060 commit numbered SOFT releases its IGSH fragment', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const files = {
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    [path.posix.join('changelog.d', 'IGSH-2272-clear-live-chat.md')]: 'Cleared chats keep their new replies.\n',
+  };
+  const titles = { 'IGSH-1': 'Earlier title', 'IGSH-2272': 'Check clear works in live chats' };
+  let generated = null;
+  try {
+    generated = buildChangelog(files, 'v0.28.1100', [], [{ sha: 'aaa', subject: 'SOFT-2272: Keep cleared chats replying' }], titles);
+  } catch (error) {
+    generated = { error: error.message };
+  }
+  assert.equal(typeof generated, 'string', `release notes build: ${generated?.error}`);
+  assert.match(generated, /IGSH-2272/);
+});
