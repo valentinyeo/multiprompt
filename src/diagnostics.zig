@@ -89,8 +89,56 @@ pub fn getSessionAuditPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u
     }
 }
 
+const PaintLogLimiter = struct {
+    const Entry = struct { used: bool = false, key: u64 = 0, line: u64 = 0 };
+    entries: [512]Entry = @splat(.{}),
+
+    fn allow(self: *PaintLogLimiter, key: []const u8, line: []const u8) bool {
+        const key_hash = std.hash.Wyhash.hash(0, key);
+        const line_hash = std.hash.Wyhash.hash(1, line);
+        const first: usize = @intCast(key_hash % self.entries.len);
+        for (0..self.entries.len) |offset| {
+            const entry = &self.entries[(first + offset) % self.entries.len];
+            if (entry.used and entry.key != key_hash) continue;
+            if (entry.used and entry.line == line_hash) return false;
+            entry.* = .{ .used = true, .key = key_hash, .line = line_hash };
+            return true;
+        }
+        self.entries[first] = .{ .used = true, .key = key_hash, .line = line_hash };
+        return true;
+    }
+};
+
+var paint_log_limiter: PaintLogLimiter = .{};
+var paint_log_busy = std.atomic.Value(bool).init(false);
+
+fn paintLogKey(msg: []const u8) ?[]const u8 {
+    if (std.mem.startsWith(u8, msg, "[photo-proof] ")) {
+        const end = std.mem.indexOf(u8, msg, " rect=") orelse return null;
+        return msg[0..end];
+    }
+    if (std.mem.startsWith(u8, msg, "[sidebar-avatar] ")) {
+        const end = std.mem.indexOf(u8, msg, " face=") orelse return null;
+        return msg[0..end];
+    }
+    if (std.mem.startsWith(u8, msg, "[bots] ")) {
+        const start = std.mem.indexOf(u8, msg, " rect=") orelse return null;
+        return msg[start..];
+    }
+    return null;
+}
+
+fn paintLogAllowed(key: []const u8, msg: []const u8) bool {
+    if (paint_log_busy.swap(true, .acquire)) return false;
+    defer paint_log_busy.store(false, .release);
+    return paint_log_limiter.allow(key, msg);
+}
+
 pub fn debugLog(msg: []const u8) void {
     if (!verboseLoggingEnabled() and !std.mem.startsWith(u8, msg, "[consolefont] ") and !std.mem.startsWith(u8, msg, "[focus-trace] ") and !std.mem.startsWith(u8, msg, "[computer] ")) return;
+    if (paintLogKey(msg)) |key| {
+        if (!paintLogAllowed(key, msg)) return;
+    }
     writeLogLine(msg);
 }
 
