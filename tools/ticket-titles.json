@@ -322,6 +322,7 @@
   "IGSH-221": "zsb: cdp cannot hold a session across calls, so Profiler/Tracing brackets around a reload are impossible",
   "IGSH-224": "Per-workspace isolated browser profiles and independent bookmarks",
   "IGSH-2273": "New shell sessions on servers disconnect at once",
+  "IGSH-2279": "Multibot: every chat sees and messages every chat, any AI",
   "IGSH-228": "zsb: type command ignores --tab flag, appends it to typed text",
   "IGSH-232": "zsb: cdp help invokes a CDP method instead of showing usage",
   "IGSH-240": "zsb: text/screenshot fail on edge:// pages",
