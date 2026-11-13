@@ -157,10 +157,10 @@ class ChatsTalkTest(unittest.TestCase):
     def test_IGSH_2279_a_pi_chat_and_a_codex_chat_are_in_the_roster(self):
         done = self.run_tool(MP_SESSIONS, "--json")
         chats = {chat["tmux"]: chat for chat in json.loads(done.stdout)}
-        self.assertEqual(chats["live-pi"]["provider"], "pi")
-        self.assertEqual(chats["live-pi"]["name"], "Pi Helper")
-        self.assertEqual(chats["live-pi"]["cwd"], "/work/pi")
-        self.assertEqual(chats["live-codex"]["provider"], "codex")
+        self.assertEqual(chats.get("live-pi", {}).get("provider"), "pi")
+        self.assertEqual(chats.get("live-pi", {}).get("name"), "Pi Helper")
+        self.assertEqual(chats.get("live-pi", {}).get("cwd"), "/work/pi")
+        self.assertEqual(chats.get("live-codex", {}).get("provider"), "codex")
 
     def test_IGSH_2279_a_pi_chat_lists_every_open_chat_with_the_same_tool(self):
         done = self.run_tool(MP_SEND, "list", "--json", MULTIPROMPT_TAB="live-pi")
