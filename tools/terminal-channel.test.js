@@ -70,7 +70,9 @@ test('a login profile that sources a missing file does not end the shell', remot
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   fs.writeFileSync(path.join(home, '.profile'), '. "$HOME/.missing-env"\n');
   const session = await terminal(t, 'printf "ALIVE\\n"', [24, 80], false, { ...process.env, HOME: home });
-  assert.match(await session.waitFor('ALIVE'), /ALIVE/);
+  const output = await session.waitFor('ALIVE').catch(error => ({ failed: String(error.message) }));
+  assert.equal(typeof output, 'string', `the shell stays open after its profile sources a missing file: ${output.failed}`);
+  assert.match(output, /ALIVE/);
 });
 
 test('server PTY has the requested initial size, UTF-8 input and a real terminal environment', remoteOnly, async (t) => {
