@@ -144,12 +144,6 @@ pub fn debugLog(msg: []const u8) void {
     writeLogLine(msg);
 }
 
-pub fn debugLogOnce(msg: []const u8) void {
-    if (!verboseLoggingEnabled()) return;
-    if (!idle_budget.logFirstTime(msg)) return;
-    debugLog(msg);
-}
-
 pub fn syncLog(msg: []const u8) void {
     idle_budget.bump(.log_line);
     writeLogLine(msg);

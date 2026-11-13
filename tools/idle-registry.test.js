@@ -93,21 +93,6 @@ test('timers that share a counter slot are listed so the budget takes the larger
   assert.deepEqual(shared.names.sort(), ['TIMER_CHAT_SEL_SCROLL', 'TIMER_SSH_RECONNECT']);
 });
 
-test('the avatar paint logs go through the once-only logger', () => {
-  const offenders = [];
-  let once = 0;
-  for (const name of fs.readdirSync(srcDir).filter(n => n.endsWith('.zig') && n !== 'idle_budget.zig')) {
-    const lines = fs.readFileSync(path.join(srcDir, name), 'utf8').split('\n');
-    lines.forEach((line, index) => {
-      if (!/\[(photo-proof|sidebar-avatar|bots)\]/.test(line)) return;
-      if (line.includes('debugLogOnce(')) once += 1;
-      else offenders.push(`${name}:${index + 1}`);
-    });
-  }
-  assert.deepEqual(offenders, [], 'per-paint avatar logs must use debugLogOnce');
-  assert.equal(once, 7);
-});
-
 test('the counter table sizes and message ids match the app', async () => {
   const { budget } = await load();
   const zig = fs.readFileSync(path.join(srcDir, 'idle_budget.zig'), 'utf8');

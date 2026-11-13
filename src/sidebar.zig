@@ -359,7 +359,6 @@ const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
 const workspaceIsLiveAnywhere = @import("workspaces.zig").workspaceIsLiveAnywhere;
 const debugLog = @import("diagnostics.zig").debugLog;
-const debugLogOnce = @import("diagnostics.zig").debugLogOnce;
 const saveSession = @import("session.zig").saveSession;
 const SavedTab = @import("app_state.zig").SavedTab;
 const TMUX_HOST_UK = @import("app_state.zig").TMUX_HOST_UK;
@@ -2248,8 +2247,8 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rec
     const appearance = avatar.forShell(shell);
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
-        debugLogOnce(std.fmt.bufPrint(&log, "[photo-proof] expanded target={d} rect={d},{d},{d},{d}", .{ index, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
-        debugLogOnce(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
+        debugLog(std.fmt.bufPrint(&log, "[photo-proof] expanded target={d} rect={d},{d},{d},{d}", .{ index, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
+        debugLog(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, appearance);
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
@@ -2290,7 +2289,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     const avatar = @import("bot_avatar.zig");
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [120]u8 = undefined;
-        debugLogOnce(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
+        debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
@@ -2590,7 +2589,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const avatar = @import("bot_avatar.zig");
                     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
                         var log: [120]u8 = undefined;
-                        debugLogOnce(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
+                        debugLog(std.fmt.bufPrint(&log, "[photo-proof] collapsed target={d} rect={d},{d},{d},{d}", .{ i, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
                     }
                     if (!photo_drawn) avatar.draw(hdc, avatar_rect, avatar.forShell(&app_state.shells[i]));
                 } else {

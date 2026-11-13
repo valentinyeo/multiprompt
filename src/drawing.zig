@@ -820,7 +820,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     if (layout.has_icon) {
         if (@import("diagnostics.zig").verboseLoggingEnabled()) {
             var log: [120]u8 = undefined;
-            @import("diagnostics.zig").debugLogOnce(std.fmt.bufPrint(&log, "[photo-proof] header target={d} rect={d},{d},{d},{d}", .{ app_state.active_shell, layout.icon.left, layout.icon.top, layout.icon.right, layout.icon.bottom }) catch "[photo-proof] unavailable");
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] header target={d} rect={d},{d},{d},{d}", .{ app_state.active_shell, layout.icon.left, layout.icon.top, layout.icon.right, layout.icon.bottom }) catch "[photo-proof] unavailable");
         }
         const avatar = @import("bot_avatar.zig");
         if (!@import("bot_photo.zig").draw(shell, hdc, layout.icon)) avatar.draw(hdc, layout.icon, avatar.forShell(shell));

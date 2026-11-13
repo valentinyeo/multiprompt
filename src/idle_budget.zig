@@ -14,28 +14,15 @@ pub const Counts = [SOURCE_COUNT]u32;
 pub const TIMER_SLOTS: usize = 256;
 pub const TIMER_OVERFLOW: usize = TIMER_SLOTS - 1;
 pub const IDLE_AFTER_MS: u64 = 60_000;
-pub const LOG_RING_SLOTS: usize = 256;
 
 pub const WM_PAINT: u32 = 0x000F;
 pub const WM_TIMER: u32 = 0x0113;
-pub const WM_KEYDOWN: u32 = 0x0100;
-pub const WM_SYSKEYDOWN: u32 = 0x0104;
-pub const WM_LBUTTONDOWN: u32 = 0x0201;
-pub const WM_RBUTTONDOWN: u32 = 0x0204;
-pub const WM_MBUTTONDOWN: u32 = 0x0207;
-pub const WM_MOUSEWHEEL: u32 = 0x020A;
-pub const WM_XBUTTONDOWN: u32 = 0x020B;
 
 var g_counts: Counts = @splat(0);
 var g_timers: [TIMER_SLOTS]u32 = @splat(0);
-var g_input_epoch: u32 = 0;
 var g_window: IdleWindow = .{};
 var g_published_report: IdleReport = .{};
 var g_report_lock: u32 = 0;
-var g_ring: [LOG_RING_SLOTS]u64 = @splat(0);
-var g_ring_next: usize = 0;
-var g_ring_epoch: u32 = 0;
-var g_ring_lock: u32 = 0;
 
 pub fn bump(source: Source) void {
     _ = @atomicRmw(u32, &g_counts[@intFromEnum(source)], .Add, 1, .monotonic);
@@ -50,22 +37,11 @@ pub fn timerFired(id: usize) void {
     bump(.timer_fire);
 }
 
-pub fn userInput() void {
-    _ = @atomicRmw(u32, &g_input_epoch, .Add, 1, .monotonic);
-}
-
-pub fn isInputMessage(message: u32) bool {
-    return switch (message) {
-        WM_KEYDOWN, WM_SYSKEYDOWN, WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEWHEEL, WM_XBUTTONDOWN => true,
-        else => false,
-    };
-}
-
 pub fn pumped(message: u32, wparam: usize) void {
     switch (message) {
         WM_TIMER => timerFired(wparam),
         WM_PAINT => bump(.invalidate),
-        else => if (isInputMessage(message)) userInput(),
+        else => {},
     }
 }
 
@@ -165,15 +141,6 @@ pub fn formatDump(buf: []u8, tick_ms: u64, idle_ms: u64, deep_idle: bool, counts
     return buf[0..len];
 }
 
-pub fn hashLine(msg: []const u8) u64 {
-    var hash: u64 = 0xcbf29ce484222325;
-    for (msg) |byte| {
-        hash ^= byte;
-        hash *%= 0x100000001b3;
-    }
-    return if (hash == 0) 1 else hash;
-}
-
 fn lock(guard: *u32) void {
     while (@cmpxchgWeak(u32, guard, 0, 1, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
 }
@@ -182,34 +149,12 @@ fn unlock(guard: *u32) void {
     @atomicStore(u32, guard, 0, .release);
 }
 
-pub fn logFirstTime(msg: []const u8) bool {
-    const hash = hashLine(msg);
-    lock(&g_ring_lock);
-    defer unlock(&g_ring_lock);
-    const epoch = @atomicLoad(u32, &g_input_epoch, .monotonic);
-    if (epoch != g_ring_epoch) {
-        g_ring_epoch = epoch;
-        g_ring = @splat(0);
-        g_ring_next = 0;
-    }
-    for (g_ring) |seen| {
-        if (seen == hash) return false;
-    }
-    g_ring[g_ring_next] = hash;
-    g_ring_next = (g_ring_next + 1) % LOG_RING_SLOTS;
-    return true;
-}
-
 pub fn resetForTest() void {
     g_counts = @splat(0);
     g_timers = @splat(0);
-    g_input_epoch = 0;
     g_window = .{};
     g_published_report = .{};
     g_report_lock = 0;
-    g_ring = @splat(0);
-    g_ring_next = 0;
-    g_ring_epoch = 0;
 }
 
 test "bump counts each source on its own slot" {
@@ -223,7 +168,7 @@ test "bump counts each source on its own slot" {
     try std.testing.expectEqual(@as(u32, 0), counts[@intFromEnum(Source.thread_spawn)]);
 }
 
-test "the pump counts timers per id, paints, and input" {
+test "the pump counts timers per id and paints" {
     resetForTest();
     pumped(WM_TIMER, 2);
     pumped(WM_TIMER, 2);
@@ -236,9 +181,6 @@ test "the pump counts timers per id, paints, and input" {
     try std.testing.expectEqual(@as(u32, 1), counts[@intFromEnum(Source.invalidate)]);
     try std.testing.expectEqual(@as(u32, 2), timers[2]);
     try std.testing.expectEqual(@as(u32, 1), timers[TIMER_OVERFLOW]);
-    try std.testing.expectEqual(@as(u32, 0), @atomicLoad(u32, &g_input_epoch, .monotonic));
-    pumped(WM_KEYDOWN, 0x41);
-    try std.testing.expectEqual(@as(u32, 1), @atomicLoad(u32, &g_input_epoch, .monotonic));
 }
 
 test "the idle window starts after a quiet minute and freezes on input" {
@@ -299,27 +241,6 @@ test "a short buffer yields an empty dump instead of a broken one" {
     const counts: Counts = @splat(0);
     const timers: [TIMER_SLOTS]u32 = @splat(0);
     try std.testing.expectEqualStrings("", formatDump(&buf, 1, 1, false, counts, timers));
-}
-
-test "each distinct log line is allowed once until the user acts" {
-    resetForTest();
-    try std.testing.expect(logFirstTime("[photo-proof] expanded target=1 rect=0,0,10,10"));
-    try std.testing.expect(!logFirstTime("[photo-proof] expanded target=1 rect=0,0,10,10"));
-    try std.testing.expect(logFirstTime("[photo-proof] expanded target=2 rect=0,0,10,10"));
-    try std.testing.expect(!logFirstTime("[photo-proof] expanded target=2 rect=0,0,10,10"));
-    pumped(WM_LBUTTONDOWN, 0);
-    try std.testing.expect(logFirstTime("[photo-proof] expanded target=1 rect=0,0,10,10"));
-}
-
-test "the log ring forgets its oldest line when full" {
-    resetForTest();
-    var buf: [32]u8 = undefined;
-    var i: usize = 0;
-    while (i < LOG_RING_SLOTS + 1) : (i += 1) {
-        const line = std.fmt.bufPrint(&buf, "line {d}", .{i}) catch unreachable;
-        try std.testing.expect(logFirstTime(line));
-    }
-    try std.testing.expect(logFirstTime("line 0"));
 }
 
 test "watchdog readers receive the duration and counts from one publication" {

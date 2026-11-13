@@ -1619,7 +1619,7 @@ pub fn paintInbox(hdc: HANDLE) void {
         const avatar_rc = RECT{ .left = layout.left + uiScaled(10), .top = y + uiScaled(8), .right = layout.left + uiScaled(50), .bottom = y + uiScaled(48) };
         if (@import("diagnostics.zig").verboseLoggingEnabled()) {
             var log: [120]u8 = undefined;
-            @import("diagnostics.zig").debugLogOnce(std.fmt.bufPrint(&log, "[photo-proof] inbox target={d} rect={d},{d},{d},{d}", .{ row.sid, avatar_rc.left, avatar_rc.top, avatar_rc.right, avatar_rc.bottom }) catch "[photo-proof] unavailable");
+            @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[photo-proof] inbox target={d} rect={d},{d},{d},{d}", .{ row.sid, avatar_rc.left, avatar_rc.top, avatar_rc.right, avatar_rc.bottom }) catch "[photo-proof] unavailable");
         }
         const local_shell: ?*const Shell = if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd))
             if (findShellById(row.sid)) |idx| &app_state.shells[idx] else null
