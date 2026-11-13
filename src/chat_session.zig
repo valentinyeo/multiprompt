@@ -689,7 +689,7 @@ fn chatFilePollInterval() u64 {
 fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, delivery: bool, streaming: bool, unchanged: bool, background: bool) u64 {
     if (disk or prepended or before > 0) return 0;
     if (more) return 1000;
-    if (delivery) return 250;
+    if (delivery and !unchanged) return 250;
     if (streaming) return 0;
     if (unchanged and background) return 4000;
     return chatFilePollInterval();
@@ -700,7 +700,9 @@ test "an unchanged background chat waits four seconds and a live chat stays fast
     try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, true, 0, false, false, false, false, false));
     try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 1, false, false, false, false, false));
     try std.testing.expectEqual(@as(u64, 1000), chatHistoryNextDelay(false, false, 0, true, false, false, false, false));
-    try std.testing.expectEqual(@as(u64, 250), chatHistoryNextDelay(false, false, 0, false, true, false, true, true));
+    try std.testing.expectEqual(@as(u64, 250), chatHistoryNextDelay(false, false, 0, false, true, false, false, true));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, true, false, true, true));
+    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, true, false, true, false));
     try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 0, false, false, true, true, true));
     try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true));
     try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, true, false));
