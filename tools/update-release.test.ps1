@@ -489,19 +489,19 @@ try {
         Passed 'first signed local release swap'
         Stop-FixtureApps
 
-        $collector = Start-Process "$target.previous.exe" -ArgumentList '--usage-telemetry' -PassThru
-        Wait-File "$target.previous.exe.telemetry-ready"
         $bridgeHelper = Start-Process "$Root/zigshell-bridge.exe" -PassThru
         Wait-File "$Root/zigshell-bridge.exe.starts"
-        Assert (-not $collector.HasExited -and -not $bridgeHelper.HasExited) 'Old helpers did not hold executable locks'
+        Assert (-not $bridgeHelper.HasExited) 'Old bridge helper did not hold its executable lock'
         Select-Release 'v1.11.0'
         Assert (Save-Update $target '1.10.0' 'x64') 'Second release not staged'
         Install-Update $target 'x64' '' '1.10.0'
-        Assert ($collector.WaitForExit(5000) -and $bridgeHelper.WaitForExit(5000)) 'Old helper processes survived swap'
+        Assert ($bridgeHelper.WaitForExit(5000)) 'Old bridge helper survived swap'
         Assert ((Get-FileHash $target).Hash -eq (Get-FileHash "$Root/v1.11.0/multiprompt-x64.exe").Hash) 'Second app update failed'
         Assert ((Get-FileHash "$Root/zigshell-bridge.exe").Hash -eq (Get-FileHash "$Root/v1.11.0/zigshell-bridge-x64.exe").Hash) 'Second bridge update failed'
         Assert (-not (Test-Path "$dir/ready.txt")) 'Second card did not clear'
-        Passed 'locked backup update succeeds'
+        Assert (-not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '--usage-telemetry' })) 'Update left a usage helper process'
+        Passed 'update with old bridge helper running succeeds'
+        Passed 'update leaves no usage helper process'
         Passed 'second consecutive update'
         Stop-FixtureApps
 

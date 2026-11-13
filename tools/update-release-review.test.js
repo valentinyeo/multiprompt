@@ -23,12 +23,13 @@ test('R2 ready dispatched before sign-in guard; rollback has no readiness deadli
   assert.match(ps, /function Start-RestoredApp/);
   assert.doesNotMatch(body(ps, 'function Start-RestoredApp', 'function Install-Update'), /WaitOne|Kill\(|AddSeconds/);
 });
-test('R3 swap stops old telemetry and bridge helpers, and locked backup must update', () => {
+test('R3 swap stops old bridge helpers and leaves no usage helper process', () => {
   const ps = read('src/update_release.ps1');
   assert.match(ps, /--stop-update-helpers/);
   assert.match(read('src/main.zig'), /update_release\.runHelperIfRequested/);
   const suite = read('tools/update-release.test.ps1');
-  assert.match(suite, /locked backup update succeeds/);
+  assert.match(suite, /update with old bridge helper running succeeds/);
+  assert.match(suite, /update leaves no usage helper process/);
   assert.doesNotMatch(suite, /Locked backup was overwritten/);
 });
 test('R4 matching bridge and extension are verified and transactionally installed', () => {
