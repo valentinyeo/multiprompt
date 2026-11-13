@@ -27,6 +27,7 @@ function toJs(code) {
     .replace(/return if \((.*?)\) (\S+) else (.*?);/g, 'return ($1) ? $2 : $3;')
     .replace(/\band\b/g, '&&').replace(/\bor\b/g, '||')
     .replace(/!= \.(\w+)/g, '!== "$1"').replace(/== \.(\w+)/g, '=== "$1"')
+    .replace(/\(\.(\w+),/g, '("$1",')
     .replace(/chat_echo\./g, '');
 }
 
@@ -38,7 +39,8 @@ function compile(source, name, scope = {}) {
   return new Function(...names, `return function(${params.join(', ')}) {${toJs(body(source, name))}};`)(...names.map((n) => scope[n]));
 }
 
-const drivesPollingZig = compile(echo, 'drivesPolling');
+const pendingExpired = compile(echo, 'pendingExpired');
+const drivesPollingZig = compile(echo, 'drivesPolling', { pendingExpired });
 const drivesPolling = drivesPollingZig || (() => true);
 
 function nextDelayFn() {
@@ -120,6 +122,16 @@ test('SOFT-1973 a delivered message older than the delivery window stops driving
   assert.equal(drivesPolling('delivered', true, false, now - 3_600_000, now), true);
   assert.equal(drivesPolling('delivered', false, true, now - 3_600_000, now), true);
   assert.equal(drivesPolling('sending', false, false, now - 3_600_000, now), true);
+});
+
+test('SOFT-1973 an old held message loaded soon after Windows boot still stops driving polling', () => {
+  assert.ok(drivesPollingZig, 'drivesPolling exists');
+  const now = 300_000;
+  const loaded = { ...staleHeld(), sent_tick_ms: now - 600_000 };
+  assert.equal(drivesPolling(loaded.state, false, false, loaded.sent_tick_ms, now), false);
+  assert.equal(timerOn([loaded], now, false), false);
+  assert.equal(settleFetches(loaded, now), false);
+  assert.equal(drivesPolling('delivered', false, false, 0, 2_000_000), false);
 });
 
 test('SOFT-1973 a quiet hidden chat with an old held message fetches almost nothing in ten minutes', () => {
