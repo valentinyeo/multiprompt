@@ -245,6 +245,7 @@
   "IGSH-1770": "Working dots always show while a chat works",
   "IGSH-1771": "Chat stays out of the Inbox while you move through it",
   "IGSH-1772": "Ctrl+K: opening a session leaves the chat with no text box",
+  "IGSH-1773": "Ctrl+K: show each bot's own picture",
   "IGSH-1774": "Workspace menu: clicking a workspace does not switch to it",
   "IGSH-1806": "Match the linked request on desktop",
   "IGSH-1808": "Live chat: connect the Cursor command line bot",
