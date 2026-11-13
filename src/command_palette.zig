@@ -834,8 +834,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS) {
         const model_idx = target - SEARCH_PI_MODEL_ROW_OFFSET;
         if (model_idx >= pi_models.models().len) return null;
-        const picked = pi_models.models()[model_idx];
-        return picked.nameText();
+        const all = pi_models.models();
+        return all[model_idx].nameText();
     }
     return switch (target) {
         SEARCH_PI_MODELS_MENU_OFFSET => "Pi Model...",
