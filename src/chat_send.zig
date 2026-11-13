@@ -466,7 +466,7 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and std.meta.eql(job.key, chatFileIdentityForShell(app_state.active_shell))) {
         if (job.command != .send and app_state.g_chat_composer_hwnd != null) {
             var text: [16384]u16 = undefined;
-            const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
+            const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
             if (len > 0 and @import("chat_slash.zig").route(true, text[0..@intCast(len)]) == job.command) {
                 _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
                 app_state.g_chat_draft_dirty = true;
@@ -545,6 +545,10 @@ const ChatPiModelJob = struct {
     ok: bool = false,
     name: [pi_models.MAX_NAME]u8 = std.mem.zeroes([pi_models.MAX_NAME]u8),
     name_len: u8 = 0,
+    provider_name: [pi_models.MAX_PROVIDER]u8 = std.mem.zeroes([pi_models.MAX_PROVIDER]u8),
+    provider_len: u8 = 0,
+    reference: [pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8 = std.mem.zeroes([pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8),
+    reference_len: u8 = 0,
 };
 
 var chat_pi_model_busy = std.atomic.Value(bool).init(false);
@@ -555,6 +559,7 @@ fn chatPiModelSetLive(shell: u32, chosen: pi_models.Model) bool {
         showHeaderNoticeAscii("This Pi chat is still starting", 4000, true);
         return false;
     }
+    if (chosen.nameText().len == 0) return false;
     if (chat_pi_model_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
     const job = std.heap.page_allocator.create(ChatPiModelJob) catch {
         chat_pi_model_busy.store(false, .release);
@@ -564,11 +569,15 @@ fn chatPiModelSetLive(shell: u32, chosen: pi_models.Model) bool {
     const name_len = @min(chosen.nameText().len, job.name.len);
     @memcpy(job.name[0..name_len], chosen.nameText()[0..name_len]);
     job.name_len = @intCast(name_len);
-    var provider_name: [pi_models.MAX_PROVIDER]u8 = std.mem.zeroes([pi_models.MAX_PROVIDER]u8);
-    var model_ref: [pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8 = undefined;
-    @memcpy(provider_name[0..chosen.providerText().len], chosen.providerText());
-    const reference = if (chosen.providerText().len > 0) std.fmt.bufPrint(&model_ref, "{s}/{s}", .{ chosen.providerText(), chosen.nameText() }) catch chosen.nameText() else chosen.nameText();
-    const thread = std.Thread.spawn(.{}, chatPiModelThread, .{ job, std.mem.sliceTo(&provider_name, 0), reference }) catch {
+    const provider_len = @min(chosen.providerText().len, job.provider_name.len);
+    @memcpy(job.provider_name[0..provider_len], chosen.providerText()[0..provider_len]);
+    job.provider_len = @intCast(provider_len);
+    const reference = if (provider_len > 0)
+        std.fmt.bufPrint(&job.reference, "{s}/{s}", .{ job.provider_name[0..provider_len], job.name[0..name_len] }) catch job.name[0..name_len]
+    else
+        job.name[0..name_len];
+    job.reference_len = @intCast(reference.len);
+    const thread = std.Thread.spawn(.{}, chatPiModelThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
         chat_pi_model_busy.store(false, .release);
         return false;
@@ -577,11 +586,11 @@ fn chatPiModelSetLive(shell: u32, chosen: pi_models.Model) bool {
     return true;
 }
 
-fn chatPiModelThread(job: *ChatPiModelJob, provider_name: []const u8, reference: []const u8) void {
+fn chatPiModelThread(job: *ChatPiModelJob) void {
     const a = std.heap.page_allocator;
     defer chat_pi_model_busy.store(false, .release);
     defer if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_PI_MODEL_RESULT, 0, @bitCast(@intFromPtr(job))) == 0) std.heap.page_allocator.destroy(job);
-    const request = pi_models.requestLine(a, job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), provider_name, reference) catch return;
+    const request = pi_models.requestLine(a, job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), job.provider_name[0..job.provider_len], job.reference[0..job.reference_len]) catch return;
     defer a.free(request);
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);

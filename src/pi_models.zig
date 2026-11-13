@@ -33,7 +33,7 @@ pub const Status = enum { idle, loading, ready, error };
 var g_slots: [2][MAX_MODELS]Model = std.mem.zeroes([2][MAX_MODELS]Model);
 var g_lens: [2]usize = .{ 0, 0 };
 var g_active = std.atomic.Value(usize).init(0);
-var g_status = std.atomic.Value(u8).init(@intFromEnum(Status.idle));
+var g_status = std.atomic.Value(u8).init(@as(u8, @intFromEnum(Status.idle)));
 var g_host: u8 = 0xFF;
 var g_fetched_ms: u64 = 0;
 var g_pending = std.atomic.Value(bool).init(false);
@@ -121,7 +121,7 @@ pub fn fillModel(model: *Model, name: []const u8, provider: []const u8, detail: 
     model.detail_len = @intCast(d);
 }
 
-fn modelNameFields(line: []const u8, fields: *[4][]const u8) usize {
+fn modelNameFields(line: []const u8, fields: anytype) usize {
     var count: usize = 0;
     var start: usize = 0;
     var i: usize = 0;
