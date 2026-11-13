@@ -53,7 +53,7 @@ test('IGSH-1922 the plus menu and Ctrl+K list Fable next to Opus, Sonnet and Hai
   assert.match(plus, /\.title = "Model", \.items = &\.\{ \.model_opus, \.model_sonnet, \.model_haiku, \.model_fable \}/);
   assert.match(plus, /\.model_fable => "Fable"/);
   assert.match(plus, /state\.active\[@intFromEnum\(Item\.model_fable\)\] = model == \.fable/);
-  assert.match(read('src/chat_live.zig'), /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable \}/);
+  assert.match(read('src/chat_live.zig'), /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra \}/);
   assert.match(read('src/main.zig'), /\.model_fable => \.\{ \.model = \.fable \}/);
   assert.match(read('src/chat_send.zig'), /\.fable => "Model: Fable"/);
   assert.match(read('src/sidebar.zig'), /SEARCH_CHAT_MODEL_FABLE_OFFSET => L\("Chat View: Model Fable"\)/);

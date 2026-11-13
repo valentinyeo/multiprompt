@@ -644,6 +644,10 @@ const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL
 const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
 const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
 const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
+const SEARCH_CHAT_MODEL_SOL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SOL_OFFSET;
+const SEARCH_CHAT_MODEL_TERRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_TERRA_OFFSET;
+const SEARCH_CHAT_MODEL_LUNA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_LUNA_OFFSET;
+const SEARCH_CHAT_MODEL_ASTRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_ASTRA_OFFSET;
 const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
 const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
 const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
@@ -3894,12 +3898,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             };
             switch (item) {
                 .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
-                .model_opus, .model_sonnet, .model_haiku, .model_fable, .effort_low, .effort_medium, .effort_high => {
+                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .effort_low, .effort_medium, .effort_high => {
                     const setting: @import("chat_live.zig").Setting = switch (item) {
                         .model_opus => .{ .model = .opus },
                         .model_sonnet => .{ .model = .sonnet },
                         .model_haiku => .{ .model = .haiku },
                         .model_fable => .{ .model = .fable },
+                        .model_sol => .{ .model = .sol },
+                        .model_terra => .{ .model = .terra },
+                        .model_luna => .{ .model = .luna },
+                        .model_astra => .{ .model = .astra },
                         .effort_low => .{ .effort = .low },
                         .effort_medium => .{ .effort = .medium },
                         else => .{ .effort = .high },
@@ -5614,7 +5622,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (findGroupIdx(gid)) |gi| @import("rename.zig").runGroupPaletteAction(hwnd, gi, target - app_state.SEARCH_GROUPCTX_BASE);
                     return 0;
                 }
-                if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET) {
+                if (app_state.isChatSettingOffset(target)) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = false;
                     clearSearchBackdrop();
@@ -5623,6 +5631,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         SEARCH_CHAT_MODEL_SONNET_OFFSET => .{ .model = .sonnet },
                         SEARCH_CHAT_MODEL_HAIKU_OFFSET => .{ .model = .haiku },
                         SEARCH_CHAT_MODEL_FABLE_OFFSET => .{ .model = .fable },
+                        SEARCH_CHAT_MODEL_SOL_OFFSET => .{ .model = .sol },
+                        SEARCH_CHAT_MODEL_TERRA_OFFSET => .{ .model = .terra },
+                        SEARCH_CHAT_MODEL_LUNA_OFFSET => .{ .model = .luna },
+                        SEARCH_CHAT_MODEL_ASTRA_OFFSET => .{ .model = .astra },
                         SEARCH_CHAT_EFFORT_LOW_OFFSET => .{ .effort = .low },
                         SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => .{ .effort = .medium },
                         SEARCH_CHAT_EFFORT_HIGH_OFFSET => .{ .effort = .high },
