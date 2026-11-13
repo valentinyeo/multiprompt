@@ -46,7 +46,8 @@ def run():
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         environment = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor")
-        os.execve("/bin/sh", ["sh", "-lc", command], environment)
+        shell = "/bin/bash" if os.path.exists("/bin/bash") else "/bin/sh"
+        os.execve(shell, [os.path.basename(shell), "-lc", command], environment)
     selector = selectors.DefaultSelector()
     pending = bytearray()
 
