@@ -186,6 +186,7 @@ const WM_APP_BROWSER_ENGINE_TOGGLE = @import("win32.zig").WM_APP_BROWSER_ENGINE_
 const WM_APP_INPUT_HOOK_RECOVER = @import("win32.zig").WM_APP_INPUT_HOOK_RECOVER;
 const WM_APP_CHAT_TOGGLE = @import("win32.zig").WM_APP_CHAT_TOGGLE;
 const WM_APP_CHAT_AC_READY = @import("win32.zig").WM_APP_CHAT_AC_READY;
+const WM_APP_PI_MODELS_READY = @import("win32.zig").WM_APP_PI_MODELS_READY;
 const WM_APP_CHAT_SEND = @import("win32.zig").WM_APP_CHAT_SEND;
 const WM_APP_CHAT_INTERRUPT = @import("win32.zig").WM_APP_CHAT_INTERRUPT;
 const WM_APP_POWER_ACTIVITY = @import("win32.zig").WM_APP_POWER_ACTIVITY;

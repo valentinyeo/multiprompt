@@ -28,7 +28,7 @@ pub const Model = struct {
     }
 };
 
-pub const Status = enum { idle, loading, ready, error };
+pub const Status = enum { idle, loading, ready, failed };
 
 var g_slots: [2][MAX_MODELS]Model = std.mem.zeroes([2][MAX_MODELS]Model);
 var g_lens: [2]usize = .{ 0, 0 };
@@ -93,8 +93,8 @@ pub fn replyOk(response: []const u8) bool {
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, response, .{}) catch return false;
     defer parsed.deinit();
     if (parsed.value != .object) return false;
-    const status = parsed.value.object.get("status") orelse return false;
-    return status == .string and std.mem.eql(u8, status.string, "ok");
+    const reply = parsed.value.object.get("status") orelse return false;
+    return reply == .string and std.mem.eql(u8, reply.string, "ok");
 }
 
 test "SOFT-2275 host request carries the Pi model and reads only an explicit ok" {
@@ -210,7 +210,7 @@ pub fn ensure(host: u8) void {
     g_status.store(@intFromEnum(Status.loading), .release);
     const thread = std.Thread.spawn(.{}, fetchThread, .{host}) catch {
         g_pending.store(false, .release);
-        g_status.store(@intFromEnum(Status.error), .release);
+        g_status.store(@intFromEnum(Status.failed), .release);
         return;
     };
     thread.detach();
@@ -221,7 +221,7 @@ fn fetchThread(host: u8) void {
     const id = g_request_id.fetchAdd(1, .monotonic);
     var request_buf: [96]u8 = undefined;
     const request = std.fmt.bufPrint(&request_buf, "{d}\tmodels\tpi\t-\t-\t\n", .{id}) catch {
-        g_status.store(@intFromEnum(Status.error), .release);
+        g_status.store(@intFromEnum(Status.failed), .release);
         return;
     };
     var bytes: [192 * 1024]u8 = undefined;
@@ -231,7 +231,7 @@ fn fetchThread(host: u8) void {
     const target = 1 - active;
     const count = if (n > 0) parseResponse(bytes[0..n], &g_slots[target]) else 0;
     if (count == 0) {
-        g_status.store(@intFromEnum(Status.error), .release);
+        g_status.store(@intFromEnum(Status.failed), .release);
         postReady(0);
         return;
     }
