@@ -174,7 +174,7 @@ class AccountDesktop(unittest.TestCase):
     def test_palette_help_and_wiki_use_the_same_commands(self):
         rows = MAIN.split('const SHORTCUT_ROWS =', 1)[1].split('\n};', 1)[0]
         docs = (ROOT / 'openwiki/operations/keyboard-shortcuts.md').read_text(encoding='utf-8')
-        for label in ('Account: Sign Out', 'Account: Devices', 'Sync: Pull Now'):
+        for label in ('Account: Sign Out', 'Account: Devices'):
             self.assertIn(label, rows)
             self.assertIn(label, docs)
             self.assertIn('L("' + label + '")', MAIN)

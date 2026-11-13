@@ -5356,7 +5356,6 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
     const sel_mode = sel_count > 0;
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         if (tc_idx) |ti| {
-            const tab = &app_state.shells[ti];
             if (@import("browser_pane.zig").browserProfileToken(ti).len > 0 and
                 app_state.g_search_result_count < app_state.g_search_results.len and
                 labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
