@@ -72,7 +72,7 @@ test('global and per-command help document workspace commands without session co
   const help = await cli(['--help'], 1);
   assert.equal(help.code, 0);
   assert.match(help.stdout, /workspace-list/);
-  assert.match(help.stdout, /session-open --workspace NAME --group NAME --host HOST --tmux SESSION --name TITLE/);
+  assert.match(help.stdout, /session-open --workspace NAME \(--group NAME \| --after-tab ID\) --host HOST --tmux SESSION --name TITLE/);
   assert.match(help.stdout, /session-status --tab ID/);
   for (const command of ['workspace-list', 'session-open', 'session-status']) {
     const result = await cli([command, '--help'], 1);
@@ -152,6 +152,26 @@ test('session-open preserves whitespace quotes Unicode and flag ordering without
     assert.deepEqual(JSON.parse(result.stdout), { ok: true, created: true, tab: 42, state: 'connecting' });
     assert.deepEqual(requests.map(decoded), [reordered]);
     assert.ok(!decoded(requests[0]).includes('--activate'));
+  });
+});
+
+test('session-open --after-tab replaces --group and passes through unchanged', async () => {
+  const after = ['session-open', '--workspace', 'Research', '--after-tab', '41', '--host', 'remote-1', '--tmux', 'live-helper', '--name', 'Helper'];
+  await bridge(async (port, requests) => {
+    const result = await cli(after, port);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(requests.map(decoded), [after]);
+    for (const invalid of [
+      ['session-open', '--workspace', 'Research', '--after-tab', '41', '--group', 'Ops', '--host', 'remote-1', '--tmux', 'live-helper', '--name', 'Helper'],
+      ['session-open', '--workspace', 'Research', '--after-tab', '0', '--host', 'remote-1', '--tmux', 'live-helper', '--name', 'Helper'],
+      ['session-open', '--workspace', 'Research', '--after-tab', '4x', '--host', 'remote-1', '--tmux', 'live-helper', '--name', 'Helper'],
+      ['session-open', '--workspace', 'Research', '--after-tab', '4294967296', '--host', 'remote-1', '--tmux', 'live-helper', '--name', 'Helper'],
+    ]) {
+      const refused = await cli(invalid, port);
+      assert.equal(refused.code, 1);
+      assert.equal(JSON.parse(refused.stdout).error, 'bad_args', refused.stdout);
+    }
+    assert.equal(requests.length, 1);
   });
 });
 
