@@ -33,7 +33,7 @@ The old form `mp-send <provider> <sid> "text" --tmux <session>` still works.
 
 ## Helper chats
 
-A chat starts its own helper chats with `mp-helper`. No account key is needed: the server starts the helper, and the desktop opens its tab through the zsb bridge.
+A chat starts its own helper chats with `mp-helper`. The desktop publishes it into `~/.multiprompt-runtime`, which is on every live chat's PATH, so no install step is needed. The server starts the helper, and the desktop opens its tab through the zsb bridge. A zsb wrapper older than `--after-tab` falls back to the parent's group.
 
 ```sh
 mp-helper start --name "Research A" --model sonnet --effort high --task "Find why the build fails"

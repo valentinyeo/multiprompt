@@ -40,6 +40,8 @@ with open(os.environ["MP_HELPER_TEST_LOG"], "a", encoding="utf-8") as stream:
     stream.write(json.dumps(["zsb", sys.argv[1:]]) + "\n")
 if sys.argv[1] == "workspace-list":
     print(os.environ.get("MP_HELPER_TEST_LIST", "{}"))
+elif sys.argv[1] == "session-open" and "--after-tab" in sys.argv and os.environ.get("MP_HELPER_TEST_OLD_ZSB"):
+    print(json.dumps(dict(ok=False, error="bad_args")))
 elif sys.argv[1] == "session-open":
     print(json.dumps(dict(ok=True, created=True, tab=44, state="connecting")))
 else:
@@ -191,6 +193,38 @@ class MpHelperTest(unittest.TestCase):
         self.assertEqual(json.loads(closed.stdout)["tab_closed"], True)
         self.assertIn(["session-close", "--tab", "45"], self.events("zsb"))
         self.assertEqual(self.events("host")[-1], ["disable", "claude", mine])
+
+    def test_SOFT_2013_an_older_zsb_falls_back_to_the_parents_group(self):
+        done = self.run_helper("start", "--name", "A", MP_HELPER_TEST_OLD_ZSB="1")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        result = json.loads(done.stdout)
+        self.assertTrue(result["visible"])
+        opened = [call for call in self.events("zsb") if call[0] == "session-open"]
+        self.assertEqual(opened[-1], ["session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", result["tmux"], "--name", "A"])
+
+    def test_SOFT_2013_a_repeat_start_keeps_a_running_helper_enabled(self):
+        first = json.loads(self.run_helper("start", "--name", "A").stdout)
+        path = next(iter(self.configs()))
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["enabled"] = True
+        path.write_text(json.dumps(config), encoding="utf-8")
+        again = self.run_helper("start", "--name", "A", "--model", "opus")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        config = json.loads(path.read_text(encoding="utf-8"))
+        self.assertTrue(config["enabled"])
+        self.assertEqual((config["model"], json.loads(again.stdout)["sid"]), ("opus", first["sid"]))
+
+    def test_SOFT_2013_the_runtime_published_copy_finds_mp_send_beside_it(self):
+        runtime = Path(self.temp.name) / "runtime"
+        runtime.mkdir()
+        for name, source in (("mp-send", ROOT / "src/mp_send.py"), ("mp-helper", ROOT / "src/mp_helper.py")):
+            stem = "0" * 64 + "-" + name
+            (runtime / stem).write_bytes(source.read_bytes())
+            (runtime / name).symlink_to(stem)
+        self.helper("Mine", "live-parent", "eeeeeeee-1111-8222-8333-444444444444")
+        done = subprocess.run([sys.executable, str(runtime / "mp-helper"), "list", "--json"], capture_output=True, text=True, env=self.env(), cwd=str(self.work), timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual([row["name"] for row in json.loads(done.stdout)], ["Mine"])
 
     def test_SOFT_2013_installer_ships_mp_helper(self):
         target = Path(self.temp.name) / "installed"

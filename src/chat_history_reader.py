@@ -7446,6 +7446,13 @@ if __name__ == '__main__':
                             _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
+                    helper_source = globals().get('MP_HELPER_SOURCE')
+                    if isinstance(helper_source, str) and helper_source:
+                        try:
+                            publish_named_tool('mp-helper', _base64.b64decode(helper_source))
+                            _os.chmod('mp-helper', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
                 missing = object()
                 try:
                     active = _json.loads(read('active.json', 4096))
