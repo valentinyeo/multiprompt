@@ -6347,6 +6347,7 @@ class IGSH_2272_ClearFollowsSessionTest(unittest.TestCase):
         with path.open('rb') as source:
             identity = reader._consumed_identity(source, self.sid, path.stat().st_ino, 0,
                                                  hashlib.sha256(raw).hexdigest(), 'asked after clear')
+        self.assertIsNotNone(identity)
         self.assertEqual(identity[0], self.sid)
 
 
