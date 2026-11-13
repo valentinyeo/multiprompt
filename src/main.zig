@@ -5411,6 +5411,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == app_state.SEARCH_CHAT_FRESH_START_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = @import("command_palette.zig").startFreshChat(app_state.active_shell);
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_CHAT_RESTART_OFFSET or target == SEARCH_CHAT_RESTART_ALL_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
@@ -7329,7 +7339,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7357,6 +7367,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("chat_send.zig").chatPermissionAnswer(ti, .deny);
                         } else if (target == SEARCH_TABCTX_CHAT_STOP) {
                             _ = @import("chat_send.zig").chatStopAgent(ti);
+                        } else if (target == app_state.SEARCH_TABCTX_FRESH_START) {
+                            _ = @import("command_palette.zig").startFreshChat(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {
                             chatResetForShell(ti);
                         } else if (target == SEARCH_TABCTX_FAVORITE) {

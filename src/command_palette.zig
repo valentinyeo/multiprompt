@@ -511,6 +511,7 @@ const MoveChatJob = struct {
 const RESTART_HOSTS = 3;
 const RestartChatJob = struct {
     all: bool = false,
+    fresh: bool = false,
     count: u8 = 0,
     hosts: [RESTART_HOSTS]u8 = @splat(0),
     ids: [RESTART_HOSTS]u32 = @splat(0),
@@ -731,6 +732,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
+    if (target == app_state.SEARCH_TABCTX_FRESH_START) return "Fresh start handover clear context same chat picture address";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -972,6 +974,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
         SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
+        app_state.SEARCH_CHAT_FRESH_START_OFFSET => "Chat View: Fresh start handover clear context same chat picture address",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -1414,7 +1417,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, app_state.SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2412,6 +2415,18 @@ fn restartChatNotice(text: []const u8) void {
 }
 
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
+    if (job.fresh) {
+        const Reply = struct { result: struct { status: []const u8 = "", reason: []const u8 = "" } = .{} };
+        const parsed = std.json.parseFromSlice(Reply, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
+            restartChatNotice("Fresh start failed: the server did not answer");
+            return;
+        };
+        defer parsed.deinit();
+        const status = parsed.value.result.status;
+        if (std.mem.eql(u8, status, "started") or std.mem.eql(u8, status, "already")) return;
+        restartChatNotice(if (std.mem.eql(u8, status, "busy")) "Fresh start: wait for this reply to finish" else "Fresh start failed: this live chat is unavailable");
+        return;
+    }
     const agent_host = @import("agent_host.zig");
     const waiting = if (job.all) agent_host.restartAllWaiting(body) else agent_host.restartWaitingReply(body);
     const nothing = job.all and agent_host.restartAllNothing(body);
@@ -2446,19 +2461,33 @@ fn restartChatThread(job: *RestartChatJob) void {
             restartChatReply(job, response.items);
         }
     } else {
-        const request = agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
+        const request = if (job.fresh)
+            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
+        else
+            agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
-        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) return;
+        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) {
+            restartChatNotice(if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+            return;
+        }
         answered = true;
         restartChatReply(job, response.items);
     }
-    if (!answered) restartChatNotice("Chat restart: the server did not answer");
+    if (!answered) restartChatNotice(if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
 }
 
 pub fn startRestartChat(all: bool) bool {
+    return startChatJob(all, false, app_state.active_shell);
+}
+
+pub fn startFreshChat(tab: u32) bool {
+    return startChatJob(false, true, tab);
+}
+
+fn startChatJob(all: bool, fresh: bool, tab: u32) bool {
     const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
-    job.* = .{ .all = all };
+    job.* = .{ .all = all, .fresh = fresh };
     if (all) {
         for (0..app_state.shell_count) |i| {
             if (job.count >= RESTART_HOSTS) break;
@@ -2478,7 +2507,6 @@ pub fn startRestartChat(all: bool) bool {
             return false;
         }
     } else {
-        const tab = app_state.active_shell;
         if (!liveChatTab(tab)) {
             std.heap.page_allocator.destroy(job);
             return false;
@@ -3979,6 +4007,14 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        liveChatTab(app_state.active_shell) and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_CHAT_FRESH_START_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_ALL_OFFSET;
@@ -5466,6 +5502,13 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Reset this chat", app_state.g_search_buf[0..app_state.g_search_len])))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_FRESH_START;
         app_state.g_search_result_count += 1;
     }
     if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
