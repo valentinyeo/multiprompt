@@ -194,3 +194,11 @@ test "local cache bypasses background stream creation while remote work is busy"
     assert.match(old.stderr, /FAIL \(TestUnexpectedResult\)/, '708 must fail the same executed loading oracle');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('SOFT-1973 a live chat drops its quiet streak before the next transcript read', () => {
+  const request = body('chatFileRequestForDelivery');
+  assert.match(request, /key\.shell_id == live_shell_id and entry\.quiet > 0/);
+  assert.match(request, /entry\.quiet = 0/);
+  assert.match(request, /entry\.next = @min\(entry\.next, now\)/);
+  assert.match(request, /if \(delivery\) g_chat_fetch_why else "view"/);
+});
