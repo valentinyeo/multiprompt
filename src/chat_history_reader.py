@@ -1630,6 +1630,15 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             hosted = None
         return (agent, sid, hosted, None) if hosted is not None else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
+    if agent == "claude" and path is not None and sid and not as_owner and host_dispatch_switch(agent, sid):
+        native = host_session_state(agent, sid).get("native_session")
+        if isinstance(native, str) and SESSION_ID.fullmatch(native) and native != sid:
+            try:
+                cleared = conversation_path(agent, native, cwd)
+            except PermissionError:
+                cleared = None
+            if cleared is not None:
+                path = cleared
     owner = conversation_owner(cwd) if agent == "claude" else None
     if follow and owner and owner[1] != HOME and source is not None and not as_owner:
         delegated = owner_response(dict(q, sid=""), owner, source)
@@ -7338,7 +7347,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 114
+RUNTIME_GENERATION = 115
 
 if __name__ == '__main__':
     import base64 as _base64
