@@ -1,0 +1,36 @@
+{
+  "version": "0.28.1683",
+  "time_unix": 1794572457,
+  "unresponsive_ms": 5083,
+  "thread_context": "captured",
+  "reason": "heartbeat",
+  "instruction": "unavailable",
+  "stack_rvas": [
+    "0xA959C", "0x2A4878", "0x2A4878", "0x2A4878",
+    "0x2A4878", "0x2A4878", "0x2A4878", "0x12417E",
+    "0x12417E", "0x2A4878", "0x5F9330", "0x2A4878",
+    "0x2A4878", "0x2A4878", "0x2A4878", "0x2A487C",
+    "0x2A4878", "0x2A4878", "0x72C61", "0xD0000"
+  ],
+  "app_events": [
+    [113437562, "0xF", 2, "chat"],
+    [113437562, "0x133", 2, "chat"],
+    [113437593, "0x113", 2, "chat"],
+    [113437593, "0xF", 2, "chat"],
+    [113437625, "0x133", 2, "chat"],
+    [113437640, "0x113", 2, "chat"],
+    [113437640, "0x8092", 2, "chat"],
+    [113443359, "0x7F", 2, "chat"],
+    [113443359, "0x8092", 2, "chat"],
+    [113446359, "0x86", 2, "chat"],
+    [113446359, "0x6", 2, "chat"],
+    [113446359, "0x1C", 2, "chat"],
+    [113446359, "0x111", 2, "chat"],
+    [113446375, "0x8092", 2, "chat"],
+    [113447921, "0x7F", 2, "chat"],
+    [113447921, "0x8092", 2, "chat"]
+  ],
+  "release_source": "40a98b02a7bc3f5c2680950f6eb8b209cd029ba6",
+  "release_executable_sha256": "c00b6cc6a70ff68151976d0dca155d5e32ffdf2542b7ee43d0ac2bde59e72a2b",
+  "symbolized_executable_sha256": "643d4874c90e449fe3a3401c7bafb4114a568eb373bbd446b1602b490acb602f"
+}
