@@ -11,7 +11,8 @@ function body(name, text = source) {
 }
 function paintFirst(text) {
   const switching = body('switchToShell', text);
-  const chat = switching.slice(switching.indexOf('} else if (g_chat_active) {'), switching.indexOf('} else if (shells[idx].hwnd'));
+  const chatStart = switching.indexOf('} else if (g_chat_active) {');
+  const chat = switching.slice(chatStart, switching.indexOf('} else if (', chatStart + 1));
   assert.match(chat, /chatDeferTranscriptLoad\(\);[\s\S]*layoutChatControls\(\);/);
   assert.doesNotMatch(chat, /positionActiveBrowser|parkInactiveBrowserPanes|updateBrowserVisibility|refreshChatTranscript/);
   for (const fn of ['positionActiveBrowser', 'updateBrowserVisibility', 'adoptBrowserTick', 'browserHealthTick', 'refreshChatTranscript', 'chatFileOnReady']) {
