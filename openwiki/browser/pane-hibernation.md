@@ -18,6 +18,6 @@ After 15 idle minutes on AC or five in power-saving mode, the native browser win
 
 `keep_awake` (Alt+P or Ctrl+K `Keep Tab Awake: On/Off`) exempts a pane from freezing and hibernation. Working sessions and recent browser commands also delay those tiers. Audible-tab detection is not implemented; keep media tabs awake manually.
 
-The URL and keep-awake setting persist. Frozen state and parked timestamps are runtime-only. `Ctrl+K` offers `Hibernate Browser Panes Now` for hidden eligible panes.
+The URL and keep-awake setting persist. Frozen state and parked timestamps are runtime-only.
 
 Run `node --test tools/browser-pane-hibernation.test.js` for portable regressions. On Windows, verify wake, saved URLs, media exemptions, and absence of grey surfaces across actual tab switches.

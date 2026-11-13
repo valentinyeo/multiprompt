@@ -227,16 +227,15 @@ test("Ctrl+K shell rows use readable names without decorative prefixes", () => {
   }
 });
 
-test("Ctrl+K opens every unopened tmux session from one selected VPS", () => {
+test("Ctrl+K no longer lists open-all VPS host rows", () => {
   const update = functionBody("updateSearchResults", "u16ToLower");
-  assert.match(update, /if \(g_search_openall_host_mode\)/);
+  assert.doesNotMatch(update, /g_search_results\[[^\]]+\] = SEARCH_OPENALL_OFFSET/);
   for (const id of [
-    "SEARCH_OPENALL_HOST_BACK_OFFSET",
     "SEARCH_OPENALL_HOST_DE_OFFSET",
     "SEARCH_OPENALL_HOST_UK_OFFSET",
     "SEARCH_OPENALL_HOST_INNE_OFFSET",
   ]) {
-    assert.match(update, new RegExp(id), `missing host picker row: ${id}`);
+    assert.doesNotMatch(update, new RegExp(id), `host picker row still listed: ${id}`);
   }
 
   const dispatchStart = source.indexOf("if (target == SEARCH_OPENALL_OFFSET)");

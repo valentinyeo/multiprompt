@@ -188,7 +188,8 @@ test('IGSH-612 every top-level Ctrl+K row belongs to a palette group', () => {
   assert.ok(sessionRows, 'paletteRowIsSession');
   const mapped = comparisons(groupOfSource(palette) + '\n' + sessionRows[0], 'target', values);
   const rows = topLevelSearchRows(palette);
-  assert.ok(rows.has('SEARCH_SHELL_DIAG_OFFSET') && rows.has('SEARCH_NEW_CLAUDE_CHAT_OFFSET') && rows.has('SEARCH_SHELLS_MENU_OFFSET'), 'top-level rows were found');
+  assert.ok(rows.has('SEARCH_SHELL_DIAG_OFFSET') && rows.has('SEARCH_NEW_CLAUDE_CHAT_OFFSET') && rows.has('SEARCH_NEW_TERMINAL_OFFSET'), 'top-level rows were found');
+  assert.ok(!rows.has('SEARCH_SHELLS_MENU_OFFSET') && !rows.has('SEARCH_NEW_CLAUDE_TERMINAL_OFFSET') && !rows.has('SEARCH_OPEN_SESSION_MENU_OFFSET'), 'outdated shell and session menus stay out of Ctrl+K');
   assert.ok(!rows.has('SEARCH_SKILLS_BACK_OFFSET'), 'submenu rows are excluded');
   const missing = [...rows].filter(name => !mapped.has(name));
   assert.deepEqual(missing, [], `Ctrl+K rows without a group in paletteGroupOf: ${missing.join(', ')}`);
@@ -215,5 +216,6 @@ test('IGSH-1081 Reconnect is named consistently in Ctrl+K and tab actions', () =
   assert.match(palette, /SEARCH_TABCTX_RECONNECT => "reattach tab"/);
   assert.match(read('src/shortcuts.zig'), /Ctrl\+Shift\+R", \.b = "Reattach active SSH\/tmux tab"/);
   assert.match(main, /if \(target == SEARCH_RECONNECT_OFFSET\) \{[^]*?WM_APP_RECONNECT/);
-  assert.match(palette, /"reconnect", "reconnect tab", "reattach"/);
+  assert.doesNotMatch(palette, /g_search_results\[[^\]]+\] = SEARCH_RECONNECT_OFFSET/);
+  assert.doesNotMatch(palette, /g_search_results\[[^\]]+\] = SEARCH_TABCTX_RECONNECT/);
 });
