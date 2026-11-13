@@ -3396,7 +3396,10 @@ def host_state_write(provider, sid, state):
 
 
 def host_claude_session(provider, sid):
-    native = host_session_state(provider, sid).get("native_session")
+    try:
+        native = host_session_state(provider, sid).get("native_session")
+    except OSError:
+        return sid
     return native if isinstance(native, str) and SESSION_ID.fullmatch(native) else sid
 
 
