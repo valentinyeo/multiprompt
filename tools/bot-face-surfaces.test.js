@@ -20,7 +20,7 @@ test('Inbox uses the owning local shell photo and chosen appearance before termi
 test('IGSH-1773 palette session rows carry stable photo keys and prefer pictures before generated faces', () => {
   const sidebar = read('src/sidebar.zig');
   assert.match(sidebar, /photo_key: \?\[32\]u8 = null/);
-  assert.match(read('src/bot_photo.zig'), /return drawKey\(key\(shell\) orelse return false, hdc, rc\);/);
+  assert.match(read('src/bot_photo.zig'), /const digest = pending_key orelse key\(shell\) orelse return false;/);
   assert.match(sidebar, /if \(row\.session_len == 0\) return paletteNamedSession\(name, ws, row\.snapshot_favorite\);/);
   assert.match(sidebar, /\.photo_key = @import\("bot_photo\.zig"\)\.key\(shell\)/);
   assert.match(sidebar, /view\.photo_key = \(@import\("bot_photo_key\.zig"\)\.Key\{ \.remote = \.\{ \.host = host, \.session = name \} \}\)\.digest\(\)/);

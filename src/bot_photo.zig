@@ -298,11 +298,17 @@ pub fn readForSync(digest: [32]u8) !SyncPhoto {
     return .absent;
 }
 
-pub fn draw(shell: *const state.Shell, hdc: H, rc: w.RECT) bool {
-    return drawKey(key(shell) orelse return false, hdc, rc);
-}
+var pending_key: ?[32]u8 = null;
+var pending_shell: state.Shell = undefined;
 
 pub fn drawKey(digest: [32]u8, hdc: H, rc: w.RECT) bool {
+    pending_key = digest;
+    return draw(&pending_shell, hdc, rc);
+}
+
+pub fn draw(shell: *const state.Shell, hdc: H, rc: w.RECT) bool {
+    const digest = pending_key orelse key(shell) orelse return false;
+    pending_key = null;
     clock +%= 1;
     var entry: ?*Entry = null;
     for (&cache) |*item| if (item.used and std.mem.eql(u8, &item.key, &digest)) { entry = item; break; };
