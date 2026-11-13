@@ -787,3 +787,10 @@ test "pending geometry is independent of state and clean mode" {
   const result = run(prelude + body(source, 'chatRelayout') + checks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+
+test('opening several windows never launches a second usage collector process', () => {
+  const panel = fs.readFileSync(path.join(__dirname, '../src/telemetry_panel.zig'), 'utf8');
+  assert.doesNotMatch(panel, /ensureUsageTelemetryCollector/);
+  assert.doesNotMatch(panel + source, /"--usage-telemetry"/);
+  assert.doesNotMatch(panel + source, /MultipromptUsageTelemetryLaunch/);
+});
