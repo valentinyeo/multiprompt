@@ -602,7 +602,7 @@ jobs:
               if ($checks.Count -ne 1) { throw "Expected exactly one x64 checksum for $asset" }
               $expected = ($checks[0] -split '\s+')[0].ToLowerInvariant()
               if ((Get-FileHash "verify-bin/$asset-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Release checksum mismatch for $asset" }
-              Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$asset.exe"
+              Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$(if ($asset -eq 'multiprompt') { 'multibot' } else { $asset }).exe"
             }
             if ($env:CHAT_SHAPE_PROOF -eq '1') {
               $archive = Join-Path $env:RUNNER_TEMP 'shape-release-extension.zip'
@@ -614,16 +614,16 @@ jobs:
             }
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
-            Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
-            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
+            Copy-Item zig-out/bin/multibot.exe verify-bin/multibot.exe
+            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multibot.pdb)) { Copy-Item zig-out/bin/multibot.pdb verify-bin/multibot.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION
             $embeddedRevision = $env:VERIFY_REVISION
           }
-          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multiprompt.exe"))
+          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multibot.exe"))
           if (-not $env:RELEASE_TAG -and ($embeddedRevision -cne $revision -or -not $binary.Contains("MPREVISION=$revision;"))) { throw 'Executable source revision mismatch' }
           if (-not $binary.Contains("MPVERSION=$version;")) { throw 'Executable version mismatch' }
-          $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash = (Get-FileHash verify-bin/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:RELEASE_TAG -eq 'v0.28.946' -and $hash -ne '45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd') { throw 'Released946 baseline hash changed' }
           $optimization = if ($env:CHAT_SHAPE_PROOF -eq '1' -and -not $env:RELEASE_TAG) { 'ReleaseSmall' } else { 'published-or-default' }
           "VERIFY_OPTIMIZATION=$optimization" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -789,7 +789,7 @@ jobs:
           $source = Get-Content negative-source/src/main.zig -Raw
           if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Negative control version missing' }
           $version = $Matches[1]
-          $exe = "$pwd/negative-source/zig-out/bin/multiprompt.exe"
+          $exe = "$pwd/negative-source/zig-out/bin/multibot.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           @{ revision = (git -C negative-source rev-parse HEAD).Trim(); version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/negative/build.json
           try {
@@ -824,7 +824,7 @@ jobs:
           $source = Get-Content negative-focus-source/src/main.zig -Raw
           if ($source -notmatch 'pub const APP_VERSION = "([^"]+)"') { throw 'Focus control version missing' }
           $version = $Matches[1]
-          $exe = "$pwd/negative-focus-source/zig-out/bin/multiprompt.exe"
+          $exe = "$pwd/negative-focus-source/zig-out/bin/multibot.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $build = @{ revision = $revision; version = $version; sha256 = $hash } | ConvertTo-Json
           $red = $null
@@ -874,7 +874,7 @@ jobs:
           $source = Get-Content skill-negative-source/src/main.zig -Raw
           if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Negative control version missing' }
           $version = $Matches[1]
-          $exe = "$pwd/skill-negative-source/zig-out/bin/multiprompt.exe"
+          $exe = "$pwd/skill-negative-source/zig-out/bin/multibot.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           @{ revision = 'd1c9c8b725c8ee63271c98cfeae7ae4cee05dc78'; version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/negative/build.json
           try {
@@ -923,16 +923,16 @@ jobs:
             Start-Sleep -Seconds 900
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
-          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/footer-full"
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/footer-full"
             foreach ($mode in @('sample', 'above', 'below')) {
               $env:VERIFY_USAGE_PACE_FILE = if ($mode -eq 'sample') { "$pwd/verify-bin/usage-pace-source.json" } else { "$pwd/tools/fixtures/IGSH-997/$mode.json" }
               $directory = "$pwd/evidence/pace-$mode"
               New-Item -ItemType Directory -Force $directory | Out-Null
               Copy-Item evidence/build.json "$directory/build.json"
-              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
+              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
             }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
@@ -990,7 +990,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Footer test-key build failed' }
             & tools/update-release-fixtures.ps1 -Root $fixture
             if ($LASTEXITCODE -ne 0) { throw 'Footer signed fixtures failed' }
-            $testExe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
+            $testExe = (Resolve-Path zig-out/bin/multibot.exe).Path
             Copy-Item "$env:GITHUB_WORKSPACE/verify-bin/usage-ssh.exe" (Split-Path $testExe)
             $testHash = (Get-FileHash $testExe -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($testHash -eq $env:VERIFY_SHA256) { throw 'Test-key executable unexpectedly matches published executable' }
@@ -1035,7 +1035,7 @@ jobs:
         timeout-minutes: ${{ env.FEATURE == 'live-chat-pane' && 60 || 30 }}
         shell: powershell
         run: |
-          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |

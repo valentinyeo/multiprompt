@@ -3,6 +3,7 @@ const IS_DEV = @import("main.zig").IS_DEV;
 const std = @import("std");
 const APP_VERSION = @import("main.zig").APP_VERSION;
 const update_release = @import("update_release.zig");
+const legacy_name = @import("legacy_name.zig");
 const update_check = @import("update_check.zig");
 const mp_version_marker = @import("main.zig").mp_version_marker;
 const DWORD = @import("win32.zig").DWORD;
@@ -239,6 +240,7 @@ var restart_after_download = false;
 var restart_status: []const u8 = "";
 
 pub fn updateCardPoll() void {
+    if (app_state.g_main_hwnd != null and legacy_name.handoffDue()) legacyHandoff(app_state.g_main_hwnd);
     if (update_release.poll()) |version| {
         if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
             card_notes = update_release.cardNotes(version);
@@ -306,6 +308,51 @@ pub fn updateCardDismiss() void {
     }
 }
 
+fn collectWindowPids(hwnd: HANDLE, pids: *[update_check.MAX_PIDS]u32) usize {
+    var ctx = ZigShellWindowList{
+        .current = hwnd,
+        .hwnds = std.mem.zeroes([MAX_WORKSPACES]HANDLE),
+        .count = 0,
+    };
+    _ = EnumWindows(&listZigShellWindowsEnum, @bitCast(@intFromPtr(&ctx)));
+    var np: usize = 0;
+    pids[np] = GetCurrentProcessId();
+    np += 1;
+    for (0..ctx.count) |i| {
+        var pid: DWORD = 0;
+        _ = GetWindowThreadProcessId(ctx.hwnds[i], &pid);
+        if (pid == 0 or np >= pids.len) continue;
+        var dup = false;
+        for (pids[0..np]) |q| {
+            if (q == pid) dup = true;
+        }
+        if (!dup) {
+            pids[np] = pid;
+            np += 1;
+        }
+    }
+    return np;
+}
+
+fn legacyHandoff(hwnd: HANDLE) void {
+    if (app_state.g_update_relaunching) return;
+    var target: [520:0]u16 = undefined;
+    const target_len = legacy_name.prepareHandoff(APP_VERSION, &target) orelse {
+        debugLog("update-card: legacy name hand-off skipped");
+        return;
+    };
+    rememberOpenWorkspaceForQuit();
+    var pids: [update_check.MAX_PIDS]u32 = undefined;
+    const np = collectWindowPids(hwnd, &pids);
+    if (!update_check.spawnRelaunchHelper(target[0..target_len], pids[0..np])) {
+        debugLog("update-card: legacy name hand-off could not start");
+        return;
+    }
+    debugLog("update-card: legacy name hand-off started");
+    app_state.g_update_relaunching = true;
+    quitAllZigShellWindows(hwnd);
+}
+
 pub fn updateCardRelaunch(hwnd: HANDLE) void {
     if (app_state.g_update_relaunching) return;
     var installed_version: [update_check.MAX_VERSION_LEN]u8 = undefined;
@@ -326,29 +373,8 @@ pub fn updateCardRelaunch(hwnd: HANDLE) void {
     restart_after_download = false;
     restart_status = "";
     rememberOpenWorkspaceForQuit();
-    var ctx = ZigShellWindowList{
-        .current = hwnd,
-        .hwnds = std.mem.zeroes([MAX_WORKSPACES]HANDLE),
-        .count = 0,
-    };
-    _ = EnumWindows(&listZigShellWindowsEnum, @bitCast(@intFromPtr(&ctx)));
     var pids: [update_check.MAX_PIDS]u32 = undefined;
-    var np: usize = 0;
-    pids[np] = GetCurrentProcessId();
-    np += 1;
-    for (0..ctx.count) |i| {
-        var pid: DWORD = 0;
-        _ = GetWindowThreadProcessId(ctx.hwnds[i], &pid);
-        if (pid == 0 or np >= pids.len) continue;
-        var dup = false;
-        for (pids[0..np]) |q| {
-            if (q == pid) dup = true;
-        }
-        if (!dup) {
-            pids[np] = pid;
-            np += 1;
-        }
-    }
+    const np = collectWindowPids(hwnd, &pids);
     const launched = if (installed_ready) update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]) else update_release.restart(pids[0..np]);
     if (!launched) {
         restart_status = "Could not restart. Try again.";

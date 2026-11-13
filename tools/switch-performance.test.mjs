@@ -381,7 +381,7 @@ test('IGSH-1197 scheduled and manual workflow measures an authenticated publishe
   assert.match(flow, /createHash\('sha256'\)/);
   assert.match(flow, /MPVERSION=\x27\+process.env.RELEASE_TAG.slice\(1\)/);
   assert.match(flow, /Switch fifty times through 400 MiB history/);
-  assert.match(flow, /-Exe released\/multiprompt.exe -Evidence evidence\/released -Revision "\$env:RELEASE_TAG" -SwitchOnly/);
+  assert.match(flow, /-Exe released\/multibot.exe -Evidence evidence\/released -Revision "\$env:RELEASE_TAG" -SwitchOnly/);
   assert.match(flow, /Require every visible switch below 200 ms/);
   assert.match(flow, /assessSwitches\(data\)[\s\S]*if\(!verdict.pass\) process.exit\(1\)/);
 });

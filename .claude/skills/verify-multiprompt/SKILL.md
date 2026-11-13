@@ -85,7 +85,7 @@ When something looks off, read the artifact's `doctor.json`, `result.json`, and 
 The executable helper is [control.ps1](control.ps1). Its exact workflow-side invocation, using values resolved and checked by the workflow, is:
 
 ```powershell
-& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
 ```
 
 Invoke it only through `verify.yml`; it refuses non-GitHub/non-Windows execution. For ordinary desktop journeys this command performs Launch, Doctor, the selected feature recipe, Evidence and Cleanup. `safe-updates` delegates to its fixture driver and `browser-emulation` to its Chrome driver before desktop Doctor; each has its own checks and cleanup. No helper requires a separate interpreter investigation or an undocumented server.
@@ -129,7 +129,7 @@ gh run download <id>
 Check the exact head SHA and source mode; never poll more often than once a minute. `build` compiles the branch with pinned Zig 0.16.0 on Windows; `v0.28.788` downloads the published x64 executable and checks its SHA256SUMS entry. The workflow invokes:
 
 ```powershell
-./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
+./tools/verify-reconnect/drive.ps1 -Exe "$PWD/bin/multibot.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
 ```
 
 Unlike the baseline `control.ps1` journeys, this harness seeds two saved tmux tabs in a unique RUNNER_TEMP profile and replaces only the SSH system boundary using the production `ssh-path.txt` override. No network or credentials are used. The console-backed stand-in implements attach, explicit new-session, list-clients, list-sessions, the `@@MP_LIVE@@` host sentinel and the `@@LS_OK@@` successful-listing sentinel. This is proof of app reconnect behavior, not a real SSH server or AI agent. Do not pass these feature stems to `verify.yml`.

@@ -1,5 +1,5 @@
 param(
-    [string]$AppPath = "$env:USERPROFILE\Documents\GitHub\zigshell\zig-out\bin\multiprompt.exe",
+    [string]$AppPath = "$env:USERPROFILE\Documents\GitHub\zigshell\zig-out\bin\multibot.exe",
     [string]$BridgePath = '',
     [string]$ExpectVersion = '',
     [switch]$StartIfMissing,
@@ -40,7 +40,7 @@ function Get-AppVersion([string]$Exe) {
 
 function Get-AppProcess([string]$Exe) {
     $full = [IO.Path]::GetFullPath($Exe)
-    return @(Get-CimInstance Win32_Process -Filter "Name = 'multiprompt.exe'" | Where-Object { $_.ExecutablePath -eq $full })
+    return @(Get-CimInstance Win32_Process -Filter "Name = 'multibot.exe' OR Name = 'multiprompt.exe'" | Where-Object { $_.ExecutablePath -eq $full })
 }
 
 function Get-WindowClass([IntPtr]$Window) {

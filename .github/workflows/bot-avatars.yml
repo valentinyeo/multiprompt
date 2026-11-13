@@ -72,7 +72,7 @@ jobs:
             foreach ($name in @('multiprompt', 'zigshell-bridge')) {
               $line = @(Get-Content verify-bin/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-fA-F0-9]{64} [ *]' + $name + '-x64\.exe$') })
               if ($line.Count -ne 1 -or (Get-FileHash "verify-bin/$name-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne ($line[0] -split '\s+')[0]) { throw 'Release checksum mismatch' }
-              Move-Item "verify-bin/$name-x64.exe" "verify-bin/$name.exe"
+              Move-Item "verify-bin/$name-x64.exe" "verify-bin/$(if ($name -eq 'multiprompt') { 'multibot' } else { $name }).exe"
             }
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
@@ -80,13 +80,13 @@ jobs:
             $version = $tag.Substring(1)
             zig build -Dversion="$version" -Drevision="$(git rev-parse HEAD)"
             if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
-            Copy-Item zig-out/bin/multiprompt.exe, zig-out/bin/zigshell-bridge.exe verify-bin/
+            Copy-Item zig-out/bin/multibot.exe, zig-out/bin/zigshell-bridge.exe verify-bin/
           }
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
           if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'Terminal fixture build failed' }
-          $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash = (Get-FileHash verify-bin/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           @{tag=$env:RELEASE_TAG; version=$version; sha256=$hash; revision=(git rev-parse HEAD).Trim()} | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_HASH=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -102,11 +102,11 @@ jobs:
           foreach ($name in @('multiprompt', 'zigshell-bridge')) {
             $line = @(Get-Content negative-bin/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-fA-F0-9]{64} [ *]' + $name + '-x64\.exe$') })
             if ($line.Count -ne 1 -or (Get-FileHash "negative-bin/$name-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne ($line[0] -split '\s+')[0]) { throw 'Negative-control checksum mismatch' }
-            Move-Item "negative-bin/$name-x64.exe" "negative-bin/$name.exe"
+            Move-Item "negative-bin/$name-x64.exe" "negative-bin/$(if ($name -eq 'multiprompt') { 'multibot' } else { $name }).exe"
           }
           Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe negative-bin/
-          $hash = (Get-FileHash negative-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          try { & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/negative-bin/multiprompt.exe" -ExpectedVersion '0.28.990' -ExpectedHash $hash -Evidence "$pwd/evidence/negative" } catch { Write-Host $_ }
+          $hash = (Get-FileHash negative-bin/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          try { & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/negative-bin/multibot.exe" -ExpectedVersion '0.28.990' -ExpectedHash $hash -Evidence "$pwd/evidence/negative" } catch { Write-Host $_ }
           $result = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
           if ($result.passed -or $result.cleanup -ne 0 -or $result.error -cne 'Timed out: large pinned and list robots') { throw 'Old application did not fail the robot outcome' }
           Write-Host 'PRE_ROBOT_RELEASE_REJECTED'
@@ -114,7 +114,7 @@ jobs:
         shell: powershell
         run: |
           foreach ($workspace in 0..2) {
-            & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence/$workspace" -WorkspaceIndex $workspace -Dpi ${{ matrix.dpi }}
+            & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence/$workspace" -WorkspaceIndex $workspace -Dpi ${{ matrix.dpi }}
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

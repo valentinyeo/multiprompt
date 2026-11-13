@@ -41,7 +41,7 @@ async function run() {
   process.env.MAGICK_THREAD_LIMIT = '1';
   const prefix = path.join(out, 'wine-prefix');
   if (fs.existsSync(prefix) || fs.existsSync(path.join(out, 'results.json'))) throw new Error('Choose a fresh output directory');
-  const requestedExe = path.resolve(options.exe), exe = path.join(out, 'multiprompt.exe');
+  const requestedExe = path.resolve(options.exe), exe = path.join(out, 'multibot.exe');
   const metadata = `${requestedExe}.chat-bench.json`;
   const binary = fs.existsSync(metadata) ? JSON.parse(fs.readFileSync(metadata)) : { protocol: 'history', exeSha256: hash(requestedExe), reader: path.resolve(here, '../../src/chat_history_reader.py') };
   if (hash(requestedExe) !== binary.exeSha256 || (binary.readerSha256 && hash(binary.reader) !== binary.readerSha256)) throw new Error('Binary/reader provenance mismatch');

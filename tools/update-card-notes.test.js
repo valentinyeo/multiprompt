@@ -266,7 +266,7 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   await download(latest, 'release-notes.json', notes);
   const history = JSON.parse(fs.readFileSync(notes, 'utf8'));
   const shipped = history.releases.find(release => release.changes.some(change => change.startsWith('IGSH-1118 ') || change === fragment));
-  let exe = path.join(root, 'zig-out/bin/multiprompt.exe');
+  let exe = path.join(root, 'zig-out/bin/multibot.exe');
   if (shipped) {
     const release = shipped.version === latest.tag_name.slice(1) ? latest : await api(`releases/tags/v${shipped.version}`);
     exe = path.join(directory, 'released.exe');

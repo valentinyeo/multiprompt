@@ -1174,7 +1174,7 @@ const IShellLinkWVtbl = extern struct {
     QueryInterface: *const fn (*IShellLinkW, *const GUID, *?*anyopaque) callconv(WINAPI) HRESULT,
     AddRef: *const anyopaque,
     Release: *const anyopaque,
-    GetPath: *const anyopaque,
+    GetPath: *const fn (*IShellLinkW, [*]u16, i32, ?*anyopaque, DWORD) callconv(WINAPI) HRESULT,
     GetIDList: *const anyopaque,
     SetIDList: *const anyopaque,
     GetDescription: *const anyopaque,

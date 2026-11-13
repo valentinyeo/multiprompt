@@ -202,7 +202,7 @@ for (const mode of ['failed', 'invalid', 'missing', 'different-binary']) {
 for (const matchingHash of [true, false]) {
   test(`IGSH-530 GitHub receipt ${matchingHash ? 'accepts the verified release' : 'rejects a different release hash'}`, async t => {
     const f = await setup(t);
-    f.run.exe = '/opt/chat-bench/results/runs/A-v0.28.739-1/multiprompt.exe';
+    f.run.exe = '/opt/chat-bench/results/runs/A-v0.28.739-1/multibot.exe';
     if (!matchingHash) f.run.binary.exeSha256 = '0'.repeat(64);
     f.save();
     const original = fs.readFileSync(f.receipt, 'utf8');
@@ -296,7 +296,8 @@ test('installer downloads latest, uploads bounded chunks, hashes every asset and
     assert.match(result.calls[assembly][1], /Sort-Object Name/);
   }
   const install = result.calls.find(args => args[1].includes('Rename-Item'))[1];
-  assert.match(install, /Copy-Item "\$s\\multiprompt-x64\.exe" "\$b\\multiprompt\.exe"/);
+  assert.match(install, /Copy-Item "\$s\\multiprompt-x64\.exe" "\$b\\\$n"/);
+  assert.match(install, /Test-Path "\$b\\multibot\.exe"/);
   assert.match(install, /Copy-Item "\$s\\zigshell-bridge-x64\.exe"/);
   assert.match(install, /multiprompt-stable-\$v-\$t\.exe/);
   assert.match(install, /Select -Skip 5/);
@@ -369,7 +370,7 @@ for (const [name, installedVersion, candidate, allowed] of [
     const probe = result.calls.findIndex(call => call[1]?.includes('MPVERSION='));
     assert(probe >= 0, 'reads the installed exe without requiring a running app');
     assert.match(result.calls[probe][1], /ReadAllBytes\(\$exe\)/);
-    assert.match(result.calls[probe][1], /\\zig-out\\bin\\multiprompt\.exe/);
+    assert.match(result.calls[probe][1], /\\zig-out\\bin\\multibot\.exe/);
     if (allowed) {
       const firstWrite = result.calls.findIndex(call => call[0] === 'write' || /New-Item|Rename-Item|Copy-Item/.test(call[1]));
       assert(probe < firstWrite, 'version check precedes every upload, rename, and copy');

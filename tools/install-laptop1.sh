@@ -22,7 +22,7 @@ if [ -z "$release" ]; then
   exit 1
 fi
 if [ "$only_ext" = 0 ] && [ -z "$bench" ]; then
-  echo 'refusing to install: pass --bench <results.json> from a default-config PASS of node tools/chat-bench/run.mjs --exe <the multiprompt.exe to install>' >&2
+  echo 'refusing to install: pass --bench <results.json> from a default-config PASS of node tools/chat-bench/run.mjs --exe <the multibot.exe to install>' >&2
   exit 1
 fi
 repo=valentinyeo/multiprompt
@@ -107,7 +107,7 @@ profile=$(lh shell '$env:USERPROFILE' --timeout 60 | tr -d '\r\n')
 if [[ ! "$profile" =~ ^[A-Za-z]:\\Users\\[A-Za-z0-9._-]+$ ]]; then echo 'refusing install: unexpected laptop user folder' >&2; exit 1; fi
 app="$profile\\Documents\\GitHub\\zigshell"
 if [ "$only_ext" = 0 ]; then
-  check_install_version "$app\\zig-out\\bin\\multiprompt.exe" "$release" "$allow_downgrade"
+  check_install_version "$app\\zig-out\\bin\\multibot.exe" "$release" "$allow_downgrade"
 fi
 upload_pc="$app\\release-upload-$(basename "$download_dir")"
 staged_pc=1
@@ -133,7 +133,8 @@ for asset in "${assets[@]}"; do upload "$asset"; done
 if [ "$only_ext" = 0 ]; then
   lh shell "\$ErrorActionPreference='Stop'; \$b='$app\\zig-out\\bin'; \$s='$upload_pc'; \$t=Get-Date -Format HHmmss;
     \$v='v$installed_version';
-    Rename-Item \"\$b\\multiprompt.exe\" \"multiprompt-stable-\$v-\$t.exe\"; Copy-Item \"\$s\\multiprompt-x64.exe\" \"\$b\\multiprompt.exe\";
+    \$n=if (Test-Path \"\$b\\multibot.exe\") { 'multibot.exe' } else { 'multiprompt.exe' };
+    Rename-Item \"\$b\\\$n\" \"multiprompt-stable-\$v-\$t.exe\"; Copy-Item \"\$s\\multiprompt-x64.exe\" \"\$b\\\$n\";
     Rename-Item \"\$b\\zigshell-bridge.exe\" \"zigshell-bridge-old-\$t.exe\" -ErrorAction SilentlyContinue; Copy-Item \"\$s\\zigshell-bridge-x64.exe\" \"\$b\\zigshell-bridge.exe\" -Force;
     Get-ChildItem \"\$b\\multiprompt-stable-v*.exe\" | Sort LastWriteTime -Descending | Select -Skip 5 | ForEach-Object { \$backup=\$_; try { Remove-Item \$backup.FullName } catch { Write-Output \"skipped locked backup \$(\$backup.Name)\" } };
     Get-ChildItem \"\$b\\zigshell-bridge-old-*.exe\" | Remove-Item -ErrorAction SilentlyContinue; 'app installed, backup of ' + \$v" --timeout 60

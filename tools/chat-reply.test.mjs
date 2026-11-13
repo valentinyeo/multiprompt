@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const zig = process.env.ZIG || 'zig';
-const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multiprompt.exe');
+const exe = path.resolve(root, process.env.MP_EXE || 'zig-out/bin/multibot.exe');
 const winPath = file => `Z:${file.replaceAll('/', '\\')}`;
 
 test('ISSUE-419 context Reply delivers the exact quote and reply once', { timeout: 175000 }, async () => {

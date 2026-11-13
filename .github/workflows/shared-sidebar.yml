@@ -131,16 +131,16 @@ jobs:
               node tools/changelog-link-audit.mjs bin/release-notes.json $env:RELEASE_TAG evidence/changelog-audit.json
               if ($LASTEXITCODE -ne 0) { throw 'Release notes audit failed' }
             }
-            Move-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+            Move-Item bin/multiprompt-x64.exe bin/multibot.exe
           } else {
             Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
             if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
             Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
             & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
             if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
-            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+            Copy-Item zig-out/bin/multibot.exe bin/multibot.exe
           }
-          $provenance = @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"}
+          $provenance = @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multibot.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"}
           if ($env:CHANGELOG_LINKS -eq 'true') { $provenance.releaseNotesSha256 = (Get-FileHash bin/release-notes.json -Algorithm SHA256).Hash.ToLower() }
           $provenance | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Native sidebar parity and actions
@@ -157,21 +157,21 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           if ($env:PALETTE_AVATAR_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -PaletteAvatarProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -PaletteAvatarProof
           } elseif ($env:DENSITY_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -DensityProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -DensityProof
           } elseif ($env:STAR_BADGE_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -StarBadgeProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -StarBadgeProof
           } elseif ($env:HIGHLIGHT_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -HighlightProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -HighlightProof
           } elseif ($env:CHANGELOG_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof -ChangelogLinks:($env:CHANGELOG_LINKS -eq 'true')
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -ChangelogProof -ChangelogLinks:($env:CHANGELOG_LINKS -eq 'true')
           } elseif ($env:MEMORY_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -MemoryProof
           } elseif ($env:ORDER_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -OrderProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence" -OrderProof
           } else {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence"
           }
       - name: Capture old starred sidebar
         if: always() && inputs.star_badge_proof

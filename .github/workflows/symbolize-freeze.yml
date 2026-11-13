@@ -37,7 +37,7 @@ jobs:
           node tools/version-stamp.mjs build "$TAG"
           zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion="${TAG#v}"
           mkdir -p compare
-          cp zig-out/bin/multiprompt.exe compare/multiprompt-x64.exe
+          cp zig-out/bin/multibot.exe compare/multiprompt-x64.exe
           sha256sum compare/multiprompt-x64.exe | tee compare/local.sha256
       - name: Compare with the published asset
         env:
@@ -62,7 +62,7 @@ jobs:
         run: |
           zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dsymbols -Dversion="${TAG#v}" --prefix zig-out-symbols
           mkdir -p symbols
-          cp zig-out-symbols/bin/multiprompt.exe symbols/multiprompt.exe
+          cp zig-out-symbols/bin/multibot.exe symbols/multibot.exe
           shopt -s nullglob
           pdbs=(zig-out-symbols/bin/*.pdb)
           if [ ${#pdbs[@]} -gt 0 ]; then
@@ -96,7 +96,7 @@ jobs:
           EOF
           mapfile -t RVAS < /tmp/report-rvas.txt
           llvm-symbolizer --relative-address --functions=linkage --demangle \
-            --obj=symbols/multiprompt.exe "${RVAS[@]}" | tee symbols/frames.txt
+            --obj=symbols/multibot.exe "${RVAS[@]}" | tee symbols/frames.txt
           echo "match=$SYMBOL_MATCH" >> symbols/frames.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

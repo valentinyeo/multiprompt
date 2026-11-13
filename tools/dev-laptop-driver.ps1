@@ -65,7 +65,7 @@ function Dev-Window($proc) {
 }
 
 function Stable-Rect {
-    $stable = Get-Process -Name 'multiprompt' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    $stable = Get-Process -Name 'multibot','multiprompt' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
     if (-not $stable) { return 'stable-none' }
     $h = [MpRig]::FindWindowFor([uint32]$stable.Id, 'ZigShell')
     if ($h -eq [IntPtr]::Zero) { return 'stable-window-missing' }

@@ -422,7 +422,7 @@ try {
     if ($UpdateFixtureRoot) {
         if ($Feature -ne 'status-card') { throw 'Update fixture is only valid for status-card' }
         $UpdateFixtureRoot = (Resolve-Path $UpdateFixtureRoot).Path
-        $copy = Join-Path $scratch 'footer-test/multiprompt.exe'
+        $copy = Join-Path $scratch 'footer-test/multibot.exe'
         New-Item -ItemType Directory -Force (Split-Path $copy) | Out-Null
         Copy-Item -LiteralPath $Exe -Destination $copy
         $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'

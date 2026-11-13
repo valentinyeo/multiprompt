@@ -370,7 +370,7 @@ jobs:
         run: |
           powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"
+          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multibot.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multibot.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload update restart proof
@@ -650,7 +650,7 @@ jobs:
         with:
           name: update-verifier-x64-${{ github.run_id }}
           path: |
-            zig-out/bin/multiprompt.exe
+            zig-out/bin/multibot.exe
             zig-out/bin/update-test-key.der
           if-no-files-found: error
           retention-days: 1
@@ -663,7 +663,7 @@ jobs:
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         with:
           name: native-update-x64-${{ github.run_id }}
-          path: ${{ runner.temp }}/native-update/bin/multiprompt.exe
+          path: ${{ runner.temp }}/native-update/bin/multibot.exe
           if-no-files-found: error
           retention-days: 1
 
@@ -740,10 +740,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "baseline/zig-out/bin/tmux.exe"
           if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+          if (-not (Test-Path baseline/zig-out/bin/multibot.exe)) { Copy-Item baseline/zig-out/bin/multiprompt.exe baseline/zig-out/bin/multibot.exe }
           "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Measure baseline session speed
         shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
+        run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multibot.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
       - name: Bound Zig cache before save
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: bash
@@ -819,7 +820,7 @@ jobs:
           "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Measure candidate session speed
         shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
+        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multibot.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
       - name: Bound Zig cache before save
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: bash

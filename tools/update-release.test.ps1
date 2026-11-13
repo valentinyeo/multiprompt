@@ -1,4 +1,4 @@
-param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multiprompt.exe", [string]$Evidence = '', [string]$NativeUpdate = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
+param([string]$Root = "$env:RUNNER_TEMP/update-release-fixtures", [string]$Verifier = "$pwd/zig-out/bin/multibot.exe", [string]$Evidence = '', [string]$NativeUpdate = '', [ValidateSet('All', 'Lifecycle', 'Rollback')][string]$TestGroup = 'All')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $script:manifestFault = ''

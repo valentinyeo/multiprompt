@@ -350,7 +350,7 @@ test('IGSH-1072 executable resolver rejects stale revisions and wrong versions b
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-identity-'));
     try {
       fs.mkdirSync(path.join(directory, 'zig-out', 'bin'), { recursive: true });
-      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'multiprompt.exe'), marker);
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'multibot.exe'), marker);
       fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'zigshell-bridge.exe'), 'bridge');
       const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `function git { '${revision}' }\n${script}`], {
         cwd: directory,

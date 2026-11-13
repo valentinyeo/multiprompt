@@ -45,7 +45,7 @@ jobs:
           if ($env:EXE_SOURCE -eq 'build') {
             zig build -Dtarget=x86_64-windows-gnu --summary all
             if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
-            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+            Copy-Item zig-out/bin/multibot.exe bin/multibot.exe
           } else {
             if ($env:EXE_SOURCE -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Expected build or a release tag' }
             gh release download $env:EXE_SOURCE --repo $env:GITHUB_REPOSITORY --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir bin
@@ -54,18 +54,18 @@ jobs:
             if ($line.Count -ne 1) { throw 'Missing unique executable checksum' }
             $expected = ($line[0] -split '\s+')[0].ToLower()
             if ((Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Release checksum mismatch' }
-            Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+            Copy-Item bin/multiprompt-x64.exe bin/multibot.exe
             Copy-Item bin/SHA256SUMS.txt evidence/
           }
           zig cc -target x86_64-windows-gnu -O2 tools/verify-reconnect/fake-ssh.c -o bin/ssh.exe
           if ($LASTEXITCODE -ne 0) { throw 'Stand-in compile failed' }
-          @{exe_source=$env:EXE_SOURCE; revision=(git rev-parse HEAD); run_id=$env:GITHUB_RUN_ID; run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; exe_sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower()} | ConvertTo-Json | Set-Content evidence/provenance.json
+          @{exe_source=$env:EXE_SOURCE; revision=(git rev-parse HEAD); run_id=$env:GITHUB_RUN_ID; run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; exe_sha256=(Get-FileHash bin/multibot.exe -Algorithm SHA256).Hash.ToLower()} | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Drive real Windows desktop
         shell: pwsh
-        run: ./tools/verify-reconnect/close-unattached.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
+        run: ./tools/verify-reconnect/close-unattached.ps1 -Exe "$PWD/bin/multibot.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence"
       - name: Prove offline close and explicit reopen
         shell: pwsh
-        run: ./tools/verify-reconnect/pending-close.ps1 -Exe "$PWD/bin/multiprompt.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence/pending-close"
+        run: ./tools/verify-reconnect/pending-close.ps1 -Exe "$PWD/bin/multibot.exe" -Ssh "$PWD/bin/ssh.exe" -Output "$PWD/evidence/pending-close"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

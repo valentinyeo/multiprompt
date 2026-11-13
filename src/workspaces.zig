@@ -34,6 +34,7 @@ const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
 const PROCESS_INFORMATION = @import("win32.zig").PROCESS_INFORMATION;
 const WIN32_FIND_DATAW = @import("win32.zig").WIN32_FIND_DATAW;
+const legacy_name = @import("legacy_name.zig");
 const IsWindow = @import("win32.zig").IsWindow;
 const SetParent = @import("win32.zig").SetParent;
 const SetWindowLongPtrW = @import("win32.zig").SetWindowLongPtrW;
@@ -1869,6 +1870,86 @@ fn repairStartMenuShortcutIdentity(exe_path: LPCWSTR) void {
     }
 }
 
+fn retargetShortcut(link_path: [*:0]const u16, old_exe: []const u16, new_exe: LPCWSTR) void {
+    var link_ptr: ?*anyopaque = null;
+    if (CoCreateInstance(&CLSID_ShellLink, null, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, &link_ptr) != S_OK or link_ptr == null) return;
+    defer comRelease(link_ptr);
+    const link: *IShellLinkW = @ptrCast(@alignCast(link_ptr.?));
+    var persist_ptr: ?*anyopaque = null;
+    if (link.lpVtbl.QueryInterface(link, &IID_IPersistFile, &persist_ptr) != S_OK or persist_ptr == null) return;
+    defer comRelease(persist_ptr);
+    const persist: *IPersistFile = @ptrCast(@alignCast(persist_ptr.?));
+    const STGM_READ: DWORD = 0x00000000;
+    if (persist.lpVtbl.Load(persist, link_path, STGM_READ) != S_OK) return;
+    var current: [520]u16 = std.mem.zeroes([520]u16);
+    if (link.lpVtbl.GetPath(link, &current, current.len, null, 0) != S_OK) return;
+    const current_len = std.mem.indexOfScalar(u16, &current, 0) orelse return;
+    if (!legacy_name.eqlIgnoreCase(current[0..current_len], old_exe)) return;
+    if (link.lpVtbl.SetPath(link, new_exe) != S_OK) return;
+    _ = link.lpVtbl.SetIconLocation(link, new_exe, 0);
+    if (persist.lpVtbl.Save(persist, link_path, 1) == S_OK) {
+        const SHCNE_UPDATEITEM: LONG = 0x00002000;
+        const SHCNF_PATHW: UINT = 0x0005;
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, link_path, null);
+    }
+}
+
+fn retargetShortcutsIn(appdata: []const u16, folder: []const u8, old_exe: []const u16, new_exe: LPCWSTR) void {
+    var pattern: [768]u16 = std.mem.zeroes([768]u16);
+    if (appdata.len + folder.len + 8 >= pattern.len) return;
+    @memcpy(pattern[0..appdata.len], appdata);
+    var dir_len = appdata.len;
+    for (folder) |c| {
+        pattern[dir_len] = c;
+        dir_len += 1;
+    }
+    const find_suffix = "\\*.lnk";
+    var pattern_len = dir_len;
+    for (find_suffix) |c| {
+        pattern[pattern_len] = c;
+        pattern_len += 1;
+    }
+    pattern[pattern_len] = 0;
+    var data: WIN32_FIND_DATAW = undefined;
+    const find = FindFirstFileW(@ptrCast(&pattern), &data);
+    if (find == INVALID_HANDLE_VALUE_PTR) return;
+    defer _ = FindClose(find);
+    while (true) {
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+            var name_len: usize = 0;
+            while (name_len < data.cFileName.len and data.cFileName[name_len] != 0) : (name_len += 1) {}
+            var full: [900]u16 = std.mem.zeroes([900]u16);
+            if (dir_len + 1 + name_len < full.len) {
+                @memcpy(full[0..dir_len], pattern[0..dir_len]);
+                full[dir_len] = '\\';
+                @memcpy(full[dir_len + 1 .. dir_len + 1 + name_len], data.cFileName[0..name_len]);
+                full[dir_len + 1 + name_len] = 0;
+                retargetShortcut(@ptrCast(&full), old_exe, new_exe);
+            }
+        }
+        if (FindNextFileW(find, &data) == 0) break;
+    }
+}
+
+fn retargetLegacyShortcuts(exe_path: LPCWSTR) void {
+    if (IS_DEV) return;
+    const exe = std.mem.span(exe_path);
+    if (legacy_name.isLegacyPath(exe)) return;
+    var old_exe: [520]u16 = undefined;
+    const old_len = legacy_name.siblingPath(exe, legacy_name.LEGACY_NAME, &old_exe) orelse return;
+    var appdata: [300]u16 = std.mem.zeroes([300]u16);
+    const appdata_len = GetEnvironmentVariableW(L("APPDATA"), &appdata, appdata.len);
+    if (appdata_len == 0 or appdata_len >= appdata.len) return;
+    const folders = [_][]const u8{
+        "\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar",
+        "\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\StartMenu",
+        "\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+        "\\Microsoft\\Windows\\Start Menu\\Programs",
+        "\\Microsoft\\Windows\\Start Menu",
+    };
+    for (folders) |folder| retargetShortcutsIn(appdata[0..appdata_len], folder, old_exe[0..old_len], exe_path);
+}
+
 fn registerJumpListInner() void {
     var exe_buf: [512:0]u16 = undefined;
     const exe_len = GetModuleFileNameW(null, &exe_buf, 512);
@@ -1876,6 +1957,7 @@ fn registerJumpListInner() void {
     exe_buf[exe_len] = 0;
     const exe_path: [*:0]const u16 = &exe_buf;
     repairStartMenuShortcutIdentity(exe_path);
+    retargetLegacyShortcuts(exe_path);
 
     var cdl_ptr: ?*anyopaque = null;
     if (CoCreateInstance(&CLSID_DestinationList, null, CLSCTX_INPROC_SERVER, &IID_ICustomDestinationList, &cdl_ptr) != S_OK) return;

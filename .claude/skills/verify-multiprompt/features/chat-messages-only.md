@@ -29,7 +29,7 @@ IGSH-816 adds the CLEAN chat view option: the Ctrl+K entry `Chat View: Toggle CL
 - Exact workflow-side journey command:
 
 ```powershell
-& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+& .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
 ```
 
 - `FEATURE=chat-messages-only` delegates to `tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only`, using its existing owned job, isolated profile, saved remote tab, Python reader and fake tmux boundary. The stand-in agent creates its own ordinary Claude JSONL transcript; the real app discovers and parses it. The harness never writes the app's chat cache.

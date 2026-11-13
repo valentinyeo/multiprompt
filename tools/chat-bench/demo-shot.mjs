@@ -11,7 +11,7 @@ import { sessions, transcript, usage } from './demo-workspace.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, i, all) => i % 2 ? pairs : [...pairs, [all[i].replace(/^--/, ''), all[i + 1]]], []));
-if (!args.exe || !args.png) throw new Error('Usage: xvfb-run -a -s "-screen 0 1600x1000x24" node tools/chat-bench/demo-shot.mjs --exe zig-out/bin/multiprompt.exe --png hero.png [--width 1600 --height 1000]');
+if (!args.exe || !args.png) throw new Error('Usage: xvfb-run -a -s "-screen 0 1600x1000x24" node tools/chat-bench/demo-shot.mjs --exe zig-out/bin/multibot.exe --png hero.png [--width 1600 --height 1000]');
 if (!process.env.DISPLAY) throw new Error('Run under xvfb-run so the app never draws on a real desktop');
 const width = Number(args.width || 1600), height = Number(args.height || 1000);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-shot-'));
@@ -19,7 +19,7 @@ const home = path.join(root, 'home'), appdata = path.join(root, 'appdata'), mail
 const env = { ...process.env, WINEPREFIX: prefix, WINEARCH: 'win64', WINEDEBUG: '-all', WINEDLLOVERRIDES: 'winemenubuilder.exe=d', MULTIPROMPT_NO_LOGIN: '1', ZIGSHELL_DEBUG: '1' };
 fs.mkdirSync(path.join(appdata, 'ZigShell'), { recursive: true });
 fs.mkdirSync(mailbox, { recursive: true });
-const exe = path.join(root, 'multiprompt.exe');
+const exe = path.join(root, 'multibot.exe');
 fs.copyFileSync(path.resolve(args.exe), exe);
 for (const s of sessions) {
   const file = path.join(home, '.claude/projects/-home-dev-notebook', `${s.sid}.jsonl`);

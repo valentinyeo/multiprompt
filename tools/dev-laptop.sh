@@ -17,7 +17,7 @@ usage: tools/dev-laptop.sh install [run-id|latest]
        tools/dev-laptop.sh cleanup <term names...>
 
 Installs the dev build on Valentin's laptop, parks it on the second monitor and drives one journey.
-Never touches multiprompt.exe.
+Never touches multibot.exe.
 USAGE
     exit 2
 }

@@ -47,16 +47,16 @@ jobs:
           Download-Release 'v0.28.1099' 'old-bin'
           if ($env:RELEASE_TAG) {
             Download-Release $env:RELEASE_TAG 'bin'
-            Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+            Copy-Item bin/multiprompt-x64.exe bin/multibot.exe
           } else {
             Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
             if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
             Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
             & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
             if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
-            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+            Copy-Item zig-out/bin/multibot.exe bin/multibot.exe
           }
-          @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); baseline='v0.28.1099'; baseline_sha256=(Get-FileHash old-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content evidence/provenance.json
+          @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multibot.exe -Algorithm SHA256).Hash.ToLower(); baseline='v0.28.1099'; baseline_sha256=(Get-FileHash old-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Old release rejects pinned ordinary close
         shell: pwsh
         run: |
@@ -66,11 +66,11 @@ jobs:
       - name: Candidate closes disconnected sessions through palette
         if: always()
         shell: pwsh
-        run: ./tools/close-disconnected.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/palette" -Entry palette
+        run: ./tools/close-disconnected.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence/palette" -Entry palette
       - name: Candidate closes disconnected sessions through sidebar
         if: always()
         shell: pwsh
-        run: ./tools/close-disconnected.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/sidebar" -Entry sidebar
+        run: ./tools/close-disconnected.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence/sidebar" -Entry sidebar
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

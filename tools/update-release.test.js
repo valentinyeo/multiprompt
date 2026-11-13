@@ -47,7 +47,7 @@ test('Windows behavioral update tests are required by CI', () => {
   ]) assert.equal(source.split('\n').filter(line => line.trim() === command).length, 1, command);
   for (const command of [
     'powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"',
-    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"',
+    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multibot.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multibot.exe"',
   ]) assert.equal(update.split('\n').filter(line => line.trim() === command).length, 1, command);
   assert.match(source, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
   assert.match(source, /foreach \(\$finding in 1\.\.9\)/);
@@ -61,7 +61,7 @@ test('Windows behavioral update tests are required by CI', () => {
     .replace("${{ github.event_name != 'pull_request' }}", 'true')
     .replace(/ -Dversion="\$\{TAG#v\}"/, '');
   assert.ok(build.includes(`run: ${releaseBuild} --summary all\n`));
-  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multiprompt.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
+  assert.match(build, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        with:\n          name: update-verifier-x64-\$\{\{ github.run_id \}\}\n          path: \|\n            zig-out\/bin\/multibot.exe\n            zig-out\/bin\/update-test-key.der\n          if-no-files-found: error\n          retention-days: 1\n          overwrite: true/);
   assert.match(build, /key: \$\{\{ runner\.os \}\}-zig-0\.16\.0-shards-v4-\$\{\{ matrix.arch \}\}-\$\{\{ hashFiles\('build\.zig', 'build\.zig\.zon'\) \}\}/);
   assert.match(update, /MULTIPROMPT_TEST_SIGNING_KEY: \$\{\{ github.workspace \}\}\/update-verifier\/update-test-key.der/);
   assert.match(build, /- name: Prepare throwaway update-test signing key\n        if: steps\.paths\.outputs\.heavy == 'true' && matrix.arch == 'x64'\n        run: node tools\/update-release-fixtures.mjs --prepare-key zig-out\/bin\/update-test-key.der/);

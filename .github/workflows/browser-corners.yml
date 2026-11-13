@@ -47,7 +47,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = (Resolve-Path negative-source/zig-out/bin/multiprompt.exe).Path
+          $exe = (Resolve-Path negative-source/zig-out/bin/multibot.exe).Path
           $source = Get-Content negative-source/src/main.zig -Raw
           if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
           $version = $Matches[1]
@@ -68,7 +68,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
+          $exe = (Resolve-Path zig-out/bin/multibot.exe).Path
           $source = Get-Content src/main.zig -Raw
           if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
           $version = $Matches[1]

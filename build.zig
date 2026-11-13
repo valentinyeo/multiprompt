@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "multiprompt",
+        .name = "multibot",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .link_libc = true,

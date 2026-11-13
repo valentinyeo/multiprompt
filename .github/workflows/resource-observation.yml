@@ -47,7 +47,7 @@ jobs:
         run: ./tools/resource-guard/measure.ps1 -Exe baseline-bin/multiprompt-x64.exe -Evidence resource-evidence/baseline -FixtureBin fixture-bin
       - name: Measure candidate
         shell: pwsh
-        run: ./tools/resource-guard/measure.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
+        run: ./tools/resource-guard/measure.ps1 -Exe zig-out/bin/multibot.exe -Evidence resource-evidence/candidate -FixtureBin fixture-bin
       - name: Evaluate resource gate
         if: always()
         run: node tools/resource-guard/evaluate.mjs

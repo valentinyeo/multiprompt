@@ -58,7 +58,7 @@ jobs:
           zig build -Dtarget=x86_64-windows-gnu -Dcpu=baseline --summary all
           if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
           New-Item -ItemType Directory -Force bin | Out-Null
-          Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+          Copy-Item zig-out/bin/multibot.exe bin/multibot.exe
           Copy-Item zig-out/bin/zigshell-bridge.exe bin/zigshell-bridge.exe
       - name: Acquire published binaries
         if: inputs.tag != ''
@@ -87,14 +87,14 @@ jobs:
             $expected = $lines[0].Substring(0, 64).ToLowerInvariant()
             if ((Get-FileHash "bin/$asset" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw "Checksum mismatch for $asset" }
           }
-          Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+          Copy-Item bin/multiprompt-x64.exe bin/multibot.exe
           Copy-Item bin/zigshell-bridge-x64.exe bin/zigshell-bridge.exe
       - name: Record binary provenance
         shell: pwsh
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          $bytes = [IO.File]::ReadAllBytes("$PWD/bin/multiprompt.exe")
+          $bytes = [IO.File]::ReadAllBytes("$PWD/bin/multibot.exe")
           $binaryText = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
           $markers = [regex]::Matches($binaryText, 'MPVERSION=(\d+\.\d+\.\d+);')
           $versions = @($markers | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
@@ -103,7 +103,7 @@ jobs:
           $sha = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source SHA' }
           New-Item -ItemType Directory -Force evidence | Out-Null
-          [ordered]@{ mode = if ($env:RELEASE_TAG) { 'published' } else { 'branch-build' }; tag = $env:RELEASE_TAG; harness_sha = $sha; app_source_sha = $sha; app_sha256 = (Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant(); bridge_sha256 = (Get-FileHash bin/zigshell-bridge.exe -Algorithm SHA256).Hash.ToLowerInvariant(); embedded_version = $versions[0]; run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/provenance.json
+          [ordered]@{ mode = if ($env:RELEASE_TAG) { 'published' } else { 'branch-build' }; tag = $env:RELEASE_TAG; harness_sha = $sha; app_source_sha = $sha; app_sha256 = (Get-FileHash bin/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant(); bridge_sha256 = (Get-FileHash bin/zigshell-bridge.exe -Algorithm SHA256).Hash.ToLowerInvariant(); embedded_version = $versions[0]; run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Build the test account service
         working-directory: service
         shell: pwsh
@@ -126,7 +126,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Rename regression failed' }
       - name: Drive the real desktop against the account service
         shell: pwsh
-        run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+        run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multibot.exe" -Output "$PWD/evidence"
       - name: Require native roundtrip evidence
         shell: pwsh
         run: |
@@ -216,7 +216,7 @@ jobs:
         shell: powershell
         env:
           PHOTO_PROOF_CREDENTIAL: ${{ inputs.pictures_isolated && secrets.IGSH_1612_FIXTURE_PROOF || (!inputs.pictures_isolated && secrets.IGSH_1612_PHOTO_PROOF || '') }}
-        run: ./tools/verify-account-photos/desktop.ps1 -Exe "$PWD/zig-out/bin/multiprompt.exe" -Evidence "$PWD/desktop-evidence"
+        run: ./tools/verify-account-photos/desktop.ps1 -Exe "$PWD/zig-out/bin/multibot.exe" -Evidence "$PWD/desktop-evidence"
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

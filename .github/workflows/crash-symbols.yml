@@ -43,6 +43,6 @@ jobs:
         with:
           name: crash-symbols-${{ inputs.revision }}
           path: |
-            zig-out/bin/multiprompt.exe
-            zig-out/bin/multiprompt.pdb
+            zig-out/bin/multibot.exe
+            zig-out/bin/multibot.pdb
           if-no-files-found: warn

@@ -64,7 +64,7 @@ jobs:
             $source = Get-Content "$side/src/main.zig" -Raw
             if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Application version missing' }
             $version = $Matches[1]
-            $hash = (Get-FileHash "$side/zig-out/bin/multiprompt.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+            $hash = (Get-FileHash "$side/zig-out/bin/multibot.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
             @{revision=(git -C $side rev-parse HEAD).Trim(); version=$version; sha256=$hash; harness=(git -C harness rev-parse HEAD).Trim(); runId=$env:GITHUB_RUN_ID; runner=$env:RUNNER_NAME} | ConvertTo-Json | Set-Content "evidence/$side-build.json"
           }
       - name: Measure five alternating unchanged baseline and candidate attempts
@@ -78,7 +78,7 @@ jobs:
             foreach ($side in @('base', 'head')) {
               $directory = "$pwd/evidence/attempt-$attempt/$side"
               $identity = Get-Content "evidence/$side-build.json" -Raw | ConvertFrom-Json
-              & powershell -NoProfile -File harness/tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only -Exe "$pwd/$side/zig-out/bin/multiprompt.exe" -Ssh "$pwd/$side/zig-out/bin/ssh.exe" -ExpectedVersion $identity.version -ExpectedHash $identity.sha256 -Evidence "$directory"
+              & powershell -NoProfile -File harness/tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only -Exe "$pwd/$side/zig-out/bin/multibot.exe" -Ssh "$pwd/$side/zig-out/bin/ssh.exe" -ExpectedVersion $identity.version -ExpectedHash $identity.sha256 -Evidence "$directory"
               if ($LASTEXITCODE -ne 0) { $failures += "$attempt/$side" }
               Copy-Item "evidence/$side-build.json" "$directory/build.json"
               if (Test-Path "$directory/remote-switch/error.txt") {

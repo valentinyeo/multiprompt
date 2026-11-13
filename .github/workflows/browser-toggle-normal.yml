@@ -66,18 +66,18 @@ jobs:
             if ($checks.Count -ne 1) { throw "Expected one checksum for $asset" }
             $expected = ($checks[0] -split '\s+')[0].ToLowerInvariant()
             if ((Get-FileHash "verify-bin/$asset-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Release checksum mismatch for $asset" }
-            Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$asset.exe"
+            Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$(if ($asset -eq 'multiprompt') { 'multibot' } else { $asset }).exe"
           }
           $version = $env:RELEASE_TAG.Substring(1)
-          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multiprompt.exe"))
+          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multibot.exe"))
           if (-not $binary.Contains("MPVERSION=$version;")) { throw 'Executable version mismatch' }
-          $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash = (Get-FileHash verify-bin/multibot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Alternate twenty before and twenty after isolated journeys
         shell: powershell
         run: |
-          & tools/browser-toggle-normal.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -BeforeRoot "$pwd/before-source" -Output "$pwd/evidence" -Runs 20
+          & tools/browser-toggle-normal.ps1 -Exe "$pwd/verify-bin/multibot.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -BeforeRoot "$pwd/before-source" -Output "$pwd/evidence" -Runs 20
       - name: Upload bounded native evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

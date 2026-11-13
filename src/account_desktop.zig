@@ -2399,6 +2399,7 @@ pub fn accountClaim(hwnd: HANDLE) bool {
             const other_is_dev = std.mem.indexOf(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("-dev")) != null;
             is_app = other_is_dev == IS_DEV and
                 (std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("multiprompt")) or
+                    std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("multibot")) or
                     std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("zigshell")));
         }
         var window_pid: DWORD = 0;

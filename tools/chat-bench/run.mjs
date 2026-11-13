@@ -53,7 +53,7 @@ async function run({ requestedExe, config, out, installable }) {
     binary = { version: marker?.[1] || 'candidate', protocol: 'history', exeSha256: hash(requestedExe), reader, readerSha256: hash(reader) };
   }
   if (hash(requestedExe) !== binary.exeSha256 || hash(binary.reader) !== binary.readerSha256) throw new Error('Binary/reader provenance mismatch');
-  const exe = path.join(out, 'multiprompt.exe');
+  const exe = path.join(out, 'multibot.exe');
   fs.copyFileSync(requestedExe, exe);
   const sourceReader = binary.reader;
   binary = { ...binary, sourceReader, reader: path.join(out, 'production-reader.py') };

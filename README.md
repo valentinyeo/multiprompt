@@ -37,7 +37,7 @@ Full shortcut list: [openwiki/operations/keyboard-shortcuts.md](openwiki/operati
 ## Install
 
 1. Open the [Releases](../../releases) page and download `multiprompt-x64.exe` (most PCs) or `multiprompt-arm64.exe` (Snapdragon laptops).
-2. Rename it to `multiprompt.exe`, put it in a folder of your choice and run it. No installer is needed.
+2. Rename it to `multibot.exe`, put it in a folder of your choice and run it. No installer is needed.
 
 Requires Windows 10 or 11.
 
@@ -58,7 +58,7 @@ zig build -Dtarget=x86_64-windows-gnu
 zig build -Dtarget=aarch64-windows-gnu
 ```
 
-The app lands in `zig-out/bin/multiprompt.exe`.
+The app lands in `zig-out/bin/multibot.exe`.
 
 Use `-Drooms-preview=true` for isolated Rooms builds. Preview defaults off. It cannot accompany `-Drelease=true`. Live Room sending remains unsupported.
 

@@ -62,9 +62,9 @@ function parseSymbolizerOutput(stdout, count) {
 function windowsHelp(offsets) {
   return [
     'To resolve these on Windows without llvm-symbolizer:',
-    '  1. Open multiprompt.exe (the build named in "version") in WinDbg with its multiprompt.pdb on the symbol path.',
-    '  2. Run:  ln multiprompt+0x' + (offsets[0] || 0).toString(16),
-    '  or with the LLVM tools:  llvm-symbolizer --use-native-pdb-reader --relative-address --obj=multiprompt.exe 0x' +
+    '  1. Open multibot.exe (the build named in "version") in WinDbg with its multibot.pdb on the symbol path.',
+    '  2. Run:  ln multibot+0x' + (offsets[0] || 0).toString(16),
+    '  or with the LLVM tools:  llvm-symbolizer --use-native-pdb-reader --relative-address --obj=multibot.exe 0x' +
       (offsets[0] || 0).toString(16),
     'The .dmp next to the report opens in WinDbg or Visual Studio and shows the full stack.',
   ].join('\n');
@@ -82,7 +82,7 @@ function main(argv) {
     else file = args[i];
   }
   if (!file) {
-    console.error('usage: node tools/crash-report.js <crash.txt> [--exe multiprompt.exe] [--symbolizer llvm-symbolizer]');
+    console.error('usage: node tools/crash-report.js <crash.txt> [--exe multibot.exe] [--symbolizer llvm-symbolizer]');
     return 2;
   }
   const report = parseCrashReport(fs.readFileSync(file, 'utf8'));
@@ -93,7 +93,7 @@ function main(argv) {
   if (report.exeOffset !== null) offsets.push(report.exeOffset);
   offsets.push(...report.stackRvas);
   if (offsets.length === 0) {
-    console.log('No exe offset in this report (the crash was outside multiprompt.exe).');
+    console.log('No exe offset in this report (the crash was outside the app).');
     return 0;
   }
   if (!exe) {

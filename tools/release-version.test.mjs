@@ -488,7 +488,7 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
   const f = fixture(t);
   fs.mkdirSync(path.join(f.dir, 'zig-out/bin'), { recursive: true });
   for (const [bytes, accepted] of [['junk MPVERSION=1.2.9; tail', true], ['MPVERSION=1.2.3;', false], ['', false], ['MPVERSION=1.2.9;MPVERSION=1.2.3;', false]]) {
-    fs.writeFileSync(path.join(f.dir, 'zig-out/bin/multiprompt.exe'), bytes);
+    fs.writeFileSync(path.join(f.dir, 'zig-out/bin/multibot.exe'), bytes);
     const result = spawnSync(process.execPath, ['--input-type=module', '-', 'v1.2.9'], { input: check, cwd: f.dir, encoding: 'utf8' });
     assert.equal(result.status === 0, accepted, result.stderr);
   }
