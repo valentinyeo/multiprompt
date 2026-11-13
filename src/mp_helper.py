@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -20,8 +21,12 @@ _send = None
 def send_module():
     global _send
     if _send is None:
-        source = Path(__file__).resolve().with_name("mp_send.py")
-        spec = importlib.util.spec_from_file_location("mp_send", source)
+        here = Path(__file__).resolve()
+        source = here.with_name("mp_send.py")
+        if not source.is_file():
+            source = here.with_name("mp-send")
+        loader = importlib.machinery.SourceFileLoader("mp_send", str(source))
+        spec = importlib.util.spec_from_loader("mp_send", loader)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         _send = module
@@ -120,27 +125,30 @@ def zsb(*args):
 
 def find_tab(listing, tmux):
     for workspace in listing.get("workspaces") or []:
-        tabs = list(workspace.get("tabs") or [])
+        tabs = [(None, tab) for tab in workspace.get("tabs") or []]
         for group in workspace.get("groups") or []:
-            tabs.extend(group.get("tabs") or [])
-        for tab in tabs:
+            tabs.extend((group.get("name"), tab) for tab in group.get("tabs") or [])
+        for group, tab in tabs:
             if tab.get("tmux") == tmux:
-                return workspace.get("name"), tab
-    return None, None
+                return workspace.get("name"), group, tab
+    return None, None, None
 
 
 def show(parent, tmux, name):
     listing = zsb("workspace-list")
     if listing.get("ok") is not True:
         return dict(ok=False, error=listing.get("error") or "zsb_failed")
-    existing = find_tab(listing, tmux)[1]
+    existing = find_tab(listing, tmux)[2]
     if existing:
         return dict(ok=True, tab=existing.get("id"), existing=True)
-    workspace, tab = find_tab(listing, parent)
+    workspace, group, tab = find_tab(listing, parent)
     if not tab or not tab.get("host"):
         return dict(ok=False, error="parent_tab_not_open")
-    return zsb("session-open", "--workspace", workspace, "--after-tab", str(tab["id"]), "--host", tab["host"],
-               "--tmux", tmux, "--name", name)
+    common = ("--host", tab["host"], "--tmux", tmux, "--name", name)
+    opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(tab["id"]), *common)
+    if opened.get("ok") is not True and opened.get("error") == "bad_args" and group:
+        opened = zsb("session-open", "--workspace", workspace, "--group", group, *common)
+    return opened
 
 
 def start(args):
@@ -161,7 +169,7 @@ def start(args):
     config = read_json(path)
     if config and (config.get("helper_parent") != parent or config.get("cwd") != folder):
         raise ValueError("a helper named " + repr(name) + " already runs here with another folder; pick another name")
-    config = dict(config or {}, enabled=False, cwd=folder, tmux=tmux, helper_parent=parent, helper_name=name)
+    config = dict(config or dict(enabled=False), cwd=folder, tmux=tmux, helper_parent=parent, helper_name=name)
     if args.model:
         config["model"] = args.model
     if args.effort:
@@ -284,7 +292,7 @@ def close(args):
     parent = parent_tmux()
     row = pick(parent, args.name)
     listing_reply = zsb("workspace-list")
-    tab = find_tab(listing_reply, row["tmux"])[1] if listing_reply.get("ok") is True else None
+    tab = find_tab(listing_reply, row["tmux"])[2] if listing_reply.get("ok") is True else None
     closed = zsb("session-close", "--tab", str(tab["id"])) if tab else dict(ok=True)
     stopped = reader_cli("disable", PROVIDER, row["sid"])
     print(json.dumps(dict(ok=stopped.get("status") == "disabled", name=row["name"], tab_closed=closed.get("ok") is True,
