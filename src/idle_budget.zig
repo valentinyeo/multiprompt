@@ -11,7 +11,7 @@ pub const Source = enum(u8) {
 
 pub const SOURCE_COUNT: usize = @typeInfo(Source).@"enum".fields.len;
 pub const Counts = [SOURCE_COUNT]u32;
-pub const TIMER_SLOTS: usize = 64;
+pub const TIMER_SLOTS: usize = 256;
 pub const TIMER_OVERFLOW: usize = TIMER_SLOTS - 1;
 pub const IDLE_AFTER_MS: u64 = 60_000;
 pub const LOG_RING_SLOTS: usize = 256;
@@ -145,8 +145,8 @@ pub fn formatIdle(buf: []u8, report: IdleReport) []const u8 {
     return buf[0..len];
 }
 
-pub fn formatDump(buf: []u8, tick_ms: u64, idle_ms: u64, counts: Counts, timers: [TIMER_SLOTS]u32) []const u8 {
-    const head = std.fmt.bufPrint(buf, "{{\"tick_ms\":{d},\"idle_ms\":{d}", .{ tick_ms, idle_ms }) catch return "";
+pub fn formatDump(buf: []u8, tick_ms: u64, idle_ms: u64, deep_idle: bool, counts: Counts, timers: [TIMER_SLOTS]u32) []const u8 {
+    const head = std.fmt.bufPrint(buf, "{{\"tick_ms\":{d},\"idle_ms\":{d},\"deep_idle\":{d}", .{ tick_ms, idle_ms, @intFromBool(deep_idle) }) catch return "";
     var len = head.len;
     inline for (@typeInfo(Source).@"enum".fields, 0..) |field, i| {
         const part = std.fmt.bufPrint(buf[len..], ",\"{s}\":{d}", .{ field.name, counts[i] }) catch return "";
@@ -290,8 +290,8 @@ test "the dump is json with every source and the live timers" {
     timers[2] = 6;
     timers[27] = 3;
     try std.testing.expectEqualStrings(
-        "{\"tick_ms\":1000,\"idle_ms\":70000,\"server_fetch\":4,\"thread_spawn\":0,\"invalidate\":0,\"timer_fire\":9,\"log_line\":0,\"process_spawn\":0,\"timers\":{\"2\":6,\"27\":3}}",
-        formatDump(&buf, 1000, 70_000, counts, timers),
+        "{\"tick_ms\":1000,\"idle_ms\":70000,\"deep_idle\":1,\"server_fetch\":4,\"thread_spawn\":0,\"invalidate\":0,\"timer_fire\":9,\"log_line\":0,\"process_spawn\":0,\"timers\":{\"2\":6,\"27\":3}}",
+        formatDump(&buf, 1000, 70_000, true, counts, timers),
     );
 }
 
@@ -299,7 +299,7 @@ test "a short buffer yields an empty dump instead of a broken one" {
     var buf: [16]u8 = undefined;
     const counts: Counts = @splat(0);
     const timers: [TIMER_SLOTS]u32 = @splat(0);
-    try std.testing.expectEqualStrings("", formatDump(&buf, 1, 1, counts, timers));
+    try std.testing.expectEqualStrings("", formatDump(&buf, 1, 1, false, counts, timers));
 }
 
 test "each distinct log line is allowed once until the user acts" {

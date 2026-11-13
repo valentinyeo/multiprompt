@@ -1,0 +1,760 @@
+{
+  "timers": {
+    "0": {
+      "id": null,
+      "files": [
+        "chat_render.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Thread timers with a callback for the screenshot fire and cancel pair; they have no window and no stable id."
+    },
+    "1": {
+      "id": 1,
+      "files": [
+        "settings_panel.zig"
+      ],
+      "owner": "settings",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Settings panel windows tick while open; a closed panel has no timer."
+    },
+    "INPUT_HOOK_THREAD_TIMER_REQUEST_ID": {
+      "id": 1,
+      "files": [
+        "shortcuts.zig"
+      ],
+      "owner": "shortcuts",
+      "kind": "periodic",
+      "idle_max_per_min": 12,
+      "reason": "Low level hook stall watchdog every 5 s on the hook thread. The hook thread has its own message loop, so the counted pump never sees it.",
+      "exception": "Twelve wakes a minute on the hook thread; not part of the counted pump.",
+      "counted": false
+    },
+    "TIMER": {
+      "id": 1087,
+      "files": [
+        "computer_pane.zig"
+      ],
+      "owner": "computer_pane",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "50 ms tick only while a computer pane session is active."
+    },
+    "TIMER_ACCOUNT": {
+      "id": 170,
+      "files": [
+        "account_desktop.zig"
+      ],
+      "owner": "account",
+      "kind": "periodic",
+      "idle_max_per_min": 12,
+      "reason": "Authenticated remote layout sync every 5 s once signed in.",
+      "exception": "Twelve wakes a minute by design: server-side layout changes have no push channel. Not armed with account bypass."
+    },
+    "TIMER_ACCOUNT_SAVE": {
+      "id": 171,
+      "files": [
+        "account_desktop.zig"
+      ],
+      "owner": "account",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Dirty layout push debounce, armed after a change."
+    },
+    "TIMER_AI_PACE": {
+      "id": 24,
+      "files": [
+        "power.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 4,
+      "reason": "Remote provider pace refresh every 15 s normal, 60 s saving, stopped in deep idle.",
+      "exception": "Four wakes a minute in normal power mode: provider usage freshness."
+    },
+    "TIMER_BROWSER_ADOPT": {
+      "id": 11,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Only while adopting a requested pane, with a deadline."
+    },
+    "TIMER_BROWSER_EDGE_MASK_RAISE": {
+      "id": 14,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded z-order repair."
+    },
+    "TIMER_BROWSER_ENGINE_SWITCH": {
+      "id": 26,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot engine transition deadline."
+    },
+    "TIMER_BROWSER_HEALTH": {
+      "id": 19,
+      "files": [
+        "power.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 60,
+      "reason": "Hung browser window check every 1 s normal, 5 s saving, 30 s deep idle.",
+      "exception": "Sixty wakes a minute in normal power mode: hung-window detection keeps its original 1 s cadence."
+    },
+    "TIMER_BROWSER_PLACEHOLDER": {
+      "id": 39,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot wake at the opening to not-open deadline."
+    },
+    "TIMER_BROWSER_SETTLE": {
+      "id": 12,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded geometry and visibility settling."
+    },
+    "TIMER_BROWSER_URL_FOCUS": {
+      "id": 45,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded address bar focus retry."
+    },
+    "TIMER_BROWSER_URL_POLL": {
+      "id": 13,
+      "files": [
+        "browser_pane.zig",
+        "main.zig"
+      ],
+      "owner": "browser",
+      "kind": "periodic",
+      "idle_max_per_min": 240,
+      "reason": "Active browser tab URL check every 250 ms normal, 2 s saving, stopped in deep idle. Armed only with a browser tab shown.",
+      "exception": "Two hundred forty wakes a minute with a browser tab shown in normal power mode: missed URL notifications."
+    },
+    "TIMER_CAP_MSG": {
+      "id": 10,
+      "files": [
+        "console.zig",
+        "voice.zig"
+      ],
+      "owner": "console",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot notice expiry."
+    },
+    "TIMER_CHAT_AC_DEBOUNCE": {
+      "id": 35,
+      "files": [
+        "chat_composer.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One retry for an open autocomplete."
+    },
+    "TIMER_CHAT_BENCH": {
+      "id": 45841,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Fixture only: 1 s command heartbeat of the chat bench."
+    },
+    "TIMER_CHAT_BROWSER_SWAP": {
+      "id": 41,
+      "files": [
+        "chat_composer.zig",
+        "chat_session.zig",
+        "console.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot first-paint browser barrier."
+    },
+    "TIMER_CHAT_DICTATION": {
+      "id": 191,
+      "files": [
+        "chat_composer.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Dictation state tick while dictation is active."
+    },
+    "TIMER_CHAT_DRAFT": {
+      "id": 40,
+      "files": [
+        "chat_composer.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot composer draft save debounce."
+    },
+    "TIMER_CHAT_FIND": {
+      "id": 107,
+      "files": [
+        "chat_find_ui.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "50 ms tick only while a find job runs."
+    },
+    "TIMER_CHAT_FOREGROUND_RETRY": {
+      "id": 38,
+      "files": [
+        "focus.zig"
+      ],
+      "owner": "focus",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded foreground retry after a user action."
+    },
+    "TIMER_CHAT_OUTBOX": {
+      "id": 37,
+      "files": [
+        "chat_send.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Only while queued sends exist."
+    },
+    "TIMER_CHAT_REFRESH": {
+      "id": 27,
+      "files": [
+        "chat_composer.zig",
+        "chat_send.zig",
+        "chat_session.zig",
+        "main.zig",
+        "voice.zig"
+      ],
+      "owner": "chat",
+      "kind": "periodic",
+      "idle_max_per_min": 80,
+      "reason": "Active chat status and activity refresh every 750 ms. Hidden or minimized views do no work; stopped in deep idle.",
+      "exception": "Eighty wakes a minute with a visible chat in normal power mode: working-status latency."
+    },
+    "TIMER_CHAT_SCROLLBAR": {
+      "id": 44,
+      "files": [
+        "chat_render.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "50 ms fade tick only while the scrollbar is visible."
+    },
+    "TIMER_CHAT_SEL_SCROLL": {
+      "id": 36,
+      "files": [
+        "chat_render.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "50 ms tick only during a selection drag. Shares id 36 with TIMER_SSH_RECONNECT."
+    },
+    "TIMER_CHAT_SEND_VERIFY": {
+      "id": 33,
+      "files": [
+        "chat_send.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded verification and retry sequence after a send."
+    },
+    "TIMER_CHAT_WORKING": {
+      "id": 43,
+      "files": [
+        "window_layout.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "250 ms working indicator, armed only while a chat is working."
+    },
+    "TIMER_CONSOLE_GEOMETRY_SETTLE": {
+      "id": 16,
+      "files": [
+        "console.zig"
+      ],
+      "owner": "console",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded resize and monitor settling."
+    },
+    "TIMER_ETA_REPAINT": {
+      "id": 32,
+      "files": [
+        "notifications.zig"
+      ],
+      "owner": "notifications",
+      "kind": "periodic",
+      "idle_max_per_min": 4,
+      "reason": "Countdown repaint every 15 s. Armed only while an ETA exists.",
+      "exception": "Four wakes a minute while an ETA is shown."
+    },
+    "TIMER_FONT_HUD": {
+      "id": 7,
+      "files": [
+        "console.zig"
+      ],
+      "owner": "console",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot HUD expiry."
+    },
+    "TIMER_FONT_SYNC": {
+      "id": 190,
+      "files": [
+        "console.zig"
+      ],
+      "owner": "console",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "150 ms tick only while an incremental font sync runs."
+    },
+    "TIMER_HOOK_UNINSTALL": {
+      "id": 4,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Short bounded input release retry."
+    },
+    "TIMER_INBOX_PUBLISH": {
+      "id": 29,
+      "files": [
+        "inbox.zig"
+      ],
+      "owner": "inbox",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot publish debounce after a mutation."
+    },
+    "TIMER_INBOX_REFRESH": {
+      "id": 8,
+      "files": [
+        "archive.zig",
+        "inbox.zig",
+        "workspaces.zig"
+      ],
+      "owner": "inbox",
+      "kind": "periodic",
+      "idle_max_per_min": 60,
+      "reason": "Live model, relative time and ETA refresh every 1 s. Armed only for the Inbox view or a starred workspace.",
+      "exception": "Sixty wakes a minute while the Inbox or a starred workspace is shown."
+    },
+    "TIMER_MONITOR_TRANSITION": {
+      "id": 23,
+      "files": [
+        "monitor.zig"
+      ],
+      "owner": "monitor",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded monitor geometry transition."
+    },
+    "TIMER_NAME_POLL": {
+      "id": 2,
+      "files": [
+        "power.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 2,
+      "reason": "Session title, cwd and process reconciliation every 30 s in normal mode, 60 s in saving and deep idle.",
+      "exception": "Two wakes a minute by design: no event source covers console-only tools and missed hooks."
+    },
+    "TIMER_NATIVE_BROWSER_FOCUS": {
+      "id": 18,
+      "files": [
+        "focus.zig",
+        "main.zig"
+      ],
+      "owner": "focus",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded user-requested focus retry."
+    },
+    "TIMER_POWER_IDLE": {
+      "id": 28,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 2,
+      "reason": "Global input and power re-evaluation every 30 s.",
+      "exception": "Two wakes a minute by design: deep idle needs a clock to start from."
+    },
+    "TIMER_REFOCUS": {
+      "id": 3,
+      "files": [
+        "archive.zig",
+        "changelog.zig",
+        "focus.zig",
+        "main.zig",
+        "reminders.zig",
+        "snippets.zig",
+        "workspace_switcher.zig"
+      ],
+      "owner": "focus",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded focus retry after a user action."
+    },
+    "TIMER_REMINDERS": {
+      "id": 15,
+      "files": [
+        "power.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 2,
+      "reason": "Reminder due-time check every 30 s.",
+      "exception": "Two wakes a minute by design: a due time needs a clock tick."
+    },
+    "TIMER_RESUME_RECONNECT": {
+      "id": 6,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot suspend and resume recovery."
+    },
+    "TIMER_ROOM": {
+      "id": 45842,
+      "files": [
+        "room_frontend.zig"
+      ],
+      "owner": "room",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "250 ms re-arm while a room action is pending."
+    },
+    "TIMER_ROOM_DISCOVERY": {
+      "id": 45845,
+      "files": [
+        "room_frontend.zig"
+      ],
+      "owner": "room",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Armed on demand by room discovery work."
+    },
+    "TIMER_ROOM_EVIDENCE": {
+      "id": 45844,
+      "files": [
+        "room_frontend.zig"
+      ],
+      "owner": "room",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Armed on demand by room evidence work."
+    },
+    "TIMER_ROOM_UI": {
+      "id": 45843,
+      "files": [
+        "room_frontend.zig"
+      ],
+      "owner": "room",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Armed on demand by room front end work."
+    },
+    "TIMER_SAVE": {
+      "id": 1282,
+      "files": [
+        "launch_cache.zig"
+      ],
+      "owner": "launch_cache",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "500 ms save debounce after a change."
+    },
+    "TIMER_SHOT_FOCUS": {
+      "id": 42,
+      "files": [
+        "chat_render.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded screenshot and paste focus handoff."
+    },
+    "TIMER_SPINNER": {
+      "id": 5,
+      "files": [
+        "clipboard.zig"
+      ],
+      "owner": "clipboard",
+      "kind": "periodic",
+      "idle_max_per_min": 120,
+      "reason": "Agent activity animation every 500 ms. Armed only while an agent is active; stopped in deep idle.",
+      "exception": "One hundred twenty wakes a minute while an agent is active."
+    },
+    "TIMER_SSH_RECONNECT": {
+      "id": 36,
+      "files": [
+        "chat_send.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "1 s tick only while reconnecting. Shares id 36 with TIMER_CHAT_SEL_SCROLL."
+    },
+    "TIMER_STARTUP": {
+      "id": 1347,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Startup sequence; ends with startup."
+    },
+    "TIMER_STARTUP_SHELL": {
+      "id": 1348,
+      "files": [
+        "console.zig"
+      ],
+      "owner": "console",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Startup shell attach; ends with startup."
+    },
+    "TIMER_SYSMENU": {
+      "id": 9,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded foreground and menu retry."
+    },
+    "TIMER_SYSTEM_THEME": {
+      "id": 25,
+      "files": [
+        "themes.zig"
+      ],
+      "owner": "themes",
+      "kind": "periodic",
+      "idle_max_per_min": 60,
+      "reason": "System theme fallback poll every 1 s normal, 10 s saving, stopped in deep idle. Not armed for a fixed theme.",
+      "exception": "Sixty wakes a minute in normal power mode, only with the System theme."
+    },
+    "TIMER_TUNNEL_KEEPER": {
+      "id": 20,
+      "files": [
+        "power.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 30,
+      "reason": "Process and connection recovery every 2 s normal, 10 s saving, 30 s deep idle.",
+      "exception": "Thirty wakes a minute in normal power mode: recovery latency is the product behaviour."
+    },
+    "TIMER_UNARCHIVE_UNATTACHED": {
+      "id": 21,
+      "files": [
+        "archive.zig"
+      ],
+      "owner": "archive",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Unarchive queue; stops when drained."
+    },
+    "TIMER_UPDATE_CHECK": {
+      "id": 172,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Fallback only. A directory watcher replaces it; armed again only if the watcher fails."
+    },
+    "TIMER_VISIT_DWELL": {
+      "id": 173,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "app",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot dwell timer for the frequent-visit tracker."
+    },
+    "TIMER_VOICE_MANUAL": {
+      "id": 192,
+      "files": [
+        "voice.zig"
+      ],
+      "owner": "voice",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Armed only for a manual voice turn."
+    },
+    "TIMER_VOICE_POLL": {
+      "id": 30,
+      "files": [
+        "main.zig",
+        "voice.zig"
+      ],
+      "owner": "voice",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "150 ms tick only while speech plays."
+    },
+    "TIMER_VOICE_TTS_POS": {
+      "id": 34,
+      "files": [
+        "main.zig"
+      ],
+      "owner": "voice",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot playback diagnostic."
+    },
+    "TIMER_VOICE_TURN_END": {
+      "id": 31,
+      "files": [
+        "voice.zig"
+      ],
+      "owner": "voice",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot debounce after DONE."
+    },
+    "TIMER_VPS_CAPACITY": {
+      "id": 22,
+      "files": [
+        "power.zig"
+      ],
+      "owner": "power",
+      "kind": "periodic",
+      "idle_max_per_min": 4,
+      "reason": "Remote inventory refresh every 15 s normal, 60 s saving, stopped in deep idle.",
+      "exception": "Four wakes a minute in normal power mode: remote inventory freshness."
+    },
+    "TIMER_WEBVIEW2_FOCUS": {
+      "id": 17,
+      "files": [
+        "browser_pane.zig"
+      ],
+      "owner": "browser",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Bounded user-requested focus retry."
+    },
+    "selection_offer_timer": {
+      "id": 2098,
+      "files": [
+        "chat_render.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "One-shot selection offer delay on its own child window."
+    }
+  },
+  "fetches": {
+    "chat_find_ui.zig:jump": {
+      "owner": "chat",
+      "trigger": "user",
+      "reason": "Fetches the page around a find hit when the user jumps to it."
+    },
+    "chat_render.zig:chatReplyResolve": {
+      "owner": "chat",
+      "trigger": "user",
+      "reason": "Fetches the quoted message when the user opens a reply."
+    },
+    "chat_render.zig:chatScrollBy": {
+      "owner": "chat",
+      "trigger": "user",
+      "reason": "Fetches older history when the user scrolls above the loaded range."
+    },
+    "chat_send.zig:chatMessageSyncFinish": {
+      "owner": "chat",
+      "trigger": "send",
+      "reason": "Fetches once after a send completes."
+    },
+    "chat_send.zig:chatTmuxSettle": {
+      "owner": "chat",
+      "trigger": "send",
+      "reason": "Fetches once after the sent text settles in the session."
+    },
+    "chat_session.zig:chatDeferTranscriptLoad": {
+      "owner": "chat",
+      "trigger": "open",
+      "reason": "Loads the transcript when a chat tab opens or is switched to."
+    },
+    "chat_session.zig:chatFileOnReady": {
+      "owner": "chat",
+      "trigger": "poll",
+      "reason": "Re-requests the active chat when its live stream revision changes and the live channel is held."
+    },
+    "chat_session.zig:chatFileRequest": {
+      "owner": "chat",
+      "trigger": "wrapper",
+      "reason": "Plain wrapper every other caller goes through; it has no trigger of its own."
+    },
+    "chat_session.zig:chatResync": {
+      "owner": "chat",
+      "trigger": "user",
+      "reason": "Re-fetches when the user asks for a resync."
+    },
+    "chat_session.zig:chatVoiceReplySource": {
+      "owner": "voice",
+      "trigger": "user",
+      "reason": "Fetches the reply text a voice turn reads out."
+    },
+    "chat_session.zig:chatWarmOftenUsed": {
+      "owner": "chat",
+      "trigger": "warm",
+      "reason": "Keeps the most recently viewed server chats that are not active warm; runs on the chat refresh tick."
+    },
+    "chat_session.zig:refreshChatBlockCache": {
+      "owner": "chat",
+      "trigger": "refresh",
+      "reason": "Requests the active chat history before the block cache is rebuilt; runs on the refresh tick and on view changes."
+    }
+  }
+}

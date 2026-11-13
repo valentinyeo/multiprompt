@@ -293,8 +293,8 @@ fn publishIdle(now: u64) void {
     const idle_ms = idleMilliseconds(now);
     idle_budget.tick(now, idle_ms);
     if (g_idle_dump_len == 0) return;
-    var buf: [1536]u8 = undefined;
-    const json = idle_budget.formatDump(&buf, now, idle_ms, idle_budget.snapshot(), idle_budget.timerSnapshot());
+    var buf: [6144]u8 = undefined;
+    const json = idle_budget.formatDump(&buf, now, idle_ms, app_state.g_power_deep_idle, idle_budget.snapshot(), idle_budget.timerSnapshot());
     if (json.len == 0) return;
     _ = file_io.writeFileAtomicSync(g_idle_dump_path[0..g_idle_dump_len], json);
 }

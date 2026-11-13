@@ -80,3 +80,11 @@ UI timers retain foreground responsiveness while background work uses notificati
 - Account login HTTP/device polling: only during explicit sign-in, bounded cancellation/deadlines; retain protocol-required polling.
 - Update helper peer-process wait: blocking WaitForMultipleObjects with a deadline, already event-driven.
 - Token Ladder post-command refresh: one delayed refresh after an explicit mode change, not a recurring idle loop; retain.
+
+## Idle budget and registry
+
+- Registry: `tools/idle-registry.json` lists every `SetTimer` id and every caller of a transcript fetch, with owner, trigger, reason and the most idle wakes allowed per minute. Any timer above one wake a minute carries a written exception. `tools/idle-registry.test.js` fails when `src/` arms or fetches from a site that is not listed, or when an entry no longer matches the code.
+- Counters: `src/idle_budget.zig` holds one fixed table of atomic counters for server fetches, thread spawns, invalidates, timer fires, log lines and process spawns. The hourly watchdog health report prints their per-minute rates for the time the user was idle.
+- Budget: `tools/idle-budget.json`. Zero server fetches, zero thread spawns, zero invalidates and zero log lines in a five minute idle window with verbose logging off. A timer may wake at most its registered rate, plus one wake of slack.
+- Gate: the `idle-budget` job in `.github/workflows/test.yml` runs `tools/idle-budget.ps1` on every pull request. It starts the built app against a fake ssh and three saved server chats with nothing new, waits for startup, idles five minutes with no input, and compares two counter dumps with `tools/idle-budget.mjs`. The failure message names the source that is over budget.
+- Verbose logging stays off for the gate, so the existing `idle-poll-proof` workflow remains the check for the verbose path.

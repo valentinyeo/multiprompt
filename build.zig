@@ -740,6 +740,8 @@ pub fn build(b: *std.Build) void {
     const footprint_telemetry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/footprint-telemetry.test.js" });
     footprint_telemetry_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&footprint_telemetry_tests.step);
+    const idle_budget_node_tests = b.addSystemCommand(&.{ "node", "--test", "tools/idle-budget.test.js", "tools/idle-registry.test.js" });
+    test_step.dependOn(&idle_budget_node_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });
