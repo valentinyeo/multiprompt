@@ -7,6 +7,8 @@ extern "user32" fn HideCaret(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 extern "user32" fn ShowCaret(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 
 pub threadlocal var native_paint = false;
+pub const MAX_CUSTOM_UNITS: usize = 64 * 1024;
+pub var measured_units: usize = 0;
 
 pub fn enabled() bool {
     var value: [8]u16 = undefined;
@@ -20,8 +22,10 @@ fn position(hwnd: w.HANDLE, index: usize) ?w.POINT {
 }
 
 pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) bool {
+    measured_units = 0;
     const length: usize = @intCast(@max(0, w.GetWindowTextLengthW(hwnd)));
     if (length == 0) return true;
+    if (length > MAX_CUSTOM_UNITS) return false;
     const allocator = std.heap.page_allocator;
     const text = allocator.alloc(u16, length + 1) catch return false;
     defer allocator.free(text);
@@ -69,11 +73,17 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
         while (i < n) {
             const point = position(hwnd, i) orelse break;
             if (point.y != origin.y) break;
+            if (i > begin and point.x >= clip.right) break;
             const units: usize = if (text[i] >= 0xd800 and text[i] <= 0xdbff and i + 1 < n and text[i + 1] >= 0xdc00 and text[i + 1] <= 0xdfff) 2 else 1;
             const next = position(hwnd, i + units);
-            var size: w.SIZE = undefined;
-            if (w.GetTextExtentPoint32W(dc, text[i..].ptr, @intCast(units), &size) == 0) return false;
-            right = if (next != null and next.?.y == point.y) next.?.x else point.x + size.cx;
+            if (next != null and next.?.y == point.y) {
+                right = next.?.x;
+            } else {
+                var size: w.SIZE = undefined;
+                if (w.GetTextExtentPoint32W(dc, text[i..].ptr, @intCast(units), &size) == 0) return false;
+                right = point.x + size.cx;
+            }
+            measured_units += 1;
             advances[i] = @floatFromInt(right - point.x);
             if (units == 2) advances[i + 1] = 0;
             if (text[i] == '\r' or text[i] == '\n' or text[i] == '\t') break;
@@ -186,6 +196,29 @@ test "IGSH-731 switch defaults on and only zero restores native EDIT" {
         try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_731"), value.ptr) != 0);
         try std.testing.expectEqual(!std.mem.eql(u16, value, L("0")), enabled());
     }
+}
+
+test "SOFT-2007 a huge draft keeps native paint and a narrow clip stops measuring" {
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const parent = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 400, 80, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const wide = try std.testing.allocator.alloc(u16, MAX_CUSTOM_UNITS + 16);
+    defer std.testing.allocator.free(wide);
+    @memset(wide, 'a');
+    wide[wide.len - 1] = 0;
+    const wide_z = wide[0 .. wide.len - 1 :0];
+    const big = w.CreateWindowExW(0, L("EDIT"), L(""), w.WS_CHILD | w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, 400, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(big);
+    _ = w.SendMessageW(big, 0x00C5, MAX_CUSTOM_UNITS + 16, 0);
+    try std.testing.expect(w.SetWindowTextW(big, wide_z.ptr) != 0);
+    try std.testing.expect(@as(usize, @intCast(w.GetWindowTextLengthW(big))) > MAX_CUSTOM_UNITS);
+    try std.testing.expect(!paint(big, dc, 0, 0xffffff));
+    try std.testing.expectEqual(@as(usize, 0), measured_units);
+    const small = w.CreateWindowExW(0, L("EDIT"), L("Message text"), w.WS_CHILD | w.ES_MULTILINE | w.ES_AUTOVSCROLL, 0, 0, 400, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(small);
+    _ = paint(small, dc, 0, 0xffffff);
+    try std.testing.expect(measured_units > 0 and measured_units <= 32);
 }
 
 test {
