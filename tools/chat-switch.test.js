@@ -27,6 +27,7 @@ function paintFirst(text) {
 
 test('chat paints before the coalesced browser exchange, including stale refresh/adoption callbacks', () => {
   paintFirst(source);
+  assert.match(body('switchToShell'), /\} else if \(@import\("chat_composer\.zig"\)\.shellConsoleReachable\(idx\)\) \{/);
   const baseline = `fn switchToShell(idx: u32) void {
     if (want_chat != g_chat_active) {
         if (want_chat) openChatView() else closeChatView();
