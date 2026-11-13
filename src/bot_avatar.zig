@@ -121,7 +121,7 @@ const Painter = struct {
 pub fn draw(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var log: [160]u8 = undefined;
-        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[bots] face={d} color={d} rect={d},{d},{d},{d}", .{ appearance.face, appearance.color, rect.left, rect.top, rect.right, rect.bottom }) catch "[bots] layout unavailable");
+        @import("diagnostics.zig").debugLogOnce(std.fmt.bufPrint(&log, "[bots] face={d} color={d} rect={d},{d},{d},{d}", .{ appearance.face, appearance.color, rect.left, rect.top, rect.right, rect.bottom }) catch "[bots] layout unavailable");
     }
     const width = rect.right - rect.left;
     const height = rect.bottom - rect.top;
