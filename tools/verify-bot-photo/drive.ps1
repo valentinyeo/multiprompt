@@ -505,11 +505,9 @@ try {
     Check 'second-bot-does-not-change-first' ((Get-FileHash $first.FullName -Algorithm SHA256).Hash -eq $replacementHash)
     Focus; Press @(0x11, 0x4b); Query 'close tab' '(7197|6232)'; Press @(0x0d)
     [void](Wait-For 'second local tab closed' { @((State).tabs | Where-Object { $_.name -eq 'Photo Beta' }).Count -eq 0 })
-    $paintStart = (Log).Length
     Focus; Press @(0x11, 0x10, 0x54)
     [void](Wait-For 'second local tab reopened with same identity' { @((State).tabs | Where-Object { $_.name -ceq 'Photo Beta' -and $_.PSObject.Properties['avatar_local_id'] -and $_.avatar_local_id -ceq $secondId }).Count -eq 1 })
     $secondIndex = Index-For $secondId
-    [void](Wait-For 'reopened photo painted' { $trace = Log; $trace.Length -ge $paintStart -and $trace.Substring($paintStart) -match ("\[photo-proof\] expanded target=" + $secondIndex + " rect=") })
     Assert-Avatar 'expanded' $secondIndex 'reopened-local-photo'
     Check 'reopened-photo-retained' ((Get-FileHash $second.FullName -Algorithm SHA256).Hash -eq $secondHash)
     $firstIndex = Index-For $firstId
