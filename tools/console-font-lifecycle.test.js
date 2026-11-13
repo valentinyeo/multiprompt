@@ -78,11 +78,11 @@ function harness() {
     'staleFontShellCount', 'fontSyncMarkAllStale', 'fontSyncActiveNow', 'fontSyncShell',
     'fontSyncTimerTick', 'settleConsoleGeometry', 'reclaimShell', 'registerBundledConsoleFonts',
     'unregisterBundledConsoleFonts'].map(name => fn(consoleSource, name)).join('\n');
-  const visibility = ['fullWidthShouldResizeConsole', 'shellConsoleVisibilityAllowed',
+  const visibility = ['fullWidthShouldResizeConsole', 'shellConsoleReachable', 'shellConsoleVisibilityAllowed',
     'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView']
     .map(name => fn(chat, name)).join('\n');
   const bundled = between(consoleSource, 'pub const BundledConsoleFonts = struct {', '\npub fn registerBundledConsoleFonts');
-  const tabBranch = '            } else if (app_state.shells[idx].hwnd != null) {';
+  const tabBranch = '            } else if (@import("chat_composer.zig").shellConsoleReachable(idx)) {';
   const tab = between(fn(consoleSource, 'switchToShell'), tabBranch, '\n            }').slice(tabBranch.length);
   const layoutSync = between(read('window_layout.zig'), '    if (fontGenStale(', '\n    const nudge');
   const poll = between(read('shell_poll.zig'), '        if (i == app_state.active_shell', '\n\n        if (local_cmd_shell)');
