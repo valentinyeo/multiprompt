@@ -42,13 +42,13 @@ test('IGSH-1521 bypass is a permission mode and the palette opens the plus menu'
   assert.match(read('src/chat_slash.zig'), /bypassPermissions/);
   assert.match(read('src/app_state.zig'), /pub const SEARCH_CHAT_MODE_BYPASS_OFFSET: usize/);
   assert.match(read('src/app_state.zig'), /pub const SEARCH_CHAT_PLUS_MENU_OFFSET: usize/);
-  assert.ok(read('src/command_palette.zig').includes('Chat View: Plus Menu'));
-  assert.ok(read('src/sidebar.zig').includes('L("Chat View: Plus Menu")'));
+  assert.ok(read('src/command_palette.zig').includes('plus menu chat view'));
+  assert.ok(read('src/sidebar.zig').includes('L("Plus menu")'));
   assert.match(read('src/main.zig'), /target == app_state\.SEARCH_CHAT_PLUS_MENU_OFFSET/);
 });
 
 test('IGSH-1521 the shortcut table and the keyboard doc list the plus menu', () => {
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
-    assert.ok(read(file).includes('Chat View: Plus Menu'), file);
+    assert.ok(read(file).includes('Plus menu'), file);
   }
 });

@@ -88,7 +88,7 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
   assert.match(main, /target == SEARCH_TABCTX_CHAT_TAB_URL\) findShellById\(app_state\.g_tabctx_sid\)/);
   assert.match(main, /if \(target == SEARCH_TABCTX_CHAT_TAB_URL\) \{\s*@import\("console\.zig"\)\.switchToShellByUser\(ti\);\s*\} else if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*@import\("chat_render\.zig"\)\.chatInsertBrowserTabUrl\(\);/);
   assert.match(sidebar, /const is_chat_action = is_chat_tab_url or/);
-  assert.match(sidebar, /L\("Chat View: Insert browser tab URL"\)/);
+  assert.match(sidebar, /L\("Insert browser page link"\)/);
   assert.match(sidebar, /L\("Ctrl\+Shift\+X"\)/);
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+X", \.b = "Insert current browser tab URL/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /\| Ctrl\+Shift\+X \| Insert current browser tab URL/);

@@ -129,11 +129,11 @@ test("usage telemetry companion self-throttles on idle and battery using OS sign
   assert.match(telemetry, /if \(wait_result == c\.WAIT_OBJECT_0\) \{\s+for \(runtime\.accounts\[0\.\.runtime\.account_count\]\) \|\*account\| account\.next_refresh_ms = 0;/);
 });
 
-test("Ctrl+K exposes Power Saver: Auto / Always / Off with the active mode tagged current", () => {
+test("Ctrl+K exposes Power Saver with the active mode tagged current", () => {
   assert.match(app, /const SEARCH_POWER_AUTO_OFFSET: usize = 6337;/);
   assert.match(app, /const SEARCH_POWER_ALWAYS_OFFSET: usize = 6338;/);
   assert.match(app, /const SEARCH_POWER_OFF_OFFSET: usize = 6339;/);
-  assert.match(app, /SEARCH_POWER_AUTO_OFFSET => "power saver auto",/);
+  assert.match(app, /SEARCH_POWER_AUTO_OFFSET => "power saver power saver auto",/);
   assert.match(app, /L\(ui_words\.global_power_auto\) else if \(is_power_always\) L\(ui_words\.global_power_always\) else L\(ui_words\.global_power_off\)/);
   assert.match(
     app,
@@ -150,5 +150,5 @@ test("deep idle stops chat refresh polling", () => {
 });
 
 test("Power Saver has an F1 shortcuts-overview row", () => {
-  assert.match(app, /Ctrl\+K \\u\{2192\} Power Saver: Auto \/ Always \/ Off/);
+  assert.match(app, /Ctrl\+K \\u\{2192\} Power Saver/);
 });

@@ -27,9 +27,9 @@ test('IGSH-1897 the expanded table opens centered, scrolls, and closes on Esc, t
   }
 });
 
-test('IGSH-1897 Ctrl+K "Chat View: Expand table" is listed in Chat View and opens the nearest table', () => {
+test('IGSH-1897 Ctrl+K "Expand table" is listed in Chat View and opens the nearest table', () => {
   const words = read('src/ui_words.zon');
-  assert.match(words, /\.palette_chat_expand_table = "Chat View: Expand table",/);
+  assert.match(words, /\.palette_chat_expand_table = "Expand table",/);
   assert.match(read('src/app_state.zig'), /pub const SEARCH_CHAT_EXPAND_TABLE_OFFSET: usize = \d+;/);
   const palette = read('src/command_palette.zig');
   assert.match(palette, /labelsMatchQuery\(&\[_\]\[\]const u8\{ @import\("ui_words\.zon"\)\.palette_chat_expand_table,[^}]*\}[^)]*\)\)\s*\{\s*app_state\.g_search_results\[app_state\.g_search_result_count\] = SEARCH_CHAT_EXPAND_TABLE_OFFSET;/);

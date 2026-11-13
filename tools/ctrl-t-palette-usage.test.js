@@ -256,7 +256,7 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   assert.match(source, /const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;/);
   assert.match(source, /const SEARCH_USAGE_LOGIN_INNE_OFFSET: usize = 6299;/);
   assert.match(source,
-    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account"/);
+    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to claude usage: sign in to primary claude account"/);
   assert.match(source,
     /SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account"/);
 
@@ -282,7 +282,7 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   const paint = source.slice(paintStart, paintEnd);
   assert.match(paint, /const is_usage_login = is_usage_login_primary or is_usage_login_inne;/);
   assert.match(paint,
-    /else if \(is_usage_login\)[\s\S]*?L\("Usage: Sign In to Primary Claude Account"\)[\s\S]*?L\("Usage: Sign In to Secondary Claude Account"\)[\s\S]*?L\("secondary@example.com"\)/);
+    /else if \(is_usage_login\)[\s\S]*?L\("Usage: Sign in to Claude"\)[\s\S]*?L\("Usage: Sign In to Secondary Claude Account"\)[\s\S]*?L\("secondary@example.com"\)/);
   for (const classifier of ["const is_newwin =", "const is_openall =", "const is_new_shell ="]) {
     const start = paint.indexOf(classifier);
     const end = paint.indexOf(";", start);

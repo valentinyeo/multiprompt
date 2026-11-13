@@ -50,7 +50,7 @@ test("All Sessions exposes direct Waiting and Archived keyboard routes", () => {
 });
 
 test("Current UI names Alt+E Waiting and Alt+X Archive", () => {
-  assert.match(source, /L\("Archive Session"\)/);
+  assert.match(source, /L\("Archive chat"\)/);
   assert.match(source, /L\("Restore Workspace Waiting Sessions"\)/);
   assert.match(source, /"Press Alt\+X again to archive"/);
   assert.match(source, /w waiting   a archived/);

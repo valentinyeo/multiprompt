@@ -722,24 +722,24 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_OPEN_SESSION_MENU_OFFSET) return "Open session...";
     if (target == SEARCH_SHELLS_MENU_OFFSET) return "More shells...";
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
-    if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
-    if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
+    if (target == SEARCH_TABCTX_CHAT_ALLOW) return "allow chat view allow";
+    if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "always allow chat view always allow";
     if (target == SEARCH_TABCTX_ADOPT_HOST) return "Move chat to new mode";
     if (target == SEARCH_TABCTX_GOOGLE_SIGNIN) return "Sign in to Google in this profile";
     if (target == SEARCH_TABCTX_RECONNECT) return "Reconnect restart session reattach tab";
-    if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
-    if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
-    if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
+    if (target == SEARCH_TABCTX_CHAT_DENY) return "deny chat view deny";
+    if (target == SEARCH_TABCTX_CHAT_STOP) return "stop agent chat view stop the agent interrupt escape";
+    if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "insert browser page link chat view insert browser tab url link ctrl shift x";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
-            SEARCH_TABCTX_CHAT_RESET => "chat view reset this chat clear bubbles cache",
+            SEARCH_TABCTX_CHAT_RESET => "reset this chat chat view reset this chat clear bubbles cache",
             SEARCH_TABCTX_RECONNECT => "reattach tab",
             SEARCH_TABCTX_INBOX_EXCLUDE => if (tab != null and tab.?.inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
-            SEARCH_TABCTX_FAVORITE => if (tab != null and tab.?.favorite) "unfavorite" else "favorite",
+            SEARCH_TABCTX_FAVORITE => "favorite unfavorite",
             SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
             SEARCH_TABCTX_KEEPALIVE => if (tab != null and tab.?.keep_alive) "keep alive: on" else "keep alive: off",
-            SEARCH_TABCTX_PIN_TOP => if (tab != null and @import("sidebar.zig").effPinnedTop(findShellById(app_state.g_tabctx_sid).?)) "unpin from top" else "pin to top",
+            SEARCH_TABCTX_PIN_TOP => "pin pin to top unpin from top",
             SEARCH_TABCTX_KEEPAWAKE => if (tab != null and tab.?.keep_awake) "keep tab awake: on" else "keep tab awake: off",
             SEARCH_TABCTX_WSMOVE => "move to workspace",
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
@@ -749,8 +749,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new chat in this group",
             SEARCH_TABCTX_MOVE_NEW_WS => "move to new workspace",
             SEARCH_TABCTX_CLEAR_SEL => "clear tab selection",
-            SEARCH_TABCTX_ARCHIVE => if (tab != null and tab.?.tmux_session_len > 0) "archive session" else "close session",
-            SEARCH_TABCTX_END_TMUX => "end tmux session",
+            SEARCH_TABCTX_ARCHIVE => "archive chat archive session close session",
+            SEARCH_TABCTX_END_TMUX => "delete chat end tmux session",
             SEARCH_TABCTX_BROWSER => if (tab != null and tab.?.browser_enabled) "close browser pane" else "open browser pane",
             SEARCH_TABCTX_CHAT_VIEW => "chat view live chat switch to terminal alt c",
             else => null,
@@ -832,7 +832,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_THEME_MID_OFFSET => "mid",
         SEARCH_THEME_LIGHT_OFFSET => "light",
         SEARCH_THEME_AMOLED_OFFSET => "amoled",
-        SEARCH_THEME_EDGE_GRAY_OFFSET => "edge grey",
+        SEARCH_THEME_EDGE_GRAY_OFFSET => "grey edge grey",
         SEARCH_THEME_MULTIPROMPT_OFFSET => "multi bot",
         SEARCH_THEME_DEV_BLUE_OFFSET => "dev blue",
         SEARCH_THEME_DEV_EDIT_OFFSET => "edit dev theme json",
@@ -847,8 +847,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_OPENALL_HOST_DE_OFFSET => "host1 vps",
         SEARCH_OPENALL_HOST_UK_OFFSET => "host2 vps",
         SEARCH_OPENALL_HOST_INNE_OFFSET => "secondary cro vps",
-        SEARCH_NEWWIN_OFFSET => "new window",
-        SEARCH_CREATEWS_OFFSET => "create workspace",
+        SEARCH_NEWWIN_OFFSET => "new workspace new window",
+        SEARCH_CREATEWS_OFFSET => "new workspace create workspace",
         SEARCH_WORKSPACES_MENU_OFFSET => "open workspace",
         SEARCH_WORKSPACE_DELETE_MENU_OFFSET => "delete workspace",
         SEARCH_QUIT_OFFSET => "quit multi bot",
@@ -869,17 +869,17 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_WSSORT_MENU_OFFSET => "sort workspaces",
         SEARCH_WSMOVE_MENU_OFFSET => "move to workspace",
         SEARCH_GROUPMOVE_MENU_OFFSET => "move to group",
-        SEARCH_HIDESIDEBAR_OFFSET => "sidebar expand",
+        SEARCH_HIDESIDEBAR_OFFSET => "sidebar sidebar expand",
         SEARCH_HIDEPILLS_OFFSET => "workspace switcher",
         SEARCH_NEXTUNREAD_OFFSET => "next unread session",
         SEARCH_SIDEBAR_COLLAPSE_OFFSET => "sidebar collapse",
         SEARCH_SIDEBAR_HIDE_OFFSET => "sidebar hide",
-        SEARCH_TABSORT_INBOX_OFFSET => "tab order auto",
+        SEARCH_TABSORT_INBOX_OFFSET => "tab order tab order auto",
         SEARCH_TABSORT_MANUAL_OFFSET => "tab order manual",
-        SEARCH_POWER_AUTO_OFFSET => "power saver auto",
+        SEARCH_POWER_AUTO_OFFSET => "power saver power saver auto",
         SEARCH_POWER_ALWAYS_OFFSET => "power saver always",
         SEARCH_POWER_OFF_OFFSET => "power saver off",
-        SEARCH_LADDER_AUTO_OFFSET => "token ladder auto",
+        SEARCH_LADDER_AUTO_OFFSET => "token plan token ladder auto",
         SEARCH_LADDER_CLAUDE_OFFSET => "token ladder burn claude",
         SEARCH_LADDER_CODEX_OFFSET => "token ladder burn codex",
         SEARCH_LADDER_DASH_OFFSET => "token ladder open dashboard",
@@ -893,7 +893,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_VOICE_STOP_OFFSET => "voice stop speaking mute",
         SEARCH_VOICE_ALWAYS_ON_OFFSET => "voice always listening on talk over",
         SEARCH_VOICE_ALWAYS_OFF_OFFSET => "voice always listening off taking turns",
-        SEARCH_VOICE_SPEED_100_OFFSET => "voice speed 1x",
+        SEARCH_VOICE_SPEED_100_OFFSET => "voice speed voice speed 1x",
         SEARCH_VOICE_SPEED_125_OFFSET => "voice speed 1.25x",
         SEARCH_VOICE_SPEED_140_OFFSET => "voice speed 1.4x",
         SEARCH_VOICE_SPEED_150_OFFSET => "voice speed 1.5x",
@@ -908,9 +908,9 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_UI_BIGGER_OFFSET => "ui size increase",
         SEARCH_UI_SMALLER_OFFSET => "ui size decrease",
         SEARCH_UI_RESET_OFFSET => "ui size reset",
-        SEARCH_CUSTOMCMD_EDIT_OFFSET => "commands edit commands.json",
+        SEARCH_CUSTOMCMD_EDIT_OFFSET => "edit custom commands commands edit commands.json",
         SEARCH_CUSTOMCMD_RELOAD_OFFSET => "commands reload",
-        SEARCH_ARCHIVE_OFFSET => "archive session",
+        SEARCH_ARCHIVE_OFFSET => "archive chat archive session close session",
         SEARCH_REOPEN_OFFSET => "reopen closed tab restore undo",
         SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude session chat terminal tab agent",
         SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => "new claude in terminal shell old plain",
@@ -923,7 +923,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SHELLS_MENU_OFFSET => "more shells cmd command prompt powershell pwsh bash git bash server ssh",
         SEARCH_URLPICK_OFFSET => "open url from screen",
         SEARCH_CLOSETAB_OFFSET => "close tab",
-        SEARCH_FAVORITE_OFFSET => "favorite: toggle star session",
+        SEARCH_FAVORITE_OFFSET => "favorite favorite: toggle star session unfavorite",
         SEARCH_MUTETAB_OFFSET => "mute tab",
         SEARCH_INBOX_EXCLUDE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
         SEARCH_KEEPALIVE_OFFSET => "keep alive",
@@ -935,62 +935,62 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_EFFORT_LOW_OFFSET => "chat view: effort low",
         SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => "chat view: effort medium",
         SEARCH_CHAT_EFFORT_HIGH_OFFSET => "chat view: effort high",
-        SEARCH_CHAT_ALLOW_OFFSET => "chat view allow",
-        SEARCH_CHAT_ALWAYS_OFFSET => "chat view always allow",
-        SEARCH_CHAT_DENY_OFFSET => "chat view deny",
-        SEARCH_CHAT_STOP_OFFSET => if (app_state.ISSUE_265_WORKING_BAR) "chat view stop the agent interrupt" else "stop agent",
-        SEARCH_CHAT_QUEUE_SEND_OFFSET => "chat view send queued messages now offline outbox",
-        SEARCH_CHAT_RESET_OFFSET => "chat view reset this chat clear bubbles cache",
-        SEARCH_CHAT_TAB_URL_OFFSET => "chat view insert browser tab url link ctrl shift x",
+        SEARCH_CHAT_ALLOW_OFFSET => "allow chat view allow",
+        SEARCH_CHAT_ALWAYS_OFFSET => "always allow chat view always allow",
+        SEARCH_CHAT_DENY_OFFSET => "deny chat view deny",
+        SEARCH_CHAT_STOP_OFFSET => "stop agent chat view stop the agent interrupt",
+        SEARCH_CHAT_QUEUE_SEND_OFFSET => "send queued messages now chat view send queued messages now offline outbox",
+        SEARCH_CHAT_RESET_OFFSET => "reset this chat chat view reset this chat clear bubbles cache",
+        SEARCH_CHAT_TAB_URL_OFFSET => "insert browser page link chat view insert browser tab url link ctrl shift x",
         SEARCH_CHAT_QUEUE_CLEAR_OFFSET => "chat view clear offline queue discard queued messages",
         SEARCH_CHAT_RETRY_UNSENT_OFFSET => "chat view retry unsent messages not sent resend",
-        SEARCH_CHAT_DISCARD_UNSENT_OFFSET => "chat view discard unsent messages not sent",
+        SEARCH_CHAT_DISCARD_UNSENT_OFFSET => "clear unsent messages chat view discard unsent messages not sent",
         SEARCH_CHAT_PUSH_QUEUED_OFFSET => "chat view send queued in claude message now push",
-        SEARCH_CHAT_EDIT_QUEUED_OFFSET => "chat view edit queued messages pull back into the prompt box",
+        SEARCH_CHAT_EDIT_QUEUED_OFFSET => "edit queued messages chat view edit queued messages pull back into the prompt box",
         SEARCH_MULTIPROMPT_LOGIN_OFFSET => "sign in to multi bot sync",
         SEARCH_SYNC_SIGNOUT_OFFSET => "account: sign out",
         SEARCH_SYNC_STATUS_OFFSET => "account: devices",
-        SEARCH_AI_USAGE_OFFSET => "usage and servers / collapsed status cards",
+        SEARCH_AI_USAGE_OFFSET => "status cards usage and servers / collapsed status cards",
         SEARCH_APPROVE_DEVICES_OFFSET => "account: approve devices",
         SEARCH_REMOVE_SERVER_1_OFFSET => "account: remove server 1",
         SEARCH_REMOVE_SERVER_2_OFFSET => "account: remove server 2",
         SEARCH_REMOVE_SERVER_3_OFFSET => "account: remove server 3",
         SEARCH_LAYOUT_PULL_OFFSET => "sync: pull now",
         SEARCH_SKILLS_MENU_OFFSET => "skills",
-        SEARCH_CHAT_REPLY_OFFSET => "Chat View: Reply to latest agent message",
+        SEARCH_CHAT_REPLY_OFFSET => "reply to latest message chat view reply to latest agent message",
         SEARCH_CHAT_REACT_LIKE_OFFSET => "Chat View: React 👍 to latest Claude message",
         SEARCH_CHAT_REACT_DISLIKE_OFFSET => "Chat View: React 👎 to latest Claude message",
         SEARCH_CHAT_REACT_HEART_OFFSET => "Chat View: React ❤️ to latest Claude message",
-        SEARCH_CLEAN_CHAT_OFFSET => "Chat View: Toggle CLEAN chat messages only hide read receipts queued status",
-        SEARCH_CHAT_TODO_OFFSET => "Chat View: Toggle todo list",
-        SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
-        SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
-        SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
-        SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
-        SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
-        SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
-        SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
-        SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
-        SEARCH_CHAT_DICTATION_OFFSET => "chat view dictation microphone speech start stop ctrl d",
-        SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file pdf zip log document image upload picture photo screenshot ctrl v drop drag",
+        SEARCH_CLEAN_CHAT_OFFSET => "hide read receipts chat view toggle clean chat messages only hide read receipts queued status",
+        SEARCH_CHAT_TODO_OFFSET => "toggle todo list chat view toggle todo list",
+        SEARCH_CHAT_FIND_OFFSET => "find in conversation chat view find in conversation ctrl f",
+        SEARCH_CHAT_TOOL_STEPS_OFFSET => "open or fold tool steps chat view open or fold all tool steps expand collapse tools",
+        SEARCH_CHAT_NEWEST_OFFSET => "scroll to newest message chat view scroll to newest message jump to bottom end",
+        SEARCH_CHAT_RESYNC_OFFSET => "resync chat chat view resync chat reload refresh repair messages",
+        SEARCH_CHAT_RESTART_OFFSET => "restart this chat on the newest version chat view restart this chat on the newest version relaunch update latest",
+        SEARCH_CHAT_RESTART_ALL_OFFSET => "restart every idle chat chat view restart every idle live chat newest version relaunch update all chats",
+        SEARCH_CHAT_MORE_MENU_OFFSET => "more menu chat view more menu three dots approve stop rename history archive model",
+        SEARCH_CHAT_COPY_CODE_OFFSET => "copy latest code block chat view copy latest code block ctrl shift d",
+        SEARCH_CHAT_DICTATION_OFFSET => "dictate chat view dictation microphone speech start stop ctrl d",
+        SEARCH_CHAT_ATTACH_OFFSET => "attach file chat view attach file pdf zip log document image upload picture photo screenshot ctrl v drop drag",
         SEARCH_CHAT_COPY_SELECTION_OFFSET => "chat view copy selection ctrl c",
-        SEARCH_CHAT_SELECTION_MENU_OFFSET => @import("ui_words.zon").palette_chat_selection_menu,
-        SEARCH_CHAT_EXPAND_TABLE_OFFSET => "chat view expand table full screen enlarge zoom read wide table",
+        SEARCH_CHAT_SELECTION_MENU_OFFSET => "add selection to chat chat view add selection to chat",
+        SEARCH_CHAT_EXPAND_TABLE_OFFSET => "expand table chat view expand table full screen enlarge zoom read wide table",
         SEARCH_CHAT_FOCUS_MESSAGES_OFFSET => "chat view focus messages keyboard up down enter options reply copy delete cancel waiting",
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
-        SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
+        SEARCH_CHAT_AC_OFFSET => "insert command or skill chat view insert command or skill browse ctrl slash",
         SEARCH_CHAT_MODE_PLAN_OFFSET => "chat permission mode: plan",
         SEARCH_CHAT_MODE_MANUAL_OFFSET => "chat permission mode: ask",
         SEARCH_CHAT_MODE_EDITS_OFFSET => "chat permission mode: accept edits",
         SEARCH_CHAT_MODE_BYPASS_OFFSET => "chat permission mode: bypass",
-        SEARCH_CHAT_PLUS_MENU_OFFSET => "Chat View: Plus Menu attach file model effort permission level",
+        SEARCH_CHAT_PLUS_MENU_OFFSET => "plus menu chat view plus menu attach file model effort permission level",
         SEARCH_SKILLS_BACK_OFFSET => "back",
         SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
         SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) words.computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
         SEARCH_BROWSER_URL_OFFSET => "browser open url",
         SEARCH_BROWSER_INSTRUCT_OFFSET => "browser: insert agent instructions",
         SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser: focus address bar",
-        SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET => "browser: switch focus between terminal and pane",
+        SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET => "browser: switch focus between chat and pane browser: switch focus between terminal and pane",
         SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET => "external browser links when pane off",
         SEARCH_SHARED_SERVER_CONNECTION_OFFSET => "remote tabs: share one server connection",
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET => "browser: auto-suspend idle panes",
@@ -1006,11 +1006,11 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_BROWSER_ENGINE_OFFSET => if (app_state.g_browser_engine == .edge) "browser: switch all panes to chrome" else "browser: switch all panes to edge",
         SEARCH_RESTART_OFFSET => "restart multi bot",
         SEARCH_UPDATE_OFFSET => "restart to update relaunch new version",
-        SEARCH_ZSB_REBIND_OFFSET => "browser: repair agent connection",
+        SEARCH_ZSB_REBIND_OFFSET => "browser: repair browser connection browser: repair agent connection",
         SEARCH_SHELL_DIAG_OFFSET => "copy session diagnostics",
         SEARCH_SYNC_NAME_OFFSET => "use agent or terminal session name",
         SEARCH_RENAME_SYNC_OFFSET => "rename session",
-        SEARCH_END_TMUX_OFFSET => "end tmux session",
+        SEARCH_END_TMUX_OFFSET => "delete chat end tmux session",
         SEARCH_REMIND_ME_OFFSET => "remind me",
         SEARCH_REMINDERS_MENU_OFFSET => "reminders",
         SEARCH_WS_SNOOZE_OFFSET => "workspace snooze",
@@ -1024,10 +1024,10 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_SESSION_OVERVIEW_MENU_OFFSET => "show all sessions",
         SEARCH_ARCHIVED_VIEW_OFFSET => "archived sessions",
         SEARCH_BROWSER_SHOTURL_OFFSET => "browser screenshot tab link in shell",
-        SEARCH_PIN_TOP_OFFSET => "pin tab to top",
+        SEARCH_PIN_TOP_OFFSET => "pin pin tab to top unpin from top",
         SEARCH_UNARCHIVE_HIDDEN_OFFSET => "restore workspace waiting sessions",
         SEARCH_UNARCHIVE_UNATTACHED_OFFSET => "restore disconnected workspace sessions",
-        SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account",
+        SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to claude usage: sign in to primary claude account",
         SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account",
         SEARCH_RENAMEWIN_OFFSET => "rename workspace",
         SEARCH_MOBILE_OFFSET => "mobile latency mode",
@@ -3930,6 +3930,7 @@ pub fn updateSearchResults() void {
             "owner@example.com",
             "primary claude account",
             "usage: sign in to primary claude account",
+            "usage: sign in to claude",
             "reconnect claude: primary",
             "reconnect claude primary telemetry",
         }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4013,7 +4014,7 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Reply to latest agent message", "quote reply" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Reply to latest agent message", "reply to latest message", "quote reply" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_REPLY_OFFSET;
         app_state.g_search_result_count += 1;
@@ -4079,7 +4080,7 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "restart every idle chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_ALL_OFFSET;
         app_state.g_search_result_count += 1;
@@ -4112,7 +4113,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ "Chat View: Toggle Dictation", "dictate", "dictation microphone speech start stop", "ctrl d" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DICTATION_OFFSET;
         app_state.g_search_result_count += 1;
@@ -4124,13 +4125,13 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_chat_active and app_state.g_chat_sel_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_selection_menu, "selection quote add to chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_selection_menu, "chat view add selection to chat", "selection quote add to chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECTION_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_expand_table, "expand table full screen enlarge zoom read wide table" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ @import("ui_words.zon").palette_chat_expand_table, "chat view expand table", "expand table full screen enlarge zoom read wide table" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EXPAND_TABLE_OFFSET;
         app_state.g_search_result_count += 1;
@@ -4752,7 +4753,7 @@ pub fn updateSearchResults() void {
         var show_cc = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const cc_labels = [_][]const u8{ "commands", "custom command", "commands.json", "edit commands", "reload commands" };
+            const cc_labels = [_][]const u8{ "commands", "custom command", "custom commands", "commands.json", "edit commands", "edit custom commands", "reload commands" };
             for (cc_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_cc = true;
@@ -5033,7 +5034,7 @@ pub fn updateSearchResults() void {
             var show_chat_stop = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const stop_labels = [_][]const u8{ (if (app_state.ISSUE_265_WORKING_BAR) "Chat View: Stop the agent" else "stop agent"), "stop agent", "interrupt", "ctrl c", "cancel response" };
+                const stop_labels = [_][]const u8{ "Chat View: Stop the agent", "stop agent", "interrupt", "ctrl c", "cancel response" };
                 for (stop_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_chat_stop = true;
@@ -5048,7 +5049,7 @@ pub fn updateSearchResults() void {
         }
 
         if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
-            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+            (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "insert browser page link", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_TAB_URL_OFFSET;
             app_state.g_search_result_count += 1;
@@ -5264,7 +5265,7 @@ pub fn updateSearchResults() void {
             var show_browser_focus_toggle = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const focus_toggle_labels = [_][]const u8{ "zigbrowser jump", "browser focus", "jump browser", "toggle browser focus", "shell browser", "alt f", "alt m", "ctrl shift m", "browser: switch focus between terminal and pane", "zigbrowser: jump to/from browser pane" };
+                const focus_toggle_labels = [_][]const u8{ "zigbrowser jump", "browser focus", "jump browser", "toggle browser focus", "shell browser", "alt f", "alt m", "ctrl shift m", "browser: switch focus between terminal and pane", "browser: switch focus between chat and pane", "zigbrowser: jump to/from browser pane" };
                 for (focus_toggle_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_browser_focus_toggle = true;
@@ -5314,7 +5315,7 @@ pub fn updateSearchResults() void {
             var show_zsb_rebind = (app_state.g_search_len == 0);
             if (app_state.g_search_len > 0) {
                 const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const zsb_labels = [_][]const u8{ "multiprompt-browser", "zsb", "rebind", "bind", "browser bind", "pane bind", "force browser", "zsb rebind", "fix zsb", "browser: repair agent connection", "repair agent connection", "multiprompt-browser: rebind active pane" };
+                const zsb_labels = [_][]const u8{ "multiprompt-browser", "zsb", "rebind", "bind", "browser bind", "pane bind", "force browser", "zsb rebind", "fix zsb", "browser: repair agent connection", "repair agent connection", "browser: repair browser connection", "repair browser connection", "multiprompt-browser: rebind active pane" };
                 for (zsb_labels) |label| {
                     if (asciiContainsQueryInsensitive(label, q)) {
                         show_zsb_rebind = true;
@@ -5783,7 +5784,7 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         }
     }
     if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "insert browser page link", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_TAB_URL;
         app_state.g_search_result_count += 1;
@@ -5813,7 +5814,7 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         app_state.g_search_result_count += 1;
     }
     if (app_state.ISSUE_265_WORKING_BAR and tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Stop agent", app_state.g_search_buf[0..app_state.g_search_len]) or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_STOP;
         app_state.g_search_result_count += 1;
@@ -5946,12 +5947,12 @@ pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
     .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
     .{ .target = app_state.SEARCH_TABCTX_COPY_ID, .label = "Copy chat ID" },
     .{ .target = app_state.SEARCH_TABCTX_HIDE, .label = "Hide from sidebar" },
-    .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete" },
+    .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete chat" },
 };
 
-pub fn chatActionLabel(target: usize, pinned: bool) ?[]const u8 {
+pub fn chatActionLabel(target: usize, _: bool) ?[]const u8 {
     for (chat_actions) |action| if (action.target == target) {
-        return if (target == SEARCH_TABCTX_PIN_TOP and pinned) "Unpin" else action.label;
+        return action.label;
     };
     return null;
 }

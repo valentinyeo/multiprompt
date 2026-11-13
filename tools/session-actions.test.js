@@ -43,7 +43,7 @@ test('Alt+X no longer has an archive binding or shortcut row', () => {
 test('both palettes use the approved seven action names in fixed context order', () => {
   const source = read('src/command_palette.zig');
   const table = source.slice(source.indexOf('pub const chat_actions ='), source.indexOf('pub fn chatActionLabel('));
-  assert.deepEqual([...table.matchAll(/\.label = "([^"]+)"/g)].map(match => match[1]), ['Pin', 'Move to workspace', 'Mark as unread', 'Rename', 'Copy chat ID', 'Hide from sidebar', 'Delete']);
+  assert.deepEqual([...table.matchAll(/\.label = "([^"]+)"/g)].map(match => match[1]), ['Pin', 'Move to workspace', 'Mark as unread', 'Rename', 'Copy chat ID', 'Hide from sidebar', 'Delete chat']);
   const context = source.slice(source.indexOf('    if (app_state.g_search_tabctx_mode) {\n        app_state.g_search_result_count = 0;'), source.indexOf('    if (app_state.g_search_workspace_mode) {', source.indexOf('    if (app_state.g_search_tabctx_mode) {\n        app_state.g_search_result_count = 0;')));
   assert.match(context, /appendChatActions\(index\)/);
   assert.doesNotMatch(context, /SEARCH_TABCTX_BACK|preferFirstFilteredResultAfterBack/);

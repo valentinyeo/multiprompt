@@ -224,7 +224,7 @@
       r("Alt+1..9", "Switch workspace 1-9", "No core Edge default, but pages may use Alt+digits.", "Sends Meta+digit to terminal apps; tmux default prefix+digits selects windows.", "Reasonable workspace namespace. Keep browser-focus escape behavior explicit and documented.", "amber"),
       r("Alt+Left / Alt+Right", "Cycle workspace", "Exact Edge history back/forward.", "Meta+arrow can be used by shells/editors; tmux has Meta bindings.", "Current split is sensible: browser focus = Edge history; shell focus = workspace. Consider Alt+J/K as the preferred workspace pair.", "amber"),
       r("Alt+J / Alt+K", "Cycle next / previous workspace", "No core Edge default.", "Meta+j/k may be used by terminal editors.", "Good browser escape/workspace chord; document as preferred over Alt+arrows.", "green"),
-      r("Ctrl+N / Alt+N pill", "New workspace", "Edge Ctrl+N opens a new browser window.", "Readline Ctrl+N means next history line.", "Keep Ctrl+N shell-scoped; prefer Ctrl+K -> New Workspace for discoverability.", "amber"),
+      r("Ctrl+N / Alt+N pill", "New workspace", "Edge Ctrl+N opens a new browser window.", "Readline Ctrl+N means next history line.", "Keep Ctrl+N shell-scoped; prefer Ctrl+K -> New workspace for discoverability.", "amber"),
 
       { section: "Inbox" },
       r("Ctrl+Shift+I", "Toggle cross-workspace inbox", "High conflict: Edge opens Developer Tools with Ctrl+Shift+I.", "No tmux default direct binding, but terminal apps may still receive it if not intercepted.", "Replace primary Inbox shortcut with Ctrl+Shift+. Keep Ctrl+Shift+I as shell-only legacy alias or remove after migration.", "red"),
@@ -247,7 +247,7 @@
 
       { section: "Spawn / Windows" },
       r("Ctrl+Shift+1..8", "Spawn shell/session presets", "No major Edge default for most digits.", "May be terminal-app-specific; shifted Ctrl digits can be inconsistent.", "Good shell-scoped. F1 overlay currently says 1..5; docs say 1..8, so update overlay/docs for consistency.", "amber"),
-      r("Ctrl+N", "New ZigShell window/workspace", "Edge new window.", "Readline next-history.", "Prefer Ctrl+K -> New Window/Workspace; keep shell-scoped if retained.", "amber"),
+      r("Ctrl+N", "New ZigShell window/workspace", "Edge new window.", "Readline next-history.", "Prefer Ctrl+K -> New workspace; keep shell-scoped if retained.", "amber"),
       r("Ctrl+Shift+T", "Reopen last closed tab", "Exact Edge reopen closed tab.", "No tmux default direct binding.", "Keep shell-scoped. Browser focus should pass through.", "amber"),
       r("Alt+Space", "Window menu", "Windows/Edge system menu convention.", "Terminal apps may use Alt+Space rarely.", "Good; aligns with OS convention.", "green"),
       r("Win+Arrows", "Snap / maximize / minimize ZigShell", "Windows global window management.", "Not tmux-visible.", "Good as OS-level retargeting.", "green"),

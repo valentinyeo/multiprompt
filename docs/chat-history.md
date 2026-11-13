@@ -110,7 +110,7 @@ On the server, download the GitHub-built `chat-audit-linux` artifact from the la
 
 ## Whole-conversation find
 
-Ctrl+F or Ctrl+K `Chat View: Find in conversation` opens the Chat View find bar.
+Ctrl+F or Ctrl+K `Find in conversation` opens the Chat View find bar.
 Typing waits 250 ms before a background request over the existing history reader
 channel. Enter/F3 moves oldest-to-newest and wraps; Shift reverses direction.
 The first selected match is the newest. Esc closes find and restores composer
