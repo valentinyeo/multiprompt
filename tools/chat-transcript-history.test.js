@@ -694,7 +694,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
 function runMetadataHarness(text, extra = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-metadata-'));
   const support = `
-${/^var g_chat_fetch_why[^\n]*$/m.exec(src)[0]}
+${(/^var g_chat_fetch_why[^\n]*$/m.exec(src) || [""])[0]}
 var g_chat_file_request_id: u32 = 0;
 const LASTINPUTINFO = struct { cbSize: u32, dwTime: u32 };
 fn IsIconic(_: HANDLE) i32 { return 0; }
