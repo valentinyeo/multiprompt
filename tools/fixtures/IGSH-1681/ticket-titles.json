@@ -318,6 +318,7 @@
   "IGSH-1965": "Ctrl+Shift+W quits the app; Ctrl+W closes browser tabs",
   "IGSH-1967": "Usage meter runs inside Multibot, not as a second hidden copy",
   "IGSH-1968": "Ctrl+K stops listing 37 outdated commands",
+  "IGSH-1969": "Ctrl+K: fold 59 duplicate commands into one each",
   "IGSH-1973": "Multibot keeps the processor busy while idle",
   "IGSH-1974": "Inne chats: the / menu shows another account's skills",
   "IGSH-2272": "Check /clear works in live chats",

@@ -255,7 +255,7 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   assert.match(source, /const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;/);
   assert.match(source, /const SEARCH_USAGE_LOGIN_INNE_OFFSET: usize = 6299;/);
   assert.match(source,
-    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account"/);
+    /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account/);
   assert.match(source,
     /SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account"/);
 
@@ -271,8 +271,9 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   }
   assert.match(update,
     /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;/);
-  assert.match(update,
+  assert.doesNotMatch(update,
     /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_INNE_OFFSET;/);
+  assert.match(update, /"usage: sign in to secondary claude account"/);
   assert.match(update, /"owner@example.com"/);
   assert.match(update, /"secondary@example.com"/);
 

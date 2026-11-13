@@ -374,7 +374,8 @@ test('v2 shared fixture is byte-identical and Frequent stays first with selected
   assert.match(read('src/frequent.zig'), /pub fn migrateSplit\(tab: u32, visits_order: bool\) u32/);
   assert.ok(read('src/sidebar.zig').includes('L(ui_words.palette_inbox_frequent)'));
   assert.ok(read('src/ui_words.zon').includes('.palette_inbox_frequent = "Inbox: frequent"'));
-  assert.ok(read('src/shortcuts.zig').includes('.a = "Ctrl+K -> Inbox: Frequent"'));
+  assert.ok(!read('src/shortcuts.zig').includes('.a = "Ctrl+K -> Inbox: Frequent"'));
+  assert.ok(read('src/command_palette.zig').includes('"inbox: frequent"'));
 });
 
 test('Computer follows a session front change', () => {

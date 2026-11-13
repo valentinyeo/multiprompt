@@ -189,9 +189,13 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
     ['Show Favorites split', 'palette_show_favorites_on'],
     ['Show All split', 'palette_show_all_split_on'],
   ]) {
-    assert.ok(read('src/shortcuts.zig').includes(`Ctrl+K -> ${label}`));
-    assert.ok(read('openwiki/operations/keyboard-shortcuts.md').includes(label));
+    assert.ok(!read('src/shortcuts.zig').includes(`Ctrl+K -> ${label}`), label);
+    assert.ok(!read('openwiki/operations/keyboard-shortcuts.md').includes(label), label);
     assert.ok(words.includes(`.${word} = "${label}: ON"`), word);
     assert.ok(sidebar.includes(`L(ui_words.${word})`), word);
+  }
+  const palette = read('src/command_palette.zig');
+  for (const label of ['show frequent split', 'frequent as first tab', 'show favorites split', 'show all split', 'inbox: frequent']) {
+    assert.ok(palette.includes(`"${label}"`), label);
   }
 });

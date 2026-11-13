@@ -25,10 +25,12 @@ test("Token Ladder commands exist on all three surfaces", () => {
   for (const label of ["Token Ladder: Auto", "Token Ladder: Burn Claude", "Token Ladder: Burn Codex", "Token Ladder: Open Dashboard"]) {
     assert.ok(words.includes(`"${label}"`), `word table ${label}`);
   }
-  assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Auto \/ Burn Claude \/ Burn Codex/);
+  assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Auto/);
   assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Open Dashboard/);
-  assert.match(wiki, /Token Ladder: Auto \/ Burn Claude \/ Burn Codex/);
+  assert.doesNotMatch(source, /Token Ladder: Burn Claude/);
+  assert.match(wiki, /Token Ladder: Auto/);
   assert.match(wiki, /Token Ladder: Open Dashboard/);
+  assert.doesNotMatch(wiki, /Burn Claude \/ Burn Codex/);
   assert.doesNotMatch(wiki.match(/Token Ladder[^\n]*/g).join("\n"), /Ctrl\+Alt/);
 });
 

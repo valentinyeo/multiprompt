@@ -22,21 +22,23 @@ test('host events and snapshots own settings, without optimistic updates', () =>
   assert.doesNotMatch(send, /settings\s*=/);
 });
 
-test('all six settings are searchable, painted and dispatched', () => {
+test('all six settings are reachable from the plus menu and land on their live dispatch', () => {
   const state = read('src/app_state.zig');
+  const plus = read('src/plus_menu.zig');
   for (const [kind, values] of [['MODEL', ['OPUS', 'SONNET', 'HAIKU', 'FABLE', 'SOL', 'TERRA', 'LUNA', 'ASTRA']], ['EFFORT', ['LOW', 'MEDIUM', 'HIGH']]]) {
     for (const value of values) {
       const id = `SEARCH_CHAT_${kind}_${value}_OFFSET`;
-      const label = `Chat View: ${kind === 'MODEL' ? 'Model' : 'Effort'} ${value[0]}${value.slice(1).toLowerCase()}`;
       assert.ok(state.includes(`pub const ${id}: usize`), id);
-      assert.ok(palette.includes(`= ${id};`) && palette.includes(label), label);
-      assert.ok(sidebar.includes(`${id} => L("${label}")`), label);
-      assert.ok(main.includes(`${id} => .{ .${kind.toLowerCase()} = .${value.toLowerCase()} }`), label);
+      assert.ok(!palette.includes(`= ${id};`), `${id} is folded into Chat View: Plus Menu`);
+      assert.match(plus, new RegExp(`${kind.toLowerCase()}_${value.toLowerCase()}\\b`), id);
+      assert.ok(main.includes(`${id} => .{ .${kind.toLowerCase()} = .${value.toLowerCase()} }`), id);
     }
   }
+  assert.match(palette, /Chat View: Plus Menu/);
+  assert.ok(palette.includes('= SEARCH_CHAT_PLUS_MENU_OFFSET;'));
   assert.ok(main.indexOf("if (app_state.isChatSettingOffset(target))") < main.indexOf("if (target >= SEARCH_ADDFAVICON_OFFSET"));
   assert.match(sidebar, /const is_chat_action = [^;]*\bis_chat_setting\b/);
-  assert.match(palette, /chatSettingsEligible\(\)/);
+  assert.match(read('src/plus_menu.zig'), /chatSettingsEligible\(\)/);
   assert.match(read('src/chat_session.zig'), /privateActionsAllowed\(\)/);
   assert.match(read('src/chat_session.zig'), /settingsKnown\(key.shell_id\)/);
 });
@@ -56,11 +58,12 @@ test('settings requests report refusal and show confirmed next values', () => {
   assert.match(plus, /state\.active\[@intFromEnum\(Item\.effort_high\)\] = selected\.effort == \.high/);
 });
 
-test('F1 and keyboard docs list both palette actions', () => {
+test('F1 and keyboard docs list the plus menu that now carries model and effort', () => {
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
     const text = read(file);
-    assert.ok(text.includes('Chat View: Model Opus / Sonnet / Haiku'), file);
-    assert.ok(text.includes('Chat View: Effort Low / Medium / High'), file);
+    assert.ok(text.includes('Chat View: Plus Menu'), file);
+    assert.ok(!text.includes('Chat View: Model Opus / Sonnet / Haiku'), file);
+    assert.ok(!text.includes('Chat View: Effort Low / Medium / High'), file);
   }
 });
 

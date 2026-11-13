@@ -19,11 +19,12 @@ assert.doesNotMatch(source, /fn resurrectArchivedWorkspaceSessions\(/,
   "the dangerous dissolved-session bulk resurrection helper must stay removed");
 
 for (const label of [
-  "Unarchive Hidden (Alt+E) Sessions",
-  "Restore Disconnected Workspace Sessions",
   "Unarchive Killed (Alt+X) Sessions",
 ]) {
   assert.match(source, new RegExp(label.replace(/[()+]/g, "\\$&")), `missing Ctrl+K action: ${label}`);
+}
+for (const offset of ["SEARCH_UNARCHIVE_HIDDEN_OFFSET", "SEARCH_UNARCHIVE_UNATTACHED_OFFSET"]) {
+  assert.match(source, new RegExp(`if \\(target == ${offset}\\)`), `restore path stays wired: ${offset}`);
 }
 
 const queueStart = source.indexOf("fn startUnarchiveUnattachedWorkspaceSessions(");
