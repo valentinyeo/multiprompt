@@ -521,7 +521,7 @@ pub fn chatPiModelSelect(index: usize) bool {
     if (index >= available.len) return false;
     const chosen = available[index];
     var command_buf: [256]u8 = undefined;
-    const command = pi_models.commandText(&command_buf, chosen);
+    const command = pi_models.commandText(&command_buf, &chosen);
     const shell = app_state.active_shell;
     const shell_ptr = &app_state.shells[shell];
     const live = shell_ptr.tmux_session_len > 0 and !@import("chat_view.zig").canToggle(shell_ptr.tmux_session[0..shell_ptr.tmux_session_len]);
@@ -694,7 +694,7 @@ pub fn sendChatPrompt() void {
                 return;
             },
             .model => {
-                if (pi_models.isPiAgent(shell.ai_agent)) {
+                if (shell.ai_agent == 3) {
                     chatPiModelPicker();
                 } else {
                     showHeaderNoticeAscii("Model picker is coming soon", 4000, false);

@@ -15,15 +15,15 @@ pub const Model = struct {
     detail: [MAX_DETAIL]u8 = std.mem.zeroes([MAX_DETAIL]u8),
     detail_len: u8 = 0,
 
-    pub fn nameText(self: Model) []const u8 {
+    pub fn nameText(self: *const Model) []const u8 {
         return self.name[0..self.name_len];
     }
 
-    pub fn providerText(self: Model) []const u8 {
+    pub fn providerText(self: *const Model) []const u8 {
         return self.provider[0..self.provider_len];
     }
 
-    pub fn detailText(self: Model) []const u8 {
+    pub fn detailText(self: *const Model) []const u8 {
         return self.detail[0..self.detail_len];
     }
 };
@@ -164,7 +164,7 @@ pub fn parseResponse(text: []const u8, out: []Model) usize {
     return count;
 }
 
-pub fn commandText(buf: []u8, model: Model) []const u8 {
+pub fn commandText(buf: []u8, model: *const Model) []const u8 {
     if (model.provider_len == 0) return std.fmt.bufPrint(buf, "/model {s}", .{model.nameText()}) catch "/model";
     return std.fmt.bufPrint(buf, "/model {s}/{s}", .{ model.providerText(), model.nameText() }) catch "/model";
 }
@@ -181,7 +181,7 @@ test "SOFT-2275 parses Pi's model rows and builds the switch command" {
     try std.testing.expectEqualStrings("deepseek-ai/DeepSeek-V4-Pro-0813", models_buf[0].nameText());
     try std.testing.expectEqualStrings("baseten", models_buf[0].providerText());
     try std.testing.expectEqualStrings("1.0M", models_buf[0].detailText());
-    const command = commandText(&frame, models_buf[1]);
+    const command = commandText(&frame, &models_buf[1]);
     try std.testing.expectEqualStrings("/model openai-codex/gpt-5.6-sol", command);
     try std.testing.expectEqual(@as(usize, 0), parseResponse("@mp\t7\tmodels\terror\t-\t0\n@@MP_END@@\n", &models_buf));
     try std.testing.expectEqual(@as(usize, 0), parseResponse("not a frame\n", &models_buf));
@@ -192,7 +192,7 @@ test "SOFT-2275 keeps a bare model name usable and rejects junk rows" {
     var frame: [128]u8 = undefined;
     var bare: Model = .{};
     fillModel(&bare, "gpt-oss-120b", "", "");
-    try std.testing.expectEqualStrings("/model gpt-oss-120b", commandText(&frame, bare));
+    try std.testing.expectEqualStrings("/model gpt-oss-120b", commandText(&frame, &bare));
     const count = parseResponse("@mp\t1\tmodels\tok\t-\t2\nX\tignored\t\t\nM\t\tempty\t\n@@MP_END@@\n", &models_buf);
     try std.testing.expectEqual(@as(usize, 0), count);
 }

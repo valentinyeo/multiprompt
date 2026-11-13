@@ -3079,6 +3079,8 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
+    if query.get("op") == "set_model" and provider == "pi" and not host_owned(provider, sid):
+        return dict(status="unavailable", reason="host_not_running")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
     if not host_owned(provider, sid) and query.get("op") == "set_model" and provider == "pi":
