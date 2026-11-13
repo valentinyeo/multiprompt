@@ -441,14 +441,14 @@ pub fn build(b: *std.Build) void {
     const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
     test_step.dependOn(&launch_regression.step);
     vps_test_step.dependOn(&launch_regression.step);
-    const usage_mode_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_single_exe.test.js" });
-    test_step.dependOn(&usage_mode_regression.step);
-    const usage_mode_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("src/usage_telemetry_mode.zig"),
+    const usage_worker_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_in_process.test.js" });
+    test_step.dependOn(&usage_worker_regression.step);
+    const usage_worker_plan_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/usage_worker_plan.zig"),
         .target = target,
         .optimize = .Debug,
     }) });
-    test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
+    test_step.dependOn(&b.addRunArtifact(usage_worker_plan_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
     for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/ssh_servers.zig", "src/bot_photo_sync.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig", "src/tmux_closed.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{

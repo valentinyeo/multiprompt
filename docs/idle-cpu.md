@@ -76,7 +76,7 @@ UI timers retain foreground responsiveness while background work uses notificati
 - Keyboard/mouse hooks: blocking GetMessage plus the watchdog above; already event-driven.
 - Voice/TTS/audio capture/playback, dictation, image decode/paste workers: run only for an active operation, use events where supplied by the audio subsystem; retain bounded device/stream and completion waits.
 - Mutex spin/yield loops: contention-only synchronization, not periodic schedulers; unchanged.
-- Usage telemetry collector: existing named refresh event, per-account deadlines, 15/60 s power policy and 5 min global-idle wait; preserve provider freshness and throttle behavior.
+- Usage telemetry collector: one in-process worker thread that exists only while the usage card is hovered or the sidebar card has been switched, and exits when it is not wanted and on app close; it waits on the named refresh event or its own wake event, with per-account deadlines, a 15/60 s power policy and a 5 min global-idle wait; no UI timer and no second process; preserve provider freshness and throttle behavior.
 - Account login HTTP/device polling: only during explicit sign-in, bounded cancellation/deadlines; retain protocol-required polling.
 - Update helper peer-process wait: blocking WaitForMultipleObjects with a deadline, already event-driven.
 - Token Ladder post-command refresh: one delayed refresh after an explicit mode change, not a recurring idle loop; retain.

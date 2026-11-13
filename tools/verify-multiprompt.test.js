@@ -1615,7 +1615,7 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.match(journey, /usagePill = \$true/);
   assert.match(journey, /Snapshot 'pill-closed'/);
   assert.match(journey, /Snapshot 'pill-open'/);
-  assert.match(control, /MultipromptUsageTelemetryLaunch/);
+  assert.match(control, /Local\\MultipromptUsageTelemetry'/);
   assert.match(control, /IGSH-908\/usage-telemetry\.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
   const measure = control.slice(control.indexOf('function Measure-StatusCard('), control.indexOf('function Sidebar-Luminance('));
