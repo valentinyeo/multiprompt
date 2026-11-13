@@ -154,6 +154,22 @@ fn sessionCount(index: usize) ?u32 {
     return count;
 }
 
+fn emptyHome(index: usize) bool {
+    const entry = &entries[index - 1];
+    if (!std.mem.eql(u8, entry.id[0..entry.id_len], "default")) return false;
+    return !current(index) and (sessionCount(index) orelse 0) == 0;
+}
+
+fn loadEntries() void {
+    entry_count = 0;
+    for (app_state.g_workspaces[0..app_state.g_workspace_count]) |entry| {
+        if (entry.archived) continue;
+        entries[entry_count] = entry;
+        entry_count += 1;
+        if (emptyHome(entry_count)) entry_count -= 1;
+    }
+}
+
 fn paint(dc: w.HANDLE) void {
     var bounds = w.RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
     const bg = w.CreateSolidBrush(@import("themes.zig").themeSidebarBg());
@@ -248,12 +264,7 @@ pub fn headerClick(x: i32, y: i32) bool {
     app_state.g_shell_focused = false;
     workspaces.syncInProcessWorkspacesToRegistry();
     workspaces.mergeWorkspaceRegistryFromDisk();
-    entry_count = 0;
-    for (app_state.g_workspaces[0..app_state.g_workspace_count]) |entry| {
-        if (entry.archived) continue;
-        entries[entry_count] = entry;
-        entry_count += 1;
-    }
+    loadEntries();
     selected = 0;
     for (0..entry_count) |i| {
         if (current(i + 1)) selected = i + 1;
@@ -447,4 +458,58 @@ test "IGSH-1687 compact rows share exact paint and hit bounds" {
     try std.testing.expect(hit(action.left, action.top - 1) == null);
     try std.testing.expect(hit(action.left, action.bottom) == null);
     try std.testing.expect(hit(scale(6), scale(5)) == null);
+}
+
+fn testEntry(id: []const u8, name: []const u8) app_state.WorkspaceEntry {
+    var entry = std.mem.zeroes(app_state.WorkspaceEntry);
+    @memcpy(entry.id[0..id.len], id);
+    entry.id_len = @intCast(id.len);
+    @memcpy(entry.name[0..name.len], name);
+    entry.name_len = @intCast(name.len);
+    return entry;
+}
+
+test "IGSH-2281 workspace menu hides an empty Main" {
+    const old_workspaces = app_state.g_workspaces;
+    const old_workspace_count = app_state.g_workspace_count;
+    const old_single = app_state.g_single_window;
+    const old_starred = app_state.g_starred_workspace;
+    const old_lws = app_state.g_lws_count;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_len = app_state.g_ws_id_len;
+    const old_active = app_state.g_active_workspace;
+    const old_shell_count = app_state.shell_count;
+    const old_entry_count = entry_count;
+    defer {
+        app_state.g_workspaces = old_workspaces;
+        app_state.g_workspace_count = old_workspace_count;
+        app_state.g_single_window = old_single;
+        app_state.g_starred_workspace = old_starred;
+        app_state.g_lws_count = old_lws;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_len;
+        app_state.g_active_workspace = old_active;
+        app_state.shell_count = old_shell_count;
+        entry_count = old_entry_count;
+    }
+    app_state.g_workspaces[0] = testEntry("default", "Main");
+    app_state.g_workspaces[1] = testEntry("ws-1", "HT Product");
+    app_state.g_workspace_count = 2;
+    app_state.g_single_window = true;
+    app_state.g_starred_workspace = true;
+    app_state.g_lws_count = 2;
+    @memcpy(app_state.g_ws_ids[0][0..7], "default");
+    app_state.g_ws_id_len[0] = 7;
+    @memcpy(app_state.g_ws_ids[1][0..4], "ws-1");
+    app_state.g_ws_id_len[1] = 4;
+    app_state.g_active_workspace = 1;
+    app_state.shell_count = 0;
+    loadEntries();
+    try std.testing.expectEqual(@as(usize, 1), entry_count);
+    try std.testing.expectEqualStrings("HT Product", entries[0].name[0..entries[0].name_len]);
+    app_state.g_starred_workspace = false;
+    app_state.g_active_workspace = 0;
+    loadEntries();
+    try std.testing.expectEqual(@as(usize, 2), entry_count);
+    try std.testing.expectEqualStrings("Main", entries[0].name[0..entries[0].name_len]);
 }
