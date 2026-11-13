@@ -18,7 +18,7 @@ function functionBody(text, name, nextName) {
 
 test("usage telemetry is native, headless, and file based", () => {
   assert.doesNotMatch(build, /\.name = "multiprompt-telemetry"/);
-  assert.match(source, /usage_telemetry\.main\(init\)/);
+  assert.match(source, /usage_telemetry\.bind\(init\.gpa, init\.io\)/);
   assert.match(build, /root_source_file = b\.path\("src\/usage_telemetry\.zig"\)/);
   assert.doesNotMatch(build, /multiprompt-usage|usage_companion/);
   assert.match(telemetry, /usage-telemetry\.json/);

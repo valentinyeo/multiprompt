@@ -1160,7 +1160,6 @@ const moveChangelogSelection = @import("changelog.zig").moveChangelogSelection;
 const openAsciiUrlInDefaultBrowser = @import("changelog.zig").openAsciiUrlInDefaultBrowser;
 const UsageLoginAccount = @import("app_state.zig").UsageLoginAccount;
 const showUsageAccountLogin = @import("telemetry_panel.zig").showUsageAccountLogin;
-const ensureUsageTelemetryCollector = @import("telemetry_panel.zig").ensureUsageTelemetryCollector;
 const requestAiPaceRefresh = @import("telemetry_panel.zig").requestAiPaceRefresh;
 const startLadderMode = @import("telemetry_panel.zig").startLadderMode;
 const cycleSidebarStatusCard = @import("telemetry_panel.zig").cycleSidebarStatusCard;
@@ -1351,7 +1350,6 @@ pub const BROWSER_EDGE_MASKS = true;
 pub const APP_VERSION = build_config.app_version orelse "0.28.883";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
-const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
 pub export const mp_version_marker: [("MPVERSION=" ++ APP_VERSION ++ ";").len]u8 = ("MPVERSION=" ++ APP_VERSION ++ ";").*;
 const workspace_snooze = @import("workspace_snooze.zig");
 const reminders_load = @import("reminders_load.zig");
@@ -9137,6 +9135,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = CloseHandle(app_state.shells[i].process);
                 }
             }
+            usage_telemetry.shutdown();
             closeTunnelKeepers();
             if (app_state.g_job != null) _ = CloseHandle(app_state.g_job);
             PostQuitMessage(0);
@@ -9150,10 +9149,7 @@ pub fn main(init: std.process.Init) void {
     @import("idle_footprint.zig").setStartupSettled(false);
     launch_cache.begin();
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return;
-    if (usage_telemetry_mode.isRequested(args)) {
-        usage_telemetry.main(init) catch {};
-        return;
-    }
+    usage_telemetry.bind(init.gpa, init.io);
     if (@import("console_snapshot.zig").runIfRequested(args)) return;
     defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;

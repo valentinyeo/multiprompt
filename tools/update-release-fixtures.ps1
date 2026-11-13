@@ -17,15 +17,6 @@ class UpdateFixture {
             child.WaitForExit();
             return child.ExitCode;
         }
-        if (args.Length > 0 && args[0] == "--usage-telemetry") {
-            using (var mutex = new Mutex(true, "Local\\MultipromptUsageTelemetry"))
-            using (var stop = new EventWaitHandle(false, EventResetMode.ManualReset, "Local\\MultipromptUsageTelemetryStop")) {
-                File.WriteAllText(exe + ".telemetry-ready", "ready");
-                stop.WaitOne();
-                mutex.ReleaseMutex();
-            }
-            return 0;
-        }
         File.AppendAllText(exe + ".starts", String.Join("|", args) + "\n");
         if (Environment.GetEnvironmentVariable("MULTIPROMPT_TEST_BROKEN") == "1") return 1;
         for (int i = 0; i + 1 < args.Length; i++) {

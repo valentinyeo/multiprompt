@@ -1,5 +1,4 @@
 const std = @import("std");
-const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
 
 pub const MARKER_PREFIX = "MPVERSION=";
 pub const MAX_VERSION_LEN = 24;
@@ -228,7 +227,6 @@ fn stopOldHelpers(dir: []const u16) void {
 
 pub fn stopForUpdate(path: []const u16) void {
     stopOldHelpers(path[0..wideDirLen(path)]);
-    usage_telemetry_mode.stopForRelaunch();
 }
 
 fn wideContains(hay: []const u16, needle: []const u8) ?usize {
@@ -325,7 +323,6 @@ pub fn runRelaunchHelperIfRequested() bool {
     if (elen == 0 or elen >= 520) return true;
     exe[elen] = 0;
     stopOldHelpers(exe[0..wideDirLen(exe[0..elen])]);
-    usage_telemetry_mode.stopForRelaunch();
 
     var cmd: [524]u16 = undefined;
     cmd[0] = '"';

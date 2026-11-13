@@ -1,6 +1,6 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
-const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
+const usage_telemetry = @import("usage_telemetry.zig");
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
@@ -137,32 +137,9 @@ pub fn showUsageAccountLogin(account: UsageLoginAccount) bool {
     return fallback != null and @intFromPtr(fallback.?) > 32;
 }
 
-pub fn ensureUsageTelemetryCollector() void {
-    var executable: [768]u16 = std.mem.zeroes([768]u16);
-    const length = GetModuleFileNameW(null, &executable, executable.len);
-    if (length == 0 or length >= executable.len) return;
-    if (usage_telemetry_mode.isRunning() or app_state.g_usage_launch_mutex != null) return;
-    const launch = CreateMutexW(null, 0, L("Local\\MultipromptUsageTelemetryLaunch")) orelse return;
-    if (GetLastError() == 183) {
-        _ = CloseHandle(launch);
-        return;
-    }
-    app_state.g_usage_launch_mutex = launch;
-    const child = ShellExecuteW(null, L("open"), @ptrCast(&executable), L("--usage-telemetry"), null, SW_HIDE);
-    if (child == null or @intFromPtr(child.?) <= 32) {
-        _ = CloseHandle(launch);
-        app_state.g_usage_launch_mutex = null;
-    }
-}
-
 pub fn syncUsageTelemetryCollector() void {
     if (app_state.g_status_card_hover) app_footprint.wake();
-    const footprint = @import("idle_footprint.zig");
-    if (footprint.usageCollectorWanted()) {
-        ensureUsageTelemetryCollector();
-        return;
-    }
-    if (usage_telemetry_mode.isRunning()) usage_telemetry_mode.stopForRelaunch();
+    usage_telemetry.sync(@import("idle_footprint.zig").usageCollectorWanted());
 }
 
 fn aiPaceJsonString(value: ?std.json.Value) ?[]const u8 {

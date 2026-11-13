@@ -1,8 +1,8 @@
 # Native AI usage telemetry
 
-`multiprompt.exe --usage-telemetry` is the headless collector for multiprompt's native
-Combined and Today's AI cards. It does not host HTTP, render a dashboard, add a
-tray icon, or require Node.js.
+The collector for multiprompt's native Combined and Today's AI cards runs inside
+`multiprompt.exe`. It does not host HTTP, render a dashboard, add a tray icon,
+start a second process, or require Node.js.
 
 Build it with:
 
@@ -10,18 +10,20 @@ Build it with:
 zig build
 ```
 
-Multiprompt starts its own executable with `--usage-telemetry` before any UI,
-session, workspace, single-instance or tray initialization. The named mutex
-`Local\MultipromptUsageTelemetry` keeps one
-collector alive across all workspace windows. Launching it again requests an
-immediate refresh without bypassing Claude's provider cooldown. The app probes
-that mutex rather than a process name before spawning a collector. On update,
-`--relaunch-after` stops legacy `multiprompt-telemetry*.exe` processes from the
-same executable directory, signals `Local\MultipromptUsageTelemetryStop`, and
-waits for the collector mutex to release before launching the new app. No
-separate telemetry executable is built or installed. Reconnect uses the exact
-first `--usage-telemetry` argument and executable directory to stop only a
-collector (including renamed images), never a workspace process.
+One background worker thread runs the collector only while the usage meter is
+wanted: while the usage card is hovered or after the sidebar card has been
+switched in this session. The UI thread only sets that wanted flag and signals the worker. It never
+waits on a fetch and has no polling timer for this. The worker exits when the
+meter is no longer wanted and when the app closes. The pure start and stop
+decision and the poll interval policy live in `src/usage_worker_plan.zig`.
+
+The named mutex `Local\MultipromptUsageTelemetry` keeps one worker alive across
+all workspace windows, and a legacy helper from an older version blocks a new
+worker the same way. Setting the named event
+`Local\MultipromptUsageTelemetryRefresh` requests an immediate refresh without
+bypassing Claude's provider cooldown; the reconnect script does this after a
+verified sign-in. On update, `--relaunch-after` stops legacy
+`multiprompt-telemetry*.exe` processes from the same executable directory.
 
 Automatic usage polling runs every ten minutes. Claude credential expiry checks
 remain independent; they read local credentials every two minutes and contact
