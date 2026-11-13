@@ -1150,9 +1150,17 @@ pub fn loadChatOutbox() void {
     armChatOutboxTimerIfNeeded();
 }
 
+fn chatOutboxNeedsTick() bool {
+    const now_ms: i64 = @intCast(GetTickCount64());
+    for (app_state.g_chat_outbox.items) |entry| {
+        if (entry.message_v1 or chat_echo.drivesPolling(entry.state, entry.channel_pending, entry.transcript_queued, entry.sent_tick_ms, now_ms)) return true;
+    }
+    return false;
+}
+
 fn armChatOutboxTimerIfNeeded() void {
     if (app_state.g_main_hwnd == null) return;
-    if (app_state.g_chat_active or app_state.g_chat_pending_reset != null or app_state.g_chat_outbox.items.len > 0 or app_state.g_chat_tmux_send_job != null or app_state.g_chat_full_settle_job != null or app_state.g_chat_message_sync_job != null) {
+    if (app_state.g_chat_active or app_state.g_chat_pending_reset != null or chatOutboxNeedsTick() or app_state.g_chat_tmux_send_job != null or app_state.g_chat_full_settle_job != null or app_state.g_chat_message_sync_job != null) {
         if (!app_state.g_chat_outbox_timer_on) {
             app_state.g_chat_outbox_timer_on = true;
             _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_OUTBOX, 250, null);
@@ -1192,6 +1200,19 @@ pub fn chatOutboxCountForShell(idx: u32) usize {
     const key = chatOutboxKeyForShell(idx, &key_buf);
     if (key.len == 0) return 0;
     return chatOutboxCountIn(&app_state.g_chat_outbox, key);
+}
+
+pub fn chatOutboxSyncCountForShell(idx: u32) usize {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return 0;
+    const now_ms: i64 = @intCast(GetTickCount64());
+    var n: usize = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.state == .cancelled or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (e.message_v1 or chat_echo.drivesPolling(e.state, e.channel_pending, e.transcript_queued, e.sent_tick_ms, now_ms)) n += 1;
+    }
+    return n;
 }
 
 pub fn chatOutboxWorkingForShell(idx: u32) bool {
@@ -2516,7 +2537,7 @@ pub fn chatOutboxTick() void {
             const idx: u32 = @intCast((app_state.g_chat_message_sync_next + offset) % count);
             const shell = app_state.shells[idx];
             if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3)) continue;
-            if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxCountForShell(idx) == 0) continue;
+            if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxSyncCountForShell(idx) == 0) continue;
             chatMessageSyncStart(idx);
             if (app_state.g_chat_message_sync_job != null) {
                 app_state.g_chat_message_sync_next = (@as(usize, idx) + 1) % count;
@@ -3941,7 +3962,7 @@ fn chatTmuxSettle() void {
             continue;
         };
         const key = chatFileIdentityForShell(idx);
-        @import("chat_session.zig").chatFileRequestForDelivery(key, true);
+        if (chat_echo.drivesPolling(entry.state, entry.channel_pending, entry.transcript_queued, entry.sent_tick_ms, now_ms)) @import("chat_session.zig").chatFileRequestForDelivery(key, true);
         const history = chatHistoryEntry(key) orelse {
             i += 1;
             continue;

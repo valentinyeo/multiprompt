@@ -512,7 +512,11 @@ test "voice request allows a replacement SID but rejects a foreign match" {
 
 pub fn chatVoiceReplySource(key: chat_transcript.Identity, request: bool) ?*const ChatHistoryEntry {
     if (!chatVoiceRequestAllowed(key, app_state.g_chat_histories.items)) return null;
-    if (request) chatFileRequestForDelivery(key, true);
+    if (request) {
+        g_chat_fetch_why = "voice";
+        defer g_chat_fetch_why = "outbox";
+        chatFileRequestForDelivery(key, true);
+    }
     var found: ?*const ChatHistoryEntry = null;
     for (app_state.g_chat_histories.items) |entry| {
         if (chatVoiceMatches(key, entry)) {
@@ -614,6 +618,8 @@ pub fn chatFetchWanted(chat_active: bool) bool {
     return @import("chat_view.zig").fetchWanted(chat_active, chatActiveTabWantsChat());
 }
 
+var g_chat_fetch_why: []const u8 = "outbox";
+
 pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool) void {
     const live_shell_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and chatActiveTabWantsChat()) app_state.shells[app_state.active_shell].shell_id else 0;
     chatHistoryStreamsKeep(live_shell_id);
@@ -624,6 +630,10 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
+    if (key.shell_id == live_shell_id and entry.quiet > 0) {
+        entry.quiet = 0;
+        entry.next = @min(entry.next, now);
+    }
     if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
     const known = entry.key;
@@ -660,8 +670,8 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     entry.pending = true;
     entry.loading_disk = load_disk;
     app_state.g_chat_file_request_id +%= 1;
-    var log_buf: [96]u8 = undefined;
-    debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript request shell={d} offset={d} before={d}", .{ key.shell_id, entry.history.offset, entry.before }) catch "[chat] transcript request");
+    var log_buf: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript request shell={d} offset={d} before={d} why={s} quiet={d}", .{ key.shell_id, entry.history.offset, entry.before, if (delivery) g_chat_fetch_why else "view", entry.quiet }) catch "[chat] transcript request");
     const thread = std.Thread.spawn(.{}, chatFileFetchThread, .{ entry, entry.key, if (pushed) |push| push.id else app_state.g_chat_file_request_id, entry.loading_disk, pushed }) catch {
         entry.pending = false;
         if (!load_disk and pushed == null) chatFetchRelease();
@@ -686,27 +696,38 @@ fn chatFilePollInterval() u64 {
     return 500;
 }
 
-fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, delivery: bool, streaming: bool, unchanged: bool, background: bool) u64 {
+fn chatQuietBackoff(quiet: u16) u64 {
+    if (quiet < 1) return 4000;
+    if (quiet < 2) return 8000;
+    if (quiet < 3) return 16000;
+    return 30000;
+}
+
+fn chatHistoryNextDelay(disk: bool, prepended: bool, before: u64, more: bool, delivery: bool, streaming: bool, unchanged: bool, background: bool, quiet: u16) u64 {
     if (disk or prepended or before > 0) return 0;
     if (more) return 1000;
     if (delivery and !unchanged) return 250;
     if (streaming) return 0;
-    if (unchanged and background) return 4000;
+    if (unchanged and background) return if (delivery) 4000 else chatQuietBackoff(quiet);
     return chatFilePollInterval();
 }
 
 test "an unchanged background chat waits four seconds and a live chat stays fast" {
-    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(true, false, 0, false, false, false, true, true));
-    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, true, 0, false, false, false, false, false));
-    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 1, false, false, false, false, false));
-    try std.testing.expectEqual(@as(u64, 1000), chatHistoryNextDelay(false, false, 0, true, false, false, false, false));
-    try std.testing.expectEqual(@as(u64, 250), chatHistoryNextDelay(false, false, 0, false, true, false, false, true));
-    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, true, false, true, true));
-    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, true, false, true, false));
-    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 0, false, false, true, true, true));
-    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true));
-    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, true, false));
-    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, false, true));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(true, false, 0, false, false, false, true, true, 0));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, true, 0, false, false, false, false, false, 0));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 1, false, false, false, false, false, 0));
+    try std.testing.expectEqual(@as(u64, 1000), chatHistoryNextDelay(false, false, 0, true, false, false, false, false, 0));
+    try std.testing.expectEqual(@as(u64, 250), chatHistoryNextDelay(false, false, 0, false, true, false, false, true, 0));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, true, false, true, true, 0));
+    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, true, false, true, false, 0));
+    try std.testing.expectEqual(@as(u64, 0), chatHistoryNextDelay(false, false, 0, false, false, true, true, true, 0));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 0));
+    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, true, false, 0));
+    try std.testing.expectEqual(@as(u64, 500), chatHistoryNextDelay(false, false, 0, false, false, false, false, true, 0));
+    try std.testing.expectEqual(@as(u64, 8000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 1));
+    try std.testing.expectEqual(@as(u64, 16000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 2));
+    try std.testing.expectEqual(@as(u64, 30000), chatHistoryNextDelay(false, false, 0, false, false, false, true, true, 60000));
+    try std.testing.expectEqual(@as(u64, 4000), chatHistoryNextDelay(false, false, 0, false, true, false, true, true, 9));
 }
 
 const ChatHistoryPush = struct { wire: std.ArrayList(u8), id: u32, read_us: u64 };
@@ -1495,7 +1516,9 @@ pub fn chatFileOnReady() void {
                 debugLog("[chat] resync completed");
             }
             const live_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
-            entry.next = GetTickCount64() + chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatDeliveryPending(entry.key.shell_id, false), entry.stream != null, entry.unchanged, entry.key.shell_id != live_id);
+            const background = entry.key.shell_id != live_id;
+            entry.quiet = if (entry.unchanged and background and !disk) entry.quiet +| 1 else 0;
+            entry.next = GetTickCount64() + chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatPollingPending(entry.key.shell_id), entry.stream != null, entry.unchanged, background, entry.quiet -| 1);
             if (belongs_to_active) {
                 active_changed = active_changed or !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
@@ -1921,6 +1944,8 @@ pub fn chatWarmOftenUsed() void {
     }
     var remote = false;
     var n: usize = 0;
+    g_chat_fetch_why = "warm";
+    defer g_chat_fetch_why = "outbox";
     while (n < count) : (n += 1) {
         const key = chatFileIdentityForShell(ranked[n].idx);
         const entry = chatHistoryEntry(key) orelse continue;
@@ -2106,6 +2131,17 @@ test "chatLatestAgentReply returns only the reply after the last prompt" {
     var out: [256]u16 = undefined;
     const n = chatLatestAgentReply(&out);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("second answer"), out[0..n]);
+}
+
+pub fn chatPollingPending(shell_id: u32) bool {
+    const now: i64 = @intCast(GetTickCount64());
+    for (app_state.g_chat_outbox.items) |entry| {
+        if (!entry.channel_sent or entry.state == .not_sent) continue;
+        if (!chat_echo.drivesPolling(entry.state, entry.channel_pending, entry.transcript_queued, entry.sent_tick_ms, now)) continue;
+        const idx = @import("chat_send.zig").chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
+        if (app_state.shells[idx].shell_id == shell_id) return true;
+    }
+    return false;
 }
 
 pub fn chatDeliveryPending(shell_id: u32, include_not_sent: bool) bool {

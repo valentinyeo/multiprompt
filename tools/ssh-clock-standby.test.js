@@ -356,6 +356,7 @@ fn chatHoldLegacyCodex() bool { return false; }
 fn chatMessageSyncFinish() void {}
 fn chatMessageSyncStart(_: u32) void {}
 fn chatOutboxCountForShell(_: u32) usize { return 0; }
+fn chatOutboxSyncCountForShell(_: u32) usize { return 0; }
 fn chatPendingResetDropIfStale() ?usize { return null; }
 fn chatPendingResetStart(_: u32) void {}
 fn sshOutboxFlushed(_: u32) void {}

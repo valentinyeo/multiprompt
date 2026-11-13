@@ -2967,6 +2967,7 @@ pub const ChatHistoryEntry = struct {
     cache_written: u64 = 0,
     cache_dirty: bool = false,
     unchanged: bool = false,
+    quiet: u16 = 0,
     incremental: bool = false,
     failures: u8 = 0,
     missing_message: [256]u16 = @splat(0),

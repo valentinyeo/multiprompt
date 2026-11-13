@@ -327,6 +327,25 @@ pub fn expiredSent(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
         now_ms - sent_ms >= 10 * 60 * 1000;
 }
 
+pub const POLL_WINDOW_MS: i64 = 600_000;
+
+pub fn drivesPolling(state: OutboxState, channel_pending: bool, transcript_queued: bool, sent_tick_ms: i64, now_ms: i64) bool {
+    if (state != .delivered and state != .not_sent) return true;
+    if (channel_pending or transcript_queued) return true;
+    if (sent_tick_ms <= 0 or now_ms < sent_tick_ms) return true;
+    return now_ms - sent_tick_ms < 600_000;
+}
+
+test "IGSH-1973 an old delivered or unsent message stops driving transcript polling" {
+    try std.testing.expect(drivesPolling(.delivered, false, false, 1000, 2000));
+    try std.testing.expect(drivesPolling(.queued, false, false, 1000, 2_000_000));
+    try std.testing.expect(drivesPolling(.delivered, true, false, 1000, 2_000_000));
+    try std.testing.expect(drivesPolling(.delivered, false, true, 1000, 2_000_000));
+    try std.testing.expect(!drivesPolling(.delivered, false, false, 1000, 601_000));
+    try std.testing.expect(!drivesPolling(.not_sent, false, false, 1000, 2_000_000));
+    try std.testing.expect(drivesPolling(.delivered, false, false, 0, 2_000_000));
+}
+
 pub fn pendingExpired(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
     return state != .not_sent and now_ms >= sent_ms and now_ms - sent_ms >= 600_000;
 }
