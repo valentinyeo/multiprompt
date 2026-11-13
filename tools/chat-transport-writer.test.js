@@ -84,6 +84,7 @@ test('production SSH writer releases the host mutex and isolates input overflow'
   const source = fs.readFileSync(file, 'utf8')
     .replace('const w = @import("win32.zig");', '')
     .replace('const state = @import("app_state.zig");', '')
+    .replaceAll('@import("idle_budget.zig")', 'struct { pub fn bump(_: anytype) void {} }')
     .replaceAll('@import("console.zig")', 'struct {}')
     .replaceAll('@import("chat_session.zig")', 'struct {}');
   assert.match(source, /fn transmit\(host: \*Host\)/, 'shared transport has an independent writer');

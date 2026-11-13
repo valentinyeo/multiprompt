@@ -323,6 +323,7 @@
   "IGSH-2013": "Chats start their own visible helper chats",
   "IGSH-2272": "Check /clear works in live chats",
   "IGSH-2010": "Chat view freezes Multibot for 5 seconds",
+  "IGSH-1975": "Multibot counts its idle work and checks it before every merge",
   "IGSH-212": "zsb: type sends multi-line text into chat composers (newlines fire as Enter)",
   "IGSH-221": "zsb: cdp cannot hold a session across calls, so Profiler/Tracing brackets around a reload are impossible",
   "IGSH-224": "Per-workspace isolated browser profiles and independent bookmarks",

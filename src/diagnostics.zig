@@ -1,5 +1,6 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const idle_budget = @import("idle_budget.zig");
 const HANDLE = @import("win32.zig").HANDLE;
 const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const Sleep = @import("win32.zig").Sleep;
@@ -139,10 +140,18 @@ pub fn debugLog(msg: []const u8) void {
     if (paintLogKey(msg)) |key| {
         if (!paintLogAllowed(key, msg)) return;
     }
+    idle_budget.bump(.log_line);
     writeLogLine(msg);
 }
 
+pub fn debugLogOnce(msg: []const u8) void {
+    if (!verboseLoggingEnabled()) return;
+    if (!idle_budget.logFirstTime(msg)) return;
+    debugLog(msg);
+}
+
 pub fn syncLog(msg: []const u8) void {
+    idle_budget.bump(.log_line);
     writeLogLine(msg);
 }
 
