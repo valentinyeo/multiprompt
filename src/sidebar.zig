@@ -204,6 +204,7 @@ const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFS
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
+const SEARCH_PI_LOGIN_OFFSET = @import("app_state.zig").SEARCH_PI_LOGIN_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
@@ -2946,6 +2947,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_always = result_idx == SEARCH_CHAT_ALWAYS_OFFSET;
                     const is_chat_deny = result_idx == SEARCH_CHAT_DENY_OFFSET;
                     const is_chat_stop = result_idx == SEARCH_CHAT_STOP_OFFSET;
+                    const is_pi_login = result_idx == SEARCH_PI_LOGIN_OFFSET;
                     const is_multiprompt_login = result_idx == SEARCH_MULTIPROMPT_LOGIN_OFFSET;
                     const is_computer = result_idx == SEARCH_COMPUTER_TOGGLE_OFFSET or result_idx == SEARCH_COMPUTER_CONTROL_OFFSET or result_idx == SEARCH_COMPUTER_WIDTH_OFFSET or result_idx == SEARCH_COMPUTER_RETRY_OFFSET;
                     const is_browser_toggle = result_idx == SEARCH_BROWSER_TOGGLE_OFFSET or is_computer;
@@ -4189,6 +4191,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var stop_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, (if (app_state.ISSUE_265_WORKING_BAR) L("Esc") else L("Ctrl+C")), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_pi_login) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var pi_login_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Log in"), -1, &pi_login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
+                        var pi_login_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("/login"), -1, &pi_login_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_computer) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
