@@ -1,1 +1,0 @@
-- Ctrl+Shift+W now quits Multibot, so Ctrl+W is free to close browser tabs. Delete a chat from Ctrl+K or its right-click menu.

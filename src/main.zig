@@ -1347,7 +1347,7 @@ pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev els
 pub const ROOMS_PREVIEW = if (@hasDecl(build_config, "rooms_preview")) build_config.rooms_preview else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
-pub const APP_VERSION = build_config.app_version orelse "0.28.883";
+pub const APP_VERSION = build_config.app_version orelse "0.28.884";
 const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 pub export const mp_version_marker: [("MPVERSION=" ++ APP_VERSION ++ ";").len]u8 = ("MPVERSION=" ++ APP_VERSION ++ ";").*;

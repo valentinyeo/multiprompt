@@ -1,3 +1,0 @@
-- The inbox lists the newest session on top in every tab.
-- J and K stop at the first and last inbox row.
-- Alt+G twice jumps to the top inbox row and Alt+Shift+G to the bottom.
