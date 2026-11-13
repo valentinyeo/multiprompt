@@ -32,3 +32,11 @@ test('only missing titles are fetched and invalid responses fail closed', async 
   await assert.rejects(resolveTicketTitles(['IGSH-3'], {}, 'token', request), /Unresolved title/);
   await assert.rejects(resolveTicketTitles(['IGSH-1'], { 'IGSH-1': '' }, '', request), /title/);
 });
+
+test('a board 2060 ticket renumbered to SOFT still resolves under its IGSH id', async () => {
+  const { resolveTicketTitles } = await load();
+  const request = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-1920', title: 'Renamed board title' }] }) });
+  assert.deepEqual(await resolveTicketTitles(['IGSH-1920'], {}, 'token', request), { 'IGSH-1920': 'Renamed board title' });
+  const wrong = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-1921', title: 'Other' }] }) });
+  await assert.rejects(resolveTicketTitles(['IGSH-1920'], {}, 'token', wrong), /Unresolved title for IGSH-1920/);
+});
