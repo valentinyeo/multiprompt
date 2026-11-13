@@ -167,17 +167,11 @@ jobs:
           cp zig-out/bin/zigshell-bridge.exe dist/zigshell-bridge-${{ matrix.arch }}.exe
           cp zig-out/bin/multiprompt-dev.exe dist/multiprompt-dev-${{ matrix.arch }}.exe
       - name: Build the symbolized twin
-        continue-on-error: true
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ needs.prepare.outputs.tag != '' }} -Dsymbols -Dversion="${TAG#v}" --prefix zig-out-debug
-          mkdir -p dist-symbols
-          cp zig-out-debug/bin/multiprompt.exe dist-symbols/multiprompt-${{ matrix.arch }}-symbols.exe
-          shopt -s nullglob
-          for pdb in zig-out-debug/bin/*.pdb; do
-            cp "$pdb" "dist-symbols/multiprompt-${{ matrix.arch }}-symbols.pdb"
-          done
+          bash tools/package-symbols.sh zig-out-debug/bin dist-symbols '${{ matrix.arch }}'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: multiprompt-${{ matrix.arch }}
@@ -187,7 +181,7 @@ jobs:
         with:
           name: multiprompt-${{ matrix.arch }}-symbols
           path: dist-symbols/*
-          if-no-files-found: warn
+          if-no-files-found: error
 
   launch:
     needs: [prepare, build]
@@ -321,12 +315,10 @@ jobs:
           MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
         run: node tools/sign-release.mjs
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        continue-on-error: true
         with:
           name: multiprompt-x64-symbols
           path: symbols
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        continue-on-error: true
         with:
           name: multiprompt-arm64-symbols
           path: symbols
@@ -365,18 +357,9 @@ jobs:
           remote=$(git ls-remote --exit-code origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
           resolved=$(printf '%s\n' "$remote" | awk 'NR == 1 { sha = $1 } /\^\{\}$/ { sha = $1 } END { print sha }')
           [ "$resolved" = "$BUILT_SHA" ] || { echo 'Release tag does not point to the built commit' >&2; exit 1; }
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+          for arch in x64 arm64; do
+            test -s "symbols/multiprompt-$arch-symbols.exe"
+            test -s "symbols/multiprompt-$arch-symbols.pdb"
+          done
+          gh release create "$TAG" dist/* symbols/* --repo "$GITHUB_REPOSITORY" --verify-tag \
             --latest="$latest" --title "multiprompt $TAG" --notes-file release-body.txt
-      - name: Attach the symbolized twins for freeze reports
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          shopt -s nullglob
-          files=(symbols/*symbols.exe)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No symbolized twin was built; freeze reports stay unnamed"
-            exit 0
-          fi
-          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
