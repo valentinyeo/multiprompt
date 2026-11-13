@@ -2529,6 +2529,7 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
+                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"

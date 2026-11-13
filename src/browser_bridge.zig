@@ -1941,12 +1941,13 @@ const ZsbSessionOpenArgs = struct {
     host: []const u8,
     tmux: []const u8,
     name: []const u8,
+    after_tab: ?u32 = null,
 };
 
 fn parseZsbSessionOpenArgs(argv: []const []const u8) !ZsbSessionOpenArgs {
     if (argv.len != 11 or !std.mem.eql(u8, argv[0], "session-open")) return error.BadArgs;
-    const flags = [_][]const u8{ "--workspace", "--group", "--host", "--tmux", "--name" };
-    var values: [5][]const u8 = @splat("");
+    const flags = [_][]const u8{ "--workspace", "--group", "--host", "--tmux", "--name", "--after-tab" };
+    var values: [6][]const u8 = @splat("");
     var i: usize = 1;
     while (i < argv.len) : (i += 2) {
         var matched = false;
@@ -1959,10 +1960,18 @@ fn parseZsbSessionOpenArgs(argv: []const []const u8) !ZsbSessionOpenArgs {
         }
         if (!matched) return error.BadArgs;
     }
-    for (values) |value| if (value.len == 0) return error.BadArgs;
+    if ((values[1].len == 0) == (values[5].len == 0)) return error.BadArgs;
+    for ([_]usize{ 0, 2, 3, 4 }) |vi| if (values[vi].len == 0) return error.BadArgs;
     try validateZsbTmux(values[3]);
     try validateZsbName(values[4]);
-    return .{ .workspace = values[0], .group = values[1], .host = values[2], .tmux = values[3], .name = values[4] };
+    var after_tab: ?u32 = null;
+    if (values[5].len != 0) {
+        for (values[5]) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+        const tab = std.fmt.parseInt(u32, values[5], 10) catch return error.BadArgs;
+        if (tab == 0) return error.BadArgs;
+        after_tab = tab;
+    }
+    return .{ .workspace = values[0], .group = values[1], .host = values[2], .tmux = values[3], .name = values[4], .after_tab = after_tab };
 }
 
 fn validateZsbTmux(tmux: []const u8) !void {
@@ -2129,13 +2138,20 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
         if (std.mem.eql(u8, ws_names[wi], args.workspace)) workspace = @intCast(wi);
     }
     const ws = workspace orelse return zsbUnknownName(out, "unknown_workspace", ws_names[0..app_state.g_lws_count]);
+    var anchor: ?u32 = null;
+    var group_id: ?u32 = null;
+    if (args.after_tab) |tab| {
+        const index = zsbShellIndexForTab(tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+        if (app_state.shells[index].workspace != ws) return zsbWorkspaceError(out, "unknown_tab");
+        anchor = index;
+        group_id = app_state.shells[index].group_id;
+    }
     var group_names: [app_state.MAX_GROUPS][]const u8 = undefined;
     var group_bufs: [app_state.MAX_GROUPS][256]u8 = undefined;
-    var group_id: ?u32 = null;
     for (app_state.groups[0..app_state.group_count], 0..) |group, gi| {
         const len = std.unicode.utf16LeToUtf8(&group_bufs[gi], group.name[0..group.name_len]) catch return zsbWorkspaceError(out, "invalid_group_name");
         group_names[gi] = group_bufs[gi][0..len];
-        if (std.mem.eql(u8, group_names[gi], args.group)) group_id = group.id;
+        if (anchor == null and std.mem.eql(u8, group_names[gi], args.group)) group_id = group.id;
     }
     const gid = group_id orelse return zsbUnknownName(out, "unknown_group", group_names[0..app_state.group_count]);
     var host_names: [3][]const u8 = undefined;
@@ -2156,7 +2172,8 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
         return pos;
     }
     if (!spawn(host, args.tmux, ws)) return zsbWorkspaceError(out, "spawn_failed");
-    const shell = &app_state.shells[app_state.shell_count - 1];
+    const placed = if (anchor) |index| zsbPlaceAfter(app_state.shell_count - 1, index) else app_state.shell_count - 1;
+    const shell = &app_state.shells[placed];
     shell.group_id = gid;
     shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, args.name) catch unreachable);
     shell.name[shell.name_len] = 0;
@@ -2244,6 +2261,17 @@ fn zsbTabParseError(out: []u8, err: anyerror) usize {
         error.InvalidName => "invalid_name",
         else => "bad_args",
     });
+}
+
+fn zsbPlaceAfter(src: u32, anchor: u32) u32 {
+    const dst = anchor + 1;
+    if (src <= dst) return src;
+    const moved = app_state.shells[src];
+    var i = src;
+    while (i > dst) : (i -= 1) app_state.shells[i] = app_state.shells[i - 1];
+    app_state.shells[dst] = moved;
+    if (app_state.active_shell >= dst and app_state.active_shell < src) app_state.active_shell += 1;
+    return dst;
 }
 
 fn zsbShellIndexForTab(tab: u32) ?u32 {
@@ -2677,6 +2705,50 @@ test "session-open parses reordered flags and rejects missing duplicate and unkn
     args = zsb_workspace_test_args;
     args[2] = "";
     try std.testing.expectError(error.BadArgs, parseZsbSessionOpenArgs(&args));
+}
+
+test "session-open --after-tab parses as the group alternative and rejects both or neither" {
+    const after = [_][]const u8{ "session-open", "--workspace", "Research", "--after-tab", "41", "--host", "remote-1", "--tmux", "live-helper", "--name", "Helper" };
+    const parsed = try parseZsbSessionOpenArgs(&after);
+    try std.testing.expectEqual(@as(?u32, 41), parsed.after_tab);
+    try std.testing.expectEqualStrings("", parsed.group);
+    try std.testing.expectEqual(@as(?u32, null), (try parseZsbSessionOpenArgs(&zsb_workspace_test_args)).after_tab);
+    var both = after;
+    both[1] = "--group";
+    try std.testing.expectError(error.BadArgs, parseZsbSessionOpenArgs(&both));
+    for ([_][]const u8{ "0", "-1", "4x", "99999999999", "+4" }) |bad| {
+        var wrong = after;
+        wrong[4] = bad;
+        try std.testing.expectError(error.BadArgs, parseZsbSessionOpenArgs(&wrong));
+    }
+}
+
+test "session-open --after-tab places the new tab right after its parent in the parent's group" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    app_state.shells[0].workspace = 1;
+    app_state.shells[0].group_id = 0;
+    app_state.shells[1] = app_state.empty_shell;
+    app_state.shells[1].shell_id = 43;
+    app_state.shells[1].workspace = 1;
+    app_state.shell_count = 2;
+    app_state.next_shell_id = 44;
+    var out: [4096]u8 = undefined;
+    const after = [_][]const u8{ "session-open", "--workspace", "Research", "--after-tab", "41", "--host", "remote-1", "--tmux", "live-helper", "--name", "Helper" };
+    const len = zsbSessionOpen(&after, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"created\":true,\"tab\":44,\"state\":\"connecting\"}\n", out[0..len]);
+    try std.testing.expectEqual(@as(u32, 3), app_state.shell_count);
+    try std.testing.expectEqual(@as(u32, 41), app_state.shells[0].shell_id);
+    try std.testing.expectEqual(@as(u32, 44), app_state.shells[1].shell_id);
+    try std.testing.expectEqual(@as(u32, 43), app_state.shells[2].shell_id);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shells[1].group_id);
+    try std.testing.expectEqual(@as(u32, 0), app_state.active_shell);
+    var missing = after;
+    missing[4] = "99";
+    missing[8] = "live-other";
+    const refused = zsbSessionOpen(&missing, &out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    try std.testing.expect(std.mem.indexOf(u8, out[0..refused], "unknown_tab") != null);
+    try std.testing.expectEqual(@as(u32, 3), app_state.shell_count);
 }
 
 test "session-open validates tmux grammar and UTF-16 title bounds and control characters" {
