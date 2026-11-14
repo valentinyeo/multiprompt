@@ -4090,12 +4090,12 @@ pub fn updateSearchResults() void {
         .{ .id = SEARCH_CHAT_SWITCH_CODEX_OFFSET, .target = 2, .name = "Chat View: Switch AI to Codex" },
         .{ .id = SEARCH_CHAT_SWITCH_PI_OFFSET, .target = 3, .name = "Chat View: Switch AI to Pi" },
     };
-    for (switch_rows) |row| {
+    for (switch_rows) |sw| {
         if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-            switchAiTab(app_state.active_shell, row.target) and
-            labelsMatchQuery(&[_][]const u8{ row.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
+            switchAiTab(app_state.active_shell, sw.target) and
+            labelsMatchQuery(&[_][]const u8{ sw.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
         {
-            app_state.g_search_results[app_state.g_search_result_count] = row.id;
+            app_state.g_search_results[app_state.g_search_result_count] = sw.id;
             app_state.g_search_result_count += 1;
         }
     }
@@ -5326,11 +5326,11 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         .{ .id = app_state.SEARCH_TABCTX_SWITCH_CODEX, .target = 2, .name = "Switch AI to Codex" },
         .{ .id = app_state.SEARCH_TABCTX_SWITCH_PI, .target = 3, .name = "Switch AI to Pi" },
     };
-    for (switch_tab_rows) |row| {
-        if (tc_idx != null and switchAiTab(tc_idx.?, row.target) and app_state.g_search_result_count < app_state.g_search_results.len and
-            labelsMatchQuery(&[_][]const u8{ row.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    for (switch_tab_rows) |sw| {
+        if (tc_idx != null and switchAiTab(tc_idx.?, sw.target) and app_state.g_search_result_count < app_state.g_search_results.len and
+            labelsMatchQuery(&[_][]const u8{ sw.name, "keep chat name picture address history subscription expiring" }, app_state.g_search_buf[0..app_state.g_search_len]))
         {
-            app_state.g_search_results[app_state.g_search_result_count] = row.id;
+            app_state.g_search_results[app_state.g_search_result_count] = sw.id;
             app_state.g_search_result_count += 1;
         }
     }
