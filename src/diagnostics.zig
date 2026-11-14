@@ -91,21 +91,21 @@ pub fn getSessionAuditPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u
 }
 
 const PaintLogLimiter = struct {
-    const Entry = struct { used: bool = false, key: u64 = 0, line: u64 = 0 };
+    const Entry = struct { used: bool = false, id: u64 = 0, line: u64 = 0, at: u64 = 0 };
     entries: [512]Entry = @splat(.{}),
 
-    fn allow(self: *PaintLogLimiter, key: []const u8, line: []const u8) bool {
-        const key_hash = std.hash.Wyhash.hash(0, key);
+    fn allow(self: *PaintLogLimiter, id: []const u8, line: []const u8, now: u64, heartbeat_ms: u64) bool {
+        const id_hash = std.hash.Wyhash.hash(0, id);
         const line_hash = std.hash.Wyhash.hash(1, line);
-        const first: usize = @intCast(key_hash % self.entries.len);
+        const first: usize = @intCast(id_hash % self.entries.len);
         for (0..self.entries.len) |offset| {
             const entry = &self.entries[(first + offset) % self.entries.len];
-            if (entry.used and entry.key != key_hash) continue;
-            if (entry.used and entry.line == line_hash) return false;
-            entry.* = .{ .used = true, .key = key_hash, .line = line_hash };
+            if (entry.used and entry.id != id_hash) continue;
+            if (entry.used and entry.line == line_hash and (heartbeat_ms == 0 or now -| entry.at < heartbeat_ms)) return false;
+            entry.* = .{ .used = true, .id = id_hash, .line = line_hash, .at = now };
             return true;
         }
-        self.entries[first] = .{ .used = true, .key = key_hash, .line = line_hash };
+        self.entries[first] = .{ .used = true, .id = id_hash, .line = line_hash, .at = now };
         return true;
     }
 };
@@ -113,32 +113,70 @@ const PaintLogLimiter = struct {
 var paint_log_limiter: PaintLogLimiter = .{};
 var paint_log_busy = std.atomic.Value(bool).init(false);
 
-fn paintLogKey(msg: []const u8) ?[]const u8 {
+const PaintLogRule = struct { id: []const u8, line: []const u8, heartbeat_ms: u64 = 0 };
+
+const PAINT_LOG_HEARTBEAT_MS: u64 = 60_000;
+const PAINT_LOG_DIVIDER_HEARTBEAT_MS: u64 = 5_000;
+const PAINT_LOG_SLOW_MS: u64 = 8;
+
+fn paintLogRule(msg: []const u8) ?PaintLogRule {
     if (std.mem.startsWith(u8, msg, "[photo-proof] ")) {
         const end = std.mem.indexOf(u8, msg, " rect=") orelse return null;
-        return msg[0..end];
+        return .{ .id = msg[0..end], .line = msg };
     }
     if (std.mem.startsWith(u8, msg, "[sidebar-avatar] ")) {
         const end = std.mem.indexOf(u8, msg, " face=") orelse return null;
-        return msg[0..end];
+        return .{ .id = msg[0..end], .line = msg };
     }
     if (std.mem.startsWith(u8, msg, "[bots] ")) {
         const start = std.mem.indexOf(u8, msg, " rect=") orelse return null;
-        return msg[start..];
+        return .{ .id = msg[start..], .line = msg };
+    }
+    if (std.mem.startsWith(u8, msg, "[chat] unread divider ")) {
+        return .{ .id = "[chat] unread divider", .line = msg, .heartbeat_ms = PAINT_LOG_DIVIDER_HEARTBEAT_MS };
+    }
+    if (std.mem.startsWith(u8, msg, "PERF[chat]: ")) {
+        const ms_at = std.mem.indexOf(u8, msg, " ms=") orelse return null;
+        const size_at = std.mem.indexOf(u8, msg, " size=") orelse return null;
+        if (size_at < ms_at) return null;
+        const stage = msg["PERF[chat]: ".len..ms_at];
+        if (std.mem.eql(u8, stage, "receive to paint")) return null;
+        const ms = std.fmt.parseInt(u64, msg[ms_at + " ms=".len .. size_at], 10) catch return null;
+        return .{ .id = msg[0..ms_at], .line = if (ms >= PAINT_LOG_SLOW_MS) msg else msg[size_at..], .heartbeat_ms = PAINT_LOG_HEARTBEAT_MS / 2 };
+    }
+    if (std.mem.startsWith(u8, msg, "browser-freeze-state: now=")) {
+        const state_at = std.mem.indexOf(u8, msg, " active=") orelse return null;
+        const shell_at = std.mem.indexOf(u8, msg, " shell=") orelse return null;
+        if (shell_at < state_at) return null;
+        const shell_end = std.mem.indexOfPos(u8, msg, shell_at + 1, " ") orelse return null;
+        return .{ .id = msg[shell_at..shell_end], .line = msg[state_at..], .heartbeat_ms = PAINT_LOG_HEARTBEAT_MS };
+    }
+    if (std.mem.startsWith(u8, msg, "[chat-live] page ") or std.mem.startsWith(u8, msg, "[chat-live] draw ")) {
+        const amount_at = std.mem.indexOf(u8, msg, " n=") orelse return null;
+        const flag_at = std.mem.indexOf(u8, msg, " f=") orelse return null;
+        if (flag_at < amount_at) return null;
+        return .{ .id = msg[0..amount_at], .line = msg[flag_at..], .heartbeat_ms = PAINT_LOG_HEARTBEAT_MS };
+    }
+    if (std.mem.startsWith(u8, msg, "[focus-trace] event=blocked ")) {
+        const trimmed = msg[0 .. std.mem.indexOf(u8, msg, " repeats=") orelse msg.len];
+        return .{ .id = trimmed, .line = trimmed, .heartbeat_ms = PAINT_LOG_HEARTBEAT_MS };
+    }
+    if (std.mem.startsWith(u8, msg, "[altq] composer_focus ")) {
+        return .{ .id = msg, .line = msg, .heartbeat_ms = PAINT_LOG_HEARTBEAT_MS };
     }
     return null;
 }
 
-fn paintLogAllowed(key: []const u8, msg: []const u8) bool {
+fn paintLogAllowed(rule: PaintLogRule) bool {
     if (paint_log_busy.swap(true, .acquire)) return false;
     defer paint_log_busy.store(false, .release);
-    return paint_log_limiter.allow(key, msg);
+    return paint_log_limiter.allow(rule.id, rule.line, GetTickCount64(), rule.heartbeat_ms);
 }
 
 pub fn debugLog(msg: []const u8) void {
     if (!verboseLoggingEnabled() and !std.mem.startsWith(u8, msg, "[consolefont] ") and !std.mem.startsWith(u8, msg, "[focus-trace] ") and !std.mem.startsWith(u8, msg, "[computer] ")) return;
-    if (paintLogKey(msg)) |key| {
-        if (!paintLogAllowed(key, msg)) return;
+    if (paintLogRule(msg)) |rule| {
+        if (!paintLogAllowed(rule)) return;
     }
     idle_budget.bump(.log_line);
     writeLogLine(msg);
@@ -621,4 +659,55 @@ pub fn logPollShellEnter() void {
     buf[pos] = ']';
     pos += 1;
     debugLog(buf[0..pos]);
+}
+
+test "IGSH-1973 an unchanged divider line logs again only after the heartbeat" {
+    var limiter: PaintLogLimiter = .{};
+    const rule = paintLogRule("[chat] unread divider count=1 marker=3 index=2 unknown=0 y=10 message_y=4 scroll=0 message=7 offset=9 line_y=24").?;
+    try std.testing.expect(limiter.allow(rule.id, rule.line, 1000, rule.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(rule.id, rule.line, 1100, rule.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(rule.id, rule.line, 5999, rule.heartbeat_ms));
+    try std.testing.expect(limiter.allow(rule.id, rule.line, 6000, rule.heartbeat_ms));
+    const moved = paintLogRule("[chat] unread divider count=1 marker=3 index=2 unknown=0 y=11 message_y=4 scroll=1 message=7 offset=9 line_y=25").?;
+    try std.testing.expect(limiter.allow(moved.id, moved.line, 6001, moved.heartbeat_ms));
+}
+
+test "IGSH-1973 chat performance lines log on change or when slow and always for receive to paint" {
+    var limiter: PaintLogLimiter = .{};
+    try std.testing.expect(paintLogRule("PERF[chat]: receive to paint ms=2 size=4") == null);
+    const fast = paintLogRule("PERF[chat]: reconcile ms=1 size=12").?;
+    const fast_again = paintLogRule("PERF[chat]: reconcile ms=3 size=12").?;
+    try std.testing.expect(limiter.allow(fast.id, fast.line, 0, fast.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(fast_again.id, fast_again.line, 10, fast_again.heartbeat_ms));
+    const grown = paintLogRule("PERF[chat]: reconcile ms=1 size=13").?;
+    try std.testing.expect(limiter.allow(grown.id, grown.line, 20, grown.heartbeat_ms));
+    const slow = paintLogRule("PERF[chat]: reconcile ms=40 size=13").?;
+    try std.testing.expect(limiter.allow(slow.id, slow.line, 30, slow.heartbeat_ms));
+}
+
+test "IGSH-1973 browser freeze state ignores the clock and logs per browser on change" {
+    var limiter: PaintLogLimiter = .{};
+    const one = paintLogRule("browser-freeze-state: now=100 active=2 swap=0 shell=21 window=5 frozen=false parked=0 activity=idle last_event=7 busy=false").?;
+    const later = paintLogRule("browser-freeze-state: now=1100 active=2 swap=0 shell=21 window=5 frozen=false parked=0 activity=idle last_event=7 busy=false").?;
+    const other = paintLogRule("browser-freeze-state: now=1100 active=2 swap=0 shell=22 window=6 frozen=false parked=0 activity=idle last_event=7 busy=false").?;
+    const frozen = paintLogRule("browser-freeze-state: now=1200 active=2 swap=0 shell=21 window=5 frozen=true parked=0 activity=idle last_event=7 busy=false").?;
+    try std.testing.expect(limiter.allow(one.id, one.line, 100, one.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(later.id, later.line, 1100, later.heartbeat_ms));
+    try std.testing.expect(limiter.allow(other.id, other.line, 1100, other.heartbeat_ms));
+    try std.testing.expect(limiter.allow(frozen.id, frozen.line, 1200, frozen.heartbeat_ms));
+    try std.testing.expect(limiter.allow(frozen.id, frozen.line, 61200, frozen.heartbeat_ms));
+}
+
+test "IGSH-1973 live page lines collapse on the flag and blocked focus lines ignore the repeat count" {
+    var limiter: PaintLogLimiter = .{};
+    const page = paintLogRule("[chat-live] page shell=9 n=100 f=1").?;
+    const next = paintLogRule("[chat-live] page shell=9 n=250 f=1").?;
+    try std.testing.expect(limiter.allow(page.id, page.line, 0, page.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(next.id, next.line, 33, next.heartbeat_ms));
+    try std.testing.expect(paintLogRule("[chat-live] start shell=9 n=0 f=1") == null);
+    const first = paintLogRule("[focus-trace] event=blocked caller=exe+0x10 target=0x5 class=\"Edit\" pid=1 ours=true focus=0x5 foreground=0x6 foreground_class=\"X\" repeats=0").?;
+    const again = paintLogRule("[focus-trace] event=blocked caller=exe+0x10 target=0x5 class=\"Edit\" pid=1 ours=true focus=0x5 foreground=0x6 foreground_class=\"X\" repeats=3").?;
+    try std.testing.expect(limiter.allow(first.id, first.line, 0, first.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(again.id, again.line, 750, again.heartbeat_ms));
+    try std.testing.expect(paintLogRule("[focus-trace] event=allowed caller=exe+0x10 repeats=0") == null);
 }
