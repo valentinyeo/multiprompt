@@ -1262,6 +1262,7 @@ const pollShellNames = @import("shell_poll.zig").pollShellNames;
 comptime {
     if (@import("builtin").is_test) {
         _ = @import("win32.zig");
+        _ = @import("coalesced_post.zig");
         _ = @import("app_state.zig");
         _ = @import("power.zig");
         _ = @import("monitor.zig");
@@ -1499,6 +1500,10 @@ fn browserFocusHotkey() void {
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }
+    if (msg == WM_TIMER and wp == @import("win32.zig").TIMER_CHAT_FILE_READY) {
+        @import("win32.zig").chatFileReadyTimer(hwnd);
+        return 0;
+    }
     if (msg == WM_ACTIVATEAPP) {
         const active = wp != 0 and IsIconic(hwnd) == 0;
         freeze_recorder.activation(active);
@@ -1507,7 +1512,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         freeze_recorder.activation(false);
     }
     if (freeze_recorder.heartbeat(msg, wp)) return 0;
-    if (msg == WM_APP_CHAT_FILE_READY) @import("win32.zig").chatFileReadyDelivered();
+    if (msg == WM_APP_CHAT_FILE_READY) @import("win32.zig").chatFileReadyBegin();
+    defer if (msg == WM_APP_CHAT_FILE_READY) @import("win32.zig").chatFileReadyFinish(hwnd);
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
         update_release.ready();

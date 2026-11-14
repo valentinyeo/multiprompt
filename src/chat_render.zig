@@ -580,7 +580,15 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             if (limit <= pos) limit = pos + 1;
             var fit: i32 = 0;
             var size: SIZE = undefined;
-            _ = GetTextExtentExPointW(hdc, text[pos..limit].ptr, @intCast(limit - pos), max_w - x, &fit, null, &size);
+            var measure_end = limit;
+            if (limit - pos > 1024) {
+                measure_end = pos + 1024;
+                if (text[measure_end - 1] >= 0xD800 and text[measure_end - 1] <= 0xDBFF) measure_end += 1;
+            }
+            _ = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), max_w - x, &fit, null, &size);
+            if (measure_end < limit and fit + 2 >= @as(i32, @intCast(measure_end - pos))) {
+                _ = GetTextExtentExPointW(hdc, text[pos..limit].ptr, @intCast(limit - pos), max_w - x, &fit, null, &size);
+            }
             const count = chat_code.fitCount(text[pos..limit], fit);
             const segment = text[pos .. pos + count];
             const w = chatTextWidth(hdc, segment);
@@ -745,7 +753,15 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
             while (pos < end) {
                 var fit: i32 = 0;
                 var size: SIZE = undefined;
-                const measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                var measure_end = end;
+                if (end - pos > 1024) {
+                    measure_end = pos + 1024;
+                    if (text[measure_end - 1] >= 0xD800 and text[measure_end - 1] <= 0xDBFF) measure_end += 1;
+                }
+                var measured = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                if (measure_end < end and fit + 2 >= @as(i32, @intCast(measure_end - pos))) {
+                    measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                }
                 const count = chat_code.fitCount(text[pos..end], fit);
                 const segment = text[pos .. pos + count];
                 const w = if (measured and count == end - pos) size.cx else chatTextWidth(hdc, segment);

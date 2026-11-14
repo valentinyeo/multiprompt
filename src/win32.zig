@@ -339,6 +339,8 @@ pub const TIMER_AI_PACE: usize = 24;
 pub const TIMER_SYSTEM_THEME: usize = 25;
 pub const TIMER_BROWSER_ENGINE_SWITCH: usize = 26;
 pub const TIMER_CHAT_REFRESH: usize = 27;
+pub const TIMER_CHAT_FILE_READY: usize = 46;
+const CHAT_FILE_READY_GAP_MS: UINT = 16;
 pub const TIMER_CHAT_WORKING: usize = 43;
 pub const TIMER_CHAT_SCROLLBAR: usize = 44;
 pub const TIMER_BROWSER_URL_FOCUS: usize = 45;
@@ -1017,15 +1019,28 @@ pub extern "user32" fn EnumWindows(WNDENUMPROC, LPARAM) callconv(WINAPI) BOOL;
 pub extern "user32" fn SendMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
 pub extern "user32" fn PostMessageW(HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) BOOL;
 
-var g_chat_file_ready_pending = std.atomic.Value(bool).init(false);
+var g_chat_file_ready = @import("coalesced_post.zig").Gate{};
 
 pub fn postChatFileReady(hwnd: HANDLE) void {
-    if (g_chat_file_ready_pending.swap(true, .acq_rel)) return;
-    if (PostMessageW(hwnd, WM_APP_CHAT_FILE_READY, 0, 0) == 0) g_chat_file_ready_pending.store(false, .release);
+    if (g_chat_file_ready.request()) postChatFileReadyNow(hwnd);
 }
 
-pub fn chatFileReadyDelivered() void {
-    g_chat_file_ready_pending.store(false, .release);
+fn postChatFileReadyNow(hwnd: HANDLE) void {
+    if (PostMessageW(hwnd, WM_APP_CHAT_FILE_READY, 0, 0) == 0) g_chat_file_ready.failed();
+}
+
+pub fn chatFileReadyBegin() void {
+    g_chat_file_ready.begin();
+}
+
+pub fn chatFileReadyFinish(hwnd: HANDLE) void {
+    if (!g_chat_file_ready.finish()) return;
+    if (SetTimer(hwnd, TIMER_CHAT_FILE_READY, CHAT_FILE_READY_GAP_MS, null) == 0) postChatFileReadyNow(hwnd);
+}
+
+pub fn chatFileReadyTimer(hwnd: HANDLE) void {
+    _ = KillTimer(hwnd, TIMER_CHAT_FILE_READY);
+    postChatFileReadyNow(hwnd);
 }
 pub extern "user32" fn SendMessageTimeoutW(HANDLE, UINT, WPARAM, LPARAM, UINT, UINT, ?*usize) callconv(WINAPI) LRESULT;
 pub extern "user32" fn CallWindowProcW(isize, HANDLE, UINT, WPARAM, LPARAM) callconv(WINAPI) LRESULT;
