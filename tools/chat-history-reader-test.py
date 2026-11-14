@@ -6845,6 +6845,11 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         self.assertTrue(writes[0]['request_id'])
         self.assertFalse([frame for frame in writes if frame.get('type') == 'user'])
 
+    def test_cursor_start_does_not_request_remote_control(self):
+        self.assertIs(reader.HOST_ADAPTERS['cursor']['open'], reader.host_cursor_open)
+        reader.host_cursor_open('cursor', self.sid, self.tmux, self.session)
+        self.assertEqual(self.writes(), [])
+
     def test_remote_control_rejection_does_not_stop_normal_chat(self):
         reader.host_claude_open(self.provider, self.sid, self.tmux, self.session)
         writes = self.writes()
