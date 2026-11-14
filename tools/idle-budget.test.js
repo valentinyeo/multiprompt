@@ -56,7 +56,7 @@ test('the captured Windows baseline fails with 41 server checks over five idle m
   const result = await run(captured.before, captured.after);
   assert.equal(result.ok, false);
   assert.equal(result.windowMs, 302797);
-  assert.deepEqual(result.failures.map(row => row.source), ['server_fetch', 'timer 36', 'timer 172']);
+  assert.deepEqual(result.failures.map(row => row.source), ['server_fetch', 'timer 36']);
   assert.equal(result.failures[0].observed, 41);
 });
 

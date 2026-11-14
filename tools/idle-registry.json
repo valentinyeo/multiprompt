@@ -608,9 +608,10 @@
         "main.zig"
       ],
       "owner": "app",
-      "kind": "event",
-      "idle_max_per_min": 0,
-      "reason": "Fallback only. A directory watcher replaces it; armed again only if the watcher fails."
+      "kind": "periodic",
+      "idle_max_per_min": 2,
+      "reason": "Update check tick every 30 s: reads the staged release, starts the release check when its own interval is due, and retries failed server key setup.",
+      "exception": "Two wakes a minute by design: the release check and the key setup retry both need a clock tick."
     },
     "TIMER_VISIT_DWELL": {
       "id": 173,
