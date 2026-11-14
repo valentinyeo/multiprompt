@@ -13,12 +13,27 @@ function Model-Palette([string]$Query, [string]$Screenshot) {
     Shot $Screenshot
     Press @(0x0D) "Enter: $Query"
 }
+function Model-Plus([string]$Item, [int]$Downs, [string]$Screenshot) {
+    Model-Palette 'plus attach file' "palette-$Item"
+    [void](Wait-For "plus menu open for $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -ne [IntPtr]::Zero } 10)
+    $actions.Add(@{case=$plan.name; input='choose plus menu row'; text=$Item})
+    for ($step = 1; $step -le $Downs; $step++) { Press @(0x28) "Down ${step}: $Item" }
+    Shot $Screenshot
+    Press @(0x0D) "Enter: plus menu $Item"
+    [void](Wait-For "plus menu closed after $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 10)
+}
 function Model-Copy([string]$Stage) {
-    Model-Palette 'chat view select all' "model-$Stage-copy-palette"
-    Press @(0x11, 0x43) 'Ctrl+C: copy history'
-    $copied = [Windows.Forms.Clipboard]::GetText()
+    [void](Wait-For 'model app is foreground for the copy' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) } 10)
+    [Windows.Forms.Clipboard]::Clear()
+    $copied = Wait-For "history selected and copied at $Stage" {
+        [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
+        try {
+            $text = [Windows.Forms.Clipboard]::GetText()
+            if ($text.Contains('The fake session is ready.')) { $text }
+        } catch [Runtime.InteropServices.ExternalException] { $null }
+    } 15
     [IO.File]::WriteAllText("$caseDir/$Stage-history.txt", $copied)
-    if (-not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "History missing at $Stage" }
+    if (-not $copied.Contains('start the fake session')) { throw "History missing at $Stage" }
     Press @(0x1B) 'Escape: clear history selection'
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 }
@@ -27,15 +42,15 @@ Type-Composer $plan.text
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft setup failed' }
 Shot 'model-before'
 $choices = @(
-    @{query='model haiku'; model='haiku'; effort='default'; name='haiku'},
-    @{query='effort low'; model='haiku'; effort='low'; name='low'},
-    @{query='effort medium'; model='haiku'; effort='medium'; name='medium'},
-    @{query='effort high'; model='haiku'; effort='high'; name='high'}
+    @{item='model_haiku'; downs=4; model='haiku'; effort='default'; name='haiku'},
+    @{item='effort_low'; downs=6; model='haiku'; effort='low'; name='low'},
+    @{item='effort_medium'; downs=7; model='haiku'; effort='medium'; name='medium'},
+    @{item='effort_high'; downs=8; model='haiku'; effort='high'; name='high'}
 )
 foreach ($choice in $choices) {
     $oldLog = (Read-Shared $hostLog).Length
     $oldArgs = (Read-Shared "$state/model-argv.jsonl").Length
-    Model-Palette $choice.query "model-palette-$($choice.name)"
+    Model-Plus $choice.item $choice.downs "model-plus-$($choice.name)"
     [void](Wait-For "production host applied $($choice.name)" {
         $config = Read-Shared $configPath | ConvertFrom-Json
         $lines = @((Read-Shared $hostLog).Substring($oldLog) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
