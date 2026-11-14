@@ -206,15 +206,14 @@ test "ISSUE-421 production box fragments stack find locates the containing row a
     try std.testing.expect(!chatTableWheel(null, WM_MOUSEHWHEEL, 120 << 16, 4 | (20 << 16)));
     try std.testing.expectEqual(@as(usize, 2), invalidates);
 }
-test "ISSUE-421 nested marker and body share the depth indent and trace only their first layout" {
+test "ISSUE-421 nested marker and body share the depth indent and never log per paint" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("- child");
     const block = ChatBlock{ .start = 500, .len = text.len, .role = .prose, .kind = .list, .markdown = true, .prefix = 2, .level = 2 };
     const before = log_count;
     _ = chatFlowBlock(null, text, block, .{ .right = 400 }, true, null, 500, null);
     try std.testing.expectEqual(@as(i32, 74), last_x);
     _ = chatFlowBlock(null, text, block, .{ .right = 400 }, true, null, 500, null);
-    try std.testing.expectEqual(before + 1, log_count);
-    try std.testing.expectEqualStrings("CHAT_LIST depth=2", logs[before][0..log_lens[before]]);
+    try std.testing.expectEqual(before, log_count);
 }
 test "ISSUE-458 production scrollbar paints without hover in both themes and reserves no space when narrow" {
     g_chat_tables.clear(std.heap.page_allocator);
