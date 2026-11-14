@@ -1150,9 +1150,17 @@ pub fn loadChatOutbox() void {
     armChatOutboxTimerIfNeeded();
 }
 
+fn chatOutboxNeedsTick() bool {
+    const now_ms: i64 = @intCast(GetTickCount64());
+    for (app_state.g_chat_outbox.items) |entry| {
+        if (entry.message_v1 or chat_echo.drivesPolling(entry.state, entry.channel_pending, entry.transcript_queued, entry.sent_tick_ms, now_ms)) return true;
+    }
+    return false;
+}
+
 fn armChatOutboxTimerIfNeeded() void {
     if (app_state.g_main_hwnd == null) return;
-    if (app_state.g_chat_active or app_state.g_chat_pending_reset != null or app_state.g_chat_outbox.items.len > 0 or app_state.g_chat_tmux_send_job != null or app_state.g_chat_full_settle_job != null or app_state.g_chat_message_sync_job != null) {
+    if (app_state.g_chat_active or app_state.g_chat_pending_reset != null or chatOutboxNeedsTick() or app_state.g_chat_tmux_send_job != null or app_state.g_chat_full_settle_job != null or app_state.g_chat_message_sync_job != null) {
         if (!app_state.g_chat_outbox_timer_on) {
             app_state.g_chat_outbox_timer_on = true;
             _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_OUTBOX, 250, null);
@@ -1192,6 +1200,19 @@ pub fn chatOutboxCountForShell(idx: u32) usize {
     const key = chatOutboxKeyForShell(idx, &key_buf);
     if (key.len == 0) return 0;
     return chatOutboxCountIn(&app_state.g_chat_outbox, key);
+}
+
+pub fn chatOutboxSyncCountForShell(idx: u32) usize {
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const key = chatOutboxKeyForShell(idx, &key_buf);
+    if (key.len == 0) return 0;
+    const now_ms: i64 = @intCast(GetTickCount64());
+    var n: usize = 0;
+    for (app_state.g_chat_outbox.items) |e| {
+        if (e.state == .cancelled or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (e.message_v1 or chat_echo.drivesPolling(e.state, e.channel_pending, e.transcript_queued, e.sent_tick_ms, now_ms)) n += 1;
+    }
+    return n;
 }
 
 pub fn chatOutboxWorkingForShell(idx: u32) bool {
@@ -2166,6 +2187,72 @@ pub fn chatEchoDiscardUnsentForActive() void {
     showHeaderNoticeAscii("No unsent messages for this tab", 3000, false);
 }
 
+pub fn chatEchoResendHeldForShell(idx: u32) u32 {
+    if (idx >= app_state.shell_count) return 0;
+    var ids: [32]u64 = undefined;
+    var count: usize = 0;
+    const now_ms = @as(i64, @intCast(GetTickCount64()));
+    for (app_state.g_chat_outbox.items) |e| {
+        if (count >= ids.len) break;
+        if (!e.message_v1 or e.state == .cancelled or e.channel_pending) continue;
+        if (!chatOutboxOwnedByShell(e.key[0..@as(usize, e.key_len)], idx)) continue;
+        if (!chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, now_ms)) continue;
+        ids[count] = e.id;
+        count += 1;
+    }
+    for (ids[0..count]) |id| chatEchoSendAgain(id);
+    return @intCast(count);
+}
+
+const CHAT_RESTART_AI_TMUX_CAP = 64;
+
+fn chatRestartAiNotice(text: []const u8) void {
+    const a = std.heap.page_allocator;
+    const notice = a.dupeZ(u8, text) catch return;
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+}
+
+fn chatRestartAiThread(host: u8, shell_id: u32, tmux: [CHAT_RESTART_AI_TMUX_CAP]u8, tmux_len: usize, sid: [40]u8, sid_len: usize, cwd: [192]u8, cwd_len: usize) void {
+    const a = std.heap.page_allocator;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "restart_ai", .id = shell_id, .tmux = tmux[0..tmux_len], .sid = sid[0..sid_len], .cwd = cwd[0..cwd_len] }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    var log: [96]u8 = undefined;
+    if (!@import("chat_session.zig").chatHistoryPersistent(host, shell_id, query, 4096, &wire, null)) {
+        debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai failed shell={d} via=tmux", .{shell_id}) catch "");
+        chatRestartAiNotice("Could not restart the AI. Check the connection and try again");
+        return;
+    }
+    if (std.mem.indexOf(u8, wire.items, "\trestart_ai\tok\t") == null) {
+        debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai refused shell={d} via=tmux", .{shell_id}) catch "");
+        if (std.mem.indexOf(u8, wire.items, "\tpane_busy\t") == null) chatRestartAiNotice("Could not restart the AI. Open the terminal and start it by hand");
+        return;
+    }
+    debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai sent shell={d} via=tmux", .{shell_id}) catch "");
+}
+
+pub fn chatRestartAi(shell_index: u32) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const shell = &app_state.shells[shell_index];
+    if (!shell.ai_stopped or shell.ai_agent != 1 or shell.kind != .tmux) return false;
+    if (shell.tmux_session_len == 0 or shell.tmux_session_len > CHAT_RESTART_AI_TMUX_CAP or shell.tmux_host >= app_state.g_chat_history_channels.len) return false;
+    var tmux: [CHAT_RESTART_AI_TMUX_CAP]u8 = std.mem.zeroes([CHAT_RESTART_AI_TMUX_CAP]u8);
+    @memcpy(tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
+    var sid: [40]u8 = std.mem.zeroes([40]u8);
+    const sid_len: usize = @min(shell.claude_sid_len, sid.len);
+    @memcpy(sid[0..sid_len], shell.claude_sid[0..sid_len]);
+    var cwd: [192]u8 = std.mem.zeroes([192]u8);
+    const cwd_len: usize = @min(shell.claude_cwd_len, cwd.len);
+    @memcpy(cwd[0..cwd_len], shell.claude_cwd[0..cwd_len]);
+    const thread = std.Thread.spawn(.{}, chatRestartAiThread, .{ shell.tmux_host, shell.shell_id, tmux, @as(usize, shell.tmux_session_len), sid, sid_len, cwd, cwd_len }) catch return false;
+    thread.detach();
+    shell.ai_stopped = false;
+    shell.ai_restart_tick = @max(GetTickCount64(), 1);
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
+}
+
 fn chatOutboxPrefixOf(text: []const u16, out: *[20]u16) []const u16 {
     var start: usize = 0;
     while (start < text.len and (text[start] == ' ' or text[start] == '\t')) : (start += 1) {}
@@ -2516,7 +2603,7 @@ pub fn chatOutboxTick() void {
             const idx: u32 = @intCast((app_state.g_chat_message_sync_next + offset) % count);
             const shell = app_state.shells[idx];
             if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3)) continue;
-            if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxCountForShell(idx) == 0) continue;
+            if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxSyncCountForShell(idx) == 0) continue;
             chatMessageSyncStart(idx);
             if (app_state.g_chat_message_sync_job != null) {
                 app_state.g_chat_message_sync_next = (@as(usize, idx) + 1) % count;
@@ -3690,7 +3777,7 @@ fn chatMessageSyncFinish() void {
     const items = json_reader.array(json_reader.field(parsed.value, if (job.synced) "events" else "items"));
     for (items) |item| {
         const event = if (job.synced) json_reader.field(item, "event") else item;
-        const snapshot_settings = if (job.synced or !std.mem.eql(u8, job.key.provider(), "claude")) std.json.Value{ .null = {} } else json_reader.field(item, "host_settings");
+        const snapshot_settings = if (job.synced or !(std.mem.eql(u8, job.key.provider(), "claude") or std.mem.eql(u8, job.key.provider(), "codex"))) std.json.Value{ .null = {} } else json_reader.field(item, "host_settings");
         if (snapshot_settings != .null) {
             if (@import("chat_live.zig").applySettingsSnapshot(job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), json_reader.uintDefault(parsed.value, "seq", 0), snapshot_settings) and idx == app_state.active_shell and app_state.g_chat_active) {
                 @import("chat_composer.zig").layoutChatControls();
@@ -3941,7 +4028,7 @@ fn chatTmuxSettle() void {
             continue;
         };
         const key = chatFileIdentityForShell(idx);
-        @import("chat_session.zig").chatFileRequestForDelivery(key, true);
+        if (chat_echo.drivesPolling(entry.state, entry.channel_pending, entry.transcript_queued, entry.sent_tick_ms, now_ms)) @import("chat_session.zig").chatFileRequestForDelivery(key, true);
         const history = chatHistoryEntry(key) orelse {
             i += 1;
             continue;
@@ -4164,6 +4251,10 @@ pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
             .sonnet => "Model: Sonnet",
             .haiku => "Model: Haiku",
             .fable => "Model: Fable",
+            .sol => "Model: Sol",
+            .terra => "Model: Terra",
+            .luna => "Model: Luna",
+            .astra => "Model: Astra",
             .unknown => return,
         },
         .effort => |effort| switch (effort) {
@@ -4180,7 +4271,7 @@ pub fn chatSetLiveSetting(setting: @import("chat_live.zig").Setting) bool {
     if (!@import("chat_session.zig").chatSettingsEligible()) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
     const live = @import("chat_live.zig");
-    const line = live.settingLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, std.mem.sliceTo(&key.sid, 0), setting) catch return false;
+    const line = live.settingLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, key.provider(), std.mem.sliceTo(&key.sid, 0), setting) catch return false;
     return chatLiveReply(line);
 }
 

@@ -227,16 +227,15 @@ test("Ctrl+K shell rows use readable names without decorative prefixes", () => {
   }
 });
 
-test("Ctrl+K opens every unopened tmux session from one selected VPS", () => {
+test("Ctrl+K no longer lists open-all VPS host rows", () => {
   const update = functionBody("updateSearchResults", "u16ToLower");
-  assert.match(update, /if \(g_search_openall_host_mode\)/);
+  assert.doesNotMatch(update, /g_search_results\[[^\]]+\] = SEARCH_OPENALL_OFFSET/);
   for (const id of [
-    "SEARCH_OPENALL_HOST_BACK_OFFSET",
     "SEARCH_OPENALL_HOST_DE_OFFSET",
     "SEARCH_OPENALL_HOST_UK_OFFSET",
     "SEARCH_OPENALL_HOST_INNE_OFFSET",
   ]) {
-    assert.match(update, new RegExp(id), `missing host picker row: ${id}`);
+    assert.doesNotMatch(update, new RegExp(id), `host picker row still listed: ${id}`);
   }
 
   const dispatchStart = source.indexOf("if (target == SEARCH_OPENALL_OFFSET)");
@@ -290,7 +289,7 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
       `${classifier} must not claim the reconnect action's numeric offset`);
   }
 
-  const launcher = functionBody("showUsageAccountLogin", "ensureUsageTelemetryCollector");
+  const launcher = functionBody("showUsageAccountLogin", "syncUsageTelemetryCollector");
   assert.match(launcher, /tools\\\\usage-telemetry\\\\reconnect-accounts\.ps1/);
   assert.match(launcher, /-AccountId claude-primary -ForceLogin/);
   assert.match(launcher, /-AccountId claude-secondary -ForceLogin/);
@@ -376,12 +375,10 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
     "a manual Claude sign-in must be detected even when the old row is only retrying");
   assert.match(accountReconnect, /LastWriteTimeUtc -gt \$sampleAt/,
     "only a credential newer than its last telemetry sample may bypass the provider cooldown once");
-  assert.match(accountReconnect, /Get-CimInstance Win32_Process/);
-  assert.match(accountReconnect, /-ArgumentList '--usage-telemetry'/);
-  assert.match(accountReconnect, /GetFullPath\(\$_\.ExecutablePath\)\) -ne \$expectedDirectory/,
-    "the recovery flow must never stop a collector from another installation");
-  assert.match(accountReconnect, /\$restartExisting = @\(\$results \| Where-Object \{ \$_\.Success -and \(\$_\.LoginAttempted -or \$_\.CredentialChanged\) \}\)\.Count -gt 0/,
-    "a verified interactive login must restart the stale single-instance collector");
+  assert.doesNotMatch(accountReconnect, /Get-CimInstance Win32_Process|--usage-telemetry|multiprompt-telemetry|\$collectorPath/,
+    "the recovery flow must not look for or launch a separate collector process");
+  assert.match(accountReconnect, /OpenExisting\('Local\\MultipromptUsageTelemetryRefresh'\)/,
+    "a verified login must wake the in-process collector through its refresh event");
   assert.match(accountReconnect, /status -eq 'ok'/);
   assert.doesNotMatch(accountReconnect, /Write-Host[^\r\n]*\$accessToken/,
     "credential values must never be printed");

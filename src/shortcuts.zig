@@ -76,7 +76,6 @@ const WM_APP_CHANGELOG_CONFIRM = @import("win32.zig").WM_APP_CHANGELOG_CONFIRM;
 const WM_APP_BROWSER_BACK = @import("win32.zig").WM_APP_BROWSER_BACK;
 const WM_APP_BROWSER_FORWARD = @import("win32.zig").WM_APP_BROWSER_FORWARD;
 const WM_APP_DICTATION_TOGGLE = @import("win32.zig").WM_APP_DICTATION_TOGGLE;
-const WM_APP_CLOSE_SESSION = @import("win32.zig").WM_APP_CLOSE_SESSION;
 const WM_APP_SNIPPETS_OPEN = @import("win32.zig").WM_APP_SNIPPETS_OPEN;
 const WM_APP_ALL_SESSIONS_KEY = @import("win32.zig").WM_APP_ALL_SESSIONS_KEY;
 const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OPEN;
@@ -249,8 +248,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+S", .b = "Favorite or unfavorite this session", .header = false },
     .{ .a = "Ctrl+Tab / Ctrl+Shift+Tab", .b = "Next / previous tab", .header = false },
     .{ .a = "Ctrl+1 ... 9", .b = "Open session 1-9 in this workspace, pinned first", .header = false },
-    .{ .a = "Ctrl+W", .b = "Quit the app; keep server agents and saved chats", .header = false },
-    .{ .a = "Ctrl+Shift+W", .b = "Delete the active chat; stop its agent and keep its history", .header = false },
+    .{ .a = "Ctrl+Shift+W", .b = "Quit the app; keep server agents and saved chats", .header = false },
+    .{ .a = "Ctrl+K -> Delete", .b = "Delete the active chat; stop its agent and keep its history", .header = false },
     .{ .a = "Ctrl+K -> Copy chat ID", .b = "Copy the chosen chat identity", .header = false },
     .{ .a = "Ctrl+K -> Hide from sidebar", .b = "Hide a chat without stopping its server agent", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (sidebar + inbox)", .header = false },
@@ -302,8 +301,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl++ / Ctrl+- / Ctrl+0", .b = "Terminal font only (Chat View text size when Chat View is active)", .header = false },
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
     .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Reconnect", .b = "Restart an ended server session with the same name (also in tab actions)", .header = false },
-    .{ .a = "Ctrl+K -> Move chat to new mode", .b = "Hand an idle old-style Claude tab to the app-owned chat, keeping its session id and history", .header = false },
     .{ .a = "Ctrl+K -> New session in this group", .b = "Start a Claude session in the tab's group straight away, in the terminal", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
@@ -328,11 +325,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K -> Edit room", .b = "Edit the selected Room", .header = false },
     .{ .a = "Ctrl+K -> Account: Sign Out", .b = "Forget this device login and lock Multi Bot", .header = false },
     .{ .a = "Ctrl+K -> Account: Approve devices", .b = "Approve or deny a new device reaching your servers", .header = false },
-    .{ .a = "Ctrl+K -> Account: Remove server 1", .b = "Remove server 1 from your account on every device after confirmation", .header = false },
-    .{ .a = "Ctrl+K -> Account: Remove server 2", .b = "Remove server 2 from your account on every device after confirmation", .header = false },
-    .{ .a = "Ctrl+K -> Account: Remove server 3", .b = "Remove server 3 from your account on every device after confirmation", .header = false },
     .{ .a = "Ctrl+K -> Account: Devices", .b = "List account devices and revoke a device", .header = false },
-    .{ .a = "Ctrl+K -> Sync: Pull Now", .b = "Reconcile server workspaces and synchronized tmux tabs", .header = false },
     .{ .a = "Ctrl+Shift+K", .b = "Open command palette from any Multi Bot surface, including browser", .header = false },
     .{ .a = "Ctrl+K \u{2192} Usage: Sign In to Primary / Secondary Claude Account", .b = "Force sign-in one telemetry profile in its own terminal", .header = false },
     .{ .a = "Ctrl+K \u{2192} Power Saver: Auto / Always / Off", .b = "Choose when background timers, VPS polling, and idle tabs slow down to save power", .header = false },
@@ -341,15 +334,12 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+T", .b = "New workspace tmux tab, Claude by default (optional configured program)", .header = false },
     .{ .a = "Ctrl+T", .b = "New Claude live chat in this workspace folder (also Alt+T outside the palette and the sidebar plus)", .header = false },
     .{ .a = "Ctrl+K -> New Claude session", .b = "Start a Claude live chat in this workspace folder; same as Ctrl+T and the sidebar plus", .header = false },
-    .{ .a = "Ctrl+K -> New Claude in terminal", .b = "Start Claude the old way, typed into a terminal in this workspace folder", .header = false },
     .{ .a = "Ctrl+K -> New Codex chat", .b = "Start a Codex live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New Pi chat", .b = "Start a Pi live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New Cursor chat", .b = "Start a Cursor CLI live chat in this workspace folder, same chat view as Claude", .header = false },
     .{ .a = "Ctrl+K -> New terminal", .b = "Open a plain tmux tab in this workspace folder, no agent", .header = false },
     .{ .a = "Ctrl+K -> Pick repo", .b = "Choose the repo this workspace starts new tabs in, when it has no folder yet", .header = false },
     .{ .a = "Ctrl+K -> Set workspace folder", .b = "Declare this workspace folder from the repo list; saved for next time", .header = false },
-    .{ .a = "Ctrl+K -> Open session...", .b = "Attach a server tmux session or any cached session on this host", .header = false },
-    .{ .a = "Ctrl+K -> More shells...", .b = "Command Prompt, PowerShell, Bash, Git Bash, server shells, open all server sessions, sessions in this folder", .header = false },
     .{ .a = "Ctrl+K Remind Me", .b = "Snooze active tmux/Claude tab via quick presets (or type a time)", .header = false },
     .{ .a = "Ctrl+H", .b = "Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more", .header = false },
     .{ .a = "Alt+H", .b = "Remind Me: hide local tab, keep tmux running, return when due", .header = false },
@@ -376,6 +366,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty.", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Restart the AI\"", .b = "Chat View: when the AI has stopped in a server chat, restart it and resume the last conversation, then send any held messages; also click \"AI stopped\" beside the title", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Expand table\"", .b = "Open the table on screen full size over a dimmed window; also its Expand button on hover. Wheel, Shift+wheel and arrow keys scroll; Esc, the X or a click outside closes", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
@@ -397,6 +388,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Model Opus / Sonnet / Haiku / Fable\"", .b = "Choose the model for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Model Sol / Terra / Luna / Astra\"", .b = "Choose the model for the next message in a live Codex chat; the plus menu has the same choices", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Effort Low / Medium / High\"", .b = "Choose the effort for the next message in a live Claude chat; the plus menu has the same choices", .header = false },
     .{ .a = "1 or Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Approve the pending permission once", .header = false },
     .{ .a = "2 or Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Always allow the pending permission this session", .header = false },
@@ -412,7 +404,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now; Auto lets the ladder decide", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Open Dashboard", .b = "Open the Token Ladder page with every plan's usage and reset clock in the browser pane", .header = false },
     .{ .a = "Alt+V", .b = "Read replies. Press later for older. Double-press to stop.", .header = false },
-    .{ .a = "Ctrl+K Voice: Always Listening On/Off", .b = "Keep the mic on to talk over replies, or return to taking turns", .header = false },
     .{ .a = "Ctrl+K \"Voice Speed: ...\"", .b = "How fast Voice Mode talks: 1x, 1.25x (default), 1.4x or 1.5x", .header = false },
     .{ .a = "Alt+R", .b = "Read the agent's last reply aloud again, right now, even with Voice Mode off", .header = false },
     .{ .a = "Alt+[ / Alt+]", .b = "Read previous / next agent reply aloud; Chat View follows the spoken reply", .header = false },
@@ -424,7 +415,6 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+Shift+X", .b = "Insert current browser tab URL (or most recent) + space at the Chat View caret; never send", .header = false },
     .{ .a = "Ctrl+Shift+L / Ctrl+L", .b = "Focus browser address bar", .header = false },
     .{ .a = "Alt+Q", .b = "Jump between typing and browser pane; restore typing if no pane", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Browser: Switch All Panes to Chrome / Edge", .b = "Switch every pane between dedicated Edge and dedicated Chrome profiles", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Use Browser Address Bar and Tabs / Use App Address Bar", .b = "Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar", .header = false },
     .{ .a = "Alt+Left / Alt+Right (browser focus)", .b = "Browser back / forward", .header = false },
     .{ .a = "Alt+I (browser focus)", .b = "Open Inbox", .header = false },
@@ -436,10 +426,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "URL bar pin", .b = "Return to this chat's pinned page", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Auto-Suspend Idle Panes", .b = "Toggle idle browser pane suspension", .header = false },
     .{ .a = "Alt+P", .b = "Keep this tab's browser pane awake (exempt from freeze/hibernate)", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Crash Reports: Open Folder", .b = "Open the folder with crash reports saved after a crash (the app also reopens itself)", .header = false },
-    .{ .a = "Ctrl+K \u{2192} Hibernate Browser Panes Now", .b = "Immediately hibernate every parked, unpinned browser pane", .header = false },
     .{ .a = "Ctrl+K -> External Browser Links When Pane Off", .b = "Toggle desktop browser for HTTP(S) links when the session pane is off (default on)", .header = false },
-    .{ .a = "Ctrl+K -> Remote Tabs: Share One Server Connection", .b = "Toggle one shared connection per server for new remote tabs, no hidden console per tab (default off; open tabs switch on next launch)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Close All Browser Panes", .b = "Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's dedicated browser profile", .header = false },
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
@@ -717,16 +704,16 @@ test "IGSH-1087 private typing bypasses chat and shell shortcuts except delibera
     try std.testing.expectEqual(@as(?u32, null), computerAppMessage(0x4B, true, true, false, false));
 }
 
-pub const SessionCloseAction = enum { quit, delete };
+pub const SessionCloseAction = enum { quit };
 
 pub fn sessionCloseShortcut(vk: u32, ctrl: bool, shift: bool, alt: bool, win: bool) ?SessionCloseAction {
-    if (vk != 0x57 or !ctrl or alt or win) return null;
-    return if (shift) .delete else .quit;
+    if (vk != 0x57 or !ctrl or !shift or alt or win) return null;
+    return .quit;
 }
 
-test "IGSH-1666 quit and delete are distinct single-press app shortcuts" {
-    try std.testing.expectEqual(SessionCloseAction.quit, sessionCloseShortcut(0x57, true, false, false, false).?);
-    try std.testing.expectEqual(SessionCloseAction.delete, sessionCloseShortcut(0x57, true, true, false, false).?);
+test "IGSH-1965 Ctrl+Shift+W quits and Ctrl+W is left for the browser pane" {
+    try std.testing.expectEqual(SessionCloseAction.quit, sessionCloseShortcut(0x57, true, true, false, false).?);
+    try std.testing.expect(sessionCloseShortcut(0x57, true, false, false, false) == null);
     try std.testing.expect(sessionCloseShortcut(0x57, false, false, false, false) == null);
     try std.testing.expect(sessionCloseShortcut(0x57, true, true, true, false) == null);
     try std.testing.expect(sessionCloseShortcut(0x57, true, false, false, true) == null);
@@ -810,7 +797,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (sessionCloseShortcut(kb.vkCode, isCtrlDown(), GetAsyncKeyState(0x10) < 0, isAltDown(kb.flags), app_state.g_win_held)) |action| {
                 switch (action) {
                     .quit => _ = PostMessageW(app_state.g_main_hwnd, WM_APP_QUIT_ALL, 1, 0),
-                    .delete => _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CLOSE_SESSION, 0, 0),
                 }
                 return 1;
             }

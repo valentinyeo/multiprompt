@@ -23,7 +23,7 @@ Press Ctrl+Shift+G twice from Overview. Click the AI usage pill at the bottom of
 
 Dispatch `verify.yml` with `feature=status-card`, optionally `tag=vX.Y.Z` for a release.
 
-The private GitHub profile receives the normal collector file `usage-telemetry.json` from `tools/fixtures/IGSH-908/`. A held `Local\MultipromptUsageTelemetryLaunch` mutex stands in for the collector and keeps a real collector from replacing the fixture or making provider calls. The app uses its ordinary file reader. No app state is set directly; Ctrl+Shift+G selects each page through real input. This proves the file/UI boundary, not live provider authentication.
+The private GitHub profile receives the normal collector file `usage-telemetry.json` from `tools/fixtures/IGSH-908/`. A held `Local\MultipromptUsageTelemetry` mutex stands in for the collector and keeps a real collector from replacing the fixture or making provider calls. The app uses its ordinary file reader. No app state is set directly; Ctrl+Shift+G selects each page through real input. This proves the file/UI boundary, not live provider authentication.
 
 The journey measures all three frames with screenshots and DPI normalization, preserving the 20–30 px compact-height checks. The AI frame must also be at the sidebar bottom, so an earlier unrelated frame cannot satisfy it. The original plain AI line fails this condition.
 

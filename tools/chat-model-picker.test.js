@@ -15,7 +15,7 @@ test('host events and snapshots own settings, without optimistic updates', () =>
   assert.match(live, /seq < live\.settings_seq/);
   assert.match(read('src/chat_send.zig'), /host_settings/);
   assert.match(read('src/chat_send.zig'), /applySettingsSnapshot/);
-  assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable \}/);
+  assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra \}/);
   assert.match(live, /pub const Effort = enum \{ unknown, low, medium, high \}/);
   const send = read('src/chat_send.zig').split('pub fn chatSetLiveSetting')[1].split('\n}')[0];
   assert.match(send, /chatLiveReply\(line\)/);
@@ -24,7 +24,7 @@ test('host events and snapshots own settings, without optimistic updates', () =>
 
 test('all six settings are searchable, painted and dispatched', () => {
   const state = read('src/app_state.zig');
-  for (const [kind, values] of [['MODEL', ['OPUS', 'SONNET', 'HAIKU', 'FABLE']], ['EFFORT', ['LOW', 'MEDIUM', 'HIGH']]]) {
+  for (const [kind, values] of [['MODEL', ['OPUS', 'SONNET', 'HAIKU', 'FABLE', 'SOL', 'TERRA', 'LUNA', 'ASTRA']], ['EFFORT', ['LOW', 'MEDIUM', 'HIGH']]]) {
     for (const value of values) {
       const id = `SEARCH_CHAT_${kind}_${value}_OFFSET`;
       const label = `Chat View: ${kind === 'MODEL' ? 'Model' : 'Effort'} ${value[0]}${value.slice(1).toLowerCase()}`;
@@ -34,7 +34,7 @@ test('all six settings are searchable, painted and dispatched', () => {
       assert.ok(main.includes(`${id} => .{ .${kind.toLowerCase()} = .${value.toLowerCase()} }`), label);
     }
   }
-  assert.ok(main.indexOf("if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET") < main.indexOf("if (target >= SEARCH_ADDFAVICON_OFFSET"));
+  assert.ok(main.indexOf("if (app_state.isChatSettingOffset(target))") < main.indexOf("if (target >= SEARCH_ADDFAVICON_OFFSET"));
   assert.match(sidebar, /const is_chat_action = [^;]*\bis_chat_setting\b/);
   assert.match(palette, /chatSettingsEligible\(\)/);
   assert.match(read('src/chat_session.zig'), /privateActionsAllowed\(\)/);
@@ -76,13 +76,13 @@ test('idle shutdown keeps confirmed settings capability', () => {
   assert.match(snapshot, /settings_known = true/);
   assert.doesNotMatch(hostStatus, /settings_known\s*=/);
   assert.match(eligible, /chatLiveWanted\(key\)/);
-  assert.match(eligible, /std\.mem\.eql\(u8, key\.provider\(\), "claude"\)/);
+  assert.match(eligible, /std\.mem\.eql\(u8, key\.provider\(\), "claude"\) or std\.mem\.eql\(u8, key\.provider\(\), "codex"\)/);
   assert.doesNotMatch(eligible, /connected|\.ended|\.cancelled/);
   assert.match(live, /live\.settings_known = false/);
   const wanted = read('src/chat_session.zig').split('fn chatLiveWanted')[1].split('\n}')[0];
   assert.doesNotMatch(wanted, /key\.codex|key\.pi|key\.provider/);
-  assert.match(read('src/chat_send.zig'), /job\.synced or !std\.mem\.eql\(u8, job\.key\.provider\(\), "claude"\)/);
-  assert.match(live, /openLine\(a, id, op, "claude", sid\)/);
+  assert.match(read('src/chat_send.zig'), /job\.synced or !\(std\.mem\.eql\(u8, job\.key\.provider\(\), "claude"\) or std\.mem\.eql\(u8, job\.key\.provider\(\), "codex"\)\)/);
+  assert.match(live, /openLine\(a, id, op, provider, sid\)/);
 });
 
 test('pending settings block sends before draft or outbox changes', () => {

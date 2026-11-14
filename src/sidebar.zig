@@ -193,6 +193,10 @@ const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL
 const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
 const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
 const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
+const SEARCH_CHAT_MODEL_SOL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SOL_OFFSET;
+const SEARCH_CHAT_MODEL_TERRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_TERRA_OFFSET;
+const SEARCH_CHAT_MODEL_LUNA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_LUNA_OFFSET;
+const SEARCH_CHAT_MODEL_ASTRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_ASTRA_OFFSET;
 const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
 const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
 const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
@@ -330,6 +334,7 @@ const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALL
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
+const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
@@ -1214,8 +1219,27 @@ pub fn applyPendingGroup() void {
 }
 
 inline fn sidebarUseKey(i: usize) u64 {
+    if (!app_state.g_sidebar_order_frozen) return sidebarLiveUseKey(i);
+    if (app_state.shells[i].frozen_use_key == null) app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
+    return app_state.shells[i].frozen_use_key.?;
+}
+
+inline fn sidebarLiveUseKey(i: usize) u64 {
     const viewed_ms = frequent.unixMs(app_state.shells[i].last_viewed / 10_000);
     return @max(viewed_ms, app_state.shells[i].last_used);
+}
+
+pub fn freezeSidebarOrder() void {
+    if (app_state.g_sidebar_order_frozen) return;
+    app_state.g_sidebar_order_frozen = true;
+    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
+}
+
+pub fn thawSidebarOrder() bool {
+    if (!app_state.g_sidebar_order_frozen) return false;
+    app_state.g_sidebar_order_frozen = false;
+    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = null;
+    return true;
 }
 
 pub inline fn effPinnedTop(i: usize) bool {
@@ -2012,13 +2036,14 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: 
 const PaletteSessionView = struct {
     appearance: @import("bot_avatar.zig").Appearance,
     favorite: bool,
+    photo_key: ?[32]u8 = null,
 };
 
 fn paletteShellView(index: usize) ?PaletteSessionView {
     if (index >= app_state.shell_count or index >= app_state.shells.len) return null;
     const shell = &app_state.shells[index];
     if (shell.tmux_session_len > shell.tmux_session.len or shell.name_len > shell.name.len) return null;
-    return .{ .appearance = @import("bot_avatar.zig").forShell(shell), .favorite = shell.favorite };
+    return .{ .appearance = @import("bot_avatar.zig").forShell(shell), .favorite = shell.favorite, .photo_key = @import("bot_photo.zig").key(shell) };
 }
 
 fn paletteNamedSession(name: []const u8, workspace: u8, favorite: bool) PaletteSessionView {
@@ -2048,7 +2073,9 @@ fn paletteRemoteSession(host: u8, name: []const u8, workspace: u8, favorite: boo
             if (paletteShellView(index)) |view| return view;
         }
     }
-    return paletteNamedSession(name, workspace, favorite);
+    var view = paletteNamedSession(name, workspace, favorite);
+    view.photo_key = (@import("bot_photo_key.zig").Key{ .remote = .{ .host = host, .session = name } }).digest();
+    return view;
 }
 
 fn paletteReminderView(index: usize, fallback: u8) ?PaletteSessionView {
@@ -2109,6 +2136,7 @@ fn paletteSessionView(target: usize) ?PaletteSessionView {
             if (row.workspace < app_state.g_lws_count) row.workspace else paletteOtherWorkspace()
         else
             row.workspace;
+        if (row.session_len == 0) return paletteNamedSession(name, ws, row.snapshot_favorite);
         return paletteRemoteSession(row.host, name, ws, row.snapshot_favorite, row.kind == .vps_only or (row.kind == .reminder and row.session_len > 0));
     }
     return null;
@@ -2837,7 +2865,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_discard_unsent = result_idx == SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
-                    const is_chat_setting = (result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or result_idx == SEARCH_CHAT_MODEL_FABLE_OFFSET;
+                    const is_chat_setting = (result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or (result_idx >= SEARCH_CHAT_MODEL_FABLE_OFFSET and result_idx <= SEARCH_CHAT_MODEL_ASTRA_OFFSET);
                     const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued or is_chat_restart or is_chat_restart_all;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
@@ -3019,7 +3047,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var log: [192]u8 = undefined;
                             debugLog(std.fmt.bufPrint(&log, "[palette-avatar] target={d} face={d} color={d} favorite={d} rect={d},{d},{d},{d}", .{ result_idx, view.appearance.face, view.appearance.color, @intFromBool(view.favorite), x, y, x + size, y + size }) catch "[palette-avatar] unavailable");
                         }
-                        @import("bot_avatar.zig").draw(hdc, avatar_rc, view.appearance);
+                        const photo_drawn = if (view.photo_key) |key| @import("bot_photo.zig").drawKey(key, hdc, avatar_rc) else false;
+                        if (!photo_drawn) @import("bot_avatar.zig").draw(hdc, avatar_rc, view.appearance);
                         if (view.favorite and !app_state.g_starred_workspace) drawRobotMarker(hdc, avatar_rc, .favorite, row_color);
                     }
 
@@ -3921,8 +3950,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L("End tmux session"), -1, &et_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
-                        var et_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Ctrl+Shift+W"), -1, &et_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ws_snooze or is_ws_snoozed or is_ws_snoozed_row) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4074,8 +4101,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L("Close Tab"), -1, &ct_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        var ct_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Ctrl+W"), -1, &ct_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_inbox_exclude) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4138,6 +4163,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             SEARCH_CHAT_MODEL_SONNET_OFFSET => L("Chat View: Model Sonnet"),
                             SEARCH_CHAT_MODEL_HAIKU_OFFSET => L("Chat View: Model Haiku"),
                             SEARCH_CHAT_MODEL_FABLE_OFFSET => L("Chat View: Model Fable"),
+                            SEARCH_CHAT_MODEL_SOL_OFFSET => L("Chat View: Model Sol"),
+                            SEARCH_CHAT_MODEL_TERRA_OFFSET => L("Chat View: Model Terra"),
+                            SEARCH_CHAT_MODEL_LUNA_OFFSET => L("Chat View: Model Luna"),
+                            SEARCH_CHAT_MODEL_ASTRA_OFFSET => L("Chat View: Model Astra"),
                             SEARCH_CHAT_EFFORT_LOW_OFFSET => L("Chat View: Effort Low"),
                             SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => L("Chat View: Effort Medium"),
                             SEARCH_CHAT_EFFORT_HIGH_OFFSET => L("Chat View: Effort High"),
@@ -4645,7 +4674,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_computer_on = if (findShellById(app_state.g_tabctx_sid)) |ti| @import("computer_pane.zig").chosenFor(ti) else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
+                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_RESTART_AI) L(ui_words.tab_context_chat_restart_ai) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             if (result_idx == SEARCH_TABCTX_WSMOVE) {
                                 _ = SelectObject(hdc, palette_hint_font);
@@ -5514,6 +5543,78 @@ test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the 
     try std.testing.expectEqual(@as(u32, 2), rows[3].shell_idx);
     app_state.g_recents_section_collapsed = true;
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+}
+
+test "IGSH-2282 a click under the pointer does not move its row until the pointer leaves the sidebar" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_group = app_state.groups[0];
+    const saved_shells = app_state.shells[0..4].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    const saved_recents = app_state.g_recents_section_collapsed;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    const saved_frozen = app_state.g_sidebar_order_frozen;
+    defer {
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.groups[0] = saved_group;
+        app_state.shells[0..4].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+        app_state.g_recents_section_collapsed = saved_recents;
+        app_state.g_ws_snoozed = saved_snoozed;
+        app_state.g_sidebar_order_frozen = saved_frozen;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_single_window = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.g_sidebar_order_frozen = false;
+    app_state.shell_count = 4;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 41, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 0 };
+    for (0..4) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(4300 + i);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].starred_group_id = 41;
+    app_state.shells[1].starred_group_id = 41;
+    app_state.shells[0].last_used = 10;
+    app_state.shells[1].last_used = 20;
+    app_state.shells[2].last_used = 30;
+    app_state.shells[3].last_used = 40;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+
+    freezeSidebarOrder();
+    app_state.shells[0].last_used = 90;
+    app_state.shells[2].last_used = 95;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+
+    try std.testing.expect(thawSidebarOrder());
+    try std.testing.expect(!thawSidebarOrder());
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 3), rows[5].shell_idx);
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

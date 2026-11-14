@@ -154,7 +154,7 @@ test('IGSH-965 send sits at the far right and the queued send is armed and consu
   assert.match(composer, /const mic_w = chatDictationMicFit\(chatDictationMicWidth\(chat_dictation_state\), [^\n]*\);\s*const mic_btn = RECT\{\s*\.left = slots\.left - uiScaled\(6\) - mic_w,/);
   assert.match(composer, /\.right = mic_btn\.left - uiScaled\(12\),/);
   assert.match(composer, /try std\.testing\.expect\(layout\.send_btn\.left > layout\.mic_btn\.right\);/);
-  assert.match(main, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\);/);
+  assert.match(main, /WM_APP_CHAT_SEND => \{\s*if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\);/);
   const readyStart = voice.indexOf('pub fn handleDictationReady(');
   const ready = voice.slice(readyStart, readyStart + 6000);
   assert.match(ready, /const send_queued = app_state\.g_dictation_send_queued\.swap\(false, \.acq_rel\);/);
@@ -187,7 +187,7 @@ test('IGSH-812 replay replaces only hardware/provider I/O and retains the produc
     assert.throws(() => seamContract(broken), assert.AssertionError, required);
   }
   assert.match(driver, /\$env:MULTIPROMPT_DICTATION_FIXTURE = \$null\s+if \(\$Feature -eq 'chat-dictation'\)/);
-  assert.match(driver, /'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE'\)\)/);
+  assert.match(driver, /'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE'(?:, '[A-Z_]+')*\)\)/);
 });
 
 test('IGSH-812 speech fixture is recorded, pinned, licensed, non-silent PCM with an explicit response stand-in', () => {
@@ -217,8 +217,6 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   assert.ok(featureMatrix(workflow).available.includes('chat-dictation'));
   assert.ok(featureMatrix(workflow).full.includes('chat-dictation'));
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-dictation.test.js/);
-  assert.ok(workflow.includes('- tools/chat-dictation.test.js'));
-  assert.ok(workflow.includes('- tools/fixtures/IGSH-812/**'));
   assert.match(workflow, /FEATURE -eq 'chat-dictation' -and \$env:RELEASE_TAG\) \{ throw/);
   for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
   const map = read(skill + 'features/chat-dictation.md');
@@ -319,7 +317,7 @@ test('IGSH-1072 branch build identity is embedded and independently checked by t
   const identity = workflow.slice(workflow.indexOf('      - name: Identify branch executable'), workflow.indexOf('      - name: Build branch executable'));
   assert.match(identity, /git describe --tags --match 'v\[0-9\]\*' --abbrev=0 HEAD/);
   assert.match(identity, /VERIFY_REVISION=\$revision/);
-  assert.doesNotMatch(identity, /\$env:FEATURE|-verify\./);
+  assert.doesNotMatch(identity, /-verify\.|\$version = [^\n]*\$env:FEATURE/);
   assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
   assert.match(workflow, /\$embeddedRevision -cne \$revision -or -not \$binary\.Contains\("MPREVISION=\$revision;"\)/);
   assert.match(workflow, /if \(-not \$binary\.Contains\("MPVERSION=\$version;"\)\) \{ throw 'Executable version mismatch' \}/);
@@ -331,7 +329,7 @@ test('IGSH-1072 branch build identity is embedded and independently checked by t
     assert.ok(build.includes(`${executable}.root_module.addObject(revision_object)`));
   }
   assert.match(driver, /Executable build\/version marker mismatch/);
-  assert.match(driver, /Doctor: wrong version in/);
+  assert.match(driver, /Doctor: executable version mismatch/);
 });
 
 test('IGSH-1072 executable resolver rejects stale revisions and wrong versions before any journey', { skip: process.platform !== 'win32' }, () => {

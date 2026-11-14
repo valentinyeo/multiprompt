@@ -30,7 +30,7 @@ test('sessions installs the SSH boundary before launch', () => {
 });
 
 test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () => {
-  const journey = sessions.slice(0, sessions.indexOf("Palette 'new claude in terminal'"));
+  const journey = sessions.slice(0, sessions.indexOf("Palette 'new terminal'"));
   assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\$_-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
   const pickerStart = journey.indexOf('Ctrl+T: select an available server after offline rejection');
   const pickerEnd = journey.indexOf("Palette 'hide from sidebar'", pickerStart);
@@ -69,7 +69,7 @@ test('IGSH-1680 native search checks both partial-name queries and the chosen ho
 });
 
 test('cancel precedes zz-last-folder chat and beta terminal checks', () => {
-  assert.match(sessions, /cancel repository picker[\s\S]*close palette[\s\S]*\$cancelled\.tabs\[\$cancelled\.active_tab\]\.tmux_host -ne 2[\s\S]*Ctrl\+T: new Claude chat after cancel[\s\S]*Type-Text 'zz-last-folder'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/zz-last-folder' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2[\s\S]*New Claude in terminal[\s\S]*Type-Text 'beta'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/beta'[\s\S]*\$tab\.cv -eq \$false\) -and \$tab\.tmux_host -eq 2/);
+  assert.match(sessions, /cancel repository picker[\s\S]*close palette[\s\S]*\$cancelled\.tabs\[\$cancelled\.active_tab\]\.tmux_host -ne 2[\s\S]*Ctrl\+T: new Claude chat after cancel[\s\S]*Type-Text 'zz-last-folder'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/zz-last-folder' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2[\s\S]*Enter: New terminal[\s\S]*Type-Text 'beta'[\s\S]*\$tab\.cwd -eq '\/work\/projects\/beta'[\s\S]*\$tab\.cv -eq \$false\) -and \$tab\.tmux_host -eq 2/);
 });
 
 test('IGSH-1447 executed production host selection follows active server', () => {

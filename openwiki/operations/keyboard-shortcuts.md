@@ -38,7 +38,6 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+K → `Chat View: Reset this chat`: also in the right-click tab palette and F1 overview; no dedicated shortcut. Clears every local queued, pending and sent bubble for that tab, deletes its disk chat cache and reloads the transcript from scratch. Keeps your unsent composer text, sends nothing and leaves the terminal/agent session running. Automatic cleanup removes exact normalized copies anywhere in user transcript history even if recorded before the send time; Sent bubbles expire after ten minutes once a successful full transcript load completed after the send. On upgrade, the old version-1 local outbox is discarded (including offline queues); new version-2 queues still persist across restarts.
 - Chat View send status: every Enter shows the message immediately at the bottom of the transcript as your own bubble with a small status line — `◷ Sending…` while the terminal write/Enter verify runs, `◷ Waiting for connection` while queued offline, and a red `Not sent · click to retry` if the verify gives up (click the bubble to re-queue it). Once the real message appears in the transcript the echo is replaced by the real bubble. If Claude takes the message out of its input box but queues it (it is still working), the bubble stays as `✓ Sent · queued in Claude · click to send now`; clicking it, or Ctrl+K → "Chat View: Send Claude's Queued Message Now", sends Ctrl+X Ctrl+S so Claude takes it immediately. Unconfirmed sends survive a restart as Not sent. Ctrl+K → "Chat View: Retry Unsent Messages" re-sends this tab's Not-sent messages in order; "Chat View: Discard Unsent Messages" drops them. No dedicated shortcut. Ctrl+K → "Chat View: Edit Queued Messages" presses Claude's Up key so the messages Claude has queued come back into its prompt box, and Chat View shows the same text in its own box. No dedicated shortcut.
 - Alt+V: Read the newest assistant reply. Press again later for an older reply. Press twice quickly to stop speech. Works in terminal and Chat View. Voice Mode remains available through Ctrl+K.
-- Ctrl+K → "Voice: Always Listening On/Off": Always listening is on by default. Turn it off to return to the old taking-turns behavior; the choice is saved in the session.
 - Ctrl+K → "Voice Speed: 1x / 1.25x / 1.4x / 1.5x": how fast Voice Mode talks. Default 1.25x. Takes effect on the next reply, no restart needed.
 - Ctrl+K → "Update: Relaunch": no dedicated shortcut. When a session installs a new build over the exe you launched from, a small card "vX is ready" with a Relaunch button appears at the bottom left of the sidebar (above the TODAY'S AI card); the x hides it until the next version. The same action is Ctrl+K "Update: Relaunch to vX" (typing "update" shows "no update ready" when nothing is installed). Relaunch saves your session, closes every workspace window gracefully, stops the old telemetry and bridge, and reopens multiprompt maximized on the new version.
 - Alt+R: Read the agent's last reply aloud again, right now. Works whether Voice Mode is on or off, and whether or not Chat View is open. With Voice Mode off, it's a one-shot: nothing else changes afterward. Also a Ctrl+K entry, "Voice: Read Last Reply".
@@ -50,10 +49,9 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+Shift+K: Open the multiprompt Ctrl+K command palette from any foreground multiprompt surface, including the focused Chrome/Edge browser pane and Chat View. The browser does not receive this chord; Ctrl+K alone still goes to the website when the browser is focused.
 - Ctrl+K → **Account: Sign Out**: clear this device's DPAPI login, attempt server revocation, and immediately lock the full window. Offline sign-out is local only; revoke the device from another signed-in device when back online.
 - Ctrl+K → **Account: Devices**: list device names/IDs; Yes revokes the displayed device, No advances, Cancel closes. Revoking this device signs it out.
-- Ctrl+K → **Sync: Pull Now**: fetch the account layout now (or send pending local edits first), reconcile workspaces/names/order and synchronized tmux tabs without killing remote tmux. Local-only tabs and unsynchronized attachments are retained.
 - Ctrl+K opens with your last 5 sessions: with nothing typed, the palette leads with the 5 sessions you viewed most recently across every workspace, newest first, each with its workspace name. The first row is the session you just left, so Ctrl+K then Enter still hops back. Snoozed workspaces and filed-away (hidden) tabs are left out, and the tab you are on is not listed. Below them a Most used header lists your ten most used commands by use count, then every other command sits under a group header (Sessions, Workspaces and windows, Sidebar and tabs, Look and settings, Debug and repair, Browser, Account and usage, Chat View). Within each part safe commands come before closing or removing ones. Up and Down skip headers. Typing a query shows the ranked list without headers.
 - Ctrl+K: Quick switcher — search/switch tabs + spawn new shells by name. Also exposes **"Open sessions in this folder"** (search "folder"/"sessions"/"repo"): when a VPS/tmux tab is focused, bulk-attaches every *other* tmux session on the **same host** whose cwd is under the focused session's folder (prefix match on `#{session_path}`). Requires the VPS list source to emit the path — the inline fallback already sends `-F '#{session_name}|#{session_activity}|#{session_path}'`; for `~/.local/bin/tmux-list.sh` append `|#{session_path}` to its `-F` format (4th field after ram; client parser detects path by leading `/`, ram by all-digits, so it tolerates 2–4 fields). Until a host emits the path, the entry just won't match there.
-- Alt+T: New workspace tmux tab in its configured or inferred remote folder. It starts Claude: with no workspace-scoped `commands.json` default the program is `claude`, which runs the app-owned host with a minted session id instead of typing into the pane ([agent host](../architecture/agent-host.md)). A workspace-scoped `alt_t` still wins and starts that program after shell startup, so `codex` or `pi` keep the typed terminal start. The neutral tab stays available as "New Host 1 VPS Shell" in Ctrl+K. The plus at the end of the sidebar list and Ctrl+T outside browser focus use the same path.
+- Alt+T: New workspace tmux tab in its configured or inferred remote folder. It starts Claude: with no workspace-scoped `commands.json` default the program is `claude`, which runs the app-owned host with a minted session id instead of typing into the pane ([agent host](../architecture/agent-host.md)). A workspace-scoped `alt_t` still wins and starts that program after shell startup, so `codex` or `pi` keep the typed terminal start. The plus at the end of the sidebar list and Ctrl+T outside browser focus use the same path.
 - Ctrl+T: New workspace tmux tab outside browser focus, same as Alt+T and the plus at the end of the sidebar list, so it also starts Claude by default. When choosing a folder, search includes project folders without Git, empty ones too, and covers up to 1024 folders on each server; the list shows the first 256 matches, so type part of a name to reach the rest. In a focused docked browser, Ctrl+T and Ctrl+K go to the browser; Ctrl+Shift+K opens the multiprompt palette.
 - Ctrl+Shift+1: New CMD tab
 - Ctrl+Shift+2: New TMUX tab
@@ -61,15 +59,13 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+Shift+4: New VPS Remote host 2 tab
 - Ctrl+Shift+5: New PowerShell tab
 - Ctrl+Shift+F: Toggle full-width ("fullscreen") for the active shell — fills the content pane instead of the centered column. Also a Ctrl+K entry ("Toggle Full-Width").
-- Ctrl+Shift+R: Reconnect/reattach the active SSH/tmux tab (recovers a dropped/black session by respawning ssh + reattaching the tmux session). Also a right-click tab menu item ("Reconnect"). No-op on cmd/pwsh tabs.
+- Ctrl+Shift+R: Reconnect/reattach the active SSH/tmux tab (recovers a dropped/black session by respawning ssh + reattaching the tmux session). No-op on cmd/pwsh tabs.
 - Ctrl+Shift+E: Archive the active tmux tab (press TWICE within 2.5s — the thread band shows the confirm prompt). Kills the remote tmux session (frees VPS RAM), saves {name, tmux session, host, Claude session id, cwd} to archive.json, closes the tab. Resurrect via Ctrl+K: type the archived name -> '\u21A9 <name>' row recreates the tmux session and relaunches `claude --resume <sid>` (or --continue without a stored id). The Claude session id arrives via the SESSION: hook broadcast (v0.28.247). Also available as Ctrl+K 'Archive Session' and in the right-click tab menu (explicit pick = confirmed, no double-press; v0.28.249)
 - Ctrl+Shift+B: Cycle sidebar: open -> collapsed -> hidden (0px focus mode) -> open. Ctrl+K 'Sidebar: Expand/Collapse/Hide' jump to a state directly
 - Ctrl+Shift+O: Toggle the docked Edge browser pane for the active tab (v0.28.264 — owner-docked top-level borderless Edge, per session; console reflows left, pane docks right). Also Ctrl+K 'Browser: Open URL...' and 'Browser: Insert Agent Instructions' (pastes the `zsb` usage guide into the shell). Drive the pane from the session via the `zsb` CLI (on each shell's PATH) or browser-cli/Playwriter. NOTE: the Edge extension + native-messaging host load from the `zigshell-browser-pane` repo folder — keep it; deleting it breaks browser CONTROL (the pane still docks). Windows-only; no VPS path yet
 - **Browser-focus escape hatches (v0.28.293):** while the docked Edge pane has FOCUS (the Ctrl+Shift+M isolation state where all keys go to Edge natively), a small set of one-press Alt combos still reach ZigShell — Edge ignores the Alt namespace, so claiming them costs no native browser shortcut. **Alt+I** = jump to Inbox (no Ctrl+Shift+M dance first), **Alt+1..9** = switch workspace (1 is Starred; 2-9 are the first eight stored workspaces), **Alt+J / Alt+K** = cycle workspace (the workspace ones are single-window-mode only, mirroring the shell-focused binds). Everything else still passes to Edge (Alt+Left/Right stay browser back/forward). Mnemonic: Ctrl = Edge, Alt = ZigShell. Implemented in the `keyboardHookProc` browser-focus passthrough block; F1 overview lists the three rows
 - Alt+S: Favorite or unfavorite this session. Starred tabs show a small yellow dot and keep it after restart, tmux adoption, or moving tabs. Ctrl+K has `Favorite: Toggle` with its current on/off state; right-click a tab for `Favorite` / `Unfavorite`. Alt+Shift+S still reaches the browser extension.
 - Alt+P: Keep the active tab awake — exempts its docked browser pane from freezing/hibernation (v0.28.635). Also Ctrl+K "Keep Tab Awake: On/Off" and the right-click tab menu. Sidebar shows a pin glyph on awake tabs and "z" on frozen/hibernated panes. See [pane hibernation](../browser/pane-hibernation.md)
-- Ctrl+K → "Hibernate Browser Panes Now": immediately sleep every hidden, unpinned browser pane (v0.28.635)
-- Ctrl+K → "Crash Reports: Open Folder": opens `%APPDATA%\ZigShell\crashes` in Explorer. After a crash the app writes `crash-<yyyymmdd-hhmmss>.txt` (version, exception, offset for the .pdb, tab count, Chat View, debug-log tail) plus a small `.dmp`, keeps the newest 10, and reopens itself with a one-line notice (not when 4 crashes happen within 15 minutes; repeat crashes wait 5 s, then 30 s, before reopening). Resolve a report with `node tools/crash-report.js <crash.txt> --exe multiprompt.exe`. Dev builds also have Ctrl+K "Debug: Crash Now" (type "crash now") to test the recorder.
 - Ctrl+K → "Power Saver: Auto / Always / Off": when background timers, VPS polling and hidden tabs slow down (Auto = on battery or Energy Saver). Deep idle applies in every mode.
 - Ctrl+K → "Token Ladder: Auto / Burn Claude / Burn Codex": picks which AI plan to use up now. Auto lets the Token Ladder decide; the active choice is tagged "current". The usage panel at the bottom of the sidebar shows the result in its top line ("BURN CLAUDE | auto") and lists the plans the ladder watches.
 - Ctrl+K → "Token Ladder: Open Dashboard": opens the ladder's usage page in the browser pane.
@@ -96,12 +92,12 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Win+Shift+Left/Right: Move the window to the adjacent monitor, preserving maximized state (v0.28.235 — natively these targeted the conhost child and did nothing)
 - Ctrl+K → "Sort Workspaces": drag rows by their ≡ handle (or Ctrl+Up/Down) to reorder the workspace pills; Enter switches to a pill; order persists (registry + session + inbox)
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
-- Ctrl+W: Close the active tab/session (both modes; reverted in v0.28.219 — .215's workspace-close granularity was wrong). Workspace close = Ctrl+K 'Close Workspace' (non-destructive, reopenable via Open Workspace); app close = Ctrl+K 'Quit ZigShell'
+- Ctrl+Shift+W: Quit the app (IGSH-1965). Ctrl+W is left for the browser pane, where it closes the tab.
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
 - F2: Rename the visible session name. With the sidebar open, edit its tab. With the sidebar collapsed or hidden, edit the top title. In Inbox, edit the selected row.
 - Enter saves, Esc cancels, and leaving the name saves.
 - Type `/rename <name>` in Chat View to rename the session.
-- Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Reconnect (remote tabs), Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Mute/Unmute (a muted session is hidden from the Inbox on every device, stays in its workspace tab, and the mute syncs through the account layout), Keep Alive (cmd/pwsh), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
+- Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
 - Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Bot face also offers Upload image and Reset. Pictures for account-backed remote sessions sync to your phone automatically. Local shell pictures stay on this computer. Reset shows the chosen face and color, and removes the shared picture. Offline picture changes sync after reconnecting.
 - No dedicated shortcut — Close all disconnected sessions: use Ctrl+K or right-click a tab. Choose the counted action. Pinned and unpinned disconnected sessions close. Live sessions stay open.
 - No dedicated shortcut — Session ETA: when an agent hook reports a time estimate for the in-flight request, the sidebar row shows a countdown ("12m", "1h 20m", amber "+4m" once overdue) and a thin progress line, Chat View's header shows "ETA 12m, done about 14:27", and Inbox rows show the same countdown. No hook wired up yet -> nothing shows. Ctrl+K → "ETA Countdown Numbers: On/Off" and "ETA Progress Line: On/Off" toggle each independently (both default on); Ctrl+K → "Estimate Accuracy" opens a read-only summary of how each agent's estimates compare to actual time taken, computed from `%APPDATA%\ZigShell\eta-log.jsonl`. Esc closes.
@@ -121,8 +117,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+W | Quit the app; keep server agents and saved chats |
-| Ctrl+Shift+W | Delete the active chat; stop its agent and keep its history |
+| Ctrl+Shift+W | Quit the app; keep server agents and saved chats |
+| Ctrl+K -&gt; Delete | Delete the active chat; stop its agent and keep its history |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
 | Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
@@ -186,8 +182,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl++ / Ctrl+- / Ctrl+0 | Terminal font only (Chat View text size when Chat View is active) |
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
 | Ctrl+Shift+R | Reattach active SSH/tmux tab |
-| Ctrl+K → Reconnect | Restart an ended server session with the same name (also in tab actions) |
-| Ctrl+K -&gt; Move chat to new mode | Hand an idle old-style Claude tab to the app-owned chat, keeping its session id and history |
 | Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
@@ -220,11 +214,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Edit room | Edit the selected Room |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot |
 | Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
-| Ctrl+K -&gt; Account: Remove server 1 | Remove server 1 from your account on every device after confirmation |
-| Ctrl+K -&gt; Account: Remove server 2 | Remove server 2 from your account on every device after confirmation |
-| Ctrl+K -&gt; Account: Remove server 3 | Remove server 3 from your account on every device after confirmation |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
-| Ctrl+K -&gt; Sync: Pull Now | Reconcile server workspaces and synchronized tmux tabs |
 | Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser |
 | Ctrl+K → Usage: Sign In to Primary / Secondary Claude Account | Force sign-in one telemetry profile in its own terminal |
 | Ctrl+K → Power Saver: Auto / Always / Off | Choose when background timers, VPS polling, and idle tabs slow down to save power |
@@ -233,15 +223,12 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+T | New workspace tmux tab, Claude by default (optional configured program) |
 | Ctrl+T | New Claude live chat in this workspace folder (also Alt+T outside the palette and the sidebar plus) |
 | Ctrl+K -&gt; New Claude session | Start a Claude live chat in this workspace folder; same as Ctrl+T and the sidebar plus |
-| Ctrl+K -&gt; New Claude in terminal | Start Claude the old way, typed into a terminal in this workspace folder |
 | Ctrl+K -&gt; New Codex chat | Start a Codex live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New Pi chat | Start a Pi live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New Cursor chat | Start a Cursor CLI live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
-| Ctrl+K -&gt; Open session... | Attach a server tmux session or any cached session on this host |
-| Ctrl+K -&gt; More shells... | Command Prompt, PowerShell, Bash, Git Bash, server shells, open all server sessions, sessions in this folder |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
 | Ctrl+H | Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more |
 | Alt+H | Remind Me: hide local tab, keep tmux running, return when due |
@@ -268,6 +255,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty. |
 | Ctrl+K "Chat View: Open or fold all tool steps" | Open every tool step's details, or fold them all; click one tool line to toggle it |
 | Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the title; also click the todo count |
+| Ctrl+K "Chat View: Restart the AI" | Chat View: when the AI has stopped in a server chat, restart it and resume the last conversation, then send any held messages; also click "AI stopped" beside the title |
 | Ctrl+Shift+D in Chat View | Copy latest code block (also its Copy button or Ctrl+K) |
 | Ctrl+K "Chat View: Expand table" | Open the table on screen full size over a dimmed window; also its Expand button on hover. Wheel, Shift+wheel and arrow keys scroll; Esc, the X or a click outside closes |
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |
@@ -289,6 +277,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
 | Ctrl+K "Chat View: Model Opus / Sonnet / Haiku / Fable" | Choose the model for the next message in a live Claude chat; the plus menu has the same choices |
+| Ctrl+K "Chat View: Model Sol / Terra / Luna / Astra" | Choose the model for the next message in a live Codex chat; the plus menu has the same choices |
 | Ctrl+K "Chat View: Effort Low / Medium / High" | Choose the effort for the next message in a live Claude chat; the plus menu has the same choices |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
@@ -304,7 +293,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K → Token Ladder: Auto / Burn Claude / Burn Codex | Choose which AI plan to use up now; Auto lets the ladder decide |
 | Ctrl+K → Token Ladder: Open Dashboard | Open the Token Ladder page with every plan's usage and reset clock in the browser pane |
 | Alt+V | Read replies. Press later for older. Double-press to stop. |
-| Ctrl+K Voice: Always Listening On/Off | Keep the mic on to talk over replies, or return to taking turns |
 | Ctrl+K "Voice Speed: ..." | How fast Voice Mode talks: 1x, 1.25x (default), 1.4x or 1.5x |
 | Alt+R | Read the agent's last reply aloud again, right now, even with Voice Mode off |
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
@@ -316,7 +304,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+X | Insert current browser tab URL (or most recent) + space at the Chat View caret; never send |
 | Ctrl+Shift+L / Ctrl+L | Focus browser address bar |
 | Alt+Q | Jump between typing and browser pane; restore typing if no pane |
-| Ctrl+K → Browser: Switch All Panes to Chrome / Edge | Switch every pane between dedicated Edge and dedicated Chrome profiles |
 | Ctrl+K → Browser: Use Browser Address Bar and Tabs / Use App Address Bar | Toggle pane between native browser chrome (tabs+omnibox) and custom URL bar |
 | Alt+Left / Alt+Right (browser focus) | Browser back / forward |
 | Alt+I (browser focus) | Open Inbox |
@@ -328,10 +315,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | URL bar pin | Return to this chat's pinned page |
 | Ctrl+K → Browser: Auto-Suspend Idle Panes | Toggle idle browser pane suspension |
 | Alt+P | Keep this tab's browser pane awake (exempt from freeze/hibernate) |
-| Ctrl+K → Crash Reports: Open Folder | Open the folder with crash reports saved after a crash (the app also reopens itself) |
-| Ctrl+K → Hibernate Browser Panes Now | Immediately hibernate every parked, unpinned browser pane |
 | Ctrl+K -&gt; External Browser Links When Pane Off | Toggle desktop browser for HTTP(S) links when the session pane is off (default on) |
-| Ctrl+K -&gt; Remote Tabs: Share One Server Connection | Toggle one shared connection per server for new remote tabs, no hidden console per tab (default off; open tabs switch on next launch) |
 | Ctrl+K → Close All Browser Panes | Close browser panes in every workspace, keep their saved URLs, and stop any Google Chrome or Microsoft Edge still running on Multiprompt's dedicated browser profile |
 | Ctrl+K → Browser: Insert Agent Instructions | Paste the multiprompt-browser guide into the active shell |
 | URL bar (click strip above pane) | Type a URL and press Enter to navigate the docked pane |

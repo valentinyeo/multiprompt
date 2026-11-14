@@ -1979,6 +1979,11 @@ pub fn overlayOpen() bool {
         app_state.g_snippet_create_active or app_state.g_inbox_active or app_state.g_all_sessions_active;
 }
 
+pub fn shellConsoleReachable(idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    return app_state.shells[idx].hwnd != null or app_state.shells[idx].native_terminal;
+}
+
 pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
     if (idx >= app_state.shell_count) return 0;
     if (app_state.shells[idx].hwnd == null and app_state.shells[idx].native_terminal and !app_state.shells[idx].disconnected) {
@@ -2095,7 +2100,7 @@ pub fn closeChatView() void {
     if (app_state.g_chat_status_hwnd != null) _ = ShowWindow(app_state.g_chat_status_hwnd, SW_HIDE);
     if (app_state.g_chat_transcript_hwnd != null) _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_HIDE);
     if (app_state.g_chat_composer_hwnd != null) _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_HIDE);
-    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
+    if (shellConsoleReachable(app_state.active_shell)) {
         if (app_state.ISSUE_440_FULL_WIDTH_CHAT and app_state.shells[app_state.active_shell].full_width_pending_console_resize) {
             app_state.shells[app_state.active_shell].full_width_pending_console_resize = false;
             if (app_state.shells[app_state.active_shell].pid != 0) @import("console.zig").applyBlackConsoleBackground(app_state.shells[app_state.active_shell].pid);

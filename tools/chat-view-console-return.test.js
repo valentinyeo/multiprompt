@@ -17,7 +17,7 @@ function fn(text, name) {
   assert.ok(end > start, name);
   return text.slice(start, end + 2);
 }
-const names = ['fullWidthShouldResizeConsole', 'shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView'];
+const names = ['fullWidthShouldResizeConsole', 'shellConsoleReachable', 'shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeChatView', 'toggleChatView'];
 
 test('remote tab connects its shared terminal when Chat View shows the console', () => {
   assert.match(fn(source, 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);

@@ -125,7 +125,7 @@ test('IGSH-720 delivery ownership stays shell-specific and releases on settlemen
   assert.equal(pending([written], shells, resolve, 1, true), true);
   assert.equal(pending([written], shells, resolve, 1, false), false);
   assert.equal(pending([{ ...written, state: 'delivered' }], shells, resolve, 1, false), true);
-  assert.match(session, /chatDeliveryPending\(entry\.key\.shell_id, false\)/);
+  assert.match(session, /chatPollingPending\(entry\.key\.shell_id\)/);
   assert.equal(pending([written], shells, resolve, 2, true), false);
   assert.equal(pending([{ ...written, key: 'removed-shell' }], shells, resolve, 1, true), false);
   assert.equal(pending([{ ...written, channel_sent: false, write_started: false }], shells, resolve, 1, true), false);

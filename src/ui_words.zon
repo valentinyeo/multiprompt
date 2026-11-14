@@ -146,6 +146,7 @@
     .tab_context_chat_always_allow = "Chat View: Always allow",
     .tab_context_chat_deny = "Chat View: Deny",
     .tab_context_chat_stop_agent = "Chat View: Stop the agent",
+    .tab_context_chat_restart_ai = "Chat View: Restart the AI",
     .tab_context_chat_insert_browser_url = "Chat View: Insert browser tab URL",
     .tab_context_chat_reset = "Chat View: Reset this chat",
     .tab_context_inbox_show_again = "Inbox: Show This Session Again",

@@ -176,9 +176,11 @@ test("shared sidebar uses session rows without the retired browser glyph rail", 
   assert.doesNotMatch(sidebar, /kaw_sb_rc|frz_sb_rc/);
 });
 
-test("F1 shortcuts overview lists Alt+P and the Hibernate Browser Panes Now command", () => {
-  assert.match(source, /\.a = "Alt\+P", \.b = "Keep this tab's browser pane awake/);
-  assert.match(source, /\.a = "Ctrl\+K.*Hibernate Browser Panes Now", \.b = "Immediately hibernate/);
+test("F1 shortcuts overview lists Alt+P and not Hibernate Browser Panes Now", () => {
+  const shortcuts = fs.readFileSync(path.join(root, "src", "shortcuts.zig"), "utf8");
+  assert.match(shortcuts, /\.a = "Alt\+P", \.b = "Keep this tab's browser pane awake/);
+  assert.doesNotMatch(shortcuts, /Hibernate Browser Panes Now/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, "src", "command_palette.zig"), "utf8"), /g_search_results\[[^\]]+\] = SEARCH_HIBERNATE_NOW_OFFSET/);
 });
 
 test("IGSH-1864 empty composer Delete discards stuck not-sent rows for the tab", () => {

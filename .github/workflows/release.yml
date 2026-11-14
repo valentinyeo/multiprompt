@@ -172,12 +172,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ needs.prepare.outputs.tag != '' }} -Dsymbols -Dversion="${TAG#v}" --prefix zig-out-debug
-          mkdir -p dist-symbols
-          cp zig-out-debug/bin/multiprompt.exe dist-symbols/multiprompt-${{ matrix.arch }}-symbols.exe
-          shopt -s nullglob
-          for pdb in zig-out-debug/bin/*.pdb; do
-            cp "$pdb" "dist-symbols/multiprompt-${{ matrix.arch }}-symbols.pdb"
-          done
+          bash tools/package-symbols.sh zig-out-debug/bin dist-symbols '${{ matrix.arch }}'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: multiprompt-${{ matrix.arch }}
@@ -374,7 +369,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           shopt -s nullglob
-          files=(symbols/*symbols.exe)
+          files=(symbols/*symbols.exe symbols/*symbols.pdb)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No symbolized twin was built; freeze reports stay unnamed"
             exit 0

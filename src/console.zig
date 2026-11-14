@@ -3013,7 +3013,7 @@ pub fn switchToShell(idx: u32) void {
                 }
                 if (foregroundIsOurs()) _ = SetForegroundWindow(app_state.g_main_hwnd);
                 if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
-            } else if (app_state.shells[idx].hwnd != null) {
+            } else if (@import("chat_composer.zig").shellConsoleReachable(idx)) {
                 {
                     const timing_started = switch_timing.start();
                     defer switch_timing.record(.console_shown, timing_started);

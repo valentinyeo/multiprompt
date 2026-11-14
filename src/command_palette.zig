@@ -138,6 +138,10 @@ const SEARCH_CHAT_MODEL_OPUS_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL
 const SEARCH_CHAT_MODEL_SONNET_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SONNET_OFFSET;
 const SEARCH_CHAT_MODEL_HAIKU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_HAIKU_OFFSET;
 const SEARCH_CHAT_MODEL_FABLE_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_FABLE_OFFSET;
+const SEARCH_CHAT_MODEL_SOL_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_SOL_OFFSET;
+const SEARCH_CHAT_MODEL_TERRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_TERRA_OFFSET;
+const SEARCH_CHAT_MODEL_LUNA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_LUNA_OFFSET;
+const SEARCH_CHAT_MODEL_ASTRA_OFFSET = @import("app_state.zig").SEARCH_CHAT_MODEL_ASTRA_OFFSET;
 const SEARCH_CHAT_EFFORT_LOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_LOW_OFFSET;
 const SEARCH_CHAT_EFFORT_MEDIUM_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
 const SEARCH_CHAT_EFFORT_HIGH_OFFSET = @import("app_state.zig").SEARCH_CHAT_EFFORT_HIGH_OFFSET;
@@ -270,6 +274,7 @@ const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALL
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
+const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HOST;
 const SEARCH_TABCTX_GOOGLE_SIGNIN = @import("app_state.zig").SEARCH_TABCTX_GOOGLE_SIGNIN;
@@ -524,9 +529,6 @@ const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
     .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
     .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
-    .{ .target = SEARCH_NEW_OFFSET + 3, .keywords = "server 1 shell host1 de vps ssh new host1 vps shell" },
-    .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "server 2 shell host2 uk vps ssh new host2 vps shell" },
-    .{ .target = SEARCH_OPENALL_OFFSET, .keywords = "open all server sessions open all vps tmux sessions" },
     .{ .target = SEARCH_OPENFOLDER_OFFSET, .keywords = "open sessions in this folder" },
     .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
@@ -729,6 +731,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_RECONNECT) return "Reconnect restart session reattach tab";
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
+    if (target == SEARCH_TABCTX_CHAT_RESTART_AI) return "chat view restart the ai agent stopped claude resume";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
@@ -932,6 +935,10 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_MODEL_SONNET_OFFSET => "chat view: model sonnet",
         SEARCH_CHAT_MODEL_HAIKU_OFFSET => "chat view: model haiku",
         SEARCH_CHAT_MODEL_FABLE_OFFSET => "chat view: model fable",
+        SEARCH_CHAT_MODEL_SOL_OFFSET => "chat view: model sol",
+        SEARCH_CHAT_MODEL_TERRA_OFFSET => "chat view: model terra",
+        SEARCH_CHAT_MODEL_LUNA_OFFSET => "chat view: model luna",
+        SEARCH_CHAT_MODEL_ASTRA_OFFSET => "chat view: model astra",
         SEARCH_CHAT_EFFORT_LOW_OFFSET => "chat view: effort low",
         SEARCH_CHAT_EFFORT_MEDIUM_OFFSET => "chat view: effort medium",
         SEARCH_CHAT_EFFORT_HIGH_OFFSET => "chat view: effort high",
@@ -1382,7 +1389,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
-    if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET) return 7;
+    if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
     if (target == app_state.SEARCH_SERVERS_OFFSET) return 3;
@@ -3319,14 +3326,6 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count = 0;
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_BACK_OFFSET;
         app_state.g_search_result_count += 1;
-        const attach_rows = [_]usize{ SEARCH_NEW_OFFSET + 1, SEARCH_NEW_OFFSET + 2 };
-        const attach_kw = [_][]const u8{ "server 1 host1 attach tmux session", "server 2 host2 attach tmux session" };
-        for (attach_rows, attach_kw) |row_target, row_kw| {
-            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-            if (!keywordsMatchAll(row_kw, app_state.g_search_buf[0..app_state.g_search_len])) continue;
-            app_state.g_search_results[app_state.g_search_result_count] = row_target;
-            app_state.g_search_result_count += 1;
-        }
         appendTmuxCacheRows();
         preferFirstFilteredResultAfterBack();
         if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
@@ -3338,15 +3337,9 @@ pub fn updateSearchResults() void {
         buildFilteredTmux();
         const ids = [_]usize{
             SEARCH_OPENALL_HOST_BACK_OFFSET,
-            SEARCH_OPENALL_HOST_DE_OFFSET,
-            SEARCH_OPENALL_HOST_UK_OFFSET,
-            SEARCH_OPENALL_HOST_INNE_OFFSET,
         };
         const labels = [_][]const u8{
             "back",
-            "host1 de vps tmux",
-            "host2 uk vps tmux",
-            "secondary cro vps tmux",
         };
         for (ids, labels) |id, label| {
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
@@ -3365,8 +3358,8 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_THEME_BACK_OFFSET;
         app_state.g_search_result_count += 1;
 
-        const theme_ids = [_]usize{ SEARCH_THEME_SYSTEM_OFFSET, SEARCH_THEME_DARK_OFFSET, SEARCH_THEME_MID_OFFSET, SEARCH_THEME_LIGHT_OFFSET, SEARCH_THEME_AMOLED_OFFSET, SEARCH_THEME_EDGE_GRAY_OFFSET, SEARCH_THEME_MULTIPROMPT_OFFSET, SEARCH_THEME_DEV_BLUE_OFFSET, SEARCH_THEME_DEV_EDIT_OFFSET, SEARCH_THEME_DEV_RELOAD_OFFSET };
-        const theme_labels = [_][]const u8{ "system windows automatic follow appearance light dark", "dark", "mid", "light", "amoled", "edge grey edge gray native edge 333333", "multi bot multiprompt midnight violet website landing", "dev blue", "edit dev theme json", "reload dev theme" };
+        const theme_ids = [_]usize{ SEARCH_THEME_SYSTEM_OFFSET, SEARCH_THEME_DARK_OFFSET, SEARCH_THEME_MID_OFFSET, SEARCH_THEME_LIGHT_OFFSET, SEARCH_THEME_AMOLED_OFFSET, SEARCH_THEME_EDGE_GRAY_OFFSET, SEARCH_THEME_MULTIPROMPT_OFFSET };
+        const theme_labels = [_][]const u8{ "system windows automatic follow appearance light dark", "dark", "mid", "light", "amoled", "edge grey edge gray native edge 333333", "multi bot multiprompt midnight violet website landing" };
         for (theme_ids, theme_labels) |theme_id, label| {
             if (!IS_DEV and theme_id >= SEARCH_THEME_DEV_BLUE_OFFSET and theme_id != SEARCH_THEME_MULTIPROMPT_OFFSET) continue;
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
@@ -3568,12 +3561,6 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_CHAT_OFFSET;
             app_state.g_search_result_count += 1;
         }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and
-            keywordsMatchAll("new claude in terminal shell old plain", app_state.g_search_buf[0..app_state.g_search_len]))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
         if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
             keywordsMatchAll("new codex chat session openai codec codecs", app_state.g_search_buf[0..app_state.g_search_len]))
         {
@@ -3608,18 +3595,6 @@ pub fn updateSearchResults() void {
             keywordsMatchAll("set workspace folder declare workspace folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SET_FOLDER_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and
-            keywordsMatchAll("open session attach tmux list pick server host1 host2", app_state.g_search_buf[0..app_state.g_search_len]))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_OPEN_SESSION_MENU_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and
-            keywordsMatchAll("more shells cmd command prompt powershell pwsh bash git bash vps server ssh", app_state.g_search_buf[0..app_state.g_search_len]))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHELLS_MENU_OFFSET;
             app_state.g_search_result_count += 1;
         }
         if (app_state.g_search_len > 0) {
@@ -3665,35 +3640,6 @@ pub fn updateSearchResults() void {
     if (show_sound_toggle and app_state.g_search_result_count < app_state.g_search_results.len) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SOUND_OFFSET;
         app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.active_shell < app_state.shell_count and faviconHostForShell(&app_state.shells[app_state.active_shell]) != null) {
-        var show_af = (app_state.g_search_len == 0);
-        if (!show_af) {
-            const af_labels = [_][]const u8{ "favicon", "add favicon", "icon" };
-            for (af_labels) |label| {
-                const qaf = app_state.g_search_buf[0..app_state.g_search_len];
-                if (qaf.len <= label.len) {
-                    var okf = true;
-                    for (0..qaf.len) |j| {
-                        const qcf = u16ToLower(qaf[j]);
-                        const lcf: u16 = label[j];
-                        if (qcf != lcf) {
-                            okf = false;
-                            break;
-                        }
-                    }
-                    if (okf) {
-                        show_af = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (show_af and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ADDFAVICON_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
     }
 
     if (app_state.g_search_len == 0) {
@@ -3984,55 +3930,11 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{"account: remove server 1"}, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_1_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{"account: remove server 2"}, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_2_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{"account: remove server 3"}, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_3_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "sync: pull now", "sync layout", "server layout", "host1 layout" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_LAYOUT_PULL_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Reply to latest agent message", "quote reply" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_REPLY_OFFSET;
         app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
-        @import("chat_composer.zig").chatAcAgent() == .claude)
-    {
-        const ReactionRow = struct { target: usize, label: []const u8, alias: []const u8 };
-        for ([_]ReactionRow{
-            .{ .target = SEARCH_CHAT_REACT_LIKE_OFFSET, .label = "Chat View: React 👍 to latest Claude message", .alias = "reaction thumbs up like agree" },
-            .{ .target = SEARCH_CHAT_REACT_DISLIKE_OFFSET, .label = "Chat View: React 👎 to latest Claude message", .alias = "reaction thumbs down dislike disagree" },
-            .{ .target = SEARCH_CHAT_REACT_HEART_OFFSET, .label = "Chat View: React ❤️ to latest Claude message", .alias = "reaction heart love" },
-        }) |reaction| {
-            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-            if (!labelsMatchQuery(&.{ reaction.label, reaction.alias }, app_state.g_search_buf[0..app_state.g_search_len])) continue;
-            app_state.g_search_results[app_state.g_search_result_count] = reaction.target;
-            app_state.g_search_result_count += 1;
-        }
     }
 
     if (app_state.ISSUE_268_CHAT_FIND and app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
@@ -4135,24 +4037,6 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EXPAND_TABLE_OFFSET;
         app_state.g_search_result_count += 1;
     }
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len) {
-        if (labelsMatchQuery(&[_][]const u8{ "chat view copy selection", "copy selection", "copy text", "ctrl c" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_COPY_SELECTION_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and
-            labelsMatchQuery(&[_][]const u8{ "chat view select all", "select all text", "ctrl a" }, app_state.g_search_buf[0..app_state.g_search_len]))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and
-            labelsMatchQuery(&[_][]const u8{ "chat view focus messages", "select message", "message options", "up" }, app_state.g_search_buf[0..app_state.g_search_len]))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FOCUS_MESSAGES_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
     if (@import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
         const query = app_state.g_search_buf[0..app_state.g_search_len];
         if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: plan", "permissions" }, query)) {
@@ -4235,25 +4119,6 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
-    if (app_state.g_search_result_count < app_state.g_search_results.len and app_state.active_shell < app_state.shell_count and
-        (app_state.shells[app_state.active_shell].kind == .vps or app_state.shells[app_state.active_shell].kind == .vps2 or app_state.shells[app_state.active_shell].kind == .tmux))
-    {
-        var show_reconnect = (app_state.g_search_len == 0);
-        if (!show_reconnect) {
-            const reconnect_labels = [_][]const u8{ "reconnect", "reconnect tab", "reattach", "reconnect ssh", "reconnect tmux", "fix black" };
-            for (reconnect_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    show_reconnect = true;
-                    break;
-                }
-            }
-        }
-        if (show_reconnect) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RECONNECT_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
-
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_singlewin = (app_state.g_search_len == 0);
         if (!show_singlewin) {
@@ -4267,23 +4132,6 @@ pub fn updateSearchResults() void {
         }
         if (show_singlewin) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SINGLEWIN_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len) {
-        var show_installhook = (app_state.g_search_len == 0);
-        if (!show_installhook) {
-            const installhook_labels = [_][]const u8{ "blue dot", "hook", "install hook", "blue dot hook", "notify", "notification", "notifications", "ping", "attention" };
-            for (installhook_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    show_installhook = true;
-                    break;
-                }
-            }
-        }
-        if (show_installhook) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_INSTALLHOOK_OFFSET;
             app_state.g_search_result_count += 1;
         }
     }
@@ -4543,24 +4391,6 @@ pub fn updateSearchResults() void {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_MODE_OFF_OFFSET;
                 app_state.g_search_result_count += 1;
             }
-        }
-    }
-
-    {
-        var show_always = app_state.g_search_len == 0;
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            for ([_][]const u8{ "voice", "always listening", "talk over", "taking turns" }) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_always = true;
-                    break;
-                }
-            }
-        }
-        if (show_always and app_state.g_search_result_count + 2 <= app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_ALWAYS_ON_OFFSET;
-            app_state.g_search_results[app_state.g_search_result_count + 1] = SEARCH_VOICE_ALWAYS_OFF_OFFSET;
-            app_state.g_search_result_count += 2;
         }
     }
 
@@ -4889,45 +4719,11 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
-    {
-        var show_urlpick = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const urlpick_labels = [_][]const u8{ "open url from screen", "url", "link", "open", "browser" };
-            for (urlpick_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_urlpick = true;
-                    break;
-                }
-            }
-        }
-        if (show_urlpick and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_URLPICK_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_DISCONNECTED_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.shell_count > 0) {
-        var show_mutetab = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const mutetab_labels = [_][]const u8{ "mute tab", "unmute tab", "mute", "unmute", "silence", "notifications" };
-            for (mutetab_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_mutetab = true;
-                    break;
-                }
-            }
-        }
-        if (show_mutetab and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_MUTETAB_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
     if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Favorite: Toggle", "unfavorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])))
     {
@@ -4942,26 +4738,6 @@ pub fn updateSearchResults() void {
         }
     }
 
-    if (app_state.active_shell < app_state.shell_count) {
-        const k = app_state.shells[app_state.active_shell].kind;
-        if (k == .cmd or k == .pwsh) {
-            var show_keepalive = (app_state.g_search_len == 0);
-            if (app_state.g_search_len > 0) {
-                const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const keepalive_labels = [_][]const u8{ "keep alive", "keep", "alive", "persist" };
-                for (keepalive_labels) |label| {
-                    if (asciiContainsQueryInsensitive(label, q)) {
-                        show_keepalive = true;
-                        break;
-                    }
-                }
-            }
-            if (show_keepalive and app_state.g_search_result_count < app_state.g_search_results.len) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_KEEPALIVE_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-        }
-    }
     if (app_state.shell_count > 0) {
         var show_chat_view = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
@@ -4981,7 +4757,25 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_OFFSET;
             app_state.g_search_result_count += 1;
         }
-        if (@import("chat_session.zig").chatSettingsEligible()) {
+        if (@import("chat_session.zig").chatSettingsEligible() and @import("chat_session.zig").chatSettingsCodex()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sol", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SOL_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Terra", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_TERRA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Luna", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_LUNA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Astra", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_ASTRA_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+        if (@import("chat_session.zig").chatSettingsEligible() and !@import("chat_session.zig").chatSettingsCodex()) {
             if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Opus", app_state.g_search_buf[0..app_state.g_search_len]))) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_OPUS_OFFSET;
                 app_state.g_search_result_count += 1;
@@ -5161,22 +4955,6 @@ pub fn updateSearchResults() void {
         }
         if (show_browser_toggle and app_state.g_search_result_count < app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_TOGGLE_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-
-        var show_browser_engine = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const engine_labels = [_][]const u8{ "browser engine", "browser profile", "dedicated edge", "dedicated chrome", "switch browser", "google chrome", "microsoft edge", "browser: switch all panes to chrome", "browser: switch all panes to edge", "browser engine: switch every pane to dedicated chrome", "browser engine: switch every pane to dedicated edge" };
-            for (engine_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_browser_engine = true;
-                    break;
-                }
-            }
-        }
-        if (show_browser_engine and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_BROWSER_ENGINE_OFFSET;
             app_state.g_search_result_count += 1;
         }
 
@@ -5365,45 +5143,13 @@ pub fn updateSearchResults() void {
         }
     }
 
-    {
-        var show_hibernate_now = (app_state.g_search_len == 0);
-        if (app_state.g_search_len > 0) {
-            const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const hib_labels = [_][]const u8{ "hibernate browser panes", "hibernate panes", "hibernate now", "hibernate", "free ram", "save ram" };
-            for (hib_labels) |label| {
-                if (asciiContainsQueryInsensitive(label, q)) {
-                    show_hibernate_now = true;
-                    break;
-                }
-            }
-        }
-        if (show_hibernate_now and app_state.g_search_result_count < app_state.g_search_results.len) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIBERNATE_NOW_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
-
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "External Browser Links When Pane Off", "desktop browser", "default browser", "open links" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
-    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Remote Tabs: Share One Server Connection", "shared server connection", "ssh connection", "hidden console" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHARED_SERVER_CONNECTION_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Close All Browser Panes", "close all browsers", "close browser windows", "free browser memory" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Crash Reports: Open Folder", "crash reports", "crash log", "crashes" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CRASH_REPORTS_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-    if (IS_DEV and app_state.g_search_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Debug: Crash Now", "crash now" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CRASH_NOW_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
@@ -5476,35 +5222,6 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_len > 0) appendTmuxCacheRows();
-
-    if (app_state.g_inactive_filtered_count >= 1 and app_state.g_search_result_count < app_state.g_search_results.len) {
-        var show_openall = (app_state.g_search_len == 0);
-        if (!show_openall) {
-            const openall_labels = [_][]const u8{ "open all", "open all vps", "tmux", "all tmux", "vps sessions" };
-            for (openall_labels) |label| {
-                const query3 = app_state.g_search_buf[0..app_state.g_search_len];
-                if (query3.len <= label.len) {
-                    var ok3 = true;
-                    for (0..query3.len) |j| {
-                        const qc3 = u16ToLower(query3[j]);
-                        const lc3: u16 = label[j];
-                        if (qc3 != lc3) {
-                            ok3 = false;
-                            break;
-                        }
-                    }
-                    if (ok3) {
-                        show_openall = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (show_openall) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_OPENALL_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var fh: u8 = 0;
@@ -5665,27 +5382,8 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
     }
     const sel_count = selectedTabCount();
     const sel_mode = sel_count > 0;
-    if (tc_idx) |ti| {
-        const k = app_state.shells[ti].kind;
-        if (k == .vps or k == .vps2 or k == .tmux) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Reconnect", "restart session", "reattach tab", "reconnect tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
-                    app_state.g_search_result_count += 1;
-                }
-            }
-        }
-    }
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         if (tc_idx) |ti| {
-            const tab = &app_state.shells[ti];
-            if (canAdoptHostTab(tab.ai_agent, tab.claude_sid_len, tab.tmux_session_len, app_state.g_chat_screen_working) and
-                app_state.g_search_result_count < app_state.g_search_results.len and
-                labelsMatchQuery(&.{ "Move chat to new mode", "adopt", "convert", "transition" }, app_state.g_search_buf[0..app_state.g_search_len]))
-            {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_ADOPT_HOST;
-                app_state.g_search_result_count += 1;
-            }
             if (@import("browser_pane.zig").browserProfileToken(ti).len > 0 and
                 app_state.g_search_result_count < app_state.g_search_results.len and
                 labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -5697,15 +5395,6 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         const label = if (tc_idx) |ti| (if (app_state.shells[ti].favorite) "Unfavorite" else "Favorite") else "Favorite";
         if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "favorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_FAVORITE;
-            app_state.g_search_result_count += 1;
-        }
-    }
-    if (app_state.g_search_result_count < app_state.g_search_results.len) {
-        const tc_muted = if (tc_idx) |ti| app_state.shells[ti].muted else false;
-        const mute_str: []const u8 = if (tc_muted) "Unmute Tab" else "Mute Tab";
-        const mute_old: []const u8 = if (tc_muted) "Unmute Activity" else "Mute Activity";
-        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ mute_str, mute_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MUTE;
             app_state.g_search_result_count += 1;
         }
     }
@@ -5730,19 +5419,6 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake", "Let Browser Pane Hibernate", "Keep Tab Awake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPAWAKE;
             app_state.g_search_result_count += 1;
-        }
-    }
-    if (tc_idx) |ti| {
-        const k = app_state.shells[ti].kind;
-        if (k == .cmd or k == .pwsh) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                const ka_str: []const u8 = if (app_state.shells[ti].keep_alive) "Keep Alive: On" else "Keep Alive: Off";
-                const ka_old: []const u8 = if (app_state.shells[ti].keep_alive) "Don't Keep Alive" else "Keep Alive on Exit";
-                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ ka_str, ka_old }, app_state.g_search_buf[0..app_state.g_search_len])) {
-                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPALIVE;
-                    app_state.g_search_result_count += 1;
-                }
-            }
         }
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -5816,6 +5492,12 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Stop the agent", app_state.g_search_buf[0..app_state.g_search_len])))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_STOP;
+        app_state.g_search_result_count += 1;
+    }
+    if (tc_idx != null and app_state.shells[tc_idx.?].ai_stopped and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Restart the AI", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESTART_AI;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_single_window and (app_state.g_lws_count > 1 or hasClosedWorkspaceMoveDestinations())) {

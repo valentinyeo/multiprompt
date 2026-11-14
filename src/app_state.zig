@@ -336,6 +336,7 @@ pub const Shell = struct {
     color: ?u8 = null,
     avatar_local_id: [16]u8 = @splat(0),
     last_used: u64 = 0,
+    frozen_use_key: ?u64 = null,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
     console_inflight: bool = false,
@@ -375,6 +376,8 @@ pub const Shell = struct {
     preview: [96]u8 = std.mem.zeroes([96]u8),
     preview_len: u32 = 0,
     ai_agent: u8 = 0,
+    ai_stopped: bool = false,
+    ai_restart_tick: u64 = 0,
     adopt_streak: u8 = 0,
     external_name_sync: ExternalNameSyncState = .{},
     console_font_logged: bool = false,
@@ -738,6 +741,7 @@ pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
 pub var g_sidebar_hover: ?u32 = null;
+pub var g_sidebar_order_frozen: bool = false;
 pub var g_room_hover: ?HitTarget = null;
 pub var g_inbox_button_hover: bool = false;
 pub var g_chat_title_inbox_hover: bool = false;
@@ -836,6 +840,7 @@ pub const TmuxSessionEntry = struct {
     title: [80]u8 = undefined,
     title_len: u32 = 0,
     agent: u8 = 0,
+    pane_shell: bool = false,
 };
 
 pub const CapacityState = enum(u8) {
@@ -1615,6 +1620,14 @@ pub const SEARCH_CHAT_MODE_EDITS_OFFSET: usize = 12002;
 pub const SEARCH_CHAT_MODE_BYPASS_OFFSET: usize = 12009;
 pub const SEARCH_CHAT_PLUS_MENU_OFFSET: usize = 12010;
 pub const SEARCH_CHAT_MODEL_FABLE_OFFSET: usize = 12011;
+pub const SEARCH_CHAT_MODEL_SOL_OFFSET: usize = 12012;
+pub const SEARCH_CHAT_MODEL_TERRA_OFFSET: usize = 12013;
+pub const SEARCH_CHAT_MODEL_LUNA_OFFSET: usize = 12014;
+pub const SEARCH_CHAT_MODEL_ASTRA_OFFSET: usize = 12015;
+
+pub fn isChatSettingOffset(target: usize) bool {
+    return (target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or (target >= SEARCH_CHAT_MODEL_FABLE_OFFSET and target <= SEARCH_CHAT_MODEL_ASTRA_OFFSET);
+}
 pub const SEARCH_CHAT_QUEUE_SEND_OFFSET: usize = 6365;
 pub const SEARCH_CHAT_RESET_OFFSET: usize = 6394;
 pub const SEARCH_CHAT_TAB_URL_OFFSET: usize = 6384;
@@ -1698,6 +1711,7 @@ pub const SEARCH_TABCTX_UNREAD: usize = 7195;
 pub const SEARCH_TABCTX_COPY_ID: usize = 7196;
 pub const SEARCH_TABCTX_HIDE: usize = 7197;
 pub const SEARCH_TABCTX_RENAME: usize = 7198;
+pub const SEARCH_TABCTX_CHAT_RESTART_AI: usize = 7199;
 pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
 pub const BOT_FACE_COUNT: usize = 21;
 pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;
@@ -2967,6 +2981,7 @@ pub const ChatHistoryEntry = struct {
     cache_written: u64 = 0,
     cache_dirty: bool = false,
     unchanged: bool = false,
+    quiet: u16 = 0,
     incremental: bool = false,
     failures: u8 = 0,
     missing_message: [256]u16 = @splat(0),
@@ -3657,8 +3672,6 @@ pub const ChangelogEntryRange = struct { top: i32, h: i32 };
 pub const ChangelogHit = union(enum) { outside, inside, close, row: ChangelogSelection };
 
 pub const UsageLoginAccount = enum { primary, secondary };
-
-pub var g_usage_launch_mutex: HANDLE = null;
 
 pub const LADDER_REFRESH_MS: u64 = 180_000;
 pub const LADDER_VALID_MS: u64 = 15 * 60_000;

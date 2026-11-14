@@ -16,7 +16,7 @@ const L = startup.L;
 const RGB = startup.RGB;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
+pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
 const ITEM_COUNT = std.meta.tags(Item).len;
 
 const Section = struct { title: ?[]const u8, items: []const Item };
@@ -24,6 +24,7 @@ const Section = struct { title: ?[]const u8, items: []const Item };
 const sections = [_]Section{
     .{ .title = null, .items = &.{.attach} },
     .{ .title = "Model", .items = &.{ .model_opus, .model_sonnet, .model_haiku, .model_fable } },
+    .{ .title = "Model", .items = &.{ .model_sol, .model_terra, .model_luna, .model_astra } },
     .{ .title = "Effort", .items = &.{ .effort_low, .effort_medium, .effort_high } },
     .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass } },
 };
@@ -41,6 +42,10 @@ fn label(item: Item) []const u8 {
         .model_sonnet => "Sonnet",
         .model_haiku => "Haiku",
         .model_fable => "Fable",
+        .model_sol => "Sol",
+        .model_terra => "Terra",
+        .model_luna => "Luna",
+        .model_astra => "Astra",
         .effort_low => "Low",
         .effort_medium => "Medium",
         .effort_high => "High",
@@ -240,7 +245,13 @@ fn snapshot(state: *State) void {
     chat_send.chatModeCapturePicker();
     const session = @import("chat_session.zig");
     const selected: chat_live.Settings = chat_live.settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
-    if (session.chatSettingsEligible()) {
+    if (session.chatSettingsEligible() and session.chatSettingsCodex()) {
+        for ([_]Item{ .model_sol, .model_terra, .model_luna, .model_astra }) |item| state.shown[@intFromEnum(item)] = true;
+        state.active[@intFromEnum(Item.model_sol)] = selected.model == .sol;
+        state.active[@intFromEnum(Item.model_terra)] = selected.model == .terra;
+        state.active[@intFromEnum(Item.model_luna)] = selected.model == .luna;
+        state.active[@intFromEnum(Item.model_astra)] = selected.model == .astra;
+    } else if (session.chatSettingsEligible()) {
         for ([_]Item{ .model_opus, .model_sonnet, .model_haiku, .model_fable, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
         const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
         const model = modelOf(selected, status);

@@ -888,10 +888,11 @@ pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bot
     return std.math.clamp(if (anchor_top) |top| top + offset else old_y, @min(0, bottom), @max(0, bottom));
 }
 
-pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32) i32 {
+pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32, anchor: ?i32) i32 {
     const bottom = content_h - viewport_h;
-    if (bottom <= 0 or boundary.index == null or boundary.unknown) return bottom;
-    return std.math.clamp(divider_y - top_pad, 0, bottom);
+    if (bottom <= 0) return bottom;
+    const target = anchor orelse if (boundary.index != null and !boundary.unknown) divider_y - top_pad else bottom;
+    return std.math.clamp(target, 0, bottom);
 }
 
 pub const MISSING_RETRY_MS: u64 = 60_000;

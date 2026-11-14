@@ -176,7 +176,7 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.ok(startId);
   const urlId = state.match(/SEARCH_TABCTX_CHAT_TAB_URL: usize = (\d+)/);
   if (urlId) assert.notEqual(startId[1], urlId[1]);
-  assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_RECONNECT/);
+  assert.doesNotMatch(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_RECONNECT/);
   assert.doesNotMatch(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
   assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_RECONNECT\) L\(ui_words\.palette_reconnect\)/);
   assert.ok(read('ui_words.zon').includes('.palette_reconnect = "Reconnect"'));
@@ -185,7 +185,7 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.ok(start >= 0);
   const dispatch = main.slice(start, main.indexOf('} else if', start));
   assert.match(dispatch, /sshReconnectNow\(ti\)/);
-  assert.match(read('shortcuts.zig'), /Ctrl\+K \\u\{2192\} Reconnect/);
+  assert.doesNotMatch(read('shortcuts.zig'), /Ctrl\+K \\u\{2192\} Reconnect/);
   assert.match(fs.readFileSync(path.join(root, 'openwiki/operations/keyboard-shortcuts.md'), 'utf8'), /Reconnect/);
 });
 

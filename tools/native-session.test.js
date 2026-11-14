@@ -59,6 +59,6 @@ test('shared server connection is a switch that defaults off and persists', () =
   assert.match(session, /if \(app_state\.g_shared_server_connection and pos \+ 36 < json_buf\.len\) \{\s*const setting = ",\\"shared_server_connection\\":true";/);
   assert.match(session, /app_state\.g_shared_server_connection = json_reader\.boolTrue\(json, "shared_server_connection"\);/);
   assert.match(read('src/main.zig'), /target == SEARCH_SHARED_SERVER_CONNECTION_OFFSET\) \{\s*app_state\.g_shared_server_connection = !app_state\.g_shared_server_connection;\s*saveSession\(\);/);
-  assert.match(read('src/command_palette.zig'), /"Remote Tabs: Share One Server Connection"/);
-  assert.match(read('src/shortcuts.zig'), /Ctrl\+K -> Remote Tabs: Share One Server Connection/);
+  assert.doesNotMatch(read('src/command_palette.zig'), /g_search_results\[[^\]]+\] = SEARCH_SHARED_SERVER_CONNECTION_OFFSET/);
+  assert.doesNotMatch(read('src/shortcuts.zig'), /Share One Server Connection/);
 });

@@ -6,11 +6,11 @@ const path = require('node:path');
 const test = require('node:test');
 const remoteOnly = { skip: process.platform === 'win32' ? 'The PTY lives on the Linux SSH server' : false };
 
-async function terminal(t, command, size = [24, 80], multiplex = false) {
+async function terminal(t, command, size = [24, 80], multiplex = false, env = process.env) {
   const worker = path.join(__dirname, '../src/terminal_channel.py');
   assert.ok(fs.existsSync(worker), 'server-side terminal channel exists');
   const args = multiplex ? ['-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'] : ['-u', worker];
-  const child = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'], env });
   let output = '';
   let stderr = '';
   const waiters = [];
@@ -64,6 +64,16 @@ async function terminal(t, command, size = [24, 80], multiplex = false) {
   send({ command, size });
   return { child, waitFor, send, input(value) { send({ input: Buffer.from(value).toString('base64') }); } };
 }
+
+test('a login profile that sources a missing file does not end the shell', remoteOnly, async (t) => {
+  const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'terminal-home-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(home, '.profile'), '. "$HOME/.missing-env"\n');
+  const session = await terminal(t, 'printf "ALIVE\\n"', [24, 80], false, { ...process.env, HOME: home });
+  const output = await session.waitFor('ALIVE').catch(error => ({ failed: String(error.message) }));
+  assert.equal(typeof output, 'string', `the shell stays open after its profile sources a missing file: ${output.failed}`);
+  assert.match(output, /ALIVE/);
+});
 
 test('server PTY has the requested initial size, UTF-8 input and a real terminal environment', remoteOnly, async (t) => {
   const session = await terminal(t, 'stty -echo; stty size; printf "TERM=%s READY\\n" "$TERM"; IFS= read -r text; printf "REPLY=%s\\n" "$text"', [31, 109]);

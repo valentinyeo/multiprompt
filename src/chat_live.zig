@@ -15,7 +15,7 @@ pub const MAX_PAGE: usize = 4 * 1024 * 1024;
 pub const ItemKind = enum { text, thinking, tool, plan };
 pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
-pub const Model = enum { unknown, opus, sonnet, haiku, fable };
+pub const Model = enum { unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra };
 pub const Effort = enum { unknown, low, medium, high };
 pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
 pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
@@ -452,11 +452,11 @@ pub fn settingReplyFailed(page: []const u8) ?bool {
 
 pub const Setting = union(enum) { model: Model, effort: Effort };
 
-pub fn settingLine(a: std.mem.Allocator, id: u32, sid: []const u8, setting: Setting) ![]u8 {
+pub fn settingLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, setting: Setting) ![]u8 {
     const op: []const u8 = switch (setting) { .model => "set_model", .effort => "set_effort" };
     const value: []const u8 = switch (setting) { .model => |model| @tagName(model), .effort => |effort| @tagName(effort) };
     if (std.mem.eql(u8, value, "unknown")) return error.InvalidSetting;
-    var out = try openLine(a, id, op, "claude", sid);
+    var out = try openLine(a, id, op, provider, sid);
     errdefer out.deinit(a);
     try out.appendSlice(a, if (setting == .model) ",\"model\":" else ",\"effort\":");
     try appendQuoted(&out, a, value);
@@ -1612,16 +1612,20 @@ test "host settings belong to a live session and survive turns" {
 
 test "setting requests and refused replies" {
     const a = std.testing.allocator;
-    const model = try settingLine(a, SETTING_REQUEST_ID, "session", .{ .model = .haiku });
+    const model = try settingLine(a, SETTING_REQUEST_ID, "claude", "session", .{ .model = .haiku });
     defer a.free(model);
     try std.testing.expect(std.mem.indexOf(u8, model, "\"op\":\"set_model\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, model, "\"provider\":\"claude\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, model, "\"model\":\"haiku\"") != null);
-    const effort = try settingLine(a, SETTING_REQUEST_ID, "session", .{ .effort = .high });
+    const effort = try settingLine(a, SETTING_REQUEST_ID, "claude", "session", .{ .effort = .high });
     defer a.free(effort);
     try std.testing.expect(std.mem.indexOf(u8, effort, "\"op\":\"set_effort\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, effort, "\"effort\":\"high\"") != null);
-    try std.testing.expectError(error.InvalidSetting, settingLine(a, 1, "session", .{ .model = .unknown }));
+    try std.testing.expectError(error.InvalidSetting, settingLine(a, 1, "claude", "session", .{ .model = .unknown }));
+    const codex = try settingLine(a, SETTING_REQUEST_ID, "codex", "session", .{ .model = .terra });
+    defer a.free(codex);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "\"provider\":\"codex\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "\"model\":\"terra\"") != null);
     try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"refused\"}}").?);
     try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"error\":\"failed\"}").?);
     try std.testing.expect(!settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"ok\"}}").?);

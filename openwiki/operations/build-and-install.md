@@ -1,6 +1,6 @@
 # Build and release
 
-Use Zig 0.16 on PATH. On Windows, `zig build` produces `zig-out/bin/multiprompt.exe` and `zigshell-bridge.exe`; `zig build dev` produces a separate development app. Telemetry runs in the main executable with `--usage-telemetry`.
+Use Zig 0.16 on PATH. On Windows, `zig build` produces `zig-out/bin/multiprompt.exe` and `zigshell-bridge.exe`; `zig build dev` produces a separate development app. The usage meter runs inside the main executable on one background worker that exists only while the usage meter is wanted (card hovered or sidebar card switched); no second process is started.
 
 Before native builds, CI runs `zig ast-check` on `build.zig` and every Zig source under `src`, including the generated release changelog. This checks syntax, not formatting or semantic compilation.
 
@@ -27,7 +27,7 @@ The window appears without waiting for GitHub. Checks and downloads run in the b
 
 Updates accept stable releases published by `github-actions[bot]` in `valentinyeo/multiprompt`. The embedded Ed25519 public key must verify the detached `SHA256SUMS.txt.sig` before any checksums are trusted. Native ARM64 or x64 app and bridge executables and the extension ZIP must match the signed manifest exactly. Authenticode policy remains additional: a signed installation requires a valid update signature from the same publisher.
 
-While working, updates are only staged. The sidebar notice and Ctrl+K **Restart to update** save sessions and restart on request; an active download finishes before the swap. Installation stops the old telemetry and bridge helpers and retains `<app>.previous.exe`. The new app reports ready when its window responds, including the sign-in screen; failed startup restores app, bridge, and extension files and suppresses that release. Rollback starts the old app without a readiness kill deadline. An unusually slow exit remains supervised and reopens the old app after it finishes.
+While working, updates are only staged. The sidebar notice and Ctrl+K **Restart to update** save sessions and restart on request; an active download finishes before the swap. Installation stops legacy telemetry helpers left by older versions and the bridge helpers and retains `<app>.previous.exe`. The new app reports ready when its window responds, including the sign-in screen; failed startup restores app, bridge, and extension files and suppresses that release. Rollback starts the old app without a readiness kill deadline. An unusually slow exit remains supervised and reopens the old app after it finishes.
 
 Extension files are updated in the configured unpacked extension directory (or the standard existing installation), excluding `themes/current`, just as the manual installer does. Existing extension reload/self-heal remains responsible for loading those files in the browser.
 

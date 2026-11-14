@@ -327,6 +327,9 @@ pub fn build(b: *std.Build) void {
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js", "tools/workspace-colors.test.js", "tools/account-bot-photos.test.js", "tools/account-picture-proof.test.js" }).step);
     const live_resume_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-switch-resume.test.js" });
+    const composer_paint_bound_tests = b.addSystemCommand(&.{ "node", "--test", "tools/composer-paint-bound.test.js" });
+    test_step.dependOn(&composer_paint_bound_tests.step);
+    vps_test_step.dependOn(&composer_paint_bound_tests.step);
     test_step.dependOn(&live_resume_tests.step);
     vps_test_step.dependOn(&live_resume_tests.step);
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
@@ -340,6 +343,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&mp_send_tests.step);
     const mp_talk_tests = b.addSystemCommand(&.{ "python3", "tools/mp-talk-test.py" });
     vps_test_step.dependOn(&mp_talk_tests.step);
+    const mp_helper_tests = b.addSystemCommand(&.{ "python3", "tools/mp-helper-test.py" });
+    vps_test_step.dependOn(&mp_helper_tests.step);
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js", "tools/mp-spawn.test.js", "tools/mp-spawn-adapters.test.js", "tools/chat-reader-windows-boundary.test.js", "tools/chat-view-everywhere.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
@@ -441,14 +446,14 @@ pub fn build(b: *std.Build) void {
     const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
     test_step.dependOn(&launch_regression.step);
     vps_test_step.dependOn(&launch_regression.step);
-    const usage_mode_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_single_exe.test.js" });
-    test_step.dependOn(&usage_mode_regression.step);
-    const usage_mode_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("src/usage_telemetry_mode.zig"),
+    const usage_worker_regression = b.addSystemCommand(&.{ "node", "--test", "tools/usage_telemetry_in_process.test.js" });
+    test_step.dependOn(&usage_worker_regression.step);
+    const usage_worker_plan_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/usage_worker_plan.zig"),
         .target = target,
         .optimize = .Debug,
     }) });
-    test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
+    test_step.dependOn(&b.addRunArtifact(usage_worker_plan_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
     for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/ssh_servers.zig", "src/bot_photo_sync.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig", "src/tmux_closed.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{

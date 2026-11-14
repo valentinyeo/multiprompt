@@ -17,6 +17,10 @@ function body(name, text = source) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2);
 }
+test('SOFT-1973 a hidden shell skips message sync when every held message is past the delivery window', () => {
+  assert.match(body('chatOutboxTick'), /chatOutboxSyncCountForShell\(idx\) == 0/);
+  assert.match(body('chatOutboxSyncCountForShell'), /drivesPolling\(/);
+});
 async function zig(code, filter, files = modern ? ['ssh_reconnect.zig'] : []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
@@ -356,6 +360,7 @@ fn chatHoldLegacyCodex() bool { return false; }
 fn chatMessageSyncFinish() void {}
 fn chatMessageSyncStart(_: u32) void {}
 fn chatOutboxCountForShell(_: u32) usize { return 0; }
+fn chatOutboxSyncCountForShell(_: u32) usize { return 0; }
 fn chatPendingResetDropIfStale() ?usize { return null; }
 fn chatPendingResetStart(_: u32) void {}
 fn sshOutboxFlushed(_: u32) void {}

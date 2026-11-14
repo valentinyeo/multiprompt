@@ -14,6 +14,7 @@ try:
 except ImportError:
     pwd = None
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -1630,6 +1631,15 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             hosted = None
         return (agent, sid, hosted, None) if hosted is not None else (agent, sid, None, empty_history_response(q, sid, tmux, agent))
+    if agent == "claude" and path is not None and sid and not as_owner and host_dispatch_switch(agent, sid):
+        native = host_session_state(agent, sid).get("native_session")
+        if isinstance(native, str) and SESSION_ID.fullmatch(native) and native != sid:
+            try:
+                cleared = conversation_path(agent, native, cwd)
+            except PermissionError:
+                cleared = None
+            if cleared is not None:
+                path = cleared
     owner = conversation_owner(cwd) if agent == "claude" else None
     if follow and owner and owner[1] != HOME and source is not None and not as_owner:
         delegated = owner_response(dict(q, sid=""), owner, source)
@@ -2118,6 +2128,45 @@ def stop_response(q):
     return f"@mp\t{rid}\t{op}\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
+RESTART_AI_SESSION = re.compile(r"[A-Za-z0-9-]{8,64}\Z")
+
+
+def restart_ai_command(sid, cwd):
+    folder = host_folder(cwd) if isinstance(cwd, str) and cwd else None
+    prefix = "cd " + shlex.quote(folder) + " && " if folder else ""
+    if sid in (None, ""):
+        return prefix + "claude --continue"
+    if not isinstance(sid, str) or RESTART_AI_SESSION.fullmatch(sid) is None:
+        return None
+    return prefix + "claude --resume " + shlex.quote(sid)
+
+
+def restart_ai_response(q):
+    rid = q.get("id", 0)
+    name = q.get("tmux")
+    reason = None
+    command = None
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+        reason = "invalid_tmux_name"
+    else:
+        command = restart_ai_command(q.get("sid"), q.get("cwd"))
+        if command is None:
+            reason = "invalid_session"
+    if reason is None and not host_pane_is_shell(name):
+        reason = "pane_busy"
+    if reason is None:
+        try:
+            running = resolve_tmux_agent("claude", name)
+        except (OSError, ValueError):
+            running = None
+        if running:
+            reason = "pane_busy"
+    if reason is None and not host_terminal_send(name, command):
+        reason = "pane_input_failed"
+    status = "error" if reason else "ok"
+    return f"@mp\t{rid}\trestart_ai\t{status}\t{reason or '-'}\t0\n{END}\n"
+
+
 def box_is_empty(box):
     return not box
 
@@ -2520,6 +2569,7 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
+                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
@@ -3025,7 +3075,9 @@ def host_reply(query):
     provider, sid = query.get("provider"), query.get("sid")
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
-    if query.get("op") in ("set_model", "set_effort") and provider != "claude":
+    if query.get("op") == "set_effort" and provider != "claude":
+        return dict(status="refused", reason="unsupported_provider")
+    if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES:
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
@@ -3041,7 +3093,7 @@ def host_reply(query):
             value = mode
         else:
             key = "model" if operation == "set_model" else "effort"
-            allowed = ("opus", "sonnet", "haiku", "fable") if key == "model" else ("low", "medium", "high")
+            allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else ("low", "medium", "high")
             value = query.get(key)
             if value not in allowed:
                 return dict(status="refused", reason="invalid_" + key)
@@ -3475,8 +3527,22 @@ def host_permission_mode(provider, sid, state=None):
     return HOST_MODE_NAMES.get(mode if mode is not None else "default", "")
 
 
+HOST_MODEL_CHOICES = dict(
+    claude=dict(opus="opus", sonnet="sonnet", haiku="haiku", fable="fable"),
+    codex=dict(sol="gpt-6.1-sol", terra="gpt-6.1-terra", luna="gpt-6-luna", astra="gpt-6-astra"),
+)
+
+
+def host_codex_model(provider, sid):
+    config = host_config(provider, sid) or {}
+    return HOST_MODEL_CHOICES["codex"].get(config.get("model"))
+
+
 def host_settings(provider, sid):
     config = host_config(provider, sid) or {}
+    if provider == "codex":
+        choice = config.get("model")
+        return dict(model=choice if choice in HOST_MODEL_CHOICES["codex"] else "", effort="")
     args = config.get("args") if isinstance(config.get("args"), list) else []
     command = config.get("command") if isinstance(config.get("command"), list) else []
     parts = command + args
@@ -4181,10 +4247,10 @@ def host_handle_request(provider, sid, tmux, session, request):
     if operation == "interrupt":
         return adapter["interrupt"](provider, sid, session)
     if operation in ("set_model", "set_effort"):
-        if provider != "claude":
+        if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
         key = "model" if operation == "set_model" else "effort"
-        allowed = ("opus", "sonnet", "haiku", "fable") if key == "model" else ("low", "medium", "high")
+        allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else ("low", "medium", "high")
         value = request.get(key)
         if value not in allowed:
             return host_refuse("invalid_" + key)
@@ -4193,8 +4259,9 @@ def host_handle_request(provider, sid, tmux, session, request):
             return host_refuse("host_disabled")
         config[key] = value
         host_write(host_paths(provider, sid)["config"], config)
-        session["settings"][key] = value
-        host_settings_event(provider, sid, tmux, session)
+        if "settings" in session:
+            session["settings"][key] = value
+            host_settings_event(provider, sid, tmux, session)
         return dict(status="ok")
     if operation == "recall":
         token, attempt = request.get("id"), request.get("attempt")
@@ -4514,6 +4581,9 @@ def host_codex_thread(provider, sid, session, resume):
     approval, sandbox = host_codex_policy(session)
     cwd = host_cwd(provider, sid)
     params = dict(cwd=cwd, approvalPolicy=approval, sandbox=sandbox, developerInstructions=HOST_APPEND_PROMPT)
+    chosen = host_codex_model(provider, sid)
+    if chosen:
+        params["model"] = chosen
     native = state.get("native_session")
     try:
         found = isinstance(native, str) and conversation_path(provider, native, cwd) is not None
@@ -4534,8 +4604,12 @@ def host_codex_write(provider, sid, session, token, text):
                                                            input=content), "steer")
     else:
         approval, sandbox = host_codex_policy(session)
-        sent = host_codex_call(session, "turn/start", dict(threadId=session["thread"], approvalPolicy=approval,
-                                                           sandboxPolicy=HOST_CODEX_SANDBOXES[sandbox], input=content), "turn")
+        params = dict(threadId=session["thread"], approvalPolicy=approval,
+                      sandboxPolicy=HOST_CODEX_SANDBOXES[sandbox], input=content)
+        chosen = host_codex_model(provider, sid)
+        if chosen:
+            params["model"] = chosen
+        sent = host_codex_call(session, "turn/start", params, "turn")
     if sent:
         session["codex_tokens"][session["seq"]] = token
     return sent
@@ -5045,7 +5119,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
     host_nightly_mark(provider, sid, session)
-    if provider == "claude":
+    if provider in ("claude", "codex"):
         session["settings"] = host_settings(provider, sid)
         session["starting_settings"] = dict(session["settings"])
         session["applied_settings"] = None
@@ -5870,14 +5944,14 @@ def message_store_transaction(q):
                 items = [dict(message=message_row(row)) for row in db.execute('SELECT * FROM shared_messages WHERE provider=? AND sid=? ORDER BY position', (provider, sid))]
                 items.extend(dict(native_message=json.loads(body)) for (body,) in db.execute("SELECT body FROM connector_facts WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='message' ORDER BY rowid", (provider, sid)))
                 items.extend(dict(attempt_receipt=json.loads(body)) for (body,) in db.execute("SELECT body FROM connector_facts WHERE provider=? AND sid=? AND json_extract(body,'$.kind') IN ('accepted','started') ORDER BY rowid", (provider, sid)))
-                if provider == "claude" and host_enabled(provider, sid):
+                if provider in ("claude", "codex") and host_enabled(provider, sid):
                     settings = host_settings(provider, sid)
                     last = db.execute("SELECT body FROM message_events WHERE provider=? AND sid=? AND json_extract(body,'$.kind')='host.settings' ORDER BY seq DESC LIMIT 1", (provider, sid)).fetchone()
                     payload = json.loads(last[0]).get("payload", {}) if last else {}
                     applied = (host_owned(provider, sid) and payload.get("applied") is True
                                and payload.get("effort") == settings["effort"]
                                and (not settings["model"] or payload.get("model") == settings["model"]))
-                    if applied and not settings["model"]:
+                    if applied and not settings["model"] and provider == "claude":
                         settings["model"] = host_model_name(payload.get("model"))
                     items.append(dict(host_settings=dict(settings, applied=applied, mode=host_permission_mode(provider, sid))))
                 db.execute('INSERT INTO message_snapshots VALUES (?,?,?,?,?,?,?)', (snapshot, provider, sid, epoch, seq, time.time(), json.dumps(items, separators=(',', ':'))))
@@ -7251,6 +7325,8 @@ def serve_request(line, source, subscriptions, lock):
             wire = draft_response(query)
         elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
             wire = stop_response(query)
+        elif query.get("op") == "restart_ai":
+            wire = restart_ai_response(query)
         elif query.get("op") == "settle":
             wire = settle_response(query, source)
         else:
@@ -7338,7 +7414,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 114
+RUNTIME_GENERATION = 117
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -7434,6 +7510,13 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
                             _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    helper_source = globals().get('MP_HELPER_SOURCE')
+                    if isinstance(helper_source, str) and helper_source:
+                        try:
+                            publish_named_tool('mp-helper', _base64.b64decode(helper_source))
+                            _os.chmod('mp-helper', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()

@@ -69,24 +69,48 @@ test "two hundred log lines reuse one open log file" {
     try std.testing.expectEqual(@as(usize, 200), w.lines);
     try std.testing.expect(w.opens <= 4);
 }
+test "SOFT-1973 repeated avatar paints log only changes while other diagnostics stay intact" {
+    const before = w.lines;
+    for (0..200) |_| {
+        diagnostics.debugLog("[photo-proof] expanded target=7 rect=20,193,56,229");
+        diagnostics.debugLog("[photo-proof] expanded target=8 rect=20,233,56,269");
+        diagnostics.debugLog("[bots] face=0 color=0 rect=20,193,56,229");
+        diagnostics.debugLog("[sidebar-avatar] target=7 face=0 color=0");
+    }
+    try std.testing.expectEqual(@as(usize, 4), w.lines - before);
+    diagnostics.debugLog("[photo-proof] expanded target=7 rect=20,200,56,236");
+    diagnostics.debugLog("[photo-proof] expanded target=7 rect=20,200,56,236");
+    diagnostics.debugLog("[photo-proof] expanded target=7 rect=20,193,56,229");
+    try std.testing.expectEqual(@as(usize, 6), w.lines - before);
+    diagnostics.debugLog("[bots] face=1 color=0 rect=20,193,56,229");
+    diagnostics.debugLog("[bots] face=1 color=0 rect=20,193,56,229");
+    diagnostics.debugLog("[sidebar-avatar] target=7 face=1 color=0");
+    try std.testing.expectEqual(@as(usize, 8), w.lines - before);
+    diagnostics.debugLog("[chat] transcript ready");
+    diagnostics.debugLog("[chat] transcript ready");
+    diagnostics.syncLog("[photo-proof] expanded target=7 rect=20,193,56,229");
+    try std.testing.expectEqual(@as(usize, 11), w.lines - before);
+    std.debug.print("SOFT-1973 repeated_avatar_lines=4 changed_and_other_lines=7\\n", .{});
+}
 `,
 };
 
-test('IGSH-1907 writing the debug log does not reopen the file for every line', t => {
+test('SOFT-1973 avatar logs skip unchanged paints and other logs reuse their file handle', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-handle-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   require('./zig-copy').copyZig(['diagnostics.zig'], dir);
   const appState = fs.readFileSync(path.join(__dirname, '../src/app_state.zig'), 'utf8');
   const mutexStart = appState.indexOf('pub const SpinMutex = struct {');
   const mutex = appState.slice(mutexStart, appState.indexOf('\n};', mutexStart) + 3);
-  fs.writeFileSync(path.join(dir, 'app_state.zig'), `const std = @import("std");\n${mutex}\npub var g_debug_log_mutex: SpinMutex = .{};\n`);
+  fs.writeFileSync(path.join(dir, 'app_state.zig'), `const std = @import("std");\n${mutex}\npub var g_debug_log_mutex: SpinMutex = .{};\npub var g_verbose_logging_known = true;\npub var g_verbose_logging_enabled = true;\n`);
   for (const [name, text] of Object.entries(stubs)) fs.writeFileSync(path.join(dir, name), text);
   const run = spawnSync(process.env.ZIG || 'zig', ['test', 'harness.zig'], {
     cwd: dir, encoding: 'utf8', timeout: 240000, maxBuffer: 16 * 1024 * 1024,
   });
   const output = `${run.stdout || ''}${run.stderr || ''}`;
-  console.log(output.split('\n').filter(line => line.includes('IGSH-1907')).join('\n'));
+  console.log(output.split('\n').filter(line => line.includes('IGSH-1907') || line.includes('SOFT-1973')).join('\n'));
   assert.equal(run.error, undefined, output);
   assert.match(output, /IGSH-1907 log_opens_per_200_lines=\d+ lines=200/, output);
+  assert.match(output, /SOFT-1973 repeated_avatar_lines=4 changed_and_other_lines=7/, output);
   assert.equal(run.status, 0, output);
 });
