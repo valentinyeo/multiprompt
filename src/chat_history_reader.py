@@ -2593,6 +2593,9 @@ HOST_CODEX_APPROVALS = ('item/commandExecution/requestApproval', 'item/fileChang
                         'execCommandApproval', 'applyPatchApproval')
 HOST_CODEX_LEGACY = {'accept': 'approved', 'acceptForSession': 'approved_for_session', 'decline': 'denied', 'cancel': 'abort'}
 HOST_PI_DIALOGS = ('select', 'confirm', 'input', 'editor')
+PI_PROVIDER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+PI_LOGIN_LIST = "mp-login-list"
+PI_LOGIN_CALL = "mp-login"
 HOST_HAX_MODEL = ('--provider=codex', '--model=gpt-6.1-sol', '--effort=medium')
 HOST_HAX_BRIDGE = (
     "import json,os,signal,subprocess,sys,threading\n"
@@ -3087,6 +3090,8 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES:
         return dict(status="refused", reason="unsupported_provider")
+    if query.get("op") == "login" and provider != "pi":
+        return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
     if not host_owned(provider, sid):
@@ -3127,7 +3132,7 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -4503,6 +4508,10 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["answer"](provider, sid, tmux, session, request)
     if operation == "interrupt":
         return adapter["interrupt"](provider, sid, session)
+    if operation == "login":
+        if provider != "pi":
+            return host_refuse("unsupported_provider")
+        return host_pi_login(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
         if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
@@ -4544,6 +4553,9 @@ def host_handle_request(provider, sid, tmux, session, request):
             or not isinstance(attempt, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", attempt)
             or type(epoch) is not int):
         return host_refuse("invalid_message")
+    dialog = session.get("pi_login_dialog") if provider == "pi" else None
+    if isinstance(dialog, dict) and isinstance(dialog.get("id"), str):
+        return host_pi_login_answer(provider, sid, tmux, session, dialog, text)
     try:
         room_scope = message_room_scope(request["room_scope"]) if "room_scope" in request else None
     except (ValueError, TypeError, AttributeError):
@@ -5136,10 +5148,123 @@ def host_pi_update(provider, sid, tmux, session, event):
         host_complete(provider, sid, tmux, session, block, update.get("content") if isinstance(update.get("content"), str) else None)
 
 
+def host_pi_login_say(provider, sid, tmux, session, text):
+    count = session.get("pi_login_note", 0) + 1
+    session["pi_login_note"] = count
+    host_event(provider, sid, tmux, session, "text.done", dict(text=text, done=True), "pi-login-" + str(count))
+
+
+def host_pi_login(provider, sid, tmux, session, request):
+    if not session.get("ready"):
+        return dict(status="busy", reason="agent_starting")
+    if session.get("pi_run") or session.get("inflight") or session.get("pi_login") or session.get("pi_login_dialog"):
+        return dict(status="busy", reason="login_busy")
+    raw = request.get("provider_id")
+    if raw in (None, ""):
+        session["pi_login"] = dict(phase="list")
+        if not host_control_send(session, dict(id=PI_LOGIN_LIST, type="get_login_providers")):
+            session.pop("pi_login", None)
+            return dict(status="error", reason="stdin_write_failed")
+        return dict(status="ok")
+    if not isinstance(raw, str) or PI_PROVIDER_ID.fullmatch(raw) is None:
+        host_pi_login_say(provider, sid, tmux, session, "That Pi provider id is not valid")
+        return host_refuse("invalid_provider")
+    session["pi_login"] = dict(phase="login", provider=raw)
+    if not host_control_send(session, dict(id=PI_LOGIN_CALL, type="login", providerId=raw)):
+        session.pop("pi_login", None)
+        return dict(status="error", reason="stdin_write_failed")
+    return dict(status="ok")
+
+
+def host_pi_login_answer(provider, sid, tmux, session, dialog, text):
+    body = text.strip()
+    if body.lower() in ("cancel", "cancelled"):
+        payload = dict(type="extension_ui_response", id=dialog["id"], cancelled=True)
+    elif dialog.get("method") == "confirm":
+        payload = dict(type="extension_ui_response", id=dialog["id"], confirmed=body.lower() in ("y", "yes", "true", "1", "ok"))
+    else:
+        payload = dict(type="extension_ui_response", id=dialog["id"], value=body)
+    if not host_control_send(session, payload):
+        return dict(status="error", reason="stdin_write_failed")
+    session.pop("pi_login_dialog", None)
+    host_log(provider, sid, "pi_login_answer", dict(method=dialog.get("method")))
+    return dict(status="ok")
+
+
+def host_pi_login_providers(provider, sid, tmux, session, data):
+    lines = ["Log in to a Pi provider:"]
+    listed = data.get("providers") if isinstance(data.get("providers"), list) else []
+    for item in listed:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            continue
+        if PI_PROVIDER_ID.fullmatch(item["id"]) is None:
+            continue
+        label = item.get("name") if isinstance(item.get("name"), str) and item.get("name") else item["id"]
+        state = "signed in" if item.get("authenticated") else "not signed in"
+        lines.append(label + " (" + item["id"] + ", " + state + ")")
+    lines.append("Send /login and the provider id.")
+    session.pop("pi_login", None)
+    host_pi_login_say(provider, sid, tmux, session, "\n".join(lines))
+
+
+def host_pi_login_result(provider, sid, tmux, session, event, data):
+    pending = session.get("pi_login") if isinstance(session.get("pi_login"), dict) else {}
+    name = data.get("providerId") if isinstance(data.get("providerId"), str) else pending.get("provider")
+    if event.get("success") is False:
+        session.pop("pi_login", None)
+        session.pop("pi_login_dialog", None)
+        reason = event.get("error") if isinstance(event.get("error"), str) and event.get("error") else "Pi login failed"
+        host_pi_login_say(provider, sid, tmux, session, reason)
+        return
+    if not isinstance(name, str) or PI_PROVIDER_ID.fullmatch(name) is None:
+        name = "provider"
+    session.pop("pi_login", None)
+    session.pop("pi_login_dialog", None)
+    session["pi_auth"] = name
+    host_pi_login_say(provider, sid, tmux, session, "Logged in to " + name + ". The next reply uses that login.")
+
+
+def host_pi_login_ui(provider, sid, tmux, session, event):
+    method = event.get("method")
+    if method == "open_url":
+        parts = []
+        for key in ("instructions", "url", "launchUrl"):
+            value = event.get(key)
+            if isinstance(value, str) and value and value not in parts:
+                parts.append(value)
+        host_pi_login_say(provider, sid, tmux, session, "\n".join(parts) or "Pi opened a login link.")
+        return True
+    if method == "notify" and session.get("pi_login"):
+        message = event.get("message") if isinstance(event.get("message"), str) else ""
+        if message:
+            host_pi_login_say(provider, sid, tmux, session, message)
+        return True
+    if method in HOST_PI_DIALOGS and session.get("pi_login") and isinstance(event.get("id"), str):
+        lines = []
+        for key in ("title", "message", "placeholder"):
+            value = event.get(key)
+            if isinstance(value, str) and value:
+                lines.append(value)
+        options = event.get("options") if isinstance(event.get("options"), list) else []
+        for option in options:
+            if isinstance(option, str) and option:
+                lines.append(option)
+        session["pi_login_dialog"] = dict(id=event["id"], method=method)
+        host_pi_login_say(provider, sid, tmux, session, "\n".join(lines) or "Pi needs an answer.")
+        return True
+    return False
+
+
 def host_pi_event(provider, sid, tmux, session, event):
     kind = event.get("type")
     if kind == "response":
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if event.get("command") == "get_login_providers":
+            host_pi_login_providers(provider, sid, tmux, session, data)
+            return
+        if event.get("command") == "login":
+            host_pi_login_result(provider, sid, tmux, session, event, data)
+            return
         if event.get("command") != "prompt" or not isinstance(event.get("id"), str):
             return
         if event.get("success") is False:
@@ -5183,6 +5308,8 @@ def host_pi_event(provider, sid, tmux, session, event):
                         is_error=failed), event["toolCallId"])
     elif kind == "agent_settled":
         host_pi_end(provider, sid, tmux, session, bool(event.get("aborted")))
+    elif kind == "extension_ui_request" and host_pi_login_ui(provider, sid, tmux, session, event):
+        return
     elif kind == "extension_ui_request" and event.get("method") in HOST_PI_DIALOGS:
         host_control_send(session, dict(type="extension_ui_response", id=event.get("id"), cancelled=True))
         host_log(provider, sid, "pi_dialog_cancelled", dict(method=event.get("method")))
@@ -7711,7 +7838,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 118
+RUNTIME_GENERATION = 120
 
 if __name__ == '__main__':
     import base64 as _base64

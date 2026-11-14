@@ -569,6 +569,23 @@ pub fn sendChatPrompt() void {
                 showHeaderNoticeAscii("Model picker is coming soon", 4000, false);
                 return;
             },
+            .login => {
+                var provider_buf: [64]u8 = undefined;
+                const provider_id = chatLoginArgument(text, &provider_buf);
+                if (provider_id.len == 0 and chatLoginArgumentTooLong(text)) {
+                    showHeaderNoticeAscii("That Pi provider id is not valid", 4000, true);
+                    return;
+                }
+                _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+                app_state.g_chat_draft_dirty = true;
+                chatDraftFlush();
+                if (shell.ai_agent == 3) {
+                    _ = chatPiLogin(provider_id);
+                } else {
+                    showHeaderNoticeAscii("Not available in live chat", 4000, false);
+                }
+                return;
+            },
             .unavailable => {
                 showHeaderNoticeAscii("Not available in live chat", 4000, false);
                 return;
@@ -4235,6 +4252,47 @@ pub fn chatStopAgent(shell_index: u32) bool {
     if (chatLiveCancelApproval(shell_index)) return true;
     if (chatLiveInterrupt(shell_index)) return true;
     return chatAgentKey(shell_index, 0x1B);
+}
+
+fn chatLoginMark(text: []const u16) []const u16 {
+    const trimmed = std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' });
+    const mark = std.unicode.utf8ToUtf16LeStringLiteral("/login");
+    if (!std.mem.startsWith(u16, trimmed, mark)) return trimmed[0..0];
+    if (trimmed.len == mark.len) return trimmed[mark.len..];
+    if (trimmed[mark.len] != ' ' and trimmed[mark.len] != '\t') return trimmed[0..0];
+    return std.mem.trim(u16, trimmed[mark.len..], &.{ ' ', '\t', '\r', '\n' });
+}
+
+fn chatLoginArgumentTooLong(text: []const u16) bool {
+    return chatLoginMark(text).len > 64;
+}
+
+fn chatLoginArgument(text: []const u16, buf: []u8) []const u8 {
+    const rest = chatLoginMark(text);
+    if (rest.len == 0 or rest.len > buf.len) return "";
+    const n = std.unicode.utf16LeToUtf8(buf, rest) catch return "";
+    return buf[0..n];
+}
+
+pub fn chatPiLogin(provider_id: []const u8) bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (shell.ai_agent != 3) {
+        showHeaderNoticeAscii("Log in is for Pi chats", 4000, false);
+        return false;
+    }
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    if (key.sid[0] == 0) {
+        showHeaderNoticeAscii("This Pi chat is still starting", 4000, true);
+        return false;
+    }
+    const line = @import("chat_live.zig").loginLine(std.heap.page_allocator, key.shell_id, std.mem.sliceTo(&key.sid, 0), provider_id) catch return false;
+    if (!chatLiveReply(line)) {
+        showHeaderNoticeAscii("Could not start Pi login; try again", 4000, true);
+        return false;
+    }
+    showHeaderNoticeAscii(if (provider_id.len == 0) "Asking Pi who can log in" else "Pi login started", 3000, false);
+    return true;
 }
 
 fn chatLiveReply(line: []u8) bool {
