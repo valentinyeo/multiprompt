@@ -255,6 +255,8 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   assert.match(source, /const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;/);
   assert.match(source,
     /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account"/);
+  assert.doesNotMatch(source,
+    /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_INNE_OFFSET;/, "the secondary profile folds into one Sign In row");
 
   const update = functionBody("updateSearchResults", "u16ToLower");
   for (const alias of [
