@@ -3071,6 +3071,7 @@ pub const folded_palette_rows = [_]usize{
     SEARCH_CLOSETAB_OFFSET,
     SEARCH_TABCTX_HIDE,
     SEARCH_SYNC_NAME_OFFSET,
+    SEARCH_RENAME_SYNC_OFFSET,
     SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET,
     SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET,
     SEARCH_WSMOVE_NEW_OFFSET,
@@ -3096,6 +3097,7 @@ pub const folded_palette_rows = [_]usize{
     SEARCH_FONT_BIGGER_OFFSET,
     SEARCH_FONT_SMALLER_OFFSET,
     SEARCH_FONT_RESET_OFFSET,
+    SEARCH_COMPUTER_WIDTH_OFFSET,
     SEARCH_LADDER_CLAUDE_OFFSET,
     SEARCH_LADDER_CODEX_OFFSET,
     SEARCH_VOICE_SPEED_125_OFFSET,
@@ -3121,12 +3123,13 @@ pub fn paletteRowFolded(target: usize) bool {
 
 fn foldPaletteRows() void {
     var kept: usize = 0;
-    for (app_state.g_search_results[0..app_state.g_search_result_count]) |row| {
+    const count: usize = app_state.g_search_result_count;
+    for (app_state.g_search_results[0..count]) |row| {
         if (paletteRowFolded(row)) continue;
         app_state.g_search_results[kept] = row;
         kept += 1;
     }
-    app_state.g_search_result_count = kept;
+    app_state.g_search_result_count = @intCast(kept);
     if (app_state.g_search_sel >= app_state.g_search_result_count) app_state.g_search_sel = 0;
 }
 

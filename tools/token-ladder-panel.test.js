@@ -22,12 +22,12 @@ test("Token Ladder commands exist on all three surfaces", () => {
     assert.ok(source.includes(`ui_words.${label}`), `palette row ${label}`);
   }
   const words = fs.readFileSync(path.join(root, "src", "ui_words.zon"), "utf8");
-  for (const label of ["Token Ladder: Auto", "Token Ladder: Burn Claude", "Token Ladder: Burn Codex", "Token Ladder: Open Dashboard"]) {
+  for (const label of ["Token plan: Auto", "Token plan: Claude", "Token plan: Codex", "Token Ladder: Open Dashboard"]) {
     assert.ok(words.includes(`"${label}"`), `word table ${label}`);
   }
-  assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Auto \/ Burn Claude \/ Burn Codex/);
+  assert.match(source, /Ctrl\+K \\u\{2192\} Token plan/);
   assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Open Dashboard/);
-  assert.match(wiki, /Token Ladder: Auto \/ Burn Claude \/ Burn Codex/);
+  assert.match(wiki, /Token plan/);
   assert.match(wiki, /Token Ladder: Open Dashboard/);
   assert.doesNotMatch(wiki.match(/Token Ladder[^\n]*/g).join("\n"), /Ctrl\+Alt/);
 });

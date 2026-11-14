@@ -3626,7 +3626,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var tl_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        const tl_label = if (app_state.g_ai_pace.from_ladder and app_state.g_ai_pace.ladder_override == 1)
+                        const tl_label = if (result_idx == SEARCH_LADDER_DASH_OFFSET)
+                            L(ui_words.global_ladder_dashboard)
+                        else if (app_state.g_ai_pace.from_ladder and app_state.g_ai_pace.ladder_override == 1)
                             L(ui_words.global_ladder_claude)
                         else if (app_state.g_ai_pace.from_ladder and app_state.g_ai_pace.ladder_override == 2)
                             L(ui_words.global_ladder_codex)
@@ -3636,7 +3638,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var tl_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        const tl_current = app_state.g_ai_pace.from_ladder;
+                        const tl_current = result_idx != SEARCH_LADDER_DASH_OFFSET and app_state.g_ai_pace.from_ladder;
                         _ = DrawTextW(hdc, if (tl_current) L(ui_words.palette_hint_current) else L(""), -1, &tl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_mode_on or is_voice_mode_off) {
                         _ = SelectObject(hdc, palette_font);
@@ -3769,7 +3771,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var ar_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (archive_has_tmux) L("Archive chat") else L("Close Session"), -1, &ar_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (archive_has_tmux) L("Archive Session") else L("Close Session"), -1, &ar_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_unarchive_hidden) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
