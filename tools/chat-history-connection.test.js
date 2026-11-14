@@ -411,3 +411,8 @@ test('IGSH-1546 the chat identity names its provider for codex and pi chats', ()
   assert.match(transcript, /7 => "cursor"/);
   assert.match(transcript, /agent: u8 = 0/);
 });
+
+test('IGSH-2010 the history stream wakes the window through the coalescing gate', () => {
+  assert.match(body('chatHistoryStreamThread'), /postChatFileReady\(/);
+  assert.doesNotMatch(body('chatHistoryStreamThread'), /PostMessageW\([^)]*WM_APP_CHAT_FILE_READY/);
+});

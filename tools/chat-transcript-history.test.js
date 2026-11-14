@@ -1245,3 +1245,8 @@ test "cache-first switch-back demand-paged tail" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
+
+test('IGSH-2010 the file fetch thread wakes the window through the coalescing gate', () => {
+  assert.match(fn('chatFileFetchThread'), /postChatFileReady\(/);
+  assert.doesNotMatch(fn('chatFileFetchThread'), /PostMessageW\([^)]*WM_APP_CHAT_FILE_READY/);
+});
