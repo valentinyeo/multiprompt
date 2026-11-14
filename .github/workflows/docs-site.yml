@@ -24,3 +24,9 @@ jobs:
           cache-dependency-path: docs-site/package-lock.json
       - run: npm ci
       - run: npm run check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: docs-site-dist
+          path: docs-site/dist/
+          if-no-files-found: error
+          retention-days: 7
