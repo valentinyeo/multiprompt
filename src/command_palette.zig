@@ -4210,6 +4210,20 @@ pub fn updateSearchResults() void {
         }
     }
 
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View on everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View off everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
     {
         var show_power = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {

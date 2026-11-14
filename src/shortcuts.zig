@@ -376,6 +376,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \"Chat View: Plus Menu\"", .b = "Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Send Queued Messages Now\"", .b = "Flush offline-queued Chat View messages for this tab now (waits for the agent prompt)", .header = false },
     .{ .a = "1 or Alt+Y in Chat View / Ctrl+K \"Chat View: Allow\"", .b = "Approve the pending permission once", .header = false },
     .{ .a = "2 or Alt+O in Chat View / Ctrl+K \"Chat View: Always allow\"", .b = "Always allow the pending permission this session", .header = false },
