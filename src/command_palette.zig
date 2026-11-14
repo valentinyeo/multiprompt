@@ -2579,7 +2579,7 @@ pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
     const result: *SwitchAiAdopt = @ptrFromInt(@as(usize, @bitCast(lp)));
     defer std.heap.page_allocator.destroy(result);
     const index = findShellById(result.shell_id) orelse {
-        if (result.notice_len > 0) @import("console.zig").showHeaderNoticeAscii(result.notice[0..result.notice_len], 4000, false);
+        if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
         return;
     };
     const shell = &app_state.shells[index];
@@ -2588,7 +2588,7 @@ pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
         saveSession();
         if (app_state.g_chat_active and index == app_state.active_shell) @import("chat_session.zig").chatFileRequest(@import("chat_session.zig").chatFileIdentityForShell(index));
     }
-    if (result.notice_len > 0) @import("console.zig").showHeaderNoticeAscii(result.notice[0..result.notice_len], 4000, false);
+    if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
 }
 
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
