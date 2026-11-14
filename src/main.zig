@@ -1884,6 +1884,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("workspaces.zig").captureWorkspaceFocus();
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_hide_sidebar and mx >= 0 and mx < SIDEBAR_W()) @import("sidebar.zig").freezeSidebarOrder();
             if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
                 !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
                 !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
@@ -2378,6 +2379,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_sidebar_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            var leave_pt: POINT = undefined;
+            _ = GetCursorPos(&leave_pt);
+            _ = ScreenToClient(hwnd, &leave_pt);
+            if (!app_state.g_hide_sidebar and leave_pt.x >= 0 and leave_pt.x < SIDEBAR_W() and leave_pt.y >= 0) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_room_hover != null) {
                 app_state.g_room_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2409,6 +2419,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_sidebar_hover = sidebar_hover;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            const pointer_in_sidebar = !app_state.g_hide_sidebar and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W();
+            if (pointer_in_sidebar) {
+                @import("sidebar.zig").freezeSidebarOrder();
+            } else if (@import("sidebar.zig").thawSidebarOrder()) {
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {
                 const hit = hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll);
                 break :blk if (hit == .room or hit == .room_new) hit else null;
@@ -2417,7 +2433,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_room_hover = room_hover;
                 _ = InvalidateRect(hwnd, null, 0);
             }
-            if (sidebar_hover != null or room_hover != null) {
+            if (sidebar_hover != null or room_hover != null or pointer_in_sidebar) {
                 var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                 _ = TrackMouseEvent(&tracking);
             }
