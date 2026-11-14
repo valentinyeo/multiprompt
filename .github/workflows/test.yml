@@ -754,7 +754,7 @@ jobs:
             $parent = (git rev-parse "$base^").Trim()
             if ($LASTEXITCODE -ne 0 -or -not $parent) { throw "Baseline build failed on $base and has no ancestor left: $buildError" }
             $base = $parent
-            if ($attempt -eq 11) { throw "Baseline build failed after 12 ancestors of ${requested}: $buildError" }
+            if ($attempt -eq 11) { throw "Baseline build failed after 12 commits from ${requested}: $buildError" }
           }
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "baseline/zig-out/bin/ssh.exe"
           if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
