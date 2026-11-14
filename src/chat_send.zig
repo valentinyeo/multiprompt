@@ -2187,6 +2187,73 @@ pub fn chatEchoDiscardUnsentForActive() void {
     showHeaderNoticeAscii("No unsent messages for this tab", 3000, false);
 }
 
+pub fn chatEchoResendHeldForShell(idx: u32) u32 {
+    if (idx >= app_state.shell_count) return 0;
+    var ids: [32]u64 = undefined;
+    var count: usize = 0;
+    const now_ms = @as(i64, @intCast(GetTickCount64()));
+    for (app_state.g_chat_outbox.items) |e| {
+        if (count >= ids.len) break;
+        if (!e.message_v1 or e.state == .cancelled or e.channel_pending) continue;
+        if (!chatOutboxOwnedByShell(e.key[0..@as(usize, e.key_len)], idx)) continue;
+        if (!chat_echo.showsNotSent(e.message_v1, e.state, std.mem.sliceTo(&e.message_phase, 0), e.sent_tick_ms, now_ms)) continue;
+        ids[count] = e.id;
+        count += 1;
+    }
+    for (ids[0..count]) |id| chatEchoSendAgain(id);
+    return @intCast(count);
+}
+
+const CHAT_RESTART_AI_TMUX_CAP = 64;
+
+fn chatRestartAiNotice(text: []const u8) void {
+    const a = std.heap.page_allocator;
+    const notice = a.dupeZ(u8, text) catch return;
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+}
+
+fn chatRestartAiThread(host: u8, shell_id: u32, tmux: [CHAT_RESTART_AI_TMUX_CAP]u8, tmux_len: usize, sid: [40]u8, sid_len: usize, cwd: [192]u8, cwd_len: usize) void {
+    const a = std.heap.page_allocator;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "restart_ai", .id = shell_id, .tmux = tmux[0..tmux_len], .sid = sid[0..sid_len], .cwd = cwd[0..cwd_len] }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    var log: [96]u8 = undefined;
+    if (!@import("chat_session.zig").chatHistoryPersistent(host, shell_id, query, 4096, &wire, null)) {
+        debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai failed shell={d} via=tmux", .{shell_id}) catch "");
+        chatRestartAiNotice("Could not restart the AI. Check the connection and try again");
+        return;
+    }
+    if (std.mem.indexOf(u8, wire.items, "\trestart_ai\tok\t") == null) {
+        debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai refused shell={d} via=tmux", .{shell_id}) catch "");
+        if (std.mem.indexOf(u8, wire.items, "\tpane_busy\t") == null) chatRestartAiNotice("Could not restart the AI. Open the terminal and start it by hand");
+        return;
+    }
+    debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai sent shell={d} via=tmux", .{shell_id}) catch "");
+}
+
+pub fn chatRestartAi(shell_index: u32) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const shell = &app_state.shells[shell_index];
+    if (!shell.ai_stopped or shell.ai_agent != 1 or shell.kind != .tmux) return false;
+    if (shell.tmux_session_len == 0 or shell.tmux_session_len > CHAT_RESTART_AI_TMUX_CAP or shell.tmux_host >= app_state.g_chat_history_channels.len) return false;
+    var tmux: [CHAT_RESTART_AI_TMUX_CAP]u8 = std.mem.zeroes([CHAT_RESTART_AI_TMUX_CAP]u8);
+    @memcpy(tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
+    var sid: [40]u8 = std.mem.zeroes([40]u8);
+    const sid_len: usize = @min(shell.claude_sid_len, sid.len);
+    @memcpy(sid[0..sid_len], shell.claude_sid[0..sid_len]);
+    var cwd: [192]u8 = std.mem.zeroes([192]u8);
+    const cwd_len: usize = @min(shell.claude_cwd_len, cwd.len);
+    @memcpy(cwd[0..cwd_len], shell.claude_cwd[0..cwd_len]);
+    const thread = std.Thread.spawn(.{}, chatRestartAiThread, .{ shell.tmux_host, shell.shell_id, tmux, @as(usize, shell.tmux_session_len), sid, sid_len, cwd, cwd_len }) catch return false;
+    thread.detach();
+    shell.ai_stopped = false;
+    shell.ai_restart_tick = @max(GetTickCount64(), 1);
+    showHeaderNoticeAscii("Restarting the AI", 3000, false);
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
+}
+
 fn chatOutboxPrefixOf(text: []const u16, out: *[20]u16) []const u16 {
     var start: usize = 0;
     while (start < text.len and (text[start] == ' ' or text[start] == '\t')) : (start += 1) {}

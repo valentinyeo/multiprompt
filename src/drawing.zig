@@ -660,6 +660,11 @@ fn chatTitleMetaText(now: u64) []const u16 {
         if (app_state.g_cap_msg_len > 0) return app_state.g_cap_msg_text[0..app_state.g_cap_msg_len];
         return std.mem.span(L("Tab limit reached (256) - close a tab"));
     }
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        if (shell.ai_stopped) return std.mem.span(L("AI stopped. Click to restart"));
+        if (shell.ai_restart_tick != 0) return std.mem.span(L("Restarting the AI"));
+    }
     if (app_state.g_chat_active and app_state.g_voice_mode_active) return std.mem.span(@import("voice.zig").voiceStatusLabel());
     return &.{};
 }
@@ -691,7 +696,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
         layout.meta_pill = .{ .left = layout.inbox.left - margin - width, .top = top, .right = layout.inbox.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
-        layout.meta_warn = app_state.g_cap_msg_until > now;
+        layout.meta_warn = app_state.g_cap_msg_until > now or (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].ai_stopped);
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
@@ -714,6 +719,15 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
 pub fn chatTitleInboxHit(x: i32, y: i32) bool {
     const layout = chatTitleLayout() orelse return false;
     const r = layout.inbox;
+    return x >= r.left and x < r.right and y >= r.top and y < r.bottom;
+}
+
+pub fn chatTitleRestartHit(x: i32, y: i32) bool {
+    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].ai_stopped) return false;
+    if (app_state.g_cap_msg_until > GetTickCount64()) return false;
+    const layout = chatTitleLayout() orelse return false;
+    if (layout.meta.len == 0) return false;
+    const r = layout.meta_pill;
     return x >= r.left and x < r.right and y >= r.top and y < r.bottom;
 }
 
