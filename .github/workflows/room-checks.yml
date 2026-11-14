@@ -12,6 +12,7 @@ on:
       - 'src/room_bridge.py'
       - 'tools/room_service_test.py'
       - 'tools/room_bridge_test.py'
+      - 'tools/room-routing.test.py'
 
 permissions:
   contents: read
@@ -44,7 +45,7 @@ jobs:
           export HOME
           HOME=$(mktemp -d "$RUNNER_TEMP/room-home.XXXXXX")
           status=0
-          for test in tools/room_service_test.py tools/room_bridge_test.py tools/room-checks/protocol.test.py; do
+          for test in tools/room_service_test.py tools/room_bridge_test.py tools/room-routing.test.py tools/room-checks/protocol.test.py; do
             echo "Running $test"
             python "$test" -v 2>&1 | tee "room-check-results/$(basename "$test").log" || status=1
           done
