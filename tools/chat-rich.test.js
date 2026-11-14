@@ -111,11 +111,11 @@ test('file attachment and inline image previews ship on every surface (issue)', 
   assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET: usize = 6372/);
   assert.match(src, /SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file/);
   assert.match(src, /is_chat_copy or is_chat_attach or/);
-  assert.match(src, /L\("Chat View: Attach File"\)/);
+  assert.match(src, /L\("Attach file"\)/);
   assert.match(src, /target == SEARCH_CHAT_ATTACH_OFFSET/);
   assert.match(src, /\.a = "\+ button \/ Ctrl\+V in Chat View"/);
   assert.match(docs, /\+ button \/ Ctrl\+V in Chat View/);
-  assert.match(docs, /Chat View: Attach File/);
+  assert.match(docs, /Attach file/);
   assert.ok(build.includes('src/chat_image.zig'));
   assert.ok(build.includes('comdlg32'));
   assert.match(body('chatButtonAt'), /attach_btn/);
@@ -135,8 +135,8 @@ test('tool lines toggle before links and selection and expose all palette surfac
   assert.match(body('refreshChatBlockCache'), /open_tools\.contains\(block\.tool_id\)/);
   assert.match(src, /SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps/);
   assert.match(src, /target == SEARCH_CHAT_TOOL_STEPS_OFFSET/);
-  assert.match(src, /L\("Chat View: Open or fold all tool steps"\)/);
-  assert.match(docs, /Chat View: Open or fold all tool steps/);
+  assert.match(src, /L\("Open or fold tool steps"\)/);
+  assert.match(docs, /Open or fold tool steps/);
 });
 
 
