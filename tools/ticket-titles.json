@@ -329,6 +329,7 @@
   "IGSH-2273": "New shell sessions on servers disconnect at once",
   "IGSH-2007": "Multiprompt stopped working: report 61342374795103",
   "IGSH-2281": "Hide the empty Main workspace from the menu",
+  "IGSH-2279": "Multibot: every chat sees and messages every chat, any AI",
   "IGSH-228": "zsb: type command ignores --tab flag, appends it to typed text",
   "IGSH-232": "zsb: cdp help invokes a CDP method instead of showing usage",
   "IGSH-240": "zsb: text/screenshot fail on edge:// pages",
@@ -565,5 +566,6 @@
   "IGSH-998": "Multiprompt: browser-switch-speed journey fails its open-pane page focus check on master most runs",
   "IGSH-2276": "Pi chats: log in from Multibot",
   "IGSH-2277": "Codex chats: pick the model in the chat",
-  "IGSH-2282": "Sidebar: a clicked chat stays under the mouse"
+  "IGSH-2282": "Sidebar: a clicked chat stays under the mouse",
+  "IGSH-2283": "Show when a chat's AI has stopped, with Restart"
 }

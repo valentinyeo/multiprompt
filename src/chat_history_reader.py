@@ -14,6 +14,7 @@ try:
 except ImportError:
     pwd = None
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -2125,6 +2126,45 @@ def stop_response(q):
             reason = "tmux_stop_failed"
     status = "error" if reason else "ok"
     return f"@mp\t{rid}\t{op}\t{status}\t{reason or '-'}\t0\n{END}\n"
+
+
+RESTART_AI_SESSION = re.compile(r"[A-Za-z0-9-]{8,64}\Z")
+
+
+def restart_ai_command(sid, cwd):
+    folder = host_folder(cwd) if isinstance(cwd, str) and cwd else None
+    prefix = "cd " + shlex.quote(folder) + " && " if folder else ""
+    if sid in (None, ""):
+        return prefix + "claude --continue"
+    if not isinstance(sid, str) or RESTART_AI_SESSION.fullmatch(sid) is None:
+        return None
+    return prefix + "claude --resume " + shlex.quote(sid)
+
+
+def restart_ai_response(q):
+    rid = q.get("id", 0)
+    name = q.get("tmux")
+    reason = None
+    command = None
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+        reason = "invalid_tmux_name"
+    else:
+        command = restart_ai_command(q.get("sid"), q.get("cwd"))
+        if command is None:
+            reason = "invalid_session"
+    if reason is None and not host_pane_is_shell(name):
+        reason = "pane_busy"
+    if reason is None:
+        try:
+            running = resolve_tmux_agent("claude", name)
+        except (OSError, ValueError):
+            running = None
+        if running:
+            reason = "pane_busy"
+    if reason is None and not host_terminal_send(name, command):
+        reason = "pane_input_failed"
+    status = "error" if reason else "ok"
+    return f"@mp\t{rid}\trestart_ai\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
 def box_is_empty(box):
@@ -7412,6 +7452,8 @@ def serve_request(line, source, subscriptions, lock):
             wire = draft_response(query)
         elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
             wire = stop_response(query)
+        elif query.get("op") == "restart_ai":
+            wire = restart_ai_response(query)
         elif query.get("op") == "settle":
             wire = settle_response(query, source)
         else:

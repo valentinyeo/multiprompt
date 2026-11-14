@@ -257,6 +257,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty. |
 | Ctrl+K "Chat View: Open or fold all tool steps" | Open every tool step's details, or fold them all; click one tool line to toggle it |
 | Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the title; also click the todo count |
+| Ctrl+K "Chat View: Restart the AI" | Chat View: when the AI has stopped in a server chat, restart it and resume the last conversation, then send any held messages; also click "AI stopped" beside the title |
 | Ctrl+Shift+D in Chat View | Copy latest code block (also its Copy button or Ctrl+K) |
 | Ctrl+K "Chat View: Expand table" | Open the table on screen full size over a dimmed window; also its Expand button on hover. Wheel, Shift+wheel and arrow keys scroll; Esc, the X or a click outside closes |
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |

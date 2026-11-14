@@ -376,6 +376,8 @@ pub const Shell = struct {
     preview: [96]u8 = std.mem.zeroes([96]u8),
     preview_len: u32 = 0,
     ai_agent: u8 = 0,
+    ai_stopped: bool = false,
+    ai_restart_tick: u64 = 0,
     adopt_streak: u8 = 0,
     external_name_sync: ExternalNameSyncState = .{},
     console_font_logged: bool = false,
@@ -838,6 +840,7 @@ pub const TmuxSessionEntry = struct {
     title: [80]u8 = undefined,
     title_len: u32 = 0,
     agent: u8 = 0,
+    pane_shell: bool = false,
 };
 
 pub const CapacityState = enum(u8) {
@@ -1709,6 +1712,7 @@ pub const SEARCH_TABCTX_UNREAD: usize = 7195;
 pub const SEARCH_TABCTX_COPY_ID: usize = 7196;
 pub const SEARCH_TABCTX_HIDE: usize = 7197;
 pub const SEARCH_TABCTX_RENAME: usize = 7198;
+pub const SEARCH_TABCTX_CHAT_RESTART_AI: usize = 7199;
 pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
 pub const BOT_FACE_COUNT: usize = 21;
 pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;

@@ -33,6 +33,8 @@ jobs:
         run: node --test tools/crash-report-tickets.test.js
       - name: Test release tag publication
         run: node --test tools/release-version.test.mjs
+      - name: Test release symbol packaging
+        run: node --test tools/package-symbols.test.mjs
       - name: Test the runtime generation guard
         run: node --test tools/check-runtime-generation.test.js
       - name: Guard the reader runtime generation
@@ -46,6 +48,8 @@ jobs:
         run: python3 tools/chat-shared-runtime.test.py -v
       - name: Track each message by its id
         run: python3 -W error::DeprecationWarning tools/message-id-delivery-test.py -v
+      - name: Restart a stopped chat AI from the reader
+        run: python3 -W error::DeprecationWarning tools/restart-ai-test.py -v
       - name: Check the Computer view finds a server desktop
         run: python3 -W error::DeprecationWarning tools/computer-discovery.test.py -v
       - name: Check every hosted chat read shape returns its replies
