@@ -33,3 +33,14 @@ test('weekly tick uses elapsed time, not quota usage, and the native card keeps 
   assert.match(card, /w.WM_APP_CHANGELOG_OPEN/);
   assert.match(card, /test "IGSH-1086 usage card keeps missing windows honest/);
 });
+
+test('SOFT-2349 opening the usage card never captures or dims the whole window per pixel on hover', () => {
+  const card = read('src/usage_card.zig');
+  const open = card.slice(card.indexOf('fn openMode('), card.indexOf('fn openNotes('));
+  assert.doesNotMatch(open, /\* 7 \/ 10/);
+  assert.match(open, /dimPixels\(pixels\)/);
+  assert.match(open, /passive\) passiveGrabRect\(/);
+  assert.match(open, /w\.BitBlt\(dc, grab\.left, grab\.top, grab\.right - grab\.left, grab\.bottom - grab\.top, screen/);
+  assert.match(card, /const dirty = ps\.rcPaint;/);
+  assert.match(card, /test "SOFT-2349 dimming/);
+});
