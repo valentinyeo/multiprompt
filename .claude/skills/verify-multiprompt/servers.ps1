@@ -16,6 +16,17 @@ function Servers-Window([string]$Class) {
     return [IntPtr]::Zero
 }
 
+function Servers-Dialog {
+    $found = [IntPtr]::Zero
+    while ($true) {
+        $found = [VerifyNative]::FindWindowEx([IntPtr]::Zero, $found, 'MultiPromptDialog', [System.Management.Automation.Language.NullString]::Value)
+        if ($found -eq [IntPtr]::Zero) { return $found }
+        [uint32]$ownerPid = 0
+        [void][VerifyNative]::GetWindowThreadProcessId($found, [ref]$ownerPid)
+        if ($ownerPid -eq $process.Id) { return $found }
+    }
+}
+
 function Servers-Control([string]$Id, [string]$Name = '') {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([VerifyNative]::GetForegroundWindow())
     $property = if ($Name) { [System.Windows.Automation.AutomationElement]::NameProperty } else { [System.Windows.Automation.AutomationElement]::AutomationIdProperty }
@@ -140,7 +151,14 @@ try {
     $result.checks += @{ name = 'servers-add-test'; passed = $true; seconds = $seconds; budgetSeconds = 120; realOpenSsh = $true }
 
     Servers-Click '310'
-    Wait-Until { (Servers-Window 'MultiPromptDialog') -ne [IntPtr]::Zero } 'removal confirmation'
+    Wait-Until { (Servers-Dialog) -ne [IntPtr]::Zero } 'removal confirmation'
+    $dialog = Servers-Dialog
+    Snapshot 'servers-remove-dialog'
+    if ((Servers-Window 'MultiPromptDialog') -eq [IntPtr]::Zero) {
+        Record 'Removal confirmation is open but the app left the Servers window foreground; bringing the owned dialog forward'
+        [VerifyNative]::BringToForeground($dialog)
+    }
+    Wait-Until { (Servers-Window 'MultiPromptDialog') -ne [IntPtr]::Zero } 'removal confirmation foreground'
     Press @(0x27) 'Right: select Remove, not Cancel'
     Press @(0x0D) 'Enter: confirm disposable-server removal'
     Wait-Until { (Servers-Window 'MultipromptSettingsServers') -ne [IntPtr]::Zero -and (Servers-Ready) -and (Servers-Text) -match "Removed\. Multibot's key is off that server\." } 'removal reports remote revocation'
