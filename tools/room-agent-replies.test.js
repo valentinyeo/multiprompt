@@ -144,6 +144,8 @@ print('ROOM_SCOPED_REPLIES_PASS')
 test('existing room store and bridge contracts remain compatible', { skip: process.platform === 'win32' }, () => {
   const result = spawnSync('python3', ['-m', 'unittest', 'discover', '-s', 'tools', '-p', 'room_*test.py'], { cwd: root, encoding: 'utf8', timeout: 60000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  const routing = spawnSync('python3', ['tools/room-routing.test.py'], { cwd: root, encoding: 'utf8', timeout: 60000 });
+  assert.equal(routing.status, 0, routing.stderr || routing.stdout);
 });
 
 test('room replies retain their exact parent and session without publishing private turns', { skip: process.platform === 'win32' }, () => {
