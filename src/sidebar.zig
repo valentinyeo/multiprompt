@@ -3597,13 +3597,16 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var pw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        const pw_label = if (is_power_auto) L(ui_words.global_power_auto) else if (is_power_always) L(ui_words.global_power_always) else L(ui_words.global_power_off);
-                        _ = DrawTextW(hdc, pw_label, -1, &pw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.global_power), -1, &pw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var pw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        const pw_current = (is_power_auto and app_state.g_power_profile == .auto) or (is_power_always and app_state.g_power_profile == .always) or (is_power_off and app_state.g_power_profile == .off);
-                        _ = DrawTextW(hdc, if (pw_current) L(ui_words.palette_hint_current) else L(""), -1, &pw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        const pw_mode = switch (app_state.g_power_profile) {
+                            .auto => L(ui_words.global_power_mode_auto),
+                            .always => L(ui_words.global_power_mode_always),
+                            .off => L(ui_words.global_power_mode_off),
+                        };
+                        _ = DrawTextW(hdc, pw_mode, -1, &pw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_always_on or is_voice_always_off) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

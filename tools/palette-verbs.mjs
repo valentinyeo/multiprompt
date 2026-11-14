@@ -36,6 +36,7 @@ export const verbs = {
   "SEARCH_TABCTX_GROUP_NEW": "group",
   "SEARCH_TABCTX_GROUP_NEW_TAB_IN": "open",
   "SEARCH_TABCTX_GROUP_REMOVE": "move",
+  "SEARCH_TABCTX_ARCHIVE": "close",
   "SEARCH_TABCTX_HIDE": "close",
   "SEARCH_TABCTX_MOVE_NEW_WS": "workspace",
   "SEARCH_TABCTX_MUTE": "mute",

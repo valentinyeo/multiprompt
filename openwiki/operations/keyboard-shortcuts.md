@@ -120,21 +120,14 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+W | Quit the app; keep server agents and saved chats |
 | Ctrl+K -&gt; Delete | Delete the active chat; stop its agent and keep its history |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
-| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
-| Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
-| Ctrl+K -&gt; Frequent as first tab | Put Frequent first or immediately after Favorites; synced across your account |
-| Ctrl+K -&gt; Show Favorites split | Show or hide Favorites; synced across your account |
-| Ctrl+K -&gt; Show All split | Show or hide All; All stays visible if every split is hidden |
-| Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest on top |
 | Ctrl+K -&gt; Inbox: Never Show This Session | Toggle permanent Inbox exclusion for this tab (also right-click tab) |
 | Alt+J / Alt+K | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | Ctrl+Shift+Up / Down | Move active tab up / down |
 | Ctrl+G | Collapse / expand tab group |
 | Alt+; / Ctrl+; | Use snippets |
 | Ctrl+K -&gt; Create Snippet | Save a named paste block |
-| Ctrl+K -&gt; Manage Snippets | Delete saved snippets; Esc cancels |
 | Delete twice in snippets | Delete the selected saved snippet |
 | F2 | Rename chat title, tab or selected Inbox session |
 
@@ -164,7 +157,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
-| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -213,11 +205,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Room name | Open a Room |
 | Ctrl+K -&gt; Edit room | Edit the selected Room |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot |
-| Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
 | Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser |
-| Ctrl+K → Usage: Sign In to Primary / Secondary Claude Account | Force sign-in one telemetry profile in its own terminal |
-| Ctrl+K → Power Saver: Auto / Always / Off | Choose when background timers, VPS polling, and idle tabs slow down to save power |
+| Ctrl+K → Usage: Sign In to Claude | Force sign-in one telemetry profile in its own terminal |
+| Ctrl+K → Power Saver | Cycle when background timers, VPS polling, and idle tabs slow down to save power: Auto, Always, Off |
 | Ctrl+Shift+G | Show usage, servers, and app version. Cycle collapsed cards. |
 | Ctrl+K -&gt; Usage and servers / collapsed status cards | Show usage, servers, and app version. Cycle collapsed cards. |
 | Alt+T | New workspace tmux tab, Claude by default (optional configured program) |
@@ -270,30 +261,24 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages including waiting ones, Enter opens the right-click options, Delete cancels a waiting message, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
-| /plan or /permissions in live chat / Ctrl+K "Chat permission mode" | Choose Plan, Ask, Accept edits, or Bypass for this chat; /plan selects Plan first |
+| /plan or /permissions in live chat, or Ctrl+K -&gt; Chat View: Plus Menu | Choose Plan, Ask, Accept edits, or Bypass for this chat; /plan selects Plan first |
 | Ctrl+K "Chat View: Plus Menu" | Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
-| Ctrl+K "Chat View: Model Opus / Sonnet / Haiku / Fable" | Choose the model for the next message in a live Claude chat; the plus menu has the same choices |
-| Ctrl+K "Chat View: Model Sol / Terra / Luna / Astra" | Choose the model for the next message in a live Codex chat; the plus menu has the same choices |
-| Ctrl+K "Chat View: Effort Low / Medium / High" | Choose the effort for the next message in a live Claude chat; the plus menu has the same choices |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
 | 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |
 | Esc (Chat View, while working) / Stop button / Ctrl+K "Chat View: Stop the agent" | Send Esc to the agent to stop its current run |
 | Ctrl+K "Chat View: Reset this chat" / right-click tab | Clear local bubbles and cache; reload history, keep unsent composer text |
-| Ctrl+K "Chat View: Clear Offline Queue" | Drop this tab's queued offline Chat View messages |
-| Ctrl+K "Chat View: Retry Unsent Messages" | Re-send this tab's Not-sent Chat View messages in order |
 | Ctrl+K "Chat View: Discard Unsent Messages" | Drop this tab's Not-sent Chat View messages |
-| Ctrl+K "Chat View: Send Claude's Queued Message Now" | Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble) |
 | Ctrl+K "Chat View: Edit Queued Messages" | Presses Claude's Up key so its queued messages come back into the prompt box, where Chat View shows and edits them too |
 | Ctrl+X then Ctrl+S in Chat View | Steers: sends the message into Claude now (Claude's Ctrl+X Ctrl+S) |
-| Ctrl+K → Token Ladder: Auto / Burn Claude / Burn Codex | Choose which AI plan to use up now; Auto lets the ladder decide |
+| Ctrl+K → Token Ladder: Auto | Cycle which AI plan to use up now: Auto, Burn Claude, Burn Codex; Auto lets the ladder decide |
 | Ctrl+K → Token Ladder: Open Dashboard | Open the Token Ladder page with every plan's usage and reset clock in the browser pane |
 | Alt+V | Read replies. Press later for older. Double-press to stop. |
-| Ctrl+K "Voice Speed: ..." | How fast Voice Mode talks: 1x, 1.25x (default), 1.4x or 1.5x |
+| Ctrl+K "Voice Speed" | Cycle how fast Voice Mode talks: 1x, 1.25x (default), 1.4x, 1.5x |
 | Alt+R | Read the agent's last reply aloud again, right now, even with Voice Mode off |
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
 | Alt+W | Open a URL in a new pane tab and focus the browser |
