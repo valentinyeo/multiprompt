@@ -3432,7 +3432,6 @@ fn unlockForegroundAfterRequestLaunch() void {
 fn launchBrowserForShellEx(idx: u32, user_initiated: bool) void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_launch, timing_started);
-    if (!user_initiated and !@import("idle_footprint.zig").passiveBrowserLaunchAllowed(idx)) return;
     if (app_state.g_app_closing or idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or webView2OwnsShell(idx) or @import("computer_pane.zig").chosenFor(idx)) return;
     const launch_engine = app_state.g_browser_engine;
     var launch_profile_buf: [browser_own_profile.TOKEN_LEN]u8 = undefined;
@@ -4299,16 +4298,14 @@ pub fn updateBrowserVisibility() void {
         hideBrowserEdgeMasks();
     }
     if (app_state.shells[app_state.active_shell].browser_hwnd == null and !app_state.g_restoring and
-        !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0 and
-        @import("idle_footprint.zig").passiveBrowserLaunchAllowed(app_state.active_shell))
+        !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0)
     {
-        if (app_state.shells[app_state.active_shell].browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
+        if (app_state.g_chat_active or app_state.shells[app_state.active_shell].browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
     }
 }
 
 pub fn relaunchActiveRestoredBrowserPane() void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    if (!@import("idle_footprint.zig").passiveBrowserLaunchAllowed(app_state.active_shell)) return;
     if (!app_state.shells[app_state.active_shell].browser_enabled or app_state.shells[app_state.active_shell].browser_open_failed) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd) |bh| {
         if (IsWindow(bh) != 0 and windowOwnerProcessStillActive(bh)) return;
