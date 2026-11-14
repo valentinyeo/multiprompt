@@ -1,1 +1,1 @@
-Opening the usage card no longer slows the rest of the app while it is open.
+The usage card now redraws only itself while it is open.

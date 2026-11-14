@@ -56,5 +56,6 @@ test('IGSH-2349 usage card logs how long opening and slow painting take', () => 
   const card = read('src/usage_card.zig');
   const open = card.slice(card.indexOf('fn openMode('), card.indexOf('fn openNotes('));
   assert.match(open, /\[usage-card\] open passive=/);
+  assert.match(open, /focus_ms=/);
   assert.match(card, /\[usage-card\] slow paint ms=/);
 });

@@ -414,6 +414,7 @@ fn openMode(passive: bool) void {
             pixel.* = ((((value >> 16) & 255) * 7 / 10) << 16) | ((((value >> 8) & 255) * 7 / 10) << 8) | ((value & 255) * 7 / 10);
         }
     }
+    const dimmed_ms = nowMs();
     hover_open = passive;
     scroll_y = 0;
     notes_focus = false;
@@ -453,18 +454,22 @@ fn openMode(passive: bool) void {
         close();
         return;
     }
+    const shown_started_ms = nowMs();
     const shown = focus.SetWindowPos(window, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     if (passive) {
         const show_error = if (shown == 0) w.GetLastError() else 0;
         var log: [160]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log, "[usage-hover] show result={d} error={d} visible={} open={}", .{ shown, show_error, w.IsWindowVisible(window), backdrop != null }) catch "[usage-hover] show");
-    } else {
+    }
+    const focus_started_ms = nowMs();
+    if (!passive) {
         _ = focus.SetFocus(window);
         _ = w.SetCapture(window);
     }
+    const focus_ms = nowMs() - focus_started_ms;
     _ = w.InvalidateRect(window, null, 0);
-    var open_log: [128]u8 = undefined;
-    debugLog(std.fmt.bufPrint(&open_log, "[usage-card] open passive={} capture_ms={d} total_ms={d}", .{ passive, captured_ms - started_ms, nowMs() - started_ms }) catch "[usage-card] open");
+    var open_log: [192]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&open_log, "[usage-card] open passive={} capture_ms={d} dim_ms={d} show_ms={d} focus_ms={d} total_ms={d}", .{ passive, captured_ms - started_ms, dimmed_ms - captured_ms, focus_started_ms - shown_started_ms, focus_ms, nowMs() - started_ms }) catch "[usage-card] open");
 }
 
 fn openNotes() void {
