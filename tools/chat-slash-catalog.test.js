@@ -24,7 +24,7 @@ test('live commands are routed before the outbox and keep the draft on refusal',
   assert.ok(send.indexOf('.decide(live, text') < send.indexOf('chatEchoEnqueueForShell('));
   assert.match(send, /\.plan, \.permissions => \{\s*chatModeOpenPicker\(route == \.plan\);\s*return;/);
   assert.match(send, /\.unavailable => \{\s*showHeaderNoticeAscii\("Not available in live chat"[^]*?return;/);
-  assert.match(send, /\.model => \{\s*showHeaderNoticeAscii\("Model picker is coming soon"[^]*?return;/);
+  assert.match(send, /\.model => \{\s*if \(shell\.ai_agent == 3\) \{\s*chatPiModelPicker\(\);\s*\} else \{\s*showHeaderNoticeAscii\("Model picker is coming soon"[^]*?return;/);
   const finish = source.slice(source.indexOf('pub fn chatModeFinish('), source.indexOf('fn chatModeOpenPicker('));
   assert.ok(finish.indexOf('if (!job.ok)') < finish.indexOf('SetWindowTextW('));
   assert.match(finish, /std\.meta\.eql\(job\.key, chatFileIdentityForShell\(app_state\.active_shell\)\)/);

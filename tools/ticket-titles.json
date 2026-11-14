@@ -565,6 +565,7 @@
   "IGSH-993": "Multiprompt: chat bench fails on every release, so nothing can be installed on the laptop",
   "IGSH-997": "Multiprompt: show each plan’s usage pace",
   "IGSH-998": "Multiprompt: browser-switch-speed journey fails its open-pane page focus check on master most runs",
+  "IGSH-2275": "Pi chats: pick any model in the chat",
   "IGSH-2276": "Pi chats: log in from Multibot",
   "IGSH-2277": "Codex chats: pick the model in the chat",
   "IGSH-2271": "Fresh start keeps the same chat, picture and address",
