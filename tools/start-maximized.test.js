@@ -34,7 +34,7 @@ function assertStartup(main, win, focus) {
   const entry = main.slice(main.indexOf('pub fn main('), main.indexOf('fn initializeDeferred('));
   assert.match(win, /pub const WS_MAXIMIZE: u32 = 0x01000000;/);
   assert.match(entry, /CreateWindowExW\(\s*0,\s*L\("ZigShell"\),[^]*?WS_OVERLAPPEDWINDOW \| WS_CLIPCHILDREN \| WS_CLIPSIBLINGS \| @import\("win32.zig"\)\.WS_MAXIMIZE,/);
-  assert.match(entry, /launch_cache\.restore\(\);[^]*?_ = ShowWindow\(hwnd, @import\("launch_plan\.zig"\)\.firstShowCommand\(\)\);\s*_ = InvalidateRect\(hwnd, null, 1\);/);
+  assert.match(entry, /launch_cache\.restore\(\);\s*_ = ShowWindow\(hwnd, @import\("launch_plan.zig"\)\.firstShowCommand\(\)\);\s*_ = InvalidateRect\(hwnd, null, 1\);/);
   const show = focus.slice(focus.indexOf('pub noinline fn ShowWindow('), focus.indexOf('pub noinline fn ShowWindowAsync('));
   assert.match(show, /const activating = cmd == SW_SHOW or cmd == SW_RESTORE or cmd == SW_MAXIMIZE;/);
   assert.match(show, /if \(activating and !focusGuardAt\(hwnd, @returnAddress\(\), false\)\) SW_SHOWNOACTIVATE else cmd/);

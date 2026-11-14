@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 
 test('both visible pace surfaces use the glyph-aware rejection check', () => {
   const source = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-feature-status-card.ps1'), 'utf8');
-  assert.match(source, /function Assert-UsagePaceInk\(\[Collections\.IDictionary\]\$Counts, \$Snapshot, \[string\]\$Surface\)/);
+  assert.match(source, /Assert-UsagePaceInk \$closedInk \$usagePaceSnapshot 'usage pill'/);
   assert.match(source, /\$paceProof\.panel = \$look/);
   assert.match(source, /Assert-UsageCardPixels 'pill-open'/);
 });

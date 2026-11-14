@@ -568,5 +568,6 @@
   "IGSH-2277": "Codex chats: pick the model in the chat",
   "IGSH-2271": "Fresh start keeps the same chat, picture and address",
   "IGSH-2282": "Sidebar: a clicked chat stays under the mouse",
-  "IGSH-2283": "Show when a chat's AI has stopped, with Restart"
+  "IGSH-2283": "Show when a chat's AI has stopped, with Restart",
+  "IGSH-2323": "Click-through check fails on every Multibot pull request"
 }

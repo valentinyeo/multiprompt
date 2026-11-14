@@ -4,17 +4,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
-test('IGSH-556: groups travel through the account only for clients that advertise them', () => {
-  const worker = read('service/worker.js');
-  assert.match(worker, /if \(!layoutFeature\(request, 'starred_groups'\)\) delete visible\.starred_group;/);
-  assert.match(worker, /favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups/);
-  const header = source => assert.match(source, /groups,group_order,starred_groups/);
+test('IGSH-556: groups stay local without account layout or Worker fields', () => {
+  const audit = source => assert.doesNotMatch(source, /\b(?:group_id|starred_group\w*)\b/);
+  const files = fs.readdirSync(path.join(__dirname, '..', 'src'))
+    .filter(file => /^account_.*\.zig$/.test(file))
+    .map(file => `src/${file}`);
+  for (const file of [...files, 'src/session_layout.zig', 'service/worker.js', 'service/test/worker.test.js']) {
+    audit(read(file));
+  }
+  for (const field of ['group_id', 'starred_group_id', 'starred_group']) {
+    assert.throws(() => audit(`tab.${field} = 17;`), assert.AssertionError);
+  }
+  const header = source => assert.match(source, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\\r\\n/);
   const client = read('src/account_client.zig');
   header(client);
-  assert.throws(() => header(client.replace('groups,group_order,starred_groups', 'groups')), assert.AssertionError);
-  assert.match(read('src/session_layout.zig'), /starred_group: \?\[\]const u8 = null,/);
-  const audit = source => assert.doesNotMatch(source, /\bgroup_id\b/);
-  assert.throws(() => audit('tab.group_id = 17;'), assert.AssertionError);
+  assert.throws(() => header(client.replace('settings,hosts', 'settings,hosts,groups')), assert.AssertionError);
 });
 
 test('IGSH-556: persistence and lifecycle paths retain the independent field', () => {
