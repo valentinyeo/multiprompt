@@ -4743,7 +4743,7 @@ def host_claude_event(provider, sid, tmux, session, event):
 
 
 def host_claude_open(provider, sid, tmux, session):
-    pass
+    host_control_request(session, dict(subtype="remote_control", enabled=True))
 
 
 HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
@@ -5567,6 +5567,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 session["state"]["agent_pid"] = agent.pid
                 host_state_write(provider, sid, session["state"])
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+                HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
@@ -7838,7 +7839,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 120
+RUNTIME_GENERATION = 121
 
 if __name__ == '__main__':
     import base64 as _base64

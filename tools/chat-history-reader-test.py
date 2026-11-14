@@ -4902,6 +4902,11 @@ for raw in sys.stdin:
         line = json.loads(raw)
     except ValueError:
         continue
+    if line.get('type') == 'control_request' and (line.get('request') or {}).get('subtype') == 'remote_control':
+        record(dict(kind='control', frame=line))
+        sys.stdout.write(json.dumps(dict(type='control_response', response=dict(subtype='success', request_id=line['request_id'], response={}))) + '\n')
+        sys.stdout.flush()
+        continue
     record(dict(kind='user', text=line['message']['content'][0]['text']))
     if mode == 'crash':
         os._exit(1)
@@ -6455,6 +6460,10 @@ for raw in sys.stdin:
         line = json.loads(raw)
     except ValueError:
         continue
+    if line.get('type') == 'control_request' and (line.get('request') or {}).get('subtype') == 'remote_control':
+        record(dict(kind='control', frame=line))
+        emit(dict(type='control_response', response=dict(subtype='success', request_id=line['request_id'], response={})))
+        continue
     record(dict(kind='user', text=line['message']['content'][0]['text']))
     turns += 1
     message_id = 'msg-' + str(turns)
@@ -6827,6 +6836,25 @@ class HostControlFixture(HostEventStreamFixture):
 
 
 class HostControlTest(HostControlFixture, unittest.TestCase):
+    def test_claude_start_enables_remote_control_without_a_model_prompt(self):
+        reader.host_claude_open(self.provider, self.sid, self.tmux, self.session)
+        writes = self.writes()
+        self.assertEqual(len(writes), 1, 'a new hosted Claude chat must enable Remote Control')
+        self.assertEqual(writes[0]['type'], 'control_request')
+        self.assertEqual(writes[0]['request'], dict(subtype='remote_control', enabled=True))
+        self.assertTrue(writes[0]['request_id'])
+        self.assertFalse([frame for frame in writes if frame.get('type') == 'user'])
+
+    def test_remote_control_rejection_does_not_stop_normal_chat(self):
+        reader.host_claude_open(self.provider, self.sid, self.tmux, self.session)
+        writes = self.writes()
+        self.assertEqual(len(writes), 1, 'Remote Control must be requested before testing rejection')
+        self.feed(dict(type='control_response', response=dict(subtype='error', request_id=writes[0]['request_id'],
+                                                            error='unsupported control request')))
+        self.feed(dict(type='assistant', message=dict(id='normal-reply', content=[dict(type='text', text='Still working')])))
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['Still working'])
+        self.assertEqual(self.session['turn'], 't-1')
+
     def test_a_control_request_is_parked_and_turned_into_an_approval_request(self):
         request_id = self.approval(suggestions=[dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
                                                      behavior='allow', destination='localSettings')])
@@ -7329,6 +7357,19 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
             self.assertEqual(result['reason'], 'recall_unavailable')
         self.assertEqual(self.writes(), previous)
         self.assertEqual(self.session['sends'], [target])
+
+
+class HostRemoteControlTest(AgentHostStreamFixture, unittest.TestCase):
+    def test_host_enables_remote_control_and_still_answers_the_first_message(self):
+        self.fake('stream')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: self.events('turn.ended'))
+        controls = self.agent_rows('control')
+        self.assertEqual(len(controls), 1, 'each new hosted Claude process must enable Remote Control')
+        self.assertEqual(controls[0]['frame']['request'], dict(subtype='remote_control', enabled=True))
+        self.assertEqual(self.user_lines(), [self.text])
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['one answer'])
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):

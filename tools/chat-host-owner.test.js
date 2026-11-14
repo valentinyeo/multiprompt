@@ -155,7 +155,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['host_handle_request']('codex', sid, tmux, session, request) == dict(status='busy', reason='agent_starting')
     with patch.dict(r, host_attempt=lambda *args: dict(status='claimed')):
         assert r['host_handle_request'](provider, sid, tmux, session, request)['status'] == 'sent'
-    assert json.loads(stream.getvalue())['message']['content'][0]['text'] == 'hello'
+    frames = [json.loads(line) for line in stream.getvalue().splitlines()]
+    assert frames[0]['type'] == 'control_request'
+    assert frames[0]['request'] == dict(subtype='remote_control', enabled=True)
+    users = [frame for frame in frames if frame.get('type') == 'user']
+    assert len(users) == 1
+    assert users[0]['message']['content'][0]['text'] == 'hello'
     assert session['ready'] is False
     class Selector:
         def __enter__(self): return self
