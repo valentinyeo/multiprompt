@@ -3826,7 +3826,7 @@ def host_fresh_start(provider, sid, tmux, session):
         return dict(status="already", reason="fresh_start_pending")
     if session["turn"] is not None or session["sends"] or session["parked"]:
         return dict(status="busy", reason="chat_busy")
-    if provider != "claude" and not session.get("ready"):
+    if not session.get("ready") and provider != "claude":
         return dict(status="busy", reason="agent_starting")
     try:
         host_fresh_archive(provider, sid, tmux, session)
@@ -3893,7 +3893,7 @@ def host_fresh_resume(provider, sid, tmux, session):
     fresh = session["state"].get("fresh_start")
     if not isinstance(fresh, dict) or fresh.get("phase") != "resume" or session.get("fresh_resumed"):
         return
-    if provider != "claude" and not session.get("ready"):
+    if not session.get("ready") and provider != "claude":
         return
     saved = host_read(host_paths(provider, sid)["root"] / fresh["file"])
     if not saved or not isinstance(saved.get("text"), str) or not saved["text"].strip():

@@ -59,7 +59,7 @@ class FakeSubprocess:
     def Popen(self, command, **kwargs):
         return command
 ns.update(pwd=FakePwd(), HOME=Path('/home/reader'), subprocess=FakeSubprocess(),
-          host_cwd=lambda *_: '/home/owner/projects/sample', host_config=lambda *_: {},
+          host_cwd=lambda *_: '/home/owner/projects/sample', host_config=lambda *_: {}, host_session_state=lambda *_: {},
           host_binary_name=lambda *_: 'claude', host_chat_name=lambda *_: 'live-test',
           READER_SOURCE=outer['READER_SOURCE'])
 print(json.dumps(ns['host_agent_start']('claude', 'test'))) `;

@@ -33,6 +33,7 @@ for provider in r['HOST_ADAPTERS']:
         session = dict(state=state)
         r['host_session_reset'](session, SimpleNamespace(stdin=io.BytesIO()))
         session['ready'] = True
+        session['hax_message'] = 0
         session['thread'] = old_native
         transcript = Path(directory) / 'old.jsonl'
         transcript.write_text(json.dumps(dict(type='multiprompt_history', row=dict(role='user', text='OLD-CONTEXT-ONLY', id='old-question'))) + '\n')
