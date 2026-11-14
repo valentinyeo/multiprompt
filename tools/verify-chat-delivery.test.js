@@ -505,7 +505,8 @@ function assertsForeground(desktop, driver) {
   };
   const expected = routine(original);
   assert.ok(expected.startsWith('Message message;') && expected.endsWith('}'));
-  assert.equal(routine(desktop).replace('keybd_event(0x12, 0, 0, UIntPtr.Zero);', 'Key(0x12, 0, 0);').replace('keybd_event(0x12, 0, 2, UIntPtr.Zero);', 'Key(0x12, 0, 2);').replace('SetFocus(focus);', 'SetFocus(hwnd);'), expected);
+  const neutralTap = 'keybd_event(0xE8, 0, 0, UIntPtr.Zero);\n        keybd_event(0xE8, 0, 2, UIntPtr.Zero);\n        ';
+  assert.equal(routine(desktop).replace(neutralTap, '').replace('keybd_event(0x12, 0, 0, UIntPtr.Zero);', 'Key(0x12, 0, 0);').replace('keybd_event(0x12, 0, 2, UIntPtr.Zero);', 'Key(0x12, 0, 2);').replace('SetFocus(focus);', 'SetFocus(hwnd);'), expected);
   assert.match(desktop, /SetFocus\(focus\);/);
   assert.match(desktop, /actualPid != pid \|\| Class\(hwnd\) != "ZigShell"/);
   assert.match(desktop, /Owner\(focus\) != pid \|\| \(focus != hwnd && !IsChild\(hwnd, focus\)\)/);
