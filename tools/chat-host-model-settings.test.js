@@ -335,6 +335,15 @@ with tempfile.TemporaryDirectory() as directory:
         r['host_write'](r['host_paths'](other, other_sid)['config'], other_config)
         for operation, key, value in (('set_model', 'model', 'opus'), ('set_effort', 'effort', 'high')):
             request = dict(provider=other, sid=other_sid, op=operation, **{key:value})
+            if other == 'pi' and operation == 'set_model':
+                assert r['host_reply'](request)['reason'] == 'host_not_running'
+                other_session = dict(state={})
+                r['host_session_reset'](other_session)
+                assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['status'] == 'refused'
+                chosen = dict(provider=other, sid=other_sid, op='set_model', provider_name='baseten', model='deepseek-ai/DeepSeek-V4-Pro-0813')
+                assert r['host_handle_request'](other, other_sid, tmux, other_session, chosen) == dict(status='error', reason='stdin_write_failed')
+                assert r['host_config'](other, other_sid) == other_config
+                continue
             expected = 'invalid_model' if other == 'codex' and operation == 'set_model' else 'unsupported_provider'
             assert r['host_reply'](request)['reason'] == expected
             other_session = dict(state={})

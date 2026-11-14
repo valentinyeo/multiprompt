@@ -133,16 +133,17 @@ ${declaration(source, 'fn contextualPayload(')}
 ${declaration(source, 'pub fn watchdogPayload(')}
 test "watchdog coverage uses numeric diagnostics without private input" {
     var out: [2048]u8 = undefined;
-    const bytes = watchdogPayload(&out, "watchdog-100-2-300-0", "0.28.1", 160, .{ .observed_ms = 60000, .responsive_ms = 59500, .unobserved_ms = 0, .freezes = 0 }).?;
+    const bytes = watchdogPayload(&out, "watchdog-100-2-300-0", "0.28.1", 160, .{ .observed_ms = 60000, .responsive_ms = 59500, .unobserved_ms = 0, .freezes = 0 }, "idle 300s per min: server_fetch=0.0 timer_fire=1.0").?;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
     defer parsed.deinit();
     try std.testing.expectEqual(@as(usize, 7), parsed.value.object.count());
     try std.testing.expectEqualStrings("Windows watchdog health", parsed.value.object.get("summary").?.string);
     try std.testing.expectEqualStrings("watchdog", parsed.value.object.get("thread").?.string);
-    try std.testing.expectEqualStrings("observed_ms: 60000\\nresponsive_ms: 59500\\nunobserved_ms: 0\\nfreezes: 0\\n", parsed.value.object.get("stack_trace").?.string);
-    try std.testing.expect(watchdogPayload(&out, "private/path", "0.28.1", 160, .{}) == null);
-    try std.testing.expect(watchdogPayload(&out, "watchdog-100-2-300-0", "private/path", 160, .{}) == null);
-    try std.testing.expect(watchdogPayload(&out, "watchdog-100-2-300-0", "0.28.1", 160, .{ .responsive_ms = 1 }) == null);
+    try std.testing.expectEqualStrings("observed_ms: 60000\\nresponsive_ms: 59500\\nunobserved_ms: 0\\nfreezes: 0\\nidle 300s per min: server_fetch=0.0 timer_fire=1.0\\n", parsed.value.object.get("stack_trace").?.string);
+    try std.testing.expect(watchdogPayload(&out, "private/path", "0.28.1", 160, .{}, "") == null);
+    try std.testing.expect(watchdogPayload(&out, "watchdog-100-2-300-0", "private/path", 160, .{}, "") == null);
+    try std.testing.expect(watchdogPayload(&out, "watchdog-100-2-300-0", "0.28.1", 160, .{ .responsive_ms = 1 }, "") == null);
+    try std.testing.expect(watchdogPayload(&out, "watchdog-100-2-300-0", "0.28.1", 160, .{}, "idle \\\"quoted\\\"") == null);
 }
 test "service payload and private input rejection" {
     var out: [8192]u8 = undefined;

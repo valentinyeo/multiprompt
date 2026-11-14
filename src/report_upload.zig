@@ -115,16 +115,18 @@ fn queueContext(kind: Kind, version: []const u8, timestamp: i64, code: u32, rvas
     queueBody(id, body);
 }
 
-pub fn watchdogPayload(out: []u8, id: []const u8, version: []const u8, timestamp: i64, health: @import("watchdog_health.zig").Snapshot) ?[]const u8 {
+pub fn watchdogPayload(out: []u8, id: []const u8, version: []const u8, timestamp: i64, health: @import("watchdog_health.zig").Snapshot, idle: []const u8) ?[]const u8 {
     if (id.len < 8 or id.len > 64 or version.len == 0 or version.len > 64 or health.responsive_ms > health.observed_ms) return null;
     for (id) |c| if (!std.ascii.isAlphanumeric(c) and c != '-') return null;
     for (version) |c| if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '-') return null;
-    return std.fmt.bufPrint(out, "{{\"id\":\"{s}\",\"captured_at\":{d},\"app_version\":\"{s}\",\"android_version\":\"Windows\",\"thread\":\"watchdog\",\"summary\":\"Windows watchdog health\",\"stack_trace\":\"observed_ms: {d}\\nresponsive_ms: {d}\\nunobserved_ms: {d}\\nfreezes: {d}\\n\"}}", .{ id, timestamp, version, health.observed_ms, health.responsive_ms, health.unobserved_ms, health.freezes }) catch null;
+    if (idle.len > 400) return null;
+    for (idle) |c| if (!std.ascii.isAlphanumeric(c) and c != ' ' and c != '=' and c != '.' and c != ':' and c != '_') return null;
+    return std.fmt.bufPrint(out, "{{\"id\":\"{s}\",\"captured_at\":{d},\"app_version\":\"{s}\",\"android_version\":\"Windows\",\"thread\":\"watchdog\",\"summary\":\"Windows watchdog health\",\"stack_trace\":\"observed_ms: {d}\\nresponsive_ms: {d}\\nunobserved_ms: {d}\\nfreezes: {d}\\n{s}\\n\"}}", .{ id, timestamp, version, health.observed_ms, health.responsive_ms, health.unobserved_ms, health.freezes, idle }) catch null;
 }
 
-pub fn queueWatchdog(id: []const u8, version: []const u8, timestamp: i64, health: @import("watchdog_health.zig").Snapshot) void {
+pub fn queueWatchdog(id: []const u8, version: []const u8, timestamp: i64, health: @import("watchdog_health.zig").Snapshot, idle: []const u8) void {
     var bytes: [2048]u8 = undefined;
-    const body = watchdogPayload(&bytes, id, version, timestamp, health) orelse return;
+    const body = watchdogPayload(&bytes, id, version, timestamp, health, idle) orelse return;
     queueBody(id, body);
 }
 

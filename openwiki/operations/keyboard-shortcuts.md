@@ -201,6 +201,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Keys | Action |
 | --- | --- |
 | Ctrl+K | Open command palette; it opens with your last 5 sessions |
+| Ctrl+Shift+N | Create a Room |
 | Ctrl+K -&gt; New room | Create a Room |
 | Ctrl+K -&gt; Room name | Open a Room |
 | Ctrl+K -&gt; Edit room | Edit the selected Room |
@@ -270,6 +271,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
+| Ctrl+K "Pi Model..." / /model in a Pi chat | Pick any model Pi lists for this chat; the choice applies to the next message, and the chat menu's Model row opens the same list |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
 | 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |

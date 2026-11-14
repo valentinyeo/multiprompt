@@ -28,6 +28,26 @@ class Completion(unittest.TestCase):
             self.assertTrue(complete.off({"test": False}, "test"))
             self.assertTrue(complete.off({"test": "disabled"}, "test"))
 
+    def test_pi_models_come_from_pi_own_list(self):
+        table = ("provider      model                                  context  max-out  thinking  images\n"
+                 "baseten       deepseek-ai/DeepSeek-V4-Pro-0813           1.0M     262.1K   yes       no    \n"
+                 "openai-codex  gpt-5.6-sol                              272K     128K     yes       yes   \n")
+        complete.PI_MODELS_CACHE["rows"] = None
+        finished = type("Finished", (), {"stdout": table})()
+        with patch.object(complete.subprocess, "run", return_value=finished):
+            status, rows = complete.pi_model_rows()
+        self.assertEqual("ok", status)
+        self.assertEqual(("M", "deepseek-ai/DeepSeek-V4-Pro-0813", "baseten", "1.0M"), rows[0])
+        self.assertEqual("gpt-5.6-sol", rows[1][1])
+        result = complete.request("9\tmodels\tpi\t-\t-\t\n")
+        self.assertIn("@mp\t9\tmodels\tok\t", result)
+        self.assertIn("M\tgpt-5.6-sol\topenai-codex\t272K", result)
+        self.assertIn("M\tdeepseek-ai/DeepSeek-V4-Pro-0813\tbaseten\t1.0M", result)
+        self.assertIn("@@MP_END@@", result)
+        with patch.object(complete.subprocess, "run", side_effect=OSError("no pi")):
+            complete.PI_MODELS_CACHE["rows"] = None
+            self.assertEqual(("error", []), complete.pi_model_rows())
+
     def test_validation_and_framing(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
             with patch.object(complete, "claude_rows", return_value=("ok", [("B", "copy", "", "Copy\tlast\nreply")])):

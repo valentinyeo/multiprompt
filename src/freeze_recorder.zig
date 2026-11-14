@@ -215,7 +215,9 @@ fn unixTime() i64 {
 fn publishHealth(session_timestamp: i64, session_clock: u64, sequence: u32, health: @import("watchdog_health.zig").Snapshot) void {
     var id_buffer: [64]u8 = undefined;
     const id = std.fmt.bufPrint(&id_buffer, "watchdog-{d}-{d}-{d}-{d}", .{ session_timestamp, win.GetCurrentProcessId(), session_clock, sequence }) catch return;
-    upload.queueWatchdog(id, g_version, unixTime(), health);
+    var idle_buffer: [320]u8 = undefined;
+    const idle = @import("idle_budget.zig").formatIdle(&idle_buffer, @import("idle_budget.zig").lastIdle());
+    upload.queueWatchdog(id, g_version, unixTime(), health, idle);
 }
 
 const Location = struct {

@@ -2,6 +2,7 @@ const std = @import("std");
 const app_state = @import("app_state.zig");
 const win = @import("win32.zig");
 const file_io = @import("file_io.zig");
+const idle_budget = @import("idle_budget.zig");
 
 const DWORD = win.DWORD;
 const HANDLE = win.HANDLE;
@@ -273,6 +274,31 @@ fn publishPeak(reading_value: Reading, version: []const u8) bool {
     return true;
 }
 
+var g_idle_dump_path: [520]u8 = undefined;
+var g_idle_dump_len: usize = 0;
+
+fn loadIdleDumpPath() void {
+    const len = win.GetEnvironmentVariableA("MULTIPROMPT_IDLE_COUNTERS", &g_idle_dump_path, g_idle_dump_path.len);
+    g_idle_dump_len = if (len > 0 and len < g_idle_dump_path.len) len else 0;
+}
+
+fn idleMilliseconds(now: u64) u64 {
+    var info = win.LASTINPUTINFO{ .cbSize = @sizeOf(win.LASTINPUTINFO), .dwTime = 0 };
+    if (win.GetLastInputInfo(&info) == 0) return 0;
+    const now32: u32 = @truncate(now);
+    return now32 -% info.dwTime;
+}
+
+fn publishIdle(now: u64) void {
+    const idle_ms = idleMilliseconds(now);
+    idle_budget.tick(now, idle_ms);
+    if (g_idle_dump_len == 0) return;
+    var buf: [6144]u8 = undefined;
+    const json = idle_budget.formatDump(&buf, now, idle_ms, app_state.g_power_deep_idle, idle_budget.snapshot(), idle_budget.timerSnapshot());
+    if (json.len == 0) return;
+    _ = file_io.writeFileAtomicSync(g_idle_dump_path[0..g_idle_dump_len], json);
+}
+
 fn samplerLoop(version: []const u8) void {
     while (true) {
         var slept: u32 = 0;
@@ -288,6 +314,7 @@ fn samplerLoop(version: []const u8) void {
         g_last_sample_ms = now;
         const sampled = sampleNow(elapsed);
         _ = publishPeak(sampled, version);
+        publishIdle(now);
         if (app_state.g_status_card_hover and app_state.g_main_hwnd != null) {
             _ = win.PostMessageW(app_state.g_main_hwnd, win.WM_APP_FOOTPRINT_READY, 0, 0);
         }
@@ -297,6 +324,7 @@ fn samplerLoop(version: []const u8) void {
 pub fn start(version: []const u8) void {
     if (g_started) return;
     g_started = true;
+    loadIdleDumpPath();
     if (loadBaseline(version)) |stored| {
         @atomicStore(u32, &g_peak_memory_mb, stored.peak_memory_mb, .monotonic);
         @atomicStore(u32, &g_peak_processes, stored.peak_processes, .monotonic);

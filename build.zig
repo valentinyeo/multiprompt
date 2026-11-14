@@ -443,6 +443,12 @@ pub fn build(b: *std.Build) void {
     const run_launch_plan_tests = b.addRunArtifact(launch_plan_tests);
     test_step.dependOn(&run_launch_plan_tests.step);
     vps_test_step.dependOn(&run_launch_plan_tests.step);
+    const idle_budget_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/idle_budget.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(idle_budget_tests).step);
     const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
     test_step.dependOn(&launch_regression.step);
     vps_test_step.dependOn(&launch_regression.step);
@@ -634,7 +640,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(chat_slash_tests).step);
     var previous_chat_run: ?*std.Build.Step = null;
-    for ([_][]const u8{ "src/agent_second_line.zig", "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_keynav.zig", "src/chat_reaction.zig", "src/chat_permission.zig", "src/chat_options.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_table_expand.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_scrollbar.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_shell_sync.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig", "src/dictation_audio.zig" }) |file| {
+    for ([_][]const u8{ "src/agent_second_line.zig", "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_keynav.zig", "src/chat_reaction.zig", "src/chat_permission.zig", "src/chat_options.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_table_expand.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_scrollbar.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_shell_sync.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig", "src/dictation_audio.zig", "src/dictation_live.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(file),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -734,6 +740,8 @@ pub fn build(b: *std.Build) void {
     const footprint_telemetry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/footprint-telemetry.test.js" });
     footprint_telemetry_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&footprint_telemetry_tests.step);
+    const idle_budget_node_tests = b.addSystemCommand(&.{ "node", "--test", "tools/idle-budget.test.js", "tools/idle-registry.test.js" });
+    test_step.dependOn(&idle_budget_node_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });
