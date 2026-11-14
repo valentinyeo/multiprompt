@@ -32,7 +32,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed=$(git diff --name-only "$BASE...$HEAD" -- src build.zig build.zig.zon .claude/skills/verify-multiprompt tools .github/required-checks.txt .github/workflows/click-through.yml .github/workflows/verify.yml)
+          changed=$(git diff --name-only "$BASE...$HEAD" -- src build.zig build.zig.zon .claude/skills/verify-multiprompt tools/verify-chat-delivery tools/chat-model-proof.cjs .github/workflows/click-through.yml .github/workflows/verify.yml)
           if [ -n "$changed" ]; then
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
