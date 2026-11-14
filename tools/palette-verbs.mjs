@@ -212,6 +212,7 @@ export const screen = {
   "SEARCH_TABCTX_CHAT_DENY": "chat",
   "SEARCH_TABCTX_CHAT_RESET": "chat",
   "SEARCH_TABCTX_CHAT_STOP": "chat",
+  "SEARCH_TABCTX_CHAT_RESTART_AI": "chat",
   "SEARCH_TABCTX_CHAT_TAB_URL": "chat",
   "SEARCH_TABCTX_CHAT_VIEW": "chat",
   "SEARCH_TABCTX_CLEAR_SEL": "local",

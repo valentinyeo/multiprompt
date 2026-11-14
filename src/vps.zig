@@ -328,6 +328,33 @@ pub fn tmuxAgentFromPaneCommand(command: []const u8) u8 {
     return 0;
 }
 
+pub fn paneCommandIsShell(command: []const u8) bool {
+    const name = if (command.len > 0 and command[0] == '-') command[1..] else command;
+    const shells = [_][]const u8{ "bash", "zsh", "sh", "dash", "fish", "ksh" };
+    for (shells) |shell| {
+        if (std.ascii.eqlIgnoreCase(name, shell)) return true;
+    }
+    return false;
+}
+
+pub const AI_RESTART_GRACE_MS: u64 = 45_000;
+
+pub const AiStoppedStep = struct {
+    stopped: bool,
+    restart_tick: u64,
+    resend: bool,
+};
+
+pub fn aiStoppedAfterPoll(ai_agent: u8, pane_shell: bool, was_stopped: bool, restart_tick: u64, now: u64) AiStoppedStep {
+    if (ai_agent != 1) return .{ .stopped = false, .restart_tick = 0, .resend = false };
+    if (restart_tick != 0) {
+        if (!pane_shell) return .{ .stopped = false, .restart_tick = 0, .resend = true };
+        if (now -| restart_tick < AI_RESTART_GRACE_MS) return .{ .stopped = false, .restart_tick = restart_tick, .resend = false };
+        return .{ .stopped = true, .restart_tick = 0, .resend = false };
+    }
+    return .{ .stopped = pane_shell, .restart_tick = 0, .resend = was_stopped and !pane_shell };
+}
+
 fn closeVpsChannelUnlocked(host: u8) void {
     if (host >= app_state.g_vps_channels.len) return;
     const ch = &app_state.g_vps_channels[host];
@@ -755,6 +782,7 @@ fn parseHostOutputIntoCache(host: u8, buf: []const u8, cache_count: *u32) u32 {
                     entry.path_len = 0;
                     entry.title_len = 0;
                     entry.agent = 0;
+                    entry.pane_shell = nf >= 5 and paneCommandIsShell(fields[4]);
                     const name_len = @min(fields[0].len, 63);
                     @memcpy(entry.name[0..name_len], fields[0][0..name_len]);
                     entry.name_len = @intCast(name_len);
@@ -988,7 +1016,7 @@ pub fn writeVpsPollCache() void {
         @memcpy(json[pos .. pos + h1.len], h1);
         pos += h1.len;
         appendJsonEscaped(&json, &pos, e.name[0..e.name_len]);
-        const numbers = std.fmt.bufPrint(json[pos..], "\",\"activity\":{d},\"ram_mb\":{d},\"host\":{d},\"agent\":{d},\"path\":\"", .{ e.activity, e.ram_mb, e.host, e.agent }) catch break;
+        const numbers = std.fmt.bufPrint(json[pos..], "\",\"activity\":{d},\"ram_mb\":{d},\"host\":{d},\"agent\":{d},\"pane_shell\":{s},\"path\":\"", .{ e.activity, e.ram_mb, e.host, e.agent, if (e.pane_shell) "true" else "false" }) catch break;
         pos += numbers.len;
         appendJsonEscaped(&json, &pos, e.path[0..e.path_len]);
         const p2 = "\",\"title\":\"";
@@ -1084,6 +1112,7 @@ pub fn loadVpsPollCacheIfChanged() void {
                 entry.ram_mb = @intCast(@max(0, vpsPollCacheJsonInt(o.get("ram_mb"))));
                 entry.host = @intCast(@max(0, @min(255, vpsPollCacheJsonInt(o.get("host")))));
                 entry.agent = @intCast(@max(0, @min(255, vpsPollCacheJsonInt(o.get("agent")))));
+                entry.pane_shell = vpsPollCacheJsonBool(o.get("pane_shell"));
                 entry.path_len = 0;
                 entry.title_len = 0;
                 const name = vpsPollCacheJsonString(o.get("name"));
@@ -1132,6 +1161,17 @@ pub fn syncLiveTmuxMetadataFromCache() bool {
             app_state.shells[i].ai_agent = e.agent;
             changed = true;
         }
+
+        const step = aiStoppedAfterPoll(app_state.shells[i].ai_agent, e.pane_shell, app_state.shells[i].ai_stopped, app_state.shells[i].ai_restart_tick, GetTickCount64());
+        if (step.stopped != app_state.shells[i].ai_stopped) {
+            app_state.shells[i].ai_stopped = step.stopped;
+            changed = true;
+        }
+        if (step.restart_tick != app_state.shells[i].ai_restart_tick) {
+            app_state.shells[i].ai_restart_tick = step.restart_tick;
+            changed = true;
+        }
+        if (step.resend) _ = @import("chat_send.zig").chatEchoResendHeldForShell(@intCast(i));
     }
 
     if (changed) publishInboxState();
@@ -1628,4 +1668,38 @@ test "IGSH-1266 pick repo typing filters by folder text and keeps every row on i
     try std.testing.expect(!repoRowMatches(&rows[0], "usage"));
     try std.testing.expect(repoRowMatches(&rows[1], "usage"));
     try std.testing.expectEqual(@as(u8, 3), rows[1].host);
+}
+
+test "IGSH-2283 a pane that shows a bare shell counts as a stopped AI" {
+    try std.testing.expect(paneCommandIsShell("bash"));
+    try std.testing.expect(paneCommandIsShell("-bash"));
+    try std.testing.expect(paneCommandIsShell("zsh"));
+    try std.testing.expect(paneCommandIsShell("sh"));
+    try std.testing.expect(paneCommandIsShell("FISH"));
+    try std.testing.expect(!paneCommandIsShell("claude"));
+    try std.testing.expect(!paneCommandIsShell("node"));
+    try std.testing.expect(!paneCommandIsShell("codex"));
+    try std.testing.expect(!paneCommandIsShell(""));
+}
+
+test "IGSH-2283 the stopped state follows the pane, the restart grace and the held messages" {
+    const stopped = aiStoppedAfterPoll(1, true, false, 0, 1000);
+    try std.testing.expect(stopped.stopped);
+    try std.testing.expect(!stopped.resend);
+    try std.testing.expect(!aiStoppedAfterPoll(1, false, false, 0, 1000).stopped);
+    try std.testing.expect(!aiStoppedAfterPoll(0, true, false, 0, 1000).stopped);
+    try std.testing.expect(!aiStoppedAfterPoll(2, true, false, 0, 1000).stopped);
+    const waiting = aiStoppedAfterPoll(1, true, false, 1000, 1000 + AI_RESTART_GRACE_MS - 1);
+    try std.testing.expect(!waiting.stopped);
+    try std.testing.expectEqual(@as(u64, 1000), waiting.restart_tick);
+    try std.testing.expect(!waiting.resend);
+    const started = aiStoppedAfterPoll(1, false, false, 1000, 5000);
+    try std.testing.expect(!started.stopped);
+    try std.testing.expectEqual(@as(u64, 0), started.restart_tick);
+    try std.testing.expect(started.resend);
+    const gave_up = aiStoppedAfterPoll(1, true, false, 1000, 1000 + AI_RESTART_GRACE_MS);
+    try std.testing.expect(gave_up.stopped);
+    try std.testing.expectEqual(@as(u64, 0), gave_up.restart_tick);
+    try std.testing.expect(!gave_up.resend);
+    try std.testing.expect(aiStoppedAfterPoll(1, false, true, 0, 1000).resend);
 }

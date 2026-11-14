@@ -783,6 +783,7 @@ const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALL
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
+const SEARCH_TABCTX_CHAT_RESTART_AI = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESTART_AI;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
@@ -1171,6 +1172,7 @@ const selectedChangelogTicket = @import("changelog.zig").selectedChangelogTicket
 const firstChangelogSelection = @import("changelog.zig").firstChangelogSelection;
 const chatTitleLayout = @import("drawing.zig").chatTitleLayout;
 const chatTitleInboxHit = @import("drawing.zig").chatTitleInboxHit;
+const chatTitleRestartHit = @import("drawing.zig").chatTitleRestartHit;
 const resetPaintBackbuffer = @import("drawing.zig").resetPaintBackbuffer;
 const ensurePaintBackbuffer = @import("drawing.zig").ensurePaintBackbuffer;
 const resetFontCache = @import("drawing.zig").resetFontCache;
@@ -1911,6 +1913,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     openInbox(hwnd);
                     return 0;
                 }
+                if (chatTitleRestartHit(mx, my)) {
+                    _ = @import("chat_send.zig").chatRestartAi(app_state.active_shell);
+                    return 0;
+                }
                 if (chatTitleLayout()) |title| {
                     const more = title.more;
                     if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
@@ -2363,7 +2369,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetCursor(app_state.g_cursor_sizewe);
                     return 1;
                 }
-                if ((app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(cursor_pt.x, cursor_pt.y) != 0) or inboxButtonHitTest(cursor_pt.x, cursor_pt.y) or chatTitleInboxHit(cursor_pt.x, cursor_pt.y)) {
+                if ((app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(cursor_pt.x, cursor_pt.y) != 0) or inboxButtonHitTest(cursor_pt.x, cursor_pt.y) or chatTitleInboxHit(cursor_pt.x, cursor_pt.y) or chatTitleRestartHit(cursor_pt.x, cursor_pt.y)) {
                     _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                     return 1;
                 }
@@ -7362,7 +7368,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7392,6 +7398,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("chat_send.zig").chatStopAgent(ti);
                         } else if (target == app_state.SEARCH_TABCTX_FRESH_START) {
                             _ = @import("command_palette.zig").startFreshChat(ti);
+                        } else if (target == SEARCH_TABCTX_CHAT_RESTART_AI) {
+                            _ = @import("chat_send.zig").chatRestartAi(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {
                             chatResetForShell(ti);
                         } else if (target == SEARCH_TABCTX_FAVORITE) {

@@ -366,6 +366,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty.", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Restart the AI\"", .b = "Chat View: when the AI has stopped in a server chat, restart it and resume the last conversation, then send any held messages; also click \"AI stopped\" beside the title", .header = false },
     .{ .a = "Ctrl+Shift+D in Chat View", .b = "Copy latest code block (also its Copy button or Ctrl+K)", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Expand table\"", .b = "Open the table on screen full size over a dimmed window; also its Expand button on hover. Wheel, Shift+wheel and arrow keys scroll; Esc, the X or a click outside closes", .header = false },
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
