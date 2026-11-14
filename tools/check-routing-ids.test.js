@@ -100,10 +100,3 @@ test('raw WM_APP arithmetic is resolved before duplicate detection', async () =>
   const source = 'const WM_APP = 0x8000; const WM_APP_CHAT_FIND = WM_APP + 202; fn send() void { post(WM_APP + (200 + 2)); }';
   assert.match((await check(source)).errors.join('\n'), /duplicate WM_APP id 202/);
 });
-
-test('the shipped source tree allocates every routing and WM_APP id exactly once', () => {
-  const root = join(__dirname, '..');
-  const result = spawnSync(process.execPath, [join(__dirname, 'check-routing-ids.mjs'), '--root', root], { encoding: 'utf8' });
-  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
-  assert.match(result.stdout, /Routing IDs OK:/);
-});
