@@ -3210,6 +3210,59 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_unarchive_hidden = (app_state.g_search_len == 0);
+        if (!show_unarchive_hidden) {
+            const hidden_labels = [_][]const u8{
+                "restore workspace waiting sessions",
+                "restore waiting sessions",
+                "waiting sessions",
+                "Unarchive Hidden (Alt+E) Sessions",
+                "unarchive hidden sessions",
+                "unarchive hidden",
+                "alt e sessions",
+                "restore hidden sessions",
+                "show hidden sessions",
+            };
+            for (hidden_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_unarchive_hidden = true;
+                    break;
+                }
+            }
+        }
+        if (show_unarchive_hidden) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UNARCHIVE_HIDDEN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_unarchive_unattached = (app_state.g_search_len == 0);
+        if (!show_unarchive_unattached) {
+            const unattached_labels = [_][]const u8{
+                "unarchive unattached sessions",
+                "unarchive unattached",
+                "ctrl w sessions",
+                "attach workspace sessions",
+                "restore unattached sessions",
+                "restore disconnected workspace sessions",
+                "disconnected workspace sessions",
+                "unarchive unattached (ctrl+w) sessions",
+            };
+            for (unattached_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_unarchive_unattached = true;
+                    break;
+                }
+            }
+        }
+        if (show_unarchive_unattached) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UNARCHIVE_UNATTACHED_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_archived_view = (app_state.g_search_len == 0);
         if (!show_archived_view) {
             const archived_view_labels = [_][]const u8{ "archived sessions", "archive", "archived", "Unarchive Killed (Alt+X) Sessions", "unarchive killed sessions", "unarchive killed", "killed sessions", "alt x", "dissolve", "dissolved", "resurrect" };

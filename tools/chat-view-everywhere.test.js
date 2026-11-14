@@ -164,6 +164,7 @@ test('IGSH-820 native refused-action tests, maps and existing Windows journey ar
     assert.deepEqual(read(skill + `features/${name}.md`).match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
     assert.ok(read(skill + 'features/README.md').includes(`](${name}.md)`));
   }
-  assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /Switch every session once/);
+  assert.doesNotMatch(read('openwiki/operations/keyboard-shortcuts.md'), /Switch every session once/);
+  assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /Chat View: Send Queued Messages Now/);
   assert.match(read(skill + 'coverage.md'), /\| IGSH-820 \|/);
 });

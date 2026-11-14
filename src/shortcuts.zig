@@ -300,6 +300,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "x in All Sessions", .b = "Close the marked unattached sessions, or the selected one, after a confirmation", .header = false },
     .{ .a = "Alt+E", .b = "Move active tab to Waiting until it gets a blue dot", .header = false },
     .{ .a = "Alt+Z", .b = "Undo the most recent move to Waiting", .header = false },
+    .{ .a = "Ctrl+K -> Restore Waiting", .b = "Restore waiting live sessions in this workspace", .header = false },
     .{ .a = "Ctrl+D in Chat View", .b = "Start/stop dictation; Enter stops recording into the composer; Escape discards the recording", .header = false },
     .{ .a = "Ctrl+Shift+Space / Enter", .b = "Start/stop dictation; Enter is stop-only while recording; Escape discards the recording", .header = false },
     .{ .a = "Spawn / Windows", .b = "", .header = true },
