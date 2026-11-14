@@ -74,8 +74,7 @@ switch (process.argv[2]) {
     contains(palette, 'SEARCH_CLEAN_CHAT_OFFSET => "Chat View: Toggle CLEAN chat');
     contains(palette, 'SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET,');
     contains(sidebar, 'is_clean_chat or is_chat_todo or is_chat_tools');
-    contains(sidebar, 'Chat View: CLEAN chat: ON (toggle)');
-    contains(sidebar, 'Chat View: CLEAN chat: OFF (toggle)');
+    contains(sidebar, 'Hide read receipts');
     const handler = main.slice(main.indexOf('if (target == SEARCH_CLEAN_CHAT_OFFSET)'), main.indexOf('if (target == SEARCH_CHAT_TODO_OFFSET)'));
     contains(handler, 'chatToggleClean();');
     contains(handler, 'saveSession();');

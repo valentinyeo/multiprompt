@@ -59,7 +59,7 @@ test('IGSH-820 commands expose pin protection and bulk views without removed row
   assert.match(main, /setEverywhere\(app_state.shells\[0\.\.app_state.shell_count\], target == SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET\)/);
   assert.match(main, /applySessionView\(\);\s*saveSession\(\);/);
   const shortcuts = read('src/shortcuts.zig');
-  assert.match(shortcuts, /Pin to Top/);
+  assert.match(shortcuts, /right-click tab -> Pin/);
   assert.match(shortcuts, /Closing unpins them\. Archiving and group closing remain protected\./);
 });
 

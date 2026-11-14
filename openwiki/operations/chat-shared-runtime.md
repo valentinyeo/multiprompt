@@ -124,7 +124,7 @@ Choose Effort Low, Medium, or High.
 Choose Permission level Ask, Accept edits, Plan, or Bypass.
 A check mark shows the current model, effort and permission level.
 The message box shows no model or effort text.
-Ctrl+K "Chat View: Plus Menu" opens the same menu from the keyboard.
+Ctrl+K "Plus menu" opens the same menu from the keyboard.
 Ctrl+K still lists every model, effort and permission choice.
 The next message waits for the new agent.
 It resumes the same conversation and keeps history.
