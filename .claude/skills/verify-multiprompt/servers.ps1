@@ -101,9 +101,11 @@ try {
     $result.checks += @{ name = 'servers-plain-failure'; passed = $true }
     $paste = [VerifyNative]::EditText([IntPtr](Servers-Control '334').Current.NativeWindowHandle)
     if (-not $paste.StartsWith('umask 077 && mkdir -p ~/.ssh')) { throw 'Missing server setup line' }
+    $pasteScript = Join-Path ([IO.Path]::GetTempPath()) ('servers-setup-' + [guid]::NewGuid().ToString('N') + '.sh')
+    [IO.File]::WriteAllBytes($pasteScript, (New-Object Text.UTF8Encoding($false)).GetBytes($paste + "`n"))
     $pasteProcess = New-Object Diagnostics.Process
     $pasteProcess.StartInfo.FileName = $bash
-    $pasteProcess.StartInfo.Arguments = '--noprofile --norc -s'
+    $pasteProcess.StartInfo.Arguments = '--noprofile --norc "' + $pasteScript.Replace('\', '/') + '"'
     $pasteProcess.StartInfo.UseShellExecute = $false
     $pasteProcess.StartInfo.CreateNoWindow = $true
     $pasteProcess.StartInfo.RedirectStandardInput = $true
@@ -112,17 +114,14 @@ try {
     $pasteProcess.StartInfo.EnvironmentVariables['HOME'] = $serverRoot.Replace('\', '/')
     [void]$pasteProcess.Start()
     try {
-        $pasteBytes = [Text.Encoding]::UTF8.GetBytes($paste + "`n")
         $pasteOut = $pasteProcess.StandardOutput.ReadToEndAsync()
         $pasteErr = $pasteProcess.StandardError.ReadToEndAsync()
-        $pasteStream = $pasteProcess.StandardInput.BaseStream
-        $pasteStream.Write($pasteBytes, 0, $pasteBytes.Length)
-        $pasteStream.Close()
+        $pasteProcess.StandardInput.Close()
         if (-not $pasteProcess.WaitForExit(10000)) { $pasteProcess.Kill(); throw 'One-time paste timed out' }
         $pasteLog = "exit=$($pasteProcess.ExitCode)`nstdout=$($pasteOut.Result)`nstderr=$($pasteErr.Result)`nhome=$($pasteProcess.StartInfo.EnvironmentVariables['HOME'])`nline=$paste"
         [IO.File]::WriteAllText((Join-Path $Evidence 'paste-result.txt'), $pasteLog)
         if ($pasteProcess.ExitCode -ne 0) { throw ('One-time paste failed: ' + $pasteLog.Replace("`n", ' | ')) }
-    } finally { $pasteProcess.Dispose() }
+    } finally { $pasteProcess.Dispose(); Remove-Item -LiteralPath $pasteScript -Force -ErrorAction SilentlyContinue }
     Servers-Click '300'
     Wait-Until { (Servers-Ready) -and (Servers-Text) -match 'Connected\. Multibot signs in with its own key\.' } 'own-key connected after paste'
     $timer.Stop()
