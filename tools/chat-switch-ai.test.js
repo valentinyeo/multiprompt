@@ -97,6 +97,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['host_config']('claude', sid) is not None
     first, _ = switch('claude', sid, 'pi', transcript)
     assert first['status'] == 'switched', first
+    identity = lambda provider, key: {name: r['host_agent_env'](provider, key).get(name) for name in ('ZSB_SESSION', 'MULTIPROMPT_TAB', 'MULTIBOT_SESSION')}
+    named = dict(ZSB_SESSION=tmux, MULTIPROMPT_TAB=tmux, MULTIBOT_SESSION=tmux)
+    assert identity('pi', first['sid']) == named, identity('pi', first['sid'])
     second, started = switch('pi', first['sid'], 'claude', transcript)
     assert second['status'] == 'switched' and second['provider'] == 'claude' and second['tmux'] == tmux, second
     assert second['sid'] not in (sid, first['sid'])
@@ -105,6 +108,7 @@ with tempfile.TemporaryDirectory() as directory:
     shown = r['host_paths']('claude', second['sid'])['history'].read_text()
     assert 'OLD-QUESTION' in shown and 'Switched AI: Claude to Pi' in shown and 'Switched AI: Pi to Claude' in shown
     assert r['host_switch_follow'](sid) == ('claude', second['sid'])
+    assert identity('claude', second['sid']) == named, identity('claude', second['sid'])
     with patch.dict(r, conversation_path=lambda *args: transcript, host_start=lambda *args: dict(status='started')):
         assert r['host_cli'](['switch-ai', 'claude', second['sid'], '--to', 'codex'])['provider'] == 'codex'
     print('SWITCH_AI_PASS')
