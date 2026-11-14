@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = process.env.CHAT_REGRESSION_SOURCE_ROOT || path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
 const state = fs.readFileSync(path.join(root, 'src/app_state.zig'), 'utf8');
+const WALL_MS = 1792250528437;
 
 function body(name) {
   const start = source.indexOf(`fn ${name}(`);
@@ -22,13 +23,16 @@ function reducerFrom(zig) {
   code = code.replace(messageLine, 'const message = wrapped === null ? value : wrapped;');
   code = code.replace(/const (token|phase) = (.*) orelse return true;/g, 'const $1 = $2 ?? null; if ($1 === null) return true;');
   code = code
-    .replace('const wall_ms = chat_echo.fileTimeToUnixMs(nowFileTime());', 'const wall_ms = 123000;')
+    .replace('const wall_ms = chat_echo.fileTimeToUnixMs(nowFileTime());', `const wall_ms = ${WALL_MS};`)
     .replace('entry.anchor.sent_ms = chatMessageSentMs(message, wall_ms);', 'entry.anchor.sent_ms = Number.isFinite(message.created) && message.created > 0 ? message.created * 1000 : wall_ms;')
     .replace('entry.sent_tick_ms = @as(i64, @intCast(GetTickCount64())) - std.math.clamp(wall_ms -| entry.anchor.sent_ms, 0, 600_000);', 'entry.sent_tick_ms = 1234 - Math.max(0, Math.min(600000, wall_ms - entry.anchor.sent_ms));')
     .replace('entry.expires_ms = entry.anchor.sent_ms +| 600_000;', 'entry.expires_ms = entry.anchor.sent_ms + 600000;')
     .replace('var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;', 'const key_buf = null;')
     .replace('chatOutboxKeyForShell(idx, &key_buf)', 'chatOutboxKeyForShell(idx, key_buf)')
     .replace('var found: ?usize = null;', 'let found = null;')
+    .replace('var adopted = false;', 'let adopted = false;')
+    .replace('chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, found.?);', 'chatOutboxRemoveAtIn(app_state.g_chat_outbox, found);')
+    .replaceAll('chat_echo.fileTimeToUnixMs(nowFileTime())', String(WALL_MS))
     .replace('for (app_state.g_chat_outbox.items, 0..) |entry, i| {', 'for (const [i, entry] of app_state.g_chat_outbox.items.entries()) {')
     .replace('for (app_state.g_chat_confirmed.items) |c| {', 'for (const c of app_state.g_chat_confirmed.items) {')
     .replaceAll('std.mem.eql(u8, entry.key[0..entry.key_len], key)', 'entry.key === key')
@@ -56,7 +60,7 @@ function reducerFrom(zig) {
     .replace('_ = json_reader.copyString(message, "state", &entry.message_phase);', 'json_reader.copyString(message, "state", entry, "message_phase");')
     .replace('entry.state = if (equal(phase, "failed")) .not_sent else if (equal(phase, "accepted") || equal(phase, "started")) .delivered else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : equal(phase, "accepted") || equal(phase, "started") ? "delivered" : "queued";')
     .replace('entry.state = if (equal(phase, "failed")) .not_sent else .queued;', 'entry.state = equal(phase, "failed") ? "not_sent" : "queued";');
-  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'chatMessageFromAgent', 'equal', code);
+  return new Function('idx', 'value', 'app_state', 'json_reader', 'chatOutboxKeyForShell', 'chatFileIdentityForShell', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInStateLimit', 'chatMessageFromAgent', 'equal', 'chat_echo', code);
 }
 
 function harness(zig = body('chatMessageReduce')) {
@@ -68,7 +72,13 @@ function harness(zig = body('chatMessageReduce')) {
       field: (object, field) => object && object[field] !== undefined ? object[field] : null,
       string: value => typeof value === 'string' ? value : null,
       copyString: (object, field, entry, target) => { entry[target] = object[field]; },
-    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text, anchor: {sent_ms: 0} }); return true; }, message => message.origin === 'agent', (a, b) => a === b),
+    }, shell => shell.key, shell => ({ sid: shell.sid }), (outbox, i) => outbox.items.splice(i, 1), (outbox, key, text) => { outbox.items.push({ key, text, anchor: {sent_ms: 0} }); return true; }, message => message.origin === 'agent', (a, b) => a === b, {
+      snapshotRowFresh: (state, sent_ms, now_ms) => {
+        if (state === 'delivered' || state === 'cancelled' || sent_ms <= 0) return false;
+        if (now_ms < sent_ms) return true;
+        return now_ms - sent_ms < 600000;
+      },
+    }),
   };
 }
 
@@ -209,6 +219,22 @@ test('receipt timestamps are initialized once rather than renewed on every repla
 test('missing send timestamp uses the original server creation rather than snapshot time', () => {
   const h = harness();
   const shell = {key: 'tab-a', sid: 'session-a'};
-  assert.equal(h.send(shell, {id: 'old-wire', text: 'older request', state: 'queued', created: 1.25}), true);
-  assert.equal(h.app.g_chat_outbox.items[0].anchor.sent_ms, 1250);
+  const created = Math.floor((WALL_MS - 60_000) / 1000);
+  assert.equal(h.send(shell, {id: 'old-wire', text: 'older request', state: 'queued', created}), true);
+  assert.equal(h.app.g_chat_outbox.items[0].anchor.sent_ms, created * 1000);
+});
+
+test('SOFT-2350 an old message the host still lists never comes back as a new unsent row', () => {
+  const h = harness();
+  const shell = { key: 'tab-a', sid: 'session-a' };
+  const wallSeconds = Math.floor(WALL_MS / 1000);
+  const staleCreated = wallSeconds - 11 * 60;
+  const waitingCreated = wallSeconds - 60;
+  for (const state of ['queued', 'sent', 'failed']) {
+    assert.equal(h.send(shell, { id: `old-${state}`, text: 'older request', state, created: staleCreated }), true);
+    assert.equal(h.app.g_chat_outbox.items.length, 0, `an old ${state} message came back as a new row`);
+  }
+  assert.equal(h.send(shell, { id: 'waiting', text: 'still waiting', state: 'queued', created: waitingCreated }), true);
+  assert.equal(h.app.g_chat_outbox.items.length, 1);
+  assert.equal(h.app.g_chat_outbox.items[0].message_phase, 'queued');
 });
