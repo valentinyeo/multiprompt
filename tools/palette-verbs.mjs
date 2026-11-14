@@ -166,6 +166,7 @@ export const screen = {
   "SEARCH_PICK_REPO_BACK_OFFSET": "menu",
   "SEARCH_PICK_REPO_OFFSET": "focus",
   "SEARCH_PICK_REPO_ROW_OFFSET": "focus",
+  "SEARCH_PI_LOGIN_OFFSET": "chat",
   "SEARCH_POWER_ALWAYS_OFFSET": "window",
   "SEARCH_POWER_AUTO_OFFSET": "window",
   "SEARCH_POWER_OFF_OFFSET": "window",
