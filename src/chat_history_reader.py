@@ -7981,6 +7981,13 @@ if __name__ == '__main__':
                             _os.chmod('mp-helper', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
+                    zsb_source = globals().get('ZSB_SOURCE')
+                    if isinstance(zsb_source, str) and zsb_source:
+                        try:
+                            publish_named_tool('mp-zsb', _base64.b64decode(zsb_source))
+                            _os.chmod('mp-zsb', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
                 missing = object()
                 try:
                     active = _json.loads(read('active.json', 4096))
