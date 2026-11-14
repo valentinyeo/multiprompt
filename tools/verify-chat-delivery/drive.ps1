@@ -17,7 +17,7 @@ Start-Transcript "$Evidence/driver.log"
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
-if ($Feature -eq 'chat-full-history') { Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing }
+if ($Feature -eq 'chat-full-history' -or $env:CHAT_MODEL_PROOF -eq '1') { Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing }
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $recoveryPair = $env:CHAT_RESYNC_PROOF -eq '1' -and $ExpectedVersion -eq '0.28.1042'
 if ($recoveryPair -and $ExpectedHash -ine '22cd593c3c4146860d140606b2104e86459de990b7447abfa7d891beeffb07b1') { throw 'Recovery proof requires published Desktop v0.28.1042 hash' }
