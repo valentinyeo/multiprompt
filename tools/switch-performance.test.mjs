@@ -93,7 +93,7 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   assert.ok(baseline && candidate, 'The two speed builds must ship as separate jobs so they run side by side');
   assert.ok(speed.includes('ref: $' + '{{ github.event.pull_request.head.sha || github.sha }}'), 'Speed proof must build the exact PR head, not a synthetic merge');
   assert.match(job('switch-performance'), /needs: \[speed-baseline, speed-candidate\]/, 'The verdict must wait for both speed builds');
-  assert.match(flow, /check-red-run, switch-performance\]/);
+  assert.match(flow, /check-red-run, switch-performance, idle-budget\]/);
   assert.match(flow, /SPEED: \$\{\{ needs\.switch-performance\.result \}\}/);
   assert.ok(flow.includes('elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then'));
   assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
