@@ -117,7 +117,9 @@ const PaintLogRule = struct { id: []const u8, line: []const u8, heartbeat_ms: u6
 
 const PAINT_LOG_HEARTBEAT_MS: u64 = 60_000;
 const PAINT_LOG_DIVIDER_HEARTBEAT_MS: u64 = 5_000;
+const PAINT_LOG_TRACE_HEARTBEAT_MS: u64 = 10_000;
 const PAINT_LOG_SLOW_MS: u64 = 8;
+const SLOW_CALL_LOG_MS: u64 = 30;
 
 fn paintLogRule(msg: []const u8) ?PaintLogRule {
     if (std.mem.startsWith(u8, msg, "[photo-proof] ")) {
@@ -163,6 +165,11 @@ fn paintLogRule(msg: []const u8) ?PaintLogRule {
     }
     if (std.mem.startsWith(u8, msg, "[altq] composer_focus ")) {
         return .{ .id = msg, .line = msg, .heartbeat_ms = PAINT_LOG_HEARTBEAT_MS };
+    }
+    if (std.mem.startsWith(u8, msg, "[bt ")) {
+        const reason_at = std.mem.indexOf(u8, msg, "] ") orelse return null;
+        const reason = msg[reason_at + 2 ..];
+        return .{ .id = reason, .line = reason, .heartbeat_ms = PAINT_LOG_TRACE_HEARTBEAT_MS };
     }
     return null;
 }
@@ -621,7 +628,7 @@ pub fn logSlowMs(label: []const u8, start_tick: u64) void {
     if (!verboseLoggingEnabled()) return;
     const now = GetTickCount64();
     const elapsed = now - start_tick;
-    if (elapsed < 5) return;
+    if (elapsed < SLOW_CALL_LOG_MS) return;
     var buf: [128]u8 = undefined;
     var pos: usize = 0;
     const tag = "PERF[t=";
@@ -710,4 +717,15 @@ test "IGSH-1973 live page lines collapse on the flag and blocked focus lines ign
     try std.testing.expect(limiter.allow(first.id, first.line, 0, first.heartbeat_ms));
     try std.testing.expect(!limiter.allow(again.id, again.line, 750, again.heartbeat_ms));
     try std.testing.expect(paintLogRule("[focus-trace] event=allowed caller=exe+0x10 repeats=0") == null);
+}
+
+test "IGSH-1973 identical browser trace reasons log once per heartbeat whatever the tick says" {
+    var limiter: PaintLogLimiter = .{};
+    const first = paintLogRule("[bt 100] mask skip (noop)").?;
+    const second = paintLogRule("[bt 900] mask skip (noop)").?;
+    try std.testing.expect(limiter.allow(first.id, first.line, 0, first.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(second.id, second.line, 800, second.heartbeat_ms));
+    try std.testing.expect(limiter.allow(second.id, second.line, 10000, second.heartbeat_ms));
+    const moved = paintLogRule("[bt 901] posMasks move 4").?;
+    try std.testing.expect(limiter.allow(moved.id, moved.line, 10001, moved.heartbeat_ms));
 }

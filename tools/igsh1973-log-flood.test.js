@@ -48,7 +48,7 @@ test('IGSH-1973 the list cache that only existed to log once per list is gone', 
 test('IGSH-1973 every repeating diagnostic line is deduplicated with a heartbeat', () => {
   const diagnostics = read('src/diagnostics.zig');
   const rules = diagnostics.slice(diagnostics.indexOf('fn paintLogRule('), diagnostics.indexOf('fn paintLogAllowed('));
-  for (const prefix of ['[chat] unread divider ', 'PERF[chat]: ', 'browser-freeze-state: now=', '[chat-live] page ', '[chat-live] draw ', '[focus-trace] event=blocked ', '[altq] composer_focus ']) {
+  for (const prefix of ['[chat] unread divider ', 'PERF[chat]: ', 'browser-freeze-state: now=', '[chat-live] page ', '[chat-live] draw ', '[focus-trace] event=blocked ', '[altq] composer_focus ', '[bt ']) {
     assert.ok(rules.includes(`"${prefix}"`), `paintLogRule must cover ${prefix}`);
   }
   assert.match(rules, /"receive to paint"\)\) return null/);
@@ -62,4 +62,12 @@ test('IGSH-1973 the repeating lines are still emitted by their owners so the rul
   assert.match(read('src/chat_session.zig'), /"\[chat-live\] \{s\} shell=\{d\} n=\{d\} f=\{d\}"/);
   assert.match(read('src/browser_pane.zig'), /"browser-freeze-state: now=\{d\} active=\{d\}/);
   assert.match(read('src/diagnostics.zig'), /"\[focus-trace\] event=\{s\} caller=/);
+});
+
+test('IGSH-1973 slow call lines need more than one clock tick', () => {
+  const diagnostics = read('src/diagnostics.zig');
+  const slow = diagnostics.slice(diagnostics.indexOf('pub fn logSlowMs('), diagnostics.indexOf('pub fn logPollShellEnter('));
+  const floor = diagnostics.match(/const SLOW_CALL_LOG_MS: u64 = (\d+);/);
+  assert.ok(floor && Number(floor[1]) >= 20, 'the slow call floor must sit above the 16 ms clock tick');
+  assert.match(slow, /if \(elapsed < SLOW_CALL_LOG_MS\) return;/);
 });
