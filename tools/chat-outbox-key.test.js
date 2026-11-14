@@ -260,3 +260,8 @@ test "legacy draft migration" {
 }
 `, ['chat_drafts.zig']);
 });
+
+test('IGSH-2278 switching chats strips live dictation words before the old draft is saved', () => {
+  const bind = body('chatDraftBindToActive');
+  assert.ok(bind.includes('chatLiveStripFromStore();'), 'live words must leave the old chat draft on a switch');
+});

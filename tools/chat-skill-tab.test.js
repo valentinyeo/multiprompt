@@ -108,3 +108,8 @@ test('ISSUE-399 a picked skill is cleared in another tab and restored in its own
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('IGSH-2278 switching chats strips live dictation words before the old draft is saved', () => {
+  const bind = body('chatDraftBindToActive');
+  assert.ok(bind.includes('chatLiveStripFromStore();'), 'live words must leave the old chat draft on a switch');
+});
