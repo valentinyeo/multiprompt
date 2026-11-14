@@ -149,6 +149,16 @@ The host keeps readable history separately from model context. Previous messages
 
 Desktop and Android compatibility still requires a live check on both clients before closing shared work. The action itself is desktop-only; it does not add a phone picker or change the account layout.
 
+## Switch AI
+
+Ctrl+K "Chat View: Switch AI to Claude", "Switch AI to Codex" and "Switch AI to Pi" and the right-click tab palette use the live-host channel. The row for the chat's current AI is hidden. There is no dedicated shortcut. The command-line equivalent is `python3 <reader> host switch-ai <provider> <sid> --to <claude|codex|pi>`.
+
+Switch AI refuses a chat that is still replying. An idle live agent is stopped first. The host writes a handover from the saved readable history: the last messages, plus a pointer to the full history file. It starts the target AI under a new session id behind the same chat name. The new AI reads the handover before any queued message is delivered, using the Fresh start gate.
+
+The chat keeps its tmux name, so the registered chat name, picture, sidebar place and roster entry stay the same, and so does the environment of the tmux session. Other chats reach it by name through the message locator, which now points at the new session. Queued messages move with it. The old session is disabled and a redirect table sends late requests, history reads and event subscriptions from the old session id to the new one. Previous messages stay above a Switch AI divider. Switching back creates another new session under the first AI.
+
+The old AI does not write its own handover yet. The handover comes from the saved history only.
+
 ## Saved permission level
 
 The host accepts `set_permission_mode` requests.
