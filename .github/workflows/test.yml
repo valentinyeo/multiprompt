@@ -954,16 +954,17 @@ jobs:
               [ "$result" = success ] || return 1
             done
           }
-          require_jobs success success success success success success success success
+          require_jobs success success success success success success success success success
           for result in failure cancelled skipped; do
-            if require_jobs "$result" success success success success success success success; then exit 1; fi
-            if require_jobs success "$result" success success success success success success; then exit 1; fi
-            if require_jobs success success "$result" success success success success success; then exit 1; fi
-            if require_jobs success success success "$result" success success success success; then exit 1; fi
-            if require_jobs success success success success "$result" success success success; then exit 1; fi
-            if require_jobs success success success success success "$result" success success; then exit 1; fi
-            if require_jobs success success success success success success "$result" success; then exit 1; fi
-            if require_jobs success success success success success success success "$result"; then exit 1; fi
+            if require_jobs "$result" success success success success success success success success; then exit 1; fi
+            if require_jobs success "$result" success success success success success success success; then exit 1; fi
+            if require_jobs success success "$result" success success success success success success; then exit 1; fi
+            if require_jobs success success success "$result" success success success success success; then exit 1; fi
+            if require_jobs success success success success "$result" success success success success; then exit 1; fi
+            if require_jobs success success success success success "$result" success success success; then exit 1; fi
+            if require_jobs success success success success success success "$result" success success; then exit 1; fi
+            if require_jobs success success success success success success success "$result" success; then exit 1; fi
+            if require_jobs success success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
           if [ "$EVENT" != pull_request ] && [ "$IDLE" = skipped ]; then IDLE=success; fi

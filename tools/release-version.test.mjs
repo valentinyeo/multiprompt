@@ -229,14 +229,16 @@ test('aggregate routing requires every test job and rejects every unsuccessful d
   assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE" "\$RED_RUN"/);
   assert.doesNotMatch(aggregate, /CHANGES|HEAVY|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success', SPEED: 'success' };
-  const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
+  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success', SPEED: 'success', IDLE: 'success' };
+  const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, EVENT: 'pull_request', ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Aggregate routing controls passed/);
   for (const job of Object.keys(success)) {
     for (const status of ['failure', 'cancelled', 'skipped', 'invalid', '']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
   }
+  assert.equal(run({ IDLE: 'skipped', EVENT: 'push' }).status, 0);
+  assert.equal(run({ IDLE: 'failure', EVENT: 'push' }).status, 1);
 });
 
 test('five Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
