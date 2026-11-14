@@ -131,8 +131,12 @@ try {
     $ssh = Join-Path $env:WINDIR 'System32/OpenSSH/ssh.exe'
     $key = Join-Path $keyRoot 'multibot_ed25519'
     $probeArgs = @('-F', 'none', '-n', '-i', $key, '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=5', '-p', $port, 'verify@127.0.0.1', 'true')
-    & $ssh @probeArgs 2>&1 | Out-File (Join-Path $Evidence 'before-remove-probe.txt')
-    if ($LASTEXITCODE -ne 0) { throw 'Positive control: real OpenSSH did not authenticate with the app key' }
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $ssh @probeArgs 2>&1 | Out-File (Join-Path $Evidence 'before-remove-probe.txt')
+        $positiveExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
+    if ($positiveExit -ne 0) { throw ('Positive control: real OpenSSH did not authenticate with the app key: exit ' + $positiveExit + ' ' + (Get-Content (Join-Path $Evidence 'before-remove-probe.txt') -Raw)) }
     $result.checks += @{ name = 'servers-add-test'; passed = $true; seconds = $seconds; budgetSeconds = 120; realOpenSsh = $true }
 
     Servers-Click '310'

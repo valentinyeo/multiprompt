@@ -75,6 +75,7 @@ def connection(client):
         channel.send_exit_status(result.returncode)
         channel.shutdown_write()
         channel.close()
+        transport.join(10)
     except (paramiko.SSHException, EOFError, OSError):
         record("connection-closed")
     finally:
