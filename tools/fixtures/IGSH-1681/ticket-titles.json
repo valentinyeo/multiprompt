@@ -6,6 +6,7 @@
   "HYCI-137": "Desktop account check loses its two-window starting point",
   "HYCI-147": "Restore permission to publish desktop updates",
   "HYCI-202": "Chat engine test fails at random when engines start together",
+  "HYCI-462": "Multiprompt master does not build: duplicate window message id holds every PR and every release",
   "HYCI-87": "Multiprompt checks: build the Windows app once per push",
   "HYCI-94": "Multiprompt Tests are red on master, so every PR looks red",
   "IGSH-1000": "Multiprompt desktop: replace the Windows title bar with our own window buttons",
