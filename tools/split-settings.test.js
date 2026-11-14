@@ -189,9 +189,11 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
     ['Show Favorites split', 'palette_show_favorites_on'],
     ['Show All split', 'palette_show_all_split_on'],
   ]) {
-    assert.ok(read('src/shortcuts.zig').includes(`Ctrl+K -> ${label}`));
-    assert.ok(read('openwiki/operations/keyboard-shortcuts.md').includes(label));
     assert.ok(words.includes(`.${word} = "${label}: ON"`), word);
     assert.ok(sidebar.includes(`L(ui_words.${word})`), word);
+  }
+  for (const label of ['Show Frequent split', 'Frequent as first tab', 'Show Favorites split', 'Show All split']) {
+    assert.ok(!read('src/shortcuts.zig').includes(label), `src/shortcuts.zig folds ${label} into Settings`);
+    assert.ok(!read('openwiki/operations/keyboard-shortcuts.md').includes(label), `keyboard docs fold ${label} into Settings`);
   }
 });

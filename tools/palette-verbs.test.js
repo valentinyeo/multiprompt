@@ -20,7 +20,8 @@ test('every palette row has a verb or a screen-only place', async () => {
   const result = coverage(palette);
   assert.deepEqual(result.missing, []);
   assert.deepEqual(result.both, []);
-  assert.ok(result.ids.length > 200);
+  assert.ok(result.ids.length > 150);
+  assert.ok(!palette.includes('g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_OPUS_OFFSET;'), 'model rows fold into the plus menu');
   for (const id of result.ids) {
     if (verbs[id]) assert.equal(screen[id], undefined);
     else assert.ok(screenOnly[screen[id]], id);

@@ -29,14 +29,18 @@ test('all six settings are searchable, painted and dispatched', () => {
       const id = `SEARCH_CHAT_${kind}_${value}_OFFSET`;
       const label = `Chat View: ${kind === 'MODEL' ? 'Model' : 'Effort'} ${value[0]}${value.slice(1).toLowerCase()}`;
       assert.ok(state.includes(`pub const ${id}: usize`), id);
-      assert.ok(palette.includes(`= ${id};`) && palette.includes(label), label);
+      if (['OPUS', 'SONNET', 'HAIKU', 'FABLE', 'LOW', 'MEDIUM', 'HIGH'].includes(value)) {
+        assert.ok(!palette.includes(`g_search_results[app_state.g_search_result_count] = ${id};`), `${id} folds into the plus menu`);
+      } else {
+        assert.ok(palette.includes(`= ${id};`), label);
+      }
       assert.ok(sidebar.includes(`${id} => L("${label}")`), label);
       assert.ok(main.includes(`${id} => .{ .${kind.toLowerCase()} = .${value.toLowerCase()} }`), label);
     }
   }
   assert.ok(main.indexOf("if (app_state.isChatSettingOffset(target))") < main.indexOf("if (target >= SEARCH_ADDFAVICON_OFFSET"));
   assert.match(sidebar, /const is_chat_action = [^;]*\bis_chat_setting\b/);
-  assert.match(palette, /chatSettingsEligible\(\)/);
+  assert.match(read('src/plus_menu.zig'), /chat_live\.settings\(/);
   assert.match(read('src/chat_session.zig'), /privateActionsAllowed\(\)/);
   assert.match(read('src/chat_session.zig'), /settingsKnown\(key.shell_id\)/);
 });
@@ -56,11 +60,11 @@ test('settings requests report refusal and show confirmed next values', () => {
   assert.match(plus, /state\.active\[@intFromEnum\(Item\.effort_high\)\] = selected\.effort == \.high/);
 });
 
-test('F1 and keyboard docs list both palette actions', () => {
+test('F1 and keyboard docs point at the Plus Menu for model and effort', () => {
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
     const text = read(file);
-    assert.ok(text.includes('Chat View: Model Opus / Sonnet / Haiku'), file);
-    assert.ok(text.includes('Chat View: Effort Low / Medium / High'), file);
+    assert.ok(text.includes('Chat View: Plus Menu'), file);
+    assert.ok(text.includes('Model, Effort and, in a Claude chat, Permission level'), file);
   }
 });
 
