@@ -147,6 +147,7 @@ const WM_APP_BROWSER_RESOLVED = @import("win32.zig").WM_APP_BROWSER_RESOLVED;
 const WM_APP_DIAG = @import("win32.zig").WM_APP_DIAG;
 const WM_APP_DICTATION_TOGGLE = @import("win32.zig").WM_APP_DICTATION_TOGGLE;
 const WM_APP_DICTATION_READY = @import("win32.zig").WM_APP_DICTATION_READY;
+const WM_APP_DICTATION_LIVE = @import("win32.zig").WM_APP_DICTATION_LIVE;
 const WM_APP_CLOSE_SESSION = @import("win32.zig").WM_APP_CLOSE_SESSION;
 const WM_APP_SNIPPETS_OPEN = @import("win32.zig").WM_APP_SNIPPETS_OPEN;
 const WM_APP_SNIPPET_FORM_SAVE = @import("win32.zig").WM_APP_SNIPPET_FORM_SAVE;
@@ -3460,6 +3461,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_DICTATION_READY => {
             handleDictationReady();
+            return 0;
+        },
+        WM_APP_DICTATION_LIVE => {
+            @import("voice.zig").handleDictationLive();
             return 0;
         },
         WM_APP_AI_PACE_READY => {

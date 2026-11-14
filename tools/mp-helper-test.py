@@ -38,8 +38,16 @@ FAKE_ZSB = r'''#!/usr/bin/env python3
 import json, os, sys
 with open(os.environ["MP_HELPER_TEST_LOG"], "a", encoding="utf-8") as stream:
     stream.write(json.dumps(["zsb", sys.argv[1:]]) + "\n")
+OPENED = os.environ.get("MP_HELPER_TEST_OPENED")
 if sys.argv[1] == "workspace-list":
-    print(os.environ.get("MP_HELPER_TEST_LIST", "{}"))
+    listing = json.loads(os.environ.get("MP_HELPER_TEST_LIST", "{}"))
+    if OPENED and os.path.exists(OPENED):
+        listing["workspaces"][1]["groups"][0]["tabs"].append(dict(id=44, title="late", host="remote-1", tmux=open(OPENED).read()))
+    print(json.dumps(listing))
+elif sys.argv[1] == "session-open" and os.environ.get("MP_HELPER_TEST_TIMEOUT"):
+    if OPENED and os.environ["MP_HELPER_TEST_TIMEOUT"] == "opens":
+        open(OPENED, "w").write(sys.argv[sys.argv.index("--tmux") + 1])
+    print(json.dumps(dict(ok=False, error="reply_timeout")))
 elif sys.argv[1] == "session-open" and "--after-tab" in sys.argv and os.environ.get("MP_HELPER_TEST_OLD_ZSB"):
     print(json.dumps(dict(ok=False, error="bad_args")))
 elif sys.argv[1] == "session-open":
@@ -205,6 +213,50 @@ class MpHelperTest(unittest.TestCase):
         self.assertTrue(result["visible"])
         opened = [call for call in self.events("zsb") if call[0] == "session-open"]
         self.assertEqual(opened[-1], ["session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", result["tmux"], "--name", "A"])
+
+    def test_IGSH_2013_zsb_is_found_in_the_local_bin_when_it_is_not_on_the_path(self):
+        local = self.home / ".local/bin"
+        local.mkdir(parents=True)
+        (self.bin / "zsb").rename(local / "zsb")
+        done = self.run_helper("start", "--name", "A", PATH="/usr/bin:/bin")
+        result = self.parsed(done)
+        self.assertTrue(result["visible"], result)
+        self.assertEqual(result["tab"], 44)
+        self.assertEqual(len([call for call in self.events("zsb") if call[0] == "session-open"]), 1)
+
+    def test_IGSH_2013_the_copy_next_to_the_runtime_helper_beats_a_stale_zsb_on_the_path(self):
+        runtime = Path(self.temp.name) / "runtime"
+        runtime.mkdir()
+        for name, source in (("mp-send", ROOT / "src/mp_send.py"), ("mp-helper", ROOT / "src/mp_helper.py")):
+            (runtime / ("0" * 64 + "-" + name)).write_bytes(source.read_bytes())
+            (runtime / name).symlink_to("0" * 64 + "-" + name)
+        (runtime / ("0" * 64 + "-mp-zsb")).write_bytes((self.bin / "zsb").read_bytes())
+        (runtime / ("0" * 64 + "-mp-zsb")).chmod(0o755)
+        (runtime / "mp-zsb").symlink_to("0" * 64 + "-mp-zsb")
+        stale = self.bin / "zsb"
+        stale.write_text("#!/bin/sh\necho '{\"ok\":false,\"error\":\"stale\"}'\n", encoding="utf-8")
+        stale.chmod(0o755)
+        done = subprocess.run([sys.executable, str(runtime / "mp-helper"), "start", "--name", "A"], capture_output=True, text=True, env=self.env(), cwd=str(self.work), timeout=60)
+        result = self.parsed(done)
+        self.assertTrue(result["visible"], result)
+        self.assertEqual(result["tab"], 44)
+
+    def test_IGSH_2013_a_reply_timeout_on_session_open_is_verified_against_the_workspace_list(self):
+        opened = Path(self.temp.name) / "opened"
+        done = self.run_helper("start", "--name", "A", MP_HELPER_TEST_TIMEOUT="opens", MP_HELPER_TEST_OPENED=str(opened))
+        result = self.parsed(done)
+        self.assertTrue(result["visible"], result)
+        self.assertEqual(result["tab"], 44)
+        self.assertNotIn("visible_error", result)
+        self.assertEqual(len([call for call in self.events("zsb") if call[0] == "session-open"]), 1)
+
+    def test_IGSH_2013_a_reply_timeout_with_no_tab_still_reports_the_failure(self):
+        opened = Path(self.temp.name) / "never"
+        done = self.run_helper("start", "--name", "A", MP_HELPER_TEST_TIMEOUT="never", MP_HELPER_TEST_OPENED=str(opened))
+        result = self.parsed(done)
+        self.assertFalse(result["visible"])
+        self.assertEqual(result["visible_error"], "reply_timeout")
+        self.assertEqual(len([call for call in self.events("zsb") if call[0] == "session-open"]), 1)
 
     def test_SOFT_2013_a_repeat_start_keeps_a_running_helper_enabled(self):
         first = self.parsed(self.run_helper("start", "--name", "A"))
