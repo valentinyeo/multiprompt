@@ -1,1 +1,1 @@
-Multiprompt now counts its own idle work each minute and checks it on every change, so it stays light on your laptop.
+Multiprompt now keeps count of its own idle background work and reports it, so it stays light on your laptop.
