@@ -7973,7 +7973,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 121
+RUNTIME_GENERATION = 122
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -8076,6 +8076,13 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('mp-helper', _base64.b64decode(helper_source))
                             _os.chmod('mp-helper', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    zsb_source = globals().get('ZSB_SOURCE')
+                    if isinstance(zsb_source, str) and zsb_source:
+                        try:
+                            publish_named_tool('mp-zsb', _base64.b64decode(zsb_source))
+                            _os.chmod('mp-zsb', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()
