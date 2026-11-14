@@ -68,8 +68,6 @@ public static class ChatDeliveryDesktop {
         uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
         bool attachedForeground = false, attachedTarget = false;
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
-        keybd_event(0xE8, 0, 0, UIntPtr.Zero);
-        keybd_event(0xE8, 0, 2, UIntPtr.Zero);
         try {
             if (foregroundThread != 0 && foregroundThread != currentThread) {
                 attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
