@@ -52,6 +52,7 @@ fn KillTimer(_: HANDLE, _: usize) i32 { return 1; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn chatDraftFlush() void {}
 fn chatComposerAutoGrow() void {}
+fn chatLiveStripFromStore() void {}
 fn chatDraftKeyForShell(idx: u32, out: []u8) []const u8 { return std.fmt.bufPrint(out, "session:#{d}", .{idx}) catch unreachable; }
 fn chatDraftLoad(id: []const u8) void { chat_drafts.set(id, std.unicode.utf8ToUtf16LeStringLiteral("ordinary question for tab B"), false) catch unreachable; }
 fn getChatDraftPath(_: []const u8, _: *[560]u8) ?[]const u8 { return "draft.txt"; }

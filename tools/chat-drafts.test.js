@@ -86,6 +86,9 @@ fn SetTimer(_: ?usize, _: usize, _: u32, _: ?*anyopaque) usize { return 1; }
 fn KillTimer(_: ?usize, _: usize) bool { return true; }
 fn InvalidateRect(_: ?usize, _: ?*anyopaque, _: i32) bool { return true; }
 fn chatComposerAutoGrow() void {}
+fn chatLiveStripFromStore() void {}
+fn chatDictationLiveDiscard() void {}
+fn chatDictationLiveFinish(_: []const u8, _: []const u16) bool { return false; }
 fn layoutChatControls() void {}
 fn chatReplyRefreshPreview() void {}
 fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 { @memcpy(buf[0..id.len], id); return buf[0..id.len]; }

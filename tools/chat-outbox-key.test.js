@@ -198,6 +198,7 @@ var malformed = false;
 fn chatDraftFlush() void {}
 fn chatDraftWriteFile(_: []const u8, _: []const u8) bool { return true; }
 fn chatComposerAutoGrow() void {}
+fn chatLiveStripFromStore() void {}
 fn SetWindowTextW(_: HANDLE, text: [*:0]const u16) i32 {
     const s = std.mem.span(text);
     @memcpy(composer[0..s.len], s);
