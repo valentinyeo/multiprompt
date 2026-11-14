@@ -107,15 +107,21 @@ try {
     $pasteProcess.StartInfo.UseShellExecute = $false
     $pasteProcess.StartInfo.CreateNoWindow = $true
     $pasteProcess.StartInfo.RedirectStandardInput = $true
+    $pasteProcess.StartInfo.RedirectStandardOutput = $true
+    $pasteProcess.StartInfo.RedirectStandardError = $true
     $pasteProcess.StartInfo.EnvironmentVariables['HOME'] = $serverRoot.Replace('\', '/')
     [void]$pasteProcess.Start()
     try {
         $pasteBytes = [Text.Encoding]::UTF8.GetBytes($paste + "`n")
+        $pasteOut = $pasteProcess.StandardOutput.ReadToEndAsync()
+        $pasteErr = $pasteProcess.StandardError.ReadToEndAsync()
         $pasteStream = $pasteProcess.StandardInput.BaseStream
         $pasteStream.Write($pasteBytes, 0, $pasteBytes.Length)
         $pasteStream.Close()
         if (-not $pasteProcess.WaitForExit(10000)) { $pasteProcess.Kill(); throw 'One-time paste timed out' }
-        if ($pasteProcess.ExitCode -ne 0) { throw 'One-time paste failed' }
+        $pasteLog = "exit=$($pasteProcess.ExitCode)`nstdout=$($pasteOut.Result)`nstderr=$($pasteErr.Result)`nhome=$($pasteProcess.StartInfo.EnvironmentVariables['HOME'])`nline=$paste"
+        [IO.File]::WriteAllText((Join-Path $Evidence 'paste-result.txt'), $pasteLog)
+        if ($pasteProcess.ExitCode -ne 0) { throw ('One-time paste failed: ' + $pasteLog.Replace("`n", ' | ')) }
     } finally { $pasteProcess.Dispose() }
     Servers-Click '300'
     Wait-Until { (Servers-Ready) -and (Servers-Text) -match 'Connected\. Multibot signs in with its own key\.' } 'own-key connected after paste'
