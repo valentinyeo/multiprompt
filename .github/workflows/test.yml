@@ -565,7 +565,7 @@ jobs:
         run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -637,6 +637,9 @@ jobs:
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs
+      - name: Test routing and message IDs
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: node --test tools/check-routing-ids.test.js
       - name: Check Zig syntax
         if: steps.paths.outputs.heavy == 'true'
         run: node tools/check-zig-syntax.mjs
