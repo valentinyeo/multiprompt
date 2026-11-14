@@ -310,6 +310,7 @@ fn Sleep(_: u32) void { unreachable; }
 fn CloseHandle(_: HANDLE) i32 { closes += 1; return 1; }
 fn TerminateProcess(_: HANDLE, _: u32) i32 { terminations += 1; return 1; }
 fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
+fn postChatFileReady(_: ?HANDLE) void {}
 fn SetEvent(_: HANDLE) i32 { return 1; }
 fn chatHistoryQuery(_: chat_transcript.Identity, _: u32, _: chat_history.History, _: u64) ?[]u8 {
     return std.heap.page_allocator.dupe(u8, "{\"id\":7}") catch null;
@@ -396,7 +397,7 @@ test "wrong stream identity closes without publishing rows" {
   try {
     const file = path.join(dir, 'push.zig');
     const code = harness + stream + ['chatHistoryChannelClose', 'chatHistoryStreamRelease', 'chatHistoryStreamStop', 'chatHistoryStreamThread'].map(body).join('\n');
-    fs.writeFileSync(file, code.replaceAll('app_state.', '').replaceAll('@import("chat_transport.zig").Channel', 'transport.Channel').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
+    fs.writeFileSync(file, code.replaceAll('app_state.', '').replaceAll('@import("chat_transport.zig").Channel', 'transport.Channel').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);
