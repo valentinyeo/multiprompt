@@ -576,6 +576,7 @@
   "IGSH-2283": "Show when a chat's AI has stopped, with Restart",
   "IGSH-2280": "Switch a chat to another AI and keep its name",
   "IGSH-2323": "Click-through check fails on every Multibot pull request",
+  "IGSH-2314": "Multi Bot rooms: messages reach the right agents",
   "IGSH-2324": "Desktop: a renamed group keeps its colour on other devices",
   "IGSH-2350": "Old messages come back as Not sent",
   "IGSH-2351": "Agent messages show raw tags in the chat"
