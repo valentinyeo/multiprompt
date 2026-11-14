@@ -293,7 +293,7 @@ test "SOFT-1974 an archived chat keeps the server it ran on" {
     try std.testing.expectEqual(TMUX_HOST_UK, entries.items[1].tmux_host);
     try std.testing.expectEqual(TMUX_HOST_INNE, entries.items[2].tmux_host);
     try std.testing.expectEqual(@as(u8, 0), entries.items[3].tmux_host);
-    var out: [4096]u8 = undefined;
+    var out: [4098]u8 = undefined;
     const len = serializeArchiveJson(entries.items, &out) orelse return error.TestUnexpectedResult;
     var restored: std.ArrayList(ArchivedEntry) = .empty;
     defer restored.deinit(allocator);
