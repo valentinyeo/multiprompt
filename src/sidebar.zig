@@ -1218,8 +1218,27 @@ pub fn applyPendingGroup() void {
 }
 
 inline fn sidebarUseKey(i: usize) u64 {
+    if (!app_state.g_sidebar_order_frozen) return sidebarLiveUseKey(i);
+    if (app_state.shells[i].frozen_use_key == null) app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
+    return app_state.shells[i].frozen_use_key.?;
+}
+
+inline fn sidebarLiveUseKey(i: usize) u64 {
     const viewed_ms = frequent.unixMs(app_state.shells[i].last_viewed / 10_000);
     return @max(viewed_ms, app_state.shells[i].last_used);
+}
+
+pub fn freezeSidebarOrder() void {
+    if (app_state.g_sidebar_order_frozen) return;
+    app_state.g_sidebar_order_frozen = true;
+    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = sidebarLiveUseKey(i);
+}
+
+pub fn thawSidebarOrder() bool {
+    if (!app_state.g_sidebar_order_frozen) return false;
+    app_state.g_sidebar_order_frozen = false;
+    for (0..app_state.shell_count) |i| app_state.shells[i].frozen_use_key = null;
+    return true;
 }
 
 pub inline fn effPinnedTop(i: usize) bool {
@@ -5524,6 +5543,78 @@ test "IGSH-1880 ungrouped Starred sessions sit under a Recents header below the 
     try std.testing.expectEqual(@as(u32, 2), rows[3].shell_idx);
     app_state.g_recents_section_collapsed = true;
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+}
+
+test "IGSH-2282 a click under the pointer does not move its row until the pointer leaves the sidebar" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_single = app_state.g_single_window;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_group = app_state.groups[0];
+    const saved_shells = app_state.shells[0..4].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    const saved_recents = app_state.g_recents_section_collapsed;
+    const saved_snoozed = app_state.g_ws_snoozed;
+    const saved_frozen = app_state.g_sidebar_order_frozen;
+    defer {
+        app_state.g_starred_workspace = saved_starred;
+        app_state.g_single_window = saved_single;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.groups[0] = saved_group;
+        app_state.shells[0..4].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+        app_state.g_recents_section_collapsed = saved_recents;
+        app_state.g_ws_snoozed = saved_snoozed;
+        app_state.g_sidebar_order_frozen = saved_frozen;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_single_window = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.g_sidebar_order_frozen = false;
+    app_state.shell_count = 4;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 41, .name = @splat(0), .name_len = 0, .collapsed = false, .color = 0 };
+    for (0..4) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].shell_id = @intCast(4300 + i);
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].starred_group_id = 41;
+    app_state.shells[1].starred_group_id = 41;
+    app_state.shells[0].last_used = 10;
+    app_state.shells[1].last_used = 20;
+    app_state.shells[2].last_used = 30;
+    app_state.shells[3].last_used = 40;
+    var rows: [MAX_ROWS]Row = undefined;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+
+    freezeSidebarOrder();
+    app_state.shells[0].last_used = 90;
+    app_state.shells[2].last_used = 95;
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 3), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[5].shell_idx);
+
+    try std.testing.expect(thawSidebarOrder());
+    try std.testing.expect(!thawSidebarOrder());
+    try std.testing.expectEqual(@as(u32, 6), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 1), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 2), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 3), rows[5].shell_idx);
 }
 
 test "IGSH-1890 group order by name moves known groups first and keeps the rest in place" {

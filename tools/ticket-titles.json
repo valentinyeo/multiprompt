@@ -562,5 +562,6 @@
   "IGSH-997": "Multiprompt: show each plan’s usage pace",
   "IGSH-998": "Multiprompt: browser-switch-speed journey fails its open-pane page focus check on master most runs",
   "IGSH-2277": "Codex chats: pick the model in the chat",
-  "IGSH-2271": "Fresh start keeps the same chat, picture and address"
+  "IGSH-2271": "Fresh start keeps the same chat, picture and address",
+  "IGSH-2282": "Sidebar: a clicked chat stays under the mouse"
 }

@@ -122,6 +122,7 @@ var g_chat_load_tries: u8 = 0; // old-defer positive control only
 var g_chat_content_h: i32 = 0;
 var g_chat_scroll_y: i32 = 0;
 var g_chat_top_pad: i32 = 0;
+var g_chat_layout_top_pad: i32 = 0;
 var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
@@ -232,6 +233,7 @@ fn chatRelayout(_: i32) void {
         y += h;
     }
     g_chat_content_h = y;
+    g_chat_layout_top_pad = g_chat_top_pad;
 }
 `;
 const entry = src.slice(src.indexOf('const ChatHistoryEntry = struct {'), src.indexOf('\n};', src.indexOf('const ChatHistoryEntry = struct {')) + 3);
@@ -303,8 +305,11 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     // Appending changes the transcript but not the reader's current message.
     var appended = try one.history.clone(a);
     try appended.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t1000\\t1200\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"appended reply\\"}\\n@@MP_END@@\\n", 2, one.key);
-    g_chat_scrolled_up = true;
-    g_chat_scroll_y = 45;
+    chatRelayoutPreservingScroll(900, fake_viewport_h);
+    chatScrollBy(g_chat_scroll_y - 45);
+    try std.testing.expect(!g_chat_read_hold);
+    try std.testing.expect(g_chat_scrolled_up);
+    try std.testing.expectEqual(@as(i32, 45), g_chat_scroll_y);
     one.result = appended;
     one.ready.store(true, .release);
     chatFileOnReady();
@@ -524,6 +529,33 @@ test('IGSH-1754 a chat switch clears the last batch time', () => {
 });
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+test('IGSH-1924 a caught-up cached chat holds its visible message across a real history append', () => {
+  const cases = String.raw`
+test "cache-first switch-back IGSH-1924 caught-up append" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    fake_viewport_h = 80;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        ("{\"role\":\"assistant\",\"text\":\"message\"}\n" ** 10) ++ "@@MP_END@@\n", 1, one.key);
+    chatDeferTranscriptLoad();
+    refreshChatTranscript(true);
+    const first = g_chat_scroll_y;
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, first);
+    try one.history.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"text\":\"later reply\"}\n@@MP_END@@\n", 2, one.key);
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(first, g_chat_scroll_y);
+    try std.testing.expect(g_chat_scroll_y < g_chat_content_h - fake_viewport_h);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
