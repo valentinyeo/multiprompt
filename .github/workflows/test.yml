@@ -33,6 +33,8 @@ jobs:
         run: node --test tools/crash-report-tickets.test.js
       - name: Test release tag publication
         run: node --test tools/release-version.test.mjs
+      - name: Test release symbol packaging
+        run: node --test tools/package-symbols.test.mjs
       - name: Test the runtime generation guard
         run: node --test tools/check-runtime-generation.test.js
       - name: Guard the reader runtime generation
