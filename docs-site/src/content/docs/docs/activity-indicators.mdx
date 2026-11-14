@@ -19,7 +19,7 @@ DONE:<tmux-session>
 `ACTIVE` starts the spinner. `DONE` stops the spinner.
 
 Remote tmux hooks write those events to the VPS loopback port `19548`.
-multiprompt owns that port through a dedicated per-host reverse-SSH tunnel
+Multibot owns that port through a dedicated per-host reverse-SSH tunnel
 keeper. The keeper starts before interactive shells, runs in a kill-on-close
 job, and retries after disconnects; interactive tabs must not compete for the
 forward themselves.
@@ -34,7 +34,7 @@ Common case:
 
 1. User is not viewing a tab.
 2. The tab receives a `DONE` lifecycle event.
-3. multiprompt marks it idle and sets the blue dot.
+3. Multibot marks it idle and sets the blue dot.
 
 The blue dot is cleared when the user views the tab.
 
@@ -62,7 +62,7 @@ Agent glyph metadata may come from tmux metadata, process scanning, screen signa
 
 Remote hooks can miss `DONE` because of tunnel drops, interrupted commands, or identity mismatches.
 
-If multiprompt sees a tab marked active but the visible agent TUI is clearly
+If Multibot sees a tab marked active but the visible agent TUI is clearly
 idle, it may recover the missing transition. Recovery requires all of the
 following:
 
@@ -91,7 +91,7 @@ has explicitly filed a recognized coding-agent session until it finishes.
 That durable filed state therefore supplies the provenance that an app restart
 would otherwise erase.
 
-For a filed background agent with no existing blue dot, multiprompt samples
+For a filed background agent with no existing blue dot, Multibot samples
 the visible console buffer during its normal metadata poll. Two consecutive
 polls must show a recognized idle prompt and no working marker. The watchdog
 then leaves the session filed, sets a durable blue dot, and republishes it into

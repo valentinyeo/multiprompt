@@ -1,13 +1,13 @@
 ---
-title: multiprompt docs
-description: The operating manual for multiprompt, a lightweight Windows workspace for multiple AI agents.
+title: Multibot docs
+description: The operating manual for Multibot, a lightweight Windows workspace for multiple AI agents.
 ---
 
-multiprompt is a Win32 workspace for running, monitoring, and prompting multiple AI agents at once. It keeps the harness small by hosting real console windows instead of rendering a terminal itself.
+Multibot is a Win32 workspace for running, monitoring, and prompting multiple AI agents at once. It keeps the harness small by hosting real console windows instead of rendering a terminal itself.
 
 The docs are the canonical behavior spec for features that have proven easy to regress: session identity, workspace restore, `multiprompt-browser` control, activity indicators, and Edge pane masking.
 
-## What multiprompt Owns
+## What Multibot Owns
 
 - Vertical session sidebar and workspace navigation.
 - Native `cmd.exe`, PowerShell, bash, SSH, and tmux panes.
@@ -15,7 +15,7 @@ The docs are the canonical behavior spec for features that have proven easy to r
 - Activity indicators driven by explicit agent lifecycle events.
 - Docked native Edge panes controlled from shells through `multiprompt-browser` (`zsb` remains a compatibility alias).
 
-## What multiprompt Does Not Own
+## What Multibot Does Not Own
 
 - Terminal rendering. The hosted console window renders text.
 - Edge internals, tabs, extensions, profile state, and page content.

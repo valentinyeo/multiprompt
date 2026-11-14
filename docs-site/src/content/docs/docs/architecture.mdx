@@ -5,9 +5,9 @@ description: The main moving parts in multiprompt.
 
 ## Process Model
 
-multiprompt keeps the permanent Windows AppUserModelID `ValentinYeo.ZigShell` across the product rename and stamps it directly on every main HWND. The process, windows, jump list, and installed or pinned taskbar shortcut must retain that same identity so Explorer cannot merge multiprompt's frequently rebuilt executable with Edge PWAs or unrelated desktop applications.
+Multibot keeps the permanent Windows AppUserModelID `ValentinYeo.ZigShell` across the product rename and stamps it directly on every main HWND. The process, windows, jump list, and installed or pinned taskbar shortcut must retain that same identity so Explorer cannot merge Multibot's frequently rebuilt executable with Edge PWAs or unrelated desktop applications.
 
-multiprompt is a native Win32 app written in Zig. It hosts real Windows console windows instead of rendering terminal text itself.
+Multibot is a native Win32 app written in Zig. It hosts real Windows console windows instead of rendering terminal text itself.
 
 ```text
 multiprompt.exe
@@ -19,7 +19,7 @@ multiprompt.exe
 
 ## Shell Hosting
 
-Each shell is a real console process. multiprompt finds or spawns the console window, strips unwanted window styles, reparents it into the right pane, and moves it during layout changes.
+Each shell is a real console process. Multibot finds or spawns the console window, strips unwanted window styles, reparents it into the right pane, and moves it during layout changes.
 
 This keeps memory low and avoids terminal rendering complexity.
 
@@ -29,7 +29,7 @@ Browser panes are native Edge windows owned and positioned by multiprompt. They 
 
 ## Notifications
 
-multiprompt listens on local notification ports and receives messages such as:
+Multibot listens on local notification ports and receives messages such as:
 
 ```text
 ACTIVE:<session>

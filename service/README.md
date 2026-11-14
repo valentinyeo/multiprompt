@@ -2,6 +2,18 @@
 
 A Cloudflare Worker and D1 database implementing device enrollment, PKCE authorization codes, rotating refresh tokens, device revocation, and revision-based workspace synchronization. Layout metadata is plaintext in D1, not end-to-end encrypted. Tokens are stored hashed; the desktop protects local credentials with Windows DPAPI.
 
+## Multibot domain migration
+
+`multibot-domains.json` contains the public domain settings for the existing account Worker. Merge its `vars` into the existing production settings and add its `domains` to that same Worker. Retain the old custom domains, D1 binding, secrets and verified email sender. Do not create a replacement database or reset devices.
+
+Deploy the updated Worker and settings before adding the new domains. Verify sign-in and the dashboard on both new hosts before releasing a desktop client that uses them. Old device authorization, refresh, API and magic-link URLs stay on their original origin; only ordinary visits to the old account and dashboard homepages redirect. The add-passkey homepage stays on its original domain too.
+
+Cookies and passkeys cannot cross unrelated domains. `LEGACY_AUTH_DOMAIN` keeps old cookies and passkeys usable at the old `/signin` address. Sign in on the new domain with an email code, then add a new passkey there. Existing device tokens remain valid against either host because both use the same database. Android clients keep their existing origin and protocol.
+
+The main website at `https://multibot.sh` is separate from these account hosts. Documentation uses `https://docs.multibot.sh`; keep the existing Pages project and attach that custom domain. Forward old website paths under `/docs/` to the same path on the docs host; forward the old homepage to `https://multibot.sh/`.
+
+Older installed updaters accept release assets only under `valentinyeo/multiprompt`. That repository stays permanent and keeps feeding updates; see `docs/release-path.md`. Keep executable names and release asset names unchanged.
+
 ## Configure your own deployment
 
 `wrangler.jsonc` is an example, not a ready-to-deploy production configuration. Replace:
