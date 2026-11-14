@@ -4,7 +4,7 @@ Agent sessions on the server can list the live chats by the name shown in the de
 
 ## Install
 
-Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py` and `mp_sessions.py` to `~/.local/share/multiprompt-talk/` and writes the `mp-send` and `mp-sessions` wrappers into `~/.local/bin`. Run it again after a release to update.
+Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py` and `mp_helper.py` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions` and `mp-helper` wrappers into `~/.local/bin`. Run it again after a release to update.
 
 ## List chats
 
@@ -30,6 +30,28 @@ mp-send --to "@Multi Bot Opus Lead{live-308b1fc}" "mention form from the @ pill"
 - Sending to your own chat is refused.
 
 The old form `mp-send <provider> <sid> "text" --tmux <session>` still works.
+
+## Helper chats
+
+A chat starts its own helper chats with `mp-helper`. The desktop publishes it into `~/.multiprompt-runtime`, which is on every live chat's PATH, so no install step is needed. The server starts the helper, and the desktop opens its tab through the zsb bridge. A zsb wrapper older than `--after-tab` falls back to the parent's group.
+
+```sh
+mp-helper start --name "Research A" --model sonnet --effort high --task "Find why the build fails"
+mp-helper start --name "Research B" --model haiku --folder ~/projects/other --task - < brief.md
+mp-helper list
+mp-helper read "Research A" --wait
+mp-helper send "Research A" "Also check the release log"
+mp-helper close "Research A"
+```
+
+- `start` runs from inside a chat. That chat is the parent. The helper tab opens right below the parent's tab, in the same workspace and group.
+- `--model` is opus, sonnet, haiku or fable. `--effort` is low, medium or high. Both default to the server's Claude defaults. `--folder` defaults to the current folder.
+- The same name under the same parent is the same helper. A repeat start reuses it and the same first task is not sent twice.
+- The helper runs with bypassPermissions, like other server-started chats. Use trusted folders only.
+- `read` prints the helper's reply to its latest prompt. `--wait` waits until its turn ends (default 600 seconds). `--json` prints name, state and reply.
+- `send` puts a message into the helper, starting with `From <parent name>:`.
+- `list` and `close` see only the calling chat's helpers. `close` stops the helper and closes its tab. The desktop refuses to close the tab you are looking at; the helper still stops.
+- When the parent tab is not open on a desktop, the helper still runs and `start` reports `"visible":false`.
 
 ## Where names come from
 

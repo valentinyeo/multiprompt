@@ -320,6 +320,7 @@
   "IGSH-1968": "Ctrl+K stops listing 37 outdated commands",
   "IGSH-1973": "Multibot keeps the processor busy while idle",
   "IGSH-1974": "Inne chats: the / menu shows another account's skills",
+  "IGSH-2013": "Chats start their own visible helper chats",
   "IGSH-2272": "Check /clear works in live chats",
   "IGSH-2010": "Chat view freezes Multibot for 5 seconds",
   "IGSH-212": "zsb: type sends multi-line text into chat composers (newlines fire as Enter)",
