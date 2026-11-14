@@ -14,9 +14,16 @@ function Model-Palette([string]$Query, [string]$Screenshot) {
     Press @(0x0D) "Enter: $Query"
 }
 function Plus-Rows([string]$Screenshot) {
+    $offset = (Read-Shared "$settings/debug.log").Length
     Model-Palette 'plus attach file' "palette-$Screenshot"
     [void](Wait-For 'plus menu open' { [ChatDeliveryDesktop]::PlusMenu($main) -ne [IntPtr]::Zero } 10)
-    $logged = Wait-For 'plus menu rows logged' { $t = (Read-Shared "$settings/debug.log"); if ($t -match '\[chat\] plus menu model_opus rect=-?\d+,-?\d+,-?\d+,-?\d+') { $t } } 10
+    $logged = Wait-For 'plus menu rows logged' {
+        $t = (Read-Shared "$settings/debug.log")
+        if ($t.Length -gt $offset) {
+            $fresh = $t.Substring($offset)
+            if ($fresh -match '\[chat\] plus menu model_opus rect=-?\d+,-?\d+,-?\d+,-?\d+') { $fresh }
+        }
+    } 10
     $rects = @{}
     foreach ($found in [regex]::Matches($logged, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
         $rects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
@@ -49,14 +56,16 @@ function Plus-Click([string]$Item, [string]$Screenshot) {
         $x = [int](($cell.left + $cell.right) / 2)
         $y = [int](($cell.top + $cell.bottom) / 2)
         Doctor
-        Assert-Foreground
-        Record "Click plus menu $Item at $x,$y"
+        if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) }
+        if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing plus menu input: owned app is not foreground' }
         $actions.Add(@{case=$plan.name; input='choose plus menu row'; text=$Item; attempt=$attempt; x=$x; y=$y})
         [ChatDeliveryDesktop]::PressClient($menu, $app.Id, $x, $y)
         $closed = $true
         try { [void](Wait-For "plus menu closed after $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 5) } catch { $closed = $false }
         if ($closed) { return }
         if ($attempt -eq 3) { throw "Plus menu stayed open after clicking $Item" }
+        Press @(0x1B) "Escape: close plus menu after $Item"
+        [void](Wait-For "plus menu closed after escape $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 5)
     }
 }
 function Model-Copy([string]$Stage) {
@@ -104,7 +113,6 @@ foreach ($choice in $choices) {
             } 20)
         } catch {
             if ($tries -ge 2) { throw }
-            Record "Host config kept the old setting after choosing $($choice.name); choosing it again"
             $retry = $true
         }
     }
