@@ -637,6 +637,9 @@ jobs:
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs
+      - name: Test routing and message IDs
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: node --test tools/check-routing-ids.test.js
       - name: Check Zig syntax
         if: steps.paths.outputs.heavy == 'true'
         run: node tools/check-zig-syntax.mjs
@@ -733,18 +736,47 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
         run: |
-          $base = (git merge-base $env:BASE HEAD).Trim()
-          git worktree add --detach baseline $base
-          if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
-          node tools/switch-performance.mjs instrument baseline
-          if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
-          Push-Location baseline
-          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Baseline build failed' } } finally { Pop-Location }
+          $requested = (git merge-base $env:BASE HEAD).Trim()
+          $base = $requested
+          $buildError = ''
+          for ($attempt = 0; $attempt -lt 12; $attempt += 1) {
+            git worktree remove --force baseline 2>$null
+            git worktree add --detach baseline $base
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
+            node tools/switch-performance.mjs instrument baseline
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
+            $log = Join-Path $env:RUNNER_TEMP "baseline-build-$attempt.log"
+            Push-Location baseline
+            try { zig build *> $log } finally { Pop-Location }
+            if ($LASTEXITCODE -eq 0) { break }
+            $firstError = Select-String -Path $log -Pattern 'error:' | Select-Object -First 1
+            if ($firstError) { $buildError = $firstError.Line.Trim() }
+            $parent = (git rev-parse "$base^").Trim()
+            if ($LASTEXITCODE -ne 0 -or -not $parent) { throw "Baseline build failed on $base and has no ancestor left: $buildError" }
+            $base = $parent
+            if ($attempt -eq 11) { throw "Baseline build failed after 12 ancestors of $requested: $buildError" }
+          }
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "baseline/zig-out/bin/ssh.exe"
           if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "baseline/zig-out/bin/tmux.exe"
           if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
           "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SPEED_REQUESTED_BASE=$requested" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          if ($base -ne $requested) {
+            "SPEED_BASE_FALLBACK=$buildError" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+      - name: Record baseline commit
+        shell: bash
+        run: |
+          mkdir -p evidence/base
+          {
+            printf 'requested base: %s\n' "$SPEED_REQUESTED_BASE"
+            printf 'measured baseline: %s\n' "$SPEED_BASE"
+            if [ -n "${SPEED_BASE_FALLBACK:-}" ]; then
+              printf 'walked back because: %s\n' "$SPEED_BASE_FALLBACK"
+            fi
+          } > evidence/base/baseline.txt
+          cat evidence/base/baseline.txt
       - name: Measure baseline session speed
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
