@@ -2390,6 +2390,66 @@ def message_expire(db, provider, sid):
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
 
 
+MESSAGE_HEAL_LIMIT = 20
+MESSAGE_HEAL_AGE = 3 * 86400
+MESSAGE_HEAL_BYTES = 32 * 1024 * 1024
+MESSAGE_HEAL_SEEN = {}
+
+
+def message_native_uuid(token):
+    import uuid
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot:' + token))
+
+
+def transcript_has_user_uuid(blob, native):
+    needle = native.encode()
+    start = blob.find(needle)
+    while start >= 0:
+        begin = blob.rfind(b'\n', 0, start) + 1
+        end = blob.find(b'\n', start)
+        line = blob[begin:end if end >= 0 else len(blob)]
+        try:
+            row = json.loads(line)
+        except (ValueError, UnicodeError):
+            row = None
+        if isinstance(row, dict) and row.get('type') == 'user' and row.get('uuid') == native:
+            return True
+        start = blob.find(needle, start + len(needle))
+    return False
+
+
+def message_heal_from_transcript(db, provider, sid, transcript, epoch):
+    if provider != 'claude' or not transcript:
+        return
+    rows = db.execute("SELECT id,attempt FROM shared_messages WHERE provider=? AND sid=? AND epoch=? AND state='failed' AND (receipt IS NULL OR receipt IN ('waiting_too_long','legacy_delivery_unconfirmed')) AND created>? ORDER BY created DESC LIMIT ?",
+                      (provider, sid, epoch, time.time() - MESSAGE_HEAL_AGE, MESSAGE_HEAL_LIMIT)).fetchall()
+    if not rows:
+        return
+    try:
+        with Path(transcript).open('rb') as source:
+            stat = os.fstat(source.fileno())
+            signature = (str(transcript), stat.st_size, stat.st_mtime_ns)
+            checked = MESSAGE_HEAL_SEEN.get((provider, sid))
+            if checked and checked[0] == signature and all(token in checked[1] for token, _ in rows):
+                return
+            source.seek(max(0, stat.st_size - MESSAGE_HEAL_BYTES))
+            blob = source.read()
+    except OSError:
+        return
+    MESSAGE_HEAL_SEEN[(provider, sid)] = (signature, {token for token, _ in rows})
+    facts = []
+    for token, attempt in rows:
+        native = message_native_uuid(token)
+        if not transcript_has_user_uuid(blob, native):
+            continue
+        digest = hashlib.sha256(('transcript:' + sid + ':' + token + ':' + attempt).encode()).hexdigest()
+        facts.append(dict(kind='accepted', sid=sid, id=token, attempt=attempt, event_id='transcript:accepted:' + digest,
+                          provenance='transcript_user_uuid'))
+    if facts:
+        saved = db.execute('SELECT state FROM connector_states WHERE provider=? AND sid=?', (provider, sid)).fetchone()
+        message_apply_connector(db, provider, sid, epoch, dict(state=json.loads(saved[0]) if saved else {}, facts=facts))
+
+
 def codex_attempt_claim(tmux, key):
     from contextlib import closing
     fields = (key.get('provider'), key.get('sid'), key.get('id'), key.get('attempt'), key.get('epoch'), key.get('text_sha256'))
@@ -4823,15 +4883,25 @@ def host_claude_recall(provider, sid, tmux, session, entry):
     return dict(status="ok")
 
 
+def host_turn_carry(provider, session, payload):
+    if provider != "claude" or payload.get("status") == "interrupted":
+        return []
+    return [entry for entry in session.get("sends") or []
+            if not entry.get("accepted") and not entry.get("carried") and entry.get("room_scope") is None]
+
+
 def host_turn_end(provider, sid, tmux, session, payload, detail):
     inflight = session.get("inflight")
+    carried = host_turn_carry(provider, session, payload)
     host_stream_finish(provider, sid, tmux, session)
     host_event(provider, sid, tmux, session, "turn.ended", payload)
-    session["state"]["inflight"] = None
-    session["state"]["sends"] = []
-    session["inflight"] = None
-    session["sends"] = []
-    session["turn"] = None
+    for entry in carried:
+        entry["carried"] = True
+    session["sends"] = carried
+    session["inflight"] = carried[0] if carried else None
+    session["turn"] = carried[0]["turn"] if carried else None
+    session["state"]["inflight"] = session["inflight"]
+    session["state"]["sends"] = [entry["id"] for entry in carried]
     session["interrupted"] = False
     host_state_write(provider, sid, session["state"])
     host_log(provider, sid, "turn_done", dict(id=inflight.get("id") if isinstance(inflight, dict) else None, **detail))
@@ -6142,6 +6212,8 @@ def message_store_transaction(q):
             if facts:
                 message_apply_connector(db, provider, sid, epoch, dict(state=state, facts=facts))
         message_expire(db, provider, sid)
+        if resolved and resolved[0] == sid:
+            message_heal_from_transcript(db, provider, sid, resolved[1], epoch)
         epoch, seq = db.execute('SELECT epoch,seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()
         if op in ('message_submit', 'message_snapshot', 'message_events', 'message_status', 'message_retry', 'message_reset'):
             if resolved and resolved[0] == sid:
