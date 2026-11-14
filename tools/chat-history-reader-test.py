@@ -6845,16 +6845,17 @@ class HostTurnTailTest(HostEventStreamFixture, unittest.TestCase):
         self.assertIsNone(self.session['inflight'])
         self.assertIsNone(self.session['turn'])
 
-    def test_igsh_2350_an_unanswered_tail_message_is_dropped_at_the_following_turn_end(self):
+    def test_igsh_2350_the_carried_tail_message_is_accepted_when_the_next_turn_ends_without_a_reply(self):
         self.session['sends'] = []
         self.session['turn'] = None
         self.deliver('first-message-0001', 'first prompt')
         self.reply('one')
-        self.deliver('tail-message-00001', 'never answered')
+        tail = self.deliver('tail-message-00001', 'answered with no text')
         self.finish()
         self.assertEqual(len(self.session['sends']), 1)
-        self.session['sends'][0]['accepted'] = False
+        self.assertFalse(tail['accepted'])
         self.finish()
+        self.assertTrue(tail['accepted'], 'the next result must accept the carried write, never lose it')
         self.assertEqual(self.session['sends'], [])
         self.assertIsNone(self.session['inflight'])
 
@@ -6880,6 +6881,32 @@ class HostTranscriptHealTest(AgentHostFixture, unittest.TestCase):
         self.write_user_line(self.token, 'delivered but never confirmed')
         row = self.message()
         self.assertEqual(row['state'], 'accepted')
+
+    def test_igsh_2350_a_hosted_chat_with_no_terminal_pane_heals_from_its_own_transcript(self):
+        self.enable()
+        reader.resolve_tmux_agent.return_value = None
+        self.seed(text='delivered to a headless chat')
+        self.mark_failed(self.token)
+        self.write_user_line(self.token, 'delivered to a headless chat')
+        self.assertEqual(self.message()['state'], 'accepted')
+
+    def test_igsh_2350_a_line_written_after_an_earlier_scan_is_still_found(self):
+        self.seed(text='arrives late')
+        self.mark_failed(self.token)
+        self.write_user_line('another-message-0001', 'something else')
+        self.assertEqual(self.message()['state'], 'failed')
+        self.write_user_line(self.token, 'arrives late')
+        self.assertEqual(self.message()['state'], 'accepted')
+
+    def test_igsh_2350_an_unchanged_transcript_is_not_scanned_again(self):
+        self.seed(text='never delivered')
+        self.mark_failed(self.token)
+        self.write_user_line('another-message-0001', 'something else')
+        self.assertEqual(self.message()['state'], 'failed')
+        with patch.object(reader, 'transcript_has_user_uuid', wraps=reader.transcript_has_user_uuid) as scan:
+            self.assertEqual(self.message()['state'], 'failed')
+            self.assertEqual(self.message()['state'], 'failed')
+        self.assertEqual(scan.call_count, 0)
 
     def test_igsh_2350_a_failed_message_missing_from_the_transcript_stays_failed(self):
         self.seed(text='really never delivered')

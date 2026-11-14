@@ -2300,6 +2300,7 @@ def message_store_db(tmux):
         db.execute("CREATE TABLE IF NOT EXISTS message_snapshots (id TEXT PRIMARY KEY, provider TEXT NOT NULL, sid TEXT NOT NULL, epoch INTEGER NOT NULL, seq INTEGER NOT NULL, created REAL NOT NULL, body TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS legacy_bindings (token TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, sid TEXT NOT NULL, queued_at INTEGER NOT NULL, origin INTEGER NOT NULL, inode INTEGER NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS legacy_locations (token TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(token,path))")
+        db.execute("CREATE TABLE IF NOT EXISTS message_heal_checked (id TEXT PRIMARY KEY, inode INTEGER NOT NULL, offset INTEGER NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS message_locators (provider TEXT NOT NULL, sid TEXT NOT NULL, tmux TEXT NOT NULL, PRIMARY KEY(provider,sid))")
         db.execute("CREATE TABLE IF NOT EXISTS message_room_scopes (id TEXT PRIMARY KEY REFERENCES shared_messages(id), scope TEXT NOT NULL)")
     return db
@@ -2392,8 +2393,7 @@ def message_expire(db, provider, sid):
 
 MESSAGE_HEAL_LIMIT = 20
 MESSAGE_HEAL_AGE = 3 * 86400
-MESSAGE_HEAL_BYTES = 32 * 1024 * 1024
-MESSAGE_HEAL_SEEN = {}
+MESSAGE_HEAL_BYTES = 8 * 1024 * 1024
 
 
 def message_native_uuid(token):
@@ -2426,28 +2426,54 @@ def message_heal_from_transcript(db, provider, sid, transcript, epoch):
     if not rows:
         return
     try:
+        stat = Path(transcript).stat()
+    except OSError:
+        return
+    floor = max(0, stat.st_size - MESSAGE_HEAL_BYTES)
+    starts = {}
+    for token, _ in rows:
+        mark = db.execute('SELECT inode,offset FROM message_heal_checked WHERE id=?', (token,)).fetchone()
+        if mark and mark[0] == stat.st_ino and mark[1] <= stat.st_size:
+            if mark[1] < stat.st_size:
+                starts[token] = max(floor, mark[1])
+        else:
+            starts[token] = floor
+    if not starts:
+        return
+    first = min(starts.values())
+    try:
         with Path(transcript).open('rb') as source:
-            stat = os.fstat(source.fileno())
-            signature = (str(transcript), stat.st_size, stat.st_mtime_ns)
-            checked = MESSAGE_HEAL_SEEN.get((provider, sid))
-            if checked and checked[0] == signature and all(token in checked[1] for token, _ in rows):
-                return
-            source.seek(max(0, stat.st_size - MESSAGE_HEAL_BYTES))
+            source.seek(first)
             blob = source.read()
     except OSError:
         return
-    MESSAGE_HEAL_SEEN[(provider, sid)] = (signature, {token for token, _ in rows})
+    boundary = first + blob.rfind(b'\n') + 1 if b'\n' in blob else first
     facts = []
     for token, attempt in rows:
-        native = message_native_uuid(token)
-        if not transcript_has_user_uuid(blob, native):
+        if token not in starts:
             continue
-        digest = hashlib.sha256(('transcript:' + sid + ':' + token + ':' + attempt).encode()).hexdigest()
-        facts.append(dict(kind='accepted', sid=sid, id=token, attempt=attempt, event_id='transcript:accepted:' + digest,
-                          provenance='transcript_user_uuid'))
+        if transcript_has_user_uuid(blob[starts[token] - first:], message_native_uuid(token)):
+            digest = hashlib.sha256(('transcript:' + sid + ':' + token + ':' + attempt).encode()).hexdigest()
+            facts.append(dict(kind='accepted', sid=sid, id=token, attempt=attempt, event_id='transcript:accepted:' + digest,
+                              provenance='transcript_user_uuid'))
+        else:
+            db.execute('INSERT OR REPLACE INTO message_heal_checked(id,inode,offset) VALUES (?,?,?)', (token, stat.st_ino, boundary))
     if facts:
         saved = db.execute('SELECT state FROM connector_states WHERE provider=? AND sid=?', (provider, sid)).fetchone()
         message_apply_connector(db, provider, sid, epoch, dict(state=json.loads(saved[0]) if saved else {}, facts=facts))
+
+
+def message_heal_transcript(provider, sid, tmux, resolved):
+    if provider != 'claude':
+        return None
+    if resolved and resolved[0] == sid:
+        return resolved[1]
+    try:
+        if host_dispatch_switch(provider, sid) and host_chat_name(provider, sid) == tmux:
+            return conversation_path(provider, sid, host_cwd(provider, sid))
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 def codex_attempt_claim(tmux, key):
@@ -6212,8 +6238,7 @@ def message_store_transaction(q):
             if facts:
                 message_apply_connector(db, provider, sid, epoch, dict(state=state, facts=facts))
         message_expire(db, provider, sid)
-        if resolved and resolved[0] == sid:
-            message_heal_from_transcript(db, provider, sid, resolved[1], epoch)
+        message_heal_from_transcript(db, provider, sid, message_heal_transcript(provider, sid, tmux, resolved), epoch)
         epoch, seq = db.execute('SELECT epoch,seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()
         if op in ('message_submit', 'message_snapshot', 'message_events', 'message_status', 'message_retry', 'message_reset'):
             if resolved and resolved[0] == sid:
