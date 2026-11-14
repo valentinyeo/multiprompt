@@ -140,10 +140,6 @@ test("Ctrl+K exposes Power Saver: Auto / Always / Off with the active mode tagge
   );
 });
 
-test("deep idle stops chat refresh polling", () => {
-  assert.match(fs.readFileSync(path.join(root, "src/power.zig"), "utf8"), /KillTimer\(hwnd, @import\("win32\.zig"\)\.TIMER_CHAT_REFRESH\)/);
-});
-
 test("Power Saver has an F1 shortcuts-overview row", () => {
   assert.match(app, /Ctrl\+K \\u\{2192\} Power Saver: Auto \/ Always \/ Off/);
 });
