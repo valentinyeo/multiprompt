@@ -5568,7 +5568,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
                 defer _ = SelectObject(mem_dc, old_font);
                 _ = SetTextColor(mem_dc, if (app_state.g_light_theme) RGB(176, 78, 58) else RGB(232, 146, 122));
                 var label = RECT{ .left = rc.left, .top = rc.bottom - uiScaled(CHAT_STATUS_H), .right = rc.right - uiScaled(6), .bottom = rc.bottom };
-                _ = chatDrawText(mem_dc, L("Not sent"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                _ = chatDrawText(mem_dc, if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].ai_stopped) L("AI stopped") else L("Not sent"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
             }
             if (nav_index != null and nav_index.? == app_state.g_chat_block_count + i) chatPaintNavRing(mem_dc, rc);
             send_latency.noteDrawn(app_state.g_chat_outbox.items[ei].id);
