@@ -33,3 +33,28 @@ test('weekly tick uses elapsed time, not quota usage, and the native card keeps 
   assert.match(card, /w.WM_APP_CHANGELOG_OPEN/);
   assert.match(card, /test "IGSH-1086 usage card keeps missing windows honest/);
 });
+
+test('IGSH-2349 usage card repaints only the card area, never the whole client window', () => {
+  const card = read('src/usage_card.zig');
+  const refresh = card.slice(card.indexOf('pub fn refresh()'), card.indexOf('pub fn close()'));
+  assert.ok(refresh.length > 0);
+  assert.doesNotMatch(refresh, /InvalidateRect\(window, null/);
+  assert.match(refresh, /invalidateCardRows\(/);
+  const key = card.slice(card.indexOf('pub fn key('), card.indexOf('fn wndProc('));
+  assert.doesNotMatch(key, /InvalidateRect\(window, null/);
+  const proc = card.slice(card.indexOf('fn wndProc('));
+  const wheel = proc.slice(proc.indexOf('w.WM_MOUSEWHEEL =>'), proc.indexOf('w.WM_SETCURSOR =>'));
+  assert.ok(wheel.length > 0);
+  assert.doesNotMatch(wheel, /InvalidateRect\(hwnd, null/);
+  const paintMsg = proc.slice(proc.indexOf('w.WM_PAINT =>'), proc.indexOf('w.WM_MOUSEMOVE =>'));
+  assert.ok(paintMsg.length > 0);
+  assert.match(paintMsg, /ps\.rcPaint/);
+  assert.doesNotMatch(paintMsg, /saved\.width, saved\.height/);
+});
+
+test('IGSH-2349 usage card logs how long opening and slow painting take', () => {
+  const card = read('src/usage_card.zig');
+  const open = card.slice(card.indexOf('fn openMode('), card.indexOf('fn openNotes('));
+  assert.match(open, /\[usage-card\] open passive=/);
+  assert.match(card, /\[usage-card\] slow paint ms=/);
+});

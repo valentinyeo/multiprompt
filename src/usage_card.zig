@@ -286,6 +286,23 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
     text(dc, "Grey tick = time passed in the window", .{ .left = left, .right = right, .top = nr.bottom + px(4), .bottom = nr.bottom + px(20) }, RGB(105, 105, 105), 0);
 }
 
+fn nowMs() u64 {
+    var counter: i64 = 0;
+    var frequency: i64 = 0;
+    _ = w.QueryPerformanceCounter(&counter);
+    _ = w.QueryPerformanceFrequency(&frequency);
+    return @intCast(@divTrunc(counter * 1000, @max(frequency, 1)));
+}
+
+fn invalidateCardRows(count: usize) void {
+    var area = geometry(bounds, anchor, count);
+    area.left -= px(4);
+    area.top -= px(4);
+    area.right += px(4);
+    area.bottom += px(4);
+    _ = w.InvalidateRect(window, &area, 0);
+}
+
 pub fn refresh() void {
     if (backdrop == null) return;
     if (hover_open and @import("update_card.zig").updateCardVisible()) {
@@ -309,7 +326,8 @@ pub fn refresh() void {
         }
     }
     scroll_y = @min(scroll_y, scrollLimit(geometry(bounds, anchor, count), count));
-    _ = w.InvalidateRect(window, null, 0);
+    if (old_count != count) invalidateCardRows(old_count);
+    invalidateCardRows(count);
 }
 
 pub fn close() void {
@@ -363,6 +381,7 @@ pub fn open() void {
 }
 
 fn openMode(passive: bool) void {
+    const started_ms = nowMs();
     const main = state.g_main_hwnd orelse return;
     if (state.g_sidebar_collapsed or state.g_hide_sidebar) return;
     _ = w.GetClientRect(main, &bounds);
@@ -387,6 +406,7 @@ fn openMode(passive: bool) void {
     const old = w.SelectObject(dc, bitmap);
     _ = w.BitBlt(dc, 0, 0, bounds.right, bounds.bottom, screen, origin.x, origin.y, 0x40CC0020);
     _ = w.GdiFlush();
+    const captured_ms = nowMs();
     const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. @as(usize, @intCast(bounds.right)) * @as(usize, @intCast(bounds.bottom))];
     if (!passive) {
         for (pixels) |*pixel| {
@@ -443,6 +463,8 @@ fn openMode(passive: bool) void {
         _ = w.SetCapture(window);
     }
     _ = w.InvalidateRect(window, null, 0);
+    var open_log: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&open_log, "[usage-card] open passive={} capture_ms={d} total_ms={d}", .{ passive, captured_ms - started_ms, nowMs() - started_ms }) catch "[usage-card] open");
 }
 
 fn openNotes() void {
@@ -464,7 +486,7 @@ pub fn key(value: usize) bool {
         const count = rowCount(&snapshot);
         const card = geometry(bounds, anchor, count);
         scroll_y = scrollLimit(card, count);
-        _ = w.InvalidateRect(window, null, 0);
+        invalidateCardRows(count);
     } else if (value == 0x0D and notes_focus) {
         openNotes();
     } else if (value == 0x26 or value == 0x28 or value == 0x21 or value == 0x22) {
@@ -472,7 +494,7 @@ pub fn key(value: usize) bool {
         const card = geometry(bounds, anchor, count);
         const step = if (value == 0x21 or value == 0x22) card.bottom - card.top - px(24) else px(40);
         scroll_y = std.math.clamp(scroll_y + (if (value == 0x26 or value == 0x21) -step else step), 0, scrollLimit(card, count));
-        _ = w.InvalidateRect(window, null, 0);
+        invalidateCardRows(count);
     }
     return true;
 }
@@ -488,8 +510,15 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             const dc = w.BeginPaint(hwnd, &ps);
             defer _ = w.EndPaint(hwnd, &ps);
             if (backdrop) |saved| {
-                _ = w.BitBlt(dc, 0, 0, saved.width, saved.height, saved.dc, 0, 0, 0x00CC0020);
+                const paint_started_ms = nowMs();
+                const dirty = ps.rcPaint;
+                _ = w.BitBlt(dc, dirty.left, dirty.top, dirty.right - dirty.left, dirty.bottom - dirty.top, saved.dc, dirty.left, dirty.top, 0x00CC0020);
                 paint(dc, bounds, anchor, &snapshot);
+                const paint_ms = nowMs() - paint_started_ms;
+                if (paint_ms >= 16) {
+                    var paint_log: [96]u8 = undefined;
+                    debugLog(std.fmt.bufPrint(&paint_log, "[usage-card] slow paint ms={d}", .{paint_ms}) catch "[usage-card] slow paint");
+                }
             }
             return 0;
         },
@@ -520,7 +549,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             const card = geometry(bounds, anchor, count);
             const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
             scroll_y = std.math.clamp(scroll_y - @divTrunc(@as(i32, delta) * px(48), 120), 0, scrollLimit(card, count));
-            _ = w.InvalidateRect(hwnd, null, 0);
+            invalidateCardRows(count);
             return 0;
         },
         w.WM_SETCURSOR => {
