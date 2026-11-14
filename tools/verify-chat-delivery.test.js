@@ -1086,7 +1086,7 @@ from unittest.mock import patch
 root = Path(sys.argv[1])
 tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8'))
 functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ('reader_namespace', 'watch_reader')]
-with tempfile.TemporaryDirectory() as temp:
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
     home = Path(temp)
     cwd = str(home / 'work' / 'demo')
     path = home / '.claude/projects' / re.sub(r'[^A-Za-z0-9]', '-', cwd) / 'sid.jsonl'
