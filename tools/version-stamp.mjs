@@ -4,8 +4,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tokenize } from './strip-comments.mjs';
-import { ticketRecord, ticketLine, resolveTicketTitles } from './ticket-titles.mjs';
-const titleCatalog = JSON.parse(fs.readFileSync(new URL('./ticket-titles.json', import.meta.url), 'utf8'));
+import { ticketRecord, ticketLine, resolveTicketTitles, loadTicketTitles } from './ticket-titles.mjs';
+const titleCatalog = loadTicketTitles();
 
 const reviewedReleases = {
   'v0.28.1027': ['77690fa1b105d6cd8070484decb8273d835334bf', { 'IGSH-1154': null }],

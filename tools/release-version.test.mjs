@@ -31,8 +31,9 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
   const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh'];
-  if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs', 'ticket-titles.json');
+  if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs');
   for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  fs.cpSync(path.join(root, 'tools/ticket-titles'), path.join(dir, 'tools/ticket-titles'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');

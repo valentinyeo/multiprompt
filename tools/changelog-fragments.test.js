@@ -53,10 +53,8 @@ test('release stamps preserve plain Unicode and quoted product lines; exact stam
 
 test('pending fragment tickets stamp from the shared title catalog', async () => {
   const { stampTree } = await import('./version-stamp.mjs');
-  const { ticketLine, ticketRecord } = await import('./ticket-titles.mjs');
-  const catalog = JSON.parse(fs.readFileSync(path.join(root, 'tools/ticket-titles.json'), 'utf8'));
-  const fixture = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
-  assert.deepEqual(catalog, fixture);
+  const { ticketLine, ticketRecord, loadTicketTitles } = await import('./ticket-titles.mjs');
+  const catalog = loadTicketTitles();
   const names = fs.readdirSync(path.join(root, 'changelog.d')).filter(name => name !== 'README.md');
   const files = {
     'src/main.zig': fs.readFileSync(path.join(root, 'src/main.zig'), 'utf8'),
