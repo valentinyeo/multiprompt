@@ -28,6 +28,8 @@ Description=Multiprompt release check on the test laptop
 Type=oneshot
 Environment=PATH=$PATH
 Environment="LAPTOP_CHECK_AGENT=$agent"
+ExecStartPre=-/usr/bin/git -C $repo fetch --depth 1 origin master
+ExecStartPre=-/usr/bin/git -C $repo checkout -q --detach origin/master
 ExecStart=/usr/bin/env node $repo/tools/laptop-check/run.mjs --host $host
 UNIT
 cat > "$HOME/.config/systemd/user/$unit.timer" <<UNIT

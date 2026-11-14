@@ -82,6 +82,8 @@ test('the setup script keeps a runner name that contains a space', () => {
 
     const unit = fs.readFileSync(path.join(home, '.config/systemd/user/multiprompt-laptop-check.service'), 'utf8');
     assert.match(unit, /^Environment="LAPTOP_CHECK_AGENT=RUNNER 14"$/m);
+    assert.match(unit, /^ExecStartPre=-\/usr\/bin\/git -C \S+ fetch --depth 1 origin master$/m);
+    assert.match(unit, /^ExecStartPre=-\/usr\/bin\/git -C \S+ checkout -q --detach origin\/master$/m);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
