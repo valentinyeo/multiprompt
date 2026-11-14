@@ -120,6 +120,12 @@ function run(file, dir) {
   return { ...result, output: (result.stdout || '') + (result.stderr || '') };
 }
 
+function assertionFailure(file, output) {
+  return file.endsWith('.py')
+    ? /^FAIL: /m.test(output) && /AssertionError/.test(output) && !/^ERROR: /m.test(output)
+    : /^# fail [1-9]\d*$/m.test(output) && /code: ['"]ERR_ASSERTION['"]/.test(output) && !/(?:code: ['"](?:MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ENOENT)['"]|name: ['"](?:Syntax|Reference|Type)Error['"])/.test(output);
+}
+
 try {
   console.log(`merge-base=${base} head=${head}`);
   if (changed.length && changed.every(file => docs.test(file))) {
@@ -131,6 +137,13 @@ try {
       git('worktree', 'add', '--quiet', '--detach', dir, ref);
       worktrees.push(dir);
     }
+    const baseDir = path.join(scratch, 'plain');
+    const ensureBase = () => {
+      if (fs.existsSync(baseDir)) return;
+      git('worktree', 'add', '--quiet', '--detach', baseDir, base);
+      worktrees.push(baseDir);
+      if (tests.some(file => file.startsWith('service/test/'))) prepareService(baseDir);
+    };
     const stampPaths = /^(?:src\/(?:main|changelog)\.zig|changelog\.d\/[^/]+)$/;
     const workflow = /^\.github\/workflows\/[^/]+\.ya?ml$/;
     if (changed.length && changed.every(file => stampPaths.test(file)) && classifyTrees(snapshot(red), snapshot(green), changed) === 'STAMP') {
@@ -153,11 +166,17 @@ try {
         if (testOnly) continue;
         const before = run(file, red);
         console.log(`MERGE_BASE ${file}\n${before.output}`);
-        if (before.status === 0) throw new Error(`${file} stayed green on merge-base source; the test does not prove this fix.`);
-        const assertion = file.endsWith('.py')
-          ? /^FAIL: /m.test(before.output) && /AssertionError/.test(before.output) && !/^ERROR: /m.test(before.output)
-          : /^# fail [1-9]\d*$/m.test(before.output) && /code: ['"]ERR_ASSERTION['"]/.test(before.output) && !/(?:code: ['"](?:MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|ENOENT)['"]|name: ['"](?:Syntax|Reference|Type)Error['"])/.test(before.output);
-        if (before.error || before.status !== 1 || !assertion) throw new Error(`${file} needs an assertion failure on merge-base source, not an infrastructure or loading error.`);
+        if (before.status === 0) {
+          ensureBase();
+          const repaired = run(file, baseDir);
+          console.log(`MERGE_BASE_SUITE ${file}\n${repaired.output}`);
+          if (repaired.error || repaired.status === 0 || !assertionFailure(file, repaired.output)) {
+            throw new Error(`${file} stayed green on merge-base source; the test does not prove this fix.`);
+          }
+          console.log(`REPAIR PROVEN ${file} exit=${repaired.status} merge-base=${base}`);
+          continue;
+        }
+        if (before.error || before.status !== 1 || !assertionFailure(file, before.output)) throw new Error(`${file} needs an assertion failure on merge-base source, not an infrastructure or loading error.`);
         console.log(`RED PROVEN ${file} exit=${before.status} merge-base=${base}`);
       }
       console.log(`${testOnly ? 'TEST_ONLY_PROVEN' : 'RED_RUN_PROVEN'} ${tests.length} changed suites`);

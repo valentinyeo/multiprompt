@@ -277,7 +277,7 @@ for (const [before, after] of [
   assert.throws(() => nativePaletteFocusContract(broken), assert.AssertionError, `reject focus regression: ${before}`);
 }
 const workflow = read('.github/workflows/verify.yml');
-assert.ok(workflow.includes('      - tools/check-workspace-focus.mjs'));
+assert.ok(read('.github/workflows/click-through.yml').includes(' tools '), 'the click-through gate reruns when the focus tool changes');
 assert.ok(workflow.includes('run: node tools/check-workspace-focus.mjs'));
 function authorizationLifetimeContract(focus, shortcuts, main) {
   const clears = /app_state\.g_focus_authorized_hwnd = null;\s*app_state\.g_focus_authorized_until = 0;\s*app_state\.g_focus_browser_shell_id = 0;/;
@@ -320,7 +320,7 @@ function workspaceFocusLandingContract(focus, workspaces) {
   const foreground = focus.slice(focus.indexOf('pub noinline fn SetForegroundWindow('), focus.indexOf('pub noinline fn SetFocus('));
   const setFocus = focus.slice(focus.indexOf('pub noinline fn SetFocus('), focus.indexOf('fn focusGuardLanded('));
   assert.match(foreground, /if \(result != 0 and hwnd != app_state\.g_main_hwnd\) focusGuardLanded\(hwnd\);/);
-  assert.match(setFocus, /if \(GetFocus\(\) == hwnd\) focusGuardLanded\(hwnd\);/);
+  assert.match(setFocus, /if \(actual_focus == hwnd\) \{\s*focusGuardLanded\(hwnd\);/);
   const landed = focus.slice(focus.indexOf('fn focusGuardLanded('), focus.indexOf('pub noinline fn AttachThreadInput('));
   assert.match(landed, /app_state\.g_focus_browser_shell_id = 0;\s*@import\("workspaces.zig"\)\.captureWorkspaceFocus\(\);\s*\}\s*\}/, 'capture the observed landing before frame activation can obscure the console');
   assert.equal((landed.match(/captureWorkspaceFocus\(/g) || []).length, 1);
@@ -335,7 +335,7 @@ const workspaces = read('src/workspaces.zig');
 workspaceFocusLandingContract(focusSource, workspaces);
 for (const [before, after] of [
   ['@import("workspaces.zig").captureWorkspaceFocus();', ''],
-  ['if (GetFocus() == hwnd) focusGuardLanded(hwnd);', 'focusGuardLanded(hwnd);'],
+  ['if (actual_focus == hwnd) {\n        focusGuardLanded(hwnd);\n    }', 'focusGuardLanded(hwnd);'],
   ['if (result != 0 and hwnd != app_state.g_main_hwnd) focusGuardLanded(hwnd);', 'focusGuardLanded(hwnd);'],
 ]) {
   const broken = focusSource.replace(before, after);
