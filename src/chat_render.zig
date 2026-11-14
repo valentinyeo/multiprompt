@@ -580,7 +580,15 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             if (limit <= pos) limit = pos + 1;
             var fit: i32 = 0;
             var size: SIZE = undefined;
-            _ = GetTextExtentExPointW(hdc, text[pos..limit].ptr, @intCast(limit - pos), max_w - x, &fit, null, &size);
+            var measure_end = limit;
+            if (limit - pos > 1024) {
+                measure_end = pos + 1024;
+                if (text[measure_end - 1] >= 0xD800 and text[measure_end - 1] <= 0xDBFF) measure_end += 1;
+            }
+            _ = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), max_w - x, &fit, null, &size);
+            if (measure_end < limit and fit + 2 >= @as(i32, @intCast(measure_end - pos))) {
+                _ = GetTextExtentExPointW(hdc, text[pos..limit].ptr, @intCast(limit - pos), max_w - x, &fit, null, &size);
+            }
             const count = chat_code.fitCount(text[pos..limit], fit);
             const segment = text[pos .. pos + count];
             const w = chatTextWidth(hdc, segment);
@@ -745,7 +753,15 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
             while (pos < end) {
                 var fit: i32 = 0;
                 var size: SIZE = undefined;
-                const measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                var measure_end = end;
+                if (end - pos > 1024) {
+                    measure_end = pos + 1024;
+                    if (text[measure_end - 1] >= 0xD800 and text[measure_end - 1] <= 0xDBFF) measure_end += 1;
+                }
+                var measured = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                if (measure_end < end and fit + 2 >= @as(i32, @intCast(measure_end - pos))) {
+                    measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                }
                 const count = chat_code.fitCount(text[pos..end], fit);
                 const segment = text[pos .. pos + count];
                 const w = if (measured and count == end - pos) size.cx else chatTextWidth(hdc, segment);
@@ -2648,11 +2664,12 @@ pub fn chatSetTopPad(new_pad: i32) void {
     if (app_state.g_chat_batch_boundary.index != null) app_state.g_chat_batch_divider_y += delta;
     app_state.g_chat_content_h = @max(0, app_state.g_chat_content_h + delta);
     app_state.g_chat_layout_top_pad = new_pad;
+    const held_y = app_state.g_chat_scroll_y;
     app_state.g_chat_scroll_y = std.math.clamp(app_state.g_chat_scroll_y, chatMinScroll(), chatMaxScroll());
     if (app_state.g_chat_read_hold and app_state.g_chat_transcript_hwnd != null) {
         var client: RECT = std.mem.zeroes(RECT);
         chatViewClientRect(&client);
-        app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y);
+        app_state.g_chat_scroll_y = chat_history.openScroll(app_state.g_chat_content_h, client.bottom - client.top, new_pad, app_state.g_chat_read_boundary, app_state.g_chat_read_divider_y, held_y);
     }
 }
 
@@ -2687,11 +2704,25 @@ pub fn chatScrollStateChanged(viewport_h: i32) void {
 }
 
 pub fn chatJumpToNewest() void {
+    app_state.g_chat_read_hold = false;
     chatScrollBy(-app_state.g_chat_content_h);
     if (app_state.g_chat_transcript_hwnd == null) return;
     var client: RECT = std.mem.zeroes(RECT);
     chatViewClientRect(&client);
     chatScrollStateChanged(client.bottom - client.top);
+}
+
+test "IGSH-1924 newest releases opening hold without scroll movement" {
+    const old_hwnd = app_state.g_chat_transcript_hwnd;
+    const old_hold = app_state.g_chat_read_hold;
+    defer {
+        app_state.g_chat_transcript_hwnd = old_hwnd;
+        app_state.g_chat_read_hold = old_hold;
+    }
+    app_state.g_chat_transcript_hwnd = null;
+    app_state.g_chat_read_hold = true;
+    chatJumpToNewest();
+    try std.testing.expect(!app_state.g_chat_read_hold);
 }
 
 pub fn chatScrollBy(delta_px: i32) void {
@@ -6407,7 +6438,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 0x21 => chatScrollBy(page),
                 0x22 => chatScrollBy(-page),
                 0x24 => chatScrollBy(app_state.g_chat_content_h),
-                0x23 => chatScrollBy(-app_state.g_chat_content_h),
+                0x23 => chatJumpToNewest(),
                 else => return DefWindowProcW(hwnd, msg, wp, lp),
             }
             return 0;

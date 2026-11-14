@@ -486,7 +486,7 @@ fn launchWorker(shell_id: u32, host: u8, command: []u8, sid: []u8) void {
     if (launchStarted(output[0..total])) return;
     @import("diagnostics.zig").debugLog2("live-chat start failed: ", output[0..@min(total, 400)]);
     if (@import("chat_live.zig").startFailed(shell_id, sid, LAUNCH_FAILED)) {
-        if (app_state.g_main_hwnd) |main| _ = w.PostMessageW(main, w.WM_APP_CHAT_FILE_READY, 0, 0);
+        if (app_state.g_main_hwnd) |main| w.postChatFileReady(main);
     }
 }
 

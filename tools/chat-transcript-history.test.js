@@ -122,6 +122,7 @@ var g_chat_load_tries: u8 = 0; // old-defer positive control only
 var g_chat_content_h: i32 = 0;
 var g_chat_scroll_y: i32 = 0;
 var g_chat_top_pad: i32 = 0;
+var g_chat_layout_top_pad: i32 = 0;
 var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
@@ -189,6 +190,7 @@ fn QueryPerformanceCounter(value: *i64) i32 { value.* = performance_ticks; perfo
 fn QueryPerformanceFrequency(value: *i64) i32 { value.* = 1_000_000; return 1; }
 fn chatBenchEnabled() bool { return false; }
 fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
+fn postChatFileReady(_: ?HANDLE) void {}
 fn Sleep(_: u32) void {}
 fn uiScaled(n: i32) i32 { return n; }
 var ticks: u64 = 500;
@@ -232,6 +234,7 @@ fn chatRelayout(_: i32) void {
         y += h;
     }
     g_chat_content_h = y;
+    g_chat_layout_top_pad = g_chat_top_pad;
 }
 `;
 const entry = src.slice(src.indexOf('const ChatHistoryEntry = struct {'), src.indexOf('\n};', src.indexOf('const ChatHistoryEntry = struct {')) + 3);
@@ -303,8 +306,11 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     // Appending changes the transcript but not the reader's current message.
     var appended = try one.history.clone(a);
     try appended.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t1000\\t1200\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"appended reply\\"}\\n@@MP_END@@\\n", 2, one.key);
-    g_chat_scrolled_up = true;
-    g_chat_scroll_y = 45;
+    chatRelayoutPreservingScroll(900, fake_viewport_h);
+    chatScrollBy(g_chat_scroll_y - 45);
+    try std.testing.expect(!g_chat_read_hold);
+    try std.testing.expect(g_chat_scrolled_up);
+    try std.testing.expectEqual(@as(i32, 45), g_chat_scroll_y);
     one.result = appended;
     one.ready.store(true, .release);
     chatFileOnReady();
@@ -515,7 +521,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'chatWorkingIndicatorSync'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady').replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'chatWorkingIndicatorSync'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -524,6 +530,33 @@ test('IGSH-1754 a chat switch clears the last batch time', () => {
 });
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+test('IGSH-1924 a caught-up cached chat holds its visible message across a real history append', () => {
+  const cases = String.raw`
+test "cache-first switch-back IGSH-1924 caught-up append" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    fake_viewport_h = 80;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n" ++
+        ("{\"role\":\"assistant\",\"text\":\"message\"}\n" ** 10) ++ "@@MP_END@@\n", 1, one.key);
+    chatDeferTranscriptLoad();
+    refreshChatTranscript(true);
+    const first = g_chat_scroll_y;
+    try std.testing.expectEqual(g_chat_content_h - fake_viewport_h, first);
+    try one.history.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"text\":\"later reply\"}\n@@MP_END@@\n", 2, one.key);
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(first, g_chat_scroll_y);
+    try std.testing.expect(g_chat_scroll_y < g_chat_content_h - fake_viewport_h);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
@@ -760,7 +793,7 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     const dispatchPrelude = extra ? fixturePrelude.replace('fn chatHistoryStreamsKeep(_: u32) void {}\n', '') : fixturePrelude;
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
     fs.writeFileSync(path.join(dir, 'main-test.zig'), (dispatchPrelude + entry +
-      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support + (extra ? fn('chatHistoryStreamsKeep', text) : '') + extra).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
+      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support + (extra ? fn('chatHistoryStreamsKeep', text) : '') + extra).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent').replaceAll('@import("win32.zig").postChatFileReady', 'postChatFileReady'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'main-test.test'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -1243,4 +1276,9 @@ test "cache-first switch-back demand-paged tail" {
   const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
+});
+
+test('IGSH-2010 the file fetch thread wakes the window through the coalescing gate', () => {
+  assert.match(fn('chatFileFetchThread'), /postChatFileReady\(/);
+  assert.doesNotMatch(fn('chatFileFetchThread'), /PostMessageW\([^)]*WM_APP_CHAT_FILE_READY/);
 });

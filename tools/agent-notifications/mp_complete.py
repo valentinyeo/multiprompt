@@ -348,16 +348,23 @@ def codex_rows(cwd, op):
     return "ok", rows
 
 
+def usable_dir(path):
+    try:
+        return Path(path).is_absolute() and Path(path).is_dir()
+    except OSError:
+        return False
+
+
 def resolve_cwd(session, supplied):
     if session != "-":
         try:
             resolved = subprocess.run(["tmux", "display-message", "-p", "-t", session, "#{pane_current_path}"],
                                       capture_output=True, text=True, encoding="utf-8", timeout=0.5, check=True).stdout.strip()
-            if Path(resolved).is_absolute() and Path(resolved).is_dir():
+            if usable_dir(resolved):
                 return Path(resolved)
         except (OSError, subprocess.SubprocessError):
             pass
-    return Path(supplied) if supplied != "-" and Path(supplied).is_absolute() and Path(supplied).is_dir() else HOME
+    return Path(supplied) if supplied != "-" and usable_dir(supplied) else HOME
 
 
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")

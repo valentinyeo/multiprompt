@@ -51,6 +51,7 @@ def fake_run(argv, **kwargs):
     return Done(0, frame.encode())
 
 real_claude_rows = complete.claude_rows
+real_resolve_cwd = complete.resolve_cwd
 complete.subprocess.run = fake_run
 complete.owner_for_cwd = lambda cwd, home=None: own(cwd, home, lookup)
 complete.claude_rows = lambda cwd: ("ok", [("S", "login-only", "", "")])
@@ -69,6 +70,26 @@ complete.resolve_cwd = lambda session, supplied: home
 login = complete.request(f"8\tslash\tclaude\t-\t{home}\t\n")
 assert calls == [], "the login user's own chat must not ask another account"
 assert "\tok\t" in login and "login-only" in login, login
+
+import pathlib
+blocked = "/home/inne/projects/app"
+real_is_dir = pathlib.Path.is_dir
+def guarded_is_dir(self):
+    if str(self) == blocked:
+        raise PermissionError(13, "Permission denied", str(self))
+    return real_is_dir(self)
+pathlib.Path.is_dir = guarded_is_dir
+complete.resolve_cwd = real_resolve_cwd
+assert complete.usable_dir(blocked) is False, "an unreadable folder must not raise"
+assert complete.usable_dir(home) is True, home
+assert str(complete.resolve_cwd("-", blocked)) == str(home), "an unreadable folder falls back to the login home"
+calls.clear()
+complete.subprocess.run = fake_run
+whole = complete.request(f"12\tslash\tclaude\t-\t{blocked}\t\n")
+assert whole == frame, whole
+argv = calls[0][0]
+assert argv[:5] == ["sudo", "-n", "-H", "-u", "inne"], argv
+pathlib.Path.is_dir = real_is_dir
 
 calls.clear()
 complete.subprocess.run = lambda argv, **kwargs: Done(1, b"")
