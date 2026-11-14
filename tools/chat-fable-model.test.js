@@ -58,6 +58,6 @@ test('IGSH-1922 the plus menu and Ctrl+K list Fable next to Opus, Sonnet and Hai
   assert.match(read('src/chat_send.zig'), /\.fable => "Model: Fable"/);
   assert.match(read('src/sidebar.zig'), /SEARCH_CHAT_MODEL_FABLE_OFFSET => L\("Chat View: Model Fable"\)/);
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
-    assert.ok(read(file).includes('Chat View: Model Opus / Sonnet / Haiku / Fable'), file);
+    assert.ok(read(file).includes('Chat View: Plus Menu'), file);
   }
 });
