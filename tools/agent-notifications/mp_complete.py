@@ -327,32 +327,6 @@ def wait_codex(request_id):
     raise TimeoutError("codex app-server timed out")
 
 
-PI_MODELS_TTL = 600
-PI_MODELS_CACHE = {"at": 0.0, "rows": None}
-
-
-def pi_model_rows():
-    now = time.monotonic()
-    cached = PI_MODELS_CACHE["rows"]
-    if cached is not None and now - PI_MODELS_CACHE["at"] < PI_MODELS_TTL:
-        return "ok", list(cached)
-    try:
-        out = subprocess.run(["pi", "--list-models"], capture_output=True, text=True, encoding="utf-8",
-                             errors="replace", timeout=20, check=True).stdout
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return ("ok", list(cached)) if cached else ("error", [])
-    rows = []
-    lines = out.splitlines()
-    for line in lines[1:]:
-        columns = [column.strip() for column in re.split(r"\s{2,}", line.strip()) if column.strip()]
-        if len(columns) < 2 or not columns[1]:
-            continue
-        rows.append(("M", columns[1], columns[0], columns[2] if len(columns) > 2 else ""))
-    PI_MODELS_CACHE["at"] = now
-    PI_MODELS_CACHE["rows"] = list(rows)
-    return ("ok" if rows else "error"), rows
-
-
 def codex_rows(cwd, op):
     global SERVER
     rows = [("B", name, "opens in terminal" if name in INTERACTIVE else "", desc) for name, _, desc in seeds("codex_slash.txt")] if op == "slash" else []
@@ -733,7 +707,7 @@ def request(line):
     session_field = fields[3] if len(fields) > 3 else "-"
     session_ok = bool(TMUX_NAME.fullmatch(session_field)) if session_field.startswith("tmux:") else session_field_ok(op, session_field)
     if (len(fields) != 6 or len(line) > 4096 or not fields[0].isdigit() or
-        fields[1] not in ("ping", "slash", "skills", "files", "transcript", "models") or fields[2] not in ("claude", "codex", "pi") or
+        fields[1] not in ("ping", "slash", "skills", "files", "transcript") or fields[2] not in ("claude", "codex") or
         not session_ok or
         fields[4] != "-" and not Path(fields[4]).is_absolute() or
         len(fields[5]) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in fields[4] + fields[5])):
@@ -751,8 +725,6 @@ def request(line):
         status, rows = "ok", []
     elif op == "files":
         status, rows = "error", []
-    elif op == "models":
-        status, rows = pi_model_rows() if fields[2] == "pi" else ("error", [])
     elif fields[2] == "claude":
         status, rows = claude_rows(cwd)
     else:

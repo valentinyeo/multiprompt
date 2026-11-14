@@ -1,13 +1,13 @@
 const std = @import("std");
 
-pub const Route = enum { send, plan, permissions, model, login, unavailable };
+pub const Route = enum { send, plan, permissions, model, unavailable };
 pub const PermissionMode = enum { manual, acceptEdits, plan, bypassPermissions };
 
 const unsupported = [_][]const u8{
     "add-dir", "artifact-capabilities", "artifact-diagramming", "artifacts", "autofix-pr",
     "background", "branch", "btw", "bug", "cd", "chrome", "copy", "design-login", "diff",
     "exit", "export", "feedback", "fork", "help", "hooks", "ide", "install-github-app",
-    "install-slack-app", "keybindings", "logout", "memory", "mobile", "passes",
+    "install-slack-app", "keybindings", "login", "logout", "memory", "mobile", "passes",
     "plugin", "powerup", "privacy-settings", "radio", "release-notes", "remote-control",
     "remote-env", "resume", "rewind", "sandbox", "scroll-speed", "skills", "slides", "status",
     "statusline", "stickers", "subtask", "tasks", "teleport", "terminal-setup", "theme", "tui",
@@ -25,7 +25,6 @@ pub fn route(live: bool, text: []const u16) Route {
     if (equals(command, "plan")) return if (has_arguments) .unavailable else .plan;
     if (equals(command, "permissions")) return if (has_arguments) .unavailable else .permissions;
     if (equals(command, "model")) return .model;
-    if (equals(command, "login")) return .login;
     for (unsupported) |name| if (equals(command, name)) return .unavailable;
     return .send;
 }
@@ -68,8 +67,6 @@ test "live slash commands route without changing terminal or custom messages" {
     try std.testing.expectEqual(Route.plan, route(true, w("/plan ")));
     try std.testing.expectEqual(Route.permissions, route(true, w("/permissions")));
     try std.testing.expectEqual(Route.model, route(true, w("/model")));
-    try std.testing.expectEqual(Route.login, route(true, w("/login")));
-    try std.testing.expectEqual(Route.login, route(true, w("/login anthropic")));
     try std.testing.expectEqual(Route.unavailable, route(true, w("/rewind")));
     try std.testing.expectEqual(Route.unavailable, route(true, w("/resume old")));
     try std.testing.expectEqual(Route.send, route(true, w("/planning")));

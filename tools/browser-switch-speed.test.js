@@ -330,7 +330,7 @@ test('QPC tracing is debug-gated, thread-local and emits exactly one aggregate l
   assert.match(consoleSource, /pub fn switchToShell\(idx: u32\) void \{\s+var timing: switch_timing.Trace = .\{\};\s+const timing_previous = switch_timing.begin\(&timing\);\s+defer switch_timing.finish\(&timing, timing_previous, idx\);/);
   for (const step of ['console_shown', 'focus', 'reposition']) assert.ok(consoleSource.includes(`defer switch_timing.record(.${step}, timing_started);`));
   for (const [fn, step] of [['hideActiveBrowser', 'hide_prev_browser'], ['parkStrayBrowserPanes', 'park'], ['updateBrowserVisibility', 'browser_visible'], ['armBrowserVisibilitySettle', 'arm_settle'], ['positionActiveBrowser', 'position'], ['setBrowserWindowPosAsync', 'browser_swp'], ['showBrowserWindowAsync', 'browser_show'], ['spawnBrowserCliHidden', 'browser_launch'], ['launchBrowserForShellEx', 'browser_launch'], ['wakeBrowserPaneFromFreeze', 'browser_wake']]) {
-    assert.match(browser, new RegExp(`fn ${fn}\\([^\\n]*\\) void \\{\\s+const timing_started = switch_timing.start\\(\\);\\s+defer switch_timing.record\\(\\.${step}, timing_started\\);`));
+    assert.match(browser, new RegExp(`fn ${fn}\\([^\\n]*\\) void \\{(?:[^\\n]*\\n){0,8}?\\s+const timing_started = switch_timing.start\\(\\);\\s+defer switch_timing.record\\(\\.${step}, timing_started\\);`));
   }
   assert.match(timing, /switch-timing: to=\{d\} total_us=\{d\}/);
   assert.match(timing, /field.name \+\+ "_us=\{d\}"/);
@@ -362,11 +362,8 @@ function assertsDispatchOnly(source) {
 }
 
 test('IGSH-1033 master smoke stays small while release candidates retain feature-owned coverage', async () => {
-  assert.doesNotMatch(workflow, /^  push:/m, 'master pushes no longer start another full matrix');
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.doesNotMatch(source, /^  push:/m);
-    assert.doesNotMatch(source, /^    tags(?:-ignore)?:/m, 'release tags do not duplicate the tested master matrix');
     assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), featureMatrix(source).pr);
     assert.deepEqual(journeyMatrix(source, 'push'), ['appearance', 'relaunch-saved-sessions']);
@@ -410,8 +407,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
-  assert.match(read('.github/workflows/click-through.yml'), /changed=\$\(git diff --name-only[^\n]*-- src[^\n]*\btools\b/);
-  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'chat-browser-shortcut', 'chat-browser-autoload', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'/);
+  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', [^)]*'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'[^)]*\)\)/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
   assert.match(map, /on demand only/);
@@ -720,8 +716,11 @@ function assertsPageFocus(focus, main, pane, driver) {
   const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
   const activation = timer.indexOf('focusActiveBrowserPaneUnlocked();');
   assert.ok(activation >= 0 && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
-  assert.ok(!timer.includes('unlockBrowserForeground'), 'the retry timer never synthesizes Alt taps');
-  assert.equal((timer.match(/keybd_event\(|SendInput\(/g) ?? []).length, 0);
+  const wrapper = focus.slice(focus.indexOf('pub fn focusActiveBrowserPane()'), focus.indexOf('pub fn focusActiveBrowserPaneUnlocked()'));
+  const request = focus.slice(focus.indexOf('pub fn requestNativeBrowserFocus()'), focus.indexOf('pub fn requestShellRefocus('));
+  for (const source of [timer, wrapper, request, handoff]) {
+    assert.doesNotMatch(source, /unlockBrowserForeground\(|keybd_event\(|SendInput\(/);
+  }
   assert.match(pane, /if \(idx == app_state.active_shell\) @import\("focus.zig"\)\.requestNativeBrowserFocus\(\);/);
   assert.match(pane, /browserFocusRequestMatches\(app_state.g_focus_browser_shell_id, app_state.shells\[idx\]\.shell_id, foregroundIsOurs\(\)\)/);
   assert.match(focus, /return requested_sid != 0 and requested_sid == active_sid and foreground_owned;/);
@@ -780,6 +779,9 @@ test('IGSH-724 native handoff targets Chrome web contents and real keys distingu
     assert.throws(() => assertsPageFocus(focus.replace(before, ''), main, browser, journey));
   }
   assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPaneUnlocked();', ''), browser, journey));
+  assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPaneUnlocked();', '                unlockBrowserForeground();\n                focusActiveBrowserPaneUnlocked();'), browser, journey));
+  assert.throws(() => assertsPageFocus(focus.replace('pub fn focusActiveBrowserPane() void {', 'pub fn focusActiveBrowserPane() void {\n    unlockBrowserForeground();'), main, browser, journey));
+  assert.throws(() => assertsPageFocus(focus.replace('pub fn requestNativeBrowserFocus() void {', 'pub fn requestNativeBrowserFocus() void {\n    unlockBrowserForeground();'), main, browser, journey));
   assert.throws(() => assertsPageFocus(focus, main, browser.replace('if (idx == app_state.active_shell) @import("focus.zig").requestNativeBrowserFocus();', ''), journey));
   for (const before of ['IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome', '++keys', 'foreach ($round in 1..5)', 'Alt+Q sent a page key to the browser menu']) {
     assert.throws(() => assertsPageFocus(focus, main, browser, journey.replace(before, '')));

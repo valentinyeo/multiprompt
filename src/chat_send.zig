@@ -62,7 +62,6 @@ const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
 const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const chatTrimRawConsoleRow = @import("chat_capture.zig").chatTrimRawConsoleRow;
 const chatFileIdentityForShell = @import("chat_session.zig").chatFileIdentityForShell;
-const pi_models = @import("pi_models.zig");
 const chatPerf = @import("chat_session.zig").chatPerf;
 const chatBenchEnabled = @import("chat_session.zig").chatBenchEnabled;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
@@ -466,7 +465,7 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and std.meta.eql(job.key, chatFileIdentityForShell(app_state.active_shell))) {
         if (job.command != .send and app_state.g_chat_composer_hwnd != null) {
             var text: [16384]u16 = undefined;
-            const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
+            const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
             if (len > 0 and @import("chat_slash.zig").route(true, text[0..@intCast(len)]) == job.command) {
                 _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
                 app_state.g_chat_draft_dirty = true;
@@ -481,133 +480,6 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
         };
         showHeaderNoticeAscii(text, 3000, false);
     }
-}
-
-pub fn chatPiModelPicker() void {
-    if (app_state.active_shell >= app_state.shell_count) return;
-    const shell = &app_state.shells[app_state.active_shell];
-    if (!pi_models.isPiAgent(shell.ai_agent)) {
-        showHeaderNoticeAscii("Model choice is for Pi chats", 4000, false);
-        return;
-    }
-    const host = pi_models.hostForShell(app_state.active_shell) orelse {
-        showHeaderNoticeAscii("Model choice needs a Pi chat on a server", 4000, true);
-        return;
-    };
-    _ = @import("win32.zig").SendMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_SEARCH_OPEN, 0, 0);
-    pi_models.ensure(host);
-    app_state.g_search_pi_models_mode = true;
-    app_state.g_search_len = 0;
-    app_state.g_search_sel = 1;
-    app_state.g_search_scroll = 0;
-    @import("command_palette.zig").updateSearchResults();
-    if (!pi_models.ready()) showHeaderNoticeAscii("Asking Pi for its model list...", 4000, false);
-}
-
-fn clearChatModelCommand() void {
-    if (app_state.g_chat_composer_hwnd == null) return;
-    var text: [4096]u16 = undefined;
-    const len = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
-    if (len <= 0) return;
-    if (@import("chat_slash.zig").route(true, text[0..@intCast(len)]) != .model) return;
-    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
-    app_state.g_chat_draft_dirty = true;
-    chatDraftFlush();
-}
-
-pub fn chatPiModelSelect(index: usize) bool {
-    if (app_state.active_shell >= app_state.shell_count) return false;
-    const available = pi_models.models();
-    if (index >= available.len) return false;
-    const chosen = available[index];
-    var command_buf: [256]u8 = undefined;
-    const command = pi_models.commandText(&command_buf, &chosen);
-    const shell = app_state.active_shell;
-    const shell_ptr = &app_state.shells[shell];
-    const live = shell_ptr.tmux_session_len > 0 and !@import("chat_view.zig").canToggle(shell_ptr.tmux_session[0..shell_ptr.tmux_session_len]);
-    if (live) {
-        clearChatModelCommand();
-        return chatPiModelSetLive(shell, chosen);
-    }
-    if (app_state.g_chat_composer_hwnd == null) return false;
-    var wide: [256]u16 = undefined;
-    const wide_len = std.unicode.utf8ToUtf16Le(&wide, command) catch return false;
-    wide[wide_len] = 0;
-    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, wide[0..wide_len :0]);
-    app_state.g_chat_draft_dirty = true;
-    chatDraftFlush();
-    sendChatPrompt();
-    return true;
-}
-
-const ChatPiModelJob = struct {
-    key: @import("chat_transcript.zig").Identity,
-    ok: bool = false,
-    name: [pi_models.MAX_NAME]u8 = std.mem.zeroes([pi_models.MAX_NAME]u8),
-    name_len: u8 = 0,
-    provider_name: [pi_models.MAX_PROVIDER]u8 = std.mem.zeroes([pi_models.MAX_PROVIDER]u8),
-    provider_len: u8 = 0,
-    reference: [pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8 = std.mem.zeroes([pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8),
-    reference_len: u8 = 0,
-};
-
-var chat_pi_model_busy = std.atomic.Value(bool).init(false);
-
-fn chatPiModelSetLive(shell: u32, chosen: pi_models.Model) bool {
-    const key = chatFileIdentityForShell(shell);
-    if (key.sid[0] == 0) {
-        showHeaderNoticeAscii("This Pi chat is still starting", 4000, true);
-        return false;
-    }
-    if (chosen.nameText().len == 0) return false;
-    if (chat_pi_model_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
-    const job = std.heap.page_allocator.create(ChatPiModelJob) catch {
-        chat_pi_model_busy.store(false, .release);
-        return false;
-    };
-    job.* = .{ .key = key };
-    const name_len = @min(chosen.nameText().len, job.name.len);
-    @memcpy(job.name[0..name_len], chosen.nameText()[0..name_len]);
-    job.name_len = @intCast(name_len);
-    const provider_len = @min(chosen.providerText().len, job.provider_name.len);
-    @memcpy(job.provider_name[0..provider_len], chosen.providerText()[0..provider_len]);
-    job.provider_len = @intCast(provider_len);
-    const reference = if (provider_len > 0)
-        std.fmt.bufPrint(&job.reference, "{s}/{s}", .{ job.provider_name[0..provider_len], job.name[0..name_len] }) catch job.name[0..name_len]
-    else
-        job.name[0..name_len];
-    job.reference_len = @intCast(reference.len);
-    const thread = std.Thread.spawn(.{}, chatPiModelThread, .{job}) catch {
-        std.heap.page_allocator.destroy(job);
-        chat_pi_model_busy.store(false, .release);
-        return false;
-    };
-    thread.detach();
-    return true;
-}
-
-fn chatPiModelThread(job: *ChatPiModelJob) void {
-    const a = std.heap.page_allocator;
-    defer chat_pi_model_busy.store(false, .release);
-    defer if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_PI_MODEL_RESULT, 0, @bitCast(@intFromPtr(job))) == 0) std.heap.page_allocator.destroy(job);
-    const request = pi_models.requestLine(a, job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), job.provider_name[0..job.provider_len], job.reference[0..job.reference_len]) catch return;
-    defer a.free(request);
-    var response: std.ArrayList(u8) = .empty;
-    defer response.deinit(a);
-    job.ok = @import("chat_session.zig").chatHistoryPersistent(job.key.host, job.key.shell_id, request, 4096, &response, null) and pi_models.replyOk(response.items);
-}
-
-pub fn chatPiModelFinish(lp: @import("win32.zig").LPARAM) void {
-    if (lp == 0) return;
-    const job: *ChatPiModelJob = @ptrFromInt(@as(usize, @bitCast(lp)));
-    defer std.heap.page_allocator.destroy(job);
-    if (!job.ok) {
-        showHeaderNoticeAscii("Pi did not switch the model; try again", 4000, true);
-        return;
-    }
-    var line_buf: [160]u8 = undefined;
-    const line = std.fmt.bufPrint(&line_buf, "Model: {s}", .{job.name[0..job.name_len]}) catch "Model changed";
-    showHeaderNoticeAscii(line, 3000, false);
 }
 
 fn chatModeOpenPicker(default_plan: bool) void {
@@ -694,28 +566,7 @@ pub fn sendChatPrompt() void {
                 return;
             },
             .model => {
-                if (shell.ai_agent == 3) {
-                    chatPiModelPicker();
-                } else {
-                    showHeaderNoticeAscii("Model picker is coming soon", 4000, false);
-                }
-                return;
-            },
-            .login => {
-                var provider_buf: [64]u8 = undefined;
-                const provider_id = chatLoginArgument(text, &provider_buf);
-                if (provider_id.len == 0 and chatLoginArgumentTooLong(text)) {
-                    showHeaderNoticeAscii("That Pi provider id is not valid", 4000, true);
-                    return;
-                }
-                _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
-                app_state.g_chat_draft_dirty = true;
-                chatDraftFlush();
-                if (shell.ai_agent == 3) {
-                    _ = chatPiLogin(provider_id);
-                } else {
-                    showHeaderNoticeAscii("Not available in live chat", 4000, false);
-                }
+                showHeaderNoticeAscii("Model picker is coming soon", 4000, false);
                 return;
             },
             .unavailable => {
@@ -4384,47 +4235,6 @@ pub fn chatStopAgent(shell_index: u32) bool {
     if (chatLiveCancelApproval(shell_index)) return true;
     if (chatLiveInterrupt(shell_index)) return true;
     return chatAgentKey(shell_index, 0x1B);
-}
-
-fn chatLoginMark(text: []const u16) []const u16 {
-    const trimmed = std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' });
-    const mark = std.unicode.utf8ToUtf16LeStringLiteral("/login");
-    if (!std.mem.startsWith(u16, trimmed, mark)) return trimmed[0..0];
-    if (trimmed.len == mark.len) return trimmed[mark.len..];
-    if (trimmed[mark.len] != ' ' and trimmed[mark.len] != '\t') return trimmed[0..0];
-    return std.mem.trim(u16, trimmed[mark.len..], &.{ ' ', '\t', '\r', '\n' });
-}
-
-fn chatLoginArgumentTooLong(text: []const u16) bool {
-    return chatLoginMark(text).len > 64;
-}
-
-fn chatLoginArgument(text: []const u16, buf: []u8) []const u8 {
-    const rest = chatLoginMark(text);
-    if (rest.len == 0 or rest.len > buf.len) return "";
-    const n = std.unicode.utf16LeToUtf8(buf, rest) catch return "";
-    return buf[0..n];
-}
-
-pub fn chatPiLogin(provider_id: []const u8) bool {
-    if (app_state.active_shell >= app_state.shell_count) return false;
-    const shell = &app_state.shells[app_state.active_shell];
-    if (shell.ai_agent != 3) {
-        showHeaderNoticeAscii("Log in is for Pi chats", 4000, false);
-        return false;
-    }
-    const key = chatFileIdentityForShell(app_state.active_shell);
-    if (key.sid[0] == 0) {
-        showHeaderNoticeAscii("This Pi chat is still starting", 4000, true);
-        return false;
-    }
-    const line = @import("chat_live.zig").loginLine(std.heap.page_allocator, key.shell_id, std.mem.sliceTo(&key.sid, 0), provider_id) catch return false;
-    if (!chatLiveReply(line)) {
-        showHeaderNoticeAscii("Could not start Pi login; try again", 4000, true);
-        return false;
-    }
-    showHeaderNoticeAscii(if (provider_id.len == 0) "Asking Pi who can log in" else "Pi login started", 3000, false);
-    return true;
 }
 
 fn chatLiveReply(line: []u8) bool {

@@ -137,18 +137,6 @@ Empty values mean the default remains unchanged.
 Older clients can ignore this event and snapshot metadata.
 The paired Android request needs no phone picker.
 
-## Fresh start
-
-Ctrl+K "Chat View: Fresh start" and the right-click tab palette use the existing live-host channel. There is no dedicated shortcut. The command-line equivalent is `python3 <reader> host fresh-start <provider> <sid>`.
-
-Fresh start refuses a chat that is still replying or awaiting permission. The current agent writes a short handover as its reply. The host saves that reply to an owner-only handover file before stopping the agent. A failed, empty, interrupted or unsaved handover never clears context.
-
-Only the provider-native conversation changes. The public provider/session key, registered chat name, account credentials and saved desktop layout remain unchanged. Claude and Pi start with a new native session id; Codex starts a new thread; Cursor and hax start without resuming the previous native conversation. The replacement receives only the saved handover, plus its normal startup instructions, and first acknowledges the unfinished work. Incoming messages remain queued until that acknowledgement completes. A failed read keeps messages gated; choose Fresh start again to retry.
-
-The host keeps readable history separately from model context. Previous messages remain above a Fresh start divider. Later accepted conversation text and tool steps append to that history. Reconnecting reads the same history file without feeding it back into the agent. The existing history wire format, message protocol 1, public chat id and delivery receipts do not change. Older clients using runtime selection receive the same wire rows. Existing agents keep their selected runtime until restarted; an old host rejects the new action without clearing anything.
-
-Desktop and Android compatibility still requires a live check on both clients before closing shared work. The action itself is desktop-only; it does not add a phone picker or change the account layout.
-
 ## Saved permission level
 
 The host accepts `set_permission_mode` requests.

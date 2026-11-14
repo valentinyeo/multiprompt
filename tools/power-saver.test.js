@@ -129,19 +129,19 @@ test("usage telemetry companion self-throttles on idle and battery using OS sign
   assert.match(telemetry, /if \(wait_result == c\.WAIT_OBJECT_0\) \{\s+for \(runtime\.accounts\[0\.\.runtime\.account_count\]\) \|\*account\| account\.next_refresh_ms = 0;/);
 });
 
-test("Ctrl+K shows one Power Saver row that cycles Auto / Always / Off and shows the active mode", () => {
+test("Ctrl+K exposes Power Saver: Auto / Always / Off with the active mode tagged current", () => {
   assert.match(app, /const SEARCH_POWER_AUTO_OFFSET: usize = 6337;/);
-  assert.match(app, /SEARCH_POWER_AUTO_OFFSET => "power saver auto always off",/);
-  assert.doesNotMatch(app, /g_search_results\[app_state\.g_search_result_count\] = SEARCH_POWER_ALWAYS_OFFSET;/);
-  assert.doesNotMatch(app, /g_search_results\[app_state\.g_search_result_count\] = SEARCH_POWER_OFF_OFFSET;/);
-  assert.match(app, /paletteDrawText\(hdc, L\(ui_words\.global_power\), -1, &pw_rc/);
+  assert.match(app, /const SEARCH_POWER_ALWAYS_OFFSET: usize = 6338;/);
+  assert.match(app, /const SEARCH_POWER_OFF_OFFSET: usize = 6339;/);
+  assert.match(app, /SEARCH_POWER_AUTO_OFFSET => "power saver auto",/);
+  assert.match(app, /L\(ui_words\.global_power_auto\) else if \(is_power_always\) L\(ui_words\.global_power_always\) else L\(ui_words\.global_power_off\)/);
   assert.match(
     app,
-    /const pw_mode = switch \(g_power_profile\) \{\s+\.auto => L\(ui_words\.global_power_mode_auto\),\s+\.always => L\(ui_words\.global_power_mode_always\),\s+\.off => L\(ui_words\.global_power_mode_off\),/
+    /const pw_current = \(is_power_auto and g_power_profile == \.auto\) or \(is_power_always and g_power_profile == \.always\) or \(is_power_off and g_power_profile == \.off\);/
   );
   assert.match(
     app,
-    /if \(target == SEARCH_POWER_AUTO_OFFSET\) \{\s+g_power_profile = switch \(g_power_profile\) \{\s+\.auto => \.always,\s+\.always => \.off,\s+\.off => \.auto,\s+\};\s+savePowerProfile\(\);\s+applyPowerProfile\(hwnd\);/  
+    /if \(target == SEARCH_POWER_AUTO_OFFSET or target == SEARCH_POWER_ALWAYS_OFFSET or target == SEARCH_POWER_OFF_OFFSET\) \{\s+g_power_profile = if \(target == SEARCH_POWER_AUTO_OFFSET\) \.auto else if \(target == SEARCH_POWER_ALWAYS_OFFSET\) \.always else \.off;\s+savePowerProfile\(\);\s+applyPowerProfile\(hwnd\);/
   );
 });
 
@@ -150,5 +150,5 @@ test("deep idle stops chat refresh polling", () => {
 });
 
 test("Power Saver has an F1 shortcuts-overview row", () => {
-  assert.match(app, /Ctrl\+K \\u\{2192\} Power Saver/);
+  assert.match(app, /Ctrl\+K \\u\{2192\} Power Saver: Auto \/ Always \/ Off/);
 });

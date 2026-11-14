@@ -149,7 +149,6 @@ const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFS
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
-const SEARCH_PI_LOGIN_OFFSET = @import("app_state.zig").SEARCH_PI_LOGIN_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
@@ -205,7 +204,6 @@ const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_M
 const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
 const SEARCH_CHAT_RESTART_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_OFFSET;
 const SEARCH_CHAT_RESTART_ALL_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESTART_ALL_OFFSET;
-const SEARCH_CHAT_FRESH_START_OFFSET = @import("app_state.zig").SEARCH_CHAT_FRESH_START_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -290,11 +288,6 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
-const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
-const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
-const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
-const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
-const pi_models = @import("pi_models.zig");
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const CustomCmd = @import("app_state.zig").CustomCmd;
 const MAX_PALETTE_USAGE = @import("app_state.zig").MAX_PALETTE_USAGE;
@@ -519,7 +512,6 @@ const MoveChatJob = struct {
 const RESTART_HOSTS = 3;
 const RestartChatJob = struct {
     all: bool = false,
-    fresh: bool = false,
     count: u8 = 0,
     hosts: [RESTART_HOSTS]u8 = @splat(0),
     ids: [RESTART_HOSTS]u32 = @splat(0),
@@ -533,6 +525,11 @@ const RestartChatJob = struct {
 };
 
 const SHELL_ROWS = [_]ShellRow{
+    .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
+    .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
+    .{ .target = SEARCH_OPENFOLDER_OFFSET, .keywords = "open sessions in this folder" },
     .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
 };
@@ -713,7 +710,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) return "New Claude in terminal";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
-    if (target == SEARCH_PI_LOGIN_OFFSET) return "Log in";
     if (target == SEARCH_NEW_CURSOR_CHAT_OFFSET) return "New Cursor chat";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
     if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
@@ -737,7 +733,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
     if (target == SEARCH_TABCTX_CHAT_RESTART_AI) return "chat view restart the ai agent stopped claude resume";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
-    if (target == app_state.SEARCH_TABCTX_FRESH_START) return "Fresh start handover clear context same chat picture address";
     if (target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE) {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
@@ -831,15 +826,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         if (idx >= app_state.g_palette_skills.len) return null;
         return app_state.g_palette_skills[idx].name;
     }
-    if (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS) {
-        const model_idx = target - SEARCH_PI_MODEL_ROW_OFFSET;
-        if (model_idx >= pi_models.models().len) return null;
-        const all = pi_models.models();
-        return all[model_idx].nameText();
-    }
     return switch (target) {
-        SEARCH_PI_MODELS_MENU_OFFSET => "Pi Model...",
-        SEARCH_PI_MODELS_BACK_OFFSET => "Back",
         SEARCH_WSMOVE_NEW_OFFSET => "move to new workspace",
         SEARCH_GROUPMOVE_NEW_OFFSET => "new group",
         SEARCH_GROUPMOVE_NONE_OFFSET => "no group",
@@ -863,7 +850,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_OPENALL_HOST_DE_OFFSET => "host1 vps",
         SEARCH_OPENALL_HOST_UK_OFFSET => "host2 vps",
         SEARCH_OPENALL_HOST_INNE_OFFSET => "secondary cro vps",
-        SEARCH_NEWWIN_OFFSET => "new workspace window",
+        SEARCH_NEWWIN_OFFSET => "new window",
         SEARCH_CREATEWS_OFFSET => "create workspace",
         SEARCH_WORKSPACES_MENU_OFFSET => "open workspace",
         SEARCH_WORKSPACE_DELETE_MENU_OFFSET => "delete workspace",
@@ -885,17 +872,17 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_WSSORT_MENU_OFFSET => "sort workspaces",
         SEARCH_WSMOVE_MENU_OFFSET => "move to workspace",
         SEARCH_GROUPMOVE_MENU_OFFSET => "move to group",
-        SEARCH_HIDESIDEBAR_OFFSET => "sidebar",
+        SEARCH_HIDESIDEBAR_OFFSET => "sidebar expand",
         SEARCH_HIDEPILLS_OFFSET => "workspace switcher",
         SEARCH_NEXTUNREAD_OFFSET => "next unread session",
         SEARCH_SIDEBAR_COLLAPSE_OFFSET => "sidebar collapse",
         SEARCH_SIDEBAR_HIDE_OFFSET => "sidebar hide",
-        SEARCH_TABSORT_INBOX_OFFSET => "tab order",
+        SEARCH_TABSORT_INBOX_OFFSET => "tab order auto",
         SEARCH_TABSORT_MANUAL_OFFSET => "tab order manual",
-        SEARCH_POWER_AUTO_OFFSET => "power saver auto always off",
+        SEARCH_POWER_AUTO_OFFSET => "power saver auto",
         SEARCH_POWER_ALWAYS_OFFSET => "power saver always",
         SEARCH_POWER_OFF_OFFSET => "power saver off",
-        SEARCH_LADDER_AUTO_OFFSET => "token ladder auto claude codex choose plan",
+        SEARCH_LADDER_AUTO_OFFSET => "token ladder auto",
         SEARCH_LADDER_CLAUDE_OFFSET => "token ladder burn claude",
         SEARCH_LADDER_CODEX_OFFSET => "token ladder burn codex",
         SEARCH_LADDER_DASH_OFFSET => "token ladder open dashboard",
@@ -909,7 +896,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_VOICE_STOP_OFFSET => "voice stop speaking mute",
         SEARCH_VOICE_ALWAYS_ON_OFFSET => "voice always listening on talk over",
         SEARCH_VOICE_ALWAYS_OFF_OFFSET => "voice always listening off taking turns",
-        SEARCH_VOICE_SPEED_100_OFFSET => "voice speed speed faster slower",
+        SEARCH_VOICE_SPEED_100_OFFSET => "voice speed 1x",
         SEARCH_VOICE_SPEED_125_OFFSET => "voice speed 1.25x",
         SEARCH_VOICE_SPEED_140_OFFSET => "voice speed 1.4x",
         SEARCH_VOICE_SPEED_150_OFFSET => "voice speed 1.5x",
@@ -959,7 +946,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_ALWAYS_OFFSET => "chat view always allow",
         SEARCH_CHAT_DENY_OFFSET => "chat view deny",
         SEARCH_CHAT_STOP_OFFSET => if (app_state.ISSUE_265_WORKING_BAR) "chat view stop the agent interrupt" else "stop agent",
-        SEARCH_PI_LOGIN_OFFSET => "log in pi login sign in provider",
         SEARCH_CHAT_QUEUE_SEND_OFFSET => "chat view send queued messages now offline outbox",
         SEARCH_CHAT_RESET_OFFSET => "chat view reset this chat clear bubbles cache",
         SEARCH_CHAT_TAB_URL_OFFSET => "chat view insert browser tab url link ctrl shift x",
@@ -988,7 +974,6 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
         SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
-        SEARCH_CHAT_FRESH_START_OFFSET => "Chat View: Fresh start handover clear context same chat picture address",
         SEARCH_CHAT_RESTART_OFFSET => "Chat View: Restart this chat on the newest version relaunch update latest",
         SEARCH_CHAT_RESTART_ALL_OFFSET => "Chat View: Restart every idle live chat newest version relaunch update all chats",
         SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
@@ -1404,7 +1389,6 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
-    if (target == SEARCH_PI_MODELS_MENU_OFFSET or target == SEARCH_PI_MODELS_BACK_OFFSET or (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS)) return 7;
     if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
@@ -1432,7 +1416,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_SHARED_SERVER_CONNECTION_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_AI_USAGE_OFFSET, SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_FRESH_START_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_PI_LOGIN_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_PLUS_MENU_OFFSET, SEARCH_CHAT_RESYNC_OFFSET, SEARCH_CHAT_RESTART_OFFSET, SEARCH_CHAT_RESTART_ALL_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_SELECTION_MENU_OFFSET, SEARCH_CHAT_EXPAND_TABLE_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -2430,18 +2414,6 @@ fn restartChatNotice(text: []const u8) void {
 }
 
 fn restartChatReply(job: *const RestartChatJob, body: []const u8) void {
-    if (job.fresh) {
-        const Reply = struct { result: struct { status: []const u8 = "", reason: []const u8 = "" } = .{} };
-        const parsed = std.json.parseFromSlice(Reply, std.heap.page_allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch {
-            restartChatNotice("Fresh start failed: the server did not answer");
-            return;
-        };
-        defer parsed.deinit();
-        const status = parsed.value.result.status;
-        if (std.mem.eql(u8, status, "started") or std.mem.eql(u8, status, "already")) return;
-        restartChatNotice(if (std.mem.eql(u8, status, "busy")) "Fresh start: wait for this reply to finish" else "Fresh start failed: this live chat is unavailable");
-        return;
-    }
     const agent_host = @import("agent_host.zig");
     const waiting = if (job.all) agent_host.restartAllWaiting(body) else agent_host.restartWaitingReply(body);
     const nothing = job.all and agent_host.restartAllNothing(body);
@@ -2476,33 +2448,19 @@ fn restartChatThread(job: *RestartChatJob) void {
             restartChatReply(job, response.items);
         }
     } else {
-        const request = if (job.fresh)
-            std.fmt.bufPrint(&buf, "{{\"op\":\"fresh_start\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}", .{ job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len] }) catch return
-        else
-            agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
+        const request = agent_host.restartRequest(&buf, job.ids[0], job.hosts[0], job.provider[0..job.provider_len], job.sid[0..job.sid_len], job.tmux[0..job.tmux_len]) orelse return;
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
-        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) {
-            restartChatNotice(if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
-            return;
-        }
+        if (!@import("chat_session.zig").chatHistoryPersistent(job.hosts[0], job.ids[0], request, 65536, &response, null)) return;
         answered = true;
         restartChatReply(job, response.items);
     }
-    if (!answered) restartChatNotice(if (job.fresh) "Fresh start failed: the server did not answer" else "Chat restart: the server did not answer");
+    if (!answered) restartChatNotice("Chat restart: the server did not answer");
 }
 
 pub fn startRestartChat(all: bool) bool {
-    return startChatJob(all, false, app_state.active_shell);
-}
-
-pub fn startFreshChat(tab: u32) bool {
-    return startChatJob(false, true, tab);
-}
-
-fn startChatJob(all: bool, fresh: bool, tab: u32) bool {
     const job = std.heap.page_allocator.create(RestartChatJob) catch return false;
-    job.* = .{ .all = all, .fresh = fresh };
+    job.* = .{ .all = all };
     if (all) {
         for (0..app_state.shell_count) |i| {
             if (job.count >= RESTART_HOSTS) break;
@@ -2522,6 +2480,7 @@ fn startChatJob(all: bool, fresh: bool, tab: u32) bool {
             return false;
         }
     } else {
+        const tab = app_state.active_shell;
         if (!liveChatTab(tab)) {
             std.heap.page_allocator.destroy(job);
             return false;
@@ -3156,25 +3115,6 @@ pub fn updateSearchResults() void {
         return;
     }
 
-    if (app_state.g_search_pi_models_mode) {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODELS_BACK_OFFSET;
-        app_state.g_search_result_count += 1;
-        const available = pi_models.models();
-        const limit = @min(available.len, MAX_PI_MODELS);
-        for (available[0..limit], 0..) |model, mi| {
-            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-            if (app_state.g_search_len > 0 and
-                !asciiContainsQueryInsensitive(model.nameText(), app_state.g_search_buf[0..app_state.g_search_len]) and
-                !asciiContainsQueryInsensitive(model.providerText(), app_state.g_search_buf[0..app_state.g_search_len]) and
-                !asciiContainsQueryInsensitive(model.detailText(), app_state.g_search_buf[0..app_state.g_search_len])) continue;
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODEL_ROW_OFFSET + mi;
-            app_state.g_search_result_count += 1;
-        }
-        preferFirstFilteredResultAfterBack();
-        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
-        return;
-    }
-
     if (app_state.g_search_skills_mode) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SKILLS_BACK_OFFSET;
         app_state.g_search_result_count += 1;
@@ -3733,6 +3673,23 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var show_create_workspace = (app_state.g_search_len == 0);
+        if (!show_create_workspace) {
+            const create_workspace_labels = [_][]const u8{ "create", "create workspace", "new workspace", "empty workspace", "blank workspace" };
+            for (create_workspace_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    show_create_workspace = true;
+                    break;
+                }
+            }
+        }
+        if (show_create_workspace) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CREATEWS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_open_workspace = (app_state.g_search_len == 0);
         if (!show_open_workspace) {
             const open_workspace_labels = [_][]const u8{ "open", "open workspace", "workspace", "workspaces", "past workspaces", "history", "window", "windows" };
@@ -3921,11 +3878,6 @@ pub fn updateSearchResults() void {
             "usage: sign in to primary claude account",
             "reconnect claude: primary",
             "reconnect claude primary telemetry",
-            "secondary@example.com",
-            "second claude account",
-            "usage: sign in to secondary claude account",
-            "reconnect claude: secondary",
-            "reconnect claude secondary telemetry",
         }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;
@@ -3968,6 +3920,13 @@ pub fn updateSearchResults() void {
         }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SYNC_STATUS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "account: approve devices", "approve device", "server access", "device keys" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_APPROVE_DEVICES_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
@@ -4018,14 +3977,6 @@ pub fn updateSearchResults() void {
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart this chat on the newest version", "relaunch update latest version restart chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        liveChatTab(app_state.active_shell) and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FRESH_START_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
@@ -4092,24 +4043,29 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
+    if (@import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: plan", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_PLAN_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: ask", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_MANUAL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: accept edits", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_EDITS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "chat permission mode: bypass", "permissions" }, query)) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODE_BYPASS_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "chat view insert command or skill", "browse commands", "browse skills", "ctrl slash", "autocomplete" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_AC_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        app_state.active_shell < app_state.shell_count and
-        pi_models.isPiAgent(app_state.shells[app_state.active_shell].ai_agent) and
-        labelsMatchQuery(&[_][]const u8{
-            "pi model",
-            "change model",
-            "pick model",
-            "switch model",
-            "model list",
-        }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_MODELS_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
@@ -4123,6 +4079,26 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SKILLS_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{
+            "reconnect ai usage accounts",
+            "login ai usage",
+            "fix stale telemetry",
+            "claude telemetry login",
+            "refresh claude login",
+            "usage account login",
+            "reconnect claude secondary",
+            "secondary@example.com",
+            "second claude account",
+            "usage: sign in to secondary claude account",
+            "reconnect claude: secondary",
+            "reconnect claude secondary telemetry",
+        }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_USAGE_LOGIN_INNE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_closewin = (app_state.g_search_len == 0);
         if (!show_closewin) {
@@ -4188,6 +4164,36 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GOINBOX_OFFSET;
             app_state.g_search_result_count += 1;
         }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"show frequent split"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHOW_FREQUENT_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"frequent as first tab"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_FREQUENT_FIRST_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"show favorites split"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHOW_FAVORITES_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"show all split"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHOW_ALL_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "inbox: frequent", "frequent", "input today", "24 hours", "watch-only", "six hours" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_INBOX_FREQUENT_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "manage snippets", "delete snippet", "remove snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_MANAGE_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "use snippets", "snippets", "snippet", "paste snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -4266,6 +4272,14 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_HIDESIDEBAR_OFFSET;
             app_state.g_search_result_count += 1;
         }
+        if (show_collapse and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SIDEBAR_COLLAPSE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (show_hide_sb and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SIDEBAR_HIDE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
     }
 
     if (app_state.g_single_window and app_state.g_search_result_count < app_state.g_search_results.len) {
@@ -4287,12 +4301,14 @@ pub fn updateSearchResults() void {
 
     {
         var show_ts_inbox = (app_state.g_search_len == 0);
+        var show_ts_manual = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
             const tab_sort_labels = [_][]const u8{ "tab order", "sort tabs", "sort", "order", "tabs", "inbox", "manual", "auto sort", "auto" };
             for (tab_sort_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_ts_inbox = true;
+                    show_ts_manual = true;
                     break;
                 }
             }
@@ -4301,20 +4317,10 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABSORT_INBOX_OFFSET;
             app_state.g_search_result_count += 1;
         }
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View on everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-
-    if (app_state.g_search_result_count < app_state.g_search_results.len and
-        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View off everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
-        app_state.g_search_result_count += 1;
+        if (show_ts_manual and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABSORT_MANUAL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
     }
 
     {
@@ -4332,6 +4338,14 @@ pub fn updateSearchResults() void {
         if (show_power) {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_POWER_AUTO_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_POWER_ALWAYS_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_POWER_OFF_OFFSET;
                 app_state.g_search_result_count += 1;
             }
         }
@@ -4353,10 +4367,12 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (show_ladder and app_state.g_search_result_count + 2 <= app_state.g_search_results.len) {
+        if (show_ladder and app_state.g_search_result_count + 4 <= app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_LADDER_AUTO_OFFSET;
-            app_state.g_search_results[app_state.g_search_result_count + 1] = SEARCH_LADDER_DASH_OFFSET;
-            app_state.g_search_result_count += 2;
+            app_state.g_search_results[app_state.g_search_result_count + 1] = SEARCH_LADDER_CLAUDE_OFFSET;
+            app_state.g_search_results[app_state.g_search_result_count + 2] = SEARCH_LADDER_CODEX_OFFSET;
+            app_state.g_search_results[app_state.g_search_result_count + 3] = SEARCH_LADDER_DASH_OFFSET;
+            app_state.g_search_result_count += 4;
         }
     }
 
@@ -4414,9 +4430,12 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (show_voice_speed and app_state.g_search_result_count < app_state.g_search_results.len) {
+        if (show_voice_speed and app_state.g_search_result_count + 4 <= app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_SPEED_100_OFFSET;
-            app_state.g_search_result_count += 1;
+            app_state.g_search_results[app_state.g_search_result_count + 1] = SEARCH_VOICE_SPEED_125_OFFSET;
+            app_state.g_search_results[app_state.g_search_result_count + 2] = SEARCH_VOICE_SPEED_140_OFFSET;
+            app_state.g_search_results[app_state.g_search_result_count + 3] = SEARCH_VOICE_SPEED_150_OFFSET;
+            app_state.g_search_result_count += 4;
         }
     }
 
@@ -4436,6 +4455,32 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_VOICE_REPLAY_OFFSET;
             app_state.g_search_result_count += 1;
         }
+    }
+
+    for ([_]struct { offset: usize, label: []const u8 }{
+        .{ .offset = SEARCH_VOICE_PREVIOUS_OFFSET, .label = "voice read previous reply" },
+        .{ .offset = SEARCH_VOICE_NEXT_OFFSET, .label = "voice read next reply" },
+    }) |action| {
+        if ((app_state.g_search_len == 0 or asciiContainsQueryInsensitive(action.label, app_state.g_search_buf[0..app_state.g_search_len])) and
+            app_state.g_search_result_count < app_state.g_search_results.len)
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = action.offset;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View on everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View off everywhere", app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET;
+        app_state.g_search_result_count += 1;
     }
 
     {
@@ -4474,6 +4519,10 @@ pub fn updateSearchResults() void {
                 app_state.g_search_result_count += 1;
             }
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ETA_PROGRESS_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ETA_ACCURACY_OFFSET;
                 app_state.g_search_result_count += 1;
             }
@@ -4494,6 +4543,28 @@ pub fn updateSearchResults() void {
         }
         if (show_tt and app_state.g_search_result_count < app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_THREADTITLE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
+    {
+        var show_font = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const font_labels = [_][]const u8{ "terminal font", "console font", "font", "size", "zoom", "in", "out", "bigger", "smaller", "text" };
+            for (font_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_font = true;
+                    break;
+                }
+            }
+        }
+        if (show_font and app_state.g_search_result_count + 3 <= app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_FONT_BIGGER_OFFSET;
+            app_state.g_search_result_count += 1;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_FONT_SMALLER_OFFSET;
+            app_state.g_search_result_count += 1;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_FONT_RESET_OFFSET;
             app_state.g_search_result_count += 1;
         }
     }
@@ -4525,9 +4596,10 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (show_cc and app_state.g_search_result_count < app_state.g_search_results.len) {
+        if (show_cc and app_state.g_search_result_count + 2 <= app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CUSTOMCMD_EDIT_OFFSET;
             app_state.g_search_result_count += 1;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CUSTOMCMD_RELOAD_OFFSET;
             app_state.g_search_result_count += 1;
         }
     }
@@ -4546,6 +4618,22 @@ pub fn updateSearchResults() void {
         }
         if (show_diag and app_state.g_search_result_count < app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHELL_DIAG_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+
+        var show_sync_name = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const sync_labels = [_][]const u8{ "use agent tmux name", "adopt agent name", "sync tab tmux agent name", "sync name", "sync tab name", "sync tmux name", "sync agent name", "sync codex name", "sync claude name", "coding agent name", "tmux title", "use agent or terminal session name", "use agent/tmux name" };
+            for (sync_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_sync_name = true;
+                    break;
+                }
+            }
+        }
+        if (show_sync_name and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SYNC_NAME_OFFSET;
             app_state.g_search_result_count += 1;
         }
 
@@ -4694,6 +4782,34 @@ pub fn updateSearchResults() void {
             }
         }
         if (@import("chat_session.zig").chatSettingsEligible() and !@import("chat_session.zig").chatSettingsCodex()) {
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Opus", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_OPUS_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sonnet", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SONNET_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Haiku", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_HAIKU_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Fable", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_FABLE_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Effort Low", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EFFORT_LOW_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Effort Medium", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EFFORT_MEDIUM_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Effort High", app_state.g_search_buf[0..app_state.g_search_len]))) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_EFFORT_HIGH_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
@@ -4730,23 +4846,6 @@ pub fn updateSearchResults() void {
                 app_state.g_search_result_count += 1;
             }
         }
-        if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].ai_agent == 3) {
-            var show_pi_login = app_state.g_search_len == 0;
-            if (app_state.g_search_len > 0) {
-                const q = app_state.g_search_buf[0..app_state.g_search_len];
-                const login_labels = [_][]const u8{ "Log in", "login", "pi login", "sign in" };
-                for (login_labels) |label| {
-                    if (asciiContainsQueryInsensitive(label, q)) {
-                        show_pi_login = true;
-                        break;
-                    }
-                }
-            }
-            if (show_pi_login and app_state.g_search_result_count < app_state.g_search_results.len) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PI_LOGIN_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-        }
 
         if (app_state.active_shell < app_state.shell_count and app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
@@ -4775,9 +4874,38 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_QUEUE_SEND_OFFSET;
             app_state.g_search_result_count += 1;
         }
+        const has_queue = app_state.active_shell < app_state.shell_count and chatOutboxCountForShell(app_state.active_shell) > 0;
+        if (has_queue and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_QUEUE_CLEAR_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
         const has_unsent = app_state.active_shell < app_state.shell_count and chatEchoCountNotSentForShell(app_state.active_shell) > 0;
+        var show_retry_unsent = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const retry_labels = [_][]const u8{ "retry unsent", "unsent message", "not sent", "resend" };
+            for (retry_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_retry_unsent = true;
+                    break;
+                }
+            }
+        }
+        if (show_retry_unsent and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RETRY_UNSENT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
         if (has_unsent and app_state.g_search_result_count < app_state.g_search_results.len) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_DISCARD_UNSENT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        var show_push_queued = app_state.active_shell < app_state.shell_count and chatEchoCountDeliveredForShell(app_state.active_shell) > 0;
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            show_push_queued = asciiContainsQueryInsensitive("send queued in claude now", q) or asciiContainsQueryInsensitive("push queued message", q);
+        }
+        if (show_push_queued and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_PUSH_QUEUED_OFFSET;
             app_state.g_search_result_count += 1;
         }
         var show_edit_queued = false;
@@ -4799,6 +4927,10 @@ pub fn updateSearchResults() void {
             if (@import("computer_pane.zig").selected()) {
                 if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "take control", "give back", "view only" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_CONTROL_OFFSET;
+                    app_state.g_search_result_count += 1;
+                }
+                if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "full width", "fullscreen" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_WIDTH_OFFSET;
                     app_state.g_search_result_count += 1;
                 }
                 if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "retry", "reconnect" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
@@ -4999,6 +5131,24 @@ pub fn updateSearchResults() void {
         }
     }
 
+    {
+        var show_keepawake = (app_state.g_search_len == 0);
+        if (app_state.g_search_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            const kaw_labels = [_][]const u8{ "keep tab awake", "keep awake", "awake", "pin tab", "hibernate", "freeze" };
+            for (kaw_labels) |label| {
+                if (asciiContainsQueryInsensitive(label, q)) {
+                    show_keepawake = true;
+                    break;
+                }
+            }
+        }
+        if (show_keepawake and app_state.g_search_result_count < app_state.g_search_results.len) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_KEEPAWAKE_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
+
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "External Browser Links When Pane Off", "desktop browser", "default browser", "open links" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET;
         app_state.g_search_result_count += 1;
@@ -5078,6 +5228,74 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_len > 0) appendTmuxCacheRows();
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var fh: u8 = 0;
+        var fbuf: [256]u8 = undefined;
+        var flen: u32 = 0;
+        if (focusedSessionFolder(&fh, &fbuf, &flen) and countFolderSessions(fh, fbuf[0..flen]) >= 1) {
+            var show_folder = (app_state.g_search_len == 0);
+            if (!show_folder) {
+                const folder_labels = [_][]const u8{ "open sessions in this folder", "folder", "this folder", "repo", "sessions" };
+                for (folder_labels) |label| {
+                    const queryf = app_state.g_search_buf[0..app_state.g_search_len];
+                    if (queryf.len <= label.len) {
+                        var okf = true;
+                        for (0..queryf.len) |j| {
+                            const qcf = u16ToLower(queryf[j]);
+                            const lcf: u16 = label[j];
+                            if (qcf != lcf) {
+                                okf = false;
+                                break;
+                            }
+                        }
+                        if (okf) {
+                            show_folder = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (show_folder) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_OPENFOLDER_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        var rh: u8 = 0;
+        var rbuf: [256]u8 = undefined;
+        var rlen: u32 = 0;
+        const repo_ok = workspacePrimaryRepo(&rh, &rbuf, &rlen);
+        const repo_count = if (repo_ok) countFolderSessions(rh, rbuf[0..rlen]) else 0;
+        var show_recover = (repo_ok and repo_count >= 1 and app_state.g_search_len == 0);
+        if (!show_recover and app_state.g_search_len > 0) {
+            const recover_labels = [_][]const u8{ "recover workspace tmux sessions", "recover tmux", "missing sessions", "recovery" };
+            for (recover_labels) |label| {
+                const queryr = app_state.g_search_buf[0..app_state.g_search_len];
+                if (queryr.len <= label.len) {
+                    var okr = true;
+                    for (0..queryr.len) |j| {
+                        const qcr = u16ToLower(queryr[j]);
+                        const lcr: u16 = label[j];
+                        if (qcr != lcr) {
+                            okr = false;
+                            break;
+                        }
+                    }
+                    if (okr) {
+                        show_recover = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (show_recover) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RECOVER_REPO_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+    }
 
     if (app_state.g_search_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
         loadArchiveIfNeeded();
@@ -5187,10 +5405,25 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         }
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const label = if (tc_idx) |ti| (if (app_state.shells[ti].inbox_excluded) "Inbox: Show This Session Again" else "Inbox: Never Show This Session") else "Inbox: Never Show This Session";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "inbox", "exclude" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_INBOX_EXCLUDE;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
         const tc_pinned = if (tc_idx) |ti| @import("sidebar.zig").effPinnedTop(ti) else false;
         const pin_str: []const u8 = if (tc_pinned) "Unpin from Top" else "Pin to Top";
         if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ pin_str, "pin", "pinned", "unpin", "top", "sidebar top" }, app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_PIN_TOP;
+            app_state.g_search_result_count += 1;
+        }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len) {
+        const tc_kaw = if (tc_idx) |ti| app_state.shells[ti].keep_awake else false;
+        const kaw_str: []const u8 = if (tc_kaw) "Keep Tab Awake: On" else "Keep Tab Awake: Off";
+        if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ kaw_str, "awake", "keep awake", "pin", "hibernate", "freeze", "wake", "Let Browser Pane Hibernate", "Keep Tab Awake" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_KEEPAWAKE;
             app_state.g_search_result_count += 1;
         }
     }
@@ -5243,13 +5476,6 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_RESET;
         app_state.g_search_result_count += 1;
     }
-
-    if (tc_idx != null and liveChatTab(tc_idx.?) and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
-    {
-        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_FRESH_START;
-        app_state.g_search_result_count += 1;
-    }
     if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
     {
@@ -5288,20 +5514,22 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
             }
         }
     }
-    if (app_state.g_search_result_count < app_state.g_search_results.len) {
-        if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to Group...", "move to group", "group" }, app_state.g_search_buf[0..app_state.g_search_len])) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_GROUPMOVE_MENU_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
     const tc_grouped = if (tc_idx) |ti| (@import("sidebar.zig").tabGroupId(ti) != 0) else false;
     if (sel_mode) {
         if (app_state.group_count < MAX_GROUPS) {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Add selected tabs to new group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW;
+                    app_state.g_search_result_count += 1;
+                }
             }
         }
         if (selectedTabsIncludeGrouped()) {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Remove selected tabs from groups", app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_REMOVE;
+                    app_state.g_search_result_count += 1;
+                }
             }
         }
         for (0..app_state.group_count) |gi| {
@@ -5325,6 +5553,10 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
             }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Move selected tabs to new workspace", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
+                app_state.g_search_result_count += 1;
+            }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
             if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -5340,15 +5572,51 @@ fn appendExtendedChatActions(tc_idx: ?u32) void {
             }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Remove from group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_REMOVE;
+                app_state.g_search_result_count += 1;
+            }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
+                app_state.g_search_result_count += 1;
+            }
         }
     } else {
         if (app_state.group_count < MAX_GROUPS) {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Add to new group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
+        for (0..app_state.group_count) |gi| {
+            if (!@import("sidebar.zig").groupInCurrentWorkspace(app_state.groups[gi].id)) continue;
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            var glbuf: [72]u8 = undefined;
+            var gli: usize = 0;
+            for ("Add to group: ") |c| {
+                if (gli >= glbuf.len) break;
+                glbuf[gli] = c;
+                gli += 1;
+            }
+            for (0..app_state.groups[gi].name_len) |j| {
+                if (gli >= glbuf.len - 1) break;
+                glbuf[gli] = @intCast(app_state.groups[gi].name[j] & 0x7F);
+                gli += 1;
+            }
+            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(glbuf[0..gli], app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_ADD_OFFSET + gi;
+                app_state.g_search_result_count += 1;
             }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Move to NEW workspace", "Move tab to new workspace" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_MOVE_NEW_WS;
+                app_state.g_search_result_count += 1;
+            }
         }
         if (sel_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
             if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Clear tab selection", app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -5365,7 +5633,7 @@ pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
     .{ .target = app_state.SEARCH_TABCTX_UNREAD, .label = "Mark as unread" },
     .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
     .{ .target = app_state.SEARCH_TABCTX_COPY_ID, .label = "Copy chat ID" },
-    .{ .target = SEARCH_TABCTX_ARCHIVE, .label = "Archive chat" },
+    .{ .target = app_state.SEARCH_TABCTX_HIDE, .label = "Hide from sidebar" },
     .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete" },
 };
 
@@ -5381,7 +5649,7 @@ fn appendChatActions(index: usize) void {
     for (chat_actions) |action| {
         if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
         const label = chatActionLabel(action.target, @import("sidebar.zig").effPinnedTop(index)).?;
-        if (!labelsMatchQuery(&.{label}, query) and !(action.target == SEARCH_TABCTX_PIN_TOP and labelsMatchQuery(&.{ "pin to top", "unpin from top", "pin tab", "unpin tab", "pinned", "sidebar top", "top" }, query)) and !(action.target == SEARCH_TABCTX_ARCHIVE and labelsMatchQuery(&.{ "close tab", "hide from sidebar", "hide" }, query)) and !(action.target == app_state.SEARCH_TABCTX_RENAME and labelsMatchQuery(&.{ "rename session", "rename tab" }, query))) continue;
+        if (!labelsMatchQuery(&.{label}, query) and !(action.target == SEARCH_TABCTX_PIN_TOP and labelsMatchQuery(&.{ "pin to top", "unpin from top", "pin tab", "unpin tab", "pinned", "sidebar top", "top" }, query)) and !(action.target == app_state.SEARCH_TABCTX_HIDE and labelsMatchQuery(&.{"close tab"}, query)) and !(action.target == app_state.SEARCH_TABCTX_RENAME and labelsMatchQuery(&.{ "rename session", "rename tab" }, query))) continue;
         if (std.mem.indexOfScalar(usize, app_state.g_search_results[0..app_state.g_search_result_count], action.target) != null) continue;
         app_state.g_search_results[app_state.g_search_result_count] = action.target;
         app_state.g_search_result_count += 1;

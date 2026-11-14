@@ -60,9 +60,6 @@ public sealed class VerifyJob : IDisposable {
         return Start(exe, directory, stdout, stderr, "--single-window --no-window-restore");
     }
     public System.Diagnostics.Process Start(string exe, string directory, string stdout, string stderr, string arguments) {
-        return Start(exe, directory, stdout, stderr, arguments, false);
-    }
-    public System.Diagnostics.Process Start(string exe, string directory, string stdout, string stderr, string arguments, bool noWindow) {
         if (started || job == IntPtr.Zero) throw new InvalidOperationException("Job is not available for launch");
         IntPtr output = IntPtr.Zero, error = IntPtr.Zero, input = IntPtr.Zero;
         ProcessInfo native = new ProcessInfo();
@@ -73,7 +70,7 @@ public sealed class VerifyJob : IDisposable {
             StartupInfo startup = new StartupInfo();
             startup.Size = Marshal.SizeOf(typeof(StartupInfo)); startup.Flags = 0x100;
             startup.Input = input; startup.Output = output; startup.Error = error;
-            Check(CreateProcess(exe, new StringBuilder("\"" + exe + "\" " + arguments), IntPtr.Zero, IntPtr.Zero, true, 4u | (noWindow ? 0x08000000u : 0u), IntPtr.Zero, directory, ref startup, out native));
+            Check(CreateProcess(exe, new StringBuilder("\"" + exe + "\" " + arguments), IntPtr.Zero, IntPtr.Zero, true, 4, IntPtr.Zero, directory, ref startup, out native));
             Check(AssignProcessToJobObject(job, native.Process));
             process = System.Diagnostics.Process.GetProcessById((int)native.Pid);
             IntPtr handle = process.Handle;

@@ -565,7 +565,7 @@ jobs:
         run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mb.test.js tools/palette-verbs.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -840,6 +840,70 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  idle-budget:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Restore Zig
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-speed-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-speed-
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Check the idle budget evaluator and registry
+        run: node --test tools/idle-budget.test.js tools/idle-registry.test.js
+      - name: Build app and fixtures
+        shell: pwsh
+        run: |
+          zig build
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "zig-out/bin/ssh.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
+          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "zig-out/bin/tmux.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+      - name: Idle five minutes with three quiet server chats
+        shell: powershell
+        run: ./tools/idle-budget.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/idle-budget
+      - name: Show the idle budget report
+        if: always()
+        shell: bash
+        run: |
+          if [ -f evidence/idle-budget/report.txt ]; then
+            cat evidence/idle-budget/report.txt
+            cat evidence/idle-budget/report.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: idle-budget-${{ github.run_id }}
+          path: evidence/idle-budget
+          if-no-files-found: warn
+          retention-days: 7
+
   switch-performance:
     needs: [speed-baseline, speed-candidate]
     if: always()
@@ -869,7 +933,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
+    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance, idle-budget]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -884,22 +948,26 @@ jobs:
           UPDATE_SOURCE: ${{ needs.test-update-source.result }}
           SPEED: ${{ needs.switch-performance.result }}
           RED_RUN: ${{ needs.check-red-run.result }}
+          IDLE: ${{ needs.idle-budget.result }}
+          EVENT: ${{ github.event_name }}
         run: |
           require_jobs() {
             for result in "$@"; do
               [ "$result" = success ] || return 1
             done
           }
-          require_jobs success success success success success success success success
+          require_jobs success success success success success success success success success
           for result in failure cancelled skipped; do
-            if require_jobs "$result" success success success success success success success; then exit 1; fi
-            if require_jobs success "$result" success success success success success success; then exit 1; fi
-            if require_jobs success success "$result" success success success success success; then exit 1; fi
-            if require_jobs success success success "$result" success success success success; then exit 1; fi
-            if require_jobs success success success success "$result" success success success; then exit 1; fi
-            if require_jobs success success success success success "$result" success success; then exit 1; fi
-            if require_jobs success success success success success success "$result" success; then exit 1; fi
-            if require_jobs success success success success success success success "$result"; then exit 1; fi
+            if require_jobs "$result" success success success success success success success success; then exit 1; fi
+            if require_jobs success "$result" success success success success success success success; then exit 1; fi
+            if require_jobs success success "$result" success success success success success success; then exit 1; fi
+            if require_jobs success success success "$result" success success success success success; then exit 1; fi
+            if require_jobs success success success success "$result" success success success success; then exit 1; fi
+            if require_jobs success success success success success "$result" success success success; then exit 1; fi
+            if require_jobs success success success success success success "$result" success success; then exit 1; fi
+            if require_jobs success success success success success success success "$result" success; then exit 1; fi
+            if require_jobs success success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED"
+          if [ "$EVENT" != pull_request ] && [ "$IDLE" = skipped ]; then IDLE=success; fi
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED" "$IDLE"

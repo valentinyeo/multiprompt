@@ -67,8 +67,7 @@ if os.name == "nt" and (os.environ.get("CHAT_MODEL_PROOF") == "1" or os.environ.
 
         socket.socket = FixtureSocket
 
-    if os.environ.get("MP_VERIFY_SOCKET_TEMP"):
-        tempfile.tempdir = os.environ["MP_VERIFY_SOCKET_TEMP"]
+    tempfile.tempdir = os.environ["MP_VERIFY_SOCKET_TEMP"]
     _kill = os.kill
     _kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     _kernel.OpenProcess.restype = wintypes.HANDLE

@@ -186,7 +186,6 @@ const WM_APP_BROWSER_ENGINE_TOGGLE = @import("win32.zig").WM_APP_BROWSER_ENGINE_
 const WM_APP_INPUT_HOOK_RECOVER = @import("win32.zig").WM_APP_INPUT_HOOK_RECOVER;
 const WM_APP_CHAT_TOGGLE = @import("win32.zig").WM_APP_CHAT_TOGGLE;
 const WM_APP_CHAT_AC_READY = @import("win32.zig").WM_APP_CHAT_AC_READY;
-const WM_APP_PI_MODELS_READY = @import("win32.zig").WM_APP_PI_MODELS_READY;
 const WM_APP_CHAT_SEND = @import("win32.zig").WM_APP_CHAT_SEND;
 const WM_APP_CHAT_INTERRUPT = @import("win32.zig").WM_APP_CHAT_INTERRUPT;
 const WM_APP_POWER_ACTIVITY = @import("win32.zig").WM_APP_POWER_ACTIVITY;
@@ -656,7 +655,6 @@ const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFS
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
-const SEARCH_PI_LOGIN_OFFSET = @import("app_state.zig").SEARCH_PI_LOGIN_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
@@ -797,11 +795,6 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
-const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
-const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
-const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
-const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
-const pi_models = @import("pi_models.zig");
 const MAX_CUSTOM_CMDS = @import("app_state.zig").MAX_CUSTOM_CMDS;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
@@ -3917,7 +3910,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = PostMessageW(hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
                 },
                 @intFromEnum(more_menu.Item.archive) => archiveActiveTab(),
-                @intFromEnum(more_menu.Item.model) => @import("chat_send.zig").chatPiModelPicker(),
                 @intFromEnum(more_menu.Item.end_session) => if (tmux) endActiveTmuxSession(),
                 @intFromEnum(more_menu.Item.remove) => closeNonTmuxTabAt(shell),
                 else => {},
@@ -4005,10 +3997,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("chat_send.zig").chatModeFinish(lp);
             return 0;
         },
-        app_state.WM_APP_PI_MODEL_RESULT => {
-            @import("chat_send.zig").chatPiModelFinish(lp);
-            return 0;
-        },
         WM_APP_CHAT_COPY_SELECTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatCopySelection();
@@ -4035,13 +4023,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CHAT_AC_READY => {
             chatAcOnFetchDone(@intCast(wp), @intCast(lp));
-            return 0;
-        },
-        WM_APP_PI_MODELS_READY => {
-            if (app_state.g_search_active and app_state.g_search_pi_models_mode) {
-                updateSearchResults();
-                _ = InvalidateRect(hwnd, null, 0);
-            }
             return 0;
         },
         WM_APP_CHAT_SEND => {
@@ -4344,7 +4325,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_group_move_mode = false;
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
-            app_state.g_search_pi_models_mode = false;
             app_state.g_search_tabctx_mode = false;
             app_state.g_workspace_color_target = null;
             app_state.g_bot_look_mode = .none;
@@ -4411,7 +4391,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_search_group_move_mode = false;
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
-            app_state.g_search_pi_models_mode = false;
             app_state.g_search_tabctx_mode = false;
             app_state.g_workspace_color_target = null;
             app_state.g_bot_look_mode = .none;
@@ -4737,12 +4716,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_scroll = 0;
                 app_state.g_search_workspace_delete_confirm = null;
                 app_state.g_search_snippet_delete_confirm = null;
-                updateSearchResults();
-                _ = InvalidateRect(hwnd, null, 0);
-            } else if (app_state.g_search_pi_models_mode) {
-                app_state.g_search_pi_models_mode = false;
-                app_state.g_search_sel = 0;
-                app_state.g_search_scroll = 0;
                 updateSearchResults();
                 _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_skills_mode) {
@@ -5467,16 +5440,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == app_state.SEARCH_CHAT_FRESH_START_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_search_from_inbox = false;
-                    app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    _ = @import("command_palette.zig").startFreshChat(app_state.active_shell);
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
                 if (target == SEARCH_CHAT_RESTART_OFFSET or target == SEARCH_CHAT_RESTART_ALL_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
@@ -5550,45 +5513,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     if (was_inbox and app_state.g_inbox_active) closeInbox(hwnd) else showActiveShellAfterOverlay();
                     chatAcOpenBrowse();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
-                if (target == SEARCH_PI_MODELS_MENU_OFFSET) {
-                    const host = pi_models.hostForShell(app_state.active_shell) orelse {
-                        showHeaderNoticeAscii("Model choice needs a Pi chat on a server", 4000, true);
-                        return 0;
-                    };
-                    pi_models.ensure(host);
-                    app_state.g_search_pi_models_mode = true;
-                    app_state.g_search_len = 0;
-                    app_state.g_search_sel = 1;
-                    app_state.g_search_scroll = 0;
-                    updateSearchResults();
-                    if (!pi_models.ready()) showHeaderNoticeAscii("Asking Pi for its model list...", 4000, false);
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
-                if (target == SEARCH_PI_MODELS_BACK_OFFSET) {
-                    app_state.g_search_pi_models_mode = false;
-                    app_state.g_search_len = 0;
-                    app_state.g_search_sel = 0;
-                    app_state.g_search_scroll = 0;
-                    updateSearchResults();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
-                if (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS) {
-                    const model_idx = target - SEARCH_PI_MODEL_ROW_OFFSET;
-                    const was_from_inbox = app_state.g_search_from_inbox;
-                    app_state.g_search_active = false;
-                    app_state.g_search_pi_models_mode = false;
-                    app_state.g_search_from_inbox = false;
-                    app_state.g_search_spawn_ws = 0xFF;
-                    app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    if (was_from_inbox and app_state.g_inbox_active) closeInbox(hwnd) else showActiveShellAfterOverlay();
-                    if (!app_state.g_chat_active) toggleChatView();
-                    if (!@import("chat_send.zig").chatPiModelSelect(@intCast(model_idx))) showHeaderNoticeAscii("Could not switch the model yet", 4000, true);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -6453,15 +6377,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_PI_LOGIN_OFFSET) {
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = false;
-                    clearSearchBackdrop();
-                    showActiveShellAfterOverlay();
-                    _ = @import("chat_send.zig").chatPiLogin("");
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
                 if (target == SEARCH_CHAT_QUEUE_SEND_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = false;
@@ -6806,12 +6721,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_TABSORT_INBOX_OFFSET) {
-                    if (app_state.g_tab_sort_auto) {
-                        materializeDisplayOrder();
-                        app_state.g_tab_sort_auto = false;
-                    } else {
-                        app_state.g_tab_sort_auto = true;
-                    }
+                    app_state.g_tab_sort_auto = true;
                     if (verboseLoggingEnabled()) debugLog("[tabsort] AUTO enabled via Ctrl+K");
                     saveSession();
                     app_state.g_search_active = false;
@@ -6838,12 +6748,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
-                if (target == SEARCH_POWER_AUTO_OFFSET) {
-                    app_state.g_power_profile = switch (app_state.g_power_profile) {
-                        .auto => .always,
-                        .always => .off,
-                        .off => .auto,
-                    };
+                if (target == SEARCH_POWER_AUTO_OFFSET or target == SEARCH_POWER_ALWAYS_OFFSET or target == SEARCH_POWER_OFF_OFFSET) {
+                    app_state.g_power_profile = if (target == SEARCH_POWER_AUTO_OFFSET) .auto else if (target == SEARCH_POWER_ALWAYS_OFFSET) .always else .off;
                     savePowerProfile();
                     applyPowerProfile(hwnd);
                     var tbuf: [256]u16 = undefined;
@@ -6857,7 +6763,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
-                if (target == SEARCH_LADDER_AUTO_OFFSET or target == SEARCH_LADDER_DASH_OFFSET) {
+                if (target >= SEARCH_LADDER_AUTO_OFFSET and target <= SEARCH_LADDER_DASH_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -6869,11 +6775,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             showHeaderNoticeAscii("Token Ladder: no dashboard link yet", 3000, false);
                         }
                     } else {
-                        startLadderMode(switch (app_state.g_ai_pace.ladder_mode) {
-                            0 => 1,
-                            1 => 2,
-                            else => 0,
-                        });
+                        startLadderMode(if (target == SEARCH_LADDER_CLAUDE_OFFSET) 1 else if (target == SEARCH_LADDER_CODEX_OFFSET) 2 else 0);
                     }
                     repositionActive();
                     _ = InvalidateRect(hwnd, null, 0);
@@ -6927,13 +6829,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_VOICE_SPEED_100_OFFSET) {
-                    app_state.g_voice_speed = switch (app_state.g_voice_speed) {
-                        .s100 => .s125,
-                        .s125 => .s140,
-                        .s140 => .s150,
-                        .s150 => .s100,
-                    };
+                if (target == SEARCH_VOICE_SPEED_100_OFFSET or target == SEARCH_VOICE_SPEED_125_OFFSET or target == SEARCH_VOICE_SPEED_140_OFFSET or target == SEARCH_VOICE_SPEED_150_OFFSET) {
+                    app_state.g_voice_speed = if (target == SEARCH_VOICE_SPEED_100_OFFSET) .s100 else if (target == SEARCH_VOICE_SPEED_125_OFFSET) .s125 else if (target == SEARCH_VOICE_SPEED_140_OFFSET) .s140 else .s150;
                     saveSession();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -7219,7 +7116,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_ws_move_mode = false;
                     app_state.g_wsmove_tab_sid = 0;
                     app_state.g_search_theme_mode = false;
-                    app_state.g_groupmove_tab_sid = if (app_state.g_search_tabctx_mode) app_state.g_tabctx_sid else if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+                    app_state.g_groupmove_tab_sid = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 1;
                     app_state.g_search_scroll = 0;
@@ -7461,7 +7358,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or target == app_state.SEARCH_TABCTX_FRESH_START or
+                if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_RESTART_AI or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
                     (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS))
                 {
                     const tc_sid = if (app_state.g_tabctx_sid == 0 and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else app_state.g_tabctx_sid;
@@ -7489,8 +7386,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = @import("chat_send.zig").chatPermissionAnswer(ti, .deny);
                         } else if (target == SEARCH_TABCTX_CHAT_STOP) {
                             _ = @import("chat_send.zig").chatStopAgent(ti);
-                        } else if (target == app_state.SEARCH_TABCTX_FRESH_START) {
-                            _ = @import("command_palette.zig").startFreshChat(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESTART_AI) {
                             _ = @import("chat_send.zig").chatRestartAi(ti);
                         } else if (target == SEARCH_TABCTX_CHAT_RESET) {
@@ -10071,7 +9966,6 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_ws_move_mode = false;
     app_state.g_search_group_move_mode = false;
     app_state.g_search_skills_mode = false;
-    app_state.g_search_pi_models_mode = false;
     app_state.g_search_tabctx_mode = false;
     app_state.g_search_groupctx_mode = false;
     app_state.g_search_remind_input_mode = false;

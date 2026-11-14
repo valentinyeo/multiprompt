@@ -253,10 +253,11 @@ test("Ctrl+K no longer lists open-all VPS host rows", () => {
 
 test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   assert.match(source, /const SEARCH_USAGE_LOGIN_PRIMARY_OFFSET: usize = 6298;/);
+  assert.match(source, /const SEARCH_USAGE_LOGIN_INNE_OFFSET: usize = 6299;/);
   assert.match(source,
     /SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => "usage: sign in to primary claude account"/);
-  assert.doesNotMatch(source,
-    /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_INNE_OFFSET;/, "the secondary profile folds into one Sign In row");
+  assert.match(source,
+    /SEARCH_USAGE_LOGIN_INNE_OFFSET => "usage: sign in to secondary claude account"/);
 
   const update = functionBody("updateSearchResults", "u16ToLower");
   for (const alias of [
@@ -270,6 +271,8 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
   }
   assert.match(update,
     /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_PRIMARY_OFFSET;/);
+  assert.match(update,
+    /g_search_results\[g_search_result_count\] = SEARCH_USAGE_LOGIN_INNE_OFFSET;/);
   assert.match(update, /"owner@example.com"/);
   assert.match(update, /"secondary@example.com"/);
 

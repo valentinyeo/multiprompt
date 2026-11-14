@@ -38,8 +38,9 @@ function verify(root) {
   assert.ok(doctor.pid > 0 && doctor.hwnd > 0 && doctor.chat);
   assert.match(doctor.sha256, /^[a-f0-9]{64}$/i);
   const actions = JSON.parse(fs.readFileSync(path.join(root, 'actions.json'), 'utf8').replace(/^\uFEFF/, ''));
-  for (const [name, item, effort] of [['haiku', 'model_haiku', 'default'], ['low', 'effort_low', 'low'], ['medium', 'effort_medium', 'medium'], ['high', 'effort_high', 'high']]) {
-    assert.ok(actions.some(action => action.input === 'choose plus menu row' && action.text === item));
+  for (const [name, effort] of [['haiku', 'default'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']]) {
+    const query = name === 'haiku' ? 'model haiku' : `effort ${name}`;
+    assert.ok(actions.some(action => action.input === 'type palette query' && action.text === query));
     const config = json(`config-${name}.json`);
     assert.equal(config.enabled, true);
     assert.equal(config.model, 'haiku');
@@ -55,7 +56,7 @@ function verify(root) {
       return model >= 0 && args[model + 1] === 'haiku' && (effort === 'default' ? level < 0 : level >= 0 && args[level + 1] === effort);
     }));
   }
-  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-plus-${choice}`, `model-after-${choice}`])]) {
+  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-palette-${choice}`, `model-after-${choice}`])]) {
     const png = fs.readFileSync(path.join(root, `${name}.png`));
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(png.length > 1000);

@@ -17,9 +17,9 @@ function body(source, name) {
   return source.slice(start, end + 2);
 }
 
-test('Snippets are rendered through Use snippets and Enter deletes instead of pasting', () => {
+test('Manage Snippets is searchable, rendered, and Enter deletes instead of pasting', () => {
   const palette = read('command_palette.zig');
-  assert.doesNotMatch(palette, /g_search_results\[[^\]]+\] = SEARCH_SNIPPET_MANAGE_OFFSET;/);
+  assert.match(palette, /"manage snippets", "delete snippet", "remove snippet"/);
   assert.match(read('sidebar.zig'), /L\(ui_words\.palette_manage_snippets\)/);
   assert.match(read('ui_words.zon'), /\.palette_manage_snippets = "Manage snippets"/);
   assert.match(main, /if \(target == SEARCH_SNIPPET_MANAGE_OFFSET\) \{\s*_ = SendMessageW\(hwnd, WM_APP_SNIPPETS_OPEN, 0, 0\);\s*app_state\.g_search_snippet_manage_mode = true/);

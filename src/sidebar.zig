@@ -204,7 +204,6 @@ const SEARCH_CHAT_ALLOW_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALLOW_OFFS
 const SEARCH_CHAT_ALWAYS_OFFSET = @import("app_state.zig").SEARCH_CHAT_ALWAYS_OFFSET;
 const SEARCH_CHAT_DENY_OFFSET = @import("app_state.zig").SEARCH_CHAT_DENY_OFFSET;
 const SEARCH_CHAT_STOP_OFFSET = @import("app_state.zig").SEARCH_CHAT_STOP_OFFSET;
-const SEARCH_PI_LOGIN_OFFSET = @import("app_state.zig").SEARCH_PI_LOGIN_OFFSET;
 const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPROMPT_LOGIN_OFFSET;
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
@@ -347,11 +346,6 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
-const SEARCH_PI_MODELS_MENU_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_MENU_OFFSET;
-const SEARCH_PI_MODEL_ROW_OFFSET = @import("app_state.zig").SEARCH_PI_MODEL_ROW_OFFSET;
-const SEARCH_PI_MODELS_BACK_OFFSET = @import("app_state.zig").SEARCH_PI_MODELS_BACK_OFFSET;
-const MAX_PI_MODELS = @import("app_state.zig").MAX_PI_MODELS;
-const pi_models = @import("pi_models.zig");
 const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
 const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
@@ -2767,8 +2761,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 L("Search groups for this session...")
             else if (app_state.g_search_skills_mode)
                 L("Search skills...")
-            else if (app_state.g_search_pi_models_mode)
-                L("Search Pi models...")
             else if (app_state.g_search_pick_repo_mode)
                 if (app_state.g_search_pick_repo_folder_mode) L("Set workspace folder...") else L("Pick a repo...")
             else if (app_state.g_search_openall_host_mode)
@@ -2845,9 +2837,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_skills_menu = result_idx == SEARCH_SKILLS_MENU_OFFSET;
                     const is_skills_back = result_idx == SEARCH_SKILLS_BACK_OFFSET;
                     const is_skill_row = result_idx >= SEARCH_SKILL_ROW_OFFSET and result_idx < SEARCH_SKILL_ROW_OFFSET + MAX_PALETTE_SKILLS;
-                    const is_pi_models_menu = result_idx == SEARCH_PI_MODELS_MENU_OFFSET;
-                    const is_pi_models_back = result_idx == SEARCH_PI_MODELS_BACK_OFFSET;
-                    const is_pi_model_row = result_idx >= SEARCH_PI_MODEL_ROW_OFFSET and result_idx < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS;
                     const is_chat_reply = result_idx == SEARCH_CHAT_REPLY_OFFSET;
                     const is_clean_chat = result_idx == SEARCH_CLEAN_CHAT_OFFSET;
                     const is_chat_todo = result_idx == SEARCH_CHAT_TODO_OFFSET;
@@ -2857,7 +2846,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_resync = result_idx == SEARCH_CHAT_RESYNC_OFFSET;
                     const is_chat_restart = result_idx == SEARCH_CHAT_RESTART_OFFSET;
                     const is_chat_restart_all = result_idx == SEARCH_CHAT_RESTART_ALL_OFFSET;
-                    const is_chat_fresh_start = result_idx == app_state.SEARCH_CHAT_FRESH_START_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
                     const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
@@ -2878,7 +2866,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_push_queued = result_idx == SEARCH_CHAT_PUSH_QUEUED_OFFSET;
                     const is_chat_edit_queued = result_idx == SEARCH_CHAT_EDIT_QUEUED_OFFSET;
                     const is_chat_setting = (result_idx >= SEARCH_CHAT_MODEL_OPUS_OFFSET and result_idx <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or (result_idx >= SEARCH_CHAT_MODEL_FABLE_OFFSET and result_idx <= SEARCH_CHAT_MODEL_ASTRA_OFFSET);
-                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued or is_chat_restart or is_chat_restart_all or is_chat_fresh_start;
+                    const is_chat_action = is_chat_tab_url or is_chat_setting or is_chat_reply or is_chat_ac or is_chat_mode or is_chat_copy or is_chat_attach or is_chat_copy_sel or is_chat_selection_menu or is_chat_expand_table or is_chat_select_all or is_chat_focus_messages or is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued or is_chat_restart or is_chat_restart_all;
                     const is_skill_action = is_skills_menu or is_skills_back or is_skill_row or is_chat_action;
                     const is_sync_signout = result_idx == SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
@@ -2978,7 +2966,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_always = result_idx == SEARCH_CHAT_ALWAYS_OFFSET;
                     const is_chat_deny = result_idx == SEARCH_CHAT_DENY_OFFSET;
                     const is_chat_stop = result_idx == SEARCH_CHAT_STOP_OFFSET;
-                    const is_pi_login = result_idx == SEARCH_PI_LOGIN_OFFSET;
                     const is_multiprompt_login = result_idx == SEARCH_MULTIPROMPT_LOGIN_OFFSET;
                     const is_computer = result_idx == SEARCH_COMPUTER_TOGGLE_OFFSET or result_idx == SEARCH_COMPUTER_CONTROL_OFFSET or result_idx == SEARCH_COMPUTER_WIDTH_OFFSET or result_idx == SEARCH_COMPUTER_RETRY_OFFSET;
                     const is_browser_toggle = result_idx == SEARCH_BROWSER_TOGGLE_OFFSET or is_computer;
@@ -3610,16 +3597,13 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var pw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L(ui_words.global_power), -1, &pw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        const pw_label = if (is_power_auto) L(ui_words.global_power_auto) else if (is_power_always) L(ui_words.global_power_always) else L(ui_words.global_power_off);
+                        _ = DrawTextW(hdc, pw_label, -1, &pw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var pw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        const pw_mode = switch (app_state.g_power_profile) {
-                            .auto => L(ui_words.global_power_mode_auto),
-                            .always => L(ui_words.global_power_mode_always),
-                            .off => L(ui_words.global_power_mode_off),
-                        };
-                        _ = DrawTextW(hdc, pw_mode, -1, &pw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        const pw_current = (is_power_auto and app_state.g_power_profile == .auto) or (is_power_always and app_state.g_power_profile == .always) or (is_power_off and app_state.g_power_profile == .off);
+                        _ = DrawTextW(hdc, if (pw_current) L(ui_words.palette_hint_current) else L(""), -1, &pw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_always_on or is_voice_always_off) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3839,11 +3823,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         var find_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync or is_chat_restart or is_chat_restart_all or is_chat_fresh_start) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_plus_menu or is_chat_resync or is_chat_restart or is_chat_restart_all) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var tools_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_fresh_start) L("Chat View: Fresh start") else if (is_chat_restart) L("Chat View: Restart this chat on the newest version") else if (is_chat_restart_all) L("Chat View: Restart every idle live chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_restart) L("Chat View: Restart this chat on the newest version") else if (is_chat_restart_all) L("Chat View: Restart every idle live chat") else if (is_chat_more_menu) L("Chat View: More Menu") else if (is_chat_plus_menu) L("Chat View: Plus Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -3917,28 +3901,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var skills_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_skills_back) L("main") else L("Chat View"), -1, &skills_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    } else if (is_pi_models_menu or is_pi_models_back) {
-                        _ = SelectObject(hdc, palette_font);
-                        _ = SetTextColor(hdc, primary_color);
-                        var pi_menu_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, if (is_pi_models_back) L("Back") else L("Pi Model..."), -1, &pi_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, palette_hint_font);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        var pi_menu_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, if (is_pi_models_back) L("main") else L("Chat View"), -1, &pi_menu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    } else if (is_pi_model_row) {
-                        const model_index = result_idx - SEARCH_PI_MODEL_ROW_OFFSET;
-                        if (model_index < pi_models.models().len) {
-                            const model = pi_models.models()[model_index];
-                            _ = SelectObject(hdc, palette_font);
-                            _ = SetTextColor(hdc, primary_color);
-                            var model_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 175, .bottom = ry + row_h };
-                            drawAscii(hdc, model.nameText(), &model_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, palette_hint_font);
-                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                            var model_hint_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            drawAscii(hdc, if (model.providerText().len > 0) model.providerText() else model.detailText(), &model_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        }
                     } else if (is_skill_row) {
                         const skill_idx = result_idx - SEARCH_SKILL_ROW_OFFSET;
                         if (skill_idx < app_state.g_palette_skills.len) {
@@ -4247,15 +4209,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var stop_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, (if (app_state.ISSUE_265_WORKING_BAR) L("Esc") else L("Ctrl+C")), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    } else if (is_pi_login) {
-                        _ = SelectObject(hdc, palette_font);
-                        _ = SetTextColor(hdc, primary_color);
-                        var pi_login_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Log in"), -1, &pi_login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, palette_hint_font);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        var pi_login_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("/login"), -1, &pi_login_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_computer) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4721,7 +4674,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_computer_on = if (findShellById(app_state.g_tabctx_sid)) |ti| @import("computer_pane.zig").chosenFor(ti) else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
                             const tc_chat_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].chat_view_on else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_RESTART_AI) L(ui_words.tab_context_chat_restart_ai) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == app_state.SEARCH_TABCTX_FRESH_START) L("Fresh start") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
+                            const tc_label: [*:0]const u16 = if (result_idx == app_state.SEARCH_TABCTX_RENAME) L("Rename session") else if (result_idx == app_state.SEARCH_TABCTX_COMPUTER) L(ui_words.computer_toggle) else if (result_idx == app_state.SEARCH_TABCTX_PIN_PAGE) L(ui_words.browser_pin_page) else if (result_idx == app_state.SEARCH_TABCTX_UNPIN_PAGE) L(ui_words.browser_unpin_page) else if (result_idx == SEARCH_TABCTX_CHAT_VIEW) (if (tc_chat_on) L(ui_words.tab_context_switch_to_terminal) else L(ui_words.tab_context_switch_to_live_chat)) else if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_GOOGLE_SIGNIN) L(ui_words.tab_context_google_signin) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_RESTART_AI) L(ui_words.tab_context_chat_restart_ai) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_computer_on) L(ui_words.computer_return_browser) else if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             if (result_idx == SEARCH_TABCTX_WSMOVE) {
                                 _ = SelectObject(hdc, palette_hint_font);

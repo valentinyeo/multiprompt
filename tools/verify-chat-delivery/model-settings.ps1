@@ -13,73 +13,12 @@ function Model-Palette([string]$Query, [string]$Screenshot) {
     Shot $Screenshot
     Press @(0x0D) "Enter: $Query"
 }
-function Plus-Rows([string]$Screenshot) {
-    $offset = (Read-Shared "$settings/debug.log").Length
-    Model-Palette 'plus attach file' "palette-$Screenshot"
-    [void](Wait-For 'plus menu open' { [ChatDeliveryDesktop]::PlusMenu($main) -ne [IntPtr]::Zero } 10)
-    $logged = Wait-For 'plus menu rows logged' {
-        $t = (Read-Shared "$settings/debug.log")
-        if ($t.Length -gt $offset) {
-            $fresh = $t.Substring($offset)
-            if ($fresh -match '\[chat\] plus menu model_opus rect=-?\d+,-?\d+,-?\d+,-?\d+') { $fresh }
-        }
-    } 10
-    $rects = @{}
-    foreach ($found in [regex]::Matches($logged, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
-        $rects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
-    }
-    Shot $Screenshot
-    return $rects
-}
-function Plus-Cell([hashtable]$Rects, [string]$Item) {
-    $anchors = @{
-        model_opus = @{first='model_opus'; index=0}; model_sonnet = @{first='model_opus'; index=1};
-        model_haiku = @{first='model_opus'; index=2}; model_fable = @{first='model_opus'; index=3};
-        effort_low = @{first='effort_low'; index=0}; effort_medium = @{first='effort_low'; index=1}; effort_high = @{first='effort_low'; index=2};
-        mode_ask = @{first='mode_ask'; index=0}; mode_edits = @{first='mode_ask'; index=1}; mode_plan = @{first='mode_ask'; index=2}; mode_bypass = @{first='mode_ask'; index=3}
-    }
-    if (-not $anchors.ContainsKey($Item)) { throw "Unknown plus menu row $Item" }
-    $spec = $anchors[$Item]
-    if (-not $Rects.ContainsKey($spec.first)) { throw "Plus menu did not show $($spec.first), so $Item cannot be chosen" }
-    $rect = $Rects[$spec.first]
-    $height = $rect[3] - $rect[1]
-    if ($height -le 0) { throw "Plus menu row $($spec.first) has no height" }
-    $top = $rect[1] + ($spec.index * $height)
-    return @{left=$rect[0]; top=$top; right=$rect[2]; bottom=$top + $height}
-}
-function Plus-Click([string]$Item, [string]$Screenshot) {
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $rects = Plus-Rows $Screenshot
-        $cell = Plus-Cell $rects $Item
-        $menu = [ChatDeliveryDesktop]::PlusMenu($main)
-        if ($menu -eq [IntPtr]::Zero) { throw 'Plus menu window disappeared before the click' }
-        $x = [int](($cell.left + $cell.right) / 2)
-        $y = [int](($cell.top + $cell.bottom) / 2)
-        Doctor
-        if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) }
-        if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing plus menu input: owned app is not foreground' }
-        $actions.Add(@{case=$plan.name; input='choose plus menu row'; text=$Item; attempt=$attempt; x=$x; y=$y})
-        [ChatDeliveryDesktop]::PressClient($menu, $app.Id, $x, $y)
-        $closed = $true
-        try { [void](Wait-For "plus menu closed after $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 5) } catch { $closed = $false }
-        if ($closed) { return }
-        if ($attempt -eq 3) { throw "Plus menu stayed open after clicking $Item" }
-        Press @(0x1B) "Escape: close plus menu after $Item"
-        [void](Wait-For "plus menu closed after escape $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 5)
-    }
-}
 function Model-Copy([string]$Stage) {
-    [void](Wait-For 'model app is foreground for the copy' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) } 10)
-    [Windows.Forms.Clipboard]::Clear()
-    $copied = Wait-For "history selected and copied at $Stage" {
-        [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
-        try {
-            $text = [Windows.Forms.Clipboard]::GetText()
-            if ($text.Contains('The fake session is ready.')) { $text }
-        } catch [Runtime.InteropServices.ExternalException] { $null }
-    } 15
+    Model-Palette 'chat view select all' "model-$Stage-copy-palette"
+    Press @(0x11, 0x43) 'Ctrl+C: copy history'
+    $copied = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$caseDir/$Stage-history.txt", $copied)
-    if (-not $copied.Contains('start the fake session')) { throw "History missing at $Stage" }
+    if (-not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "History missing at $Stage" }
     Press @(0x1B) 'Escape: clear history selection'
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 }
@@ -88,34 +27,15 @@ Type-Composer $plan.text
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft setup failed' }
 Shot 'model-before'
 $choices = @(
-    @{item='model_haiku'; model='haiku'; effort='default'; name='haiku'},
-    @{item='effort_low'; model='haiku'; effort='low'; name='low'},
-    @{item='effort_medium'; model='haiku'; effort='medium'; name='medium'},
-    @{item='effort_high'; model='haiku'; effort='high'; name='high'}
+    @{query='model haiku'; model='haiku'; effort='default'; name='haiku'},
+    @{query='effort low'; model='haiku'; effort='low'; name='low'},
+    @{query='effort medium'; model='haiku'; effort='medium'; name='medium'},
+    @{query='effort high'; model='haiku'; effort='high'; name='high'}
 )
 foreach ($choice in $choices) {
     $oldLog = (Read-Shared $hostLog).Length
     $oldArgs = (Read-Shared "$state/model-argv.jsonl").Length
-    $wantModel = $choice.model
-    $wantEffort = $choice.effort
-    $tries = 0
-    $retry = $true
-    while ($retry) {
-        $tries++
-        $retry = $false
-        Plus-Click $choice.item "model-plus-$($choice.name)"
-        try {
-            [void](Wait-For "host config shows $($choice.name)" {
-                $config = Read-Shared $configPath | ConvertFrom-Json
-                $effort = ''
-                if ($config.PSObject.Properties['effort']) { $effort = [string]$config.effort }
-                $config.model -ceq $wantModel -and ($wantEffort -eq 'default' -or $effort -ceq $wantEffort)
-            } 20)
-        } catch {
-            if ($tries -ge 2) { throw }
-            $retry = $true
-        }
-    }
+    Model-Palette $choice.query "model-palette-$($choice.name)"
     [void](Wait-For "production host applied $($choice.name)" {
         $config = Read-Shared $configPath | ConvertFrom-Json
         $lines = @((Read-Shared $hostLog).Substring($oldLog) -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })

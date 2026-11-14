@@ -26,8 +26,8 @@ function fixture() {
   fs.mkdirSync(path.join(dir, 'host'));
   fs.mkdirSync(path.join(dir, 'stand-in'));
   write('stand-in/model-reader.jsonl', JSON.stringify({ inner_sha256: 'a'.repeat(64) }) + '\n');
-  for (const [name, item, effort] of [['haiku', 'model_haiku', 'default'], ['low', 'effort_low', 'low'], ['medium', 'effort_medium', 'medium'], ['high', 'effort_high', 'high']]) {
-    actions.push({ input: 'choose plus menu row', text: item });
+  for (const [name, effort] of [['haiku', 'default'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']]) {
+    actions.push({ input: 'type palette query', text: name === 'haiku' ? 'model haiku' : `effort ${name}` });
     write(`config-${name}.json`, { enabled: true, model: 'haiku', ...(effort === 'default' ? {} : { effort }) });
     hostLog += JSON.stringify({ event: 'model_effort_settings_applied', detail: { model: 'haiku', effort } }) + '\n';
     argvLog += JSON.stringify({ argv: ['--model', 'haiku', ...(effort === 'default' ? [] : ['--effort', effort])] }) + '\n';
@@ -39,7 +39,7 @@ function fixture() {
   fs.writeFileSync(path.join(root, 'actions.json'), JSON.stringify(actions));
   const png = Buffer.alloc(1024);
   Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
-  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-plus-${choice}`, `model-after-${choice}`])]) fs.writeFileSync(path.join(root, `${name}.png`), png);
+  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-palette-${choice}`, `model-after-${choice}`])]) fs.writeFileSync(path.join(root, `${name}.png`), png);
   return { root, dir, write };
 }
 
@@ -112,14 +112,4 @@ test('rejects a plus menu that keeps a check mark or loses the active style', t 
   assert.throws(() => verify(f.root));
   f.write('plus-active.json', good);
   assert.deepEqual(verify(f.root).efforts, ['low', 'medium', 'high']);
-});
-
-test('journey chooses model and effort from the shipped plus menu, not the retired palette rows', () => {
-  const journey = source('tools/verify-chat-delivery/model-settings.ps1');
-  assert.match(journey, /function Plus-Click/);
-  assert.match(journey, /PressClient\(\$menu, \$app\.Id, \$x, \$y\)/);
-  assert.match(journey, /input='choose plus menu row'/);
-  assert.doesNotMatch(journey, /Press @\(0x28\)/);
-  assert.doesNotMatch(journey, /@{query='(?:model|effort)/);
-  assert.match(source('tools/verify-chat-delivery/drive.ps1'), /CHAT_MODEL_PROOF -eq '1'\) \{ Add-Type -Path "\$PSScriptRoot\/chat-switch-observer\.cs"/);
 });

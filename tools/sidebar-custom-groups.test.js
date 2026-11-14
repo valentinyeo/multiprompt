@@ -43,8 +43,8 @@ test("Ctrl+K moves the active session through a keyboard-first group submenu", (
   assert.match(source, /const SEARCH_GROUPMOVE_MENU_OFFSET/);
   assert.match(source, /g_search_results\[g_search_result_count\] = SEARCH_GROUPMOVE_MENU_OFFSET/);
   assert.match(source, /if \(g_search_group_move_mode\) \{[\s\S]*?SEARCH_GROUPMOVE_BACK_OFFSET[\s\S]*?SEARCH_GROUPMOVE_GROUP_OFFSET \+ gi[\s\S]*?SEARCH_GROUPMOVE_NEW_OFFSET[\s\S]*?SEARCH_GROUPMOVE_NONE_OFFSET/);
-  assert.match(source, /target == SEARCH_GROUPMOVE_MENU_OFFSET[\s\S]*?g_groupmove_tab_sid = if \(g_search_tabctx_mode\) g_tabctx_sid else if \(active_shell < shell_count\) shells\[active_shell\]\.shell_id/,
-    "opening the submenu must capture the active session by stable ID, or the right-clicked tab in the tab palette");
+  assert.match(source, /target == SEARCH_GROUPMOVE_MENU_OFFSET[\s\S]*?g_groupmove_tab_sid = if \(active_shell < shell_count\) shells\[active_shell\]\.shell_id/,
+    "opening the submenu must capture the active session by stable ID");
   assert.match(source, /assignTabOrSelectionToGroup\(g_groupmove_tab_sid, groups\[gi\]\.id\)/);
   assert.match(source, /removeTabOrSelectionFromGroup\(g_groupmove_tab_sid\)/);
   assert.match(source, /else if \(g_search_group_move_mode\)[\s\S]*?g_groupmove_tab_sid = 0/,
