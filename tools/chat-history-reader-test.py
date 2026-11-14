@@ -6808,6 +6808,95 @@ class AgentHostStreamContractTest(AgentHostStreamFixture, AgentHostTest):
     pass
 
 
+class HostTurnTailTest(HostEventStreamFixture, unittest.TestCase):
+    def deliver(self, token, text):
+        entry = dict(id=token, attempt='attempt-' + token, epoch=0, at=time.time(), accepted=False, text=text,
+                     turn='t-' + token, sha256=hashlib.sha256(text.encode()).hexdigest(), uuid=None, recall_uuid=None)
+        self.session['sends'].append(entry)
+        if self.session['turn'] is None:
+            self.session['turn'] = entry['turn']
+        if not isinstance(self.session.get('inflight'), dict):
+            self.session['inflight'] = entry
+        self.session['state']['sends'] = [item['id'] for item in self.session['sends']]
+        return entry
+
+    def reply(self, text='ok'):
+        self.feed(dict(type='assistant', message=dict(id='msg-' + text, role='assistant', content=[dict(type='text', text=text)])))
+
+    def finish(self):
+        self.feed(dict(type='result', subtype='success', stop_reason='end_turn', usage={}))
+
+    def test_igsh_2350_a_message_written_at_the_tail_of_a_turn_is_still_accepted_by_the_next_turn(self):
+        self.session['sends'] = []
+        self.session['turn'] = None
+        first = self.deliver('first-message-0001', 'first prompt')
+        self.reply('one')
+        self.assertTrue(first['accepted'])
+        tail = self.deliver('tail-message-00001', 'written right before the result')
+        self.finish()
+        self.assertEqual([item['id'] for item in self.session['sends']], ['tail-message-00001'],
+                         'a write the agent has not answered yet must survive the end of the previous turn')
+        self.assertEqual(self.session['state']['sends'], ['tail-message-00001'])
+        self.assertIs(self.session['inflight'], tail)
+        self.reply('two')
+        self.assertTrue(tail['accepted'], 'the next turn must accept the message that was written at the tail')
+        self.finish()
+        self.assertEqual(self.session['sends'], [])
+        self.assertIsNone(self.session['inflight'])
+        self.assertIsNone(self.session['turn'])
+
+    def test_igsh_2350_an_unanswered_tail_message_is_dropped_at_the_following_turn_end(self):
+        self.session['sends'] = []
+        self.session['turn'] = None
+        self.deliver('first-message-0001', 'first prompt')
+        self.reply('one')
+        self.deliver('tail-message-00001', 'never answered')
+        self.finish()
+        self.assertEqual(len(self.session['sends']), 1)
+        self.session['sends'][0]['accepted'] = False
+        self.finish()
+        self.assertEqual(self.session['sends'], [])
+        self.assertIsNone(self.session['inflight'])
+
+
+class HostTranscriptHealTest(AgentHostFixture, unittest.TestCase):
+    def write_user_line(self, token, text, native_uuid=None):
+        import uuid as uuid_module
+        native = native_uuid or str(uuid_module.uuid5(uuid_module.NAMESPACE_URL, 'multibot:' + token))
+        line = dict(type='user', uuid=native, parentUuid=None,
+                    message=dict(role='user', content=[dict(type='text', text=text)]))
+        with self.transcript.open('a') as stream:
+            stream.write(json.dumps(line) + '\n')
+
+    def mark_failed(self, token, receipt=None):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt=? WHERE id=?", (receipt, token))
+        db.close()
+
+    def test_igsh_2350_a_failed_message_found_in_the_transcript_reconciles_to_accepted(self):
+        self.seed(text='delivered but never confirmed')
+        self.mark_failed(self.token)
+        self.write_user_line(self.token, 'delivered but never confirmed')
+        row = self.message()
+        self.assertEqual(row['state'], 'accepted')
+
+    def test_igsh_2350_a_failed_message_missing_from_the_transcript_stays_failed(self):
+        self.seed(text='really never delivered')
+        self.mark_failed(self.token)
+        self.write_user_line('another-message-0001', 'something else')
+        self.assertEqual(self.message()['state'], 'failed')
+
+    def test_igsh_2350_a_cancelled_message_is_never_revived(self):
+        self.seed(text='removed by the user')
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=?", (self.token,))
+        db.close()
+        self.write_user_line(self.token, 'removed by the user')
+        self.assertEqual(self.message()['state'], 'cancelled')
+
+
 class HostControlFixture(HostEventStreamFixture):
     def writes(self):
         return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
