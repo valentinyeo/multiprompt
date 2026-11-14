@@ -232,6 +232,9 @@ var g_chat_ac_skill_shell_id: u32 = 0;
 var g_chat_ac_skill_command: [256]u16 = @splat(0);
 var mode_picker: ?bool = null;
 fn chatModeOpenPicker(plan: bool) void { mode_picker = plan; }
+fn chatLoginArgument(_: []const u16, _: []u8) []const u8 { return ""; }
+fn chatLoginArgumentTooLong(_: []const u16) bool { return false; }
+fn chatPiLogin(_: []const u8) bool { return false; }
 var g_chat_ac_dialog_command: [256]u16 = @splat(0);
 var g_chat_draft_dirty = false;
 const TIMER_CHAT_REFRESH: u32 = 1;
