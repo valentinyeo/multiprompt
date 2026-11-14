@@ -43,7 +43,7 @@ The old form `mp-send <provider> <sid> "text" --tmux <session>` still works.
 
 ## Helper chats
 
-A chat starts its own helper chats with `mp-helper`. The desktop publishes it into `~/.multiprompt-runtime`, which is on every live chat's PATH, so no install step is needed. The server starts the helper, and the desktop opens its tab through the zsb bridge. A zsb wrapper older than `--after-tab` falls back to the parent's group.
+A chat starts its own helper chats with `mp-helper`. The desktop publishes it into `~/.multiprompt-runtime`, which is on every live chat's PATH, so no install step is needed. The desktop also publishes its own zsb wrapper there as `mp-zsb`, and `mp-helper` uses that copy first, then `zsb` on the PATH, then `~/.local/bin/zsb`. The server starts the helper, and the desktop opens its tab through the zsb bridge. A zsb wrapper older than `--after-tab` falls back to the parent's group. A `reply_timeout` from `session-open` is checked against `workspace-list` for the helper's tab and counts as success when the tab is there. `mp-zsb` is kept identical to `tools/vps-multiprompt-browser.sh`.
 
 ```sh
 mp-helper start --name "Research A" --model sonnet --effort high --task "Find why the build fails"
