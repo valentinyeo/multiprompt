@@ -1014,10 +1014,6 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
         var body = area;
         const indent = @as(i32, block.level) * uiScaled(22);
         body.left += indent + uiScaled(30);
-        if (block.level > 0 and app_state.g_chat_tables.list(std.heap.page_allocator, offset, block.level)) {
-            var log: [64]u8 = undefined;
-            debugLog(std.fmt.bufPrint(&log, "CHAT_LIST depth={d}", .{block.level}) catch "");
-        }
         if (paint) {
             const old = SelectObject(hdc, ensureChatFont());
             defer _ = SelectObject(hdc, old);

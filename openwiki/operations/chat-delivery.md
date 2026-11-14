@@ -120,8 +120,8 @@ Table geometry is cached by block offset, text hash, viewport width, font size a
 UI scale. Repeated paints and hit tests reuse column widths and row heights.
 List depth follows the parent indentation stack rather than a fixed spaces count.
 With debug logging enabled, layout builds emit
-`CHAT_TABLE rows=<body rows> columns=<n> header_bold=1 content_w=<px> view_w=<px> source=<pipe|box>`
-and first nested-list layouts emit `CHAT_LIST depth=<n>`.
+`CHAT_TABLE rows=<body rows> columns=<n> header_bold=1 content_w=<px> view_w=<px> source=<pipe|box>`.
+Painting a list never logs.
 
 The shared fixtures live only in `src/testdata/chat-table-fixture.md` and
 `src/testdata/chat-table-fixture.terminal.txt`. Native parser/cache tests and
