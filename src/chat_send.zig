@@ -2249,7 +2249,6 @@ pub fn chatRestartAi(shell_index: u32) bool {
     thread.detach();
     shell.ai_stopped = false;
     shell.ai_restart_tick = @max(GetTickCount64(), 1);
-    showHeaderNoticeAscii("Restarting the AI", 3000, false);
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     return true;
 }
