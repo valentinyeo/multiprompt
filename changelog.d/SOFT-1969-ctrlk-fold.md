@@ -1,0 +1,1 @@
+Ctrl+K now shows one row for each action instead of repeating it. New terminal, Archive chat, Rename, Power Saver, Token plan, Voice speed, Tab order and Sidebar each cycle through their choices from that single row.

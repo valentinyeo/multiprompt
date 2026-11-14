@@ -279,6 +279,7 @@ const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HO
 const SEARCH_TABCTX_GOOGLE_SIGNIN = @import("app_state.zig").SEARCH_TABCTX_GOOGLE_SIGNIN;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
+const SEARCH_TABCTX_HIDE = @import("app_state.zig").SEARCH_TABCTX_HIDE;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
 const SEARCH_ADDFAVICON_OFFSET = @import("app_state.zig").SEARCH_ADDFAVICON_OFFSET;
 const SEARCH_ARCHIVED_OFFSET = @import("app_state.zig").SEARCH_ARCHIVED_OFFSET;
@@ -3058,11 +3059,83 @@ fn appendPinnedPageResults(shell_id: u32) void {
     }
 }
 
+pub const folded_palette_rows = [_]usize{
+    SEARCH_NEW_OFFSET + 0,
+    SEARCH_NEW_OFFSET + 5,
+    SEARCH_NEW_OFFSET + 6,
+    SEARCH_NEW_OFFSET + 7,
+    SEARCH_OPENFOLDER_OFFSET,
+    SEARCH_RECOVER_REPO_OFFSET,
+    SEARCH_UNARCHIVE_HIDDEN_OFFSET,
+    SEARCH_UNARCHIVE_UNATTACHED_OFFSET,
+    SEARCH_CLOSETAB_OFFSET,
+    SEARCH_TABCTX_HIDE,
+    SEARCH_SYNC_NAME_OFFSET,
+    SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET,
+    SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET,
+    SEARCH_WSMOVE_NEW_OFFSET,
+    SEARCH_TABCTX_MOVE_NEW_WS,
+    SEARCH_TABCTX_GROUP_NEW,
+    SEARCH_TABCTX_GROUP_REMOVE,
+    SEARCH_SNIPPET_MANAGE_OFFSET,
+    SEARCH_CHAT_RETRY_UNSENT_OFFSET,
+    SEARCH_CHAT_PUSH_QUEUED_OFFSET,
+    SEARCH_CHAT_QUEUE_CLEAR_OFFSET,
+    SEARCH_CREATEWS_OFFSET,
+    SEARCH_SHOW_FREQUENT_OFFSET,
+    SEARCH_FREQUENT_FIRST_OFFSET,
+    SEARCH_SHOW_FAVORITES_OFFSET,
+    SEARCH_SHOW_ALL_OFFSET,
+    SEARCH_INBOX_FREQUENT_OFFSET,
+    SEARCH_SIDEBAR_COLLAPSE_OFFSET,
+    SEARCH_SIDEBAR_HIDE_OFFSET,
+    SEARCH_TABSORT_MANUAL_OFFSET,
+    SEARCH_TABCTX_KEEPAWAKE,
+    SEARCH_POWER_ALWAYS_OFFSET,
+    SEARCH_POWER_OFF_OFFSET,
+    SEARCH_FONT_BIGGER_OFFSET,
+    SEARCH_FONT_SMALLER_OFFSET,
+    SEARCH_FONT_RESET_OFFSET,
+    SEARCH_LADDER_CLAUDE_OFFSET,
+    SEARCH_LADDER_CODEX_OFFSET,
+    SEARCH_VOICE_SPEED_125_OFFSET,
+    SEARCH_VOICE_SPEED_140_OFFSET,
+    SEARCH_VOICE_SPEED_150_OFFSET,
+    SEARCH_VOICE_PREVIOUS_OFFSET,
+    SEARCH_VOICE_NEXT_OFFSET,
+    SEARCH_ETA_PROGRESS_OFFSET,
+    SEARCH_CUSTOMCMD_RELOAD_OFFSET,
+    SEARCH_APPROVE_DEVICES_OFFSET,
+    SEARCH_USAGE_LOGIN_INNE_OFFSET,
+};
+
+pub fn paletteRowFolded(target: usize) bool {
+    if (target >= SEARCH_CHAT_MODE_PLAN_OFFSET and target <= SEARCH_CHAT_MODEL_ASTRA_OFFSET and target != SEARCH_CHAT_PLUS_MENU_OFFSET) return true;
+    if (target >= SEARCH_TABCTX_GROUP_ADD_OFFSET and target < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS) return true;
+    if (target == SEARCH_KEEPAWAKE_OFFSET) return true;
+    for (folded_palette_rows) |row| {
+        if (target == row) return true;
+    }
+    return false;
+}
+
+fn foldPaletteRows() void {
+    var kept: usize = 0;
+    for (app_state.g_search_results[0..app_state.g_search_result_count]) |row| {
+        if (paletteRowFolded(row)) continue;
+        app_state.g_search_results[kept] = row;
+        kept += 1;
+    }
+    app_state.g_search_result_count = kept;
+    if (app_state.g_search_sel >= app_state.g_search_result_count) app_state.g_search_sel = 0;
+}
+
 pub fn updateSearchResults() void {
     app_state.g_search_revision +%= 1;
     if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
     @import("room_frontend.zig").resetPaletteRooms();
     defer {
+        foldPaletteRows();
         if (app_state.g_search_active) {
             var trace: [128]u8 = undefined;
             const target = if (app_state.g_search_sel < app_state.g_search_result_count) app_state.g_search_results[app_state.g_search_sel] else 0;

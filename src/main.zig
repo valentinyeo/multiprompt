@@ -5862,8 +5862,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_HIDESIDEBAR_OFFSET) {
-                    app_state.g_hide_sidebar = false;
-                    app_state.g_sidebar_collapsed = false;
+                    if (app_state.g_hide_sidebar) {
+                        app_state.g_hide_sidebar = false;
+                        app_state.g_sidebar_collapsed = false;
+                    } else if (app_state.g_sidebar_collapsed) {
+                        app_state.g_sidebar_collapsed = false;
+                        app_state.g_hide_sidebar = true;
+                    } else {
+                        app_state.g_sidebar_collapsed = true;
+                    }
                     saveSession();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -6708,8 +6715,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_TABSORT_INBOX_OFFSET) {
-                    app_state.g_tab_sort_auto = true;
-                    if (verboseLoggingEnabled()) debugLog("[tabsort] AUTO enabled via Ctrl+K");
+                    if (app_state.g_tab_sort_auto) {
+                        materializeDisplayOrder();
+                        app_state.g_tab_sort_auto = false;
+                    } else {
+                        app_state.g_tab_sort_auto = true;
+                    }
+                    if (verboseLoggingEnabled()) debugLog("[tabsort] cycled via Ctrl+K");
                     saveSession();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -6736,7 +6748,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_POWER_AUTO_OFFSET or target == SEARCH_POWER_ALWAYS_OFFSET or target == SEARCH_POWER_OFF_OFFSET) {
-                    app_state.g_power_profile = if (target == SEARCH_POWER_AUTO_OFFSET) .auto else if (target == SEARCH_POWER_ALWAYS_OFFSET) .always else .off;
+                    app_state.g_power_profile = if (target == SEARCH_POWER_AUTO_OFFSET)
+                        (switch (app_state.g_power_profile) {
+                            .auto => .always,
+                            .always => .off,
+                            .off => .auto,
+                        })
+                    else if (target == SEARCH_POWER_ALWAYS_OFFSET) .always else .off;
                     savePowerProfile();
                     applyPowerProfile(hwnd);
                     var tbuf: [256]u16 = undefined;
@@ -6762,7 +6780,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             showHeaderNoticeAscii("Token Ladder: no dashboard link yet", 3000, false);
                         }
                     } else {
-                        startLadderMode(if (target == SEARCH_LADDER_CLAUDE_OFFSET) 1 else if (target == SEARCH_LADDER_CODEX_OFFSET) 2 else 0);
+                        startLadderMode(if (target == SEARCH_LADDER_CLAUDE_OFFSET) 1 else if (target == SEARCH_LADDER_CODEX_OFFSET) 2 else if (!app_state.g_ai_pace.from_ladder) 0 else (app_state.g_ai_pace.ladder_override + 1) % 3);
                     }
                     repositionActive();
                     _ = InvalidateRect(hwnd, null, 0);
@@ -6817,7 +6835,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_VOICE_SPEED_100_OFFSET or target == SEARCH_VOICE_SPEED_125_OFFSET or target == SEARCH_VOICE_SPEED_140_OFFSET or target == SEARCH_VOICE_SPEED_150_OFFSET) {
-                    app_state.g_voice_speed = if (target == SEARCH_VOICE_SPEED_100_OFFSET) .s100 else if (target == SEARCH_VOICE_SPEED_125_OFFSET) .s125 else if (target == SEARCH_VOICE_SPEED_140_OFFSET) .s140 else .s150;
+                    app_state.g_voice_speed = if (target == SEARCH_VOICE_SPEED_100_OFFSET)
+                        (switch (app_state.g_voice_speed) {
+                            .s100 => .s125,
+                            .s125 => .s140,
+                            .s140 => .s150,
+                            .s150 => .s100,
+                        })
+                    else if (target == SEARCH_VOICE_SPEED_125_OFFSET) .s125 else if (target == SEARCH_VOICE_SPEED_140_OFFSET) .s140 else .s150;
                     saveSession();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;

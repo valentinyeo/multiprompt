@@ -33,7 +33,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Alt+Q (Alt+M): Switch between typing and the browser pane. With no pane, restore the chat box or shell; in Chat View, lost focus or transcript focus returns to the chat box. Closes Chat Find before switching.
 - Ctrl+K -> `Computer: Show or hide`: show or hide this session's Computer. Watching starts view-only. The session's right-click menu also opens Computer. The pill controls typing and mouse access. Ctrl+Shift+F expands Computer without hiding window controls. Ctrl+K includes `Computer: Retry` for lost connections. See [Computer view](../browser/computer-view.md).
 - Alt+C: Toggle Chat View on/off for the active terminal tab, current tab only. Off for live chats, which stay in Chat View and have no terminal; their Ctrl+K toggle row is hidden. Works from every focus state — terminal, the chat composer, the transcript, or a focused docked browser pane (exits browser focus first). Esc no longer closes Chat View; it only closes an overlay (Ctrl+K/F1/Inbox) opened on top of it. Also a Ctrl+K entry that toggles the same way. Page Up / Page Down scroll the conversation while the cursor stays in the typing box (once the box has grown past five lines and shows its own scroll bar, they scroll the box instead).
-- Chat View: Ctrl+K "Chat View: On Everywhere" or "Chat View: Off Everywhere" switches every unlocked session once. Afterwards, Alt+C and tab switches remember each session independently. "Always Chat View for this session" and "Always shell view for this session" immediately lock the session to that view, survive restart, and are skipped by everywhere actions. "Clear Always view for this session" removes the lock without changing the view. All three session actions are also in the right-click tab palette.
+- Chat View: Ctrl+K "Chat View" switches the active session once. Alt+C and tab switches remember each session independently. "Always Chat View for this session" and "Always shell view for this session" immediately lock the session to that view, survive restart, and are skipped by everywhere actions. "Clear Always view for this session" removes the lock without changing the view. All three session actions are also in the right-click tab palette.
 - Ctrl+K → "Chat View: Send Queued Messages Now" / "Chat View: Clear Offline Queue": no dedicated shortcut. When Chat View sends into a stalled ssh/tmux link, or the write/Enter fails, the message is queued per tab (FIFO, max 20) instead of being lost and the composer clears. The queue persists across restart in `%APPDATA%\ZigShell\chat-outbox.json` and flushes one at a time once the link is back and the agent is idle at its `❯` input prompt; background tabs flush when their console is idle and the send route does not need focus. "Send Queued Messages Now" flushes immediately (still waits for the idle prompt); "Clear Offline Queue" drops the active tab's queue and reports how many were dropped. Closing a tab drops its queue. Disconnected `.tmux` tabs also auto-reattach on a 5s/10s/20s/30s backoff while Windows reports internet; plain VPS tabs stay manual (Ctrl+Shift+R) because a fresh plain shell would lose the remote session's live state.
 - Ctrl+K → `Chat View: Reset this chat`: also in the right-click tab palette and F1 overview; no dedicated shortcut. Clears every local queued, pending and sent bubble for that tab, deletes its disk chat cache and reloads the transcript from scratch. Keeps your unsent composer text, sends nothing and leaves the terminal/agent session running. Automatic cleanup removes exact normalized copies anywhere in user transcript history even if recorded before the send time; Sent bubbles expire after ten minutes once a successful full transcript load completed after the send. On upgrade, the old version-1 local outbox is discarded (including offline queues); new version-2 queues still persist across restarts.
 - Chat View send status: every Enter shows the message immediately at the bottom of the transcript as your own bubble with a small status line — `◷ Sending…` while the terminal write/Enter verify runs, `◷ Waiting for connection` while queued offline, and a red `Not sent · click to retry` if the verify gives up (click the bubble to re-queue it). Once the real message appears in the transcript the echo is replaced by the real bubble. If Claude takes the message out of its input box but queues it (it is still working), the bubble stays as `✓ Sent · queued in Claude · click to send now`; clicking it, or Ctrl+K → "Chat View: Send Claude's Queued Message Now", sends Ctrl+X Ctrl+S so Claude takes it immediately. Unconfirmed sends survive a restart as Not sent. Ctrl+K → "Chat View: Retry Unsent Messages" re-sends this tab's Not-sent messages in order; "Chat View: Discard Unsent Messages" drops them. No dedicated shortcut. Ctrl+K → "Chat View: Edit Queued Messages" presses Claude's Up key so the messages Claude has queued come back into its prompt box, and Chat View shows the same text in its own box. No dedicated shortcut.
@@ -120,21 +120,14 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+W | Quit the app; keep server agents and saved chats |
 | Ctrl+K -&gt; Delete | Delete the active chat; stop its agent and keep its history |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
-| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
-| Ctrl+K -&gt; Show Frequent split | Show or hide Frequent; synced across your account |
-| Ctrl+K -&gt; Frequent as first tab | Put Frequent first or immediately after Favorites; synced across your account |
-| Ctrl+K -&gt; Show Favorites split | Show or hide Favorites; synced across your account |
-| Ctrl+K -&gt; Show All split | Show or hide All; All stays visible if every split is hidden |
-| Ctrl+K -&gt; Inbox: Frequent | Sessions you use or repeatedly watch across devices, newest on top |
 | Ctrl+K -&gt; Inbox: Never Show This Session | Toggle permanent Inbox exclusion for this tab (also right-click tab) |
 | Alt+J / Alt+K | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | Ctrl+Shift+Up / Down | Move active tab up / down |
 | Ctrl+G | Collapse / expand tab group |
 | Alt+; / Ctrl+; | Use snippets |
 | Ctrl+K -&gt; Create Snippet | Save a named paste block |
-| Ctrl+K -&gt; Manage Snippets | Delete saved snippets; Esc cancels |
 | Delete twice in snippets | Delete the selected saved snippet |
 | F2 | Rename chat title, tab or selected Inbox session |
 
@@ -164,7 +157,6 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Tab / h / l | Switch workspace split |
 | e or Alt+E / z or Alt+Z / u | Archive / undo archive / toggle read-unread |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
-| Ctrl+K -&gt; Hide from sidebar | Hide a chat without stopping its server agent |
 | Ctrl+Shift+U | Toggle unread-only filter (global) |
 | Alt+I (inside) | Jump back to ALL split |
 | q / Esc | Close Inbox |
@@ -213,11 +205,10 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Room name | Open a Room |
 | Ctrl+K -&gt; Edit room | Edit the selected Room |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot |
-| Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
 | Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser |
 | Ctrl+K → Usage: Sign In to Primary / Secondary Claude Account | Force sign-in one telemetry profile in its own terminal |
-| Ctrl+K → Power Saver: Auto / Always / Off | Choose when background timers, VPS polling, and idle tabs slow down to save power |
+| Ctrl+K → Power Saver | Cycle power saving for background timers, VPS polling and idle tabs: Auto, Always, Off |
 | Ctrl+Shift+G | Show usage, servers, and app version. Cycle collapsed cards. |
 | Ctrl+K -&gt; Usage and servers / collapsed status cards | Show usage, servers, and app version. Cycle collapsed cards. |
 | Alt+T | New workspace tmux tab, Claude by default (optional configured program) |
@@ -273,26 +264,19 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K "Chat View: Plus Menu" | Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
-| Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |
 | Ctrl+K "Chat View: Send Queued Messages Now" | Flush offline-queued Chat View messages for this tab now (waits for the agent prompt) |
-| Ctrl+K "Chat View: Model Opus / Sonnet / Haiku / Fable" | Choose the model for the next message in a live Claude chat; the plus menu has the same choices |
-| Ctrl+K "Chat View: Model Sol / Terra / Luna / Astra" | Choose the model for the next message in a live Codex chat; the plus menu has the same choices |
-| Ctrl+K "Chat View: Effort Low / Medium / High" | Choose the effort for the next message in a live Claude chat; the plus menu has the same choices |
 | 1 or Alt+Y in Chat View / Ctrl+K "Chat View: Allow" | Approve the pending permission once |
 | 2 or Alt+O in Chat View / Ctrl+K "Chat View: Always allow" | Always allow the pending permission this session |
 | 3 or Alt+D in Chat View / Ctrl+K "Chat View: Deny" | Decline the pending permission |
 | Esc (Chat View, while working) / Stop button / Ctrl+K "Chat View: Stop the agent" | Send Esc to the agent to stop its current run |
 | Ctrl+K "Chat View: Reset this chat" / right-click tab | Clear local bubbles and cache; reload history, keep unsent composer text |
-| Ctrl+K "Chat View: Clear Offline Queue" | Drop this tab's queued offline Chat View messages |
-| Ctrl+K "Chat View: Retry Unsent Messages" | Re-send this tab's Not-sent Chat View messages in order |
 | Ctrl+K "Chat View: Discard Unsent Messages" | Drop this tab's Not-sent Chat View messages |
-| Ctrl+K "Chat View: Send Claude's Queued Message Now" | Presses Claude's Ctrl+X Ctrl+S to send its queued message now (same as clicking the bubble) |
 | Ctrl+K "Chat View: Edit Queued Messages" | Presses Claude's Up key so its queued messages come back into the prompt box, where Chat View shows and edits them too |
 | Ctrl+X then Ctrl+S in Chat View | Steers: sends the message into Claude now (Claude's Ctrl+X Ctrl+S) |
-| Ctrl+K → Token Ladder: Auto / Burn Claude / Burn Codex | Choose which AI plan to use up now; Auto lets the ladder decide |
+| Ctrl+K → Token plan | Cycle which AI plan to use up now: Auto, Claude or Codex |
 | Ctrl+K → Token Ladder: Open Dashboard | Open the Token Ladder page with every plan's usage and reset clock in the browser pane |
 | Alt+V | Read replies. Press later for older. Double-press to stop. |
-| Ctrl+K "Voice Speed: ..." | How fast Voice Mode talks: 1x, 1.25x (default), 1.4x or 1.5x |
+| Ctrl+K → Voice speed | Cycle how fast Voice Mode talks: 1x, 1.25x, 1.4x, 1.5x |
 | Alt+R | Read the agent's last reply aloud again, right now, even with Voice Mode off |
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
 | Alt+W | Open a URL in a new pane tab and focus the browser |
@@ -322,7 +306,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+, / Ctrl+K -&gt; Settings | Open Settings; Escape closes the panel |
 | Ctrl+K -&gt; Servers | Add, test and remove the servers Multibot signs in to with its own key |
 | Ctrl+K -&gt; Changelog | what changed in each version |
-| (agent-reported) Session ETA countdown | Sidebar row shows time left + a progress line; toggle either from Ctrl+K → ETA Countdown Numbers / ETA Progress Line |
+| (agent-reported) Session ETA countdown | Sidebar row shows time left and a progress line; toggle it from Ctrl+K → ETA Countdown Numbers |
 | Ctrl+K → Estimate Accuracy | See how each agent's time estimates compare to how long tasks actually took |
 | Ctrl+K → Restart Multi Bot | Save session and relaunch the app |
 | Ctrl+K → Restart to update | Restart when an update is ready (same as the sidebar card) |

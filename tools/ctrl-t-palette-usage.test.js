@@ -189,7 +189,7 @@ test("all session rename entry points synchronize display surfaces without chang
   assert.match(rename, /SendMessageW\(g_edit_hwnd, 0x00B1, 0, @bitCast\(@as\(isize, -1\)\)\)/);
   assert.match(commit, /findShellById\(renamed_sid\)/);
   assert.match(source, /target == SEARCH_RENAME_SYNC_OFFSET[\s\S]*?beginPaletteRenameInput\(shell\)/);
-  assert.match(source, /L\("Rename Session"\)/);
+  assert.match(source, /L\("Rename"\)/);
   assert.match(source, /L\("Use Agent or Terminal Session Name"\)/);
 
   assert.match(canonical, /blockExternalNameSyncUntilTitleChanges/,

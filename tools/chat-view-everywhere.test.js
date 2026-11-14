@@ -164,6 +164,8 @@ test('IGSH-820 native refused-action tests, maps and existing Windows journey ar
     assert.deepEqual(read(skill + `features/${name}.md`).match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
     assert.ok(read(skill + 'features/README.md').includes(`](${name}.md)`));
   }
-  assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /Switch every session once/);
+  const doc = read('openwiki/operations/keyboard-shortcuts.md');
+  assert.match(doc, /Ctrl\+K "Chat View" switches the active session once/);
+  assert.ok(!doc.includes('Chat View: On Everywhere'));
   assert.match(read(skill + 'coverage.md'), /\| IGSH-820 \|/);
 });
