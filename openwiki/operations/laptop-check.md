@@ -39,7 +39,7 @@ systemctl --user start multiprompt-laptop-check.service
 journalctl --user -u multiprompt-laptop-check.service -n 40
 ```
 
-`setup.sh` keeps its own shallow clone in `~/projects/multiprompt-laptop-check` and rewrites the timer units in `~/.config/systemd/user`. It never touches a working checkout.
+`setup.sh` keeps its own shallow clone in `~/projects/multiprompt-laptop-check` and rewrites the timer units in `~/.config/systemd/user`. It never touches a working checkout. Before each run the service fetches `origin/master` into that clone, so a merged fix reaches the live timer without a second install. A failed fetch is ignored and the run uses the copy it has.
 
 Stop the routine with `systemctl --user disable --now multiprompt-laptop-check.timer`.
 
