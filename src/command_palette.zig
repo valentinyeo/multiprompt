@@ -4868,40 +4868,6 @@ pub fn updateSearchResults() void {
 
     if (app_state.g_search_len > 0) appendTmuxCacheRows();
 
-    if (app_state.g_search_result_count < app_state.g_search_results.len) {
-        var rh: u8 = 0;
-        var rbuf: [256]u8 = undefined;
-        var rlen: u32 = 0;
-        const repo_ok = workspacePrimaryRepo(&rh, &rbuf, &rlen);
-        const repo_count = if (repo_ok) countFolderSessions(rh, rbuf[0..rlen]) else 0;
-        var show_recover = (repo_ok and repo_count >= 1 and app_state.g_search_len == 0);
-        if (!show_recover and app_state.g_search_len > 0) {
-            const recover_labels = [_][]const u8{ "recover workspace tmux sessions", "recover tmux", "missing sessions", "recovery" };
-            for (recover_labels) |label| {
-                const queryr = app_state.g_search_buf[0..app_state.g_search_len];
-                if (queryr.len <= label.len) {
-                    var okr = true;
-                    for (0..queryr.len) |j| {
-                        const qcr = u16ToLower(queryr[j]);
-                        const lcr: u16 = label[j];
-                        if (qcr != lcr) {
-                            okr = false;
-                            break;
-                        }
-                    }
-                    if (okr) {
-                        show_recover = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (show_recover) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_RECOVER_REPO_OFFSET;
-            app_state.g_search_result_count += 1;
-        }
-    }
-
     if (app_state.g_search_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
         loadArchiveIfNeeded();
         const query_arc = app_state.g_search_buf[0..app_state.g_search_len];

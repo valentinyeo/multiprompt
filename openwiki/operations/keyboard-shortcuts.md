@@ -242,7 +242,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | End / Ctrl+K "Chat View: Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |
 | Alt+C | Switch terminal tabs between the shell and the chat view; off for live chats, which have no terminal; also the Ctrl+K row and the tab menu for terminal tabs |
-| Ctrl+K -&gt; Switch to chat view / Switch to shell | Show a terminal tab as the chat view or the shell; hidden for live chats; same as Alt+C and the right-click tab menu |
+| Ctrl+K -&gt; Switch to chat view / Switch to shell | Switch every session once, unlocking as it goes (the old On Everywhere / Off Everywhere names still search); afterwards Alt+C and tab switches keep each session independent; hidden for live chats |
 | + button / Ctrl+V in Chat View | Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File) |
 | Right-click Claude message / Ctrl+K reactions | Send a quoted reaction; show its badge |
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message. Click × to remove it. Escape cancels quotes when the draft is empty. |
