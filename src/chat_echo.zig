@@ -371,6 +371,24 @@ test "IGSH-1847 a failed send and a ten-minute wait show Not sent" {
     try std.testing.expect(!showsNotSent(false, .not_sent, "failed", 1, 2));
 }
 
+pub fn snapshotRowFresh(state: OutboxState, sent_ms: i64, now_ms: i64) bool {
+    if (state == .delivered or state == .cancelled or sent_ms <= 0) return false;
+    if (now_ms < sent_ms) return true;
+    return now_ms - sent_ms < NOT_SENT_WAIT_MS;
+}
+
+test "SOFT-2350 an old message the host still lists never becomes a new unsent row" {
+    const now: i64 = 1_792_250_528_437;
+    try std.testing.expect(!snapshotRowFresh(.queued, now - NOT_SENT_WAIT_MS, now));
+    try std.testing.expect(!snapshotRowFresh(.not_sent, now - NOT_SENT_WAIT_MS - 1, now));
+    try std.testing.expect(snapshotRowFresh(.queued, now - NOT_SENT_WAIT_MS + 1, now));
+    try std.testing.expect(snapshotRowFresh(.queued, now + 1, now));
+    try std.testing.expect(!snapshotRowFresh(.queued, 0, now));
+    for ([_]OutboxState{ .delivered, .cancelled }) |state| {
+        try std.testing.expect(!snapshotRowFresh(state, now, now));
+    }
+}
+
 pub const SETTLE_GRACE_MS: i64 = 20_000;
 
 pub const DeliveryEvidence = struct {

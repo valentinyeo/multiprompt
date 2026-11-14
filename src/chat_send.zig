@@ -3811,6 +3811,7 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     const key = chatOutboxKeyForShell(idx, &key_buf);
     const identity = chatFileIdentityForShell(idx);
     var found: ?usize = null;
+    var adopted = false;
     for (app_state.g_chat_outbox.items, 0..) |entry, i| {
         if (entry.message_v1 and std.mem.eql(u8, entry.key[0..entry.key_len], key) and std.mem.eql(u8, &entry.message_sid, &identity.sid) and std.mem.eql(u8, std.mem.sliceTo(&entry.message_wire_id, 0), token)) { found = i; break; }
     }
@@ -3835,6 +3836,7 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
         entry.message_v1 = true;
         entry.message_sid = chatFileIdentityForShell(idx).sid;
         _ = json_reader.copyString(message, "id", &entry.message_wire_id);
+        adopted = true;
     }
     const entry = &app_state.g_chat_outbox.items[found.?];
     if (std.mem.eql(u8, phase, "accepted") and std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "started")) return true;
@@ -3848,6 +3850,10 @@ fn chatMessageReduce(idx: u32, value: std.json.Value) bool {
     }
     entry.write_started = true;
     entry.channel_sent = true;
+    if (adopted and !chat_echo.snapshotRowFresh(entry.state, entry.anchor.sent_ms, chat_echo.fileTimeToUnixMs(nowFileTime()))) {
+        chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, found.?);
+        return true;
+    }
     return true;
 }
 
