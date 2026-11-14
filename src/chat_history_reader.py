@@ -33,6 +33,9 @@ _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 _INTERRUPT_MARKERS = ("[Request interrupted by user]", "[Request interrupted by user for tool use]")
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
 _SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
+_CURSOR_STAMP = re.compile(r"\A\s*<timestamp>.*?</timestamp>\s*", re.S)
+_CURSOR_QUERY = re.compile(r"\A\s*<user_query>\s*(.*?)\s*</user_query>\s*\Z", re.S)
+_CURSOR_INJECTIONS = ("<manually_attached_skills>",)
 SEARCH_ASCII_FOLDS = "ßİŉſǰẖẗẘẙẚẞKﬀﬁﬂﬃﬄﬅﬆ"
 END = "@@MP_END@@"
 PAGE_BYTES = 350000
@@ -106,20 +109,23 @@ def conversation_path(agent, sid, cwd, home=None):
                     return path
         return None
     roots = ([directory / "projects" for directory in claude_config_dirs(home)]
-             if agent == "claude" else [home / ".codex/sessions"])
+             if agent == "claude" else [home / ".cursor/projects"] if agent == "cursor" else [home / ".codex/sessions"])
     denied = None
     for root in roots:
         candidates = []
         if agent == "claude":
             folder = claude_project_folder(cwd)
             candidates.append(root / folder / (sid + ".jsonl"))
+        elif agent == "cursor":
+            candidates.append(root / cursor_project_folder(cwd) / "agent-transcripts" / sid / (sid + ".jsonl"))
         else:
             candidates.extend(root.glob("**/rollout-*-" + sid + ".jsonl"))
 
         for exact in (True, False):
             if not exact:
                 try:
-                    candidates = list(root.glob("*/" + sid + ".jsonl")) if agent == "claude" else []
+                    candidates = (list(root.glob("*/" + sid + ".jsonl")) if agent == "claude" else
+                                  list(root.glob("*/agent-transcripts/" + sid + "/" + sid + ".jsonl")) if agent == "cursor" else [])
                 except PermissionError as error:
                     denied = error
                     continue
@@ -194,6 +200,15 @@ def clean_command_markup(text):
         text = _LOCAL_COMMAND.sub("", text)
     return text
 
+def cursor_prompt(text):
+    if text.lstrip().startswith(_CURSOR_INJECTIONS):
+        return None
+    stamped = _CURSOR_STAMP.match(text)
+    if stamped is None:
+        return text
+    query = _CURSOR_QUERY.match(text[stamped.end():])
+    return query.group(1) if query else None
+
 def process_basename(value):
     return str(value).replace("\\", "/").rsplit("/", 1)[-1]
 
@@ -237,6 +252,9 @@ def agent_pid_for_panes(pane_pids, table, agent):
 
 def claude_project_folder(cwd):
     return re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+
+def cursor_project_folder(cwd):
+    return re.sub(r"[^A-Za-z0-9]+", "-", str(cwd)).strip("-")
 
 def newest_jsonl(paths):
     best = None
@@ -745,6 +763,12 @@ def conversation_event(event, agent):
         if event.get("type") != "message":
             return None
         message = event.get("message") or {}
+    elif agent == "cursor":
+        message = event.get("message")
+        role = event.get("role") or (message.get("role") if isinstance(message, dict) else None)
+        if not isinstance(message, dict) or not isinstance(role, str):
+            return None
+        message = dict(message, role=role)
     elif agent == "claude":
         attachment = event.get("attachment") if event.get("type") == "attachment" else None
         if isinstance(attachment, dict) and attachment.get("type") == "queued_command" and not event.get("isSidechain"):
@@ -770,6 +794,10 @@ def conversation_event(event, agent):
     else:
         text = content if isinstance(content, str) else ""
     text = _SYSTEM_REMINDER.sub("", text)
+    if agent == "cursor" and role == "user":
+        text = cursor_prompt(text)
+        if text is None:
+            return None
     if role == "user":
         if text.lstrip().startswith("<task-notification>") or text.strip() in _INTERRUPT_MARKERS:
             return None
@@ -987,8 +1015,9 @@ def conversation_rows(event, agent, offset=0, search=False):
         row = event.get("row")
         return [dict(row)] if isinstance(row, dict) and row.get("role") in ("user", "assistant", "tool", "tool_result") else []
     message = conversation_event(event, agent)
-    if message and event.get("kind") in ("user", "assistant"):
-        message["id"] = "hax:" + str(offset) + ":" + hashlib.sha256(wire_row(event).encode("utf-8")).hexdigest()[:16]
+    if message and (event.get("kind") in ("user", "assistant") or agent == "cursor"):
+        prefix = "hax:" if event.get("kind") in ("user", "assistant") else "cursor:"
+        message["id"] = prefix + str(offset) + ":" + hashlib.sha256(wire_row(event).encode("utf-8")).hexdigest()[:16]
     tools = tool_events(event, agent, search=search)
     if not tools or agent != "claude" or event.get("type") != "assistant":
         return ([message] if message else []) + tools
@@ -1634,9 +1663,18 @@ def resolve_response_path(q, source=None, as_owner=False):
     denied = False
     delegated = None
     try:
-        path = conversation_path(agent, sid, cwd) if sid and not follow else None
+        path = conversation_path(agent, sid, cwd) if sid and (not follow or agent == "cursor") else None
     except PermissionError:
         path, denied = None, True
+    if agent == "cursor" and sid and not as_owner and host_dispatch_switch(agent, sid):
+        native = host_session_state(agent, sid).get("native_session")
+        if isinstance(native, str) and SESSION_ID.fullmatch(native) and native != sid:
+            try:
+                resumed = conversation_path(agent, native, cwd)
+            except PermissionError:
+                resumed = None
+            if resumed is not None:
+                path = resumed
     if agent == "codex" and sid and host_dispatch_switch(agent, sid):
         native = host_session_state(agent, sid).get("native_session")
         try:
@@ -1668,13 +1706,13 @@ def resolve_response_path(q, source=None, as_owner=False):
                 if delegated != missing_response(q, "session transcript not found"):
                     return agent, sid, None, delegated
 
-    if path is None and not denied and agent == "claude" and sid and host_dispatch_switch(agent, sid):
+    if path is None and not denied and agent in ("claude", "cursor") and sid and host_dispatch_switch(agent, sid):
         try:
             existing = conversation_path(agent, sid, cwd)
         except PermissionError:
             existing = None
         if existing is None:
-            return agent, sid, None, empty_history_response(q, sid, tmux)
+            return agent, sid, None, empty_history_response(q, sid, tmux, agent)
     if path is None and tmux:
         try:
             resolved = (resolve_tmux_agent(agent, tmux, q["discovery_pid"])
@@ -8057,7 +8095,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 126
+RUNTIME_GENERATION = 127
 
 if __name__ == '__main__':
     import base64 as _base64

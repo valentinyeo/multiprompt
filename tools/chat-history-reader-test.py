@@ -4,6 +4,7 @@ import hashlib
 import json
 import io
 import os
+import re
 import selectors
 import shutil
 import sqlite3
@@ -8066,6 +8067,86 @@ class SOFT2272HostedClearTest(unittest.TestCase):
     def test_an_owner_read_never_switches_session(self):
         wire = reader.response(dict(self.query), reader.READER_SOURCE, as_owner=True)
         self.assertIn('PINEAPPLE', wire)
+
+
+class SOFT2310CursorHistoryTest(unittest.TestCase):
+    host_sid = '11111111-2222-4333-8444-555555555555'
+    native_sid = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+    tmux = 'live-cursor'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.cwd = str(self.home / 'work')
+        Path(self.cwd).mkdir()
+        self.query = dict(id=7, codex=False, provider='cursor', sid=self.host_sid, tmux=self.tmux, cwd=self.cwd,
+                          follow=True, cached_sid=self.host_sid, inode=0, offset=0, start=0)
+
+    def transcript(self, sid, question, answer, stamp='Monday, Nov 10, 2026, 6:34 AM (UTC+1)'):
+        folder = re.sub(r'[^A-Za-z0-9]+', '-', self.cwd).strip('-')
+        path = self.home / '.cursor/projects' / folder / 'agent-transcripts' / sid / (sid + '.jsonl')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [dict(role='user', message=dict(content=[dict(type='text', text='<timestamp>' + stamp + '</timestamp>\n<user_query>\n' + question + '\n</user_query>')])),
+                dict(role='assistant', message=dict(content=[dict(type='text', text=answer)])),
+                dict(type='turn_ended', status='success')]
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        return path
+
+    def host(self, native):
+        reader.host_write(reader.host_paths('cursor', self.host_sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=self.cwd))
+        reader.host_write(reader.host_paths('cursor', self.host_sid)['state'],
+                          dict(provider='cursor', sid=self.host_sid, native_session=native))
+
+    def wire(self):
+        with patch.object(reader, 'resolve_tmux_agent', side_effect=AssertionError('unexpected discovery')):
+            return reader.response(dict(self.query))
+
+    def messages(self, wire):
+        return [row for row in (json.loads(line) for line in wire.splitlines()[1:-1])
+                if row.get('role') in ('user', 'assistant')]
+
+    def test_a_reopened_cursor_chat_shows_its_earlier_messages(self):
+        self.host(self.native_sid)
+        self.transcript(self.native_sid, 'which colour did I pick?', 'You picked lime.')
+        wire = self.wire()
+        self.assertIn('\thistory\tok\t' + self.host_sid + '\t', wire)
+        self.assertEqual([(row['role'], row['text']) for row in self.messages(wire)],
+                         [('user', 'which colour did I pick?'), ('assistant', 'You picked lime.')])
+
+    def test_the_chat_keeps_its_own_cursor_transcript_without_a_native_switch(self):
+        self.host(self.host_sid)
+        self.transcript(self.host_sid, 'still here', 'yes')
+        wire = self.wire()
+        self.assertEqual([row['text'] for row in self.messages(wire)], ['still here', 'yes'])
+
+    def test_injected_cursor_turns_are_not_shown_as_prompts(self):
+        self.host(self.native_sid)
+        path = self.transcript(self.native_sid, 'real question', 'real answer')
+        injected = ['<timestamp>Monday, Nov 10, 2026, 6:35 AM (UTC+1)</timestamp>',
+                    '<manually_attached_skills>\nSkill Name: demo\n</manually_attached_skills>']
+        with path.open('a') as target:
+            for text in injected:
+                target.write(json.dumps(dict(role='user', message=dict(content=[dict(type='text', text=text)]))) + '\n')
+        wire = self.wire()
+        self.assertEqual([(row['role'], row['text']) for row in self.messages(wire)],
+                         [('user', 'real question'), ('assistant', 'real answer')])
+
+    def test_codex_chats_still_show_their_earlier_messages(self):
+        path = self.home / '.codex/sessions/2026/11/10/rollout-2026-sid.jsonl'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(dict(type='session_meta', payload=dict(id='sid', cwd=self.cwd))) + '\n' +
+                        json.dumps(dict(type='response_item', payload=dict(type='message', role='user',
+                                      content=[dict(type='input_text', text='codex question')]))) + '\n' +
+                        json.dumps(dict(type='response_item', payload=dict(type='message', role='assistant',
+                                      content=[dict(type='output_text', text='codex answer')]))) + '\n')
+        wire = reader.response(dict(self.query, codex=True, provider='codex', sid='sid', tmux=''))
+        self.assertIn('\thistory\tok\tsid\t', wire)
+        self.assertEqual([(row['role'], row['text']) for row in self.messages(wire)],
+                         [('user', 'codex question'), ('assistant', 'codex answer')])
 
 
 def load_tests(loader, tests, pattern):

@@ -42,8 +42,11 @@ executable's embedded
 `src/chat_history_reader.py` through stdin. It installs nothing and does not
 need changes to the existing `mp_complete.py` deployment or its shared channel.
 A saved sid selects exactly `~/.claude/projects/<encoded cwd>/<sid>.jsonl`
-(with a root-confined sid lookup for alternate cwd encodings), or Codex's
-`~/.codex/sessions/**/rollout-*-<sid>.jsonl`. Missing sids/files resolve the
+(with a root-confined sid lookup for alternate cwd encodings), Codex's
+`~/.codex/sessions/**/rollout-*-<sid>.jsonl`, or Cursor's
+`~/.cursor/projects/<encoded cwd>/agent-transcripts/<sid>/<sid>.jsonl` (with the
+same root-confined lookup). A hosted Cursor chat reads the native session the
+host recorded, so it keeps its earlier messages after a restart. Missing sids/files resolve the
 named tmux pane's live agent descendant and Claude's
 `~/.claude/sessions/<pid>.json` map; the existing cwd-based discovery fallback
 remains for harnesses without that map. No unscoped active tmux session is used.
