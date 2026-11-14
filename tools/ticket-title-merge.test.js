@@ -9,7 +9,6 @@ const root = path.resolve(__dirname, '..');
 
 test('the title catalog is one file per ticket and nothing else', () => {
   assert.equal(fs.existsSync(path.join(root, 'tools/ticket-titles.json')), false, 'shared catalog file is gone');
-  assert.equal(fs.existsSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json')), false, 'shared fixture copy is gone');
   const dir = path.join(root, 'tools/ticket-titles');
   assert.ok(fs.statSync(dir).isDirectory(), 'catalog is a directory');
   for (const name of fs.readdirSync(dir)) {

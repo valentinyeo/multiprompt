@@ -6,11 +6,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint } from './version-stamp.mjs';
-import { loadTicketTitles } from './ticket-titles.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
-const titles = loadTicketTitles();
+const titles = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
 const line = id => `${id} ${titles[id]}`;
 const release = (version, ...ids) => ({ version, changes: ids.map(line), tickets: ids.map(id => `https://app.hypertask.ai/detail/project-${id.startsWith('HYCI-') ? '11514' : '2060'}/${id.split('-')[1]}`) });
 const main = 'pub const APP_VERSION = "0.28.735";\nconst untouched = 1;\n';

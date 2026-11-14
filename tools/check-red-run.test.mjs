@@ -5,7 +5,6 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { stampTree } from './version-stamp.mjs';
-import { loadTicketTitles } from './ticket-titles.mjs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -493,7 +492,7 @@ const after = 1;
     for (const [file, text] of Object.entries(files)) f.write(file, text);
     const base = f.commit();
     const stamped = stampTree(files);
-    const titles = loadTicketTitles();
+    const titles = JSON.parse(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1681/ticket-titles.json'), 'utf8'));
     assert.ok(stamped.files['src/changelog.zig'].includes(`IGSH-154 ${titles['IGSH-154']}`));
     for (const [file, text] of Object.entries(stamped.files)) f.write(file, text);
     for (const file of stamped.removed) fs.unlinkSync(path.join(f.repo, file));

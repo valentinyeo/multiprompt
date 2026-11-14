@@ -34,6 +34,7 @@ function fixture(t) {
   const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs'];
   if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs');
   for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  assert.ok(fs.existsSync(path.join(root, 'tools/ticket-titles')), 'title catalog folder exists');
   fs.cpSync(path.join(root, 'tools/ticket-titles'), path.join(dir, 'tools/ticket-titles'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'changelog.d'));
   git('add', 'tools');

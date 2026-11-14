@@ -53,7 +53,9 @@ test('release stamps preserve plain Unicode and quoted product lines; exact stam
 
 test('pending fragment tickets stamp from the shared title catalog', async () => {
   const { stampTree } = await import('./version-stamp.mjs');
-  const { ticketLine, ticketRecord, loadTicketTitles } = await import('./ticket-titles.mjs');
+  const titleModule = await import('./ticket-titles.mjs');
+  assert.equal(typeof titleModule.loadTicketTitles, 'function', 'one loader reads the title catalog');
+  const { ticketLine, ticketRecord, loadTicketTitles } = titleModule;
   const catalog = loadTicketTitles();
   const names = fs.readdirSync(path.join(root, 'changelog.d')).filter(name => name !== 'README.md');
   const files = {
