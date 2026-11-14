@@ -499,6 +499,16 @@
       "idle_max_per_min": 0,
       "reason": "Armed on demand by room evidence work."
     },
+    "TIMER_ROOM_REPLIES": {
+      "id": 45846,
+      "files": [
+        "room_frontend.zig"
+      ],
+      "owner": "room",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "Armed after a posted room message while the room is visible and selected and an addressed agent has not replied; 2 s for two minutes, then 15 s, stops after 30 minutes."
+    },
     "TIMER_ROOM_UI": {
       "id": 45843,
       "files": [

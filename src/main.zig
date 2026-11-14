@@ -1323,6 +1323,8 @@ comptime {
         _ = @import("smooth.zig");
         _ = @import("bot_avatar.zig");
         _ = @import("room_view.zig");
+        _ = @import("room_post.zig");
+        _ = @import("room_journal.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");

@@ -13,7 +13,19 @@ pub const Member = struct {
     session_identity: []const u8,
 };
 
-pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, status };
+pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status };
+
+pub fn requestKind(kind: @import("room_journal.zig").Kind) RequestKind {
+    return switch (kind) {
+        .create => .create,
+        .edit => .edit,
+        .post => .post,
+    };
+}
+
+pub fn isMutation(kind: RequestKind) bool {
+    return kind == .create or kind == .edit or kind == .post;
+}
 pub const Result = struct {
     kind: RequestKind,
     value: std.json.Parsed(std.json.Value),
@@ -43,6 +55,7 @@ pub const Controller = struct {
     has_account: bool = false,
     host_uuid: [36]u8 = undefined,
     has_host_uuid: bool = false,
+    live_send: bool = false,
     job: ?*transport.Job = null,
     kind: RequestKind = .capabilities,
     journal_lock: ?@import("room_journal.zig").Lock = null,
@@ -123,12 +136,12 @@ pub const Controller = struct {
         const record = entry.record();
         if (record.kind != kind or record.revision != revision or !std.mem.eql(u8, record.command_id, command_id) or !std.mem.eql(u8, record.room_id, room_id) or (record.state != .prepared and record.state != .uncertain)) return error.WrongCommand;
         try journal.updateLocked(&guard, command_id, .uncertain, "");
-        if (!self.launchBytes(if (kind == .create) .create else .edit, record.request)) return error.LaunchRefused;
+        if (!self.launchBytes(requestKind(kind), record.request)) return error.LaunchRefused;
         self.journal_lock = guard;
     }
 
     pub fn capabilities(self: *Controller) bool {
-        return self.launch(.capabilities, .{ .op = "capabilities" });
+        return self.launch(.capabilities, .{ .op = "capabilities", .room_messages = 1 });
     }
 
     pub fn catalog(self: *Controller, after: u64, through: ?u64) bool {
@@ -181,10 +194,6 @@ pub const Controller = struct {
         return self.launchTypedPrepared(.edit, command_id, room_id, revision, .{ .op = "edit", .host_uuid = self.host_uuid[0..], .command_id = command_id, .room_id = room_id, .expected_revision = revision, .name = name, .members = members });
     }
 
-    pub fn submit(_: *Controller) room_view.ActionResult {
-        return .unsupported;
-    }
-
     pub fn restart(_: *Controller) room_view.ActionResult {
         return .unsupported;
     }
@@ -213,7 +222,7 @@ pub const Controller = struct {
             if (self.journal_lock) |*guard| guard.deinit();
             self.journal_lock = null;
         }
-        const mutation = self.kind == .create or self.kind == .edit;
+        const mutation = isMutation(self.kind);
         if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .outcome_unknown = mutation } };
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
@@ -251,6 +260,6 @@ test "room controller pins remote UUID before catalog operations" {
     try std.testing.expect(controller.bindHost("10000000-0000-4000-8000-000000000001"));
     try std.testing.expectEqualStrings("10000000-0000-4000-8000-000000000001", &controller.host_uuid);
     try std.testing.expect(!controller.bindHost("20000000-0000-4000-8000-000000000002"));
-    try std.testing.expectEqual(room_view.ActionResult.unsupported, controller.submit());
+    try std.testing.expect(!controller.live_send);
     try std.testing.expectEqual(room_view.ActionResult.unsupported, controller.restart());
 }
