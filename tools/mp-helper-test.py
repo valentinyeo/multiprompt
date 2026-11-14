@@ -84,6 +84,10 @@ class MpHelperTest(unittest.TestCase):
     def run_helper(self, *args, **extra):
         return subprocess.run([sys.executable, str(MP_HELPER), *args], capture_output=True, text=True, env=self.env(**extra), cwd=str(self.work), timeout=60)
 
+    def parsed(self, result):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def events(self, kind):
         if not self.log.exists():
             return []
@@ -129,9 +133,9 @@ class MpHelperTest(unittest.TestCase):
         self.assertEqual(result["task"], dict(id=submitted[0]["message_id"], state="accepted"))
 
     def test_SOFT_2013_two_helpers_get_distinct_chats_and_a_repeat_reuses_one(self):
-        first = json.loads(self.run_helper("start", "--name", "A", "--model", "haiku").stdout)
-        second = json.loads(self.run_helper("start", "--name", "B", "--model", "opus").stdout)
-        again = json.loads(self.run_helper("start", "--name", "a").stdout)
+        first = self.parsed(self.run_helper("start", "--name", "A", "--model", "haiku"))
+        second = self.parsed(self.run_helper("start", "--name", "B", "--model", "opus"))
+        again = self.parsed(self.run_helper("start", "--name", "a"))
         self.assertNotEqual(first["sid"], second["sid"])
         self.assertEqual(first["sid"], again["sid"])
         self.assertEqual(again["model"], "haiku")
@@ -180,7 +184,7 @@ class MpHelperTest(unittest.TestCase):
         tmux = self.helper("Mine", "live-parent", mine)
         self.helper("Theirs", "live-other", "dddddddd-1111-8222-8333-444444444444")
         listed = self.run_helper("list", "--json")
-        self.assertEqual([row["name"] for row in json.loads(listed.stdout)], ["Mine"])
+        self.assertEqual([row["name"] for row in self.parsed(listed)], ["Mine"])
         self.assertEqual(self.run_helper("read", "Theirs").returncode, 2)
         sent = self.run_helper("send", "Mine", "check line 12")
         self.assertEqual(sent.returncode, 0, sent.stderr)
@@ -203,7 +207,7 @@ class MpHelperTest(unittest.TestCase):
         self.assertEqual(opened[-1], ["session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", result["tmux"], "--name", "A"])
 
     def test_SOFT_2013_a_repeat_start_keeps_a_running_helper_enabled(self):
-        first = json.loads(self.run_helper("start", "--name", "A").stdout)
+        first = self.parsed(self.run_helper("start", "--name", "A"))
         path = next(iter(self.configs()))
         config = json.loads(path.read_text(encoding="utf-8"))
         config["enabled"] = True
@@ -219,6 +223,7 @@ class MpHelperTest(unittest.TestCase):
         runtime.mkdir()
         for name, source in (("mp-send", ROOT / "src/mp_send.py"), ("mp-helper", ROOT / "src/mp_helper.py")):
             stem = "0" * 64 + "-" + name
+            self.assertTrue(source.is_file(), str(source))
             (runtime / stem).write_bytes(source.read_bytes())
             (runtime / name).symlink_to(stem)
         self.helper("Mine", "live-parent", "eeeeeeee-1111-8222-8333-444444444444")
