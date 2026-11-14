@@ -3443,6 +3443,29 @@ class SharedQueueDraftTest(unittest.TestCase):
                     self.assertEqual(self.live()['queue'], [dict(text=text, sender=sender, injected=True)])
                 self.query.update(cached_sid='', inode=0, offset=0)
 
+    def test_IGSH_2351_agent_messages_become_named_incoming_notes(self):
+        samples = [
+            ('<agent-message from="abb23277c284f1efe">\nPR #3506 is green &amp; ready\n</agent-message>', 'Another agent', 'PR #3506 is green & ready'),
+            ('<agent-message from="heic-verify">\nStanding down.\n</agent-message>', 'heic-verify', 'Standing down.'),
+            ('<agent-message from="abb23277c284f1efe" from-name="Poteto 2 LC">hi</agent-message>', 'Poteto 2 LC', 'hi'),
+            ('<agent-message>hi</agent-message>', 'Another agent', 'hi'),
+            ('<agent-message from="  ">hi</agent-message>', 'Another agent', 'hi'),
+        ]
+        for envelope, sender, text in samples:
+            with self.subTest(sender=sender, text=text):
+                self.assertEqual(reader.queue_item(envelope), dict(text=text, sender=sender, injected=True))
+        for plain in ('Please read <agent-message from="x">example</agent-message>',
+                      '<agent-message from=x>bad</agent-message>',
+                      '<agent-message-extra>hi</agent-message-extra>'):
+            with self.subTest(plain=plain):
+                self.assertEqual(reader.queue_item(plain), plain)
+        queued = '<agent-message from="abb23277c284f1efe">\nready\n</agent-message>'
+        state = ([queued], [])
+        reader.queue_apply(state, self.op('remove', '<agent-message from="other-agent">ready</agent-message>'))
+        self.assertEqual(state, ([queued], []))
+        reader.queue_apply(state, self.op('remove', '<agent-message from="abb23277c284f1efe">ready</agent-message>'))
+        self.assertEqual(state, ([], [queued]))
+
     def test_IGSH_722_queue_keeps_non_envelopes_as_plain_strings(self):
         samples = ['hello', 'Please read <cross-session-message>example</cross-session-message>',
                    '<cross-session-message>one</cross-session-message> and reply',

@@ -304,19 +304,40 @@ fn wordChar(c: u16) bool {
     return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
 }
 
+const EnvelopeKind = enum { cross, task, agent };
+
+const Envelope = struct { kind: EnvelopeKind, open: []const u16, close: []const u16 };
+
+fn envelopeKind(text: []const u16) ?Envelope {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const kinds = [_]Envelope{
+        .{ .kind = .cross, .open = w("<cross-session-message"), .close = w("</cross-session-message>") },
+        .{ .kind = .task, .open = w("<task-notification"), .close = w("</task-notification>") },
+        .{ .kind = .agent, .open = w("<agent-message"), .close = w("</agent-message>") },
+    };
+    for (kinds) |k| if (std.mem.startsWith(u16, text, k.open)) return k;
+    return null;
+}
+
+fn hexId(value: []const u16) bool {
+    if (value.len < 12) return false;
+    for (value) |c| if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f'))) return false;
+    return true;
+}
+
 fn injectedEnvelope(raw: []const u16, allow_truncated: bool) ?InjectedMessage {
     const text = std.mem.trim(u16, raw, XML_SPACE);
-    const cross = std.unicode.utf8ToUtf16LeStringLiteral("<cross-session-message");
-    const task = std.unicode.utf8ToUtf16LeStringLiteral("<task-notification");
-    const is_task = std.mem.startsWith(u16, text, task);
-    const prefix = if (is_task) task else cross;
-    if (!std.mem.startsWith(u16, text, prefix) or text.len <= prefix.len) return null;
+    const found = envelopeKind(text) orelse return null;
+    const prefix = found.open;
+    if (text.len <= prefix.len) return null;
     if (text[prefix.len] != '>' and std.mem.indexOfScalar(u16, XML_SPACE, text[prefix.len]) == null) return null;
     const end = xmlTagEnd(text) orelse return null;
-    const close = if (is_task) std.unicode.utf8ToUtf16LeStringLiteral("</task-notification>") else std.unicode.utf8ToUtf16LeStringLiteral("</cross-session-message>");
+    const close = found.close;
     const close_at = std.mem.indexOfPos(u16, text, end + 1, close) orelse if (allow_truncated) text.len else return null;
     if (close_at < text.len and close_at + close.len != text.len) return null;
-    var sender: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("another session");
+    var sender: []const u16 = if (found.kind == .agent) std.unicode.utf8ToUtf16LeStringLiteral("Another agent") else std.unicode.utf8ToUtf16LeStringLiteral("another session");
+    var origin: []const u16 = &.{};
+    var named = false;
     var attrs = std.mem.trim(u16, text[prefix.len..end], XML_SPACE);
     while (attrs.len > 0) {
         const name_end = std.mem.indexOfAny(u16, attrs, &.{ '=', ' ', '\t', '\r', '\n' }) orelse return null;
@@ -330,12 +351,16 @@ fn injectedEnvelope(raw: []const u16, allow_truncated: bool) ?InjectedMessage {
         attrs = attrs[1..];
         const value_end = std.mem.indexOfScalar(u16, attrs, quote) orelse return null;
         const value = attrs[0..value_end];
-        if (std.mem.eql(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("from-name")) and std.mem.trim(u16, value, XML_SPACE).len > 0) sender = value;
+        if (std.mem.eql(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("from-name")) and std.mem.trim(u16, value, XML_SPACE).len > 0) {
+            sender = value;
+            named = true;
+        } else if (std.mem.eql(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("from"))) origin = std.mem.trim(u16, value, XML_SPACE);
         attrs = attrs[value_end + 1 ..];
         if (attrs.len > 0 and std.mem.indexOfScalar(u16, XML_SPACE, attrs[0]) == null) return null;
         attrs = std.mem.trimStart(u16, attrs, XML_SPACE);
     }
-    return .{ .sender = if (is_task) std.unicode.utf8ToUtf16LeStringLiteral("Task") else sender, .body = std.mem.trim(u16, text[end + 1 .. close_at], XML_SPACE) };
+    if (found.kind == .agent and !named and origin.len > 0 and !hexId(origin)) sender = origin;
+    return .{ .sender = if (found.kind == .task) std.unicode.utf8ToUtf16LeStringLiteral("Task") else sender, .body = std.mem.trim(u16, text[end + 1 .. close_at], XML_SPACE) };
 }
 
 pub fn decodeXml(text: []const u16, out: []u16, strip_tags: bool) usize {
@@ -617,6 +642,25 @@ test "injected envelopes extract only the named sender and whole body" {
     try std.testing.expectEqualSlices(u16, w("another session"), injectedMessage(w("<cross-session-message from='secret'>hello</cross-session-message>")).?.sender);
     try std.testing.expectEqualSlices(u16, w("another session"), injectedMessage(w("<cross-session-message from-name='  '>hello</cross-session-message>")).?.sender);
     try std.testing.expectEqualSlices(u16, w("Task"), injectedMessage(w("<task-notification from-name='ignored'><summary>done</summary></task-notification>")).?.sender);
+}
+
+test "IGSH-2351 agent messages show a named incoming card without tags" {
+    @setEvalBranchQuota(10000);
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const anonymous = injectedMessage(w("<agent-message from=\"abb23277c284f1efe\">\nPR #3506 is green\n</agent-message>")).?;
+    try std.testing.expectEqualSlices(u16, w("Another agent"), anonymous.sender);
+    try std.testing.expectEqualSlices(u16, w("PR #3506 is green"), anonymous.body);
+    try std.testing.expectEqualSlices(u16, w("heic-verify"), injectedMessage(w("<agent-message from='heic-verify'>done</agent-message>")).?.sender);
+    try std.testing.expectEqualSlices(u16, w("Poteto 2 LC"), injectedMessage(w("<agent-message from='abb23277c284f1efe' from-name='Poteto 2 LC'>hi</agent-message>")).?.sender);
+    try std.testing.expectEqualSlices(u16, w("Another agent"), injectedMessage(w("<agent-message>hi</agent-message>")).?.sender);
+    try std.testing.expect(injectedMessage(w("Please read <agent-message from='x'>hi</agent-message>")) == null);
+    try std.testing.expect(injectedMessage(w("<agent-message-extra>hi</agent-message>")) == null);
+    var text: [128]u16 = undefined;
+    var out: [8]md.Block = undefined;
+    const message = try messageBlocks("<agent-message from=\"abb23277c284f1efe\">\nPR #3506 is green\n</agent-message>", &text, 0, .user, &out);
+    try std.testing.expectEqual(md.Role.injected, out[0].role);
+    try std.testing.expectEqualSlices(u16, w("Another agent"), std.mem.sliceTo(&out[0].sender, 0));
+    try std.testing.expectEqualSlices(u16, w("PR #3506 is green"), text[0..message.len]);
 }
 
 test "mixed messages mentions siblings and malformed wrappers stay normal" {

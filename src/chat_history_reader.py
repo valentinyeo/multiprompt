@@ -1502,13 +1502,14 @@ def box_draft(target):
 
 
 def queue_envelope(text):
-    envelope = re.fullmatch(r"""\s*<(cross-session-message|task-notification)(?=[\s>])((?:[^>"']|"[^"]*"|'[^']*')*)>(.*?)</\1>\s*""", text, re.S)
+    envelope = re.fullmatch(r"""\s*<(cross-session-message|task-notification|agent-message)(?=[\s>])((?:[^>"']|"[^"]*"|'[^']*')*)>(.*?)</\1>\s*""", text, re.S)
     if envelope is None:
         return None
     kind, attrs, body = envelope.groups()
     if '</' + kind + '>' in body:
         return None
     sender = ''
+    origin = ''
     while attrs.strip():
         attr = re.match(r"""\s*([^=\s]+)\s*=\s*(["'])(.*?)\2(?=\s|$)""", attrs, re.S)
         if attr is None:
@@ -1516,7 +1517,11 @@ def queue_envelope(text):
         name, _quote, value = attr.groups()
         if name == 'from-name' and value.strip():
             sender = value
+        elif name == 'from':
+            origin = value.strip()
         attrs = attrs[attr.end():]
+    if kind == 'agent-message' and not sender and origin and not re.fullmatch(r"[0-9a-f]{12,}", html.unescape(origin)):
+        sender = origin
     return kind, sender, body
 
 
@@ -1534,7 +1539,7 @@ def queue_item(text):
         return text[:QUEUE_TEXT]
     kind, sender, body = envelope
     body = re.sub(r"""</?[A-Za-z](?:[^>"']|"[^"]*"|'[^']*')*>""", '', body.strip())
-    return dict(text=html.unescape(body)[:QUEUE_TEXT], sender='Task' if kind == 'task-notification' else html.unescape(sender or 'another session'), injected=True)
+    return dict(text=html.unescape(body)[:QUEUE_TEXT], sender='Task' if kind == 'task-notification' else html.unescape(sender or ('Another agent' if kind == 'agent-message' else 'another session')), injected=True)
 
 
 def _consumed_identity(source, sid, inode, offset, digest, text):
@@ -7876,7 +7881,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 122
+RUNTIME_GENERATION = 123
 
 if __name__ == '__main__':
     import base64 as _base64
