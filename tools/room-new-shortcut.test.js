@@ -32,8 +32,8 @@ test('Ctrl+Shift+N opens the new room form from anywhere', () => {
   const shortcuts = read('shortcuts.zig');
   assert.match(
     shortcuts,
-    /if \(shift and kb\.vkCode == 0x4E\) \{\s*if \(@import\("room_frontend\.zig"\)\.enabled\) \{\s*_ = PostMessageW\(app_state\.g_main_hwnd, WM_APP_NEW_ROOM, 0, 0\);\s*return 1;/,
-    'keyboard hook posts WM_APP_NEW_ROOM for Ctrl+Shift+N when rooms are enabled'
+    /if \(shift and kb\.vkCode == 0x4E\) \{\s*if \(@import\("room_frontend\.zig"\)\.enabled\) \{\s*if \(activeBrowserHasForegroundFocus\(\)\) \{\s*return CallNextHookEx\(app_state\.g_hook, nCode, wp, lp\);\s*\}\s*_ = PostMessageW\(app_state\.g_main_hwnd, WM_APP_NEW_ROOM, 0, 0\);\s*return 1;/,
+    'keyboard hook posts WM_APP_NEW_ROOM for Ctrl+Shift+N when rooms are enabled and the browser pane does not have focus'
   );
   assert.match(shortcuts, /\.a = "Ctrl\+Shift\+N", \.b = "Create a Room"/, 'SHORTCUT_ROWS lists the key');
 

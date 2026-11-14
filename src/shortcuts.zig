@@ -2002,6 +2002,9 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (shift and kb.vkCode == 0x4E) {
                     if (@import("room_frontend.zig").enabled) {
+                        if (activeBrowserHasForegroundFocus()) {
+                            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+                        }
                         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_ROOM, 0, 0);
                         return 1;
                     }
