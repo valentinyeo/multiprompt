@@ -4193,7 +4193,7 @@ fn chatLoginMark(text: []const u16) []const u16 {
     const mark = std.unicode.utf8ToUtf16LeStringLiteral("/login");
     if (!std.mem.startsWith(u16, trimmed, mark)) return trimmed[0..0];
     if (trimmed.len == mark.len) return trimmed[mark.len..];
-    if (trimmed[mark.len] != ' ' and trimmed[mark.len] != '\t') return "";
+    if (trimmed[mark.len] != ' ' and trimmed[mark.len] != '\t') return trimmed[0..0];
     return std.mem.trim(u16, trimmed[mark.len..], &.{ ' ', '\t', '\r', '\n' });
 }
 
