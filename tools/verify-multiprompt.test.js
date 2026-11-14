@@ -120,19 +120,28 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
 });
 
 test('IGSH-1113 required appearance verification cannot be filtered out for any PR', () => {
-  const trigger = workflow.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
-  assert.ok(trigger?.includes("      - '**'"));
+  const gate = read('.github/workflows/click-through.yml');
+  const trigger = gate.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)*)/m)?.[1] ?? '';
+  assert.match(gate, /^  pull_request:$/m, 'every pull request opens the click-through gate');
   assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
+  for (const path of ['src', 'build.zig', 'build.zig.zon', '.claude/skills/verify-multiprompt', 'tools']) {
+    assert.ok(gate.includes(path), `pull requests that change ${path} run the journeys`);
+  }
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
-  const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
-  assert.ok(push, 'master pushes still trigger full verification');
   const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
-  verifyPushBranches(workflow);
+  const gate = read('.github/workflows/click-through.yml');
+  for (const source of [workflow, gate]) {
+    const push = source.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
+    if (push) verifyPushBranches(source);
+    assert.doesNotMatch(push?.[1] ?? '', /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
+  }
+  assert.doesNotMatch(workflow, /^  tags:/m, 'release tags do not start the full matrix');
+  assert.match(workflow, /^  schedule:$/m, 'a nightly run still checks master');
+  assert.match(workflow, /^  workflow_call:$/m, 'journeys and releases reuse this matrix');
   assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
-  assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
 });
 
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
@@ -214,7 +223,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
-  assert.match(workflow, /paths:[\s\S]*?- tools\/verify-multiprompt\.test\.js/);
+  assert.match(read('.github/workflows/click-through.yml'), /changed=\$\(git diff --name-only[^\n]*-- src[^\n]*\btools\b/);
   assert.throws(() => allowsSessionOpen(workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
 });
 
@@ -271,9 +280,11 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.doesNotMatch(links.replace('startTunnelInboundListener();', ''), listenerBeforeRestore);
   const account = read('src/account_desktop.zig');
   const worker = account.slice(account.indexOf('fn layoutSyncWorker('), account.indexOf('fn accountPrepareRestore('));
-  const discoveryBeforeResume = /resolveSshPath\(false\);[\s\S]*?accountResumeJob\(\.startup\)/;
-  assert.match(worker, discoveryBeforeResume);
-  assert.doesNotMatch(worker.replace('resolveSshPath(false)', 'unresolvedSshPath()'), discoveryBeforeResume);
+  const discoveryBeforeRequest = /resolveSshPath\(false\);[\s\S]*?accountRequest\(job, reply\)/;
+  assert.match(worker, discoveryBeforeRequest);
+  assert.doesNotMatch(worker.replace('resolveSshPath(false)', 'unresolvedSshPath()'), discoveryBeforeRequest);
+  const start = account.slice(account.indexOf('pub fn startAccountJob('), account.indexOf('fn accountJobFree(') > account.indexOf('pub fn startAccountJob(') ? account.indexOf('fn accountSyncPhotos(') : account.length);
+  assert.match(start, /accountLoadPending\(\)[\s\S]*?accountResumeJob\(\.startup\)/);
   assert.match(bridge, /pub fn startTunnelInboundListener\(\)[\s\S]*?sin_port = htons\(0\)[\s\S]*?sin_addr = 0x0100007F/);
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
@@ -288,7 +299,8 @@ test('G2: transport encodes the CLI bytes with bounded TCP and no external harne
   assert.ok(cli.includes('request = f"ZSB:{session}:{payload}\\n"'));
   assert.ok(cli.includes('sock.sendall((request if endpoint else f"AUTH:{token}:" + request).encode())'));
   assert.ok(transport.includes('[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))'));
-  assert.ok(transport.includes('[Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")'));
+  assert.ok(transport.includes('[Text.Encoding]::UTF8.GetBytes("ZSB:${Session}:${payload}`n")'));
+  assert.match(transport, /\[string\]\$Session = 'workspace'/);
   assert.match(transport, /Doctor\s+Assert-Foreground\s+Record/);
   assert.match(transport, /ConnectAsync\('127\.0\.0\.1', \$Port\)/);
   assert.match(transport, /connecting\.Wait\(5000\)/);
@@ -735,9 +747,9 @@ test('IGSH-376 Chat View keeps desktop toggle evidence separate from native rece
   assert.equal((chat.split('$localAgent =')[0].match(/Press @\(0x12, 0x43\)/g) || []).length, 3);
   const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = (\d+)/)[1]);
   const waits = [...chat.matchAll(/AddMilliseconds\((\d+)\)/g)];
-  assert.equal(waits.length, 2);
+  assert.equal(waits.length, 4);
   for (const wait of waits) assert.ok(Number(wait[1]) > debounce);
-  assert.equal((chat.match(/Wait-Until \{ \[DateTime\]::UtcNow -ge \$toggleReady \}/g) || []).length, 2);
+  assert.equal((chat.match(/Wait-Until \{ \[DateTime\]::UtcNow -ge \$toggleReady \}/g) || []).length, 4);
   assert.match(chat, /ClassNameProperty, 'ZigShellChatTranscript'/);
   assert.match(chat, /-not \$_\.Current.IsOffscreen/);
   assert.match(chat, /\.cv -eq \$true/);
@@ -982,8 +994,8 @@ test('IGSH-556: Favorites groups journey uses real keys and requires independent
     assert.ok(featureMatrix(workflowText).available.includes('favorites-groups'));
     assert.match(favorites, /Press @\(0x12, 0x53\)/);
     assert.match(favorites, /favorite -eq \$true/);
-    assert.equal((favorites.match(/Palette 'move to group'/g) || []).length, 2);
-    assert.equal((favorites.match(/Type-Text 'new group'/g) || []).length, 2);
+    assert.equal((favorites.match(/Palette 'move to group'/g) || []).length, 3);
+    assert.equal((favorites.match(/Type-Text 'new group'/g) || []).length, 3);
     assert.match(favorites, /Press @\(0x12, 0x31\)/);
     assert.match(favorites, /\$newGroups\[0\]\.id -ne \$homeGroupId/);
     assert.match(favorites, /\$state.tabs\[\$tabIndex\].group_id -eq \$homeGroupId -and \$state.tabs\[\$tabIndex\].starred_group_id -eq \$newGroups\[0\].id/);
@@ -1025,7 +1037,7 @@ test('ISSUE-559 cleanup tolerates only typed missing paths and reports remaining
     ['if (-not (Test-VanishedScratchItem $_ $entry.FullName)) { throw }', 'throw'],
     ['Scratch cleanup left paths:', 'Cleanup failed:'],
     ['function Remove-ScratchPath([string]$Path, [int]$Seconds = 20)', 'function Remove-ScratchPath([string]$Path, [int]$Seconds = 1)'],
-    ['$deadline = [DateTime]::UtcNow.AddSeconds($Seconds)', '$deadline = [DateTime]::UtcNow.AddSeconds(1)'],
+    ['function Remove-ScratchPath([string]$Path, [int]$Seconds = 20) {\n    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)', 'function Remove-ScratchPath([string]$Path, [int]$Seconds = 20) {\n    $deadline = [DateTime]::UtcNow'],
   ]) {
     const broken = control.replace(before, after);
     assert.notEqual(broken, control);
@@ -1052,7 +1064,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /function Activate-OwnedFrame \{[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'chat-browser-shortcut'"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
@@ -1060,7 +1072,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.doesNotMatch(setup, /Assert-BrowserPane|PaneLayoutProof|Start-Sleep/);
   assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt.test.js/);
-  assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
+  assert.ok(read('.github/workflows/click-through.yml').includes('tools'));
 });
 
 test('ISSUE-569 restore registry, real close/kill and persistent private relaunches cannot be skipped', () => {
@@ -1175,15 +1187,20 @@ test('ISSUE-569 relaunch activation recovers foreground only as an input precond
     ["($Name + '.focus.json')", "($Name + '.ignored.json')"],
     ["$bitmap.Save((Join-Path $Evidence ($Name + '.png'))", "$bitmap.Save((Join-Path $Evidence ($Name + '.ignored'))"],
   ]) {
-    const broken = control.replace(before, after);
+    const broken = control.replaceAll(before, after);
     assert.notEqual(broken, control);
-    assert.throws(() => contract(broken));
+    assert.throws(() => contract(broken), assert.AssertionError, before);
   }
 });
 
 test('ISSUE-569 snapshots identify foreign foreground windows and preserve pre-close desktop ancestry', () => {
   function contract(driver) {
-    const identity = driver.slice(driver.indexOf('    public static Dictionary<string, object> WindowIdentity('), driver.indexOf('    public static bool PaneVisible('));
+    const member = name => {
+      const start = driver.indexOf(name);
+      return driver.slice(start, driver.indexOf('\n    public static', start + name.length));
+    };
+    const identity = member('    public static Dictionary<string, object> WindowIdentity(') +
+      member('    public static List<Dictionary<string, object>> DesktopWindows()');
     for (const required of [
       'uint ownerThread = GetWindowThreadProcessId(hwnd, out ownerPid);',
       '{ "handle", hwnd.ToInt64() }', '{ "pid", ownerPid }', '{ "thread", ownerThread }',
@@ -1258,22 +1275,22 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
 test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
   function contract(session, console, cache, main) {
     const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
-    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        if (app_state.g_all_sessions_active) {'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        saveSession();') + '        saveSession();'.length);
     const attention = switching.indexOf('app_state.shells[idx].needs_attention = false;');
     assert.ok(attention >= 0 && attention < switching.indexOf('saveSession();'), 'persist final attention state before returning to the browser queue');
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
     assert.doesNotMatch(save, /selected_shell_id\s*=/);
-    const selectionSave = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    const selectionSave = session.slice(session.indexOf('pub fn saveSessionQueued()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
     assert.match(selectionSave, /if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{/);
     assert.match(selectionSave, /selected_shell_id = shell_id/);
     assert.match(selectionSave, /selected_starred = app_state.g_starred_workspace/);
-    assert.match(selectionSave, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return;/);
+    assert.match(selectionSave, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return false;/);
     assert.match(save, /saveSession\(\)/);
     const deferred = cache.slice(cache.indexOf('pub fn deferred('), cache.indexOf('pub fn closedDuringStartup('));
     assert.doesNotMatch(deferred, /selected_shell_id = state.shells\[state.active_shell\].shell_id/);
     assert.match(deferred, /shell.shell_id == selected_shell_id/);
-    const persistence = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    const persistence = session.slice(session.indexOf('pub fn saveSessionQueued()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
     assert.doesNotMatch(persistence, /if \(@import\("launch_cache.zig"\).pending\) return;/);
     assert.match(session, /active_shell_id\\":\{d\}/);
     assert.match(session, /selectedSavedTab\(json, tabs\[0\.\.tab_count\]/);
@@ -1499,7 +1516,7 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
   const agent = read('tools/chat-local-agent.c');
   assert.ok(featureMatrix(workflow).full.includes('chat-view'));
-  assert.match(workflow, /- tools\/chat-local-agent\.c/);
+  assert.match(read('.github/workflows/click-through.yml'), /changed=\$\(git diff --name-only[^\n]*-- src[^\n]*\btools\b/);
   assert.match(workflow, /if: env\.RELEASE_TAG == ''[^\n]*\|\| env\.FEATURE == 'chat-view'/);
   assert.match(workflow, /zig cc -target x86_64-windows-gnu -O2 tools\/chat-local-agent\.c -o verify-bin\/claude\.exe/);
   assert.match(workflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Local Claude console stand-in build failed' \}/);
@@ -1692,7 +1709,7 @@ test('ISSUE-569 local CMD restore has PID zero until UI completion, and split-gr
   function timing(consoleSource, session, main, cache) {
     const spawn = consoleSource.slice(consoleSource.indexOf('pub fn spawnShellWithSession('), consoleSource.indexOf('pub fn respawnShellInPlace('));
     assert.match(spawn, /var pi = std.mem.zeroes\(PROCESS_INFORMATION\);/);
-    assert.match(spawn, /const asynchronous = @import\("launch_cache.zig"\).pending or app_state.g_account_applying;/);
+    assert.match(spawn, /const asynchronous = @import\("launch_cache.zig"\).pending or app_state.g_account_applying[^;]*;/);
     assert.match(spawn, /if \(!asynchronous and CreateProcessW\([^;]+&pi\)/);
     assert.match(spawn, /\.console_inflight = asynchronous,[\s\S]*?\.pid = pi.dwProcessId,/);
     const worker = consoleSource.slice(consoleSource.indexOf('fn startupShellWorker('), consoleSource.indexOf('fn discardStartupShell('));
@@ -1718,7 +1735,7 @@ test('ISSUE-569 local CMD restore has PID zero until UI completion, and split-gr
   timing(...sources);
   for (const [index, required] of [
     [0, 'var pi = std.mem.zeroes(PROCESS_INFORMATION);'],
-    [0, 'const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying;'],
+    [0, 'const asynchronous = @import("launch_cache.zig").pending or app_state.g_account_applying'],
     [0, 'app_state.shells[idx].pid = job.pid;'], [1, 'normalizeGroupOrder();'],
   ]) {
     const broken = [...sources];
@@ -1893,12 +1910,12 @@ test('ISSUE-569 fast and deferred restore keep the authoritative view and sessio
     const saveCache = cache.slice(cache.indexOf('pub fn save()'), cache.indexOf('test "'));
     assert.match(saveCache, /\.starred = state.g_starred_workspace,/);
     assert.match(saveCache, /\.active = state.shells\[state.active_shell\].shell_id,/);
-    const save = session.slice(session.indexOf('pub fn saveSession()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
+    const save = session.slice(session.indexOf('pub fn saveSessionQueued()'), session.indexOf('pub fn preserveFailedRemoteSavedTab('));
     assert.match(save, /if \(@import\("launch_cache.zig"\).pending\) \{\s*if \(app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count\) \{/);
     assert.match(save, /selected_shell_id = shell_id;\s*@import\("launch_cache.zig"\).selected_starred = app_state.g_starred_workspace;/);
     assert.match(save, /selected_live_shell_id = if \(@import\("launch_cache.zig"\).tabs_restored or !@import\("launch_cache.zig"\).cachedShell\(shell_id\)\) shell_id else 0;/);
-    assert.match(save, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return;/);
-    assert.ok(save.indexOf('else if (!@import("launch_cache.zig").tabs_restored) return;') < save.indexOf('saveSessionTo('));
+    assert.match(save, /else if \(!@import\("launch_cache.zig"\).tabs_restored\) return false;/);
+    assert.ok(save.indexOf('else if (!@import("launch_cache.zig").tabs_restored) return false;') < save.indexOf('saveSessionTo('));
     const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
     assert.doesNotMatch(switching, /selected_shell_id\s*=/);
     const view = session.slice(session.indexOf('fn savedStarredView('), session.indexOf('fn restoreStarredView('));
@@ -1938,7 +1955,7 @@ test('ISSUE-569 fast and deferred restore keep the authoritative view and sessio
     [1, '    const s = parsed.value;', '    const s = parsed.value;\n    selected_shell_id = s.active;'],
     [2, 'app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count', 'app_state.active_shell < app_state.shell_count'],
     [2, 'selected_starred = app_state.g_starred_workspace;', 'selected_starred = false;'],
-    [2, 'else if (!@import("launch_cache.zig").tabs_restored) return;', ''],
+    [2, 'else if (!@import("launch_cache.zig").tabs_restored) return false;', ''],
     [2, 'return @import("launch_cache.zig").selected_starred;', 'return app_state.g_starred_workspace;'],
     [2, 'if (tab.shell_id == @import("launch_cache.zig").selected_shell_id)', 'if (true)'],
     [2, 'return selectedSavedTab(json, tabs, 0) != null;', 'return true;'],
@@ -2054,7 +2071,7 @@ test('IGSH-901 tab-names journey seeds unflagged names once, reorders them and s
   assert.match(control, /ValidateSet\([^\n)]*'tab-names'/);
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('tab-names'));
-  assert.match(control, /\$Feature -in @\('browser-own-profile', 'tab-names'\)/);
+  assert.match(control, /\$Feature -in @\('sessions', 'browser-own-profile', 'tab-names'/);
   assert.match(control, /if \(\$Feature -eq 'tab-names'\) \{\s+\$seedFolder = Join-Path \$scratch 'GitHub'/);
   const journey = control.slice(control.indexOf("        'tab-names' {"), control.indexOf("        'favorites-groups' {"));
   assert.match(journey, /Press @\(0x11, 0x10, 0x26\)/);
@@ -2064,7 +2081,8 @@ test('IGSH-901 tab-names journey seeds unflagged names once, reorders them and s
   assert.match(journey, /Tab names or order changed after/);
   assert.match(journey, /A seeded name became manual before/);
   for (const name of ['names-launch', 'names-restart-1', 'names-restart-2', 'names-restart-3', 'tab-names-order-survive-restarts']) assert.ok(journey.includes(name));
-  const seed = control.slice(control.indexOf("    if ($Feature -eq 'tab-names') {"), control.indexOf("    $job = New-Object VerifyJob"));
+  const seedStart = control.indexOf("    if ($Feature -eq 'tab-names') {");
+  const seed = control.slice(seedStart, control.indexOf('    if ($Feature -eq ', seedStart + 20));
   assert.doesNotMatch(seed, /manual\s*=\s*\$true/);
   const map = read(skill + 'features/tab-names.md');
   assert.match(map, /Seeding boundary/);
@@ -2087,13 +2105,13 @@ test('IGSH-706 inbox journey proves mute hides the published session without clo
     /Wait-Until \{\s+\$state = Read-Session\s+\$null -ne \$state -and \$state\.active_tab -eq \$baseline\.active_tab -and\s+\$state\.tabs\[\$state\.active_tab\]\.shell_id -eq \$sid -and\s+\$state\.tabs\[\$state\.active_tab\]\.PSObject\.Properties\['muted'\] -and \$state\.tabs\[\$state\.active_tab\]\.muted -eq \$true\s+\}/,
     /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 0 \}/,
     /Press @\(0x11, 0x10, 0x49\) 'Ctrl\+Shift\+I: open Inbox with the session muted'/,
-    /Wait-Until \{ \[VerifyNative\]::Title\(\$script:window\)\.StartsWith\('Inbox - '\) \}/,
+    /Wait-Until \{ \(\(\$state = Read-Inbox\) -and \$state\.PSObject\.Properties\['inbox_active'\] -and \$state\.inbox_active -eq \$true\) -or \[VerifyNative\]::Title\(\$script:window\)\.StartsWith\('Inbox - '\) \} 'muted Inbox window state'/,
     /Press @\(0x12, 0x49\) 'Alt\+I: select All split with the session muted'\s+Snapshot 'muted'/,
     /\$result\.checks \+= @\{ name = 'inbox-muted-hidden'; sid = \$sid; listed = \$false; title = \[VerifyNative\]::Title\(\$script:window\) \}/,
-    /Press @\(0x1B\) 'Esc: return from Inbox with the session muted'\s+Wait-Until \{ -not \[VerifyNative\]::Title\(\$script:window\)\.StartsWith\('Inbox - '\) \}/,
-    /Wait-Until \{\s+\$state = Read-Session\s+\$null -ne \$state -and @\(\$state\.tabs\)\.Count -eq @\(\$baseline\.tabs\)\.Count -and\s+@\(\$state\.tabs \| Where-Object \{ \$_\.shell_id -eq \$sid \}\)\.Count -eq 1\s+\}/,
+    /Press @\(0x1B\) 'Esc: return from Inbox with the session muted'\s+Wait-Until \{ \(\(\$state = Read-Inbox\) -and \$state\.PSObject\.Properties\['inbox_active'\] -and \$state\.inbox_active -eq \$false\)/,
+    /Wait-Until \{\s+\$state = Read-Session\s+\$null -ne \$state -and @\(\$state\.tabs\)\.Count -eq @\(\$baseline\.tabs\)\.Count -and\s+@\(\$state\.tabs \| Where-Object \{ \$_\.shell_id -eq \$sid \}\)\.Count -eq 1\s+\} 'muted session still exists with unchanged tab count'/,
     /Snapshot 'muted-returned'\s+Palette 'unmute tab'\s+Press @\(0x0D\) 'Enter: unmute the current tab'/,
-    /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 1 \}/,
+    /Wait-Until \{ \$state = Read-Inbox; \$null -ne \$state -and @\(\$state\.shells \| Where-Object \{ \$_\.sid -eq \$sid \}\)\.Count -eq 1 \} 'unmuted session listed in published Inbox'/,
     /\$result\.checks \+= @\{ name = 'inbox-unmuted-listed'; sid = \$sid; listed = \$true \}/,
   ];
   function contract(source) {
@@ -2225,7 +2243,7 @@ test('IGSH-857: debug.log is read with shared access so a live app write cannot 
   assert.ok(!control.includes('[IO.File]::ReadAllText($launchLog)'));
   const helper = control.slice(control.indexOf('function Read-SharedText('), control.indexOf('function Read-DictationAudit('));
   assert.match(helper, /\[IO\.FileShare\]::ReadWrite/);
-  assert.equal(control.split('(Read-SharedText $log)').length - 1, 4);
+  assert.equal(control.split('(Read-SharedText $log)').length - 1, 6);
   assert.equal(control.split('Read-SharedText $launchLog').length - 1, 1);
 });
 
@@ -2266,7 +2284,8 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
-  assert.deepEqual(features.available, registered);
+  assert.deepEqual(registered.filter(name => !features.available.includes(name)), [], 'every control recipe has a feature map');
+  assert.deepEqual(features.available.filter(name => !registered.includes(name)), ['chat-model', 'chat-working-live'], 'these run through their own proof scripts');
   assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);
   assert.equal(features.available.includes('ssh-tab-reconnect'), false);
   assert.equal(features.available.includes('chat-sync-audit'), false);
@@ -2522,7 +2541,7 @@ test('IGSH-1176 browser warning times out before its job cancellation boundary',
   assert.match(driver, /if \(\$env:FEATURE -eq 'browser-pane-stuck' -and \$env:VERIFY_BROWSER_STALL -eq '1'\)/);
   assert.match(driver, /Start-Sleep -Seconds 900/);
   assert.match(workflow, /if: always\(\) && env\.FEATURE == 'browser-pane-stuck' && steps\.desktop-driver\.outcome == 'failure' && contains/);
-  assert.match(read('.github/workflows/release.yml'), /browser_stall: \$\{\{ inputs\.browser_stall \|\| false \}\}/);
+  assert.match(workflow, /      browser_stall:\n        required: false\n        default: false\n        type: boolean/);
   assert.match(workflow, /- name: Upload durable verification evidence\s+if: always\(\)/);
 });
 
