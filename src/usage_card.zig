@@ -286,6 +286,38 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
     text(dc, "Grey tick = time passed in the window", .{ .left = left, .right = right, .top = nr.bottom + px(4), .bottom = nr.bottom + px(20) }, RGB(105, 105, 105), 0);
 }
 
+pub fn dimPixels(pixels: []u32) void {
+    const lanes = 8;
+    const Vec = @Vector(lanes, u32);
+    const mask: Vec = @splat(0x00FF00FF);
+    const scale: Vec = @splat(179);
+    const eight: Vec = @splat(8);
+    var index: usize = 0;
+    while (index + lanes <= pixels.len) : (index += lanes) {
+        const value: Vec = pixels[index..][0..lanes].*;
+        const rb = (((value & mask) * scale) >> eight) & mask;
+        const g = ((((value >> eight) & mask) * scale) >> eight) & mask;
+        pixels[index..][0..lanes].* = rb | (g << eight);
+    }
+    while (index < pixels.len) : (index += 1) {
+        const value = pixels[index];
+        const rb = (((value & 0x00FF00FF) * 179) >> 8) & 0x00FF00FF;
+        const g = (((((value >> 8) & 0x00FF00FF) * 179) >> 8) & 0x00FF00FF) << 8;
+        pixels[index] = rb | g;
+    }
+}
+
+pub fn passiveGrabRect(client: RECT, pill: RECT, row: RECT, count: usize) RECT {
+    const card = geometry(client, pill, count);
+    const margin = px(32);
+    return .{
+        .left = @max(client.left, @min(card.left, row.left) - margin),
+        .top = @max(client.top, card.top - margin),
+        .right = @min(client.right, @max(card.right, row.right) + margin),
+        .bottom = @min(client.bottom, @max(card.bottom, row.bottom) + margin),
+    };
+}
+
 pub fn refresh() void {
     if (backdrop == null) return;
     if (hover_open and @import("update_card.zig").updateCardVisible()) {
@@ -375,6 +407,8 @@ fn openMode(passive: bool) void {
     }
     var origin = w.POINT{ .x = 0, .y = 0 };
     _ = w.ClientToScreen(main, &origin);
+    snapshot = state.g_ai_pace;
+    const grab = if (passive) passiveGrabRect(bounds, anchor, @import("capacity.zig").sidebarUsageRowRect(), 3) else bounds;
     const screen = w.GetDC(null);
     defer _ = w.ReleaseDC(null, screen);
     const dc = w.CreateCompatibleDC(screen) orelse return;
@@ -385,14 +419,11 @@ fn openMode(passive: bool) void {
         return;
     };
     const old = w.SelectObject(dc, bitmap);
-    _ = w.BitBlt(dc, 0, 0, bounds.right, bounds.bottom, screen, origin.x, origin.y, 0x40CC0020);
+    _ = w.BitBlt(dc, grab.left, grab.top, grab.right - grab.left, grab.bottom - grab.top, screen, origin.x + grab.left, origin.y + grab.top, 0x40CC0020);
     _ = w.GdiFlush();
-    const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. @as(usize, @intCast(bounds.right)) * @as(usize, @intCast(bounds.bottom))];
     if (!passive) {
-        for (pixels) |*pixel| {
-            const value = pixel.*;
-            pixel.* = ((((value >> 16) & 255) * 7 / 10) << 16) | ((((value >> 8) & 255) * 7 / 10) << 8) | ((value & 255) * 7 / 10);
-        }
+        const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. @as(usize, @intCast(bounds.right)) * @as(usize, @intCast(bounds.bottom))];
+        dimPixels(pixels);
     }
     hover_open = passive;
     scroll_y = 0;
@@ -409,7 +440,6 @@ fn openMode(passive: bool) void {
         focus.cancelShellRefocus(main);
         state.g_popup_menu_active = true;
     }
-    snapshot = state.g_ai_pace;
     _ = w.MoveWindow(window, 0, 0, bounds.right, bounds.bottom, 0);
     if (passive) {
         const card = geometry(bounds, anchor, rowCount(&snapshot));
@@ -488,7 +518,8 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             const dc = w.BeginPaint(hwnd, &ps);
             defer _ = w.EndPaint(hwnd, &ps);
             if (backdrop) |saved| {
-                _ = w.BitBlt(dc, 0, 0, saved.width, saved.height, saved.dc, 0, 0, 0x00CC0020);
+                const dirty = ps.rcPaint;
+                _ = w.BitBlt(dc, dirty.left, dirty.top, dirty.right - dirty.left, dirty.bottom - dirty.top, saved.dc, dirty.left, dirty.top, 0x00CC0020);
                 paint(dc, bounds, anchor, &snapshot);
             }
             return 0;
@@ -607,4 +638,19 @@ test "IGSH-1086 usage card keeps missing windows honest and weekly elapsed indep
     try std.testing.expectEqual(@as(?u16, 1000), weeklyElapsed(goal, goal.weekly_reset_filetime));
     goal.weekly_reset_filetime *= 2;
     try std.testing.expectEqual(@as(?u16, 0), weeklyElapsed(goal, 0));
+}
+
+test "SOFT-2349 dimming matches the 70 percent look and a hover grab stays near the card" {
+    var pixels = [_]u32{ 0x00FFFFFF, 0x00000000, 0x00643210, 0x80C8C8C8, 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF, 0x00643210 };
+    dimPixels(&pixels);
+    try std.testing.expectEqual(@as(u32, 0x00B2B2B2), pixels[0] & 0x00FFFFFF);
+    try std.testing.expectEqual(@as(u32, 0), pixels[1]);
+    try std.testing.expectEqual(@as(u32, 0x0045220B), pixels[2] & 0x00FFFFFF);
+    try std.testing.expectEqual(pixels[2], pixels[8]);
+    const client = RECT{ .left = 0, .top = 0, .right = 3840, .bottom = 2160 };
+    const pill = RECT{ .left = 8, .top = 2100, .right = 300, .bottom = 2150 };
+    const row = RECT{ .left = 8, .top = 2100, .right = 300, .bottom = 2150 };
+    const grab = passiveGrabRect(client, pill, row, 3);
+    try std.testing.expect(grab.right - grab.left < 500);
+    try std.testing.expect(@as(i64, grab.right - grab.left) * (grab.bottom - grab.top) * 8 < @as(i64, client.right) * client.bottom);
 }
