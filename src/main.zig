@@ -76,6 +76,7 @@ const WM_APP_SEARCH_BACKSPACE = @import("win32.zig").WM_APP_SEARCH_BACKSPACE;
 const WM_APP_SEARCH_MOVE = @import("win32.zig").WM_APP_SEARCH_MOVE;
 const WM_APP_SEARCH_CONFIRM = @import("win32.zig").WM_APP_SEARCH_CONFIRM;
 const WM_APP_REOPEN_CLOSED = @import("win32.zig").WM_APP_REOPEN_CLOSED;
+const WM_APP_NEW_ROOM = @import("win32.zig").WM_APP_NEW_ROOM;
 const WM_APP_TOGGLE_SIDEBAR = @import("win32.zig").WM_APP_TOGGLE_SIDEBAR;
 const WM_APP_TMUX_LIST_READY = @import("win32.zig").WM_APP_TMUX_LIST_READY;
 const WM_APP_NEW_WINDOW = @import("win32.zig").WM_APP_NEW_WINDOW;
@@ -1490,6 +1491,15 @@ fn showPickRepoFailure(saving_folder: bool) void {
         .spawn_shell => showHeaderNoticeAscii("Pick repo: the new tab did not start", 5000, true),
         .none => showHeaderNoticeAscii("Pick repo: nothing started", 4000, true),
     }
+}
+
+fn openNewRoom(hwnd: HANDLE) void {
+    app_state.g_search_active = false;
+    clearSearchBackdrop();
+    if (app_state.g_inbox_active) closeInbox(hwnd);
+    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
+    @import("room_frontend.zig").openCreate();
+    _ = InvalidateRect(hwnd, null, 0);
 }
 
 fn browserFocusHotkey() void {
@@ -6185,12 +6195,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (@import("room_frontend.zig").enabled and target == @import("room_frontend.zig").new_room_target) {
-                    app_state.g_search_active = false;
-                    clearSearchBackdrop();
-                    if (app_state.g_inbox_active) closeInbox(hwnd);
-                    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
-                    @import("room_frontend.zig").openCreate();
-                    _ = InvalidateRect(hwnd, null, 0);
+                    openNewRoom(hwnd);
                     return 0;
                 }
                 if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) {
@@ -7958,6 +7963,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_REOPEN_CLOSED => {
             reopenLastClosedShell();
+            return 0;
+        },
+        WM_APP_NEW_ROOM => {
+            if (!@import("room_frontend.zig").enabled) return 0;
+            openNewRoom(hwnd);
             return 0;
         },
         WM_APP_TOGGLE_SIDEBAR => {

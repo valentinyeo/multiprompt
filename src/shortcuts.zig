@@ -32,6 +32,7 @@ const WM_APP_SEARCH_BACKSPACE = @import("win32.zig").WM_APP_SEARCH_BACKSPACE;
 const WM_APP_SEARCH_MOVE = @import("win32.zig").WM_APP_SEARCH_MOVE;
 const WM_APP_SEARCH_CONFIRM = @import("win32.zig").WM_APP_SEARCH_CONFIRM;
 const WM_APP_REOPEN_CLOSED = @import("win32.zig").WM_APP_REOPEN_CLOSED;
+const WM_APP_NEW_ROOM = @import("win32.zig").WM_APP_NEW_ROOM;
 const WM_APP_TOGGLE_SIDEBAR = @import("win32.zig").WM_APP_TOGGLE_SIDEBAR;
 const WM_APP_NEW_WINDOW = @import("win32.zig").WM_APP_NEW_WINDOW;
 const WM_APP_PASTE = @import("win32.zig").WM_APP_PASTE;
@@ -312,6 +313,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Win+Shift+Left/Right", .b = "Move window to the adjacent monitor", .header = false },
     .{ .a = "Palette / Actions", .b = "", .header = true },
     .{ .a = "Ctrl+K", .b = "Open command palette; it opens with your last 5 sessions", .header = false },
+    .{ .a = "Ctrl+Shift+N", .b = "Create a Room", .header = false },
     .{ .a = "Ctrl+K -> New room", .b = "Create a Room", .header = false },
     .{ .a = "Ctrl+K -> Room name", .b = "Open a Room", .header = false },
     .{ .a = "Ctrl+K -> Edit room", .b = "Edit the selected Room", .header = false },
@@ -1997,6 +1999,15 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (!shift and kb.vkCode == 0x4E) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_WINDOW, 0, 0);
                     return 1;
+                }
+                if (shift and kb.vkCode == 0x4E) {
+                    if (@import("room_frontend.zig").enabled) {
+                        if (activeBrowserHasForegroundFocus()) {
+                            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+                        }
+                        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_ROOM, 0, 0);
+                        return 1;
+                    }
                 }
                 if (shift and kb.vkCode == 0x55) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_TOGGLE_UNREAD, 0, 0);
