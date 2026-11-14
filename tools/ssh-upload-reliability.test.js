@@ -17,6 +17,7 @@ test('executed SSH capture survives ongoing transfer progress, drains output, re
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-upload-reliability-'));
   const fixture = String.raw`
 const std = @import("std");
+const idle_budget = struct { pub fn bump(_: anytype) void {} };
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -112,6 +113,12 @@ test "stdin partial writes refresh inactivity after each successful write" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the one shot server capture counts its server check and its process for the idle budget', () => {
+  const capture = body('sshOneShotCaptureInput');
+  assert.match(capture, /idle_budget\.bump\(\.server_fetch\);/);
+  assert.match(capture, /idle_budget\.bump\(\.process_spawn\);/);
 });
 
 test('upload ssh starts detached so it gets no hidden console', () => {

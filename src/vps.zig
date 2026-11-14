@@ -9,6 +9,7 @@ const STARTUPINFOW = @import("win32.zig").STARTUPINFOW;
 const PROCESS_INFORMATION = @import("win32.zig").PROCESS_INFORMATION;
 const WIN32_FIND_DATAW = @import("win32.zig").WIN32_FIND_DATAW;
 const CreateProcessW = @import("win32.zig").CreateProcessW;
+const idle_budget = @import("idle_budget.zig");
 const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
 const TerminateProcess = @import("win32.zig").TerminateProcess;
@@ -166,6 +167,7 @@ pub fn startFaviconFetch(shell_idx: u32) void {
 
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     app_state.g_favicon_fetching = true;
+    idle_budget.bump(.process_spawn);
     const ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 1, SSH_HELPER_FLAGS, null, null, &si, &pi);
     _ = CloseHandle(write_pipe);
 
@@ -180,6 +182,7 @@ pub fn startFaviconFetch(shell_idx: u32) void {
     app_state.g_favicon_fetch_pipe = read_pipe;
     app_state.g_favicon_fetch_process = pi.hProcess;
 
+    idle_budget.bump(.thread_spawn);
     const fetch_thread = std.Thread.spawn(.{}, faviconFetchThread, .{}) catch {
         _ = CloseHandle(read_pipe);
         _ = CloseHandle(pi.hProcess);
@@ -307,6 +310,7 @@ pub fn fetchTmuxSessions() void {
     debugLog("fetchTmuxSessions: starting background SSH (DE + UK + HOST3)");
     app_state.g_tmux_fetching = true;
 
+    idle_budget.bump(.thread_spawn);
     const fetch_thread = std.Thread.spawn(.{}, tmuxFetchThreadDual, .{}) catch {
         debugLog("fetchTmuxSessions: thread spawn failed");
         app_state.g_tmux_fetching = false;
@@ -424,6 +428,7 @@ fn spawnPersistentChannelUnlocked(host: u8, ch: *VpsChannel, ac: bool) void {
     si.hStdOutput = child_stdout_write;
     si.hStdError = child_stdout_write;
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
+    idle_budget.bump(.process_spawn);
     const ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 1, SSH_HELPER_FLAGS, null, null, &si, &pi);
     _ = CloseHandle(child_stdin_read);
     _ = CloseHandle(child_stdout_write);
@@ -499,6 +504,7 @@ pub fn fetchAcPersistent(host: u8, request: []const u8, buf: []u8) ?usize {
     const ch = &app_state.g_ac_channels[host];
     if (!ch.alive) spawnAcChannelUnlocked(host);
     if (!ch.alive) return null;
+    idle_budget.bump(.server_fetch);
     var written: DWORD = 0;
     if (WriteFile(ch.stdin_write, request.ptr, @intCast(request.len), &written, null) == 0 or written != request.len) {
         closeAcChannelUnlocked(host);
@@ -571,6 +577,7 @@ fn fetchHostPersistent(host: u8, buf: []u8) ?usize {
     if (!ch.alive) spawnVpsChannelUnlocked(host);
     if (!ch.alive) return null;
 
+    idle_budget.bump(.server_fetch);
     var written: DWORD = 0;
     if (WriteFile(ch.stdin_write, "\n", 1, &written, null) == 0 or written == 0) {
         closeVpsChannelUnlocked(host);
@@ -654,6 +661,8 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
     };
     cmd_buf[pos] = 0;
 
+    idle_budget.bump(.server_fetch);
+    idle_budget.bump(.process_spawn);
     const ok = CreateProcessW(
         null,
         @ptrCast(&cmd_buf),
@@ -677,6 +686,7 @@ pub fn sshOneShotCaptureInput(cmd_str: []const u8, buf: []u8, stdin: HANDLE, tim
     _ = CloseHandle(pi.hThread);
 
     var activity = std.atomic.Value(u64).init(GetTickCount64());
+    if (stdin != null) idle_budget.bump(.thread_spawn);
     const pump = if (stdin != null) std.Thread.spawn(.{}, sshInputPump, .{ stdin, stdin_write, &activity }) catch {
         _ = TerminateProcess(pi.hProcess, 1);
         _ = CloseHandle(pi.hProcess);
@@ -1406,6 +1416,7 @@ pub fn requestRepoRefresh(host: u8) void {
     cache.fetching = true;
     const generation = cache.generation;
     g_repo_mutex.unlock();
+    idle_budget.bump(.thread_spawn);
     const thread = std.Thread.spawn(.{ .stack_size = 512 * 1024 }, repoFetchThread, .{ host, generation }) catch {
         while (!g_repo_mutex.tryLock()) Sleep(0);
         repoPublish(cache, generation, false, &.{});

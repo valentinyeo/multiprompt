@@ -1,6 +1,7 @@
 const std = @import("std");
 const w = @import("win32.zig");
 const state = @import("app_state.zig");
+const idle_budget = @import("idle_budget.zig");
 const a = std.heap.page_allocator;
 const MAX_BUFFER = 32 * 1024 * 1024;
 
@@ -162,6 +163,7 @@ fn start(host: *Host, index: u8) bool {
     si.hStdOutput = child_output;
     si.hStdError = stderr;
     var pi = std.mem.zeroes(w.PROCESS_INFORMATION);
+    idle_budget.bump(.process_spawn);
     if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, console.SSH_HELPER_FLAGS, null, null, &si, &pi) == 0) return false;
     _ = w.CloseHandle(pi.hThread);
     process = pi.hProcess;
@@ -200,6 +202,7 @@ fn start(host: *Host, index: u8) bool {
     host.input = input;
     host.output = output;
     host.running = true;
+    idle_budget.bump(.thread_spawn);
     const thread = std.Thread.spawn(.{}, receive, .{host}) catch {
         host.running = false;
         host.process = null;
@@ -264,6 +267,7 @@ pub fn write(channel: *Channel, line: []const u8) bool {
     lock(host);
     defer host.mutex.unlock();
     if (channel.ended or !host.running) return false;
+    if (!channel.terminal) idle_budget.bump(.server_fetch);
     const sent = if (channel.command.len > 0 and !channel.started)
         packet(host, .{ .channel = channel.id, .command = channel.command, .data = line })
     else
@@ -418,6 +422,7 @@ fn receive(host: *Host) void {
         host.retry_at = w.GetTickCount64() + 250;
         host.mutex.unlock();
     }
+    idle_budget.bump(.thread_spawn);
     writer = std.Thread.spawn(.{}, transmit, .{host}) catch return;
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);

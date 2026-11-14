@@ -166,7 +166,15 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     const speedJobs = ['speed-baseline', 'speed-candidate'].map(name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0]).filter(Boolean);
-    const caches = workflow.split(/(?=^      - )/m).filter(step => !speedJobs.some(job => job.includes(step))).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
+    const idleJob = workflow.split('\n  idle-budget:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
+    if (file === 'test.yml') assert.ok(idleJob, 'test.yml runs the idle budget job');
+    if (idleJob) {
+      const idleCaches = idleJob.split(/(?=^      - )/m).filter(step => /uses: actions\/cache/.test(step));
+      assert.equal(idleCaches.length, 1);
+      assert.match(idleCaches[0], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
+      assert.match(idleJob, /if: github\.event_name == 'pull_request'\n/);
+    }
+    const caches = workflow.split(/(?=^      - )/m).filter(step => !speedJobs.some(job => job.includes(step)) && !idleJob?.includes(step)).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
     const canSave = /^  push:\n/m.test(workflow);

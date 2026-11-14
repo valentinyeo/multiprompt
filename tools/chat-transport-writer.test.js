@@ -78,12 +78,21 @@ test "blocked SSH writes leave incoming data and other channels usable with boun
 }
 `;
 
+test('production SSH transport counts nonterminal requests before sending', () => {
+  const source = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  const write = source.slice(source.indexOf('pub fn write('), source.indexOf('\npub fn read('));
+  assert.match(write, /if \(!channel\.terminal\) idle_budget\.bump\(\.server_fetch\);/);
+  assert.ok(write.indexOf('if (channel.ended or !host.running) return false;') < write.indexOf('idle_budget.bump(.server_fetch)'));
+  assert.ok(write.indexOf('idle_budget.bump(.server_fetch)') < write.indexOf('packet(host,'));
+});
+
 test('production SSH writer releases the host mutex and isolates input overflow', () => {
   const file = path.join(root, 'src/chat_transport.zig');
   assert.ok(fs.existsSync(file), 'shared SSH transport exists');
   const source = fs.readFileSync(file, 'utf8')
     .replace('const w = @import("win32.zig");', '')
     .replace('const state = @import("app_state.zig");', '')
+    .replaceAll('@import("idle_budget.zig")', 'struct { pub fn bump(_: anytype) void {} }')
     .replaceAll('@import("console.zig")', 'struct {}')
     .replaceAll('@import("chat_session.zig")', 'struct {}');
   assert.match(source, /fn transmit\(host: \*Host\)/, 'shared transport has an independent writer');

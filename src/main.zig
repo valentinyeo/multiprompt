@@ -9520,6 +9520,7 @@ pub fn main(init: std.process.Init) void {
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
         if (@import("settings_panel.zig").dialogMessage(&msg)) continue;
+        @import("idle_budget.zig").pumped(msg.message, msg.wParam);
         _ = TranslateMessage(&msg);
         _ = DispatchMessageW(&msg);
         launch_cache.acceptedInput(msg.message);

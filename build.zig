@@ -443,6 +443,12 @@ pub fn build(b: *std.Build) void {
     const run_launch_plan_tests = b.addRunArtifact(launch_plan_tests);
     test_step.dependOn(&run_launch_plan_tests.step);
     vps_test_step.dependOn(&run_launch_plan_tests.step);
+    const idle_budget_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/idle_budget.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(idle_budget_tests).step);
     const launch_regression = b.addSystemCommand(&.{ "node", "--test", "tools/instant-launch.test.js" });
     test_step.dependOn(&launch_regression.step);
     vps_test_step.dependOn(&launch_regression.step);
@@ -734,6 +740,8 @@ pub fn build(b: *std.Build) void {
     const footprint_telemetry_tests = b.addSystemCommand(&.{ "node", "--test", "tools/footprint-telemetry.test.js" });
     footprint_telemetry_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&footprint_telemetry_tests.step);
+    const idle_budget_node_tests = b.addSystemCommand(&.{ "node", "--test", "tools/idle-budget.test.js", "tools/idle-registry.test.js" });
+    test_step.dependOn(&idle_budget_node_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
     const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });

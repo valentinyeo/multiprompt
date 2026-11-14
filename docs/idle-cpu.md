@@ -5,7 +5,7 @@ UI timers retain foreground responsiveness while background work uses notificati
 ## Changed work
 
 - TIMER_BROWSER_PLACEHOLDER: one-shot wake at the opening-to-not-open deadline; no timer for a covered pane, an outstanding launch, or a settled not-open label. Existing browser adoption/visibility/layout invalidations still handle actual changes.
-- TIMER_UPDATE_CHECK: replaced by a nonrecursive executable-directory change notification. Rearm before posting the UI message, stat/version checks remain unchanged, stop event and join release the worker on close. The original 30 s timer is retained only if watching cannot start or subsequently fails.
+- TIMER_UPDATE_CHECK: replaced by a nonrecursive executable-directory change notification. Rearm before posting the UI message, stat/version checks remain unchanged, stop event and join release the worker on close. The 30 s timer stays armed because it also drives the release check and the key setup retry; it is registered at two wakes a minute.
 - TIMER_CHAT_REFRESH: retains its 750 ms activity/status cadence, but hidden/minimized non-voice views do no refresh work. File-backed chats read only the last 70 console rows needed for working-status detection, not 1200 rows followed by discarded transcript parsing. Voice and screen-backed chats retain their previous behavior.
 - TIMER_NAME_POLL: cadence unchanged; inbox publication now follows actual detected changes instead of an unconditional heartbeat. Inbox liveness uses live HWND enumeration, not file age.
 - TIMER_SYSTEM_THEME: no timer for fixed themes. System themes keep the same 1/10 s normal/saving fallback and deep-idle stop; Windows broadcasts remain immediate. Loading/saving a theme or changing the power profile resynchronizes the timer, including switching back to System. The helper ignores a null startup HWND rather than creating a thread timer.
@@ -61,7 +61,7 @@ UI timers retain foreground responsiveness while background work uses notificati
 | TIMER_CHAT_FOREGROUND_RETRY | Bounded user-action focus retry; retain. |
 | TIMER_ACCOUNT | 20 s authenticated remote sync; retain server freshness; file notifications cannot observe server-side changes. |
 | TIMER_FONT_SYNC | On-demand incremental font sync, stops when complete; retain. |
-| TIMER_UPDATE_CHECK | Changed as above, failure fallback only. |
+| TIMER_UPDATE_CHECK | Kept at 30 s; registered at two wakes a minute. |
 | TIMER_ACCOUNT_SAVE | Dirty-layout retry/debounce only; retain authentication/conflict recovery. |
 | TIMER_CHAT_BENCH | Fixture-only 1 s command/heartbeat; retain hang and switch measurement semantics. |
 | INPUT_HOOK_THREAD_TIMER_REQUEST_ID | 5 s low-level-hook stall watchdog, blocking GetMessage between ticks; retain missed-hook recovery. |
@@ -80,3 +80,11 @@ UI timers retain foreground responsiveness while background work uses notificati
 - Account login HTTP/device polling: only during explicit sign-in, bounded cancellation/deadlines; retain protocol-required polling.
 - Update helper peer-process wait: blocking WaitForMultipleObjects with a deadline, already event-driven.
 - Token Ladder post-command refresh: one delayed refresh after an explicit mode change, not a recurring idle loop; retain.
+
+## Idle budget and registry
+
+- Registry: `tools/idle-registry.json` lists every `SetTimer` id and every caller of a transcript fetch, with owner, trigger, reason and the most idle wakes allowed per minute. Any timer above one wake a minute carries a written exception. `tools/idle-registry.test.js` fails when `src/` arms or fetches from a site that is not listed, or when an entry no longer matches the code.
+- Counters: `src/idle_budget.zig` holds one fixed table of atomic counters for server fetches, thread spawns, invalidates, timer fires, log lines and process spawns. The hourly watchdog health report prints their per-minute rates for the time the user was idle.
+- Budget: `tools/idle-budget.json`. Zero server fetches, zero thread spawns, zero invalidates and zero log lines in a five minute idle window with verbose logging off. A timer may wake at most its registered rate, plus one wake of slack.
+- Gate: the `idle-budget` job in `.github/workflows/test.yml` runs `tools/idle-budget.ps1` on every pull request. It starts the built app against a fake ssh and three saved server chats with nothing new, waits for startup, idles five minutes with no input, and compares two counter dumps with `tools/idle-budget.mjs`. The failure message names the source that is over budget.
+- Verbose logging stays off for the gate, so the existing `idle-poll-proof` workflow remains the check for the verbose path.
