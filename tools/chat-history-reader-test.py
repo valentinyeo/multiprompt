@@ -4518,10 +4518,6 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
 
         class Fake:
             @staticmethod
-            def message_store_path():
-                return Path(tempfile.gettempdir()) / 'mp-send-1900-no-store.sqlite3'
-
-            @staticmethod
             def message_store_request(query):
                 queries.append(query)
                 state = 'queued' if query['op'] == 'message_submit' else 'failed'
@@ -4541,10 +4537,6 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
 
         class Fake:
             @staticmethod
-            def message_store_path():
-                return Path(tempfile.gettempdir()) / 'mp-send-1900-no-store.sqlite3'
-
-            @staticmethod
             def message_store_request(query):
                 state = 'queued' if query['op'] == 'message_submit' else 'sent'
                 return dict(message=dict(id=query.get('message_id'), state=state, receipt=None))
@@ -4560,10 +4552,6 @@ class IGSH_1900_MpSendReportTest(unittest.TestCase):
         module = self.module()
 
         class Fake:
-            @staticmethod
-            def message_store_path():
-                return Path(tempfile.gettempdir()) / 'mp-send-1900-no-store.sqlite3'
-
             @staticmethod
             def message_store_request(query):
                 state = 'queued' if query['op'] == 'message_submit' else 'failed'

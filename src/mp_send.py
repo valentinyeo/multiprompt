@@ -206,7 +206,10 @@ def live_chats():
 
 
 def recent_agent_messages(reader, provider=None, sid=None, sender=None, window=60.0):
-    path = reader.message_store_path()
+    locate = getattr(reader, "message_store_path", None)
+    if locate is None:
+        return 0
+    path = locate()
     if not path.is_file():
         return 0
     since = time.time() - window
