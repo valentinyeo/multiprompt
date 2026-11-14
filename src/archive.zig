@@ -282,6 +282,24 @@ fn serializeArchiveJson(entries: []const ArchivedEntry, out: []u8) ?usize {
     return pos + 1;
 }
 
+test "SOFT-1974 an archived chat keeps the server it ran on" {
+    const allocator = std.testing.allocator;
+    var entries: std.ArrayList(ArchivedEntry) = .empty;
+    defer entries.deinit(allocator);
+    const json = "[{\"name\":\"First\",\"tmux_session\":\"on-first\",\"host\":0},{\"name\":\"Second\",\"tmux_session\":\"on-second\",\"host\":1},{\"name\":\"Third\",\"tmux_session\":\"on-third\",\"host\":2},{\"name\":\"Odd\",\"tmux_session\":\"on-odd\",\"host\":9}]";
+    try std.testing.expect(parseArchiveJson(allocator, json, &entries));
+    try std.testing.expectEqual(@as(u8, 0), entries.items[0].tmux_host);
+    try std.testing.expectEqual(TMUX_HOST_UK, entries.items[1].tmux_host);
+    try std.testing.expectEqual(TMUX_HOST_INNE, entries.items[2].tmux_host);
+    try std.testing.expectEqual(@as(u8, 0), entries.items[3].tmux_host);
+    var out: [4096]u8 = undefined;
+    const len = serializeArchiveJson(entries.items, &out) orelse return error.TestUnexpectedResult;
+    var restored: std.ArrayList(ArchivedEntry) = .empty;
+    defer restored.deinit(allocator);
+    try std.testing.expect(parseArchiveJson(allocator, out[0..len], &restored));
+    for (entries.items, restored.items) |before, after| try std.testing.expectEqual(before.tmux_host, after.tmux_host);
+}
+
 test "archive JSON grows beyond the former entry and file-size limits" {
     const allocator = std.testing.allocator;
     var entries: std.ArrayList(ArchivedEntry) = .empty;
