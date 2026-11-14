@@ -233,6 +233,9 @@ var g_chat_ac_skill_command: [256]u16 = @splat(0);
 var mode_picker: ?bool = null;
 fn chatModeOpenPicker(plan: bool) void { mode_picker = plan; }
 fn chatPiModelPicker() void {}
+fn chatLoginArgument(_: []const u16, _: []u8) []const u8 { return ""; }
+fn chatLoginArgumentTooLong(_: []const u16) bool { return false; }
+fn chatPiLogin(_: []const u8) bool { return false; }
 var g_chat_ac_dialog_command: [256]u16 = @splat(0);
 var g_chat_draft_dirty = false;
 const TIMER_CHAT_REFRESH: u32 = 1;
@@ -2342,4 +2345,20 @@ test('IGSH-1633 reply-position oracle rejects retained accepted messages', () =>
   const result = runHarness('sent-pile');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /expected 0, found 1/);
+});
+
+test('SOFT-2276 Pi login sends Pi login into the chat', () => {
+  const root = path.join(__dirname, '..');
+  const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
+  const live = fs.readFileSync(path.join(root, 'src/chat_live.zig'), 'utf8');
+  const loginAt = send.indexOf('pub fn chatPiLogin(');
+  assert.notEqual(loginAt, -1);
+  const loginFn = send.slice(loginAt, send.indexOf('\n}\n', loginAt));
+  assert.match(loginFn, /@import\("chat_live\.zig"\)\.loginLine\(std\.heap\.page_allocator, key\.shell_id, std\.mem\.sliceTo\(&key\.sid, 0\), provider_id\)/);
+  assert.match(loginFn, /if \(!chatLiveReply\(line\)\)/);
+  const lineAt = live.indexOf('pub fn loginLine(');
+  assert.notEqual(lineAt, -1);
+  const lineFn = live.slice(lineAt, live.indexOf('\n}\n', lineAt));
+  assert.match(lineFn, /openLine\(a, id, "login", "pi", sid\)/);
+  assert.match(send, /if \(shell\.ai_agent == 3\) \{\n\s+_ = chatPiLogin\(provider_id\);/);
 });
