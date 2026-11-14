@@ -220,6 +220,16 @@
       "idle_max_per_min": 0,
       "reason": "One-shot composer draft save debounce."
     },
+    "TIMER_CHAT_FILE_READY": {
+      "id": 46,
+      "files": [
+        "win32.zig"
+      ],
+      "owner": "chat",
+      "kind": "event",
+      "idle_max_per_min": 0,
+      "reason": "16 ms one-shot re-arm after a chat file ready message. Counted only when it fires, so it adds nothing in idle."
+    },
     "TIMER_CHAT_FIND": {
       "id": 107,
       "files": [

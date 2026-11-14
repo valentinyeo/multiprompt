@@ -60,7 +60,7 @@ function enclosingFunction(lines, line) {
 }
 
 function sourceFiles(srcDir) {
-  return fs.readdirSync(srcDir).filter(name => name.endsWith('.zig') && name !== 'win32.zig').sort();
+  return fs.readdirSync(srcDir).filter(name => name.endsWith('.zig')).sort();
 }
 
 export function scanTimerSites(srcDir = defaultSrc) {
