@@ -52,8 +52,9 @@ print_help() {
         echo '  Reports connecting, connected after a live tmux attachment, or disconnected with exit_code.'
         echo '  An unknown exit code is 4294967295; an unknown tab returns unknown_tab.'
         ;;
-      session-open) echo 'usage: zsb session-open --workspace <name> --group <name> --host <host name> --tmux <session> --name <tab title>'
+      session-open) echo 'usage: zsb session-open --workspace <name> (--group <name> | --after-tab <id>) --host <host name> --tmux <session> --name <tab title>'
         echo '  Names match exactly. Opens an existing remote tmux session in the background; never activates.'
+        echo '  --after-tab places the new tab right below tab <id>, in its group.'
         echo '  Replies include state; created:true is not proof of connection. Use session-status --tab <id>.'
         echo '  --tmux accepts 1-63 letters, digits, hyphens, underscores or dots.'
         echo '  --name accepts 1-63 UTF-16 units, without control characters.'
@@ -144,7 +145,7 @@ usage: zsb <command> [args] (also: multiprompt-browser)
 
 Commands and flags:
   workspace-list                    List workspaces, groups, tabs and host names as JSON
-  session-open --workspace NAME --group NAME --host HOST --tmux SESSION --name TITLE
+  session-open --workspace NAME (--group NAME | --after-tab ID) --host HOST --tmux SESSION --name TITLE
                                     Attach a remote tmux tab in the background, idempotently
   session-status --tab ID            Report connection state and exit_code when disconnected
   session-close --tab ID             Close one background terminal tab
@@ -526,14 +527,19 @@ elif args[0] == "session-status":
     except ValueError:
         fail("bad_args", "usage: zsb session-status --tab <positive tab id>")
 elif args[0] == "session-open":
-    flags = {"--workspace", "--group", "--host", "--tmux", "--name"}
+    flags = {"--workspace", "--group", "--after-tab", "--host", "--tmux", "--name"}
     values = {}
     if len(args) != 11:
-        fail("bad_args", "session-open requires --workspace, --group, --host, --tmux and --name")
+        fail("bad_args", "session-open requires --workspace, --group or --after-tab, --host, --tmux and --name")
     for flag, value in zip(args[1::2], args[2::2]):
         if flag not in flags or flag in values or not value or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value):
             fail("bad_args", "session-open requires each named flag once, with nonempty values and no control characters")
         values[flag] = value
+    if ("--group" in values) == ("--after-tab" in values):
+        fail("bad_args", "session-open takes --group or --after-tab, not both")
+    after = values.get("--after-tab")
+    if after is not None and (not after.isascii() or not after.isdigit() or not 0 < int(after) <= 0xffffffff):
+        fail("bad_args", "--after-tab takes a positive tab id")
     tmux = values["--tmux"]
     if len(tmux) > 63 or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in tmux):
         fail("invalid_tmux", "tmux session must contain 1-63 letters, digits, hyphens, underscores or dots")
