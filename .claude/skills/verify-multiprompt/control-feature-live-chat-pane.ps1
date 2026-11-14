@@ -87,7 +87,7 @@ try {
     $selectChat = {
         param([hashtable]$Chat)
         $selected = {
-            $switches = [regex]::Matches((Get-Content $log -Raw), 'switchToShell: \d+ -> (\d+)')
+            $switches = [regex]::Matches(((Get-Content $log -Raw) -join ''), 'switchToShell: \d+ -> (\d+)')
             $switches.Count -gt 0 -and [int]$switches[$switches.Count - 1].Groups[1].Value -eq $Chat.index
         }
         if (& $selected) { return }
