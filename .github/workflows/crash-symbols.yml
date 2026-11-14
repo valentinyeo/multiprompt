@@ -35,7 +35,7 @@ jobs:
           if (-not $tag.StartsWith('v')) { throw 'no reachable release tag' }
           $revision = (git rev-parse HEAD).Trim()
           "crash-symbols build $tag $revision" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          zig build -Drelease=false -Dsymbols -Dversion="$($tag.Substring(1))" -Drevision="$revision"
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dsymbols -Dversion="$($tag.Substring(1))" -Drevision="$revision"
           if ($LASTEXITCODE -ne 0) { throw 'build failed' }
           Get-ChildItem zig-out/bin | Format-Table Name, Length
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
