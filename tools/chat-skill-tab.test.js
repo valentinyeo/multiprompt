@@ -52,6 +52,7 @@ fn KillTimer(_: HANDLE, _: usize) i32 { return 1; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn chatDraftFlush() void {}
 fn chatComposerAutoGrow() void {}
+fn chatLiveStripFromStore() void {}
 fn chatDraftKeyForShell(idx: u32, out: []u8) []const u8 { return std.fmt.bufPrint(out, "session:#{d}", .{idx}) catch unreachable; }
 fn chatDraftLoad(id: []const u8) void { chat_drafts.set(id, std.unicode.utf8ToUtf16LeStringLiteral("ordinary question for tab B"), false) catch unreachable; }
 fn getChatDraftPath(_: []const u8, _: *[560]u8) ?[]const u8 { return "draft.txt"; }
@@ -106,4 +107,9 @@ test('ISSUE-399 a picked skill is cleared in another tab and restored in its own
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'repro.zig'), '--test-filter', 'ISSUE-399'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('IGSH-2278 switching chats strips live dictation words before the old draft is saved', () => {
+  const bind = body('chatDraftBindToActive');
+  assert.ok(bind.includes('chatLiveStripFromStore();'), 'live words must leave the old chat draft on a switch');
 });
