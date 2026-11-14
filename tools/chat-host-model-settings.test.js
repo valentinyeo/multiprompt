@@ -172,6 +172,10 @@ with tempfile.TemporaryDirectory() as directory:
         def __init__(self): self.lines = []
         def write(self, data): self.lines.append(data)
         def flush(self): pass
+    def frames(process, kind):
+        return [frame for frame in (json.loads(line) for line in process.stdin.lines) if frame.get('type') == kind]
+    def remote_control_once(process):
+        return [frame['request'] for frame in frames(process, 'control_request')] == [dict(subtype='remote_control', enabled=True)]
     session['agent'] = type('Agent', (), {'stdin': Input()})()
     sent = r['host_handle_request'](provider, sid, tmux, session, dict(op='deliver', id='synthetic-message-123', attempt='one', epoch=1, text='hello'))
     assert sent['status'] == 'sent', sent
@@ -241,12 +245,13 @@ with tempfile.TemporaryDirectory() as directory:
     assert command[command.index('--model')+1] == 'haiku', command
     assert command[command.index('--effort')+1] == 'low', command
     assert command[command.index('--resume')+1] == sid, command
-    assert len(original.stdin.lines) == 0 and len(replacement.stdin.lines) == 1
+    assert not frames(original, 'user') and len(frames(replacement, 'user')) == 1
+    assert remote_control_once(original) and remote_control_once(replacement), (original.stdin.lines, replacement.stdin.lines)
     class DelayedOutput:
         def __init__(self, process, *messages):
             self.process, self.messages = process, list(messages)
         def read1(self, size):
-            assert self.process.stdin.lines, 'init emitted before first user input'
+            assert frames(self.process, 'user'), 'init emitted before first user input'
             return (json.dumps(self.messages.pop(0)) + '\n').encode()
     class DelayedProcess:
         def __init__(self, *messages):
@@ -277,7 +282,8 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(selectors, 'DefaultSelector', Selector), patch.object(r['subprocess'], 'Popen', delayed_spawn):
         r['host_loop'](provider, sid, tmux, dict(state={}), object(), initial)
     assert [action['status'] for action in actions] == ['sent', 'ok', 'sent'], actions
-    assert len(initial.stdin.lines) == len(next_agent.stdin.lines) == 1
+    assert len(frames(initial, 'user')) == len(frames(next_agent, 'user')) == 1
+    assert remote_control_once(initial) and remote_control_once(next_agent)
     assert calls[-1][calls[-1].index('--model')+1] == 'opus'
     r['host_accept_client'] = client
     config = r['host_config'](provider, sid)
@@ -305,7 +311,8 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(selectors, 'DefaultSelector', Selector), patch.object(r['subprocess'], 'Popen', preinit_spawn):
         r['host_loop'](provider, sid, tmux, dict(state={}), object(), first_agent)
     assert [action['status'] for action in actions] == ['ok', 'sent'], actions
-    assert not first_agent.stdin.lines and len(selected_agent.stdin.lines) == 1
+    assert not frames(first_agent, 'user') and len(frames(selected_agent, 'user')) == 1
+    assert remote_control_once(first_agent) and remote_control_once(selected_agent)
     assert calls[-1][calls[-1].index('--effort')+1] == 'medium'
     r['host_accept_client'] = client
     config = r['host_config'](provider, sid)
@@ -319,7 +326,7 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(selectors, 'DefaultSelector', Selector):
         r['host_loop'](provider, sid, tmux, dict(state={}), object(), failed)
     assert [reply['status'] for reply in replies] == ['ok', 'busy']
-    assert not failed.stdin.lines
+    assert not frames(failed, 'user') and remote_control_once(failed)
     assert r['host_settings'](provider, sid)['effort'] == 'low'
     for other in ('codex', 'pi', 'hax'):
         other_sid = 'synthetic-' + other

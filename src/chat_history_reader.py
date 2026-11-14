@@ -4759,6 +4759,10 @@ def host_claude_event(provider, sid, tmux, session, event):
 
 
 def host_claude_open(provider, sid, tmux, session):
+    host_control_request(session, dict(subtype="remote_control", enabled=True))
+
+
+def host_cursor_open(provider, sid, tmux, session):
     pass
 
 
@@ -5452,7 +5456,7 @@ HOST_ADAPTERS = {
     "hax": dict(argv=host_hax_argv, open=host_hax_open, write=host_hax_write, event=host_hax_event,
                 answer=host_pi_answer, interrupt=host_hax_interrupt, set_mode=host_hax_set_mode,
                 binding="hax_bridge_prompt", provenance="hax_run_started"),
-    "cursor": dict(argv=host_cursor_argv, open=host_claude_open, write=host_claude_write, event=host_cursor_event,
+    "cursor": dict(argv=host_cursor_argv, open=host_cursor_open, write=host_claude_write, event=host_cursor_event,
                    answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
                    binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }
@@ -5605,6 +5609,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 session["state"]["agent_pid"] = agent.pid
                 host_state_write(provider, sid, session["state"])
                 selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+                HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             idle = session["turn"] is None and not isinstance(session.get("inflight"), dict) and not session["parked"]
             if idle and not session["sends"] and (host_restart_requested(provider, sid) or host_nightly_due(provider, sid)):
                 if host_rotate(provider, sid, session, agent):
@@ -7876,7 +7881,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 122
+RUNTIME_GENERATION = 124
 
 if __name__ == '__main__':
     import base64 as _base64
