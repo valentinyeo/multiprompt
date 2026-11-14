@@ -115,6 +115,12 @@ test "stdin partial writes refresh inactivity after each successful write" {
   }
 });
 
+test('the one shot server capture counts its server check and its process for the idle budget', () => {
+  const capture = body('sshOneShotCaptureInput');
+  assert.match(capture, /idle_budget\.bump\(\.server_fetch\);/);
+  assert.match(capture, /idle_budget\.bump\(\.process_spawn\);/);
+});
+
 test('upload ssh starts detached so it gets no hidden console', () => {
   assert.match(body('sshOneShotCaptureInput'), /CreateProcessW\(\s*null,\s*@ptrCast\(&cmd_buf\),\s*null,\s*null,\s*1,\s*SSH_HELPER_FLAGS,/);
 });

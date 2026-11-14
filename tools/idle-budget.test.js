@@ -1,9 +1,17 @@
-const test = require('node:test');
+const nodeTest = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+const REQUIRED = ['tools/idle-budget.mjs', 'tools/idle-budget.json', 'tools/idle-registry.json', 'tools/idle-registry.mjs', 'tools/idle-budget.ps1', 'src/idle_budget.zig'];
+function test(name, fn) {
+  nodeTest(name, async (...args) => {
+    for (const file of REQUIRED) assert.ok(fs.existsSync(path.join(__dirname, '..', file)), `${file} exists`);
+    return fn(...args);
+  });
+}
 
 let tools;
 async function load() {

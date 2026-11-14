@@ -1,4 +1,4 @@
-const test = require('node:test');
+const nodeTest = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -6,6 +6,14 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const srcDir = path.join(root, 'src');
 const registryPath = path.join(__dirname, 'idle-registry.json');
+
+const REQUIRED = ['tools/idle-budget.mjs', 'tools/idle-budget.json', 'tools/idle-registry.json', 'tools/idle-registry.mjs', 'src/idle_budget.zig'];
+function test(name, fn) {
+  nodeTest(name, async (...args) => {
+    for (const file of REQUIRED) assert.ok(fs.existsSync(path.join(root, file)), `${file} exists`);
+    return fn(...args);
+  });
+}
 
 let tools;
 async function load() {

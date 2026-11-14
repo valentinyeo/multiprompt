@@ -167,6 +167,7 @@ test('PR, manual and nightly runs restore Zig caches while master pushes can sav
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     const speedJobs = ['speed-baseline', 'speed-candidate'].map(name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0]).filter(Boolean);
     const idleJob = workflow.split('\n  idle-budget:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
+    if (file === 'test.yml') assert.ok(idleJob, 'test.yml runs the idle budget job');
     if (idleJob) {
       const idleCaches = idleJob.split(/(?=^      - )/m).filter(step => /uses: actions\/cache/.test(step));
       assert.equal(idleCaches.length, 1);
