@@ -573,5 +573,6 @@
   "IGSH-2278": "Dictation: show words while I speak",
   "IGSH-2282": "Sidebar: a clicked chat stays under the mouse",
   "IGSH-2283": "Show when a chat's AI has stopped, with Restart",
-  "IGSH-2323": "Click-through check fails on every Multibot pull request"
+  "IGSH-2323": "Click-through check fails on every Multibot pull request",
+  "IGSH-2324": "Desktop: a renamed group keeps its colour on other devices"
 }

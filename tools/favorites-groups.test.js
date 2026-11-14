@@ -16,8 +16,8 @@ test('IGSH-556: groups sync behind their own tokens and keep regular and Favorit
   assert.match(layout, /x\.starred_group orelse ""/);
   assert.match(layout, /pub fn withoutStarredGroups/);
   const desktop = read('src/account_desktop.zig');
-  assert.match(desktop, /if \(tab\.group\) \|name\| shell\.group_id = try syncedGroupId\(shell\.group_id, name, false/);
-  assert.match(desktop, /if \(tab\.starred_group\) \|name\| shell\.starred_group_id = try syncedGroupId\(shell\.starred_group_id, name, true/);
+  assert.match(desktop, /if \(tab\.group\) \|name\| shell\.group_id = try syncedGroupId\(shell\.group_id, name, false, desired\.tabs\)/);
+  assert.match(desktop, /if \(tab\.starred_group\) \|name\| shell\.starred_group_id = try syncedGroupId\(shell\.starred_group_id, name, true, desired\.tabs\)/);
 });
 
 test('IGSH-556: persistence and lifecycle paths retain the independent field', () => {
