@@ -116,8 +116,10 @@ test('rejects a plus menu that keeps a check mark or loses the active style', t 
 
 test('journey chooses model and effort from the shipped plus menu, not the retired palette rows', () => {
   const journey = source('tools/verify-chat-delivery/model-settings.ps1');
-  assert.match(journey, /function Model-Plus/);
+  assert.match(journey, /function Plus-Click/);
+  assert.match(journey, /PressClient\(\$menu, \$app\.Id, \$x, \$y\)/);
   assert.match(journey, /input='choose plus menu row'/);
+  assert.doesNotMatch(journey, /Press @\(0x28\)/);
   assert.doesNotMatch(journey, /@{query='(?:model|effort)/);
   assert.match(source('tools/verify-chat-delivery/drive.ps1'), /CHAT_MODEL_PROOF -eq '1'\) \{ Add-Type -Path "\$PSScriptRoot\/chat-switch-observer\.cs"/);
 });
