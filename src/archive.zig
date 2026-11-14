@@ -223,7 +223,8 @@ fn parseArchiveJson(allocator: std.mem.Allocator, json: []const u8, parsed: *std
         e.ai_agent = if (agent >= 1 and agent <= 3) @intCast(agent) else 1;
         e.claude_sid_len = json_reader.copyString(obj, "csid", &e.claude_sid);
         e.claude_cwd_len = json_reader.copyString(obj, "ccwd", &e.claude_cwd);
-        if (json_reader.uint(obj, "host") == 1) e.tmux_host = 1;
+        const host = json_reader.uint(obj, "host");
+        e.tmux_host = if (host <= TMUX_HOST_INNE) @intCast(host) else 0;
         if (e.tmux_session_len > 0) parsed.append(allocator, e) catch return false;
     }
     return true;
