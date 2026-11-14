@@ -3,7 +3,7 @@ import base64
 from collections import OrderedDict, deque
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import select
 import shutil
@@ -11,6 +11,11 @@ import subprocess
 import sys
 import tempfile
 import time
+
+try:
+    import pwd
+except ImportError:
+    pwd = None
 
 HOME = Path.home()
 CACHE = HOME / ".cache/multiprompt/complete/claude.json"
@@ -96,6 +101,62 @@ def scan(root, prefix, kind, overrides, commands=False):
         description = fields.get("description") or next((s.strip("# ") for s in body.splitlines() if s.strip()), "")
         result.append((kind, name, clean(fields.get("argument-hint")), clean(description)))
     return result
+
+
+OWNER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,31}\Z")
+OWNER_ROOTS = ("/", "home")
+
+
+def owner_for_cwd(cwd, home=None, lookup=None):
+    lookup = lookup or (pwd.getpwnam if pwd is not None else None)
+    if lookup is None:
+        return None
+    parts = PurePosixPath(str(cwd or "")).parts
+    if len(parts) < 3 or parts[:2] != OWNER_ROOTS or ".." in parts:
+        return None
+    if not OWNER_NAME.fullmatch(parts[2]):
+        return None
+    try:
+        user = lookup(parts[2])
+    except KeyError:
+        return None
+    folder = PurePosixPath(str(user.pw_dir))
+    if user.pw_uid == 0 or folder != PurePosixPath(*OWNER_ROOTS) / parts[2]:
+        return None
+    if home is not None and folder == PurePosixPath(str(home)):
+        return None
+    return user.pw_name
+
+
+def owner_response(line, user):
+    try:
+        source = Path(__file__).read_bytes()
+    except OSError:
+        return None
+    encoded = base64.b64encode(line.rstrip("\n").encode("utf-8")).decode("ascii")
+    try:
+        result = subprocess.run(["sudo", "-n", "-H", "-u", user, "--", "python3", "-", "--once", encoded],
+                                input=source, capture_output=True, timeout=6, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    end = (END + "\n").encode("ascii")
+    if result.returncode == 0 and result.stdout.endswith(end):
+        return result.stdout.decode("utf-8", "replace")
+    return None
+
+
+def answer_as_owner(line, cwd, supplied):
+    candidates = [cwd]
+    if supplied not in (None, "-") and str(supplied) != str(cwd):
+        candidates.append(supplied)
+    for candidate in candidates:
+        user = owner_for_cwd(candidate, HOME)
+        if user is None:
+            continue
+        answer = owner_response(line, user)
+        if answer is not None:
+            return answer
+    return None
 
 
 def project_and_plugins(cwd, settings):
@@ -221,10 +282,10 @@ def claude_rows(cwd):
     rows = [("B", c.get("name", "").lstrip("/"), clean(c.get("argumentHint")), clean(c.get("description")))
             for c in cached.get("commands", []) if c.get("name", "").lstrip("/") not in CLAUDE_HIDDEN]
     rows += [("B", name, "opens in terminal", desc) for name, _, desc in seeds("claude_interactive_builtins.tsv")]
-    rows += project_and_plugins(cwd, read_json(HOME / ".claude/settings.json"))
+    skills = project_and_plugins(cwd, read_json(HOME / ".claude/settings.json"))
     if stale and not cached:
-        return "loading", []
-    return ("stale" if stale else "ok"), rows
+        return "loading", skills
+    return ("stale" if stale else "ok"), rows + skills
 
 
 def codex_call(method, params):
@@ -649,6 +710,10 @@ def request(line):
             return tmux_transcript_response(rid, fields[2], session_field[len("tmux:"):])
         return transcript_response(rid, fields[2], fields[5], Path(fields[4]), fields[3])
     cwd = resolve_cwd(fields[3], fields[4])
+    if op in ("slash", "skills"):
+        answer = answer_as_owner(line, cwd, fields[4])
+        if answer is not None:
+            return answer
     if op == "ping":
         status, rows = "ok", []
     elif op == "files":
