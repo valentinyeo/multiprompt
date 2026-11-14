@@ -16,7 +16,6 @@ const chat_echo = @import("chat_echo.zig");
 const chat_style = @import("chat_style.zig");
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
-const WM_APP_CHAT_FILE_READY = @import("win32.zig").WM_APP_CHAT_FILE_READY;
 const TIMER_CHAT_REFRESH = @import("win32.zig").TIMER_CHAT_REFRESH;
 const TIMER_CHAT_BROWSER_SWAP = @import("win32.zig").TIMER_CHAT_BROWSER_SWAP;
 const WM_TIMER = @import("win32.zig").WM_TIMER;
@@ -917,7 +916,7 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
         chatLiveLog("page", stream.shell_id, end, @intFromBool(changed));
         std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
         frame.items.len -= end + 1;
-        if (changed and app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+        if (changed and app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
     }
 }
 
@@ -945,7 +944,7 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
     defer chatHistoryStreamRelease(stream);
     defer {
         stream.ended.store(true, .release);
-        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+        if (app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
     }
     const query = chatHistoryQuery(key, stream.id, history, 0) orelse return;
     defer a.free(query);
@@ -978,7 +977,7 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
         std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
         frame.items.len -= end + 1;
         stream.ready.store(true, .release);
-        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+        if (app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
         if (WaitForSingleObject(stream.ack, 0xFFFFFFFF) != 0) return;
     }
 }
@@ -1100,6 +1099,7 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const codex = @embedFile("chat_connectors/codex.py");
     const mp_send = @embedFile("mp_send.py");
     const feedback = @embedFile("multibot_feedback.py");
+    const helper = @embedFile("mp_helper.py");
     const claude64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(claude.len)) catch return null;
     defer allocator.free(claude64);
     const codex64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(codex.len)) catch return null;
@@ -1108,11 +1108,14 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     defer allocator.free(mp_send64);
     const feedback64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(feedback.len)) catch return null;
     defer allocator.free(feedback64);
+    const helper64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(helper.len)) catch return null;
+    defer allocator.free(helper64);
     _ = std.base64.standard.Encoder.encode(claude64, claude);
     _ = std.base64.standard.Encoder.encode(codex64, codex);
     _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
     _ = std.base64.standard.Encoder.encode(feedback64, feedback);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
+    _ = std.base64.standard.Encoder.encode(helper64, helper);
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
@@ -1238,7 +1241,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             }
         }
         entry.ready.store(true, .release);
-        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+        if (app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
         return;
     }
     var wire: std.ArrayList(u8) = if (pushed) |push| push.wire else .empty;
@@ -1402,7 +1405,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         debugLog(std.fmt.bufPrint(&log_buf, "[chat] push shell={d} read_us={d} apply_us={d} bytes={d}", .{ key.shell_id, push.read_us, apply_us, wire.items.len }) catch "[chat] push");
     }
     entry.ready.store(true, .release);
-    if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+    if (app_state.g_main_hwnd != null) @import("win32.zig").postChatFileReady(app_state.g_main_hwnd);
 }
 
 var g_chat_live_seen_revision: u64 = 0;

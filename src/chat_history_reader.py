@@ -2529,6 +2529,7 @@ HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and
                           "or implementation request in a later turn.")
 HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\n"
                       "Browser pane: use `zsb --help`.\n"
+                      "Helper chats: `mp-helper --help` starts, reads, messages and closes them.\n"
                       "Computer view is view-only unless the user grants control. The browser does not operate Computer.\n"
                       "When a missing capability blocks you, run\n"
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
@@ -7594,6 +7595,13 @@ if __name__ == '__main__':
                         try:
                             publish_named_tool('multibot-feedback', _base64.b64decode(feedback_source))
                             _os.chmod('multibot-feedback', 0o700, dir_fd=directory)
+                        except (ValueError, OSError, NotImplementedError):
+                            pass
+                    helper_source = globals().get('MP_HELPER_SOURCE')
+                    if isinstance(helper_source, str) and helper_source:
+                        try:
+                            publish_named_tool('mp-helper', _base64.b64decode(helper_source))
+                            _os.chmod('mp-helper', 0o700, dir_fd=directory)
                         except (ValueError, OSError, NotImplementedError):
                             pass
                 missing = object()
