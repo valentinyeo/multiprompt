@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -15,6 +16,8 @@ PROVIDER = "claude"
 MODELS = ("opus", "sonnet", "haiku", "fable")
 EFFORTS = ("low", "medium", "high")
 FOLDER = re.compile(r"[A-Za-z0-9_./~+ -]{1,220}\Z")
+VERIFY_TRIES = 4
+VERIFY_PAUSE = 1.0
 _send = None
 
 
@@ -111,9 +114,21 @@ def reader_cli(*args):
     return reply if isinstance(reply, dict) else {}
 
 
+def zsb_command():
+    candidates = [Path(__file__).resolve().with_name("mp-zsb")]
+    found = shutil.which("zsb")
+    if found:
+        candidates.append(Path(found))
+    candidates.append(Path.home() / ".local/bin/zsb")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "zsb"
+
+
 def zsb(*args):
     try:
-        done = subprocess.run(["zsb", *args], capture_output=True, text=True, timeout=30)
+        done = subprocess.run([zsb_command(), *args], capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as error:
         return dict(ok=False, error="zsb_unavailable", message=str(error))
     try:
@@ -134,6 +149,17 @@ def find_tab(listing, tmux):
     return None, None, None
 
 
+def verify_tab(tmux):
+    for attempt in range(VERIFY_TRIES):
+        if attempt:
+            time.sleep(VERIFY_PAUSE)
+        listing = zsb("workspace-list")
+        tab = find_tab(listing, tmux)[2] if listing.get("ok") is True else None
+        if tab:
+            return tab
+    return None
+
+
 def show(parent, tmux, name):
     listing = zsb("workspace-list")
     if listing.get("ok") is not True:
@@ -148,6 +174,10 @@ def show(parent, tmux, name):
     opened = zsb("session-open", "--workspace", workspace, "--after-tab", str(tab["id"]), *common)
     if opened.get("ok") is not True and opened.get("error") == "bad_args" and group:
         opened = zsb("session-open", "--workspace", workspace, "--group", group, *common)
+    if opened.get("ok") is not True and opened.get("error") == "reply_timeout":
+        tab = verify_tab(tmux)
+        if tab:
+            return dict(ok=True, tab=tab.get("id"), verified=True)
     return opened
 
 
