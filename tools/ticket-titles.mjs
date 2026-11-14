@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 const boards = { IGSH: 2060, HYCI: 11514 };
 const aliases = { IGSH: 'SOFT' };
 
@@ -7,6 +9,24 @@ export function ticketRecord(id, title) {
     throw new Error(`Missing or invalid title for ${id}`);
   }
   return { id, title };
+}
+
+export const ticketTitlesDir = new URL('./ticket-titles/', import.meta.url);
+
+export function ticketTitleFile(id) {
+  if (typeof id !== 'string' || !/^(?:IGSH|HYCI)-[1-9]\d*$/.test(id)) throw new Error(`Invalid ticket ID: ${id}`);
+  return `${id}.txt`;
+}
+
+export function loadTicketTitles(dir = ticketTitlesDir) {
+  const titles = {};
+  for (const name of fs.readdirSync(dir).sort()) {
+    const match = /^((?:IGSH|HYCI)-[1-9]\d*)\.txt$/.exec(name);
+    if (!match) throw new Error(`Unexpected entry in ticket title catalog: ${name}`);
+    const title = fs.readFileSync(new URL(name, dir), 'utf8').replace(/\r?\n$/, '');
+    titles[match[1]] = ticketRecord(match[1], title).title;
+  }
+  return titles;
 }
 
 export function ticketLine(record) {
