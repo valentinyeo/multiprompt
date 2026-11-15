@@ -43,7 +43,8 @@ test('SOFT-2380 the three views reuse the inbox membership rule instead of copyi
   assert.match(view, /pub fn includes\(tab: u32, ws: u32, favorite: bool, visits: \[\]const u64, input: u64, now_ms: u64\) bool \{\n    return switch \(frequent\.splitKind\(tab\)\) \{\n        \.frequent => frequent\.inFrequent\(/);
   const inbox = read('src/inbox.zig');
   assert.match(inbox, /fn inboxFrequent\(row: InboxRow, now_ms: u64\) bool \{\n    return @import\("workspace_view\.zig"\)\.includes\(frequent\.frequent_split/);
-  assert.match(inbox, /@import\("workspace_view\.zig"\)\.includes\(app_state\.g_inbox_tab, r\.ws, r\.favorite/);
+  assert.match(inbox, /favoriteSplitMatches\(app_state\.g_inbox_tab, r\.ws, r\.favorite\)/);
+  assert.match(inbox, /if \(ka != kb\) return frequent\.newestFirst\(ka, kb\);/);
   assert.match(inbox, /return view\.newer\(app_state\.g_inbox_tab/);
   assert.match(read('src/workspaces.zig'), /@import\("workspace_view\.zig"\)\.includes\(app_state\.g_view_split, shell\.workspace, shell\.favorite/);
   assert.match(sidebar, /@import\("workspace_view\.zig"\)\.includes\(app_state\.g_view_split, row\.ws, row\.favorite/);

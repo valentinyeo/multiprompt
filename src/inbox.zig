@@ -709,6 +709,9 @@ fn inboxFrequent(row: InboxRow, now_ms: u64) bool {
 fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
     const now_ms = frequent.unixMs(nowFileTime() / 10_000);
     const view = @import("workspace_view.zig");
+    const ka = view.recencyKey(app_state.g_inbox_tab, a.la, a.lv, view.visitSlice(&a.visits), a.input, now_ms);
+    const kb = view.recencyKey(app_state.g_inbox_tab, b.la, b.lv, view.visitSlice(&b.visits), b.input, now_ms);
+    if (ka != kb) return frequent.newestFirst(ka, kb);
     return view.newer(app_state.g_inbox_tab, .{
         .la = a.la,
         .lv = a.lv,
@@ -920,7 +923,8 @@ pub fn inboxRowVisible(r: *const InboxRow) bool {
         if (app_state.shells[idx].muted) return false;
     }
     if (app_state.g_unread_only and !r.att) return false;
-    if (!@import("workspace_view.zig").includes(app_state.g_inbox_tab, r.ws, r.favorite, r.visits.optional() orelse &.{}, r.input, frequent.unixMs(nowFileTime() / 10_000))) return false;
+    if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
+    if (app_state.g_inbox_tab == frequent.frequent_split and !inboxFrequent(r.*, frequent.unixMs(nowFileTime() / 10_000))) return false;
     return inboxFilterMatches(r);
 }
 

@@ -681,6 +681,7 @@ test('IGSH-457 console lifecycle harness includes Starred workspace dependencies
   }
   assert.match(source, /var g_starred_workspace = false/);
   assert.match(source, /var g_starred_last_shell: u32 = 0/);
+  assert.match(fn(workspace, 'starredShellVisible'), /app_state\.g_view_split/);
   assert.doesNotMatch(source, /@import\("inbox.zig"\)/);
 });
 

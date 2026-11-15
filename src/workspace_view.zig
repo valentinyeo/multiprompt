@@ -84,7 +84,7 @@ pub fn newer(tab: u32, a: Order, b: Order, now_ms: u64) bool {
     return a.sid < b.sid;
 }
 
-test "SOFT-2380 all frequent and favorites views share the inbox membership rule" {
+test "SOFT-2380 the three inbox tabs share one membership rule" {
     const now: u64 = 1_800_000_000_000;
     try std.testing.expect(includes(frequent.all_split, 0, false, &.{}, 0, now));
     try std.testing.expect(includes(frequent.all_split, 42, false, &.{}, 0, now));
