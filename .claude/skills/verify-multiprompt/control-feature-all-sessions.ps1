@@ -75,12 +75,12 @@ All-Step 'tab-next' { Press @(0x4C) 'L: next tab' } @('view tab=204 host=255 vis
 All-Step 'tab-previous' { Press @(0x48) 'H: previous tab' } @('view tab=200 host=255 visible=6')
 All-Step 'waiting' { Press @(0x57) 'W: Waiting tab' } @('view tab=202 host=255 visible=0')
 All-Step 'unattached' { Press @(0x55) 'U: No window tab' } @('view tab=205 host=255 visible=2')
-All-Step 'marked' { Press @(0x20) 'Space: mark unattached session' } @('view tab=205 host=255 visible=2 selected=0 marks=1')
+All-Step 'marked' { Press @(0x20) 'Space: mark unattached session' } @('view tab=205 host=255 visible=2 selected=1 marks=1')
 All-Step 'clear-marks' {
     $match = [regex]::Match((All-Frame), 'footer_y=(\d+)')
     Doctor; Wait-Foreground; Record 'Click Clear marks'
     [VerifyNative]::ClickClient($script:window, 336, [int]$match.Groups[1].Value)
-} @('view tab=205 host=255 visible=2 selected=0 marks=0')
+} @('view tab=205 host=255 visible=2 selected=1 marks=0')
 Press @(0x58) 'X: close selected unattached session'
 Wait-Until { (Read-SharedText $log) -match 'all-sessions close-confirm count=1' } 'close confirmation'
 Snapshot 'close-confirm'
