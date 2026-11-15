@@ -587,6 +587,7 @@ var g_chat_working_applied_len: usize = 0;
 var g_chat_working_timer_running = false;
 var g_chat_working_hold_until: u64 = 0;
 var g_chat_working_hold_shell: usize = 0;
+var g_chat_working_was_shown = false;
 const shell_count = 2;
 var active_shell: usize = 0;
 var shells = [_]struct { activity: enum { idle, active } = .idle, console_working: bool = false, working_since_ms: u64 = 0 }{ .{}, .{} };
@@ -616,6 +617,7 @@ test "pending local sends show working before a channel or agent is active" {
 }
 test "idle, edges, background tab, elapsed update and close" {
     g_chat_working_hold_until = 0;
+    g_chat_working_was_shown = false;
     fake_tick = 100;
     chatWorkingTimesPoll(); chatWorkingIndicatorSync(); chatWorkingBarTick();
     try std.testing.expectEqual(@as(usize, 0), starts + stops + paints);

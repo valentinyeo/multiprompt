@@ -370,10 +370,22 @@ pub fn chatWorkingBarVisible() bool {
     const open = app_state.ISSUE_265_WORKING_BAR and app_state.g_chat_active and app_state.active_shell < app_state.shell_count;
     const shown = open and (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0 or @import("chat_send.zig").chatOutboxWorkingForShell(app_state.active_shell));
     const now = @import("win32.zig").GetTickCount64();
-    if (!open) app_state.g_chat_working_hold_until = 0;
-    if (shown) app_state.g_chat_working_hold_shell = app_state.active_shell;
-    if (shown) app_state.g_chat_working_hold_until = now + 1000;
-    return shown or (open and app_state.g_chat_working_hold_shell == app_state.active_shell and now < app_state.g_chat_working_hold_until);
+    if (!open) {
+        app_state.g_chat_working_hold_until = 0;
+        app_state.g_chat_working_was_shown = false;
+        return false;
+    }
+    if (shown) {
+        app_state.g_chat_working_was_shown = true;
+        app_state.g_chat_working_hold_shell = app_state.active_shell;
+        return true;
+    }
+    if (app_state.g_chat_working_was_shown) {
+        app_state.g_chat_working_was_shown = false;
+        app_state.g_chat_working_hold_shell = app_state.active_shell;
+        app_state.g_chat_working_hold_until = now + 1000;
+    }
+    return app_state.g_chat_working_hold_shell == app_state.active_shell and now < app_state.g_chat_working_hold_until;
 }
 
 pub fn chatStopVisible() bool {
