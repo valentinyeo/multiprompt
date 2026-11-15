@@ -493,6 +493,7 @@ pub fn messageBlocks(bytes: []const u8, wide: []u16, offset: usize, role: md.Rol
             actual_role = .injected;
         }
     }
+    len = @import("chat_mention.zig").revealChatNames(wide, len);
     const n = md.blocks(wide[0..len], offset, actual_role, out);
     if (n > 0 and actual_role == .injected) out[0].sender = sender;
     return .{ .len = len, .count = n };
