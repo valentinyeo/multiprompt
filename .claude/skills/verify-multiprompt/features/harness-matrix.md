@@ -23,7 +23,7 @@ Preconditions:
 
 - Doctor passes on a fresh GitHub Windows desktop.
 - `HARNESS_SSH_EXE` is the runner's local ssh stand-in. It answers `ssh -V` and, for a `python3` channel, runs `tools/harness-matrix/host.py`.
-- The saved session turns on shared server connection, so Open shell on VPS opens the native terminal. That is the tab whose cols and rows follow the window. The stand-in does not provide a console window for the older ssh login command.
+- The saved session keeps one local Command Prompt so Doctor sees a shell. An empty tab list restores as a valid session and the desktop never becomes ready. The journey then turns on shared server connection from Ctrl+K. That switch starts off. Turning it on is what makes Open shell on VPS the native terminal whose cols and rows follow the window. The stand-in does not provide a console window for the older ssh login command.
 - The stand-in maps the app's remote-1 argument to vps1 and remote-2 to vps2.
 
 Dispatch the matrix on demand, or let a pull request that touches chat, terminal, or palette files run it:
@@ -52,4 +52,4 @@ gh run watch <id> --interval 300
 - Pi and Cursor skill lists stay failed while the palette has no skill-row ids.
 - A shell CLI stays failed while the stand-in host has no real version output for that command. Do not print a stand-in version to make the cell pass.
 - A shell-quality row that fails on master stays failed. Do not raise the 50 ms budget and do not accept 80x24.
-- New terminal on a GitHub runner opens the folder picker when the workspace has no folder. The shell-quality rows use Open shell on VPS 1 after turning on one shared server connection, so the tab is the native grid. Without that, the app starts a login console, and the stand-in has no Unix login to keep that console open.
+- New terminal on a GitHub runner opens the folder picker when the workspace has no folder. The shell-quality rows use Open shell on VPS 1 after turning on one shared server connection, so the tab is the native grid. Without that, the app starts a login console, and the stand-in has no Unix login to keep that console open. Seeding the switch already on makes the same Ctrl+K row turn it off.

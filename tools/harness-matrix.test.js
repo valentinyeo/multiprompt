@@ -78,6 +78,8 @@ test('SOFT-2471 the workflow stays inside four jobs and off release', () => {
   assert.match(text, /src\/\*\*\/\*chat\*/);
   const control = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
   assert.match(control, /ValidateSet\([^\n)]*'harness-matrix'/);
+  assert.match(control, /\{"tabs":\[\{"kind":"cmd","name":"Command Prompt","shell_id":1\}\],"single_window":true\}/);
+  assert.doesNotMatch(control, /"tabs":\[\]/);
   assert.match(control, /control-feature-harness-matrix\.ps1/);
   assert.match(fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/harness-matrix.md'), 'utf8'), /^## Driving it with control\.ps1$/m);
 });
