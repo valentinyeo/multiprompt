@@ -585,6 +585,8 @@ var g_chat_working_text: [128]u16 = @splat(0);
 var g_chat_working_applied: [128]u16 = @splat(0);
 var g_chat_working_applied_len: usize = 0;
 var g_chat_working_timer_running = false;
+var g_chat_working_hold_until: u64 = 0;
+var g_chat_working_hold_shell: usize = 0;
 const shell_count = 2;
 var active_shell: usize = 0;
 var shells = [_]struct { activity: enum { idle, active } = .idle, console_working: bool = false, working_since_ms: u64 = 0 }{ .{}, .{} };
@@ -608,9 +610,13 @@ test "pending local sends show working before a channel or agent is active" {
     pending_send = true;
     try std.testing.expect(chatWorkingBarVisible());
     pending_send = false;
+    try std.testing.expect(chatWorkingBarVisible());
+    fake_tick += 1000;
     try std.testing.expect(!chatWorkingBarVisible());
 }
 test "idle, edges, background tab, elapsed update and close" {
+    g_chat_working_hold_until = 0;
+    fake_tick = 100;
     chatWorkingTimesPoll(); chatWorkingIndicatorSync(); chatWorkingBarTick();
     try std.testing.expectEqual(@as(usize, 0), starts + stops + paints);
     shells[0].activity = .active;
@@ -629,6 +635,9 @@ test "idle, edges, background tab, elapsed update and close" {
     fake_tick = 12100; active_shell = 0; chatWorkingTimesPoll(); chatWorkingIndicatorSync();
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Working… · 12s"), g_chat_working_applied[0..g_chat_working_applied_len]);
     shells[0].activity = .idle; chatWorkingTimesPoll(); chatWorkingIndicatorSync();
+    try std.testing.expectEqual(@as(u64, 100), shells[0].working_since_ms);
+    try std.testing.expectEqual(@as(usize, 0), stops);
+    fake_tick = 13100; chatWorkingTimesPoll(); chatWorkingIndicatorSync();
     try std.testing.expectEqual(@as(u64, 0), shells[0].working_since_ms);
     try std.testing.expectEqual(@as(usize, 1), stops);
     const before = paints; chatWorkingIndicatorSync(); chatWorkingBarTick();

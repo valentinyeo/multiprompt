@@ -7976,6 +7976,8 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try std.testing.expect(layout.chatStopVisible());
         app_state.g_chat_outbox.items[0].state = .delivered;
         layout.chatWorkingIndicatorSync();
+        w.Sleep(1200);
+        layout.chatWorkingIndicatorSync();
         try liveWorkingProofFrame(dc, case.files[6], bytes, info.header, started, case.name, "idle");
         try std.testing.expect(g_working_rect == null);
         try std.testing.expect(!layout.chatStopVisible());

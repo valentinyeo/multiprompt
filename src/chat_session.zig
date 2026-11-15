@@ -1029,9 +1029,9 @@ fn chatLiveSyncWorking() void {
     if (shell.shell_id == 0) return;
     const live = @import("chat_live.zig");
     if (!live.attached(shell.shell_id)) return;
-    const working = live.running(shell.shell_id);
+    const working = live.busy(shell.shell_id);
     app_state.g_chat_screen_working = working;
-    shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, working, GetTickCount64());
+    if (working) shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, true, GetTickCount64());
 }
 
 fn chatLiveSyncCard() void {
