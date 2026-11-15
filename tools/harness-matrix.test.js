@@ -83,6 +83,9 @@ test('SOFT-2471 the workflow stays inside four jobs and off release', () => {
   const driver = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-feature-harness-matrix.ps1'), 'utf8');
   assert.doesNotMatch(driver, /6388/);
   assert.match(driver, /Open shell on VPS 1/);
+  assert.match(driver, /BitBlt/);
+  assert.match(driver, /IsWindowVisible/);
+  assert.doesNotMatch(driver, /x < 56/);
   const standIn = fs.readFileSync(path.join(root, 'tools/harness-matrix/ssh.c'), 'utf8');
   assert.ok(standIn.indexOf('python \\"') < standIn.indexOf('py -3'));
   assert.match(standIn, /SetHandleInformation/);

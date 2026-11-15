@@ -9,28 +9,70 @@ public static class HarnessGrid {
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
     [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
-    [DllImport("gdi32.dll")] static extern uint GetPixel(IntPtr dc, int x, int y);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref Gui info);
+    [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, int operation);
     struct Rect { public int Left, Top, Right, Bottom; }
-    static IntPtr found;
+    struct Point { public int X, Y; }
+    struct Gui {
+        public int cbSize, flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public Rect caret;
+    }
+    static System.Collections.Generic.List<IntPtr> visible = new System.Collections.Generic.List<IntPtr>();
     public static IntPtr Find(IntPtr parent) {
-        found = IntPtr.Zero;
+        visible.Clear();
         EnumChildWindows(parent, delegate(IntPtr hwnd, IntPtr data) {
             StringBuilder name = new StringBuilder(64);
             GetClassName(hwnd, name, name.Capacity);
-            if (name.ToString() == "MPTerminal") { found = hwnd; return false; }
+            if (name.ToString() == "MPTerminal" && IsWindowVisible(hwnd)) visible.Add(hwnd);
             return true;
         }, IntPtr.Zero);
-        return found;
+        if (visible.Count == 0) return IntPtr.Zero;
+        uint pid;
+        Gui info = new Gui();
+        info.cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Gui));
+        if (GetGUIThreadInfo(GetWindowThreadProcessId(parent, out pid), ref info)) {
+            foreach (IntPtr hwnd in visible) if (hwnd == info.hwndFocus) return hwnd;
+        }
+        IntPtr best = visible[0];
+        int bestArea = 0;
+        foreach (IntPtr hwnd in visible) {
+            int area = Width(hwnd) * Height(hwnd);
+            if (area > bestArea) { bestArea = area; best = hwnd; }
+        }
+        return best;
     }
     public static int Width(IntPtr hwnd) { Rect rect; if (!GetClientRect(hwnd, out rect)) return 0; return rect.Right - rect.Left; }
     public static int Height(IntPtr hwnd) { Rect rect; if (!GetClientRect(hwnd, out rect)) return 0; return rect.Bottom - rect.Top; }
     public static long Sample(IntPtr hwnd) {
-        IntPtr dc = GetDC(hwnd);
-        long hash = 1469598103934665603;
-        try {
-            for (int y = 2; y < 28; y += 4) for (int x = 2; x < 56; x += 4) hash = (hash ^ GetPixel(dc, x, y)) * 1099511628211;
-        } finally { ReleaseDC(hwnd, dc); }
-        return hash;
+        int width = Width(hwnd);
+        int height = System.Math.Min(72, Height(hwnd));
+        if (width < 8 || height < 8) return 0;
+        Point origin = new Point();
+        if (!ClientToScreen(hwnd, ref origin)) return 0;
+        using (var bitmap = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppRgb))
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap)) {
+            IntPtr screen = GetDC(IntPtr.Zero);
+            IntPtr target = graphics.GetHdc();
+            try {
+                if (!BitBlt(target, 0, 0, width, height, screen, origin.X, origin.Y, 0x00CC0020)) return 0;
+            } finally {
+                graphics.ReleaseHdc(target);
+                ReleaseDC(IntPtr.Zero, screen);
+            }
+            var bits = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+            try {
+                int count = System.Math.Abs(bits.Stride) * height;
+                byte[] raw = new byte[count];
+                System.Runtime.InteropServices.Marshal.Copy(bits.Scan0, raw, 0, count);
+                long hash = 1469598103934665603;
+                for (int i = 0; i < raw.Length; i += 4) hash = (hash ^ raw[i]) * 1099511628211;
+                return hash;
+            } finally { bitmap.UnlockBits(bits); }
+        }
     }
 }
 "@
@@ -161,7 +203,7 @@ if ($shellRows.Count -gt 0) {
                 }
                 $sorted = @($samples | Sort-Object)
                 $p95 = $sorted[[math]::Ceiling($sorted.Count * 0.95) - 1]
-                $detail = "p95 ${p95} ms"
+                $detail = "p95 $p95 ms, $($samples.Count) keys, min $($sorted[0]) max $($sorted[-1])"
                 if ($p95 -gt 50) { throw $detail }
             }
             $pass = $true
@@ -279,8 +321,9 @@ $matrixPath = Join-Path $Evidence 'matrix-results.json'
 $utf8 = New-Object Text.UTF8Encoding $false
 [IO.File]::WriteAllText($matrixPath, (ConvertTo-Json -InputObject @($script:matrixResults) -Depth 6), $utf8)
 $reportPath = Join-Path $Evidence 'report.md'
-$report = & node (Join-Path $PSScriptRoot '../../../tools/harness-matrix.js') report $matrixPath
+$reportLines = @(& node (Join-Path $PSScriptRoot '../../../tools/harness-matrix.js') report $matrixPath)
 if ($LASTEXITCODE -ne 0) { throw 'Could not generate the harness matrix report' }
+$report = ((@($reportLines) | ForEach-Object { "$_" }) -join "`n") + "`n"
 [IO.File]::WriteAllText($reportPath, $report, $utf8)
 if ($env:GITHUB_STEP_SUMMARY) { Get-Content -LiteralPath $reportPath -Raw | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY }
 $failed = @($script:matrixResults | Where-Object { -not $_.pass })
