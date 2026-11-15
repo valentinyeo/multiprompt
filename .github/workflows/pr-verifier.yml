@@ -165,6 +165,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: write
       pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -241,6 +242,18 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.resolve.outputs.number }}
         run: gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file verifier-out/comment.md
+      - name: Record the verdict on the pull request head
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          RESULT: ${{ steps.final.outputs.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          conclusion=success
+          [ "$RESULT" = FAIL ] && conclusion=failure
+          gh api "repos/$REPO/check-runs" -X POST -f name=pstack-verifier -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$conclusion" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
