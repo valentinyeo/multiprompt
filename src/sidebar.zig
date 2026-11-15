@@ -1226,7 +1226,7 @@ pub fn applyPendingGroup() void {
 
 const FrozenRow = struct {
     id: u32,
-    rank: u32,
+    rank: u64,
 };
 
 var g_frozen_rows: [MAX_SHELLS]FrozenRow = undefined;
