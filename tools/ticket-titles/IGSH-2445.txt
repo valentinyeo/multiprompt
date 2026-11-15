@@ -1,0 +1,1 @@
+Show each session state and running counts per server in All sessions
