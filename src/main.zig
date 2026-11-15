@@ -991,7 +991,7 @@ const openAllSessionsFilter = @import("archive.zig").openAllSessionsFilter;
 const closeAllSessionsFilter = @import("archive.zig").closeAllSessionsFilter;
 const allSessionsClick = @import("archive.zig").allSessionsClick;
 const allSessionsHover = @import("archive.zig").allSessionsHover;
-const allSessionsToggleServerFilter = @import("archive.zig").allSessionsToggleServerFilter;
+const allSessionsPaletteServer = @import("archive.zig").allSessionsPaletteServer;
 const handleAllSessionsKey = @import("archive.zig").handleAllSessionsKey;
 const startUnarchiveUnattachedWorkspaceSessions = @import("archive.zig").startUnarchiveUnattachedWorkspaceSessions;
 const unarchiveNextUnattachedSession = @import("archive.zig").unarchiveNextUnattachedSession;
@@ -5648,9 +5648,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_ALL_SESSIONS_SERVER_OFFSET) {
-                    openAllSessions(hwnd);
-                    allSessionsToggleServerFilter();
-                    _ = InvalidateRect(hwnd, null, 0);
+                    allSessionsPaletteServer(hwnd);
                     return 0;
                 }
                 if (target == SEARCH_SNIPPET_MANAGE_OFFSET) {

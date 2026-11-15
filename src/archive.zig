@@ -58,7 +58,6 @@ const RGB = @import("startup.zig").RGB;
 const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
 const Shell = @import("app_state.zig").Shell;
 const MAX_SHELLS = @import("app_state.zig").MAX_SHELLS;
-const customColorOr = @import("themes.zig").customColorOr;
 const themeConsoleBg = @import("themes.zig").themeConsoleBg;
 const logUnarchive = @import("sidebar.zig").logUnarchive;
 const applyPendingGroup = @import("sidebar.zig").applyPendingGroup;
@@ -123,7 +122,8 @@ const AS_TAB_NO_WINDOW = @import("app_state.zig").AS_TAB_NO_WINDOW;
 const AS_HOST_FILTER_ALL = @import("app_state.zig").AS_HOST_FILTER_ALL;
 const DT_CENTER = @import("win32.zig").DT_CENTER;
 const DT_CALCRECT = @import("win32.zig").DT_CALCRECT;
-const drawAgentIcon = @import("drawing.zig").drawAgentIcon;
+const tokens = @import("design_tokens.zig");
+const drawUtf16 = @import("dwrite_text.zig").draw;
 const fillRoundRect = @import("smooth.zig").fillRoundRect;
 const AS_ROW_OTHER = @import("app_state.zig").AS_ROW_OTHER;
 const ALL_SESSIONS_TAB_COUNT = @import("app_state.zig").ALL_SESSIONS_TAB_COUNT;
@@ -1318,16 +1318,12 @@ test "session view states count running, no window, and archived per server" {
     try std.testing.expectEqual(SessionViewState.archived, sessionViewState(.archived));
 }
 
-fn copyShellPreview(dst: []u8, shell: *const Shell) u32 {
-    if (shell.last_title_len <= 0) return 0;
-    const n = @min(@as(usize, @intCast(shell.last_title_len)), dst.len);
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const wc = shell.last_title[i];
-        if (wc < 32 or wc >= 127) return @intCast(i);
-        dst[i] = @intCast(wc);
-    }
-    return @intCast(i);
+fn copyShellSecondLine(dst: []u8, index: u32) u32 {
+    const line = @import("agent_second_line.zig").forShell(index);
+    const n = @min(line.len, dst.len);
+    if (n == 0) return 0;
+    @memcpy(dst[0..n], line.text[0..n]);
+    return @intCast(n);
 }
 
 fn copyShellNameAscii(dst: []u8, shell: *const Shell) u32 {
@@ -1533,7 +1529,7 @@ pub fn buildSessionOverviewRows() void {
             const row = &app_state.g_session_overview_rows.items[app_state.g_session_overview_rows.items.len - 1];
             row.ram_mb = tmuxSessionRamMb(host, sess, app_state.shells[i].ram_mb);
             row.agent = app_state.shells[i].ai_agent;
-            row.preview_len = copyShellPreview(row.preview[0..], &app_state.shells[i]);
+            row.preview_len = copyShellSecondLine(row.preview[0..], @intCast(i));
         }
     }
 
@@ -1598,7 +1594,7 @@ pub fn buildSessionOverviewRows() void {
             const row = &app_state.g_session_overview_rows.items[app_state.g_session_overview_rows.items.len - 1];
             row.ram_mb = tmuxSessionRamMb(host, sess, app_state.shells[i].ram_mb);
             row.agent = app_state.shells[i].ai_agent;
-            row.preview_len = copyShellPreview(row.preview[0..], &app_state.shells[i]);
+            row.preview_len = copyShellSecondLine(row.preview[0..], @intCast(i));
         }
     }
 
@@ -1836,7 +1832,8 @@ pub fn allSessionsNthVisible(want: u32) ?u32 {
 
 fn allSessionsClusterCount(tab: u32) u32 {
     const rows = app_state.g_session_overview_rows.items[0..app_state.g_session_overview_count];
-    if (tab == AS_TAB_ALL or tab == AS_TAB_RUNNING or tab == AS_TAB_NO_WINDOW or tab == AS_TAB_ARCHIVED) {
+    const searching = app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0;
+    if (!searching and (tab == AS_TAB_ALL or tab == AS_TAB_RUNNING or tab == AS_TAB_NO_WINDOW or tab == AS_TAB_ARCHIVED)) {
         const counts = sessionViewCounts(rows, app_state.g_all_sessions_host_filter);
         if (tab == AS_TAB_RUNNING) return counts.running;
         if (tab == AS_TAB_NO_WINDOW) return counts.no_window;
@@ -1846,6 +1843,7 @@ fn allSessionsClusterCount(tab: u32) u32 {
     var c: u32 = 0;
     for (rows) |*row| {
         if (app_state.g_all_sessions_host_filter != AS_HOST_FILTER_ALL and row.host != app_state.g_all_sessions_host_filter) continue;
+        if (!allSessionsFilterMatches(row)) continue;
         if (allSessionsRowInTab(row, tab)) c += 1;
     }
     return c;
@@ -1854,16 +1852,6 @@ fn allSessionsClusterCount(tab: u32) u32 {
 pub fn allSessionsSplitVisible(tab: u32) bool {
     if (tab == AS_TAB_ALL or tab == AS_TAB_RUNNING or tab == AS_TAB_NO_WINDOW or tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED) return true;
     return allSessionsClusterCount(tab) > 0;
-}
-
-fn allSessionsKindColor(kind: SessionOverviewKind, blue: DWORD, green: DWORD) DWORD {
-    return switch (kind) {
-        .open => green,
-        .reminder => RGB(245, 158, 11),
-        .hidden => blue,
-        .vps_only => if (app_state.g_light_theme) RGB(110, 90, 180) else RGB(167, 139, 250),
-        .archived => if (app_state.g_light_theme) RGB(120, 90, 150) else RGB(150, 120, 200),
-    };
 }
 
 pub fn drawAttentionDot(hdc: HANDLE, cx: i32, cy: i32, radius: i32, color: DWORD) void {
@@ -1976,6 +1964,31 @@ fn sessionOverviewPreview(row: *const SessionOverviewRow) []const u8 {
     return preview;
 }
 
+fn allSessionsWorkspaceLabel(row: *const SessionOverviewRow, buf: *[32]u8) []const u8 {
+    if (row.workspace != AS_ROW_OTHER and row.workspace < app_state.g_lws_count) {
+        const name = workspaceDisplayName(row.workspace, buf);
+        if (name.len > 0 and !rawLiveId(name)) return name;
+    }
+    if (row.context_len > 0 and row.context_len <= row.context.len) {
+        const ctx = row.context[0..row.context_len];
+        if (!rawLiveId(ctx)) return ctx;
+    }
+    return "";
+}
+
+fn drawAllSessionsAvatar(hdc: HANDLE, rect: RECT, row: *const SessionOverviewRow) void {
+    if (row.shell_id != 0) {
+        if (findShellById(row.shell_id)) |idx| {
+            const shell = &app_state.shells[idx];
+            const avatar = @import("bot_avatar.zig");
+            if (!@import("bot_photo.zig").draw(shell, hdc, rect)) avatar.draw(hdc, rect, avatar.forShell(shell));
+            return;
+        }
+    }
+    const key = if (row.session_len > 0 and row.session_len <= row.session.len) row.session[0..row.session_len] else sessionOverviewPublicName(row);
+    @import("bot_avatar.zig").draw(hdc, rect, @import("bot_avatar.zig").Appearance.forSession(key));
+}
+
 fn asFormatRam(mb: u32, buf: []u8) []const u8 {
     if (mb == 0) return "-";
     if (mb >= 1024) {
@@ -2041,53 +2054,28 @@ fn allSessionsMarkRect(y: i32, row_h: i32) RECT {
     return .{ .left = uiScaled(14), .top = top, .right = uiScaled(14) + side, .bottom = top + side };
 }
 
-fn asInitials(name: []const u8, buf: *[2]u8) []const u8 {
-    var n: usize = 0;
-    var take_next = true;
-    for (name) |c| {
-        if (c == ' ') {
-            take_next = true;
-            continue;
-        }
-        if (!take_next) continue;
-        buf[n] = std.ascii.toUpper(c);
-        n += 1;
-        take_next = false;
-        if (n == 2) break;
-    }
-    if (n == 0 and name.len > 0) {
-        buf[0] = std.ascii.toUpper(name[0]);
-        n = 1;
-    }
-    return buf[0..n];
-}
-
-fn asAvatarColor(name: []const u8) DWORD {
-    const colors = [_]DWORD{
-        RGB(247, 180, 200),
-        RGB(154, 209, 255),
-        RGB(255, 179, 138),
-        RGB(199, 240, 168),
-        RGB(255, 210, 122),
-        RGB(216, 194, 255),
-        RGB(168, 230, 224),
-    };
-    var hash: u32 = 0;
-    for (name) |c| hash = hash *% 33 +% c;
-    return colors[hash % colors.len];
-}
-
 fn asDrawPill(hdc: HANDLE, rc: RECT, fill: DWORD, text: []const u8, text_color: DWORD, font: HANDLE) void {
     fillRoundRect(hdc, rc, uiScaled(6), fill);
     _ = SelectObject(hdc, font);
     _ = SetTextColor(hdc, text_color);
     var text_rc = rc;
-    drawAscii(hdc, text, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    asDrawUtf8(hdc, text, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+fn tokenColor(hex: u32) DWORD {
+    return RGB(@intCast((hex >> 16) & 0xff), @intCast((hex >> 8) & 0xff), @intCast(hex & 0xff));
 }
 
 fn asDrawWide(hdc: HANDLE, text: []const u16, rc: *RECT, flags: u32) void {
     if (text.len == 0) return;
-    _ = DrawTextW(hdc, @ptrCast(text.ptr), @intCast(text.len), rc, flags);
+    _ = drawUtf16(hdc, @ptrCast(text.ptr), @intCast(text.len), rc, flags);
+}
+
+fn asDrawUtf8(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void {
+    var buf: [160]u16 = undefined;
+    const n = std.unicode.utf8ToUtf16Le(buf[0..], text) catch 0;
+    if (n == 0) return;
+    _ = drawUtf16(hdc, &buf, @intCast(n), rc, flags);
 }
 
 pub fn paintAllSessions(hdc: HANDLE) void {
@@ -2102,22 +2090,21 @@ pub fn paintAllSessions(hdc: HANDLE) void {
     const global_counts = sessionViewCounts(rows, AS_HOST_FILTER_ALL);
     const running_hosts = sessionViewRunningHosts(rows);
 
-    const card: DWORD = if (light) RGB(246, 246, 248) else RGB(22, 22, 22);
-    const fg: DWORD = if (light) RGB(32, 32, 36) else RGB(236, 236, 240);
-    const muted: DWORD = if (light) RGB(90, 90, 98) else RGB(138, 138, 142);
-    const chip_bg: DWORD = if (light) RGB(255, 255, 255) else RGB(26, 26, 30);
-    const chip_on: DWORD = if (light) RGB(226, 226, 232) else RGB(50, 50, 59);
-    const line: DWORD = if (light) RGB(220, 220, 224) else RGB(38, 38, 42);
-    const row_bg: DWORD = if (light) RGB(232, 232, 236) else RGB(31, 31, 36);
+    const card: DWORD = if (light) RGB(246, 246, 248) else tokenColor(tokens.ReaderBackground);
+    const fg: DWORD = if (light) RGB(32, 32, 36) else tokenColor(tokens.ReaderForeground);
+    const muted: DWORD = if (light) RGB(90, 90, 98) else tokenColor(tokens.ReaderHint);
+    const chip_bg: DWORD = if (light) RGB(255, 255, 255) else tokenColor(tokens.ReaderPanel);
+    const chip_on: DWORD = if (light) RGB(226, 226, 232) else tokenColor(tokens.ReaderRaised);
+    const line: DWORD = if (light) RGB(220, 220, 224) else tokenColor(tokens.ReaderOutline);
+    const row_bg: DWORD = if (light) RGB(232, 232, 236) else tokenColor(tokens.ReaderControl);
     const green: DWORD = RGB(46, 204, 113);
     const green_text: DWORD = if (light) RGB(22, 122, 68) else RGB(123, 215, 162);
-    const blue: DWORD = customColorOr("attention", RGB(60, 120, 220));
+    const blue: DWORD = RGB(60, 120, 220);
     const blue_text: DWORD = if (light) RGB(36, 78, 168) else RGB(126, 166, 230);
     const grey: DWORD = if (light) RGB(110, 110, 118) else RGB(143, 143, 151);
     const amber: DWORD = RGB(240, 180, 90);
     const danger: DWORD = RGB(238, 111, 100);
     const mark: DWORD = RGB(240, 130, 70);
-    _ = allSessionsKindColor(.archived, grey, green);
 
     const bg_br = CreateSolidBrush(card);
     _ = FillRect(hdc, &rc, bg_br);
@@ -2129,7 +2116,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
 
     _ = SetTextColor(hdc, fg);
     var title_rc = RECT{ .left = uiScaled(20), .top = chrome.title_y, .right = w - uiScaled(20), .bottom = chrome.title_y + uiScaled(24) };
-    _ = DrawTextW(hdc, L("Show all sessions"), -1, &title_rc, DT_SINGLELINE | DT_NOPREFIX);
+    _ = drawUtf16(hdc, L("Show all sessions"), -1, &title_rc, DT_SINGLELINE | DT_NOPREFIX);
 
     _ = SelectObject(hdc, font_subtitle);
     _ = SetTextColor(hdc, muted);
@@ -2201,10 +2188,10 @@ pub fn paintAllSessions(hdc: HANDLE) void {
     var query_rc = RECT{ .left = search_rc.left + uiScaled(10), .top = search_rc.top, .right = search_rc.right - uiScaled(8), .bottom = search_rc.bottom };
     if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) {
         _ = SetTextColor(hdc, fg);
-        _ = DrawTextW(hdc, @ptrCast(&app_state.g_all_sessions_filter_buf), @intCast(app_state.g_all_sessions_filter_len), &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = drawUtf16(hdc, @ptrCast(&app_state.g_all_sessions_filter_buf), @intCast(app_state.g_all_sessions_filter_len), &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     } else {
         _ = SetTextColor(hdc, muted);
-        _ = DrawTextW(hdc, L("Search name, workspace or server"), -1, &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = drawUtf16(hdc, L("Search name, workspace or server"), -1, &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 
     app_state.g_all_sessions_split_tab_count = 0;
@@ -2256,7 +2243,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         _ = SelectObject(hdc, font_title);
         _ = SetTextColor(hdc, muted);
         var empty_rc = RECT{ .left = uiScaled(24), .top = chrome.list_top + uiScaled(12), .right = w - uiScaled(24), .bottom = chrome.list_top + uiScaled(40) };
-        _ = DrawTextW(hdc, if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) L("No sessions match this filter.") else L("No sessions in this filter."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
+        _ = drawUtf16(hdc, if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) L("No sessions match this filter.") else L("No sessions in this filter."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
     }
 
     var y: i32 = chrome.list_top;
@@ -2285,7 +2272,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
                 _ = SelectObject(hdc, font_subtitle);
                 _ = SetTextColor(hdc, RGB(23, 16, 8));
                 var check_rc = mark_rc;
-                _ = DrawTextW(hdc, L("v"), -1, &check_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+                _ = drawUtf16(hdc, L("✓"), -1, &check_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
             }
         }
 
@@ -2296,22 +2283,14 @@ pub fn paintAllSessions(hdc: HANDLE) void {
             .right = uiScaled(40) + uiScaled(34),
             .bottom = y + @divTrunc(chrome.row_h - uiScaled(34), 2) + uiScaled(34),
         };
-        if (row.agent != 0) {
-            var icon_rc = avatar;
-            drawAgentIcon(hdc, &icon_rc, row.agent, state == .running);
-        } else {
-            fillRoundRect(hdc, avatar, uiScaled(17), asAvatarColor(name));
-            var initials: [2]u8 = undefined;
-            _ = SelectObject(hdc, font_subtitle);
-            _ = SetTextColor(hdc, RGB(19, 19, 22));
-            var ini_rc = avatar;
-            drawAscii(hdc, asInitials(name, &initials), &ini_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-        }
+        drawAllSessionsAvatar(hdc, avatar, row);
         const dot: DWORD = switch (state) {
             .running => green,
             .no_window => blue,
             .archived => grey,
         };
+        const ring: DWORD = if (hovered or selected) row_bg else card;
+        drawAttentionDot(hdc, avatar.right - uiScaled(2), avatar.bottom - uiScaled(2), uiScaled(6), ring);
         drawAttentionDot(hdc, avatar.right - uiScaled(2), avatar.bottom - uiScaled(2), uiScaled(4), dot);
 
         const actions = allSessionsActionRects(w, y, chrome.row_h);
@@ -2330,7 +2309,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
                 var time_rc = RECT{ .left = cursor_right, .top = y, .right = cursor_right + time_w, .bottom = y + chrome.row_h };
                 _ = SelectObject(hdc, font_subtitle);
                 _ = SetTextColor(hdc, muted);
-                _ = DrawTextW(hdc, @ptrCast(&tbuf), @intCast(tl), &time_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
+                _ = drawUtf16(hdc, &tbuf, @intCast(tl), &time_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
             }
         }
         var ram_store: [24]u8 = undefined;
@@ -2338,15 +2317,17 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         const ram_heavy = !archived and row.ram_mb >= 300;
         var mem_rc = RECT{ .left = cursor_right - mem_w, .top = y, .right = cursor_right, .bottom = y + chrome.row_h };
         _ = SetTextColor(hdc, if (ram_heavy) amber else muted);
-        drawAscii(hdc, ram_label, &mem_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
+        asDrawUtf8(hdc, ram_label, &mem_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
         cursor_right -= mem_w;
         var host_rc = RECT{ .left = cursor_right - srv_w, .top = y, .right = cursor_right - uiScaled(6), .bottom = y + chrome.row_h };
         _ = SetTextColor(hdc, muted);
-        drawAscii(hdc, sessionOverviewHostLabel(row.host), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        asDrawUtf8(hdc, sessionOverviewHostLabel(row.host), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         cursor_right -= srv_w;
-        if (row.context_len > 0 and !rawLiveId(row.context[0..row.context_len])) {
+        var ws_store: [32]u8 = undefined;
+        const ws_label = allSessionsWorkspaceLabel(row, &ws_store);
+        if (ws_label.len > 0) {
             const ws_rc = RECT{ .left = cursor_right - ws_w, .top = y + @divTrunc(chrome.row_h - uiScaled(22), 2), .right = cursor_right - uiScaled(8), .bottom = y + @divTrunc(chrome.row_h - uiScaled(22), 2) + uiScaled(22) };
-            asDrawPill(hdc, ws_rc, if (archived) (if (light) RGB(236, 236, 238) else RGB(30, 30, 35)) else (if (light) RGB(232, 232, 236) else RGB(35, 35, 41)), row.context[0..row.context_len], if (archived) grey else fg, font_subtitle);
+            asDrawPill(hdc, ws_rc, if (archived) (if (light) RGB(236, 236, 238) else tokenColor(tokens.ReaderPanel)) else (if (light) RGB(232, 232, 236) else tokenColor(tokens.ReaderRaised)), ws_label, if (archived) grey else fg, font_subtitle);
         }
         cursor_right -= ws_w;
         const state_color: DWORD = switch (state) {
@@ -2358,7 +2339,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         drawAttentionDot(hdc, state_rc.left + uiScaled(4), y + @divTrunc(chrome.row_h, 2), uiScaled(3), dot);
         var state_text = RECT{ .left = state_rc.left + uiScaled(12), .top = y, .right = state_rc.right, .bottom = y + chrome.row_h };
         _ = SetTextColor(hdc, state_color);
-        drawAscii(hdc, sessionViewStateLabel(state), &state_text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        asDrawUtf8(hdc, sessionViewStateLabel(state), &state_text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
         const name_left = avatar.right + uiScaled(10);
         const name_right = @max(name_left + uiScaled(40), state_rc.left - uiScaled(8));
@@ -2377,13 +2358,13 @@ pub fn paintAllSessions(hdc: HANDLE) void {
             _ = SelectObject(hdc, font_title);
             _ = SetTextColor(hdc, if (archived) grey else fg);
         }
-        drawAscii(hdc, name, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        asDrawUtf8(hdc, name, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         const preview = sessionOverviewPreview(row);
         if (preview.len > 0) {
             _ = SelectObject(hdc, font_subtitle);
             _ = SetTextColor(hdc, if (archived) grey else muted);
             var prev_rc = RECT{ .left = name_left, .top = y + uiScaled(26), .right = name_right, .bottom = y + chrome.row_h - uiScaled(4) };
-            drawAscii(hdc, preview, &prev_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            asDrawUtf8(hdc, preview, &prev_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
 
         if (hovered) {
@@ -2394,7 +2375,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
                 _ = SelectObject(hdc, font_subtitle);
                 _ = SetTextColor(hdc, if (danger_button) danger else fg);
                 var button_rc = button;
-                _ = DrawTextW(hdc, label, -1, &button_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+                _ = drawUtf16(hdc, label, -1, &button_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
             }
         }
 
@@ -2426,10 +2407,10 @@ pub fn paintAllSessions(hdc: HANDLE) void {
     app_state.g_all_sessions_foot_clear_rc = clear_rc;
     fillRoundRect(hdc, close_rc, uiScaled(6), if (close_enabled) (if (light) RGB(255, 232, 230) else RGB(41, 28, 27)) else chip_bg);
     _ = SetTextColor(hdc, if (close_enabled) danger else muted);
-    _ = DrawTextW(hdc, L("Close marked"), -1, &close_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = drawUtf16(hdc, L("Close marked"), -1, &close_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     fillRoundRect(hdc, clear_rc, uiScaled(6), chip_bg);
     _ = SetTextColor(hdc, if (close_enabled) fg else muted);
-    _ = DrawTextW(hdc, L("Clear marks"), -1, &clear_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = drawUtf16(hdc, L("Clear marks"), -1, &clear_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
     _ = SelectObject(hdc, old_font);
 }
@@ -2464,6 +2445,38 @@ pub fn allSessionsToggleServerFilter() void {
         return;
     };
     allSessionsToggleHost(app_state.g_session_overview_rows.items[ri].host);
+}
+
+fn allSessionsSelectActiveHost() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const host = tmuxHostForShell(&app_state.shells[app_state.active_shell]) orelse return;
+    var seen: u32 = 0;
+    for (0..app_state.g_session_overview_count) |i| {
+        const row = &app_state.g_session_overview_rows.items[i];
+        if (!allSessionsRowVisible(row)) continue;
+        if (row.host == host) {
+            app_state.g_all_sessions_sel = seen;
+            return;
+        }
+        seen += 1;
+    }
+}
+
+pub fn allSessionsPaletteServer(hwnd: HANDLE) void {
+    const was = app_state.g_all_sessions_active;
+    if (!was) {
+        openAllSessions(hwnd);
+        app_state.g_all_sessions_tab = AS_TAB_ALL;
+        allSessionsSelectActiveHost();
+    } else if (app_state.g_search_active) {
+        app_state.g_search_active = false;
+        app_state.g_browser_url_mode = false;
+        app_state.g_search_snippet_mode = false;
+        app_state.g_search_session_overview_mode = false;
+        clearSearchBackdrop();
+    }
+    allSessionsToggleServerFilter();
+    _ = InvalidateRect(hwnd, null, 0);
 }
 
 fn allSessionsArchiveAt(ri: u32) void {
