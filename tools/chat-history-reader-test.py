@@ -8198,6 +8198,7 @@ class SOFT_2461_PiChatSkillsTest(unittest.TestCase):
         self.write_skill(theirs, 'their-skill')
         with patch.object(reader, 'conversation_owner', return_value=('owner', owner)):
             argv = reader.host_pi_argv('pi', self.sid, ['pi'])
+        self.assertIn('--skill', argv)
         self.assertEqual(argv[argv.index('--skill') + 1:], [str(theirs)])
         self.assertNotIn(str(self.home / '.claude' / 'skills'), argv)
 
