@@ -1369,9 +1369,19 @@ pub fn chatOutboxWorkingForShell(idx: u32) bool {
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
     if (key.len == 0) return false;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[idx].shell_id;
+    const running = live.running(shell_id);
+    const reply_present = live.replyPresent(shell_id);
+    const reply_ms: i64 = if (idx == app_state.active_shell) chatEchoLatestReplyMs(app_state.g_chat_blocks[0..app_state.g_chat_block_count]) else 0;
     for (app_state.g_chat_outbox.items) |entry| {
-        if (entry.state != .queued and entry.state != .sending) continue;
-        if (std.mem.eql(u8, entry.key[0..entry.key_len], key)) return true;
+        if (!std.mem.eql(u8, entry.key[0..entry.key_len], key)) continue;
+        const phase = std.mem.sliceTo(&entry.message_phase, 0);
+        const wire = std.mem.sliceTo(&entry.message_wire_id, 0);
+        const owns = live.ownsTurn(shell_id, wire);
+        const reply_started = (entry.anchor.sent_ms > 0 and reply_ms > entry.anchor.sent_ms) or (owns and running and reply_present);
+        const chat_stopped = owns and !running;
+        if (chat_echo.keepsWorking(entry.state, phase, reply_started, chat_stopped)) return true;
     }
     return false;
 }

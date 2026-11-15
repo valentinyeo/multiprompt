@@ -433,6 +433,25 @@ pub fn phaseTaken(phase: []const u8) bool {
     return std.mem.eql(u8, phase, "accepted") or std.mem.eql(u8, phase, "started");
 }
 
+pub fn keepsWorking(state: OutboxState, phase: []const u8, reply_started: bool, chat_stopped: bool) bool {
+    if (state == .queued or state == .sending) return true;
+    if (state != .delivered or !phaseTaken(phase)) return false;
+    return !reply_started and !chat_stopped;
+}
+
+test "SOFT-2418 an accepted message keeps working until the reply starts or the chat stops" {
+    try std.testing.expect(keepsWorking(.queued, "", true, true));
+    try std.testing.expect(keepsWorking(.sending, "sent", false, false));
+    try std.testing.expect(!keepsWorking(.not_sent, "accepted", false, false));
+    try std.testing.expect(!keepsWorking(.cancelled, "started", false, false));
+    try std.testing.expect(!keepsWorking(.delivered, "queued", false, false));
+    try std.testing.expect(!keepsWorking(.delivered, "sent", false, false));
+    try std.testing.expect(keepsWorking(.delivered, "accepted", false, false));
+    try std.testing.expect(keepsWorking(.delivered, "started", false, false));
+    try std.testing.expect(!keepsWorking(.delivered, "accepted", true, false));
+    try std.testing.expect(!keepsWorking(.delivered, "started", false, true));
+}
+
 pub const TAKEN_MAX_AGE_MS: i64 = 60_000;
 
 pub fn takenSettled(watch: *DeliveryWatch, state: OutboxState, phase: []const u8, replied: bool, now_ms: i64, sent_tick_ms: i64) bool {

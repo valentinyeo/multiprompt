@@ -30,6 +30,17 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 const chat_echo = @import("chat_echo.zig");
+const ChatLive = struct {
+    pub fn running(_: u32) bool {
+        return false;
+    }
+    pub fn replyPresent(_: u32) bool {
+        return false;
+    }
+    pub fn ownsTurn(_: u32, _: []const u8) bool {
+        return false;
+    }
+};
 const chat_reaction = @import("chat_reaction.zig");
 var g_reaction_view: chat_reaction.View = .{};
 const json_reader = @import("json_reader.zig");
@@ -2114,7 +2125,8 @@ function runHarness(control = false) {
       .replaceAll('@import("app_state.zig").ShellKind', 'ShellKind')
       .replaceAll('@import("win32.zig").MessageBoxW', 'MessageBoxW')
       .replaceAll('@import("fonts.zig").messageBox', 'MessageBoxW')
-      .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+      .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog')
+      .replaceAll('@import("chat_live.zig")', 'ChatLive');
     if (source.includes('fn chatOutboxRequeueAfterReconnect(')) functions += '\n' + body('chatOutboxRequeueAfterReconnect');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'sent-pile') {
