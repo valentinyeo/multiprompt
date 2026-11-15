@@ -38,11 +38,12 @@ function block(source, start, end) {
 }
 
 test("A click under the pointer keeps its row in place until the pointer leaves the sidebar", () => {
-  const key = between("fn sidebarUseKey(", "pub inline fn effPinnedTop(");
-  assert.match(key, /if \(!g_sidebar_order_frozen\) return sidebarLiveUseKey\(i\);/, "a thawed sidebar follows the live use key");
-  assert.match(key, /return shells\[i\]\.frozen_use_key\.\?;/, "a frozen sidebar answers from the snapshot, not from the click");
-  assert.match(key, /for \(0\.\.shell_count\) \|i\| shells\[i\]\.frozen_use_key = sidebarLiveUseKey\(i\);/, "freezing snapshots every row before the click lands");
-  assert.match(key, /for \(0\.\.shell_count\) \|i\| shells\[i\]\.frozen_use_key = null;/, "thawing drops the snapshot so rows reorder");
+  const key = between("const FrozenRow = struct {", "pub inline fn effPinnedTop(");
+  assert.match(key, /g_sidebar_order_frozen or g_frozen_rows_len == 0\) return sidebarLiveUseKey\(i\);/, "a thawed sidebar follows the live use key");
+  assert.match(key, /return frozenRank\(shells\[i\]\.shell_id\);/, "a frozen sidebar answers from the frozen row order, not from the click");
+  assert.match(key, /if \(row\.id == shell_id\) return row\.rank;/, "frozen places are looked up by chat id, so a rebuilt chat keeps its row");
+  assert.match(key, /g_frozen_rows\[g_frozen_rows_len\] = \.\{ \.id = shell_id, \.rank = 0 \};/, "freezing snapshots every row before the click lands");
+  assert.match(key, /g_frozen_rows_len = 0;/, "thawing drops the snapshot so rows reorder");
   const down = block(main, "WM_LBUTTONDOWN => {", "headerClick(mx, my)");
   assert.match(down, /freezeSidebarOrder\(\)/, "a press in the sidebar freezes the order before the chat switch stamps the row");
   const move = block(main, "WM_MOUSEMOVE => {", "const room_hover");
