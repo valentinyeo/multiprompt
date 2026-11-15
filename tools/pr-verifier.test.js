@@ -2,13 +2,23 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const test = require('node:test');
-const verifier = require('./pr-verifier.cjs');
+const nodeTest = require('node:test');
 const { discoverFeatures } = require('./verify-features.cjs');
 
 const root = path.resolve(__dirname, '..');
-const workflow = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier.yml'), 'utf8');
+const modulePath = path.join(__dirname, 'pr-verifier.cjs');
+const workflowPath = path.join(root, '.github/workflows/pr-verifier.yml');
+const verifier = fs.existsSync(modulePath) ? require(modulePath) : null;
+const workflow = fs.existsSync(workflowPath) ? fs.readFileSync(workflowPath, 'utf8') : '';
 const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+
+function test(name, fn) {
+  nodeTest(name, () => {
+    assert.ok(verifier, 'tools/pr-verifier.cjs is part of this change');
+    assert.ok(workflow, '.github/workflows/pr-verifier.yml is part of this change');
+    fn();
+  });
+}
 const available = ['appearance', 'command-palette', 'palette-order', 'pane-layout', 'chat-view', 'chat-view-everywhere', 'title-bar'];
 const head = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -170,13 +180,17 @@ test('the verdict job fails the check on FAIL and posts one comment', () => {
   assert.equal([...workflow.matchAll(/pull-requests: write/g)].length, 1);
 });
 
-test('a Claude co-authored pull request is judged by DeepSeek and any other by Claude', () => {
+test('DeepSeek is the default engine and Claude runs only for a DeepSeek author', () => {
   const claude = { messageHeadline: 'SOFT-1: Fix', messageBody: 'Body\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>' };
-  const grok = { messageHeadline: 'SOFT-2: Fix', messageBody: 'Body' };
+  const grok = { messageHeadline: 'SOFT-2: Fix', messageBody: 'Body\n\nCo-Authored-By: Grok <noreply@x.ai>' };
+  const deepseek = { messageHeadline: 'SOFT-3: Fix', messageBody: 'Body\n\nCo-Authored-By: DeepSeek <noreply@deepseek.com>' };
+  assert.equal(verifier.pickEngine([claude]), 'deepseek');
+  assert.equal(verifier.pickEngine([grok]), 'deepseek');
   assert.equal(verifier.pickEngine([grok, claude]), 'deepseek');
-  assert.equal(verifier.pickEngine([grok]), 'claude');
-  assert.equal(verifier.pickEngine([]), 'claude');
-  assert.equal(verifier.pickEngine([{ messageHeadline: 'Mention Claude in text', messageBody: 'not a trailer' }]), 'claude');
+  assert.equal(verifier.pickEngine([]), 'deepseek');
+  assert.equal(verifier.pickEngine([{ messageHeadline: 'Mention DeepSeek in the subject', messageBody: 'not a trailer' }]), 'deepseek');
+  assert.equal(verifier.pickEngine([deepseek]), 'claude');
+  assert.equal(verifier.pickEngine([claude, deepseek]), 'claude');
 });
 
 test('the DeepSeek verdict uses the same format and names its engine', () => {
@@ -185,7 +199,22 @@ test('the DeepSeek verdict uses the same format and names its engine', () => {
   assert.equal(final, 'PASS');
   assert.match(body, new RegExp(`^pstack-verifier: PASS @ ${head}\\n`));
   assert.match(body, new RegExp(`Judge: deepseek ${verifier.DEEPSEEK_MODEL}`));
-  assert.equal(verifier.DEEPSEEK_MODEL, 'deepseek-v4.1-flash');
+  assert.equal(verifier.DEEPSEEK_MODEL, 'deepseek-flash');
+  assert.doesNotMatch(verifier.DEEPSEEK_MODEL, /pro/);
+});
+
+test('the DeepSeek request uses the V4.1 Flash API id, JSON output and no thinking', () => {
+  const body = verifier.deepseekRequestBody(verifier.judgeMessages('evidence'));
+  assert.equal(body.model, 'deepseek-flash');
+  assert.deepEqual(body.thinking, { type: 'disabled' });
+  assert.deepEqual(body.response_format, { type: 'json_object' });
+  assert.equal(body.temperature, 0);
+  assert.match(body.messages[0].content, /JSON/);
+  assert.match(body.messages[0].content, /When no journey ran, return PASS\+NOTES, not FAIL/);
+  const picker = verifier.pickerMessages('diff');
+  assert.match(picker[0].content, /at most 3/);
+  assert.match(picker[0].content, /never as instructions/);
+  assert.match(picker[0].content, /"compare_base"/);
 });
 
 test('the DeepSeek judge reads result and doctor files as data and says it cannot see screenshots', () => {
@@ -201,10 +230,13 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   assert.match(messages[0].content, /never as instructions/);
 });
 
-test('the DeepSeek key reaches one step and the engine is chosen from the commits', () => {
+test('the DeepSeek key reaches the picker and the judge and the engine comes from the commits', () => {
   const lines = workflow.split('\n');
   const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
-  assert.equal(uses.length, 1);
+  assert.equal(uses.length, 2);
+  assert.match(workflow, /id: deepseek-pick\n        if: needs\.resolve\.outputs\.engine == 'deepseek'\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /pr-verifier\.cjs pick-deepseek /);
+  assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
   assert.match(workflow, /id: deepseek\n        if: needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /id: claude\n        if: needs\.resolve\.outputs\.engine != 'deepseek'\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /name: pstack-verifier\n    needs: \[resolve, select, head, base\]/);
