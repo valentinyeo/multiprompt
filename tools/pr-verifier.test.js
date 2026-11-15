@@ -1,0 +1,170 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const verifier = require('./pr-verifier.cjs');
+const { discoverFeatures } = require('./verify-features.cjs');
+
+const root = path.resolve(__dirname, '..');
+const workflow = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier.yml'), 'utf8');
+const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+const available = ['appearance', 'command-palette', 'palette-order', 'pane-layout', 'chat-view', 'chat-view-everywhere', 'title-bar'];
+const head = 'a'.repeat(40);
+const base = 'b'.repeat(40);
+
+function evidenceDir(entries) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-'));
+  for (const [name, result] of Object.entries(entries)) {
+    fs.mkdirSync(path.join(dir, name), { recursive: true });
+    fs.writeFileSync(path.join(dir, name, 'after.png'), 'png');
+    if (result) fs.writeFileSync(path.join(dir, name, 'result.json'), JSON.stringify(result));
+  }
+  return dir;
+}
+
+function selection(features, extra = {}) {
+  return { features, dropped: [], compareBase: features.length > 0, reason: '', uncovered: '', doneWhen: [], newMap: '', ...extra };
+}
+
+test('only real, fast journeys are selected and at most three', () => {
+  const result = verifier.validateSelection({ features: ['appearance', 'made-up', 'pane-layout', 'appearance', 'command-palette', 'palette-order', 'chat-view'], compare_base: true }, available);
+  assert.deepEqual(result.features, ['appearance', 'command-palette', 'palette-order']);
+  assert.deepEqual(result.dropped, ['made-up', 'pane-layout', 'chat-view']);
+  assert.equal(result.compareBase, true);
+});
+
+test('an empty selection never compares a base build', () => {
+  const result = verifier.validateSelection({ features: [], compare_base: true, uncovered: 'the new shortcut', new_map: '# map' }, available);
+  assert.deepEqual(result.features, []);
+  assert.equal(result.compareBase, false);
+  assert.equal(result.newMap, '# map');
+});
+
+test('a selection that is not JSON is refused', () => {
+  assert.throws(() => verifier.validateSelection('not json', available), /not valid JSON/);
+  assert.throws(() => verifier.validateSelection('null', available), /must be an object/);
+});
+
+test('every journey the picker may choose exists as a feature map', () => {
+  const real = discoverFeatures().available;
+  for (const name of verifier.selectable(real)) assert.ok(fs.existsSync(path.join(root, '.claude/skills/verify-multiprompt/features', `${name}.md`)));
+  for (const name of verifier.SLOW_FEATURES) assert.ok(!verifier.selectable(real).includes(name));
+});
+
+test('evidence folders split into head and base without mixing similar feature names', () => {
+  const dir = evidenceDir({
+    'verify-chat-view': { status: 'passed', checks: [1, 2] },
+    'verify-chat-view-everywhere': { status: 'failed', error: 'other journey' },
+    [`verify-chat-view-${base}`]: { status: 'failed', error: 'old behaviour' },
+    [`verify-chat-view-${'c'.repeat(40)}`]: { status: 'passed' },
+    'verify-title-bar-96-light': { status: 'passed' },
+  });
+  const summary = verifier.summarize(dir, ['chat-view', 'title-bar'], base);
+  assert.deepEqual(summary.head['chat-view'].map(run => run.artifact), ['verify-chat-view']);
+  assert.equal(summary.head['chat-view'][0].checks, 2);
+  assert.deepEqual(summary.base['chat-view'].map(run => [run.artifact, run.status, run.error]), [[`verify-chat-view-${base}`, 'failed', 'old behaviour']]);
+  assert.deepEqual(summary.head['title-bar'].map(run => run.artifact), ['verify-title-bar-96-light']);
+  assert.deepEqual(summary.head['chat-view'][0].screenshots, ['after.png']);
+});
+
+test('a head journey that failed forces FAIL whatever the verifier said', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'failed', error: 'no ring' } });
+  const summary = verifier.summarize(dir, ['appearance'], base);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['looks fine'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'https://example.test/run/1' });
+  assert.equal(final, 'FAIL');
+  assert.match(body, new RegExp(`^VERDICT: FAIL ${head}\\n`));
+  assert.match(body, /Head journey not passed: appearance \(failed\)/);
+});
+
+test('a missing head result is FAIL, not a pass', () => {
+  const summary = verifier.summarize(evidenceDir({}), ['appearance'], base);
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' }).final, 'FAIL');
+});
+
+test('a clean head and a red base is PASS with the before and after rows', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'passed' }, [`verify-appearance-${base}`]: { status: 'failed' } });
+  const summary = verifier.summarize(dir, ['appearance'], base);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['after.png shows the row'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'https://example.test/run/2' });
+  assert.equal(final, 'PASS');
+  assert.match(body, /- appearance: head passed, base failed/);
+  assert.match(body, /Run: https:\/\/example\.test\/run\/2/);
+  assert.match(body, /<!-- pr-verifier -->/);
+});
+
+test('no journey and a claimed PASS is capped at PASS+NOTES', () => {
+  const summary = verifier.summarize(evidenceDir({}), [], base);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['docs only'] }, headSha: head, summary, selection: selection([]), runUrl: 'u' });
+  assert.equal(final, 'PASS+NOTES');
+  assert.match(body, /No desktop journey ran/);
+});
+
+test('an uncovered part of the change caps PASS at PASS+NOTES', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
+  const summary = verifier.summarize(dir, ['appearance'], base);
+  const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance'], { uncovered: 'the shortcut' }), runUrl: 'u' });
+  assert.equal(result.final, 'PASS+NOTES');
+});
+
+test('a missing or invalid verdict is FAIL and evidence stops at eight lines', () => {
+  const summary = verifier.summarize(evidenceDir({}), [], base);
+  assert.equal(verifier.finalize({ verdict: null, headSha: head, summary, selection: selection([]), runUrl: 'u' }).final, 'FAIL');
+  assert.equal(verifier.finalize({ verdict: { verdict: 'MAYBE', evidence: [] }, headSha: head, summary, selection: selection([]), runUrl: 'u' }).final, 'FAIL');
+  const many = Array.from({ length: 20 }, (_, index) => `line ${index}\nwith newline`);
+  const { body } = verifier.finalize({ verdict: { verdict: 'PASS+NOTES', evidence: many }, headSha: head, summary, selection: selection([]), runUrl: 'u' });
+  const lines = body.split('\n').filter(line => /^- line /.test(line));
+  assert.equal(lines.length, verifier.MAX_EVIDENCE_LINES);
+  assert.ok(lines.every(line => !line.includes('\r')));
+});
+
+test('the workflow starts on same-repository pull requests and on a dispatched pull request number', () => {
+  const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
+  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review\]/);
+  assert.match(events, /workflow_dispatch:\n    inputs:\n      pr:\n        description: .+\n        required: true/);
+  assert.doesNotMatch(events, /pull_request_target|workflow_run|schedule|push:/);
+  assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository && !github\.event\.pull_request\.draft/);
+});
+
+test('the Claude key reaches only the two action steps and never a script', () => {
+  const lines = workflow.split('\n');
+  const uses = lines.map((line, index) => [line, index]).filter(([line]) => line.includes('secrets.CLAUDE_CODE_OAUTH_TOKEN'));
+  assert.equal(uses.length, 2);
+  for (const [line, index] of uses) {
+    assert.match(line, /^          claude_code_oauth_token: /);
+    const action = lines.slice(index - 4, index).join('\n');
+    assert.match(action, /uses: anthropics\/claude-code-action@[0-9a-f]{40}/);
+  }
+  assert.doesNotMatch(workflow, /secrets: inherit/);
+  assert.doesNotMatch(workflow, /^\s+secrets:/m);
+});
+
+test('Claude gets read tools and read-only git and gh only', () => {
+  const allowed = [...workflow.matchAll(/--allowedTools "([^"]+)"/g)].map(match => match[1]);
+  assert.equal(allowed.length, 2);
+  for (const tools of allowed) {
+    assert.equal(tools, 'Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)');
+  }
+  assert.doesNotMatch(workflow, /dangerously|--permission-mode|Bash\(\*\)|Bash\(node|Bash\(python/);
+});
+
+test('Claude output reaches scripts through environment variables, never inline', () => {
+  for (const match of workflow.matchAll(/^\s+run: .*$/gm)) assert.doesNotMatch(match[0], /structured_output|github\.event\.pull_request\.(?:title|body)/);
+  const runBlocks = workflow.split(/^\s+run: \|\n/m).slice(1).map(block => block.split(/^      - /m)[0]);
+  for (const block of runBlocks) assert.doesNotMatch(block, /structured_output|pull_request\.(?:title|body|head\.ref)/);
+});
+
+test('the verifier reuses verify.yml for head and for the merge base build', () => {
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
+  assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      app_revision: \$\{\{ needs\.resolve\.outputs\.base_sha \}\}/);
+  assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
+  assert.match(verify, /app-revision: \$\{\{ inputs\.app_revision && fromJSON\(format\('\["\{0\}"\]', inputs\.app_revision\)\)/);
+  assert.match(verify, /continue-on-error: .*inputs\.app_revision != ''/);
+  assert.match(verify, /name: verify-app\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
+});
+
+test('the verdict job fails the check on FAIL and posts one comment', () => {
+  assert.match(workflow, /gh pr comment "\$PR_NUMBER" --repo "\$REPO" --body-file verifier-out\/comment\.md/);
+  assert.match(workflow, /run: test "\$RESULT" != FAIL/);
+  assert.match(workflow, /pull-requests: write/);
+  assert.equal([...workflow.matchAll(/pull-requests: write/g)].length, 1);
+});
