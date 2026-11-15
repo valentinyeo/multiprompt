@@ -119,12 +119,16 @@ public static class ChatDeliveryDesktop {
     [StructLayout(LayoutKind.Sequential)] struct CursorInfo { public uint Size, Flags; public IntPtr Cursor; public Point Position; }
     [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CursorInfo info);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr LoadCursor(IntPtr instance, IntPtr name);
-    public static bool HoverHand(IntPtr hwnd, uint pid, int x, int y) {
+    public static long[] HoverCursor(IntPtr hwnd, uint pid, int x, int y) {
         if (Owner(hwnd) != pid || GetForegroundWindow() != hwnd) throw new InvalidOperationException("Hover foreground ownership mismatch");
         var point = ScreenPoint(hwnd, x, y);
         if (WindowFromPoint(point) != hwnd || !SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Hover target is not the owned HWND");
+        var inputs = new Input[1];
+        inputs[0].Data.Mouse = new Mouse { Flags = 1 };
+        if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Hover SendInput failed");
         var info = new CursorInfo { Size = (uint)Marshal.SizeOf(typeof(CursorInfo)) };
-        return GetCursorInfo(ref info) && info.Flags == 1 && info.Cursor == LoadCursor(IntPtr.Zero, (IntPtr)32649);
+        if (!GetCursorInfo(ref info)) throw new InvalidOperationException("GetCursorInfo failed");
+        return new long[] { info.Flags, info.Cursor.ToInt64(), LoadCursor(IntPtr.Zero, (IntPtr)32649).ToInt64(), info.Position.X, info.Position.Y };
     }
     public static void PressClient(IntPtr hwnd, uint pid, int x, int y) {
         if (Owner(hwnd) != pid) throw new InvalidOperationException("Click owner mismatch");

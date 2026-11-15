@@ -27,6 +27,7 @@ function fixture() {
   write('plus-default.json', { expected_active: defaults, failures: [], rows: ['model_opus', 'model_fable', 'effort_medium', 'effort_low'].map(item => ({ item, mark: 0, accent: defaults.includes(item) ? 40 : 0 })) });
   for (const [name, text, amber] of [['fable', 'Fable 5.2 · medium', true], ['opus', 'Opus 5.5 · medium', false]]) {
     write(`header-${name}.json`, { text, amber, rect: [400, 30, 540, 48], titleBottom: 31, ink: 40, hand: true, pickerOpened: true });
+    write(`header-${name}-cursor.json`, { flags: 1, actual: 42, expectedHand: 42, x: 470, y: 39 });
   }
   const actions = [{ input: 'click header model', text: 'Fable 5.2 · medium' }, { input: 'click header model', text: 'Opus 5.5 · medium' }, { input: 'Enter: send with the default model' }];
   let hostLog = '';
@@ -151,6 +152,8 @@ test('rejects a plus menu that keeps a check mark or loses the active style', t 
 test('journey chooses model and effort from the shipped plus menu, not the retired palette rows', () => {
   const journey = source('tools/verify-chat-delivery/model-settings.ps1');
   assert.doesNotMatch(journey, /[^\x00-\x7f]/);
+  assert.match(source('tools/verify-chat-delivery/desktop.cs'), /public static long\[\] HoverCursor[\s\S]*?SendInput\(1, inputs/);
+  assert.match(journey, /header-\$Name-cursor\.json/);
   assert.match(journey, /function Plus-Click/);
   assert.match(journey, /PressClient\(\$menu, \$app\.Id, \$x, \$y\)/);
   assert.match(journey, /input='choose plus menu row'/);

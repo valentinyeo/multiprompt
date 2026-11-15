@@ -68,6 +68,10 @@ function verify(root) {
     assert.ok(header.ink >= 10);
     assert.ok(header.rect[1] >= header.titleBottom - 1 && header.rect[3] > header.titleBottom);
     assert.equal(header.hand, true);
+    const cursor = json(`header-${name}-cursor.json`);
+    assert.equal(cursor.flags, 1);
+    assert.ok(cursor.expectedHand > 0);
+    assert.equal(cursor.actual, cursor.expectedHand);
     assert.equal(header.pickerOpened, true);
     assert.ok(actions.some(action => action.input === 'click header model' && action.text === text));
   }

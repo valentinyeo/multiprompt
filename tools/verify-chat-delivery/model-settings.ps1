@@ -161,7 +161,11 @@ function Header-Proof([string]$Name, [string]$Text, [bool]$Amber) {
     $x = [int](($rect[0] + $rect[2]) / 2)
     $y = [int](($rect[1] + $rect[3]) / 2)
     Doctor
-    [void](Wait-For 'hand cursor over the model line' { [ChatDeliveryDesktop]::HoverHand($main, $app.Id, $x, $y) } 10)
+    [void](Wait-For 'hand cursor over the model line' {
+        $cursor = [ChatDeliveryDesktop]::HoverCursor($main, $app.Id, $x, $y)
+        Save @{flags=$cursor[0]; actual=$cursor[1]; expectedHand=$cursor[2]; x=$cursor[3]; y=$cursor[4]} "$caseDir/header-$Name-cursor.json"
+        $cursor[0] -eq 1 -and $cursor[1] -eq $cursor[2]
+    } 10)
     Shot "model-header-$Name"
     $actions.Add(@{case=$plan.name; input='click header model'; text=$Text; x=$x; y=$y})
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, $x, $y)
