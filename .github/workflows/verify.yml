@@ -208,8 +208,70 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  agent-sync:
+    if: inputs.feature == 'agent-sync'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.app_revision || inputs.revision || github.sha }}
+          path: product
+          persist-credentials: false
+      - name: Install checksum-verified official Hypertask CLI
+        run: |
+          base=https://github.com/hypertask-ai/cli/releases/download/v0.2.53
+          curl -fsSL "$base/checksums.txt" -o "$RUNNER_TEMP/checksums.txt"
+          curl -fsSL "$base/hypertask-linux-x86_64" -o "$RUNNER_TEMP/hypertask-linux-x86_64"
+          (cd "$RUNNER_TEMP" && grep -E '^[a-fA-F0-9]{64}  \*?hypertask-linux-x86_64$' checksums.txt | sha256sum --check --strict)
+          install -m 755 "$RUNNER_TEMP/hypertask-linux-x86_64" "$RUNNER_TEMP/hypertask"
+      - name: Create an isolated systemd user
+        run: |
+          sudo useradd --create-home --shell /bin/bash mp-agent-journey
+          uid=$(id -u mp-agent-journey)
+          sudo loginctl enable-linger mp-agent-journey
+          sudo systemctl start "user@$uid.service"
+          mkdir -p evidence
+          sudo chown mp-agent-journey evidence
+      - name: Drive the installed rename timer through real CLI HTTP
+        run: |
+          uid=$(id -u mp-agent-journey)
+          sudo -u mp-agent-journey env HOME=/home/mp-agent-journey XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" GITHUB_ACTIONS=true python3 tools/verify-agent-sync.py --root "$PWD/product" --cli "$RUNNER_TEMP/hypertask" --evidence "$PWD/evidence"
+      - name: Remove the owned user and record cleanup
+        if: always()
+        run: |
+          if id mp-agent-journey >/dev/null 2>&1; then
+            uid=$(id -u mp-agent-journey)
+            sudo loginctl disable-linger mp-agent-journey
+            sudo systemctl stop "user@$uid.service"
+            sudo userdel --remove mp-agent-journey
+          fi
+          sudo chown -R "$(id -u):$(id -g)" evidence
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          path = Path('evidence/result.json')
+          if path.exists():
+              result = json.loads(path.read_text())
+              result['scratchRemoved'] = not Path('/home/mp-agent-journey').exists()
+              if not result['scratchRemoved']:
+                  result['status'] = 'failed'
+              path.write_text(json.dumps(result, indent=2) + '\n')
+              assert result['scratchRemoved'], 'owned user home remains'
+          PYTHON
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: verify-agent-sync${{ inputs.app_revision && format('-{0}', inputs.app_revision) || '' }}
+          path: evidence/
+          retention-days: 7
+          if-no-files-found: error
   journeys:
-    if: inputs.feature != 'chat-sync-audit'
+    if: inputs.feature != 'chat-sync-audit' && inputs.feature != 'agent-sync'
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.features.outputs.full }}
@@ -238,7 +300,7 @@ jobs:
     outputs:
       version: ${{ steps.identity.outputs.version }}
     needs: journeys
-    if: inputs.feature != 'chat-sync-audit'
+    if: inputs.feature != 'chat-sync-audit' && inputs.feature != 'agent-sync'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -371,7 +433,7 @@ jobs:
           if-no-files-found: error
   verify:
     needs: [journeys, build-app]
-    if: inputs.feature != 'chat-sync-audit'
+    if: inputs.feature != 'chat-sync-audit' && inputs.feature != 'agent-sync'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}

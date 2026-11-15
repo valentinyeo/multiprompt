@@ -269,7 +269,11 @@ test('the DeepSeek judge reads result and doctor files as data and says it canno
   fs.writeFileSync(path.join(dir, 'verify-appearance', 'doctor.json'), '{"ok":true}');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
   fs.writeFileSync(path.join(out, 'pr.md'), '# Pull request 1');
+  fs.writeFileSync(path.join(dir, 'verify-appearance', 'requests.json'), '[{"method":"PATCH","body":{"display_name":"Renamed chat"}}]');
+  fs.writeFileSync(path.join(dir, 'verify-appearance', 'journal.txt'), 'mp-agent-sync.service finished');
   const material = verifier.judgeInputs(out, dir);
+  assert.match(material, /Renamed chat/);
+  assert.match(material, /mp-agent-sync.service finished/);
   assert.match(material, /evidence\/verify-appearance\/result\.json/);
   assert.match(material, /evidence\/verify-appearance\/doctor\.json/);
   const messages = verifier.judgeMessages(material);
