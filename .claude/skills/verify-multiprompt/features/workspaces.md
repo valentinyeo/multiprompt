@@ -12,7 +12,7 @@ Read the current workspace name above the sessions. Click the name to open the w
 ## How to get to it (user POV)
 
 - In single-window mode press Ctrl+N, or use the new-workspace pill (Alt+N).
-- Alt+1 selects Starred; Alt+2 through Alt+9 select the first eight stored workspaces.
+- Alt+1 selects Favorites. All, Frequent and Favorites sit above the stored workspaces. Alt+2 through Alt+9 select the first eight stored workspaces.
 - Alt+Left / Alt+Right cycle workspaces; Alt+J / Alt+K also cycle outside an Inbox context.
 - Workspace pills are mouse entry points. Ctrl+K `Open Workspace` opens stored workspaces; `Sort Workspaces` orders pills. These are alternative paths, not exercised here.
 - Agents use `zsb workspace-list` to discover workspace, group and host names, then `zsb session-open --workspace <name> --group <name> --host <reported host> --tmux <session> --name <title>` to open a background tmux tab without switching the active workspace or tab. See [Session open](session-open.md) for that separate CLI journey and its SSH boundary.
@@ -27,9 +27,9 @@ Preconditions:
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=workspaces`; Windows runs `control.ps1 -Feature workspaces`.
 - **Identity regression.** Before creating another workspace, toggle Single-window mode off and back on through real Ctrl+K commands. Require the home workspace identity to equal the current window identity (`default`). This reproduces IGSH-1774 without writing settings or forging clicks. After creating another workspace, the existing first-workspace click must return to this same-ID home slot and close the menu; Alt+2 and Alt+3 must still switch between both slots.
 - **Create.** Press Ctrl+N and require exactly one new saved workspace and CMD session.
-- **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first workspace row, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
+- **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first stored workspace, below the view rows, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
 - **Themes.** Capture the header and open card in dark, Multiprompt, light, AMOLED, mid, edge grey and system themes. Check native card fill and dismiss with Escape without switching.
-- **Compact geometry.** Require 28px rows, 6px panel insets and a 7px divider gap: height is `19 + rowCount * 28` at the journey’s 100% scale. Zero/unknown counts are blank; current rows use semibold names without ticks.
+- **Compact geometry.** Require 28px rows, 6px panel insets and a 7px divider gap: height is `19 + (stored workspaces + view rows + New workspace) * 28` at the journey’s 100% scale. View rows are three when All, Frequent and Favorites are listed, and one on a build that only has Starred. The journey reads that count from the card height. Zero/unknown counts are blank; current rows use semibold names without ticks.
 - **Keyboard.** Exercise Up/Down and Enter to select the first workspace, then return by mouse. Inspect `workspace-keyboard-selected.png`. Escape is checked in every theme. Scrolling and divider hit boundaries retain executable Zig coverage.
 - **Theme limitation.** Graphite 2 is not shipped. Record it unavailable; Edge Grey screenshots are separately labelled, never substitutes.
 - **New workspace.** Click the card's New workspace row. Require exactly one additional workspace and a closed card.

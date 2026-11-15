@@ -36,6 +36,10 @@ test('SOFT-2380 workspace menu shows All Frequent and Favorites above the real w
   assert.match(paint, /workspace_view\.viewName\(viewSplitAt\(index\)\)/);
   const header = between(switcher, 'pub fn paintHeader(', 'fn rowCount()');
   assert.match(header, /if \(app_state\.g_starred_workspace\) workspace_view\.viewName\(app_state\.g_view_split\)/);
+  const journey = read('.claude/skills/verify-multiprompt/workspace-switcher.ps1');
+  assert.match(journey, /function Get-WorkspaceViewRows/);
+  assert.match(journey, /\$target = \$index \+ \$views/);
+  assert.doesNotMatch(journey, /\$target = \$index \+ 1/);
 });
 
 test('SOFT-2380 the three views reuse the inbox membership rule instead of copying it', () => {
