@@ -4,11 +4,21 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
-const matrix = require('./harness-matrix.js');
 
 const root = path.join(__dirname, '..');
 
+function mustExist(rel) {
+  assert.equal(fs.existsSync(path.join(root, rel)), true, rel);
+}
+
+function requireMatrix() {
+  mustExist('tools/harness-matrix.js');
+  mustExist('tools/harness-matrix.json');
+  return require('./harness-matrix.js');
+}
+
 test('SOFT-2471 the matrix generates every cell once', () => {
+  const matrix = requireMatrix();
   const rows = matrix.cells();
   assert.equal(rows.length, 19);
   assert.equal(new Set(rows.map(row => row.id)).size, 19);
@@ -29,6 +39,8 @@ test('SOFT-2471 the matrix generates every cell once', () => {
 });
 
 test('SOFT-2471 the report is generated from the same table', () => {
+  const matrix = requireMatrix();
+  mustExist('.claude/skills/verify-multiprompt/features/harness-matrix.md');
   const sample = matrix.cells().map(row => ({ id: row.id, pass: row.id === 'fit_on_resize', detail: row.id === 'fit_on_resize' ? '' : 'still open', screenshot: row.screenshot }));
   const text = matrix.report(sample);
   assert.equal(text.split('\n').filter(line => line.startsWith('| ') && !line.startsWith('| cell') && !line.startsWith('| ---')).length, 19);
@@ -40,11 +52,14 @@ test('SOFT-2471 the report is generated from the same table', () => {
 });
 
 test('SOFT-2471 palette targets match the app', () => {
+  const matrix = requireMatrix();
   const source = fs.readFileSync(path.join(root, 'src/app_state.zig'), 'utf8');
   assert.deepEqual(matrix.mismatches(source), []);
 });
 
 test('SOFT-2471 the workflow stays inside four jobs and off release', () => {
+  mustExist('.github/workflows/harness-matrix.yml');
+  mustExist('.claude/skills/verify-multiprompt/control-feature-harness-matrix.ps1');
   const text = fs.readFileSync(path.join(root, '.github/workflows/harness-matrix.yml'), 'utf8');
   const jobsText = text.slice(text.indexOf('\njobs:\n'));
   const jobs = [...jobsText.matchAll(/^  [a-z0-9-]+:$/gm)].map(match => match[0].trim());
@@ -61,6 +76,7 @@ test('SOFT-2471 the workflow stays inside four jobs and off release', () => {
 });
 
 test('SOFT-2471 the local host stand-in records size and echoes a key', async () => {
+  mustExist('tools/harness-matrix/host.py');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-matrix-'));
   const child = spawn('python3', [path.join(root, 'tools/harness-matrix/host.py')], {
     env: { ...process.env, HARNESS_MATRIX_LOG: dir, HARNESS_HOST: 'vps1', HARNESS_VERSION_COMMANDS: 'python3 --version' },
