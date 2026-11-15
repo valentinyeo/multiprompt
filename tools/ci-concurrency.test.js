@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { followDecision } = require('./release-follow.cjs');
 
 const workflowDir = path.join(__dirname, '..', '.github', 'workflows');
 const group = 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
@@ -58,6 +59,22 @@ test('the release workflow does not cancel an in-progress publication', () => {
     assert.doesNotMatch(read(name), /cancel-in-progress:\s*(?:true|\$\{\{\s*true\s*\}\})/);
   }
   assert.match(topConcurrency(read('release.yml')), /cancel-in-progress:\s*false/);
+  assert.match(topConcurrency(read('auto-release.yml')), /cancel-in-progress:\s*false/);
   assert.doesNotMatch(onBlock(read('release.yml')), /pull_request/);
   assert.doesNotMatch(onBlock(read('auto-release.yml')), /pull_request/);
+});
+
+test('a newer master commit still gets a release when this run is not the tip', () => {
+  const tip = 'b'.repeat(40);
+  const built = 'a'.repeat(40);
+  assert.equal(followDecision({ tip, built, releaseResult: 'success', runs: [], selfId: '1' }).dispatch, true);
+  assert.equal(followDecision({ tip, built, releaseResult: 'success', runs: [{ id: '9', headSha: tip, status: 'queued', conclusion: '' }], selfId: '1' }).dispatch, false);
+  assert.equal(followDecision({ tip, built, releaseResult: 'success', runs: [{ id: '9', headSha: tip, status: 'completed', conclusion: 'success' }], selfId: '1' }).dispatch, false);
+  assert.equal(followDecision({ tip: built, built, releaseResult: 'success', runs: [], selfId: '1' }).dispatch, false);
+  assert.equal(followDecision({ tip: built, built, releaseResult: 'failure', runs: [], selfId: '4' }).dispatch, false);
+  assert.equal(followDecision({ tip: built, built, releaseResult: 'cancelled', runs: [{ id: '4', headSha: built, status: 'in_progress', conclusion: '' }], selfId: '4' }).dispatch, true);
+  for (const name of ['release.yml', 'auto-release.yml']) {
+    assert.match(read(name), /node tools\/release-follow\.cjs/);
+    assert.match(read(name), /gh workflow run auto-release\.yml --ref master/);
+  }
 });
