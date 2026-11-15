@@ -953,6 +953,7 @@ jobs:
         working-directory: emoji-negative-source
         run: zig build -Dversion="${{ env.VERIFY_VERSION }}" -Drevision=9b8c59971273f6146b20fe901166b8469c88f637
       - name: Require the same journey to reject pre-fix emoji pixels
+        id: emoji-negative
         if: env.FEATURE == 'reaction-emoji' && env.RELEASE_TAG == '' && env.VERIFY_APP_REVISION == ''
         shell: powershell
         run: |
@@ -1095,6 +1096,14 @@ jobs:
           if ($env:FEATURE -eq 'safe-updates' -and (Test-Path evidence/safe-updates.json)) {
             $proof = Get-Content evidence/safe-updates.json -Raw | ConvertFrom-Json
             @{ feature = 'safe-updates'; version = $env:VERIFY_VERSION; sha256 = $env:VERIFY_SHA256; status = $(if ($proof.success) { 'passed' } else { 'failed' }); checks = $proof.checks; cleanup = $proof.cleanup } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
+          }
+          if ($env:FEATURE -eq 'reaction-emoji' -and -not $env:RELEASE_TAG -and -not $env:VERIFY_APP_REVISION -and (Test-Path evidence/result.json)) {
+            $emoji = Get-Content evidence/result.json -Raw | ConvertFrom-Json
+            if ($emoji.status -eq 'passed' -and '${{ steps.emoji-negative.outcome }}' -ne 'success') {
+              $emoji.status = 'failed'
+              $emoji | Add-Member -NotePropertyName error -NotePropertyValue 'The required pre-fix emoji pixel rejection did not complete'
+              $emoji | ConvertTo-Json -Depth 12 | Set-Content evidence/result.json
+            }
           }
           if (-not (Test-Path evidence/result.json)) {
             $failure = @{ feature = $env:FEATURE; version = $env:VERIFY_VERSION; sha256 = $env:VERIFY_SHA256; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' }
