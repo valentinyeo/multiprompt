@@ -28,6 +28,7 @@ def main():
     names = home / ".local/state/multiprompt/chat-names.json"
     remote = {AGENT: "Hypertask before", OTHER: "Unrelated agent"}
     requests = []
+    commands = []
     result = dict(status="failed", checks=[], boundary="Real reader protocol, installer, official Hypertask CLI and systemd user timer; loopback HTTP replaces only the Hypertask service. No desktop or live account is exercised.")
 
     class Api(BaseHTTPRequestHandler):
@@ -65,6 +66,7 @@ def main():
 
     def run(command, expected=0, **kwargs):
         done = subprocess.run([str(part) for part in command], capture_output=True, text=True, timeout=30, **kwargs)
+        commands.append(dict(argv=[str(part) for part in command], code=done.returncode, stdout=done.stdout, stderr=done.stderr))
         if done.returncode != expected:
             raise AssertionError(f"{command[0]} returned {done.returncode}, expected {expected}: {done.stdout} {done.stderr}")
         return done.stdout
@@ -154,7 +156,7 @@ def main():
         result["cleanup"] = "Owned timer and service stopped; loopback server closed" if not thread.is_alive() and (cleanup.returncode == 0 and stopped.returncode == 0 or not installed.exists()) else "failed"
         if result["cleanup"] == "failed":
             result["status"] = "failed"
-        for filename, value in (("result.json", result), ("doctor.json", doctor), ("requests.json", requests)):
+        for filename, value in (("result.json", result), ("doctor.json", doctor), ("requests.json", requests), ("commands.json", commands)):
             (args.evidence / filename).write_text(json.dumps(value, indent=2) + "\n")
         (args.evidence / "journal.txt").write_text(journal.stdout + journal.stderr)
         if names.exists():

@@ -40,7 +40,7 @@ test('the hosted journey cannot inherit the runner configuration or install dire
   const path = require('node:path');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-environment-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(home, 'verify-agent-sync.py'), 'import json, os\nprint(json.dumps({key: os.environ.get(key) for key in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "MP_TALK_BIN")}))\n');
+  fs.writeFileSync(path.join(home, 'verify-agent-sync.py'), 'import json, os\nprint(json.dumps({key: os.environ.get(key) for key in ("HOME", "PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "MP_TALK_BIN")}))\n');
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   const launch = workflow.match(/sudo -u mp-agent-journey (env [^\n]+)/)?.[1];
   assert.ok(launch, 'the Linux journey must launch with its own environment');
@@ -49,5 +49,5 @@ test('the hosted journey cannot inherit the runner configuration or install dire
     encoding: 'utf8', timeout: 10000,
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), { HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local/share'), MP_TALK_BIN: null });
+  assert.deepEqual(JSON.parse(result.stdout), { HOME: home, PATH: `${home}/.local/bin:/usr/local/bin:/usr/bin:/bin`, XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local/share'), MP_TALK_BIN: null });
 });
