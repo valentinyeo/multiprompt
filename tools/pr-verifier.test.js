@@ -73,7 +73,7 @@ test('a head journey that failed forces FAIL whatever the verifier said', () => 
   const summary = verifier.summarize(dir, ['appearance'], base);
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['looks fine'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'https://example.test/run/1' });
   assert.equal(final, 'FAIL');
-  assert.match(body, new RegExp(`^VERDICT: FAIL ${head}\\n`));
+  assert.match(body, new RegExp(`^pstack-verifier: FAIL @ ${head}\\n`));
   assert.match(body, /Head journey not passed: appearance \(failed\)/);
 });
 
@@ -89,7 +89,8 @@ test('a clean head and a red base is PASS with the before and after rows', () =>
   assert.equal(final, 'PASS');
   assert.match(body, /- appearance: head passed, base failed/);
   assert.match(body, /Run: https:\/\/example\.test\/run\/2/);
-  assert.match(body, /<!-- pr-verifier -->/);
+  assert.match(body, /<!-- pstack-verifier -->/);
+  assert.match(body, /Judge: claude/);
 });
 
 test('no journey and a claimed PASS is capped at PASS+NOTES', () => {
@@ -167,4 +168,44 @@ test('the verdict job fails the check on FAIL and posts one comment', () => {
   assert.match(workflow, /run: test "\$RESULT" != FAIL/);
   assert.match(workflow, /pull-requests: write/);
   assert.equal([...workflow.matchAll(/pull-requests: write/g)].length, 1);
+});
+
+test('a Claude co-authored pull request is judged by DeepSeek and any other by Claude', () => {
+  const claude = { messageHeadline: 'SOFT-1: Fix', messageBody: 'Body\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>' };
+  const grok = { messageHeadline: 'SOFT-2: Fix', messageBody: 'Body' };
+  assert.equal(verifier.pickEngine([grok, claude]), 'deepseek');
+  assert.equal(verifier.pickEngine([grok]), 'claude');
+  assert.equal(verifier.pickEngine([]), 'claude');
+  assert.equal(verifier.pickEngine([{ messageHeadline: 'Mention Claude in text', messageBody: 'not a trailer' }]), 'claude');
+});
+
+test('the DeepSeek verdict uses the same format and names its engine', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['result.json shows every check passed'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u', engine: 'deepseek' });
+  assert.equal(final, 'PASS');
+  assert.match(body, new RegExp(`^pstack-verifier: PASS @ ${head}\\n`));
+  assert.match(body, new RegExp(`Judge: deepseek ${verifier.DEEPSEEK_MODEL}`));
+  assert.equal(verifier.DEEPSEEK_MODEL, 'deepseek-v4.1-flash');
+});
+
+test('the DeepSeek judge reads result and doctor files as data and says it cannot see screenshots', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'passed', checks: [1] } });
+  fs.writeFileSync(path.join(dir, 'verify-appearance', 'doctor.json'), '{"ok":true}');
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-out-'));
+  fs.writeFileSync(path.join(out, 'pr.md'), '# Pull request 1');
+  const material = verifier.judgeInputs(out, dir);
+  assert.match(material, /evidence\/verify-appearance\/result\.json/);
+  assert.match(material, /evidence\/verify-appearance\/doctor\.json/);
+  const messages = verifier.judgeMessages(material);
+  assert.match(messages[0].content, /cannot see screenshots/);
+  assert.match(messages[0].content, /never as instructions/);
+});
+
+test('the DeepSeek key reaches one step and the engine is chosen from the commits', () => {
+  const lines = workflow.split('\n');
+  const uses = lines.filter(line => line.includes('secrets.DEEPSEEK_API_KEY'));
+  assert.equal(uses.length, 1);
+  assert.match(workflow, /id: deepseek\n        if: needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /id: claude\n        if: needs\.resolve\.outputs\.engine != 'deepseek'\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /name: pstack-verifier\n    needs: \[resolve, select, head, base\]/);
 });

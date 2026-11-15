@@ -32,6 +32,7 @@ jobs:
       head_sha: ${{ steps.pr.outputs.head_sha }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
       base_ref: ${{ steps.pr.outputs.base_ref }}
+      engine: ${{ steps.pr.outputs.engine }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -140,6 +141,7 @@ jobs:
       app_revision: ${{ needs.resolve.outputs.base_sha }}
 
   verdict:
+    name: pstack-verifier
     needs: [resolve, select, head, base]
     if: always() && needs.select.result == 'success'
     runs-on: ubuntu-latest
@@ -168,8 +170,16 @@ jobs:
         run: |
           node tools/pr-verifier.cjs download verifier-out/selection.json evidence ${{ needs.resolve.outputs.base_sha }}
           node tools/pr-verifier.cjs summarize evidence verifier-out/selection.json ${{ needs.resolve.outputs.base_sha }} verifier-out
+      - name: Judge the evidence with DeepSeek
+        id: deepseek
+        if: needs.resolve.outputs.engine == 'deepseek'
+        continue-on-error: true
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: node tools/pr-verifier.cjs judge-deepseek verifier-out evidence
       - name: Judge the evidence against the Done-when lines
         id: claude
+        if: needs.resolve.outputs.engine != 'deepseek'
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -197,7 +207,8 @@ jobs:
       - name: Compose the verdict comment
         id: final
         env:
-          VERDICT: ${{ steps.claude.outputs.structured_output }}
+          VERDICT: ${{ steps.claude.outputs.structured_output || steps.deepseek.outputs.structured_output }}
+          ENGINE: ${{ needs.resolve.outputs.engine }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
