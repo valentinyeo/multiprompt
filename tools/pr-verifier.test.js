@@ -84,7 +84,23 @@ test('a head journey that failed forces FAIL whatever the verifier said', () => 
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['looks fine'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'https://example.test/run/1' });
   assert.equal(final, 'FAIL');
   assert.match(body, new RegExp(`^pstack-verifier: FAIL @ ${head}\\n`));
-  assert.match(body, /Head journey not passed: appearance \(failed\)/);
+  assert.match(body, /Head journey not passed: appearance \(head failed, base missing\)/);
+});
+
+test('a journey that fails on head and base is noted, not a FAIL', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'failed' }, [`verify-appearance-${base}`]: { status: 'failed' } });
+  const summary = verifier.summarize(dir, ['appearance'], base);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['diff matches the ticket'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
+  assert.equal(final, 'PASS+NOTES');
+  assert.match(body, /Already failing on the merge base, so not caused by this change: appearance\./);
+});
+
+test('a journey that passes on base and fails on head is FAIL', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'failed' }, [`verify-appearance-${base}`]: { status: 'passed' } });
+  const summary = verifier.summarize(dir, ['appearance'], base);
+  const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
+  assert.equal(final, 'FAIL');
+  assert.match(body, /Head journey not passed: appearance \(head failed, base passed\)/);
 });
 
 test('a missing head result is FAIL, not a pass', () => {
