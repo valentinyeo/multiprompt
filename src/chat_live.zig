@@ -732,7 +732,8 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
         const applied = applyValue(live, std.heap.page_allocator, seq, event) catch false;
         changed = changed or applied;
     }
-    return changed and live.touchIfVisible();
+    if (changed) _ = live.touchIfVisible();
+    return changed;
 }
 
 pub fn applySettingsSnapshot(shell_id: u32, sid: []const u8, seq: u64, payload: std.json.Value) bool {

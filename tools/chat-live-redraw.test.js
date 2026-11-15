@@ -38,7 +38,7 @@ test('a live revision change redraws the sidebar only when the preview line diff
 test('a page that changes nothing on screen does not bump the live revision', () => {
   const apply = body(live, 'pub fn applyPage(');
   assert.ok(!/if \(changed\) live\.touch\(\);/.test(apply));
-  assert.ok(/changed and live\.touchIfVisible\(\)/.test(apply));
+  assert.ok(/if \(changed\) _ = live\.touchIfVisible\(\);/.test(apply));
   assert.ok(/pub fn touchIfVisible\(self: \*Live\) bool/.test(live));
   assert.ok(/pub fn visibleStamp\(self: \*const Live\) u64/.test(live));
 });
