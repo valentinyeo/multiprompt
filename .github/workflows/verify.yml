@@ -942,6 +942,38 @@ jobs:
             }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: env.FEATURE == 'reaction-emoji' && env.RELEASE_TAG == '' && env.VERIFY_APP_REVISION == ''
+        with:
+          ref: 9b8c59971273f6146b20fe901166b8469c88f637
+          path: emoji-negative-source
+          persist-credentials: false
+      - name: Build the pre-fix reaction emoji control
+        if: env.FEATURE == 'reaction-emoji' && env.RELEASE_TAG == '' && env.VERIFY_APP_REVISION == ''
+        working-directory: emoji-negative-source
+        run: zig build -Dversion="${{ env.VERIFY_VERSION }}" -Drevision=9b8c59971273f6146b20fe901166b8469c88f637
+      - name: Require the same journey to reject pre-fix emoji pixels
+        if: env.FEATURE == 'reaction-emoji' && env.RELEASE_TAG == '' && env.VERIFY_APP_REVISION == ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence/emoji-negative | Out-Null
+          Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe emoji-negative-source/zig-out/bin/
+          $exe = "$pwd/emoji-negative-source/zig-out/bin/multiprompt.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ revision='9b8c59971273f6146b20fe901166b8469c88f637'; version=$env:VERIFY_VERSION; sha256=$hash } | ConvertTo-Json | Set-Content evidence/emoji-negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature reaction-emoji -Exe $exe -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $hash -Evidence "$pwd/evidence/emoji-negative"
+          } catch { Write-Host "Negative control returned: $_" }
+          $red = Get-Content evidence/emoji-negative/result.json -Raw | ConvertFrom-Json
+          $clean = Get-Content evidence/emoji-negative/cleanup.json -Raw | ConvertFrom-Json
+          $pixels = Get-Content evidence/emoji-negative/reactions/dark-pixels-stderr.log -Raw
+          if ($red.status -ne 'failed' -or $red.error -notlike '*full-size colour reaction and react button on dark*' -or $pixels -notlike '*must be a full-size colour emoji*') { throw 'Pre-fix reaction control failed before the emoji pixel assertion' }
+          if ($clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed) { throw 'Pre-fix reaction control left owned processes or scratch data' }
+          $head = Get-Content evidence/result.json -Raw | ConvertFrom-Json
+          $head | Add-Member -NotePropertyName negativeControl -NotePropertyValue @{ revision='9b8c59971273f6146b20fe901166b8469c88f637'; rejectedAt='full-size colour emoji pixel assertion'; error=$pixels; cleanup=$clean }
+          $head | ConvertTo-Json -Depth 12 | Set-Content evidence/result.json
+          $global:LASTEXITCODE = 0
       - name: Save paired session views
         if: success() && steps.desktop-driver.outcome == 'success' && env.CHAT_HAX_PROOF == '1'
         shell: powershell

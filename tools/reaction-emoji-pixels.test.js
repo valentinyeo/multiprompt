@@ -1,13 +1,24 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { discoverFeatures } = require('./verify-features.cjs');
+const { validateSelection } = require('./pr-verifier.cjs');
 
-function image(emojiSize = 14, color = 0xffcc4d) {
+test('SOFT-2441 the PR verifier can select the reaction emoji journey', () => {
+  const available = discoverFeatures().available;
+  assert.ok(available.includes('reaction-emoji'));
+  assert.deepEqual(validateSelection({ features: ['reaction-emoji'], compare_base: true }, available).features, ['reaction-emoji']);
+});
+
+function image(emojiSize = 14, color = 0xffcc4d, target = 'both') {
   const width = 140, height = 60;
   const pixels = Buffer.alloc(width * height * 4);
   const fill = (left, top, w, h, value) => {
     for (let y = top; y < top + h; y++) for (let x = left; x < left + w; x++) pixels.writeUInt32LE(value, (y * width + x) * 4);
   };
-  for (const left of [10, 62]) fill(left, 20, emojiSize, emojiSize, color);
+  for (const [name, left] of [['reaction', 10], ['react', 62]]) {
+    const change = target === 'both' || target === name;
+    fill(left, 20, change ? emojiSize : 14, change ? emojiSize : 14, change ? color : 0xffcc4d);
+  }
   fill(96, 25, 8, 3, 0x777777);
   fill(124, 25, 4, 2, 0x777777);
   return { width, height, pixels };
@@ -26,11 +37,13 @@ test('SOFT-2441 full-size colour reactions and hover emoji pass', async () => {
   assert.equal(result.react.height, 14);
 });
 
-for (const [name, size, color] of [['tiny', 7, 0xffcc4d], ['monochrome', 14, 0xcccccc], ['missing', 0, 0xffcc4d]]) {
-  test(`SOFT-2441 rejects ${name} reaction or react emoji`, async () => {
-    const { assertEmojiPixels } = await import('./reaction-emoji-pixels.mjs');
-    assert.throws(() => assertEmojiPixels(image(size, color), geometry), /full-size colour/);
-  });
+for (const target of ['reaction', 'react']) {
+  for (const [name, size, color] of [['tiny', 7, 0xffcc4d], ['monochrome', 14, 0xcccccc], ['missing', 0, 0xffcc4d]]) {
+    test(`SOFT-2441 rejects ${name} ${target} emoji independently`, async () => {
+      const { assertEmojiPixels } = await import('./reaction-emoji-pixels.mjs');
+      assert.throws(() => assertEmojiPixels(image(size, color, target), geometry), new RegExp(`${target} must be a full-size colour`));
+    });
+  }
 }
 
 test('SOFT-2441 reply and more controls must remain visible', async () => {

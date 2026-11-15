@@ -24,7 +24,7 @@ The independent pixel checker requires at least 20 yellow/orange pixels per emoj
 
 Inspect `reactions-emoji-dark.png`, `reactions-emoji-light.png`, the four `reaction-emoji-*-4x.png` crops and the measured bounds in `result.json`. `doctor.json` records the owned executable identity. `cleanup.json` must show zero owned processes and removed scratch data.
 
-For before/after proof, run this same head harness with `app_revision` set to the merge base through the PR verifier's base journey. The old hover text smiley must fail the colour-pixel assertion after reaching the real reaction, not at launch or setup. A passing head run proves both themes; source tests alone do not.
+After the head journey passes, the workflow builds pre-fix master `9b8c59971273f6146b20fe901166b8469c88f637` and runs this identical head harness against that executable. The old build must fail the colour-pixel assertion after reaching the real reaction, not at launch or setup. Its screenshots, Doctor and cleanup receipts are retained under `emoji-negative/`, and the root `result.json` records the rejected pixel assertion. A passing head run proves both themes; source tests alone do not.
 
 ## Gotchas
 
