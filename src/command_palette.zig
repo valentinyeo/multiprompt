@@ -325,6 +325,7 @@ const saveSession = @import("session.zig").saveSession;
 const TMUX_HOST_UK = @import("app_state.zig").TMUX_HOST_UK;
 const TMUX_HOST_INNE = @import("app_state.zig").TMUX_HOST_INNE;
 const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
+const loadArchiveIfNeeded = @import("archive.zig").loadArchiveIfNeeded;
 const loadSnippetsIfChanged = @import("snippets.zig").loadSnippetsIfChanged;
 const snippetMatchesQuery = @import("snippets.zig").snippetMatchesQuery;
 const MAX_REMINDERS = @import("app_state.zig").MAX_REMINDERS;
@@ -536,12 +537,6 @@ const RestartChatJob = struct {
 };
 
 const SHELL_ROWS = [_]ShellRow{
-    .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
-    .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
-    .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
-    .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
-    .{ .target = SEARCH_NEW_OFFSET + 3, .keywords = "open shell on vps 1 host1 server 1 ssh new host1 vps shell" },
-    .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "open shell on vps 2 host2 server 2 ssh new host2 vps shell" },
     .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
 };
@@ -550,7 +545,7 @@ pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -558,7 +553,7 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
     try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
@@ -805,8 +800,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             "new cmd shell",
             "attach host1 tmux session",
             "attach host2 tmux session",
-            "Open shell on VPS 1",
-            "Open shell on VPS 2",
+            "new host1 vps shell",
+            "new host2 vps shell",
             "new powershell",
             "new bash shell",
             "new git bash shell",
@@ -3294,120 +3289,6 @@ fn appendPinnedPageResults(shell_id: u32) void {
     }
 }
 
-fn paletteShellIsActive(index: usize) bool {
-    if (index >= app_state.shell_count) return false;
-    const shell = &app_state.shells[index];
-    if (shell.inbox_archived and !shell.needs_attention) return false;
-    return !@import("workspaces.zig").workspaceSlotArchived(shell.workspace);
-}
-
-fn appendPaletteShellRows() void {
-    for (0..app_state.shell_count) |i| {
-        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-        if (!paletteShellIsActive(i)) continue;
-        if (app_state.g_search_len == 0) {
-            app_state.g_search_results[app_state.g_search_result_count] = i;
-            app_state.g_search_result_count += 1;
-            continue;
-        }
-        const q = app_state.g_search_buf[0..app_state.g_search_len];
-        const remote_host: ?u8 = switch (app_state.shells[i].kind) {
-            .tmux => app_state.shells[i].tmux_host,
-            .vps => 0,
-            .vps2 => 1,
-            else => null,
-        };
-        if (u16ContainsInsensitive(app_state.shells[i].name[0..app_state.shells[i].name_len], q) or
-            (if (app_state.shells[i].last_title_len > 0) u16ContainsInsensitive(app_state.shells[i].last_title[0..@intCast(app_state.shells[i].last_title_len)], q) else false) or
-            kindMatchesQuery(app_state.shells[i].kind, q) or
-            sessionFolderMatchesQuery(&app_state.shells[i], q) or
-            (if (remote_host) |host| tmuxHostMatchesQuery(host, q) else false))
-        {
-            app_state.g_search_results[app_state.g_search_result_count] = i;
-            app_state.g_search_result_count += 1;
-        }
-    }
-}
-
-test "SOFT-2444 Ctrl+K session rows keep active sessions and drop archived ones" {
-    const saved_count = app_state.shell_count;
-    const saved_shells = [4]app_state.Shell{ app_state.shells[0], app_state.shells[1], app_state.shells[2], app_state.shells[3] };
-    const saved_len = app_state.g_search_len;
-    const saved_buf = app_state.g_search_buf;
-    const saved_results = app_state.g_search_results;
-    const saved_result_count = app_state.g_search_result_count;
-    const saved_ws_count = app_state.g_workspace_count;
-    const saved_workspaces = app_state.g_workspaces;
-    const saved_lws = app_state.g_lws_count;
-    const saved_ids = app_state.g_ws_ids;
-    const saved_id_lens = app_state.g_ws_id_len;
-    defer {
-        app_state.shell_count = saved_count;
-        inline for (0..4) |i| app_state.shells[i] = saved_shells[i];
-        app_state.g_search_len = saved_len;
-        app_state.g_search_buf = saved_buf;
-        app_state.g_search_results = saved_results;
-        app_state.g_search_result_count = saved_result_count;
-        app_state.g_workspace_count = saved_ws_count;
-        app_state.g_workspaces = saved_workspaces;
-        app_state.g_lws_count = saved_lws;
-        app_state.g_ws_ids = saved_ids;
-        app_state.g_ws_id_len = saved_id_lens;
-    }
-
-    app_state.g_lws_count = 2;
-    app_state.g_ws_ids[0] = std.mem.zeroes([32]u8);
-    app_state.g_ws_ids[1] = std.mem.zeroes([32]u8);
-    @memcpy(app_state.g_ws_ids[0][0..4], "live");
-    app_state.g_ws_id_len[0] = 4;
-    @memcpy(app_state.g_ws_ids[1][0..3], "old");
-    app_state.g_ws_id_len[1] = 3;
-    app_state.g_workspace_count = 2;
-    app_state.g_workspaces[0] = std.mem.zeroes(app_state.WorkspaceEntry);
-    app_state.g_workspaces[1] = std.mem.zeroes(app_state.WorkspaceEntry);
-    @memcpy(app_state.g_workspaces[0].id[0..4], "live");
-    app_state.g_workspaces[0].id_len = 4;
-    @memcpy(app_state.g_workspaces[1].id[0..3], "old");
-    app_state.g_workspaces[1].id_len = 3;
-    app_state.g_workspaces[1].archived = true;
-
-    app_state.shell_count = 4;
-    inline for (0..4) |i| app_state.shells[i] = app_state.empty_shell;
-    const names = [_][]const u8{ "Triage LC", "Triage LC", "Ping", "Broadcast" };
-    for (names, 0..) |name, i| {
-        app_state.shells[i].name_len = @intCast(name.len);
-        for (name, 0..) |c, j| app_state.shells[i].name[j] = c;
-    }
-    app_state.shells[1].inbox_archived = true;
-    app_state.shells[2].inbox_archived = true;
-    app_state.shells[2].needs_attention = true;
-    app_state.shells[3].workspace = 1;
-
-    app_state.g_search_len = 0;
-    app_state.g_search_result_count = 0;
-    appendPaletteShellRows();
-    try std.testing.expectEqualSlices(usize, &.{ 0, 2 }, app_state.g_search_results[0..app_state.g_search_result_count]);
-
-    const query = "tri";
-    for (query, 0..) |c, i| app_state.g_search_buf[i] = c;
-    app_state.g_search_len = @intCast(query.len);
-    app_state.g_search_result_count = 0;
-    appendPaletteShellRows();
-    try std.testing.expectEqualSlices(usize, &.{0}, app_state.g_search_results[0..app_state.g_search_result_count]);
-
-    app_state.shells[1].inbox_archived = false;
-    app_state.g_workspaces[1].archived = false;
-    app_state.g_search_len = 0;
-    app_state.g_search_result_count = 0;
-    appendPaletteShellRows();
-    try std.testing.expectEqualSlices(usize, &.{ 0, 1, 2, 3 }, app_state.g_search_results[0..app_state.g_search_result_count]);
-
-    app_state.g_search_len = @intCast(query.len);
-    app_state.g_search_result_count = 0;
-    appendPaletteShellRows();
-    try std.testing.expectEqualSlices(usize, &.{ 0, 1 }, app_state.g_search_results[0..app_state.g_search_result_count]);
-}
-
 pub fn updateSearchResults() void {
     app_state.g_search_revision +%= 1;
     if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
@@ -3951,14 +3832,6 @@ pub fn updateSearchResults() void {
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_TERMINAL_OFFSET;
             app_state.g_search_result_count += 1;
-        }
-        if (app_state.g_search_len == 0) {
-            const vps_shells = [_]usize{ SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4 };
-            for (vps_shells) |vps_shell| {
-                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-                app_state.g_search_results[app_state.g_search_result_count] = vps_shell;
-                app_state.g_search_result_count += 1;
-            }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             keywordsMatchAll("pick repo choose repository folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4522,10 +4395,6 @@ pub fn updateSearchResults() void {
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "use snippets", "snippets", "snippet", "paste snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPETS_MENU_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
-    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"manage snippets"}, app_state.g_search_buf[0..app_state.g_search_len])) {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_MANAGE_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "create snippet", "new snippet", "snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -5386,9 +5255,68 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
-    appendPaletteShellRows();
+    for (0..app_state.shell_count) |i| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (app_state.g_search_len == 0) {
+            app_state.g_search_results[app_state.g_search_result_count] = i;
+            app_state.g_search_result_count += 1;
+            continue;
+        }
+        const q = app_state.g_search_buf[0..app_state.g_search_len];
+        const remote_host: ?u8 = switch (app_state.shells[i].kind) {
+            .tmux => app_state.shells[i].tmux_host,
+            .vps => 0,
+            .vps2 => 1,
+            else => null,
+        };
+        if (u16ContainsInsensitive(app_state.shells[i].name[0..app_state.shells[i].name_len], q) or
+            (if (app_state.shells[i].last_title_len > 0) u16ContainsInsensitive(app_state.shells[i].last_title[0..@intCast(app_state.shells[i].last_title_len)], q) else false) or
+            kindMatchesQuery(app_state.shells[i].kind, q) or
+            sessionFolderMatchesQuery(&app_state.shells[i], q) or
+            (if (remote_host) |host| tmuxHostMatchesQuery(host, q) else false))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = i;
+            app_state.g_search_result_count += 1;
+        }
+    }
 
     if (app_state.g_search_len > 0) appendTmuxCacheRows();
+
+    if (app_state.g_search_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
+        loadArchiveIfNeeded();
+        const query_arc = app_state.g_search_buf[0..app_state.g_search_len];
+        var ai: usize = 0;
+        while (ai < @min(app_state.g_archived_count, 64)) : (ai += 1) {
+            const e = &app_state.g_archived.items[ai];
+            var name_w: [64]u16 = undefined;
+            for (e.name[0..e.name_len], 0..) |c, ni| name_w[ni] = @intCast(c);
+            var sess_w: [64]u16 = undefined;
+            for (e.tmux_session[0..e.tmux_session_len], 0..) |c, si| sess_w[si] = @intCast(c);
+            var all_arc = true;
+            var wstart_a: usize = 0;
+            var qp_a: usize = 0;
+            while (qp_a <= query_arc.len) : (qp_a += 1) {
+                const at_end_a = (qp_a == query_arc.len);
+                if (at_end_a or query_arc[qp_a] == ' ') {
+                    if (qp_a > wstart_a) {
+                        const word_a = query_arc[wstart_a..qp_a];
+                        const name_hit_a = u16ContainsInsensitive(name_w[0..e.name_len], word_a);
+                        const sess_hit_a = !name_hit_a and u16ContainsInsensitive(sess_w[0..e.tmux_session_len], word_a);
+                        if (!name_hit_a and !sess_hit_a) {
+                            all_arc = false;
+                            break;
+                        }
+                    }
+                    wstart_a = qp_a + 1;
+                }
+            }
+            if (!all_arc) continue;
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_ARCHIVED_OFFSET + ai;
+                app_state.g_search_result_count += 1;
+            }
+        }
+    }
 
     if (app_state.g_search_len > 0) appendGroupPaletteResults();
     if (@import("room_frontend.zig").isActive()) {

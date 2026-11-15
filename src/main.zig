@@ -6325,6 +6325,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_open_session_mode = open_session;
                     app_state.g_search_shells_mode = !open_session;
                     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_shells_mode = false;
+                    app_state.g_search_open_session_mode = false;
                     app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_workspace_delete_mode = false;
