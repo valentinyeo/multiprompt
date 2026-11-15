@@ -540,6 +540,8 @@ const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
     .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
     .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 3, .keywords = "open shell on vps 1 host1 server 1 ssh new host1 vps shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "open shell on vps 2 host2 server 2 ssh new host2 vps shell" },
     .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
 };
@@ -548,7 +550,7 @@ pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -556,7 +558,7 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_CURSOR_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
     try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
@@ -803,8 +805,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             "new cmd shell",
             "attach host1 tmux session",
             "attach host2 tmux session",
-            "new host1 vps shell",
-            "new host2 vps shell",
+            "Open shell on VPS 1",
+            "Open shell on VPS 2",
             "new powershell",
             "new bash shell",
             "new git bash shell",
@@ -3949,6 +3951,14 @@ pub fn updateSearchResults() void {
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_TERMINAL_OFFSET;
             app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_len == 0) {
+            const vps_shells = [_]usize{ SEARCH_NEW_OFFSET + 3, SEARCH_NEW_OFFSET + 4 };
+            for (vps_shells) |vps_shell| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                app_state.g_search_results[app_state.g_search_result_count] = vps_shell;
+                app_state.g_search_result_count += 1;
+            }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             keywordsMatchAll("pick repo choose repository folder repo", app_state.g_search_buf[0..app_state.g_search_len]))

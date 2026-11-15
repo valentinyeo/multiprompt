@@ -49,3 +49,36 @@ test('SOFT-2460 a plain shell spawn logs each silent refusal', () => {
   const native = consoleSrc.slice(consoleSrc.indexOf('fn spawnNativeShell('), start);
   assert.match(native, /spawnShell refused: native open/);
 });
+
+test('SOFT-2460 Ctrl+K lists Open shell on VPS 1 and VPS 2', () => {
+  const palette = read('src/command_palette.zig');
+  const rows = palette.slice(palette.indexOf('const SHELL_ROWS'), palette.indexOf('pub const PICK_REPO_LABEL'));
+  assert.match(rows, /SEARCH_NEW_OFFSET \+ 3, \.keywords = "open shell on vps 1/);
+  assert.match(rows, /SEARCH_NEW_OFFSET \+ 4, \.keywords = "open shell on vps 2/);
+  assert.match(palette, /"Open shell on VPS 1"/);
+  assert.match(palette, /"Open shell on VPS 2"/);
+  const empty = palette.slice(palette.indexOf('keywordsMatchAll("new terminal shell plain"'), palette.indexOf('keywordsMatchAll("pick repo'));
+  assert.match(empty, /SEARCH_NEW_OFFSET \+ 3/);
+  assert.match(empty, /SEARCH_NEW_OFFSET \+ 4/);
+  const main = read('src/main.zig');
+  const menu = main.slice(main.indexOf('if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET)'), main.indexOf('if (target == SEARCH_REOPEN_OFFSET)'));
+  assert.match(menu, /g_search_shells_mode = !open_session/);
+  assert.doesNotMatch(menu, /g_search_shells_mode = false/);
+  assert.doesNotMatch(menu, /g_search_open_session_mode = false/);
+  assert.match(read('src/sidebar.zig'), /L\("Open shell on VPS 1"\)/);
+  assert.match(read('src/sidebar.zig'), /L\("Open shell on VPS 2"\)/);
+});
+
+test('SOFT-2460 a shell tab reports its real size and the console font override', () => {
+  const native = read('src/native_session.zig');
+  const height = native.slice(native.indexOf('fn shellFontHeight()'), native.indexOf('fn shellFont('));
+  assert.match(height, /g_console_font_override > 0/);
+  assert.match(height, /mainWindowDpi\(\)/);
+  const ready = native.slice(native.indexOf('pub fn ready('), native.indexOf('pub fn alive('));
+  assert.match(ready, /repositionActive\(\)[\s\S]*mp_terminal_window_report\(/);
+  const restyle = native.slice(native.indexOf('pub fn restyle('), native.indexOf('pub fn copy('));
+  assert.match(restyle, /mp_terminal_window_style\([\s\S]*mp_terminal_window_report\(/);
+  const window = read('src/terminal_window.c');
+  assert.match(window, /void mp_terminal_window_report\(HWND hwnd\)/);
+  assert.match(window, /if \(\(changed \|\| force\) && t->resize\) t->resize\(rows, cols, t->user\)/);
+});
