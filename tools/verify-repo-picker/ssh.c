@@ -16,6 +16,40 @@ int main(int argc, char **argv) {
     if (!log) return 3;
     fputs(cmd, log);
     fclose(log);
+    snprintf(path, sizeof(path), "%s\\all-sessions", root);
+    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+        int host = strstr(cmd, "remote-3") ? 2 : strstr(cmd, "remote-2") ? 1 : 0;
+        const char *names[] = {"first", "terminal-owner", "spare", "remote-one", "second"};
+        const int hosts[] = {0, 0, 0, 1, 2};
+        const int memory[] = {128, 32, 64, 512, 256};
+        if (strstr(cmd, "tmux kill-session -t ")) {
+            for (int i = 0; i < 5; i++) {
+                if (hosts[i] != host || !strstr(cmd, names[i])) continue;
+                snprintf(path, sizeof(path), "%s\\closed-%s", root, names[i]);
+                FILE *closed = fopen(path, "wb");
+                if (!closed) return 5;
+                fputs(names[i], closed);
+                fclose(closed);
+            }
+            return 0;
+        }
+        if (strstr(cmd, "tmux list-clients") || strstr(cmd, "tmux list-sessions")) {
+            int probe = strstr(cmd, "tmux list-clients") != NULL;
+            for (int i = 0; i < 5; i++) {
+                if (hosts[i] != host) continue;
+                snprintf(path, sizeof(path), "%s\\closed-%s", root, names[i]);
+                if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) continue;
+                if (probe) {
+                    if (i != 2 && i != 3) puts(names[i]);
+                    printf("@@S %s\n", names[i]);
+                } else {
+                    printf("%s|1|%d|/work/projects/example|bash|%s\n", names[i], memory[i], names[i]);
+                }
+            }
+            if (probe) puts("@@LS_OK@@\n@@MP_LIVE@@");
+            return 0;
+        }
+    }
     if (strstr(cmd, "@@MP_REPOS_OK@@")) {
         const char *only = getenv("MP_VERIFY_REPOS");
         if (only && only[0]) {

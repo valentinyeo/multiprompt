@@ -74,6 +74,10 @@ The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session
 
 The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictation`, branch build only) drives Ctrl+D, Enter, repeated Ctrl+D and a real mic click. Recorded PCM and offline provider-response replay traverse the production worker/parser/draft delivery; exact native composer text must appear within 1000 ms, while listening-time typing and active/idle microphone pixels are checked independently. This does not verify acoustic recognition or microphone hardware.
 
+## All sessions
+
+Use [all-sessions](features/all-sessions.md) for the redesigned All sessions view. It drives the actual overlay with three saved tabs, one archived identity and an SSH-only boundary across three generic servers. Require all seven named Done-when checks, inspect its screenshots and painter receipts, and independently read the app-written archive and SSH end receipts. The `sessions`, `session-actions` and `command-palette` journeys exercise other surfaces and cannot substitute for this journey.
+
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:

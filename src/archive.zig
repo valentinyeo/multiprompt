@@ -2089,6 +2089,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
     const rows = app_state.g_session_overview_rows.items[0..app_state.g_session_overview_count];
     const global_counts = sessionViewCounts(rows, AS_HOST_FILTER_ALL);
     const running_hosts = sessionViewRunningHosts(rows);
+    if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] begin", .{});
 
     const card: DWORD = if (light) RGB(246, 246, 248) else tokenColor(tokens.ReaderBackground);
     const fg: DWORD = if (light) RGB(32, 32, 36) else tokenColor(tokens.ReaderForeground);
@@ -2174,6 +2175,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         app_state.g_all_sessions_chip_host[slot] = row.host;
         app_state.g_all_sessions_chip_rc[slot] = chip_rc;
         app_state.g_all_sessions_chip_n += 1;
+        if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] chip host={d} running={d} ram={d} rect={d},{d},{d},{d}", .{ row.host, host_rows_running, mem, chip_rc.left, chip_rc.top, chip_rc.right, chip_rc.bottom });
         chip_x += chip_w + uiScaled(8);
     }
 
@@ -2233,6 +2235,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
             app_state.g_all_sessions_split_ids[si] = tabid;
             app_state.g_all_sessions_split_tab_count += 1;
         }
+        if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] tab id={d} count={d} rect={d},{d},{d},{d}", .{ tabid, count, pill_rc.left, pill_rc.top, pill_rc.right, pill_rc.bottom });
         tx = pill_rc.right + uiScaled(4);
     }
 
@@ -2330,6 +2333,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
             asDrawPill(hdc, ws_rc, if (archived) (if (light) RGB(236, 236, 238) else tokenColor(tokens.ReaderPanel)) else (if (light) RGB(232, 232, 236) else tokenColor(tokens.ReaderRaised)), ws_label, if (archived) grey else fg, font_subtitle);
         }
         cursor_right -= ws_w;
+        if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] row session={s} state={s} workspace={s} host={d} ram={d} selected={d} y={d} open={d} archive={d} close={d}", .{ row.session[0..row.session_len], sessionViewStateLabel(state), ws_label, row.host, row.ram_mb, @intFromBool(selected), y + @divTrunc(chrome.row_h, 2), @divTrunc(actions[0].left + actions[0].right, 2), @divTrunc(actions[1].left + actions[1].right, 2), @divTrunc(actions[2].left + actions[2].right, 2) });
         const state_color: DWORD = switch (state) {
             .running => green_text,
             .no_window => blue_text,
@@ -2412,6 +2416,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
     _ = SetTextColor(hdc, if (close_enabled) fg else muted);
     _ = drawUtf16(hdc, L("Clear marks"), -1, &clear_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
+    if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] view tab={d} host={d} visible={d} selected={d} marks={d} running={d} servers={d} archived={d} footer_y={d}", .{ app_state.g_all_sessions_tab, app_state.g_all_sessions_host_filter, vis, app_state.g_all_sessions_sel, marked_n, global_counts.running, running_hosts, global_counts.archived, @divTrunc(close_rc.top + close_rc.bottom, 2) });
     _ = SelectObject(hdc, old_font);
 }
 
