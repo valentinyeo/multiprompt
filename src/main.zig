@@ -4015,7 +4015,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_ATTACH_FAILED => {
-            if (lp != 0) @import("chat_render.zig").chatFileNotice(lp) else showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
+            if (lp != 0 and wp != 0) {
+                const low: u32 = @truncate(wp);
+                if (low != 0) @import("chat_send.zig").chatRestartAiApplyRefusal(low - 1, wp >> 32 != 0);
+                @import("chat_render.zig").chatFileNotice(lp);
+            } else if (lp != 0) @import("chat_render.zig").chatFileNotice(lp) else showHeaderNoticeAscii(chatAttachErrorText(wp), 4000, true);
             return 0;
         },
         app_state.WM_APP_CHAT_MODE_RESULT => {

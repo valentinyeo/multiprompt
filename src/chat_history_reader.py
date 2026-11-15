@@ -4664,6 +4664,19 @@ def host_refuse(reason, **extra):
     return dict(status="refused", reason=reason, **extra)
 
 
+def host_clear_session(session):
+    state = session.get("state") if isinstance(session, dict) else None
+    if not isinstance(state, dict):
+        return host_refuse("clear_unavailable")
+    if session.get("turn") is not None or session.get("sends") or session.get("parked") or session.get("inflight"):
+        return host_refuse("chat_busy")
+    state["context_session"] = str(uuid.uuid4())
+    state.pop("native_session", None)
+    state.pop("display_history", None)
+    session["clear_agent"] = True
+    return dict(status="ok")
+
+
 def host_handle_request(provider, sid, tmux, session, request):
     operation = request.get("op")
     if operation == "ping":
@@ -4677,6 +4690,14 @@ def host_handle_request(provider, sid, tmux, session, request):
     adapter = HOST_ADAPTERS[provider]
     if operation == "fresh_start":
         return host_fresh_start(provider, sid, tmux, session)
+    if operation == "clear":
+        if provider != "claude":
+            return host_refuse("unsupported_provider")
+        reply = host_clear_session(session)
+        if reply.get("status") == "ok":
+            host_state_write(provider, sid, session["state"])
+            host_log(provider, sid, "clear")
+        return reply
     if operation == "deliver" and session["state"].get("fresh_start"):
         return dict(status="busy", reason="fresh_start_pending")
     if operation in ("approval_reply", "question_reply", "plan_reply"):
@@ -5751,6 +5772,24 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 host_history_append(provider, sid, session, dict(role="assistant", text="---\nFresh start\n---"))
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             host_fresh_resume(provider, sid, tmux, session)
+            if session.pop("clear_agent", None):
+                selector.unregister(agent.stdout)
+                host_agent_stop(agent)
+                session["agent"] = None
+                session["ready"] = False
+                try:
+                    agent = host_agent_start(provider, sid, session["state"].get("mode"))
+                except (OSError, RuntimeError):
+                    agent = None
+                if agent is None:
+                    host_log(provider, sid, "clear_failed")
+                    return
+                host_session_reset(session, agent)
+                session["state"]["agent_pid"] = agent.pid
+                host_state_write(provider, sid, session["state"])
+                selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+                HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
+                continue
             if (provider == "claude" and session["settings"] != session["starting_settings"]
                     and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
                 selector.unregister(agent.stdout)
@@ -7128,10 +7167,52 @@ def held_queue_fields(tmux, sid, with_receipts=False):
     return dict(queue=[row[0] for row in queued], sent=result)
 
 
+def bare_clear(text):
+    return isinstance(text, str) and text.strip() == "/clear"
+
+
+CLEAR_REASON = re.compile(r"[A-Za-z0-9_]{1,40}\Z")
+
+
+def clear_wire(rid, status, reason):
+    token = "-" if status == "ok" else reason if isinstance(reason, str) and CLEAR_REASON.fullmatch(reason) else "clear_failed"
+    return f"@mp\t{rid}\tsend\t{status}\t{token}\t0\n{END}\n"
+
+
+def send_clear(q):
+    rid = q.get("id", 0)
+    name = q.get("tmux")
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+        return clear_wire(rid, "error", "invalid_tmux_name")
+    if host_pane_claimed(name):
+        sid = host_sid_for_tmux("claude", name)
+        if not isinstance(sid, str) or not sid:
+            return clear_wire(rid, "error", "clear_unavailable")
+        reply = host_request("claude", sid, dict(op="clear"))
+        if not isinstance(reply, dict) or reply.get("status") != "ok":
+            reason = reply.get("reason") if isinstance(reply, dict) else None
+            return clear_wire(rid, "error", reason if isinstance(reason, str) else "clear_failed")
+        return clear_wire(rid, "ok", None)
+    if host_pane_is_shell(name):
+        try:
+            running = resolve_tmux_agent("claude", name)
+        except (OSError, ValueError):
+            running = None
+        if running:
+            return clear_wire(rid, "error", "pane_busy")
+        return clear_wire(rid, "error", "needs_restart")
+    return None
+
+
 def send_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
     text = q.get("text")
+    if bare_clear(text) and q.get("op", "send") == "send":
+        cleared = send_clear(q)
+        if cleared is not None:
+            return cleared
+        text = "/clear"
     reason = None
     if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
         reason = "invalid_tmux_name"
@@ -8057,7 +8138,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 126
+RUNTIME_GENERATION = 127
 
 if __name__ == '__main__':
     import base64 as _base64

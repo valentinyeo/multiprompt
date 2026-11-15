@@ -1172,16 +1172,33 @@ pub fn syncLiveTmuxMetadataFromCache() bool {
             changed = true;
         }
 
-        const step = aiStoppedAfterPoll(app_state.shells[i].ai_agent, e.pane_shell, app_state.shells[i].ai_stopped, app_state.shells[i].ai_restart_tick, GetTickCount64());
-        if (step.stopped != app_state.shells[i].ai_stopped) {
-            app_state.shells[i].ai_stopped = step.stopped;
-            changed = true;
+        const now = GetTickCount64();
+        const restart_busy = app_state.shells[i].ai_restart_busy and e.pane_shell and now -| app_state.shells[i].ai_restart_busy_tick < AI_RESTART_GRACE_MS;
+        if (!restart_busy and app_state.shells[i].ai_restart_busy) {
+            app_state.shells[i].ai_restart_busy = false;
+            app_state.shells[i].ai_restart_busy_tick = 0;
         }
-        if (step.restart_tick != app_state.shells[i].ai_restart_tick) {
-            app_state.shells[i].ai_restart_tick = step.restart_tick;
-            changed = true;
+        const step = aiStoppedAfterPoll(app_state.shells[i].ai_agent, e.pane_shell, app_state.shells[i].ai_stopped, app_state.shells[i].ai_restart_tick, now);
+        if (restart_busy) {
+            if (app_state.shells[i].ai_stopped) {
+                app_state.shells[i].ai_stopped = false;
+                changed = true;
+            }
+            if (app_state.shells[i].ai_restart_tick != 0) {
+                app_state.shells[i].ai_restart_tick = 0;
+                changed = true;
+            }
+        } else {
+            if (step.stopped != app_state.shells[i].ai_stopped) {
+                app_state.shells[i].ai_stopped = step.stopped;
+                changed = true;
+            }
+            if (step.restart_tick != app_state.shells[i].ai_restart_tick) {
+                app_state.shells[i].ai_restart_tick = step.restart_tick;
+                changed = true;
+            }
+            if (step.resend) _ = @import("chat_send.zig").chatEchoResendHeldForShell(@intCast(i));
         }
-        if (step.resend) _ = @import("chat_send.zig").chatEchoResendHeldForShell(@intCast(i));
     }
 
     if (changed) publishInboxState();

@@ -2355,10 +2355,36 @@ pub fn chatEchoResendHeldForShell(idx: u32) u32 {
 
 const CHAT_RESTART_AI_TMUX_CAP = 64;
 
-fn chatRestartAiNotice(text: []const u8) void {
+fn chatRestartAiReason(wire: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, wire, "\tpane_busy\t") != null) return "The AI is still running, so it was not restarted.";
+    if (std.mem.indexOf(u8, wire, "\tinvalid_session\t") != null) return "Could not restart the AI. This chat has no session to resume.";
+    if (std.mem.indexOf(u8, wire, "\tinvalid_tmux_name\t") != null) return "Could not restart the AI. This chat has no server session.";
+    if (std.mem.indexOf(u8, wire, "\tpane_input_failed\t") != null) return "Could not restart the AI. The server did not accept the command.";
+    return "Could not restart the AI. Open the terminal and start it by hand";
+}
+
+fn chatRestartAiPost(shell_id: u32, text: []const u8, busy: bool) void {
     const a = std.heap.page_allocator;
     const notice = a.dupeZ(u8, text) catch return;
-    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+    const marker: usize = @as(usize, shell_id) + 1;
+    const packed = if (busy) marker | (@as(usize, 1) << 32) else marker;
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, packed, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+}
+
+pub fn chatRestartAiApplyRefusal(shell_id: u32, busy: bool) void {
+    const idx = @import("inbox.zig").findShellById(shell_id) orelse return;
+    const shell = &app_state.shells[idx];
+    shell.ai_restart_tick = 0;
+    if (busy) {
+        shell.ai_restart_busy = true;
+        shell.ai_restart_busy_tick = @max(GetTickCount64(), 1);
+        shell.ai_stopped = false;
+    } else {
+        shell.ai_stopped = true;
+        shell.ai_restart_busy = false;
+        shell.ai_restart_busy_tick = 0;
+    }
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
 fn chatRestartAiThread(host: u8, shell_id: u32, tmux: [CHAT_RESTART_AI_TMUX_CAP]u8, tmux_len: usize, sid: [40]u8, sid_len: usize, cwd: [192]u8, cwd_len: usize) void {
@@ -2370,12 +2396,12 @@ fn chatRestartAiThread(host: u8, shell_id: u32, tmux: [CHAT_RESTART_AI_TMUX_CAP]
     var log: [96]u8 = undefined;
     if (!@import("chat_session.zig").chatHistoryPersistent(host, shell_id, query, 4096, &wire, null)) {
         debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai failed shell={d} via=tmux", .{shell_id}) catch "");
-        chatRestartAiNotice("Could not restart the AI. Check the connection and try again");
+        chatRestartAiPost(shell_id, "Could not restart the AI. Check the connection and try again", false);
         return;
     }
     if (std.mem.indexOf(u8, wire.items, "\trestart_ai\tok\t") == null) {
         debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai refused shell={d} via=tmux", .{shell_id}) catch "");
-        if (std.mem.indexOf(u8, wire.items, "\tpane_busy\t") == null) chatRestartAiNotice("Could not restart the AI. Open the terminal and start it by hand");
+        chatRestartAiPost(shell_id, chatRestartAiReason(wire.items), std.mem.indexOf(u8, wire.items, "\tpane_busy\t") != null);
         return;
     }
     debugLog(std.fmt.bufPrint(&log, "[chat] restart_ai sent shell={d} via=tmux", .{shell_id}) catch "");
@@ -3673,14 +3699,34 @@ fn chatTmuxSendEligible(idx: u32) bool {
     return app_state.shells[idx].kind == .tmux and key.tmux[0] != 0 and key.host < app_state.g_chat_history_channels.len;
 }
 
+fn chatClearNotice(wire: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, wire, "\tneeds_restart\t") != null) return "";
+    if (std.mem.indexOf(u8, wire, "\tpane_busy\t") != null) return "The AI is still running, so the chat was not cleared.";
+    if (std.mem.indexOf(u8, wire, "\tchat_busy\t") != null) return "Wait for this reply to finish, then clear the chat.";
+    if (std.mem.indexOf(u8, wire, "\tclear_unavailable\t") != null) return "Could not clear this chat. The server session is not ready.";
+    if (std.mem.indexOf(u8, wire, "\thost_unreachable\t") != null or std.mem.indexOf(u8, wire, "\thost_closed\t") != null) return "Could not clear this chat. Check the connection and try again.";
+    return "Could not clear this chat. Try again.";
+}
+
+fn chatClearStore(job: *app_state.ChatTmuxSendJob, notice: []const u8) void {
+    const n = @min(notice.len, job.clear_notice.len);
+    if (n == 0) return;
+    @memcpy(job.clear_notice[0..n], notice[0..n]);
+    job.clear_notice_len = @intCast(n);
+}
+
 fn chatTmuxSendStart(idx: u32, text: []const u16, echo_id: u64, retry: bool, status: bool, dismiss: bool) bool {
     if (app_state.g_chat_tmux_send_job != null) return false;
+    const clear_chat = app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent == 1 and @import("chat_slash.zig").bareClear(text);
+    if (clear_chat) {
+        if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].message_v1 = false;
+    }
     const a = std.heap.page_allocator;
     const job = a.create(app_state.ChatTmuxSendJob) catch return false;
     job.* = .{ .key = chatFileIdentityForShell(idx), .echo_id = echo_id, .text = a.dupe(u16, text) catch {
         a.destroy(job);
         return false;
-    }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0 };
+    }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1 and !clear_chat, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0, .clear_chat = clear_chat };
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = app_state.g_chat_outbox.items[ei];
         if (!entry.message_v1 and app_state.shells[idx].ai_agent >= 2) { a.free(job.text); a.destroy(job); return false; }
@@ -3781,14 +3827,17 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     if (@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 4096, &wire, &job.written)) {
         job.rejected = chatTmuxSendRejected(wire.items);
         job.box_not_clear = std.mem.indexOf(u8, wire.items, "\tsend\terror\tbox_not_clear\t") != null;
+        job.needs_restart = job.clear_chat and std.mem.indexOf(u8, wire.items, "\tneeds_restart\t") != null;
         var reply_buf: [128]u8 = undefined;
         const ok = std.mem.indexOf(u8, wire.items, "\tsend\tok\t") != null;
-        const reason = if (ok) "ok" else if (job.box_not_clear) "box_not_clear" else if (job.rejected) "rejected" else "unclear";
+        const reason = if (ok) "ok" else if (job.needs_restart) "needs_restart" else if (job.box_not_clear) "box_not_clear" else if (job.rejected) "rejected" else "unclear";
         @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&reply_buf, "[chat] send legacy reply={s} written={}", .{ reason, job.written }) catch "[chat] send legacy reply");
         if (!ok) job.rejected = true;
+        if (job.clear_chat and !ok and !job.needs_restart) chatClearStore(job, chatClearNotice(wire.items));
     } else {
         @import("diagnostics.zig").debugLog("[chat] send legacy channel unavailable");
         job.rejected = true;
+        if (job.clear_chat) chatClearStore(job, "Could not clear this chat. Check the connection and try again");
     }
 }
 
@@ -4031,6 +4080,18 @@ fn chatTmuxSendFinish() void {
         std.heap.page_allocator.destroy(job);
     }
     const idx = @import("inbox.zig").findShellById(job.key.shell_id) orelse return;
+    if (job.clear_chat) {
+        if (chatOutboxIndexById(job.echo_id)) |i| chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+        _ = saveChatOutbox();
+        chatOutboxChanged();
+        if (job.needs_restart) {
+            app_state.shells[idx].ai_stopped = true;
+            if (!chatRestartAi(idx)) showHeaderNoticeAscii("Could not restart the AI. Open the terminal and start it by hand", 5000, true);
+        } else if (job.clear_notice_len != 0) {
+            showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
+        }
+        return;
+    }
     if (job.message_reset) {
         const current = chatFileIdentityForShell(idx);
         const pending_reset = app_state.g_chat_pending_reset orelse return;
