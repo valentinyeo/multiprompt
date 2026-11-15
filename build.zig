@@ -898,7 +898,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&windows_shortcut_passthrough_tests.step);
     const inbox_reduction_search_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-reduction-search.test.js" });
     test_step.dependOn(&inbox_reduction_search_tests.step);
-    const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js" });
+    const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js", "tools/dictation-respect-edits.test.js" });
     test_step.dependOn(&dictation_paste_tests.step);
     const deepgram_key_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/deepgram_key.zig"),
