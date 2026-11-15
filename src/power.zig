@@ -315,6 +315,7 @@ pub fn applyPowerProfile(hwnd: HANDLE) void {
 
     if (mode == .deep_idle) {
         _ = KillTimer(hwnd, TIMER_SPINNER);
+        _ = KillTimer(hwnd, @import("win32.zig").TIMER_CHAT_REFRESH);
         app_state.g_spinner_running = false;
     } else {
         startSpinnerTimerIfNeeded();
