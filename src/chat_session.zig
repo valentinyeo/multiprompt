@@ -1414,6 +1414,8 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
 
 var g_chat_live_seen_revision: u64 = 0;
 var g_chat_live_drawn_revision: u64 = 0;
+var g_chat_live_preview_shell: u32 = 0;
+var g_chat_live_preview: @import("agent_second_line.zig").Line = .{};
 
 pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
@@ -1428,8 +1430,16 @@ pub fn chatFileOnReady() void {
             g_chat_live_seen_revision = live_revision;
             active_changed = true;
             chatLiveSyncWorking();
-            preview_changed = true;
-            if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+            const preview = @import("agent_second_line.zig").forShell(app_state.active_shell);
+            if (g_chat_live_preview_shell != live_shell or !std.meta.eql(g_chat_live_preview, preview)) {
+                g_chat_live_preview_shell = live_shell;
+                g_chat_live_preview = preview;
+                preview_changed = true;
+            }
+            if (app_state.g_main_hwnd != null) {
+                const pane = chatViewLayout().pane;
+                _ = InvalidateRect(app_state.g_main_hwnd, &pane, 0);
+            }
             @import("window_layout.zig").chatWorkingIndicatorSync();
             if (live.held(live_shell)) chatFileRequest(key);
         }

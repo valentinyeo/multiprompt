@@ -98,6 +98,11 @@ pub const PendingSettings = struct {
 
 pub const SENT_KEYS: usize = 4;
 
+fn stampInt(h: *std.hash.Wyhash, value: u64) void {
+    const copy = value;
+    h.update(std.mem.asBytes(&copy));
+}
+
 pub const Live = struct {
     used: bool = false,
     shell_id: u32 = 0,
@@ -117,6 +122,7 @@ pub const Live = struct {
     settings_known: bool = false,
     ended: ItemStatus = .ok,
     revision: u64 = 0,
+    stamp: u64 = 0,
     parked_at: u64 = 0,
     card_dismissed: bool = false,
     held: bool = false,
@@ -157,6 +163,50 @@ pub const Live = struct {
 
     pub fn touch(self: *Live) void {
         self.revision +%= 1;
+        self.stamp = self.visibleStamp();
+    }
+
+    pub fn touchIfVisible(self: *Live) bool {
+        if (self.visibleStamp() == self.stamp) return false;
+        self.touch();
+        return true;
+    }
+
+    pub fn visibleStamp(self: *const Live) u64 {
+        var h = std.hash.Wyhash.init(0);
+        stampInt(&h, @intFromEnum(self.state));
+        stampInt(&h, @intFromBool(self.held));
+        stampInt(&h, @intFromEnum(self.ended));
+        stampInt(&h, @intFromBool(self.card_dismissed));
+        stampInt(&h, @intFromBool(self.reply_in_history));
+        stampInt(&h, @intFromEnum(self.settings.model));
+        stampInt(&h, @intFromEnum(self.settings.effort));
+        stampInt(&h, @intFromEnum(self.settings.mode));
+        stampInt(&h, @intFromBool(self.settings.applied));
+        stampInt(&h, @intFromBool(self.settings_known));
+        stampInt(&h, @intFromBool(self.request.open));
+        stampInt(&h, @intFromEnum(self.request.kind));
+        h.update(self.request.idSlice());
+        h.update(self.request.titleSlice());
+        stampInt(&h, self.prompt.identity);
+        stampInt(&h, @as(u64, @intCast(self.prompt.count)));
+        for (self.answer_lens, 0..) |len, index| {
+            stampInt(&h, @as(u64, @intCast(len)));
+            h.update(self.answers[index][0..len]);
+        }
+        h.update(self.turn[0..self.turn_len]);
+        h.update(self.sent_id[0..self.sent_id_len]);
+        for (self.sent_keys[0..self.sent_key_count]) |key| stampInt(&h, key);
+        for (self.items.items) |*item| {
+            stampInt(&h, @intFromEnum(item.kind));
+            stampInt(&h, @intFromEnum(item.status));
+            stampInt(&h, @intFromBool(item.done));
+            stampInt(&h, item.key);
+            h.update(item.idSlice());
+            stampInt(&h, @as(u64, @intCast(item.text.items.len)));
+            h.update(item.text.items);
+        }
+        return h.final();
     }
 
     fn itemFor(self: *Live, a: std.mem.Allocator, id: []const u8, kind: ItemKind) !*Item {
@@ -682,8 +732,7 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
         const applied = applyValue(live, std.heap.page_allocator, seq, event) catch false;
         changed = changed or applied;
     }
-    if (changed) live.touch();
-    return changed;
+    return changed and live.touchIfVisible();
 }
 
 pub fn applySettingsSnapshot(shell_id: u32, sid: []const u8, seq: u64, payload: std.json.Value) bool {
@@ -1747,4 +1796,27 @@ test "pending setting requests block until replies failure or disconnect" {
     try std.testing.expectEqual(@as(u32, 2), pending.clear());
     try std.testing.expect(!pending.pending());
     try std.testing.expectEqual(@as(u32, 0), pending.clear());
+}
+
+test "SOFT-2373 an event that changes nothing on screen leaves the revision alone" {
+    var live: Live = .{};
+    defer live.deinit(std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try applyValue(&live, std.testing.allocator, 1, try parse(a, "{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{\"message_id\":\"m\"}}"));
+    try std.testing.expect(live.touchIfVisible());
+    const revision = live.revision;
+    _ = try applyValue(&live, std.testing.allocator, 2, try parse(a, "{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}"));
+    try std.testing.expect(!live.touchIfVisible());
+    _ = try applyValue(&live, std.testing.allocator, 3, try parse(a, "{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}"));
+    try std.testing.expect(!live.touchIfVisible());
+    try std.testing.expectEqual(revision, live.revision);
+    _ = try applyValue(&live, std.testing.allocator, 4, try parse(a, "{\"kind\":\"text.delta\",\"item\":\"m:text:0\",\"payload\":{\"text\":\"one\"}}"));
+    try std.testing.expect(live.touchIfVisible());
+    _ = try applyValue(&live, std.testing.allocator, 5, try parse(a, "{\"kind\":\"text.delta\",\"item\":\"m:text:0\",\"payload\":{\"text\":\"one\"}}"));
+    try std.testing.expect(!live.touchIfVisible());
+    _ = try applyValue(&live, std.testing.allocator, 6, try parse(a, "{\"kind\":\"turn.ended\",\"turn\":\"t-1\",\"payload\":{\"status\":\"ok\"}}"));
+    try std.testing.expect(live.touchIfVisible());
+    try std.testing.expectEqual(revision + 2, live.revision);
 }
