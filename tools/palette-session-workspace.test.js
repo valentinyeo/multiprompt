@@ -43,6 +43,7 @@ test('native palette journey seeds and checks the real session and workspace row
   assert.match(setup, /\$saved\.tabs -isnot \[array\]/);
   assert.match(setup, /\$savedRegistry\.windows -isnot \[array\]/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
+  assert.doesNotMatch(journey, /6248|use agent or terminal session name/);
   const restart = journey.indexOf("Restart-SessionRestore 'palette-ranking' $false $false $paletteRankingSeed");
   assert.ok(restart > 0);
   const restored = journey.slice(restart);

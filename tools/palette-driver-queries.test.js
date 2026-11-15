@@ -78,6 +78,7 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   assert.match(speed, /close_ms = 100/);
   assert.match(speed, /after_ms = 100/);
   assert.match(speed, /Ctrl\+N: leave Other so the saved folder can start a tab[\s\S]*\$repoTabsBefore[\s\S]*Ctrl\+T: new tab in the harness folder/);
+  assert.match(speed, /Palette 'close tab' '7110'/);
   const setup = read('.claude/skills/verify-multiprompt/control.ps1');
   const paletteSetup = setup.indexOf("if ($Feature -eq 'command-palette') {");
   const launch = setup.indexOf('$process = $job.Start(');
