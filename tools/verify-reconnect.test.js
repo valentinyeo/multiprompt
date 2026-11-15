@@ -67,7 +67,7 @@ const baseline = ['browser-pane-stuck.md', 'appearance.md', 'command-palette.md'
 const reconnect = ['ended-remote-session.md', 'saved-remote-workspace.md', 'ssh-tab-reconnect.md'];
 const linuxHost = ['live-chat-parity.md'];
 const features = fs.readdirSync(path.join(root, '.claude/skills/verify-multiprompt/features')).filter(f => f.endsWith('.md') && f !== 'README.md');
-for (const file of [...baseline, ...reconnect]) assert.ok(features.includes(file), `required feature: ${file}`);
+for (const file of [...baseline, ...reconnect, ...linuxHost]) assert.ok(features.includes(file), `required feature: ${file}`);
 const index = read('.claude/skills/verify-multiprompt/features/README.md');
 for (const file of features) {
   assert.ok(index.includes(`](${file})`), file);

@@ -10,6 +10,7 @@ const script = path.join(root, 'tools/live-chat-parity.py');
 const steps = ['start', 'reply', 'skills', 'working-start', 'working-end', 'stop', 'reopen', 'name'];
 
 function run(args) {
+  assert.equal(fs.existsSync(script), true);
   return spawnSync('python3', [script, ...args], { encoding: 'utf8', timeout: 180000, cwd: root });
 }
 
@@ -64,6 +65,7 @@ test('a stale slash catalog with rows counts as skills', () => {
     '@mp\t1\tslash\tloading\t/tmp/work\t0\n@@MP_END@@\n',
     '@mp\t1\tslash\tstale\t/tmp/work\t0\n@@MP_END@@\n',
   ];
+  assert.equal(fs.existsSync(script), true);
   const result = spawnSync('python3', ['-c', probe, script, JSON.stringify(samples)], { encoding: 'utf8', cwd: root });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), [
@@ -98,7 +100,9 @@ test('stand-in providers match and the report survives cleanup', () => {
 });
 
 test('the parity map is linked and is not a desktop journey', () => {
-  const map = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/live-chat-parity.md'), 'utf8');
+  const mapPath = path.join(root, '.claude/skills/verify-multiprompt/features/live-chat-parity.md');
+  assert.equal(fs.existsSync(mapPath), true);
+  const map = fs.readFileSync(mapPath, 'utf8');
   assert.deepEqual(map.match(/^## .+$/gm), [
     '## Sub-features',
     '## How to get to it (user POV)',
