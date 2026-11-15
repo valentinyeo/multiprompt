@@ -50,9 +50,9 @@ pub fn build(b: *std.Build) void {
             .optimize = stable_optimize,
         }),
     });
-    const rooms_preview = b.option(bool, "rooms-preview", "Compile the experimental desktop Rooms integration") orelse false;
+    const rooms_preview_flag = b.option(bool, "rooms-preview", "Compile the desktop Rooms integration");
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
-    if (release and rooms_preview) @panic("Rooms preview cannot be included in a release");
+    const rooms_preview = rooms_preview_flag orelse release;
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
         if ((std.base64.standard.Decoder.calcSizeForSlice(encoded) catch 0) != 32) @panic("Invalid release signing public key: expected base64 raw 32-byte key");
