@@ -21,6 +21,7 @@ pub const Emoji = enum(u2) {
 };
 
 pub const Reaction = struct { emoji: Emoji, reference: u64, quote: []const u16 };
+const LikeWish = enum(u8) { show, hide };
 pub const Pending = struct { id: u64, text: []const u16, allow_mixed: bool = false };
 
 pub const Projection = struct {
@@ -132,6 +133,11 @@ pub const View = struct {
     pending_projections: std.ArrayList(ProjectedPending) = .empty,
     hash: u64 = 0,
     context: u64 = 0,
+    like_counts: []u16 = &.{},
+    wish_refs: [24]u64 = @splat(0),
+    wish_kind: [24]LikeWish = @splat(.hide),
+    wish_len: usize = 0,
+    wish_context: u64 = 0,
 
     pub fn deinit(self: *View, a: std.mem.Allocator) void {
         self.hidden.deinit(a);
@@ -230,8 +236,65 @@ pub const View = struct {
             source[out] = cursor;
             out += 1;
         }
-        for (matches.items) |match| self.badges.items[match.target] |= match.emoji.bit();
+        for (matches.items) |match| self.noteLike(match.target, match.emoji, false);
         return .{ .text = display_text, .source = source };
+    }
+
+    fn noteLike(self: *View, target: usize, emoji: Emoji, pending: bool) void {
+        if (emoji != .like) {
+            self.badges.items[target] |= emoji.bit();
+            return;
+        }
+        const counted = target < self.like_counts.len and self.like_counts[target] != 0;
+        if (pending and counted) return;
+        if (!pending and target < self.like_counts.len) self.like_counts[target] += 1;
+        self.badges.items[target] ^= emoji.bit();
+    }
+
+    pub fn wishLike(self: *View, reference: u64, show: bool) void {
+        if (reference == 0) return;
+        self.wish_context = self.context;
+        const kind: LikeWish = if (show) .show else .hide;
+        for (self.wish_refs[0..self.wish_len], 0..) |existing, i| {
+            if (existing != reference) continue;
+            self.wish_kind[i] = kind;
+            return;
+        }
+        if (self.wish_len == self.wish_refs.len) {
+            self.wish_refs[0] = reference;
+            self.wish_kind[0] = kind;
+            return;
+        }
+        self.wish_refs[self.wish_len] = reference;
+        self.wish_kind[self.wish_len] = kind;
+        self.wish_len += 1;
+    }
+
+    fn foldLikes(self: *View, blocks: []const md.Block) void {
+        var i: usize = 0;
+        while (i < self.wish_len) {
+            const reference = self.wish_refs[i];
+            const wish = self.wish_kind[i];
+            var raw = false;
+            var last: ?usize = null;
+            for (blocks, 0..) |block, index| {
+                if (block.reaction_reference != reference or (block.role != .prose and block.role != .code)) continue;
+                last = index;
+                if ((self.badges.items[index] & Emoji.like.bit()) != 0) raw = true;
+            }
+            if ((wish == .hide and !raw) or (wish == .show and raw)) {
+                self.wish_len -= 1;
+                self.wish_refs[i] = self.wish_refs[self.wish_len];
+                self.wish_kind[i] = self.wish_kind[self.wish_len];
+                continue;
+            }
+            if (wish == .hide) {
+                for (blocks, 0..) |block, index| {
+                    if (block.reaction_reference == reference) self.badges.items[index] &= ~Emoji.like.bit();
+                }
+            } else if (last) |index| self.badges.items[index] |= Emoji.like.bit();
+            i += 1;
+        }
     }
 
     pub fn projected(self: *const View, index: usize) ?*const Projection {
@@ -271,6 +334,15 @@ pub const View = struct {
         try self.badges.resize(a, blocks.len);
         @memset(self.hidden.items, false);
         @memset(self.badges.items, 0);
+        if (self.wish_context != self.context) {
+            self.wish_len = 0;
+            self.wish_context = self.context;
+        }
+        const like_counts = try a.alloc(u16, blocks.len);
+        defer a.free(like_counts);
+        @memset(like_counts, 0);
+        self.like_counts = like_counts;
+        defer self.like_counts = &.{};
         self.pending.clearRetainingCapacity();
         var targets = std.AutoHashMap(u64, Target).init(a);
         defer targets.deinit();
@@ -288,7 +360,7 @@ pub const View = struct {
             if (parse(body)) |reaction| {
                 if (try resolve(a, reaction, &targets, blocks, text, i)) |target| {
                     self.hidden.items[i] = true;
-                    self.badges.items[target] |= reaction.emoji.bit();
+                    self.noteLike(target, reaction.emoji, false);
                     self.hideReplies(blocks, i + 1);
                     continue;
                 }
@@ -317,7 +389,7 @@ pub const View = struct {
             if (parse(item.text)) |reaction| {
                 if (try resolve(a, reaction, &targets, blocks, text, blocks.len)) |target| {
                     try self.pending.append(a, item.id);
-                    self.badges.items[target] |= reaction.emoji.bit();
+                    self.noteLike(target, reaction.emoji, true);
                     continue;
                 }
             }
@@ -340,6 +412,7 @@ pub const View = struct {
                 return err;
             };
         }
+        self.foldLikes(blocks);
         var hash = std.hash.Wyhash.init(0);
         for (self.hidden.items, 0..) |hidden, index| {
             if (hidden) hash.update(std.mem.asBytes(&index));
@@ -616,4 +689,40 @@ test "IGSH-1012 a lone session reply to a reaction is hidden and other replies s
     _ = try view.build(a, &[_]md.Block{ target, react, ack_block }, capture, &.{});
     try std.testing.expect(!view.visibleFrom(&[_]md.Block{ target, react, ack_block }, 1));
     try std.testing.expect(view.visibleFrom(&[_]md.Block{ target, react, ack_block }, 0));
+}
+
+test "SOFT-2442 a second thumbs up removes the badge and one pending copy does not" {
+    const a = std.testing.allocator;
+    const words = std.unicode.utf8ToUtf16LeStringLiteral("Answer");
+    const id = reference("msg_target");
+    var line: [256]u16 = undefined;
+    const reaction = format(.like, id, words, &line).?;
+    const capture = try a.alloc(u16, words.len + reaction.len * 2);
+    defer a.free(capture);
+    @memcpy(capture[0..words.len], words);
+    @memcpy(capture[words.len..][0..reaction.len], reaction);
+    @memcpy(capture[words.len + reaction.len ..], reaction);
+    const target: md.Block = .{ .start = 0, .len = words.len, .role = .prose, .first = true, .message_id = 1, .reaction_reference = id };
+    const first: md.Block = .{ .start = words.len, .len = reaction.len, .role = .user, .first = true };
+    const second: md.Block = .{ .start = words.len + reaction.len, .len = reaction.len, .role = .user, .first = true };
+    var view: View = .{};
+    defer view.deinit(a);
+    _ = try view.build(a, &.{ target }, words, &.{.{ .id = 1, .text = reaction }});
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    _ = try view.build(a, &.{ target }, words, &.{ .{ .id = 1, .text = reaction }, .{ .id = 2, .text = reaction } });
+    try std.testing.expectEqual(@as(u8, 0), view.mask(0));
+    _ = try view.build(a, &.{ target, first }, capture, &.{});
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    _ = try view.build(a, &.{ target, first }, capture, &.{.{ .id = 7, .text = reaction }});
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    _ = try view.build(a, &.{ target, first, second }, capture, &.{});
+    try std.testing.expectEqual(@as(u8, 0), view.mask(0));
+    view.wishLike(id, true);
+    _ = try view.build(a, &.{ target, first, second }, capture, &.{});
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    view.wishLike(id, false);
+    _ = try view.build(a, &.{ target, first }, capture, &.{});
+    try std.testing.expectEqual(@as(u8, 0), view.mask(0));
+    _ = try view.build(a, &.{ target, first, second }, capture, &.{});
+    try std.testing.expectEqual(@as(u8, 0), view.mask(0));
 }
