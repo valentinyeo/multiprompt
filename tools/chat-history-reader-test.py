@@ -8162,6 +8162,46 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+class SOFT_2461_PiChatSkillsTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.sid = '11111111-2222-4333-8444-555555555555'
+
+    def write_skill(self, root, name):
+        folder = root / name
+        folder.mkdir(parents=True)
+        (folder / 'SKILL.md').write_text('---\nname: %s\ndescription: Shared skill.\n---\n\nUse it.\n' % name)
+
+    def test_a_pi_live_chat_argv_names_the_same_shared_skill_directories(self):
+        shared = self.home / '.agents' / 'skills'
+        claude = self.home / '.claude' / 'skills'
+        self.write_skill(shared, 'shared-skill')
+        self.write_skill(claude, 'claude-only')
+        argv = reader.host_pi_argv('pi', self.sid, ['pi'])
+        prompt = argv.index('--append-system-prompt')
+        self.assertEqual(argv[prompt + 2:], ['--skill', str(shared), '--skill', str(claude)])
+        self.assertNotIn('--no-skills', argv)
+        self.assertNotIn('--skill', reader.host_claude_argv('claude', self.sid, ['claude']))
+
+    def test_missing_shared_skill_directories_are_not_passed(self):
+        argv = reader.host_pi_argv('pi', self.sid, ['pi'])
+        self.assertNotIn('--skill', argv)
+        self.assertNotIn('--no-skills', argv)
+
+    def test_a_pi_chat_in_another_home_uses_that_home_skill_directories(self):
+        owner = self.home / 'owner'
+        theirs = owner / '.claude' / 'skills'
+        self.write_skill(theirs, 'their-skill')
+        with patch.object(reader, 'conversation_owner', return_value=('owner', owner)):
+            argv = reader.host_pi_argv('pi', self.sid, ['pi'])
+        self.assertEqual(argv[argv.index('--skill') + 1:], [str(theirs)])
+        self.assertNotIn(str(self.home / '.claude' / 'skills'), argv)
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:

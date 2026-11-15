@@ -3524,9 +3524,25 @@ def host_pi_choice(provider, sid):
     return list(HOST_PI_MODEL)
 
 
+def host_pi_skill_args(provider, sid):
+    cwd = host_cwd(provider, sid)
+    owner = conversation_owner(cwd, include_home=True)
+    home = owner[1] if owner else HOME
+    args = []
+    for name in (".agents", ".claude"):
+        path = home / name / "skills"
+        try:
+            found = path.is_dir()
+        except OSError:
+            found = False
+        if found:
+            args += ["--skill", str(path)]
+    return args
+
+
 def host_pi_argv(provider, sid, base):
     native = host_session_state(provider, sid).get("context_session") or sid
-    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), "--session-id", native, "--append-system-prompt", HOST_APPEND_PROMPT]
+    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), "--session-id", native, "--append-system-prompt", HOST_APPEND_PROMPT] + host_pi_skill_args(provider, sid)
 
 
 def host_hax_argv(provider, sid, base):
@@ -8078,7 +8094,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 127
+RUNTIME_GENERATION = 128
 
 if __name__ == '__main__':
     import base64 as _base64
