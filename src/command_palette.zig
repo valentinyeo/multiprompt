@@ -2809,6 +2809,7 @@ fn spawnWorkspaceSession(with_agent: bool, plain_claude: bool) bool {
     if (workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {
         return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent, plain_claude);
     }
+    @import("diagnostics.zig").debugLog("[pick] no workspace folder, opening repo picker");
     pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace), plain_claude);
     return false;
 }
