@@ -16,6 +16,11 @@ function declaration(name) {
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf('\n};', start) + 3);
 }
+test('SOFT-2418 an accepted send stays working until the reply starts or the chat stops', () => {
+  const echo = fs.readFileSync(path.join(__dirname, '../src/chat_echo.zig'), 'utf8');
+  assert.match(echo, /pub fn keepsWorking\(state: OutboxState, phase: \[\]const u8, reply_started: bool, chat_stopped: bool\) bool/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/chat_send.zig'), 'utf8'), /chat_echo\.keepsWorking\(entry\.state, phase, reply_started, chat_stopped\)/);
+});
 const prelude = `
 const std = @import("std");
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
