@@ -1,0 +1,1 @@
+Redraw the chat and sidebar only when something on screen changed

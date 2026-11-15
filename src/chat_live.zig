@@ -1806,17 +1806,17 @@ test "SOFT-2373 an event that changes nothing on screen leaves the revision alon
     const a = arena.allocator();
     _ = try applyValue(&live, std.testing.allocator, 1, try parse(a, "{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{\"message_id\":\"m\"}}"));
     try std.testing.expect(live.touchIfVisible());
-    const revision = live.revision;
+    const before = live.revision;
     _ = try applyValue(&live, std.testing.allocator, 2, try parse(a, "{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}"));
     try std.testing.expect(!live.touchIfVisible());
     _ = try applyValue(&live, std.testing.allocator, 3, try parse(a, "{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}"));
     try std.testing.expect(!live.touchIfVisible());
-    try std.testing.expectEqual(revision, live.revision);
+    try std.testing.expectEqual(before, live.revision);
     _ = try applyValue(&live, std.testing.allocator, 4, try parse(a, "{\"kind\":\"text.delta\",\"item\":\"m:text:0\",\"payload\":{\"text\":\"one\"}}"));
     try std.testing.expect(live.touchIfVisible());
     _ = try applyValue(&live, std.testing.allocator, 5, try parse(a, "{\"kind\":\"text.delta\",\"item\":\"m:text:0\",\"payload\":{\"text\":\"one\"}}"));
     try std.testing.expect(!live.touchIfVisible());
     _ = try applyValue(&live, std.testing.allocator, 6, try parse(a, "{\"kind\":\"turn.ended\",\"turn\":\"t-1\",\"payload\":{\"status\":\"ok\"}}"));
     try std.testing.expect(live.touchIfVisible());
-    try std.testing.expectEqual(revision + 2, live.revision);
+    try std.testing.expectEqual(before + 2, live.revision);
 }
