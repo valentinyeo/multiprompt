@@ -260,6 +260,10 @@ test "channel write failure falls back once but a written request or retry never
     try std.testing.expectEqual(@as(usize, 0), pastes);
 }
 `;
+test('SOFT-2420 a finished clear clears a stale stopped badge', () => {
+  assert.match(body('chatTmuxSendFinish'), /clear_chat/);
+  assert.match(body('chatTmuxSendFinish'), /ai_stopped = false/);
+});
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
