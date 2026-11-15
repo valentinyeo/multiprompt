@@ -23,11 +23,11 @@ function imageFor(name, file) {
 test('parses independent native stages and measures synthetic pixels', () => {
   const result = observe(log, imageFor);
   assert.deepEqual(result.cases.empty.observations, {
-    queuedDots: true, acceptedGapDots: false, startedDotsWithinOneSecondOfSyntheticEnqueue: true,
+    queuedDots: true, acceptedGapDots: true, startedDotsWithinOneSecondOfSyntheticEnqueue: true,
     animated: true, dotsOnReplyDelta: true, dotsAfterTurnEnded: false, idleDots: false,
   });
   assert.deepEqual(result.cases.history.observations, {
-    queuedDots: true, acceptedGapDots: false, startedDotsWithinOneSecondOfSyntheticEnqueue: false,
+    queuedDots: true, acceptedGapDots: true, startedDotsWithinOneSecondOfSyntheticEnqueue: false,
     animated: false, dotsOnReplyDelta: false, dotsAfterTurnEnded: false, idleDots: false,
   });
   assert.equal(result.cases.history.stages['turn-started'].blocks, 2);
