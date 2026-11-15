@@ -82,6 +82,8 @@
             $repoEntries = @(foreach ($name in $repoNames) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; folder_host = '0'; default = $true; workspace = $name; cwd = $repoFolder } })
             [IO.File]::WriteAllText($repoCommands, ([ordered]@{ commands = $repoEntries } | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 500
+            Press @(0x11, 0x4E) 'Ctrl+N: leave Other so the saved folder can start a tab'
+            Wait-Until { $state = Read-Session; $state.active_workspace -ne 0 -and $state.workspace_count -ge 2 } 'named workspace active'
             $repoTabsBefore = @((Read-Session).tabs).Count
             Press @(0x11, 0x54) 'Ctrl+T: new tab in the harness folder'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore + 1 } 'harness folder tab open'

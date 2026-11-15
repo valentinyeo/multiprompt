@@ -68,8 +68,8 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   const body = updateSearchResultsBody();
   assert.match(body, /if \(app_state\.g_search_len > 0\) \{[\s\S]*for \(SHELL_ROWS\)/);
   const fixture = read('tools/fixtures/IGSH-1743/palette-usage.tsv').trim().split(/\r?\n/).map(line => line.split('\t')[0]);
-  for (const dead of ['2000', '6001', '6248']) assert.equal(fixture.includes(dead), false, dead);
-  assert.deepEqual(fixture.slice(0, 10), ['6295', '3000', '4000', '5100', '6200', '6204', '6247', '7000', '8000', '5102']);
+  for (const dead of ['2000', '6001', '6248', '5100', '5102']) assert.equal(fixture.includes(dead), false, dead);
+  assert.deepEqual(fixture.slice(0, 10), ['6295', '3000', '4000', '6291', '6200', '6204', '6247', '7000', '8000', '6227']);
   const journey = read('.claude/skills/verify-multiprompt/control-feature-palette-order.ps1');
   assert.doesNotMatch(journey, /6248|use agent or terminal session name/);
   const speed = read('.claude/skills/verify-multiprompt/control-feature-command-palette.ps1');
@@ -77,4 +77,10 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   assert.match(speed, /scroll_ms = 100/);
   assert.match(speed, /close_ms = 100/);
   assert.match(speed, /after_ms = 100/);
+  assert.match(speed, /Ctrl\+N: leave Other so the saved folder can start a tab[\s\S]*\$repoTabsBefore[\s\S]*Ctrl\+T: new tab in the harness folder/);
+  const setup = read('.claude/skills/verify-multiprompt/control.ps1');
+  const paletteSetup = setup.indexOf("if ($Feature -eq 'command-palette') {");
+  const launch = setup.indexOf('$process = $job.Start(');
+  assert.ok(paletteSetup > 0 && paletteSetup < launch);
+  assert.match(setup.slice(paletteSetup, launch), /MP_VERIFY_REPOS = '\/tmp\/multiprompt-harness-folder'/);
 });

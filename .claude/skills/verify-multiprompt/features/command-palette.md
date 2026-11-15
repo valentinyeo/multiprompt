@@ -6,7 +6,7 @@ Find real actions in Ctrl+K, execute an app-size change and reset it while check
 
 - `changelog-speed`: a cold Ctrl+K Changelog open finishes below 200 milliseconds, and Page Down, Escape and the response after close finish below 100 milliseconds, across five samples; screen pixels must change and the UI thread must respond. Full history stays available.
 - `palette-search`: filter commands using an actual supported query.
-- `pick-repo-list`: with no workspace folder declared, Ctrl+K `pick repo` opens the Pick repo list, and Esc returns with the tab count unchanged.
+- `pick-repo-list`: Ctrl+N leaves the catch-all workspace, Ctrl+T opens the saved folder, then Ctrl+K `pick repo` opens Back plus that one harness folder, and Esc returns with the tab count unchanged.
 - `palette-execute`: execute UI Size: Increase and save 110% app scale.
 - `update-command-idle`: search Restart to update and execute with no staged update, retaining the owned app and session.
 - `palette-reset`: navigate to UI Size: Reset and restore 100%.
