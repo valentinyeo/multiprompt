@@ -49,6 +49,7 @@ _TRACKED_ID = re.compile(r"\n\[mp:([0-9a-f]{16})\]\s*\Z")
 DRAFT_TEXT = 4000
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b(?:\[[0-9;:?]*[ -/]*[@-~]|[@-Z\\-_])")
+_TERMINAL_REPLY = re.compile(r"(?:\x1b|\^\[)(?:\[[\x30-\x3f]*[\x20-\x2f]*[cR]|\](?:(?!\x1b|\^\[).)*?(?:\x07|\^G|(?:\x1b|\^\[)\\))")
 SETTLE_SUFFIX_MIN = 24
 SETTLE_SIBLINGS_MAX = 4
 ISSUE_345_STALE_JUMPS_TO_TAIL = True
@@ -1464,7 +1465,12 @@ def styled_chars(line):
     return result
 
 
+def strip_terminal_replies(text):
+    return _TERMINAL_REPLY.sub("", text)
+
+
 def box_draft_text(shown):
+    shown = strip_terminal_replies(shown)
     lines = [styled_chars(line) for line in shown.splitlines()]
     plain = ["".join(char for char, _dim, _inverse in line) for line in lines]
     starts = [i for i, line in enumerate(plain) if line.startswith("❯")]

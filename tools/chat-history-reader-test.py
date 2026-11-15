@@ -3537,6 +3537,16 @@ class SharedQueueDraftTest(unittest.TestCase):
             self.assertEqual(reader.box_draft_text(shown), expected, repr(shown))
         self.assertIsNone(reader.box_draft_text('no prompt here\n'))
 
+    def test_SOFT_2459_terminal_replies_are_not_typed_text(self):
+        reply = "^[[?61;1;6;7;21;22;23;24;28;32;42;52c^[[>0;10;1c"
+        rule = "─" * 8
+        self.assertEqual(reader.box_draft_text("❯ " + reply + "\n" + rule + "\n"), "")
+        raw = "\x1b[?61;1;6;7;21;22;23;24;28;32;42;52c\x1b[>0;10;1c"
+        self.assertEqual(reader.box_draft_text("❯ " + raw + "\n" + rule + "\n"), "")
+        self.assertEqual(reader.box_draft_text("❯ keep ^[[12;40R me\n" + rule + "\n"), "keep  me")
+        self.assertEqual(reader.box_draft_text("❯ note \x1b]10;rgb:1/1/1\x07\n" + rule + "\n"), "note")
+        self.assertEqual(reader.box_draft_text("❯ []\n" + rule + "\n"), "[]")
+
     def test_IGSH_682_box_draft_asks_tmux_for_escapes_without_wrapping(self):
         calls = []
 

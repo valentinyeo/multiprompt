@@ -113,6 +113,49 @@ fn statusText(out: []u16, text: []const u8) usize {
     return n;
 }
 
+fn skipTerminalReply(text: []const u8, start: usize) ?usize {
+    var at = start;
+    if (at < text.len and text[at] == 0x1b) {
+        at += 1;
+    } else if (at + 1 < text.len and text[at] == '^' and text[at + 1] == '[') {
+        at += 2;
+    } else return null;
+    if (at >= text.len) return null;
+    if (text[at] == '[') {
+        at += 1;
+        while (at < text.len and text[at] >= 0x30 and text[at] <= 0x3f) at += 1;
+        while (at < text.len and text[at] >= 0x20 and text[at] <= 0x2f) at += 1;
+        if (at < text.len and (text[at] == 'c' or text[at] == 'R')) return at + 1;
+        return null;
+    }
+    if (text[at] != ']') return null;
+    at += 1;
+    while (at < text.len) {
+        if (text[at] == 0x07) return at + 1;
+        if (text[at] == '^' and at + 1 < text.len and text[at + 1] == 'G') return at + 2;
+        if (text[at] == 0x1b and at + 1 < text.len and text[at + 1] == '\\') return at + 2;
+        if (text[at] == '^' and at + 2 < text.len and text[at + 1] == '[' and text[at + 2] == '\\') return at + 3;
+        if (text[at] == 0x1b or (text[at] == '^' and at + 1 < text.len and text[at + 1] == '[')) return null;
+        at += 1;
+    }
+    return null;
+}
+
+fn stripTerminalReplies(out: []u8, text: []const u8) usize {
+    var written: usize = 0;
+    var i: usize = 0;
+    while (i < text.len and written < out.len) {
+        if (skipTerminalReply(text, i)) |end| {
+            i = end;
+            continue;
+        }
+        out[written] = text[i];
+        written += 1;
+        i += 1;
+    }
+    return written;
+}
+
 fn keepText(out: []u16, text: []const u8, keep_newlines: bool) usize {
     var view = std.unicode.Utf8View.init(text) catch return 0;
     var it = view.iterator();
@@ -197,7 +240,9 @@ pub fn parseStatus(line: []const u8) ?Parsed {
     }
     if (value.draft) |draft| {
         if (draft.len <= DRAFT_TEXT) {
-            result.draft_len = keepText(&result.draft, draft, true);
+            var cleaned: [DRAFT_TEXT]u8 = undefined;
+            const cleaned_len = stripTerminalReplies(&cleaned, draft);
+            result.draft_len = keepText(&result.draft, cleaned[0..cleaned_len], true);
             result.draft_known = true;
         }
     }
@@ -778,6 +823,16 @@ test "IGSH-682 status row carries the shell queue sent first and the box draft" 
     try std.testing.expect(empty.live_known);
     try std.testing.expect(empty.draft_known);
     try std.testing.expectEqual(@as(usize, 0), empty.queue_len);
+}
+
+test "SOFT-2459 device attribute replies never become composer text" {
+    const reply = (parseStatus("{\"role\":\"status\",\"draft\":\"^[[?61;1;6;7;21;22;23;24;28;32;42;52c^[[>0;10;1c\"}").?).status;
+    try std.testing.expect(reply.draft_known);
+    try std.testing.expectEqual(@as(usize, 0), reply.draft_len);
+    const typed = (parseStatus("{\"role\":\"status\",\"draft\":\"[]\"}").?).status;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("[]"), typed.draft[0..typed.draft_len]);
+    const around = (parseStatus("{\"role\":\"status\",\"draft\":\"keep ^[[12;40R me\"}").?).status;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("keep  me"), around.draft[0..around.draft_len]);
 }
 
 test "IGSH-722 long queued envelopes and clipped old reader strings become incoming notes" {
