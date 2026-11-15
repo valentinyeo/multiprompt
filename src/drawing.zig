@@ -674,9 +674,10 @@ pub fn headerLineAmber(model: []const u16) bool {
     return (model.len >= titled.len and std.mem.eql(u16, model[0..titled.len], titled)) or (model.len >= lower.len and std.mem.eql(u16, model[0..lower.len], lower)) or (model.len >= raw.len and std.mem.eql(u16, model[0..raw.len], raw));
 }
 
-fn chatHeaderModel(shell_index: u32) struct { line: []const u16, amber: bool } {
-    const empty = .{ .line = &.{}, .amber = false };
-    if (shell_index >= app_state.shell_count) return empty;
+const HeaderModel = struct { line: []const u16 = &.{}, amber: bool = false };
+
+fn chatHeaderModel(shell_index: u32) HeaderModel {
+    if (shell_index >= app_state.shell_count) return .{};
     const shell = &app_state.shells[shell_index];
     var model: []const u16 = &.{};
     if (shell.ai_agent != 0 and shell.shell_id != 0) {
@@ -717,7 +718,7 @@ fn chatHeaderModel(shell_index: u32) struct { line: []const u16, amber: bool } {
         for (fallback[0..n], 0..) |ch, i| wide_fallback[i] = ch;
         model_text = wide_fallback[0..n];
     }
-    if (model_text.len == 0 and effort.len == 0) return empty;
+    if (model_text.len == 0 and effort.len == 0) return .{};
     return .{ .line = joinHeaderModel(model_text, effort, &g_chat_header_model), .amber = headerLineAmber(model_text) };
 }
 
