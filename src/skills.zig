@@ -133,9 +133,17 @@ fn scanRoot(
 ) !void {
     var dir = std.Io.Dir.openDirAbsolute(io, root_path, .{ .iterate = true }) catch return;
     defer dir.close(io);
-    var walker = try dir.walk(allocator);
+    var walker = try dir.walkSelectively(allocator);
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
+        if (entry.kind == .directory or (entry.kind == .sym_link and entry.depth() == 1)) {
+            var child = entry;
+            child.kind = .directory;
+            walker.enter(io, child) catch |err| {
+                if (entry.kind != .sym_link or err == error.OutOfMemory) return err;
+            };
+            continue;
+        }
         if (entry.kind != .file or !std.ascii.eqlIgnoreCase(entry.basename, "SKILL.md")) continue;
         const bytes = entry.dir.readFileAlloc(io, entry.basename, allocator, .limited(1024 * 1024)) catch continue;
         const parent = std.fs.path.basename(std.fs.path.dirname(entry.path) orelse "");
@@ -288,6 +296,36 @@ test "SOFT-2476 linked skill folders are discovered without following nested lin
     try std.testing.expectEqualStrings("Linked skill.", items[1].description);
     try std.testing.expectEqualStrings("Linked instructions.", items[1].body);
     try std.testing.expectEqual(Source.harness, items[1].source);
+    try tmp.dir.writeFile(io, .{ .sub_path = ".claude/settings.json", .data = "{\"skillOverrides\":{\"valentin-mode\":false}}" });
+    const enabled = try discover(allocator, io, home, &.{});
+    defer deinitAll(allocator, enabled);
+    try std.testing.expectEqual(@as(usize, 1), enabled.len);
+    try std.testing.expectEqualStrings("ordinary", enabled[0].name);
+}
+
+test "SOFT-2476 linked plugin skills keep names and qualified overrides" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "skills");
+    try tmp.dir.createDirPath(io, "installed");
+    try tmp.dir.writeFile(io, .{ .sub_path = "installed/SKILL.md", .data = "---\nname: review\n---\nReview instructions." });
+    try tmp.dir.symLink(io, "../installed", "skills/linked-review", .{ .is_directory = true });
+    const root = try tmp.dir.realPathFileAlloc(io, "skills", allocator);
+    defer allocator.free(root);
+    var items: std.ArrayList(Skill) = .empty;
+    defer {
+        for (items.items) |*skill| skill.deinit(allocator);
+        items.deinit(allocator);
+    }
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, "{\"example:review\":false}", .{});
+    defer parsed.deinit();
+    try scanRoot(allocator, io, root, &items, parsed.value, "example");
+    try std.testing.expectEqual(@as(usize, 0), items.items.len);
+    try scanRoot(allocator, io, root, &items, null, "example");
+    try std.testing.expectEqual(@as(usize, 1), items.items.len);
+    try std.testing.expectEqualStrings("review", items.items[0].name);
 }
 
 test "off skill overrides are excluded" {
