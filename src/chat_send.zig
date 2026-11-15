@@ -4089,7 +4089,9 @@ fn chatTmuxSendFinish() void {
         } else {
             app_state.shells[idx].ai_stopped = false;
             app_state.shells[idx].ai_restart_tick = 0;
-            if (job.clear_notice_len != 0) showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
+            if (job.clear_notice_len != 0) {
+                showHeaderNoticeAscii(job.clear_notice[0..job.clear_notice_len], 5000, true);
+            }
         }
         return;
     }

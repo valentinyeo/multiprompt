@@ -52,6 +52,12 @@ jobs:
         run: python3 -W error::DeprecationWarning tools/restart-ai-test.py -v
       - name: Clear a server chat from the reader
         run: python3 -W error::DeprecationWarning tools/clear-server-chat-test.py -v
+      - name: Keep the corner badge off a live AI
+        run: python3 -W error::DeprecationWarning tools/clear-badge-test.py -v
+      - name: Hide the delivery tag in a chat bubble
+        run: python3 -W error::DeprecationWarning tools/clear-display-tag-test.py -v
+      - name: Keep a cleared reply on the assistant side
+        run: python3 -W error::DeprecationWarning tools/clear-reset-side-test.py -v
       - name: Clear a server chat in the desktop send path
         run: node --test tools/clear-server-chat.test.js
       - name: Check the Computer view finds a server desktop

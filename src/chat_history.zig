@@ -454,6 +454,7 @@ pub const History = struct {
     }
 
     fn keepReplySide(self: *History, a: std.mem.Allocator, previous: History) !void {
+        if (std.mem.indexOf(u8, self.rows.items, "\"role\":\"user\"") == null) return;
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();

@@ -19,6 +19,8 @@ class ClearResetSideTest(unittest.TestCase):
         self.assertEqual(shown["text"], PAUSED)
 
     def test_a_reset_page_does_not_repeat_the_reply_as_the_user(self):
+        source = (ROOT / "src/chat_history_reader.py").read_text(encoding="utf-8")
+        self.assertIn("def keep_reply_side(", source)
         rows = [
             dict(role="assistant", text=PAUSED, id="a"),
             dict(role="user", text="/clear", id="c"),
@@ -29,7 +31,6 @@ class ClearResetSideTest(unittest.TestCase):
         self.assertIn(("assistant", PAUSED), [(row["role"], row["text"]) for row in kept])
         self.assertNotIn(("user", PAUSED), [(row["role"], row["text"]) for row in kept])
         self.assertIn(("user", "/clear"), [(row["role"], row["text"]) for row in kept])
-        source = (ROOT / "src/chat_history_reader.py").read_text(encoding="utf-8")
         self.assertIn("paired = keep_reply_side(", source)
 
 
