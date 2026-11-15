@@ -537,6 +537,10 @@ const RestartChatJob = struct {
 };
 
 const SHELL_ROWS = [_]ShellRow{
+    .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
+    .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
     .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
 };
@@ -4394,6 +4398,10 @@ pub fn updateSearchResults() void {
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "use snippets", "snippets", "snippet", "paste snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPETS_MENU_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"manage snippets"}, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_MANAGE_OFFSET;
         app_state.g_search_result_count += 1;
     }
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "create snippet", "new snippet", "snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
