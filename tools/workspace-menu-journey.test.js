@@ -15,6 +15,11 @@ test('SOFT-2374 the verifier can run the contested-registry menu and hover journ
   assert.match(journey, /AssertResponsive/);
   assert.match(journey, /AssertHighlight/);
   assert.match(journey, /Read-Session/);
+  const proof = read('.github/workflows/workspace-menu-proof.yml');
+  assert.match(proof, /app_revision: \$\{\{ needs.revisions.outputs.base \}\}/);
+  assert.match(proof, /revision: \$\{\{ needs.revisions.outputs.head \}\}/);
+  const workflow = read('.github/workflows/verify.yml').split('  workflow_call:')[0];
+  assert.ok((workflow.match(/^      [a-z_]+:$/gm) || []).length <= 25);
 });
 
 test('SOFT-2374 hosted clicks send an absolute mouse move before button input', () => {

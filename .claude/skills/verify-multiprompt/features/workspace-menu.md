@@ -27,7 +27,7 @@ Dispatch `gh workflow run verify.yml --ref <branch> -f feature=workspace-menu`. 
 6. Require the registry write time to stay unchanged. Click the other workspace, then return through hover and Enter. Require both original identities and CMD sessions in saved state.
 7. Check app-published menu-open durations against the same 200 ms limit. Preserve `menu-latency.json`, `menu-responses-*.json`, `menu-log-open-ms.json`, `registry-contention.json`, `menu-preserved.session.json`, screenshots, Doctor and zero-process cleanup.
 
-The same head driver can run against the merge-base app through `verify.yml`'s `app_revision` input. The pre-fix app must fail the contested first-paint deadline, not launch or setup. A base run with only a setup failure does not prove this fix.
+`workspace-menu-proof.yml` automatically runs this same head driver against both the PR app and its merge-base app through `verify.yml`'s reusable `app_revision` input. The pre-fix app must fail the contested first-paint deadline, not launch or setup. A base run with only a setup failure does not prove this fix.
 
 ## Gotchas
 
