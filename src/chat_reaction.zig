@@ -251,21 +251,21 @@ pub const View = struct {
         self.badges.items[target] ^= emoji.bit();
     }
 
-    pub fn wishLike(self: *View, reference: u64, show: bool) void {
-        if (reference == 0) return;
+    pub fn wishLike(self: *View, message: u64, show: bool) void {
+        if (message == 0) return;
         self.wish_context = self.context;
         const kind: LikeWish = if (show) .show else .hide;
         for (self.wish_refs[0..self.wish_len], 0..) |existing, i| {
-            if (existing != reference) continue;
+            if (existing != message) continue;
             self.wish_kind[i] = kind;
             return;
         }
         if (self.wish_len == self.wish_refs.len) {
-            self.wish_refs[0] = reference;
+            self.wish_refs[0] = message;
             self.wish_kind[0] = kind;
             return;
         }
-        self.wish_refs[self.wish_len] = reference;
+        self.wish_refs[self.wish_len] = message;
         self.wish_kind[self.wish_len] = kind;
         self.wish_len += 1;
     }
@@ -273,12 +273,12 @@ pub const View = struct {
     fn foldLikes(self: *View, blocks: []const md.Block) void {
         var i: usize = 0;
         while (i < self.wish_len) {
-            const reference = self.wish_refs[i];
+            const message = self.wish_refs[i];
             const wish = self.wish_kind[i];
             var raw = false;
             var last: ?usize = null;
             for (blocks, 0..) |block, index| {
-                if (block.reaction_reference != reference or (block.role != .prose and block.role != .code)) continue;
+                if (block.reaction_reference != message or (block.role != .prose and block.role != .code)) continue;
                 last = index;
                 if ((self.badges.items[index] & Emoji.like.bit()) != 0) raw = true;
             }
@@ -290,7 +290,7 @@ pub const View = struct {
             }
             if (wish == .hide) {
                 for (blocks, 0..) |block, index| {
-                    if (block.reaction_reference == reference) self.badges.items[index] &= ~Emoji.like.bit();
+                    if (block.reaction_reference == message) self.badges.items[index] &= ~Emoji.like.bit();
                 }
             } else if (last) |index| self.badges.items[index] |= Emoji.like.bit();
             i += 1;
