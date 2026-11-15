@@ -910,6 +910,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&deepgram_key_source_tests.step);
     const session_state_bucket_tests = b.addSystemCommand(&.{ "node", "--test", "tools/session-state-buckets.test.js" });
     test_step.dependOn(&session_state_bucket_tests.step);
+    const all_sessions_state_tests = b.addSystemCommand(&.{ "node", "--test", "tools/all-sessions-states.test.js" });
+    test_step.dependOn(&all_sessions_state_tests.step);
+    vps_test_step.dependOn(&all_sessions_state_tests.step);
     const other_workspace_invariant_tests = b.addSystemCommand(&.{ "node", "--test", "tools/other-workspace-invariant.test.js" });
     test_step.dependOn(&other_workspace_invariant_tests.step);
     const zig_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zig-copy.test.js" });

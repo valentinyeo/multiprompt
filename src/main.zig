@@ -747,6 +747,7 @@ const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_
 const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
 const SEARCH_SESSION_OVERVIEW_MENU_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
 const SEARCH_ARCHIVED_VIEW_OFFSET = @import("app_state.zig").SEARCH_ARCHIVED_VIEW_OFFSET;
+const SEARCH_ALL_SESSIONS_SERVER_OFFSET = @import("app_state.zig").SEARCH_ALL_SESSIONS_SERVER_OFFSET;
 const SEARCH_BROWSER_SHOTURL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_SHOTURL_OFFSET;
 const SEARCH_PIN_TOP_OFFSET = @import("app_state.zig").SEARCH_PIN_TOP_OFFSET;
 const SEARCH_UNARCHIVE_HIDDEN_OFFSET = @import("app_state.zig").SEARCH_UNARCHIVE_HIDDEN_OFFSET;
@@ -981,7 +982,6 @@ const AS_TAB_ALL = @import("app_state.zig").AS_TAB_ALL;
 const AS_TAB_ARCHIVED = @import("app_state.zig").AS_TAB_ARCHIVED;
 const buildSessionOverviewRows = @import("archive.zig").buildSessionOverviewRows;
 const allSessionsRowVisible = @import("archive.zig").allSessionsRowVisible;
-const allSessionsListTop = @import("archive.zig").allSessionsListTop;
 const allSessionsVisibleCount = @import("archive.zig").allSessionsVisibleCount;
 const allSessionsNthVisible = @import("archive.zig").allSessionsNthVisible;
 const allSessionsSplitVisible = @import("archive.zig").allSessionsSplitVisible;
@@ -989,7 +989,9 @@ const openAllSessions = @import("archive.zig").openAllSessions;
 const closeAllSessions = @import("archive.zig").closeAllSessions;
 const openAllSessionsFilter = @import("archive.zig").openAllSessionsFilter;
 const closeAllSessionsFilter = @import("archive.zig").closeAllSessionsFilter;
-const allSessionsJump = @import("archive.zig").allSessionsJump;
+const allSessionsClick = @import("archive.zig").allSessionsClick;
+const allSessionsHover = @import("archive.zig").allSessionsHover;
+const allSessionsToggleServerFilter = @import("archive.zig").allSessionsToggleServerFilter;
 const handleAllSessionsKey = @import("archive.zig").handleAllSessionsKey;
 const startUnarchiveUnattachedWorkspaceSessions = @import("archive.zig").startUnarchiveUnattachedWorkspaceSessions;
 const unarchiveNextUnattachedSession = @import("archive.zig").unarchiveNextUnattachedSession;
@@ -1995,42 +1997,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
 
             if (app_state.g_all_sessions_active) {
-                app_state.g_all_sessions_ctx = false;
-                if (!app_state.g_all_sessions_close_running) app_state.g_all_sessions_confirm = false;
-                const list_top = allSessionsListTop();
-                const tab_strip_bot: i32 = 54;
-                if (my >= 0 and my < tab_strip_bot) {
-                    var tab_hit: ?u32 = null;
-                    for (0..app_state.g_all_sessions_split_tab_count) |ti| {
-                        if (mx >= app_state.g_all_sessions_split_xs[ti] and mx < app_state.g_all_sessions_split_xe[ti]) {
-                            tab_hit = app_state.g_all_sessions_split_ids[ti];
-                            break;
-                        }
-                    }
-                    if (tab_hit) |new_tab| {
-                        if (allSessionsSplitVisible(new_tab)) {
-                            app_state.g_all_sessions_tab = new_tab;
-                            app_state.g_all_sessions_sel = 0;
-                            _ = InvalidateRect(hwnd, null, 0);
-                        }
-                    }
-                } else if (my >= list_top) {
-                    var client_rc2: RECT = std.mem.zeroes(RECT);
-                    _ = GetClientRect(hwnd, &client_rc2);
-                    const row_h: i32 = uiScaled(32);
-                    const footer_h: i32 = 30;
-                    const avail = client_rc2.bottom - list_top - footer_h;
-                    const max_rows: u32 = if (avail > row_h) @intCast(@divFloor(avail, row_h)) else 1;
-                    const vis = allSessionsVisibleCount();
-                    var scroll_row: u32 = 0;
-                    if (app_state.g_all_sessions_sel >= max_rows) scroll_row = app_state.g_all_sessions_sel - max_rows + 1;
-                    const clicked_vrow: u32 = @intCast(@divFloor(my - list_top, row_h));
-                    const target_vrow = scroll_row + clicked_vrow;
-                    if (target_vrow < vis) {
-                        app_state.g_all_sessions_sel = target_vrow;
-                        allSessionsJump(hwnd);
-                    }
-                }
+                allSessionsClick(hwnd, mx, my);
                 return 0;
             }
 
@@ -2444,6 +2411,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
+            if (app_state.g_all_sessions_active) allSessionsHover(GET_X(lp), GET_Y(lp));
             const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
                 .tab => |index| index,
                 else => null,
@@ -5677,6 +5645,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_all_sessions_unattached_only = false;
                     app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
                     openAllSessions(hwnd);
+                    return 0;
+                }
+                if (target == SEARCH_ALL_SESSIONS_SERVER_OFFSET) {
+                    openAllSessions(hwnd);
+                    allSessionsToggleServerFilter();
+                    _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
                 if (target == SEARCH_SNIPPET_MANAGE_OFFSET) {

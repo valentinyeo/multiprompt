@@ -118,6 +118,13 @@ const AS_TAB_ALL = @import("app_state.zig").AS_TAB_ALL;
 const AS_TAB_OTHER = @import("app_state.zig").AS_TAB_OTHER;
 const AS_TAB_WAITING = @import("app_state.zig").AS_TAB_WAITING;
 const AS_TAB_ARCHIVED = @import("app_state.zig").AS_TAB_ARCHIVED;
+const AS_TAB_RUNNING = @import("app_state.zig").AS_TAB_RUNNING;
+const AS_TAB_NO_WINDOW = @import("app_state.zig").AS_TAB_NO_WINDOW;
+const AS_HOST_FILTER_ALL = @import("app_state.zig").AS_HOST_FILTER_ALL;
+const DT_CENTER = @import("win32.zig").DT_CENTER;
+const DT_CALCRECT = @import("win32.zig").DT_CALCRECT;
+const drawAgentIcon = @import("drawing.zig").drawAgentIcon;
+const fillRoundRect = @import("smooth.zig").fillRoundRect;
 const AS_ROW_OTHER = @import("app_state.zig").AS_ROW_OTHER;
 const ALL_SESSIONS_TAB_COUNT = @import("app_state.zig").ALL_SESSIONS_TAB_COUNT;
 const closeShellRemember = @import("console.zig").closeShellRemember;
@@ -1215,9 +1222,112 @@ pub fn sessionOverviewKindLabel(kind: SessionOverviewKind) []const u8 {
 
 fn sessionOverviewKindMatches(kind: SessionOverviewKind, query: []const u16) bool {
     return asciiContainsQueryInsensitive(sessionOverviewKindLabel(kind), query) or
+        asciiContainsQueryInsensitive(sessionViewStateLabel(sessionViewState(kind)), query) or
         (kind == .hidden and asciiContainsQueryInsensitive("waiting wait hidden blue dot alt e", query)) or
-        (kind == .vps_only and asciiContainsQueryInsensitive("only on vps not attached", query)) or
+        (kind == .vps_only and asciiContainsQueryInsensitive("only on vps not attached no window", query)) or
+        (kind == .reminder and asciiContainsQueryInsensitive("no window", query)) or
+        (kind == .open and asciiContainsQueryInsensitive("running", query)) or
         (kind == .archived and asciiContainsQueryInsensitive("archive archived dissolve dissolved resurrect killed session archive", query));
+}
+
+pub const SessionViewState = enum(u8) { running, no_window, archived };
+
+pub fn sessionViewState(kind: SessionOverviewKind) SessionViewState {
+    return switch (kind) {
+        .open, .hidden => .running,
+        .vps_only, .reminder => .no_window,
+        .archived => .archived,
+    };
+}
+
+pub fn sessionViewStateLabel(state: SessionViewState) []const u8 {
+    return switch (state) {
+        .running => "Running",
+        .no_window => "No window",
+        .archived => "Archived",
+    };
+}
+
+pub const SessionViewCounts = struct {
+    all: u32 = 0,
+    running: u32 = 0,
+    no_window: u32 = 0,
+    archived: u32 = 0,
+};
+
+pub fn sessionViewCounts(rows: []const SessionOverviewRow, host_filter: u8) SessionViewCounts {
+    var counts = SessionViewCounts{};
+    for (rows) |row| {
+        if (host_filter != AS_HOST_FILTER_ALL and row.host != host_filter) continue;
+        counts.all += 1;
+        switch (sessionViewState(row.kind)) {
+            .running => counts.running += 1,
+            .no_window => counts.no_window += 1,
+            .archived => counts.archived += 1,
+        }
+    }
+    return counts;
+}
+
+pub fn sessionViewRunningHosts(rows: []const SessionOverviewRow) u32 {
+    var seen = [_]bool{false} ** 8;
+    var n: u32 = 0;
+    for (rows) |row| {
+        if (sessionViewState(row.kind) != .running or row.host >= seen.len or seen[row.host]) continue;
+        seen[row.host] = true;
+        n += 1;
+    }
+    return n;
+}
+
+pub fn sessionViewLiveRamMb(rows: []const SessionOverviewRow, host: u8) u32 {
+    var total: u32 = 0;
+    for (rows) |row| {
+        if (row.host != host or sessionViewState(row.kind) == .archived) continue;
+        total +|= row.ram_mb;
+    }
+    return total;
+}
+
+test "session view states count running, no window, and archived per server" {
+    const rows = [_]SessionOverviewRow{
+        .{ .kind = .open, .host = 0 },
+        .{ .kind = .open, .host = 0 },
+        .{ .kind = .hidden, .host = 1 },
+        .{ .kind = .vps_only, .host = 0 },
+        .{ .kind = .reminder, .host = 1 },
+        .{ .kind = .vps_only, .host = 1 },
+        .{ .kind = .archived, .host = 0 },
+        .{ .kind = .archived, .host = 1 },
+        .{ .kind = .archived, .host = 1 },
+    };
+    const all = sessionViewCounts(&rows, AS_HOST_FILTER_ALL);
+    try std.testing.expectEqual(@as(u32, 3), all.running);
+    try std.testing.expectEqual(@as(u32, 3), all.no_window);
+    try std.testing.expectEqual(@as(u32, 3), all.archived);
+    const host0 = sessionViewCounts(&rows, 0);
+    try std.testing.expectEqual(@as(u32, 2), host0.running);
+    try std.testing.expectEqual(@as(u32, 1), host0.no_window);
+    try std.testing.expectEqual(@as(u32, 1), host0.archived);
+    try std.testing.expect(host0.running != all.running);
+    try std.testing.expectEqual(@as(u32, 2), sessionViewRunningHosts(&rows));
+    try std.testing.expectEqual(SessionViewState.running, sessionViewState(.open));
+    try std.testing.expectEqual(SessionViewState.running, sessionViewState(.hidden));
+    try std.testing.expectEqual(SessionViewState.no_window, sessionViewState(.vps_only));
+    try std.testing.expectEqual(SessionViewState.no_window, sessionViewState(.reminder));
+    try std.testing.expectEqual(SessionViewState.archived, sessionViewState(.archived));
+}
+
+fn copyShellPreview(dst: []u8, shell: *const Shell) u32 {
+    if (shell.last_title_len <= 0) return 0;
+    const n = @min(@as(usize, @intCast(shell.last_title_len)), dst.len);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const wc = shell.last_title[i];
+        if (wc < 32 or wc >= 127) return @intCast(i);
+        dst[i] = @intCast(wc);
+    }
+    return @intCast(i);
 }
 
 fn copyShellNameAscii(dst: []u8, shell: *const Shell) u32 {
@@ -1303,6 +1413,7 @@ pub fn sessionOverviewRowMatches(row: *const SessionOverviewRow, query: []const 
     if (asciiContainsQueryInsensitive(row.name[0..row.name_len], query)) return true;
     if (asciiContainsQueryInsensitive(row.session[0..row.session_len], query)) return true;
     if (asciiContainsQueryInsensitive(row.context[0..row.context_len], query)) return true;
+    if (row.preview_len > 0 and asciiContainsQueryInsensitive(row.preview[0..row.preview_len], query)) return true;
     if (sessionOverviewKindMatches(row.kind, query)) return true;
     if (row.stale_candidate and asciiContainsQueryInsensitive("stale cleanup candidate detached idle 72 hours", query)) return true;
     return tmuxHostMatchesQuery(row.host, query);
@@ -1422,6 +1533,7 @@ pub fn buildSessionOverviewRows() void {
             const row = &app_state.g_session_overview_rows.items[app_state.g_session_overview_rows.items.len - 1];
             row.ram_mb = tmuxSessionRamMb(host, sess, app_state.shells[i].ram_mb);
             row.agent = app_state.shells[i].ai_agent;
+            row.preview_len = copyShellPreview(row.preview[0..], &app_state.shells[i]);
         }
     }
 
@@ -1486,6 +1598,7 @@ pub fn buildSessionOverviewRows() void {
             const row = &app_state.g_session_overview_rows.items[app_state.g_session_overview_rows.items.len - 1];
             row.ram_mb = tmuxSessionRamMb(host, sess, app_state.shells[i].ram_mb);
             row.agent = app_state.shells[i].ai_agent;
+            row.preview_len = copyShellPreview(row.preview[0..], &app_state.shells[i]);
         }
     }
 
@@ -1588,6 +1701,8 @@ fn allSessionsRowTab(row: *const SessionOverviewRow) u32 {
 
 fn allSessionsRowInTab(row: *const SessionOverviewRow, tab: u32) bool {
     if (tab == AS_TAB_ALL) return true;
+    if (tab == AS_TAB_RUNNING) return sessionViewState(row.kind) == .running;
+    if (tab == AS_TAB_NO_WINDOW) return sessionViewState(row.kind) == .no_window;
     if (tab == AS_TAB_WAITING) return row.kind == .hidden;
     if (tab == AS_TAB_ARCHIVED) return row.kind == .archived;
     return allSessionsRowTab(row) == tab;
@@ -1642,6 +1757,8 @@ test "All Sessions RAM totals deduplicate live tmux sessions and exclude dissolv
 
 fn allSessionsTabLabel(tab: u32, buf: *[32]u8) []const u8 {
     if (tab == AS_TAB_ALL) return "All";
+    if (tab == AS_TAB_RUNNING) return "Running";
+    if (tab == AS_TAB_NO_WINDOW) return "No window";
     if (tab == AS_TAB_WAITING) return "Waiting";
     if (tab == AS_TAB_ARCHIVED) return "Archived";
     if (tab == AS_TAB_OTHER) return "Other";
@@ -1657,16 +1774,45 @@ fn allSessionsFilterMatches(row: *const SessionOverviewRow) bool {
 }
 
 pub fn allSessionsRowVisible(row: *const SessionOverviewRow) bool {
-    const state_destination = app_state.g_all_sessions_tab == AS_TAB_WAITING or app_state.g_all_sessions_tab == AS_TAB_ARCHIVED;
+    if (app_state.g_all_sessions_host_filter != AS_HOST_FILTER_ALL and row.host != app_state.g_all_sessions_host_filter) return false;
     const g_all_sessions_killed_only = app_state.g_all_sessions_tab == AS_TAB_ARCHIVED;
     if (g_all_sessions_killed_only and row.kind != .archived) return false;
-    if (!state_destination and app_state.g_all_sessions_unattached_only and row.kind != .vps_only) return false;
     if (!allSessionsRowInTab(row, app_state.g_all_sessions_tab)) return false;
     return allSessionsFilterMatches(row);
 }
 
+const AllSessionsChrome = struct {
+    title_y: i32,
+    summary_y: i32,
+    chip_y: i32,
+    chip_h: i32,
+    tab_y: i32,
+    tab_h: i32,
+    list_top: i32,
+    footer_h: i32,
+    row_h: i32,
+};
+
+fn allSessionsChrome() AllSessionsChrome {
+    return .{
+        .title_y = uiScaled(14),
+        .summary_y = uiScaled(38),
+        .chip_y = uiScaled(62),
+        .chip_h = uiScaled(32),
+        .tab_y = uiScaled(104),
+        .tab_h = uiScaled(30),
+        .list_top = uiScaled(144),
+        .footer_h = uiScaled(44),
+        .row_h = uiScaled(54),
+    };
+}
+
 pub fn allSessionsListTop() i32 {
-    return if (app_state.g_all_sessions_filter_active) 90 else 54;
+    return allSessionsChrome().list_top;
+}
+
+pub fn allSessionsRowH() i32 {
+    return allSessionsChrome().row_h;
 }
 
 pub fn allSessionsVisibleCount() u32 {
@@ -1689,18 +1835,24 @@ pub fn allSessionsNthVisible(want: u32) ?u32 {
 }
 
 fn allSessionsClusterCount(tab: u32) u32 {
+    const rows = app_state.g_session_overview_rows.items[0..app_state.g_session_overview_count];
+    if (tab == AS_TAB_ALL or tab == AS_TAB_RUNNING or tab == AS_TAB_NO_WINDOW or tab == AS_TAB_ARCHIVED) {
+        const counts = sessionViewCounts(rows, app_state.g_all_sessions_host_filter);
+        if (tab == AS_TAB_RUNNING) return counts.running;
+        if (tab == AS_TAB_NO_WINDOW) return counts.no_window;
+        if (tab == AS_TAB_ARCHIVED) return counts.archived;
+        return counts.all;
+    }
     var c: u32 = 0;
-    for (0..app_state.g_session_overview_count) |i| {
-        const row = &app_state.g_session_overview_rows.items[i];
-        const state_destination = tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED;
-        if (!state_destination and app_state.g_all_sessions_unattached_only and row.kind != .vps_only) continue;
+    for (rows) |*row| {
+        if (app_state.g_all_sessions_host_filter != AS_HOST_FILTER_ALL and row.host != app_state.g_all_sessions_host_filter) continue;
         if (allSessionsRowInTab(row, tab)) c += 1;
     }
     return c;
 }
 
 pub fn allSessionsSplitVisible(tab: u32) bool {
-    if (tab == AS_TAB_ALL or tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED) return true;
+    if (tab == AS_TAB_ALL or tab == AS_TAB_RUNNING or tab == AS_TAB_NO_WINDOW or tab == AS_TAB_WAITING or tab == AS_TAB_ARCHIVED) return true;
     return allSessionsClusterCount(tab) > 0;
 }
 
@@ -1784,116 +1936,330 @@ fn drawAllSessionsCloseConfirm(hdc: HANDLE, w: i32, h: i32, font_title: HANDLE, 
     drawAscii(hdc, "Enter / y  Close        Esc / n  Cancel", &key_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 }
 
+fn asPushU16(buf: []u16, n: *usize, cp: u16) void {
+    if (n.* < buf.len) {
+        buf[n.*] = cp;
+        n.* += 1;
+    }
+}
+
+fn asPushAscii(buf: []u16, n: *usize, text: []const u8) void {
+    for (text) |c| asPushU16(buf, n, c);
+}
+
+fn asDot() u16 {
+    return 0x00B7;
+}
+
+fn rawLiveId(text: []const u8) bool {
+    return text.len >= 6 and std.mem.startsWith(u8, text, "live-");
+}
+
+fn sessionOverviewPublicName(row: *const SessionOverviewRow) []const u8 {
+    if (row.name_len > 0 and row.name_len <= row.name.len) {
+        const named = row.name[0..row.name_len];
+        if (!rawLiveId(named)) return named;
+    }
+    if (row.context_len > 0 and row.context_len <= row.context.len) {
+        const ctx = row.context[0..row.context_len];
+        if (!rawLiveId(ctx) and ctx.len > 0) return ctx;
+    }
+    return "Session";
+}
+
+fn sessionOverviewPreview(row: *const SessionOverviewRow) []const u8 {
+    if (row.preview_len == 0 or row.preview_len > row.preview.len) return "";
+    const preview = row.preview[0..row.preview_len];
+    if (rawLiveId(preview)) return "";
+    const name = sessionOverviewPublicName(row);
+    if (std.mem.eql(u8, preview, name)) return "";
+    return preview;
+}
+
+fn asFormatRam(mb: u32, buf: []u8) []const u8 {
+    if (mb == 0) return "-";
+    if (mb >= 1024) {
+        const whole = mb / 1024;
+        const tenth = (mb % 1024) * 10 / 1024;
+        return std.fmt.bufPrint(buf, "{d}.{d} GB", .{ whole, tenth }) catch "-";
+    }
+    return std.fmt.bufPrint(buf, "{d} MB", .{mb}) catch "-";
+}
+
+fn asHit(rc: RECT, x: i32, y: i32) bool {
+    return x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom;
+}
+
+fn asMeasure(hdc: HANDLE, text: []const u16) i32 {
+    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    _ = DrawTextW(hdc, @ptrCast(text.ptr), @intCast(text.len), &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    return calc.right - calc.left;
+}
+
+fn allSessionsMaxRows(height: i32) u32 {
+    const chrome = allSessionsChrome();
+    const avail = height - chrome.list_top - chrome.footer_h;
+    if (app_state.g_all_sessions_sel >= allSessionsVisibleCount() and allSessionsVisibleCount() > 0) {
+        app_state.g_all_sessions_sel = allSessionsVisibleCount() - 1;
+    }
+    return if (avail > chrome.row_h) @intCast(@divFloor(avail, chrome.row_h)) else 1;
+}
+
+fn allSessionsScrollRow(max_rows: u32) u32 {
+    if (app_state.g_all_sessions_sel >= max_rows) return app_state.g_all_sessions_sel - max_rows + 1;
+    return 0;
+}
+
+fn allSessionsSearchRect(width: i32) RECT {
+    const chrome = allSessionsChrome();
+    const box_w = uiScaled(280);
+    return .{
+        .left = width - uiScaled(20) - box_w,
+        .top = chrome.tab_y,
+        .right = width - uiScaled(20),
+        .bottom = chrome.tab_y + chrome.tab_h,
+    };
+}
+
+fn allSessionsActionRects(width: i32, y: i32, row_h: i32) [3]RECT {
+    const button_h = uiScaled(24);
+    const top = y + @divTrunc(row_h - button_h, 2);
+    const gap = uiScaled(6);
+    const right = width - uiScaled(16);
+    const close_w = uiScaled(108);
+    const archive_w = uiScaled(72);
+    const open_w = uiScaled(56);
+    const close = RECT{ .left = right - close_w, .top = top, .right = right, .bottom = top + button_h };
+    const archive = RECT{ .left = close.left - gap - archive_w, .top = top, .right = close.left - gap, .bottom = top + button_h };
+    const open = RECT{ .left = archive.left - gap - open_w, .top = top, .right = archive.left - gap, .bottom = top + button_h };
+    return .{ open, archive, close };
+}
+
+fn allSessionsMarkRect(y: i32, row_h: i32) RECT {
+    const side = uiScaled(15);
+    const top = y + @divTrunc(row_h - side, 2);
+    return .{ .left = uiScaled(14), .top = top, .right = uiScaled(14) + side, .bottom = top + side };
+}
+
+fn asInitials(name: []const u8, buf: *[2]u8) []const u8 {
+    var n: usize = 0;
+    var take_next = true;
+    for (name) |c| {
+        if (c == ' ') {
+            take_next = true;
+            continue;
+        }
+        if (!take_next) continue;
+        buf[n] = std.ascii.toUpper(c);
+        n += 1;
+        take_next = false;
+        if (n == 2) break;
+    }
+    if (n == 0 and name.len > 0) {
+        buf[0] = std.ascii.toUpper(name[0]);
+        n = 1;
+    }
+    return buf[0..n];
+}
+
+fn asAvatarColor(name: []const u8) DWORD {
+    const colors = [_]DWORD{
+        RGB(247, 180, 200),
+        RGB(154, 209, 255),
+        RGB(255, 179, 138),
+        RGB(199, 240, 168),
+        RGB(255, 210, 122),
+        RGB(216, 194, 255),
+        RGB(168, 230, 224),
+    };
+    var hash: u32 = 0;
+    for (name) |c| hash = hash *% 33 +% c;
+    return colors[hash % colors.len];
+}
+
+fn asDrawPill(hdc: HANDLE, rc: RECT, fill: DWORD, text: []const u8, text_color: DWORD, font: HANDLE) void {
+    fillRoundRect(hdc, rc, uiScaled(6), fill);
+    _ = SelectObject(hdc, font);
+    _ = SetTextColor(hdc, text_color);
+    var text_rc = rc;
+    drawAscii(hdc, text, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+fn asDrawWide(hdc: HANDLE, text: []const u16, rc: *RECT, flags: u32) void {
+    if (text.len == 0) return;
+    _ = DrawTextW(hdc, @ptrCast(text.ptr), @intCast(text.len), rc, flags);
+}
+
 pub fn paintAllSessions(hdc: HANDLE) void {
     buildSessionOverviewRows();
     var rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const w = rc.right;
     const h = rc.bottom;
+    const chrome = allSessionsChrome();
+    const light = app_state.g_light_theme;
+    const rows = app_state.g_session_overview_rows.items[0..app_state.g_session_overview_count];
+    const global_counts = sessionViewCounts(rows, AS_HOST_FILTER_ALL);
+    const running_hosts = sessionViewRunningHosts(rows);
 
-    const bg_br = CreateSolidBrush(themeConsoleBg());
+    const card: DWORD = if (light) RGB(246, 246, 248) else RGB(22, 22, 22);
+    const fg: DWORD = if (light) RGB(32, 32, 36) else RGB(236, 236, 240);
+    const muted: DWORD = if (light) RGB(90, 90, 98) else RGB(138, 138, 142);
+    const chip_bg: DWORD = if (light) RGB(255, 255, 255) else RGB(26, 26, 30);
+    const chip_on: DWORD = if (light) RGB(226, 226, 232) else RGB(50, 50, 59);
+    const line: DWORD = if (light) RGB(220, 220, 224) else RGB(38, 38, 42);
+    const row_bg: DWORD = if (light) RGB(232, 232, 236) else RGB(31, 31, 36);
+    const green: DWORD = RGB(46, 204, 113);
+    const green_text: DWORD = if (light) RGB(22, 122, 68) else RGB(123, 215, 162);
+    const blue: DWORD = customColorOr("attention", RGB(60, 120, 220));
+    const blue_text: DWORD = if (light) RGB(36, 78, 168) else RGB(126, 166, 230);
+    const grey: DWORD = if (light) RGB(110, 110, 118) else RGB(143, 143, 151);
+    const amber: DWORD = RGB(240, 180, 90);
+    const danger: DWORD = RGB(238, 111, 100);
+    const mark: DWORD = RGB(240, 130, 70);
+    _ = allSessionsKindColor(.archived, grey, green);
+
+    const bg_br = CreateSolidBrush(card);
     _ = FillRect(hdc, &rc, bg_br);
     _ = DeleteObject(bg_br);
-
     const font_title = uiFontInboxTitle();
     const font_subtitle = uiFontInboxSub();
     const old_font = SelectObject(hdc, font_title);
     _ = SetBkMode(hdc, TRANSPARENT);
 
-    const fg_dim: DWORD = if (app_state.g_light_theme) RGB(110, 110, 110) else if (app_state.g_mid_theme or app_state.g_edge_gray_theme) RGB(255, 255, 255) else RGB(150, 150, 150);
-    const fg_bright: DWORD = if (app_state.g_light_theme) RGB(20, 20, 20) else if (app_state.g_mid_theme or app_state.g_edge_gray_theme) RGB(255, 255, 255) else RGB(235, 235, 235);
-    const blue: DWORD = customColorOr("attention", RGB(60, 120, 220));
-    const green: DWORD = RGB(46, 204, 113);
+    _ = SetTextColor(hdc, fg);
+    var title_rc = RECT{ .left = uiScaled(20), .top = chrome.title_y, .right = w - uiScaled(20), .bottom = chrome.title_y + uiScaled(24) };
+    _ = DrawTextW(hdc, L("Show all sessions"), -1, &title_rc, DT_SINGLELINE | DT_NOPREFIX);
 
-    var tx: i32 = 44;
-    const tab_y: i32 = 14;
-    app_state.g_all_sessions_split_tab_count = 0;
-    const purple: DWORD = if (app_state.g_light_theme) RGB(110, 90, 180) else RGB(167, 139, 250);
-    const lws_u: u32 = app_state.g_lws_count;
-    var cand_i: u32 = 0;
-    while (cand_i < lws_u + 4) : (cand_i += 1) {
-        const tabid: u32 = if (cand_i == 0)
-            AS_TAB_ALL
-        else if (cand_i == 1)
-            AS_TAB_WAITING
-        else if (cand_i == 2)
-            AS_TAB_ARCHIVED
-        else if (cand_i <= lws_u + 2)
-            cand_i - 3
-        else
-            AS_TAB_OTHER;
-        if (!allSessionsSplitVisible(tabid)) continue;
-        const tx_before = tx;
-        const count = allSessionsClusterCount(tabid);
-        const tab_dot: DWORD = if (tabid == AS_TAB_ARCHIVED or tabid == AS_TAB_OTHER) purple else if (count > 0) blue else fg_dim;
-        var lbuf: [32]u8 = undefined;
-        drawInboxTab(hdc, &tx, tab_y, allSessionsTabLabel(tabid, &lbuf), count, allSessionsTabRamMb(tabid), app_state.g_all_sessions_tab == tabid, fg_bright, fg_dim, true, tab_dot, 8, blue);
-        if (app_state.g_all_sessions_split_tab_count < ALL_SESSIONS_TAB_COUNT) {
-            const si = app_state.g_all_sessions_split_tab_count;
-            app_state.g_all_sessions_split_xs[si] = tx_before;
-            app_state.g_all_sessions_split_xe[si] = tx;
-            app_state.g_all_sessions_split_ids[si] = tabid;
-            app_state.g_all_sessions_split_tab_count += 1;
-        }
+    _ = SelectObject(hdc, font_subtitle);
+    _ = SetTextColor(hdc, muted);
+    var summary: [96]u16 = undefined;
+    var sn: usize = 0;
+    var num_buf: [24]u8 = undefined;
+    const run_n = std.fmt.bufPrint(&num_buf, "{d}", .{global_counts.running}) catch "0";
+    asPushAscii(&summary, &sn, run_n);
+    asPushAscii(&summary, &sn, " running on ");
+    const host_n = std.fmt.bufPrint(&num_buf, "{d}", .{running_hosts}) catch "0";
+    asPushAscii(&summary, &sn, host_n);
+    asPushAscii(&summary, &sn, if (running_hosts == 1) " server " else " servers ");
+    asPushU16(&summary, &sn, asDot());
+    asPushAscii(&summary, &sn, " ");
+    const arc_n = std.fmt.bufPrint(&num_buf, "{d}", .{global_counts.archived}) catch "0";
+    asPushAscii(&summary, &sn, arc_n);
+    asPushAscii(&summary, &sn, " archived");
+    var summary_rc = RECT{ .left = uiScaled(20), .top = chrome.summary_y, .right = w - uiScaled(20), .bottom = chrome.summary_y + uiScaled(20) };
+    asDrawWide(hdc, summary[0..sn], &summary_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    app_state.g_all_sessions_chip_n = 0;
+    var chip_x: i32 = uiScaled(20);
+    var seen_host = [_]bool{false} ** 8;
+    for (rows) |row| {
+        if (row.host >= seen_host.len or seen_host[row.host]) continue;
+        if (app_state.g_all_sessions_chip_n >= app_state.g_all_sessions_chip_host.len) break;
+        seen_host[row.host] = true;
+        const host_rows_running = sessionViewCounts(rows, row.host).running;
+        const mem = sessionViewLiveRamMb(rows, row.host);
+        var mem_buf: [24]u8 = undefined;
+        const mem_label = asFormatRam(mem, &mem_buf);
+        var chip: [96]u16 = undefined;
+        var cn: usize = 0;
+        asPushAscii(&chip, &cn, sessionOverviewHostLabel(row.host));
+        asPushAscii(&chip, &cn, " ");
+        asPushU16(&chip, &cn, asDot());
+        asPushAscii(&chip, &cn, " ");
+        const run_label = std.fmt.bufPrint(&num_buf, "{d} running", .{host_rows_running}) catch "0 running";
+        asPushAscii(&chip, &cn, run_label);
+        asPushAscii(&chip, &cn, " ");
+        asPushU16(&chip, &cn, asDot());
+        asPushAscii(&chip, &cn, " ");
+        asPushAscii(&chip, &cn, mem_label);
+        _ = SelectObject(hdc, font_subtitle);
+        const chip_w = asMeasure(hdc, chip[0..cn]) + uiScaled(28);
+        if (chip_x + chip_w > w - uiScaled(16)) break;
+        const chip_rc = RECT{ .left = chip_x, .top = chrome.chip_y, .right = chip_x + chip_w, .bottom = chrome.chip_y + chrome.chip_h };
+        const on = app_state.g_all_sessions_host_filter == row.host;
+        fillRoundRect(hdc, chip_rc, uiScaled(9), if (on) chip_on else chip_bg);
+        drawAttentionDot(hdc, chip_rc.left + uiScaled(12), chip_rc.top + @divTrunc(chrome.chip_h, 2), uiScaled(3), green);
+        _ = SetTextColor(hdc, if (on) fg else muted);
+        var chip_text = RECT{ .left = chip_rc.left + uiScaled(20), .top = chip_rc.top, .right = chip_rc.right - uiScaled(8), .bottom = chip_rc.bottom };
+        asDrawWide(hdc, chip[0..cn], &chip_text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const slot = app_state.g_all_sessions_chip_n;
+        app_state.g_all_sessions_chip_host[slot] = row.host;
+        app_state.g_all_sessions_chip_rc[slot] = chip_rc;
+        app_state.g_all_sessions_chip_n += 1;
+        chip_x += chip_w + uiScaled(8);
     }
-    var div_rc = RECT{ .left = 16, .top = tab_y + 28, .right = w - 16, .bottom = tab_y + 29 };
-    const div_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(52, 52, 52));
+
+    var div_rc = RECT{ .left = uiScaled(16), .top = chrome.tab_y + chrome.tab_h, .right = w - uiScaled(16), .bottom = chrome.tab_y + chrome.tab_h + 1 };
+    const div_br = CreateSolidBrush(line);
     _ = FillRect(hdc, &div_rc, div_br);
     _ = DeleteObject(div_br);
 
-    if (app_state.g_all_sessions_filter_active) {
-        var search_rc = RECT{ .left = 22, .top = 50, .right = w - 22, .bottom = 82 };
-        const search_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(242, 246, 252) else RGB(28, 34, 44));
-        _ = FillRect(hdc, &search_rc, search_br);
-        _ = DeleteObject(search_br);
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, blue);
-        var find_rc = RECT{ .left = 32, .top = 50, .right = 132, .bottom = 82 };
-        _ = DrawTextW(hdc, L("Find sessions"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        var query_rc = RECT{ .left = 142, .top = 50, .right = w - 34, .bottom = 82 };
-        if (app_state.g_all_sessions_filter_len > 0) {
-            _ = SetTextColor(hdc, fg_bright);
-            _ = DrawTextW(hdc, @ptrCast(&app_state.g_all_sessions_filter_buf), @intCast(app_state.g_all_sessions_filter_len), &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        } else {
-            _ = SetTextColor(hdc, fg_dim);
-            _ = DrawTextW(hdc, L("Type a name, tmux session, workspace, host, or status..."), -1, &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    const search_rc = allSessionsSearchRect(w);
+    fillRoundRect(hdc, search_rc, uiScaled(8), if (light) RGB(255, 255, 255) else RGB(16, 16, 19));
+    _ = SelectObject(hdc, font_subtitle);
+    var query_rc = RECT{ .left = search_rc.left + uiScaled(10), .top = search_rc.top, .right = search_rc.right - uiScaled(8), .bottom = search_rc.bottom };
+    if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) {
+        _ = SetTextColor(hdc, fg);
+        _ = DrawTextW(hdc, @ptrCast(&app_state.g_all_sessions_filter_buf), @intCast(app_state.g_all_sessions_filter_len), &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    } else {
+        _ = SetTextColor(hdc, muted);
+        _ = DrawTextW(hdc, L("Search name, workspace or server"), -1, &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+
+    app_state.g_all_sessions_split_tab_count = 0;
+    const state_tabs = [_]u32{ AS_TAB_ALL, AS_TAB_RUNNING, AS_TAB_NO_WINDOW, AS_TAB_ARCHIVED };
+    var tx: i32 = uiScaled(16);
+    for (state_tabs) |tabid| {
+        if (tx + uiScaled(40) >= search_rc.left - uiScaled(8)) break;
+        const count = allSessionsClusterCount(tabid);
+        var lbuf: [32]u8 = undefined;
+        const label = allSessionsTabLabel(tabid, &lbuf);
+        var pill: [40]u8 = undefined;
+        const pill_text = std.fmt.bufPrint(&pill, "{s} {d}", .{ label, count }) catch label;
+        _ = SelectObject(hdc, font_subtitle);
+        var wide: [48]u16 = undefined;
+        var wn: usize = 0;
+        asPushAscii(&wide, &wn, pill_text);
+        const pill_w = asMeasure(hdc, wide[0..wn]) + uiScaled(22);
+        const pill_rc = RECT{ .left = tx, .top = chrome.tab_y, .right = tx + pill_w, .bottom = chrome.tab_y + chrome.tab_h };
+        const selected_tab = app_state.g_all_sessions_tab == tabid;
+        if (selected_tab) fillRoundRect(hdc, pill_rc, uiScaled(14), if (light) RGB(220, 220, 226) else RGB(43, 43, 51));
+        const dot_color: DWORD = switch (tabid) {
+            AS_TAB_RUNNING => green,
+            AS_TAB_NO_WINDOW => blue,
+            AS_TAB_ARCHIVED => grey,
+            else => card,
+        };
+        var text_left = pill_rc.left + uiScaled(10);
+        if (tabid != AS_TAB_ALL) {
+            drawAttentionDot(hdc, pill_rc.left + uiScaled(12), pill_rc.top + @divTrunc(chrome.tab_h, 2), uiScaled(3), dot_color);
+            text_left = pill_rc.left + uiScaled(20);
         }
+        _ = SetTextColor(hdc, if (selected_tab) fg else muted);
+        var pill_text_rc = RECT{ .left = text_left, .top = pill_rc.top, .right = pill_rc.right - uiScaled(8), .bottom = pill_rc.bottom };
+        asDrawWide(hdc, wide[0..wn], &pill_text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        if (app_state.g_all_sessions_split_tab_count < ALL_SESSIONS_TAB_COUNT) {
+            const si = app_state.g_all_sessions_split_tab_count;
+            app_state.g_all_sessions_split_xs[si] = pill_rc.left;
+            app_state.g_all_sessions_split_xe[si] = pill_rc.right;
+            app_state.g_all_sessions_split_ids[si] = tabid;
+            app_state.g_all_sessions_split_tab_count += 1;
+        }
+        tx = pill_rc.right + uiScaled(4);
     }
 
-    const row_h: i32 = uiScaled(32);
-    const list_top = allSessionsListTop();
-    const footer_h: i32 = 30;
-    const avail = h - list_top - footer_h;
-    const max_rows: u32 = if (avail > row_h) @intCast(@divFloor(avail, row_h)) else 1;
+    const max_rows = allSessionsMaxRows(h);
+    const scroll_row = allSessionsScrollRow(max_rows);
     const vis = allSessionsVisibleCount();
-    if (app_state.g_all_sessions_sel >= vis and vis > 0) app_state.g_all_sessions_sel = vis - 1;
-    var scroll_row: u32 = 0;
-    if (app_state.g_all_sessions_sel >= max_rows) scroll_row = app_state.g_all_sessions_sel - max_rows + 1;
-
-    if (!app_state.g_session_overview_repo_ok) {
+    if (vis == 0) {
         _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, fg_dim);
-        var empty_rc = RECT{ .left = 24, .top = list_top + 12, .right = w - 24, .bottom = list_top + 44 };
-        _ = DrawTextW(hdc, L("No workspace repo detected."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
-    } else if (vis == 0) {
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, fg_dim);
-        var empty_rc = RECT{ .left = 24, .top = list_top + 12, .right = w - 24, .bottom = list_top + 44 };
-        _ = DrawTextW(hdc, if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) L("No sessions match this search.") else L("No sessions in this cluster."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
+        _ = SetTextColor(hdc, muted);
+        var empty_rc = RECT{ .left = uiScaled(24), .top = chrome.list_top + uiScaled(12), .right = w - uiScaled(24), .bottom = chrome.list_top + uiScaled(40) };
+        _ = DrawTextW(hdc, if (app_state.g_all_sessions_filter_active and app_state.g_all_sessions_filter_len > 0) L("No sessions match this filter.") else L("No sessions in this filter."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
     }
 
-    const name_right: i32 = @max(@as(i32, 160), @min(@as(i32, 420), w - 520));
-    const kind_left: i32 = name_right + 14;
-    const kind_right: i32 = kind_left + 110;
-    const ctx_left: i32 = kind_right + 14;
-    const ctx_right: i32 = ctx_left + 150;
-    const host_left: i32 = ctx_right + 14;
-    const host_right: i32 = host_left + 100;
-    const sess_left: i32 = host_right + 14;
-    const ram_left: i32 = w - 184;
-    const ram_right: i32 = w - 100;
-
-    var y: i32 = list_top;
+    var y: i32 = chrome.list_top;
     var vrow: u32 = 0;
     var drawn: u32 = 0;
     for (0..app_state.g_session_overview_count) |i| {
@@ -1903,106 +2269,332 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         vrow += 1;
         if (this_vrow < scroll_row) continue;
         if (drawn >= max_rows) break;
-
+        const hovered = app_state.g_all_sessions_hover == this_vrow;
         const selected = this_vrow == app_state.g_all_sessions_sel;
-        const kind_color = allSessionsKindColor(row.kind, blue, green);
-        if (selected) {
-            var sel_rc = RECT{ .left = 12, .top = y, .right = w - 12, .bottom = y + row_h };
-            const sel_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(225, 235, 250) else RGB(34, 44, 60));
-            _ = FillRect(hdc, &sel_rc, sel_br);
-            _ = DeleteObject(sel_br);
-            var bar_rc = RECT{ .left = 12, .top = y, .right = if (app_state.g_all_sessions_ctx) 18 else 15, .bottom = y + row_h };
-            const bar_br = CreateSolidBrush(if (app_state.g_all_sessions_ctx) RGB(240, 180, 90) else kind_color);
-            _ = FillRect(hdc, &bar_rc, bar_br);
-            _ = DeleteObject(bar_br);
+        const state = sessionViewState(row.kind);
+        const archived = state == .archived;
+        if (hovered or selected) {
+            const row_rc = RECT{ .left = uiScaled(8), .top = y, .right = w - uiScaled(8), .bottom = y + chrome.row_h };
+            fillRoundRect(hdc, row_rc, uiScaled(8), row_bg);
         }
-
+        const mark_rc = allSessionsMarkRect(y, chrome.row_h);
         const marked = allSessionsRowMarked(row);
-        if (marked) {
-            var mark_rc = RECT{ .left = 12, .top = y, .right = 19, .bottom = y + row_h };
-            const mark_br = CreateSolidBrush(RGB(240, 130, 70));
-            _ = FillRect(hdc, &mark_rc, mark_br);
-            _ = DeleteObject(mark_br);
+        if (hovered or marked or selected) {
+            fillRoundRect(hdc, mark_rc, uiScaled(3), if (marked) mark else if (light) RGB(255, 255, 255) else RGB(19, 19, 22));
+            if (marked) {
+                _ = SelectObject(hdc, font_subtitle);
+                _ = SetTextColor(hdc, RGB(23, 16, 8));
+                var check_rc = mark_rc;
+                _ = DrawTextW(hdc, L("v"), -1, &check_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            }
         }
-        const cy = y + @divTrunc(row_h, 2);
-        drawAttentionDot(hdc, 28, cy, 4, if (row.attention) blue else kind_color);
 
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, if (selected or row.attention) fg_bright else fg_dim);
-        var name_rc = RECT{ .left = 44, .top = y, .right = name_right, .bottom = y + row_h };
-        const label = if (row.name_len > 0) row.name[0..row.name_len] else row.session[0..row.session_len];
-        drawAscii(hdc, label, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const name = sessionOverviewPublicName(row);
+        const avatar = RECT{
+            .left = uiScaled(40),
+            .top = y + @divTrunc(chrome.row_h - uiScaled(34), 2),
+            .right = uiScaled(40) + uiScaled(34),
+            .bottom = y + @divTrunc(chrome.row_h - uiScaled(34), 2) + uiScaled(34),
+        };
+        if (row.agent != 0) {
+            var icon_rc = avatar;
+            drawAgentIcon(hdc, &icon_rc, row.agent, state == .running);
+        } else {
+            fillRoundRect(hdc, avatar, uiScaled(17), asAvatarColor(name));
+            var initials: [2]u8 = undefined;
+            _ = SelectObject(hdc, font_subtitle);
+            _ = SetTextColor(hdc, RGB(19, 19, 22));
+            var ini_rc = avatar;
+            drawAscii(hdc, asInitials(name, &initials), &ini_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
+        const dot: DWORD = switch (state) {
+            .running => green,
+            .no_window => blue,
+            .archived => grey,
+        };
+        drawAttentionDot(hdc, avatar.right - uiScaled(2), avatar.bottom - uiScaled(2), uiScaled(4), dot);
 
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, if (marked) RGB(240, 130, 70) else if (row.stale_candidate) RGB(230, 150, 55) else kind_color);
-        var kind_rc = RECT{ .left = kind_left, .top = y, .right = kind_right, .bottom = y + row_h };
-        drawAscii(hdc, if (marked) "marked" else if (row.stale_candidate) "stale?" else sessionOverviewKindLabel(row.kind), &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        _ = SetTextColor(hdc, fg_dim);
-        var ctx_rc = RECT{ .left = ctx_left, .top = y, .right = ctx_right, .bottom = y + row_h };
-        drawAscii(hdc, row.context[0..row.context_len], &ctx_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        var host_rc = RECT{ .left = host_left, .top = y, .right = host_right, .bottom = y + row_h };
+        const actions = allSessionsActionRects(w, y, chrome.row_h);
+        const text_right: i32 = if (hovered) actions[0].left - uiScaled(8) else w - uiScaled(16);
+        const time_w = uiScaled(62);
+        const mem_w = uiScaled(68);
+        const srv_w = uiScaled(78);
+        const ws_w = uiScaled(96);
+        const state_w = uiScaled(104);
+        var cursor_right = text_right;
+        if (!hovered) {
+            cursor_right -= time_w;
+            if (row.last_active != 0) {
+                var tbuf: [24]u16 = undefined;
+                const tl = inboxRelTime(row.last_active, &tbuf);
+                var time_rc = RECT{ .left = cursor_right, .top = y, .right = cursor_right + time_w, .bottom = y + chrome.row_h };
+                _ = SelectObject(hdc, font_subtitle);
+                _ = SetTextColor(hdc, muted);
+                _ = DrawTextW(hdc, @ptrCast(&tbuf), @intCast(tl), &time_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
+            }
+        }
+        var ram_store: [24]u8 = undefined;
+        const ram_label = if (archived or row.ram_mb == 0) "-" else asFormatRam(row.ram_mb, &ram_store);
+        const ram_heavy = !archived and row.ram_mb >= 300;
+        var mem_rc = RECT{ .left = cursor_right - mem_w, .top = y, .right = cursor_right, .bottom = y + chrome.row_h };
+        _ = SetTextColor(hdc, if (ram_heavy) amber else muted);
+        drawAscii(hdc, ram_label, &mem_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
+        cursor_right -= mem_w;
+        var host_rc = RECT{ .left = cursor_right - srv_w, .top = y, .right = cursor_right - uiScaled(6), .bottom = y + chrome.row_h };
+        _ = SetTextColor(hdc, muted);
         drawAscii(hdc, sessionOverviewHostLabel(row.host), &host_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        cursor_right -= srv_w;
+        if (row.context_len > 0 and !rawLiveId(row.context[0..row.context_len])) {
+            const ws_rc = RECT{ .left = cursor_right - ws_w, .top = y + @divTrunc(chrome.row_h - uiScaled(22), 2), .right = cursor_right - uiScaled(8), .bottom = y + @divTrunc(chrome.row_h - uiScaled(22), 2) + uiScaled(22) };
+            asDrawPill(hdc, ws_rc, if (archived) (if (light) RGB(236, 236, 238) else RGB(30, 30, 35)) else (if (light) RGB(232, 232, 236) else RGB(35, 35, 41)), row.context[0..row.context_len], if (archived) grey else fg, font_subtitle);
+        }
+        cursor_right -= ws_w;
+        const state_color: DWORD = switch (state) {
+            .running => green_text,
+            .no_window => blue_text,
+            .archived => grey,
+        };
+        const state_rc = RECT{ .left = cursor_right - state_w, .top = y, .right = cursor_right - uiScaled(8), .bottom = y + chrome.row_h };
+        drawAttentionDot(hdc, state_rc.left + uiScaled(4), y + @divTrunc(chrome.row_h, 2), uiScaled(3), dot);
+        var state_text = RECT{ .left = state_rc.left + uiScaled(12), .top = y, .right = state_rc.right, .bottom = y + chrome.row_h };
+        _ = SetTextColor(hdc, state_color);
+        drawAscii(hdc, sessionViewStateLabel(state), &state_text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
-        if (sess_left < ram_left - 24) {
-            var sess_rc = RECT{ .left = sess_left, .top = y, .right = ram_left - 12, .bottom = y + row_h };
-            drawAscii(hdc, row.session[0..row.session_len], &sess_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const name_left = avatar.right + uiScaled(10);
+        const name_right = @max(name_left + uiScaled(40), state_rc.left - uiScaled(8));
+        _ = SelectObject(hdc, font_title);
+        _ = SetTextColor(hdc, if (archived) grey else fg);
+        var name_rc = RECT{ .left = name_left, .top = y + uiScaled(6), .right = name_right, .bottom = y + uiScaled(26) };
+        if (row.attention) {
+            var wait_wide: [20]u16 = undefined;
+            var wait_n: usize = 0;
+            asPushAscii(&wait_wide, &wait_n, "Waiting on you");
+            _ = SelectObject(hdc, font_subtitle);
+            const wait_w = asMeasure(hdc, wait_wide[0..wait_n]) + uiScaled(14);
+            name_rc.right = @max(name_left + uiScaled(20), name_right - wait_w - uiScaled(8));
+            const wait_rc = RECT{ .left = name_rc.right + uiScaled(6), .top = y + uiScaled(7), .right = name_rc.right + uiScaled(6) + wait_w, .bottom = y + uiScaled(25) };
+            asDrawPill(hdc, wait_rc, if (light) RGB(255, 244, 220) else RGB(48, 40, 24), "Waiting on you", amber, font_subtitle);
+            _ = SelectObject(hdc, font_title);
+            _ = SetTextColor(hdc, if (archived) grey else fg);
+        }
+        drawAscii(hdc, name, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const preview = sessionOverviewPreview(row);
+        if (preview.len > 0) {
+            _ = SelectObject(hdc, font_subtitle);
+            _ = SetTextColor(hdc, if (archived) grey else muted);
+            var prev_rc = RECT{ .left = name_left, .top = y + uiScaled(26), .right = name_right, .bottom = y + chrome.row_h - uiScaled(4) };
+            drawAscii(hdc, preview, &prev_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
 
-        var ram_buf: [24]u8 = undefined;
-        const ram_label = if (row.ram_mb > 0)
-            std.fmt.bufPrint(&ram_buf, "{d} MB", .{row.ram_mb}) catch "? MB"
-        else if (row.kind == .archived)
-            "0 MB"
-        else
-            "? MB";
-        _ = SetTextColor(hdc, if (selected) fg_bright else fg_dim);
-        var ram_rc = RECT{ .left = ram_left, .top = y, .right = ram_right, .bottom = y + row_h };
-        drawAscii(hdc, ram_label, &ram_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
-
-        if (row.last_active != 0) {
-            var tbuf: [24]u16 = undefined;
-            const tl = inboxRelTime(row.last_active, &tbuf);
-            var time_rc = RECT{ .left = w - 84, .top = y, .right = w - 16, .bottom = y + row_h };
-            _ = DrawTextW(hdc, @ptrCast(&tbuf), @intCast(tl), &time_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
+        if (hovered) {
+            const labels = [_][*:0]const u16{ L("Open"), L("Archive"), L("Close session") };
+            for (actions, labels, 0..) |button, label, bi| {
+                const danger_button = bi == 2;
+                fillRoundRect(hdc, button, uiScaled(6), if (danger_button) (if (light) RGB(255, 232, 230) else RGB(41, 28, 27)) else (if (light) RGB(255, 255, 255) else RGB(43, 43, 51)));
+                _ = SelectObject(hdc, font_subtitle);
+                _ = SetTextColor(hdc, if (danger_button) danger else fg);
+                var button_rc = button;
+                _ = DrawTextW(hdc, label, -1, &button_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            }
         }
 
-        y += row_h;
+        y += chrome.row_h;
         drawn += 1;
     }
 
-    if (app_state.g_all_sessions_confirm) drawAllSessionsCloseConfirm(hdc, w, h, font_title, font_subtitle, fg_bright, fg_dim);
+    if (app_state.g_all_sessions_confirm) drawAllSessionsCloseConfirm(hdc, w, h, font_title, font_subtitle, fg, muted);
 
+    const foot_top = h - chrome.footer_h;
+    var foot_line = RECT{ .left = 0, .top = foot_top, .right = w, .bottom = foot_top + 1 };
+    const foot_br = CreateSolidBrush(line);
+    _ = FillRect(hdc, &foot_line, foot_br);
+    _ = DeleteObject(foot_br);
     _ = SelectObject(hdc, font_subtitle);
-    var ft_rc = RECT{ .left = 22, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
-    if (app_state.g_all_sessions_close_running) {
-        _ = SetTextColor(hdc, RGB(240, 180, 90));
-        var cl_buf: [64]u8 = undefined;
-        const cl_msg = std.fmt.bufPrint(&cl_buf, "Closing sessions {d} of {d}...", .{ @min(app_state.g_all_sessions_close_next, app_state.g_all_sessions_close_count), app_state.g_all_sessions_close_count }) catch "Closing sessions...";
-        drawAscii(hdc, cl_msg, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    } else if (app_state.g_all_sessions_confirm) {
-        _ = SetTextColor(hdc, RGB(240, 180, 90));
-        _ = DrawTextW(hdc, L("Close sessions:     Enter / y  Close        Esc / n  Cancel"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    } else if (app_state.g_all_sessions_ctx) {
-        _ = SetTextColor(hdc, RGB(240, 180, 90));
-        _ = DrawTextW(hdc, L("Session actions:     Enter / a  Attach        k  KILL remote tmux session        q / Esc  Cancel"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    } else if (app_state.g_all_sessions_filter_active) {
-        _ = SetTextColor(hdc, fg_dim);
-        _ = DrawTextW(hdc, L("Type to reduce   Backspace edit   Up/Down move   Enter open   Esc clear search"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    } else {
-        _ = SetTextColor(hdc, fg_dim);
-        _ = DrawTextW(hdc, L("Ctrl+F search   Ctrl+K actions   h/l tabs   j/k move   Space mark   x close unattached   w waiting   a archived   u unattached   Enter open   q/Esc close"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        if (app_state.g_all_sessions_unattached_only) {
-            _ = SetTextColor(hdc, blue);
-            var uo_rc = RECT{ .left = w - 230, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
-            _ = DrawTextW(hdc, L("UNATTACHED ONLY"), -1, &uo_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-        }
-    }
+    const marked_n = app_state.g_all_sessions_mark_count;
+    var foot_label: [48]u8 = undefined;
+    const foot_text = if (marked_n == 0)
+        "Nothing marked"
+    else
+        (std.fmt.bufPrint(&foot_label, "{d} marked", .{marked_n}) catch "marked");
+    _ = SetTextColor(hdc, if (marked_n == 0) muted else mark);
+    var foot_rc = RECT{ .left = uiScaled(20), .top = foot_top, .right = uiScaled(160), .bottom = h };
+    drawAscii(hdc, foot_text, &foot_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    const close_enabled = marked_n > 0;
+    var close_rc = RECT{ .left = uiScaled(168), .top = foot_top + uiScaled(8), .right = uiScaled(280), .bottom = h - uiScaled(8) };
+    var clear_rc = RECT{ .left = close_rc.right + uiScaled(8), .top = close_rc.top, .right = close_rc.right + uiScaled(112), .bottom = close_rc.bottom };
+    app_state.g_all_sessions_foot_close_rc = close_rc;
+    app_state.g_all_sessions_foot_clear_rc = clear_rc;
+    fillRoundRect(hdc, close_rc, uiScaled(6), if (close_enabled) (if (light) RGB(255, 232, 230) else RGB(41, 28, 27)) else chip_bg);
+    _ = SetTextColor(hdc, if (close_enabled) danger else muted);
+    _ = DrawTextW(hdc, L("Close marked"), -1, &close_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    fillRoundRect(hdc, clear_rc, uiScaled(6), chip_bg);
+    _ = SetTextColor(hdc, if (close_enabled) fg else muted);
+    _ = DrawTextW(hdc, L("Clear marks"), -1, &clear_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
     _ = SelectObject(hdc, old_font);
 }
 
+pub fn allSessionsHover(mx: i32, my: i32) void {
+    _ = mx;
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    const chrome = allSessionsChrome();
+    var hover: u32 = 0xFFFFFFFF;
+    if (my >= chrome.list_top and my < rc.bottom - chrome.footer_h) {
+        const max_rows = allSessionsMaxRows(rc.bottom);
+        const scroll_row = allSessionsScrollRow(max_rows);
+        const clicked: u32 = @intCast(@divFloor(my - chrome.list_top, chrome.row_h));
+        const target = scroll_row + clicked;
+        if (target < allSessionsVisibleCount() and clicked < max_rows) hover = target;
+    }
+    if (hover != app_state.g_all_sessions_hover) {
+        app_state.g_all_sessions_hover = hover;
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    }
+}
+
+fn allSessionsToggleHost(host: u8) void {
+    app_state.g_all_sessions_host_filter = if (app_state.g_all_sessions_host_filter == host) AS_HOST_FILTER_ALL else host;
+    app_state.g_all_sessions_sel = 0;
+}
+
+pub fn allSessionsToggleServerFilter() void {
+    const ri = allSessionsNthVisible(app_state.g_all_sessions_sel) orelse {
+        app_state.g_all_sessions_host_filter = AS_HOST_FILTER_ALL;
+        return;
+    };
+    allSessionsToggleHost(app_state.g_session_overview_rows.items[ri].host);
+}
+
+fn allSessionsArchiveAt(ri: u32) void {
+    if (ri >= app_state.g_session_overview_count) return;
+    const row = &app_state.g_session_overview_rows.items[ri];
+    if (row.shell_id != 0) {
+        if (findShellById(row.shell_id)) |idx| {
+            archiveTabAt(idx);
+            return;
+        }
+    }
+    if (row.kind != .vps_only or row.session_len == 0 or row.session_len > row.session.len) {
+        showHeaderNoticeAscii("Open the session before archiving", 2500, true);
+        return;
+    }
+    loadArchiveFromDisk(true);
+    var entry = ArchivedEntry{};
+    const nlen: u32 = @min(row.name_len, entry.name.len);
+    if (nlen > 0) @memcpy(entry.name[0..nlen], row.name[0..nlen]);
+    entry.name_len = nlen;
+    const slen: u32 = @min(row.session_len, entry.tmux_session.len);
+    @memcpy(entry.tmux_session[0..slen], row.session[0..slen]);
+    entry.tmux_session_len = slen;
+    entry.tmux_host = row.host;
+    if (!remoteTmuxTargetIsSafe(entry.tmux_session[0..slen]) or !upsertArchivedEntry(entry) or !saveArchive()) {
+        showHeaderNoticeAscii("Archive save failed", 2500, true);
+        return;
+    }
+    const sess = entry.tmux_session[0..slen];
+    if (killRemoteTmuxSession(sess, entry.tmux_host, "", 1, null) == .gone) {
+        removeTmuxCacheEntry(entry.tmux_host, sess);
+        buildSessionOverviewRows();
+        showHeaderNoticeAscii("Session archived", 2500, false);
+    } else {
+        showHeaderNoticeAscii("Could not end the remote session", 3500, true);
+    }
+}
+
+fn allSessionsBeginCloseRow(hwnd: HANDLE, ri: u32) void {
+    if (ri >= app_state.g_session_overview_count) return;
+    const row = &app_state.g_session_overview_rows.items[ri];
+    if (row.kind != .vps_only or row.session_len == 0) {
+        showHeaderNoticeAscii("Only unattached sessions can be closed here", 2500, true);
+        return;
+    }
+    app_state.g_all_sessions_close_count = 1;
+    const t = &app_state.g_all_sessions_close_queue[0];
+    t.host = row.host;
+    t.session_len = row.session_len;
+    t.agent = row.agent != 0;
+    @memcpy(t.session[0..row.session_len], row.session[0..row.session_len]);
+    app_state.g_all_sessions_ctx = false;
+    app_state.g_all_sessions_confirm = true;
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+pub fn allSessionsClick(hwnd: HANDLE, mx: i32, my: i32) void {
+    app_state.g_all_sessions_ctx = false;
+    if (!app_state.g_all_sessions_close_running) app_state.g_all_sessions_confirm = false;
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(hwnd, &rc);
+    const chrome = allSessionsChrome();
+    if (asHit(allSessionsSearchRect(rc.right), mx, my)) {
+        openAllSessionsFilter(hwnd);
+        return;
+    }
+    for (0..app_state.g_all_sessions_chip_n) |i| {
+        if (asHit(app_state.g_all_sessions_chip_rc[i], mx, my)) {
+            allSessionsToggleHost(app_state.g_all_sessions_chip_host[i]);
+            _ = InvalidateRect(hwnd, null, 0);
+            return;
+        }
+    }
+    if (my >= chrome.tab_y and my < chrome.tab_y + chrome.tab_h) {
+        for (0..app_state.g_all_sessions_split_tab_count) |ti| {
+            if (mx >= app_state.g_all_sessions_split_xs[ti] and mx < app_state.g_all_sessions_split_xe[ti]) {
+                app_state.g_all_sessions_tab = app_state.g_all_sessions_split_ids[ti];
+                app_state.g_all_sessions_unattached_only = false;
+                app_state.g_all_sessions_sel = 0;
+                _ = InvalidateRect(hwnd, null, 0);
+                return;
+            }
+        }
+    }
+    if (my >= rc.bottom - chrome.footer_h) {
+        if (asHit(app_state.g_all_sessions_foot_close_rc, mx, my) and app_state.g_all_sessions_mark_count > 0) {
+            allSessionsBeginClose(hwnd);
+            return;
+        }
+        if (asHit(app_state.g_all_sessions_foot_clear_rc, mx, my)) {
+            app_state.g_all_sessions_mark_count = 0;
+            _ = InvalidateRect(hwnd, null, 0);
+            return;
+        }
+        return;
+    }
+    if (my >= chrome.list_top) {
+        const max_rows = allSessionsMaxRows(rc.bottom);
+        const scroll_row = allSessionsScrollRow(max_rows);
+        const clicked: u32 = @intCast(@divFloor(my - chrome.list_top, chrome.row_h));
+        const target = scroll_row + clicked;
+        if (target >= allSessionsVisibleCount() or clicked >= max_rows) return;
+        const y = chrome.list_top + @as(i32, @intCast(clicked)) * chrome.row_h;
+        const ri = allSessionsNthVisible(target) orelse return;
+        if (asHit(allSessionsMarkRect(y, chrome.row_h), mx, my)) {
+            app_state.g_all_sessions_sel = target;
+            allSessionsToggleMark(hwnd);
+            return;
+        }
+        if (app_state.g_all_sessions_hover == target) {
+            const actions = allSessionsActionRects(rc.right, y, chrome.row_h);
+            if (asHit(actions[0], mx, my)) {
+                app_state.g_all_sessions_sel = target;
+                allSessionsJump(hwnd);
+                return;
+            }
+            if (asHit(actions[1], mx, my)) {
+                allSessionsArchiveAt(ri);
+                _ = InvalidateRect(hwnd, null, 0);
+                return;
+            }
+            if (asHit(actions[2], mx, my)) {
+                app_state.g_all_sessions_sel = target;
+                allSessionsBeginCloseRow(hwnd, ri);
+                return;
+            }
+        }
+        app_state.g_all_sessions_sel = target;
+        allSessionsJump(hwnd);
+    }
+}
 pub fn openAllSessions(hwnd: HANDLE) void {
     @import("room_frontend.zig").leaveForOtherFront();
     if (app_state.g_search_active) {
@@ -2028,7 +2620,17 @@ pub fn openAllSessions(hwnd: HANDLE) void {
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
     app_state.g_all_sessions_sel = 0;
-    if (!allSessionsSplitVisible(app_state.g_all_sessions_tab)) app_state.g_all_sessions_tab = AS_TAB_ALL;
+    app_state.g_all_sessions_host_filter = AS_HOST_FILTER_ALL;
+    app_state.g_all_sessions_hover = 0xFFFFFFFF;
+    const opened_tab = app_state.g_all_sessions_tab;
+    if (opened_tab != AS_TAB_ALL and opened_tab != AS_TAB_RUNNING and opened_tab != AS_TAB_NO_WINDOW and opened_tab != AS_TAB_WAITING and opened_tab != AS_TAB_ARCHIVED) {
+        app_state.g_all_sessions_tab = AS_TAB_ALL;
+    }
+    app_state.g_all_sessions_split_ids[0] = AS_TAB_ALL;
+    app_state.g_all_sessions_split_ids[1] = AS_TAB_RUNNING;
+    app_state.g_all_sessions_split_ids[2] = AS_TAB_NO_WINDOW;
+    app_state.g_all_sessions_split_ids[3] = AS_TAB_ARCHIVED;
+    app_state.g_all_sessions_split_tab_count = 4;
     hideShellsForOverlay();
     updateBrowserVisibility();
     _ = SetTimer(hwnd, TIMER_INBOX_REFRESH, 1000, null);
@@ -2045,6 +2647,8 @@ pub fn closeAllSessions(hwnd: HANDLE) void {
     app_state.g_all_sessions_close_count = 0;
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
+    app_state.g_all_sessions_host_filter = AS_HOST_FILTER_ALL;
+    app_state.g_all_sessions_hover = 0xFFFFFFFF;
     if (!app_state.g_inbox_active) _ = KillTimer(hwnd, TIMER_INBOX_REFRESH);
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
         _ = showShellConsole(app_state.active_shell, SW_SHOW, "closeAllSessions");
@@ -2115,7 +2719,7 @@ pub fn allSessionsRowMarked(row: *const SessionOverviewRow) bool {
 fn allSessionsToggleMark(hwnd: HANDLE) void {
     const ri = allSessionsNthVisible(app_state.g_all_sessions_sel) orelse return;
     const row = &app_state.g_session_overview_rows.items[ri];
-    if (row.kind != .vps_only or row.session_len == 0) {
+    if (row.session_len == 0) {
         showHeaderNoticeAscii("Only unattached sessions can be marked", 2500, true);
         return;
     }
@@ -2319,12 +2923,11 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
             app_state.g_all_sessions_sel = 0;
         },
         34 => {
-            app_state.g_all_sessions_unattached_only = !app_state.g_all_sessions_unattached_only;
+            app_state.g_all_sessions_unattached_only = false;
+            app_state.g_all_sessions_tab = AS_TAB_NO_WINDOW;
             app_state.g_all_sessions_sel = 0;
-            if (app_state.g_all_sessions_tab != AS_TAB_ALL and allSessionsClusterCount(app_state.g_all_sessions_tab) == 0) {
-                app_state.g_all_sessions_tab = AS_TAB_ALL;
-            }
         },
+        45 => allSessionsToggleServerFilter(),
         35 => {
             app_state.g_all_sessions_unattached_only = false;
             app_state.g_all_sessions_tab = AS_TAB_WAITING;

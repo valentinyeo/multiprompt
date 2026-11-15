@@ -295,10 +295,11 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
     .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
     .{ .a = "Ctrl+K -> New session in this group", .b = "Start a Claude session in the tab's group straight away, in the terminal", .header = false },
-    .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
+    .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview. w waiting   a archived. u is No window. s filters the server", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
     .{ .a = "Space in All Sessions", .b = "Mark or unmark the selected unattached session", .header = false },
     .{ .a = "x in All Sessions", .b = "Close the marked unattached sessions, or the selected one, after a confirmation", .header = false },
+    .{ .a = "s in All Sessions", .b = "Filter to this row's server. Press s again to clear", .header = false },
     .{ .a = "Alt+E", .b = "Move active tab to Waiting until it gets a blue dot", .header = false },
     .{ .a = "Alt+Z", .b = "Undo the most recent move to Waiting", .header = false },
     .{ .a = "Ctrl+K -> Restore Waiting", .b = "Restore waiting live sessions in this workspace", .header = false },
@@ -1654,6 +1655,10 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (!ctrl and kb.vkCode == 0x55) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 34, 0);
+                    return 1;
+                }
+                if (!ctrl and kb.vkCode == 0x53) {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 45, 0);
                     return 1;
                 }
                 if (!ctrl and kb.vkCode == 0x57) {

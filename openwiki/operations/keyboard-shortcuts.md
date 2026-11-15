@@ -175,10 +175,11 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
 | Ctrl+Shift+R | Reattach active SSH/tmux tab |
 | Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal |
-| Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
+| Ctrl+K -&gt; All Sessions | Open session overview. w waiting   a archived. u is No window. s filters the server |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
 | Space in All Sessions | Mark or unmark the selected unattached session |
 | x in All Sessions | Close the marked unattached sessions, or the selected one, after a confirmation |
+| s in All Sessions | Filter to this row's server. Press s again to clear |
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
