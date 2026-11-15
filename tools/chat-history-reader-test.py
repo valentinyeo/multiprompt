@@ -8162,6 +8162,61 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
         self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
 
 
+FAKE_CURSOR = r'''#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+log = os.environ['FAKE_AGENT_LOG']
+def record(value):
+    with open(log, 'a') as stream:
+        stream.write(json.dumps(value) + '\n')
+record(dict(kind='start', args=args))
+if '--append-system-prompt' in args:
+    sys.stderr.write("error: unknown option '--append-system-prompt'\n")
+    sys.exit(1)
+prompt = sys.stdin.read()
+record(dict(kind='prompt', text=prompt, args=args))
+if not prompt.strip():
+    sys.stderr.write('Error: No prompt provided for print mode\n')
+    sys.exit(1)
+sid = 'cursor-session-2462'
+if '--resume' in args:
+    sid = args[args.index('--resume') + 1]
+def emit(event):
+    sys.stdout.write(json.dumps(event) + '\n')
+    sys.stdout.flush()
+emit(dict(type='system', subtype='init', session_id=sid, model='cursor', permissionMode='default'))
+sys.stdout.write('Connection lost, reconnecting (attempt 1)...\n')
+sys.stdout.flush()
+emit(dict(type='connection', subtype='reconnecting', session_id=sid))
+emit(dict(type='thinking', subtype='delta', text='Checking', session_id=sid))
+emit(dict(type='thinking', subtype='completed', session_id=sid))
+emit(dict(type='assistant', message=dict(role='assistant', content=[dict(type='text', text='PONG')]), session_id=sid))
+emit(dict(type='result', subtype='success', is_error=False, result='PONG', session_id=sid))
+'''
+
+
+class SOFT_2462_CursorLiveChatTest(HostProviderCase):
+    provider = 'cursor'
+    fixture = 'tools/fixtures/IGSH-1545/pi-rpc.json'
+
+    def enable(self, **extra):
+        self.agent.write_text(FAKE_CURSOR)
+        super().enable(**extra)
+
+    def test_a_new_cursor_chat_answers_one_message(self):
+        self.enable()
+        self.send('cursor_fixture_message_01')
+        done = self.wait_for(lambda: self.events('text.done'))
+        self.assertEqual([row['payload']['text'] for row in done], ['PONG'])
+        self.assertEqual(self.wait_for(lambda: self.events('turn.ended'))[0]['payload']['status'], 'completed')
+        prompts = self.rows('prompt')
+        self.assertEqual([row['text'] for row in prompts], [self.text])
+        args = prompts[0]['args']
+        self.assertNotIn('--append-system-prompt', args)
+        self.assertEqual(args[args.index('--output-format') + 1], 'stream-json')
+        self.assertEqual(reader.host_session_state(self.provider, self.sid).get('native_session'), 'cursor-session-2462')
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:

@@ -2666,6 +2666,77 @@ HOST_HAX_BRIDGE = (
     "if worker is not None:\n"
     "    worker.join()\n"
 )
+HOST_CURSOR_BRIDGE = (
+    "import json,os,signal,subprocess,sys,threading\n"
+    "cmd=sys.argv[1:]\n"
+    "resume=None\n"
+    "if '--resume' in cmd:\n"
+    "    i=cmd.index('--resume');resume=cmd[i+1];del cmd[i:i+2]\n"
+    "child=None\n"
+    "def drain(pipe,box):\n"
+    "    try:\n"
+    "        data=b''\n"
+    "        while len(data)<8192:\n"
+    "            chunk=pipe.read(1024)\n"
+    "            if not chunk:break\n"
+    "            data+=chunk\n"
+    "        box.append(data)\n"
+    "    except OSError:\n"
+    "        pass\n"
+    "def emit(obj):\n"
+    "    sys.stdout.write(json.dumps(obj,separators=(',',':'))+'\\n');sys.stdout.flush()\n"
+    "def run(text):\n"
+    "    global child,resume\n"
+    "    argv=list(cmd)+(['--resume',resume] if isinstance(resume,str) and resume else [])\n"
+    "    try:\n"
+    "        p=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)\n"
+    "    except OSError as exc:\n"
+    "        emit(dict(type='result',subtype='error',is_error=True,result=str(exc)));return\n"
+    "    child=p\n"
+    "    box=[]\n"
+    "    drained=threading.Thread(target=drain,args=(p.stderr,box),daemon=True);drained.start()\n"
+    "    try:\n"
+    "        p.stdin.write(text.encode('utf-8'));p.stdin.close()\n"
+    "    except OSError:\n"
+    "        pass\n"
+    "    saw=False\n"
+    "    for raw in p.stdout:\n"
+    "        line=raw.decode('utf-8','replace').strip()\n"
+    "        if not line or line.startswith('Connection lost'):continue\n"
+    "        try:\n"
+    "            event=json.loads(line)\n"
+    "        except ValueError:\n"
+    "            continue\n"
+    "        if isinstance(event,dict) and isinstance(event.get('session_id'),str) and event['session_id']:\n"
+    "            resume=event['session_id']\n"
+    "        if isinstance(event,dict) and event.get('type')=='result':\n"
+    "            saw=True\n"
+    "        sys.stdout.write(line+'\\n');sys.stdout.flush()\n"
+    "    code=p.wait();child=None;drained.join(timeout=1)\n"
+    "    if not saw:\n"
+    "        err=b''.join(box).decode('utf-8','replace').strip()\n"
+    "        reason=err.splitlines()[-1] if err else 'cursor exited %s'%code\n"
+    "        emit(dict(type='result',subtype='error',is_error=True,result=reason[:500]))\n"
+    "for line in sys.stdin:\n"
+    "    line=line.strip()\n"
+    "    if not line:continue\n"
+    "    try:\n"
+    "        message=json.loads(line)\n"
+    "    except ValueError:\n"
+    "        continue\n"
+    "    if not isinstance(message,dict):continue\n"
+    "    if message.get('type')=='user':\n"
+    "        body=message.get('message') if isinstance(message.get('message'),dict) else {}\n"
+    "        content=body.get('content') if isinstance(body.get('content'),list) else []\n"
+    "        parts=[block.get('text') for block in content if isinstance(block,dict) and block.get('type')=='text' and isinstance(block.get('text'),str)]\n"
+    "        text='\\n'.join(parts).strip()\n"
+    "        if text:run(text)\n"
+    "    elif message.get('type')=='control_request' and isinstance(message.get('request'),dict) and message['request'].get('subtype')=='interrupt' and child is not None:\n"
+    "        try:\n"
+    "            os.killpg(child.pid,signal.SIGINT)\n"
+    "        except OSError:\n"
+    "            pass\n"
+)
 HOST_CODEX_SANDBOXES = {'danger-full-access': {'type': 'dangerFullAccess'},
                         'read-only': {'type': 'readOnly', 'networkAccess': False},
                         'workspace-write': {'type': 'workspaceWrite', 'writableRoots': [], 'networkAccess': False,
@@ -3537,12 +3608,21 @@ def host_hax_argv(provider, sid, base):
 
 
 def host_cursor_argv(provider, sid, base, mode=None):
-    command = base + ["-p", "--output-format", "stream-json", "--stream-partial-output",
-                      "--trust", "--force", "--append-system-prompt", HOST_APPEND_PROMPT]
+    cleaned, skip = [], False
+    for part in base:
+        if skip:
+            skip = False
+            continue
+        if part == "--append-system-prompt":
+            skip = True
+            continue
+        if part == "--stream-partial-output":
+            continue
+        cleaned.append(part)
     native = host_session_state(provider, sid).get("native_session")
-    if isinstance(native, str) and native:
-        return command + ["--resume", native]
-    return command
+    resume = ["--resume", native] if isinstance(native, str) and native else []
+    return ["python3", "-u", "-c", HOST_CURSOR_BRIDGE, *cleaned, "-p", "--output-format", "stream-json",
+            "--trust", "--force", *resume]
 
 
 def host_model_name(value):
@@ -4845,6 +4925,13 @@ def host_agent_event(provider, sid, tmux, session, raw):
 
 def host_cursor_event(provider, sid, tmux, session, event):
     kind = event.get("type")
+    if kind in ("connection", "retry"):
+        return
+    if kind == "assistant":
+        message = event.get("message") if isinstance(event.get("message"), dict) else None
+        if isinstance(message, dict) and not isinstance(message.get("id"), str):
+            session["cursor_text_n"] = session.get("cursor_text_n", 0) + 1
+            event = dict(event, message=dict(message, id="cursor-text-" + str(session["cursor_text_n"])))
     if kind == "thinking":
         subtype = event.get("subtype")
         block_id = session.get("cursor_think_id", "think")
@@ -4928,7 +5015,7 @@ def host_claude_open(provider, sid, tmux, session):
 
 
 def host_cursor_open(provider, sid, tmux, session):
-    pass
+    session["ready"] = True
 
 
 HOST_SKILL_TOKEN = re.compile(r"(?<!\S)/([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)(?=\s|$)")
@@ -8078,7 +8165,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 127
+RUNTIME_GENERATION = 128
 
 if __name__ == '__main__':
     import base64 as _base64
