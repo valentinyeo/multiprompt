@@ -182,5 +182,6 @@ The helper creates a private Windows Job object with kill-on-close and no breaka
 
 Use `/maintain-verification-skill` when menus, keyboard routing, persistence or startup change. Update the relevant map, [coverage table](coverage.md) and harness together, then repeat the GitHub journey and screenshot review. Never relabel an unverified path as covered.
 
+- [Live chat parity](features/live-chat-parity.md): the same hosted start, reply, skills, working, stop, reopen, and name steps for Claude, Pi, Cursor, and Codex. Run `python3 tools/live-chat-parity.py --stand-in --evidence <dir>` in CI and `--real` only when proving the providers on the server that already hosts them. This is not a Windows desktop journey, and desktop journeys still never run on the Linux server.
 - [Skill pills](features/chat-skill-pill.md): native draft and sent-history colors on dark and light themes.
 - [Chat options](features/chat-options.md): clickable answer cards for lettered or numbered options and terminal pick lists.

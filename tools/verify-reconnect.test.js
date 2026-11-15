@@ -65,6 +65,7 @@ assert.match(skill, /\.github\/workflows\/verify-reconnect\.yml/);
 assert.match(skill, /tools\/verify-reconnect\//);
 const baseline = ['browser-pane-stuck.md', 'appearance.md', 'command-palette.md', 'inbox.md', 'session-open.md', 'favorites-groups.md', 'sessions.md', 'workspaces.md'];
 const reconnect = ['ended-remote-session.md', 'saved-remote-workspace.md', 'ssh-tab-reconnect.md'];
+const linuxHost = ['live-chat-parity.md'];
 const features = fs.readdirSync(path.join(root, '.claude/skills/verify-multiprompt/features')).filter(f => f.endsWith('.md') && f !== 'README.md');
 for (const file of [...baseline, ...reconnect]) assert.ok(features.includes(file), `required feature: ${file}`);
 const index = read('.claude/skills/verify-multiprompt/features/README.md');
@@ -72,7 +73,7 @@ for (const file of features) {
   assert.ok(index.includes(`](${file})`), file);
   assert.deepEqual(read(`.claude/skills/verify-multiprompt/features/${file}`).match(/^## .+$/gm), [
     '## Sub-features', '## How to get to it (user POV)',
-    reconnect.includes(file) ? '## Driving it with the Windows reconnect harness' : '## Driving it with control.ps1',
+    reconnect.includes(file) ? '## Driving it with the Windows reconnect harness' : linuxHost.includes(file) ? '## Driving it with live-chat-parity.py' : '## Driving it with control.ps1',
     '## Gotchas',
   ]);
 }

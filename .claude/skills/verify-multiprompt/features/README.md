@@ -111,6 +111,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Successful remote/AI/browser journeys still need their real prerequisites and are not verified by this map; the browser recovery journey deliberately has no extension attached.
 
 - [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
+- [Live chat parity](live-chat-parity.md): Claude, Pi, Cursor, and Codex each start, reply, list skills, show working, stop, reopen, and keep the chat name. A step that passes only for Claude fails the check. The stand-in comparison runs in CI. Real providers are manual.
 
 ### SSH reconnect maps
 
