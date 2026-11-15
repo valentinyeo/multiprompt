@@ -4294,12 +4294,16 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
     }
 }
 
+fn chatReactionEmojiFont() HANDLE {
+    if (app_state.g_chat_rich_fonts[0] == null) {
+        app_state.g_chat_rich_fonts[0] = @import("fonts.zig").emoji(-uiScaled(app_state.g_chat_font_pt));
+    }
+    return app_state.g_chat_rich_fonts[0] orelse ensureChatFont();
+}
+
 fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     if (mask == 0) return;
-    if (app_state.g_chat_rich_fonts[11] == null) {
-        app_state.g_chat_rich_fonts[11] = @import("fonts.zig").emoji(-uiScaled(17));
-    }
-    const old = SelectObject(hdc, app_state.g_chat_rich_fonts[11]);
+    const old = SelectObject(hdc, chatReactionEmojiFont());
     defer _ = SelectObject(hdc, old);
     const count: i32 = @intCast(@popCount(mask));
     var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(34), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - uiScaled(12) };
@@ -5626,14 +5630,18 @@ fn chatMessageActionAt(x: i32, y: i32) ?u8 {
 fn chatPaintMessageActions(dc: HANDLE) void {
     const index = chat_hover_message orelse return;
     const rc = chatMessageActionRect(index) orelse return;
-    const old = SelectObject(dc, @import("drawing.zig").uiFontTitle());
-    defer _ = SelectObject(dc, old);
     _ = SetBkMode(dc, TRANSPARENT);
     _ = SetTextColor(dc, if (app_state.g_light_theme) RGB(105, 105, 105) else @import("design_tokens.zig").ReaderHint);
-    const labels = [_]LPCWSTR{ L("\u{263A}"), L("\u{21A9}"), L("\u{2026}") };
+    const react = L("\u{1F642}");
+    var cell = RECT{ .left = rc.left, .top = rc.top, .right = rc.left + uiScaled(28), .bottom = rc.bottom };
+    const old = SelectObject(dc, chatReactionEmojiFont());
+    defer _ = SelectObject(dc, old);
+    _ = chatDrawText(dc, react, -1, &cell, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = SelectObject(dc, @import("drawing.zig").uiFontTitle());
+    const labels = [_]LPCWSTR{ L("\u{21A9}"), L("\u{2026}") };
     for (labels, 0..) |label, i| {
-        const offset: i32 = @intCast(i);
-        var cell = RECT{ .left = rc.left + offset * uiScaled(28), .top = rc.top, .right = rc.left + (offset + 1) * uiScaled(28), .bottom = rc.bottom };
+        const offset: i32 = @intCast(i + 1);
+        cell = RECT{ .left = rc.left + offset * uiScaled(28), .top = rc.top, .right = rc.left + (offset + 1) * uiScaled(28), .bottom = rc.bottom };
         _ = DrawTextW(dc, label, -1, &cell, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
 }
