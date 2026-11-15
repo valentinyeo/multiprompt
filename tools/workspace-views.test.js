@@ -41,7 +41,10 @@ test('SOFT-2380 workspace menu shows All Frequent and Favorites above the real w
   assert.match(journey, /\$target = \$index \+ \$views/);
   assert.doesNotMatch(journey, /\$target = \$index \+ 1/);
   assert.match(journey, /workspace-card views=All\\\|Frequent\\\|Favorites/);
+  assert.match(journey, /Get-Variable -Name workspaceViewsChecked -Scope Script -ValueOnly -ErrorAction SilentlyContinue/);
+  assert.doesNotMatch(journey, /if \(-not \$script:workspaceViewsChecked\)/);
   assert.match(journey, /PostMessage\(\$card, \[uint32\]0x0201/);
+  assert.match(journey, /New workspace click was not delivered/);
   assert.match(switcher, /workspace-card views=\{s\}\|\{s\}\|\{s\}/);
   assert.match(switcher, /pub fn parentClick\(x: i32, y: i32\) bool/);
   assert.match(main, /workspace_switcher\.zig"\)\.parentClick\(mx, my\)/);

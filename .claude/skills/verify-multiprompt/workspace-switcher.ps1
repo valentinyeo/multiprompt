@@ -22,7 +22,7 @@ function Open-WorkspaceCard([string]$Shot) {
     Wait-Until { (Get-WorkspaceCard) -ne [IntPtr]::Zero } 'native workspace card visible'
     $viewLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
     Wait-Until { (Read-SharedText $viewLog) -match 'workspace-card views=All\|Frequent\|Favorites' } 'menu lists All, Frequent and Favorites'
-    if (-not $script:workspaceViewsChecked) {
+    if (-not (Get-Variable -Name workspaceViewsChecked -Scope Script -ValueOnly -ErrorAction SilentlyContinue)) {
         $script:workspaceViewsChecked = $true
         $result.checks += @{ name = 'workspace-card-views'; rows = @('All', 'Frequent', 'Favorites') }
     }
@@ -66,9 +66,9 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     Record ('Click named workspace row ' + $state.workspaces[$Workspace].name)
     $clickX = 50
     $clickY = 6 + $target * 28 + 14
-    [VerifyNative]::ClickClient($card, $clickX, $clickY)
     $packed = [IntPtr]((($clickY -band 65535) * 65536) + ($clickX -band 65535))
-    [void][VerifyNative]::PostMessage($card, [uint32]0x0201, [UIntPtr]::Zero, $packed)
+    if (-not [VerifyNative]::PostMessage($card, [uint32]0x0201, [UIntPtr]::Zero, $packed)) { throw 'Workspace row click was not delivered' }
+    [VerifyNative]::ClickClient($card, $clickX, $clickY)
     Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq $Workspace -and -not (Read-Session).starred_view } 'card closed and chosen workspace saved'
     Snapshot $Shot
     Save-Json (Read-Session) ($Shot + '.session.json')
@@ -156,8 +156,12 @@ $rect = New-Object VerifyNative+Rect
 if (-not [VerifyNative]::GetClientRect($card, [ref]$rect)) { throw 'Card rectangle unavailable' }
 $newRow = $stored.Count + (Get-WorkspaceViewRows $stored.Count $rect.Bottom)
 $count = (Read-Session).workspace_count
-Record 'Click New workspace in workspace card'
-[VerifyNative]::ClickClient($card, 50, (6 + $newRow * 28 + 7 + 14))
+    Record 'Click New workspace in workspace card'
+    $newX = 50
+    $newY = 6 + $newRow * 28 + 7 + 14
+    $newPacked = [IntPtr]((($newY -band 65535) * 65536) + ($newX -band 65535))
+    if (-not [VerifyNative]::PostMessage($card, [uint32]0x0201, [UIntPtr]::Zero, $newPacked)) { throw 'New workspace click was not delivered' }
+    [VerifyNative]::ClickClient($card, $newX, $newY)
 Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).workspace_count -eq $count + 1 } 'card created one workspace and closed'
 $result.checks += @{ name = 'workspace-card-create'; workspacesBefore = $count; workspacesAfter = (Read-Session).workspace_count }
 
