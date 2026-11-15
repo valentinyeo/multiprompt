@@ -512,11 +512,11 @@ fn registryDocument(out: []u8) usize {
         const p1 = "{\"id\":\"";
         @memcpy(out[pos .. pos + p1.len], p1);
         pos += p1.len;
-        appendJsonEscaped(&out, &pos, e.id[0..e.id_len]);
+        appendJsonEscaped(out, &pos, e.id[0..e.id_len]);
         const p2 = "\",\"name\":\"";
         @memcpy(out[pos .. pos + p2.len], p2);
         pos += p2.len;
-        appendJsonEscaped(&out, &pos, e.name[0..e.name_len]);
+        appendJsonEscaped(out, &pos, e.name[0..e.name_len]);
         const p3 = "\",\"restore\":";
         @memcpy(out[pos .. pos + p3.len], p3);
         pos += p3.len;
@@ -532,7 +532,7 @@ fn registryDocument(out: []u8) usize {
             const p4 = ",\"host\":\"";
             @memcpy(out[pos .. pos + p4.len], p4);
             pos += p4.len;
-            appendJsonEscaped(&out, &pos, e.host[0..e.host_len]);
+            appendJsonEscaped(out, &pos, e.host[0..e.host_len]);
             out[pos] = '"';
             pos += 1;
         }
