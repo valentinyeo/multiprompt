@@ -9,13 +9,9 @@ function read(name) {
   return fs.readFileSync(path.join(root, 'src', name), 'utf8');
 }
 
-function readName(name) {
-  return name.replace(/[\\"]/g, (ch) => `\\${ch}`);
-}
-
-function mentionNote(sourceName, visible) {
-  const readAs = readName(sourceName);
-  return `Valentin mentioned you in ${sourceName}: ${visible}. Answer his question first. Read that chat for context with mp-send read "${readAs}".`;
+function mentionNote(sourceName, provider, sid, visible) {
+  const who = provider || sid ? `${sourceName} (${[provider, sid].filter(Boolean).join(', ')})` : sourceName;
+  return `Valentin mentioned you in ${who}: ${visible}. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl`;
 }
 
 function isMentionNote(text) {
@@ -51,17 +47,21 @@ test('SOFT-2430 a live mention is delivered once and the note does not fan out',
   assert.deepEqual(mentionTargets('ask @Design Lead', 'live-factory', live), []);
   assert.deepEqual(mentionTargets('mail user@example.com', 'live-factory', live), []);
   const visible = 'ask @Design Lead and @Notes and @Factory and @Missing and @Term';
-  const note = mentionNote('Factory', visible);
-  assert.equal(note, 'Valentin mentioned you in Factory: ask @Design Lead and @Notes and @Factory and @Missing and @Term. Answer his question first. Read that chat for context with mp-send read "Factory".');
+  const note = mentionNote('Factory', 'claude', '11111111-2222-3333-4444-555555555555', visible);
+  assert.equal(note, 'Valentin mentioned you in Factory (claude, 11111111-2222-3333-4444-555555555555): ask @Design Lead and @Notes and @Factory and @Missing and @Term. Answer his question first. List chats with mp-sessions --json; a Claude chat\'s history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl');
   assert.equal(isMentionNote(note), true);
   assert.deepEqual(mentionTargets(`${note} @Notes{live-notes}`, 'live-factory', live), []);
-  assert.equal(mentionNote('Say "hi"', 'hello'), 'Valentin mentioned you in Say "hi": hello. Answer his question first. Read that chat for context with mp-send read "Say \\"hi\\"".');
+  assert.equal(mentionNote('Say "hi"', 'claude', 'abc', 'hello'), 'Valentin mentioned you in Say "hi" (claude, abc): hello. Answer his question first. List chats with mp-sessions --json; a Claude chat\'s history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl');
   const mention = read('chat_mention.zig');
   const send = read('chat_send.zig');
   assert.match(mention, /pub fn mentionTargets\(/);
   assert.match(mention, /pub fn isMentionNote\(/);
   assert.match(mention, /pub fn mentionNote\(/);
-  assert.match(mention, /Answer his question first\. Read that chat for context with mp-send read/);
+  assert.match(mention, /pub fn revealChatNames\(/);
+  assert.match(mention, /List chats with mp-sessions --json; a Claude chat's history is ~\/\.claude\/projects\/<cwd with every non-alphanumeric character as ->\/<sid>\.jsonl/);
+  assert.doesNotMatch(mention, /mp-send read/);
+  assert.match(send, /mention\.providerName\(shell\.ai_agent\)/);
+  assert.match(send, /shell\.claude_sid/);
   assert.match(mention, /test "SOFT-2430 a mention reaches that live chat once and the note does not fan out"/);
   assert.match(send, /deliverMentions\(app_state\.active_shell, app_state\.g_chat_outbox\.items\[ei\]\.id, send_text\)/);
   assert.match(send, /fn deliverMentions\(/);
