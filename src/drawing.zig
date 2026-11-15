@@ -690,7 +690,8 @@ fn chatHeaderModel(shell_index: u32) HeaderModel {
             }
         }
     }
-    const selected = if (shell.shell_id != 0) (@import("chat_live.zig").settings(shell.shell_id) orelse .{}) else .{};
+    var selected: @import("chat_live.zig").Settings = .{};
+    if (shell.shell_id != 0) selected = @import("chat_live.zig").settings(shell.shell_id) orelse .{};
     var fallback: []const u8 = "";
     if (model.len == 0) {
         fallback = switch (selected.model) {
