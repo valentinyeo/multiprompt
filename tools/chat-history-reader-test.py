@@ -8068,6 +8068,100 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.assertIn('PINEAPPLE', wire)
 
 
+class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
+    provider = 'pi'
+    sid = 'pi-login-answer'
+    tmux = 'pi-login-chat'
+    code = 'mp-login-secret-918273'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.stream = io.BytesIO()
+        self.session = dict(state=dict(display_history=True))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=self.stream))
+        self.session['ready'] = True
+        self.session['pi_login'] = dict(phase='login', provider='anthropic')
+        self.printed = []
+        self.attempts = []
+        patch.object(reader, 'serve_print', side_effect=self.printed.append).start()
+        patch.object(reader, 'host_owned', return_value=True).start()
+        patch.object(reader, 'host_request', side_effect=self.forward).start()
+        patch.object(reader, 'host_attempt', side_effect=self.track_attempt).start()
+
+    def forward(self, provider, sid, request):
+        return reader.host_handle_request(provider, sid, self.tmux, self.session, request)
+
+    def track_attempt(self, *args, **kwargs):
+        self.attempts.append(args)
+        return dict(status='claimed') if len(args) < 9 or args[8] is None else None
+
+    def lines(self):
+        return [json.loads(line) for line in self.stream.getvalue().splitlines() if line.strip()]
+
+    def prompts(self):
+        return [line for line in self.lines() if line.get('type') == 'prompt']
+
+    def ask(self, dialog_id='ask-1'):
+        reader.host_pi_event(self.provider, self.sid, self.tmux, self.session, dict(
+            type='extension_ui_request', id=dialog_id, method='input', message='Paste the code'))
+
+    def serve(self, **query):
+        reader.serve_request(json.dumps(dict(id=41, provider=self.provider, sid=self.sid, **query)), None, {}, threading.Lock())
+        return self.printed[-1]
+
+    def stored(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        log = reader.host_paths(self.provider, self.sid)['log']
+        blob = (history.read_text() if history.exists() else '') + (log.read_text() if log.exists() else '')
+        db = reader.message_store_db(self.tmux)
+        try:
+            rows = [row[0] for row in db.execute('SELECT text FROM shared_messages')]
+            rows += [row[0] for row in db.execute('SELECT body FROM message_events')]
+            rows += [row[0] for row in db.execute('SELECT binding FROM message_attempts')]
+        finally:
+            db.close()
+        sends = json.dumps(self.session.get('sends') or [])
+        return blob + '\n' + '\n'.join(rows) + '\n' + sends
+
+    def test_login_answer_arrives_as_data_and_a_late_retry_is_not_a_prompt(self):
+        started = self.serve(op='login')
+        self.assertEqual(started['result'], dict(status='busy', reason='login_busy'))
+        self.ask()
+        refused = self.serve(op='login_answer', command=dict(type='prompt', message=self.code))
+        self.assertEqual(refused['result'], dict(status='refused', reason='invalid_answer'))
+        self.assertEqual(self.prompts(), [])
+        self.assertEqual(self.session['pi_login_dialog']['id'], 'ask-1')
+        answered = self.serve(op='login_answer', data=self.code)
+        self.assertEqual(answered['result'], dict(status='final'))
+        self.assertNotIn(self.code, json.dumps(answered))
+        self.assertNotIn('pi_login_dialog', self.session)
+        self.assertEqual(self.lines()[-1], dict(type='extension_ui_response', id='ask-1', value=self.code))
+        self.assertNotIn(self.code, self.stored())
+        self.assertEqual(self.attempts, [])
+        before = len(self.lines())
+        retry = self.serve(op='login_answer', data=self.code)
+        self.assertEqual(retry['result']['status'], 'final')
+        self.assertEqual(self.lines()[before:], [])
+        dispatched = reader.message_store_request(dict(
+            message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux, op='message_dispatch'))
+        self.assertIsNone(dispatched['message'])
+        self.assertEqual(self.prompts(), [])
+        self.assertNotIn(self.code, self.stored())
+        self.ask('ask-2')
+        desktop = reader.host_handle_request(self.provider, self.sid, self.tmux, self.session, dict(
+            op='deliver', id='desktop-login-answer-01', attempt='one', epoch=1, text=self.code))
+        self.assertEqual(desktop['status'], 'ok')
+        self.assertEqual(self.lines()[-1], dict(type='extension_ui_response', id='ask-2', value=self.code))
+        follow = reader.host_handle_request(self.provider, self.sid, self.tmux, self.session, dict(
+            op='deliver', id='desktop-login-answer-02', attempt='one', epoch=1, text='hello after login'))
+        self.assertEqual(follow['status'], 'sent')
+        self.assertEqual(self.prompts(), [dict(id='desktop-login-answer-02', type='prompt', message='hello after login')])
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
