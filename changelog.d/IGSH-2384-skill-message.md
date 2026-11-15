@@ -1,0 +1,1 @@
+A message that includes a skill command shows once after you send it.
