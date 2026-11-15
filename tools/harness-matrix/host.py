@@ -19,8 +19,8 @@ class Lines:
 
 
 def emit(value):
-    sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    sys.stdout.buffer.write(json.dumps(value, separators=(",", ":")).encode() + b"\n")
+    sys.stdout.buffer.flush()
 
 
 def log_dir():
