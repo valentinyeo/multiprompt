@@ -42,10 +42,14 @@ int main(int argc, char **argv) {
     start.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     start.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     start.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    snprintf(launch, sizeof(launch), "py -3 \"%s\"", script);
-    if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, 0, NULL, NULL, &start, &process)) {
-        snprintf(launch, sizeof(launch), "python \"%s\"", script);
-        if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, 0, NULL, NULL, &start, &process)) return 4;
+    if (!start.hStdInput || !start.hStdOutput ||
+        !SetHandleInformation(start.hStdInput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) ||
+        !SetHandleInformation(start.hStdOutput, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)) return 4;
+    if (start.hStdError) SetHandleInformation(start.hStdError, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    snprintf(launch, sizeof(launch), "python \"%s\"", script);
+    if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &start, &process)) {
+        snprintf(launch, sizeof(launch), "py -3 \"%s\"", script);
+        if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &start, &process)) return 4;
     }
     CloseHandle(process.hThread);
     wait = WaitForSingleObject(process.hProcess, INFINITE);

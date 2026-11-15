@@ -67,11 +67,26 @@ def version_output(command):
     return body
 
 
+def trace(text):
+    folder = log_dir()
+    if not folder:
+        return
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, host_name() + "-host.log"), "a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    except OSError:
+        return
+
+
 def main():
     lines = Lines()
+    trace("boot")
     if lines.next() is None or lines.next() is None:
+        trace("stdin ended before the channel was ready")
         return 1
     emit({"ready": True})
+    trace("ready")
     typed = {}
     while True:
         raw = lines.next()
