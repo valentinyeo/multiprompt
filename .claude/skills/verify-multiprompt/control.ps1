@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('whats-new', 'bot-photo', 'servers', 'settings-panel', 'appearance', 'app-icon', 'sessions', 'session-actions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'inbox-no-footer', 'inbox-space', 'command-palette', 'link-picker', 'computer-menu', 'session-open', 'favorites-groups', 'server-open-group', 'chat-first-paint', 'chat-browser-shortcut', 'chat-browser-autoload', 'chat-not-sent-remove', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-typing', 'live-chat-pane', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'chat-slash', 'permission-rows', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-startup-failure', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions', 'harness-matrix')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -127,7 +127,7 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch before launch' }
     $bytes = [IO.File]::ReadAllBytes($Exe)
     if (-not [Text.Encoding]::ASCII.GetString($bytes).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable build/version marker mismatch' }
-    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE', 'MP_VERIFY_DEEPGRAM_PORT')) {
+    foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE', 'MP_VERIFY_STATE', 'MP_VERIFY_DEEPGRAM_PORT', 'HARNESS_MATRIX_LOG', 'HARNESS_HOST_PY', 'HARNESS_VERSION_COMMANDS', 'HARNESS_MATRIX_PART')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile', 'live-chat-pane')) {
@@ -290,6 +290,18 @@ try {
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
         Save-Json $seed 'seed-session.json'
         $result.repoPickerBoundary = 'Two synthetic tmux tabs in Other, host 0 then active host 2, and an Example terminal with seeded reported cwd; distinct per-host SSH listings, switchable discovery failure and console-backed tmux; no real SSH, tmux server or agent verified.'
+    }
+    if ($Feature -eq 'harness-matrix') {
+        if (-not $env:HARNESS_SSH_EXE -or -not (Test-Path -LiteralPath $env:HARNESS_SSH_EXE)) { throw 'harness-matrix needs the local ssh stand-in' }
+        New-Item -ItemType Directory -Force (Join-Path $scratch 'roaming/ZigShell'), (Join-Path $Evidence 'host-log') | Out-Null
+        $ssh = Join-Path $scratch 'ssh.exe'
+        Copy-Item -LiteralPath $env:HARNESS_SSH_EXE -Destination $ssh
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
+        $env:HARNESS_MATRIX_LOG = Join-Path $Evidence 'host-log'
+        $env:HARNESS_HOST_PY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/harness-matrix/host.py')).Path
+        $env:HARNESS_VERSION_COMMANDS = (& node -e "const m=require('./tools/harness-matrix.js'); process.stdout.write(m.load().harnesses.map(item => item.version_command).join('\n'))")
+        if ($LASTEXITCODE -ne 0 -or -not $env:HARNESS_VERSION_COMMANDS) { throw 'harness version commands missing' }
+        $result.standIn = 'Local ssh stands in for both hosts. It skips the real servers, their accounts, a Unix login shell, harness CLIs, and live model or skill catalogs.'
     }
     if ($Feature -eq 'command-palette') {
         $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
@@ -673,6 +685,9 @@ try {
         }
         'command-palette' {
             . (Join-Path $PSScriptRoot 'control-feature-command-palette.ps1')
+        }
+        'harness-matrix' {
+            . (Join-Path $PSScriptRoot 'control-feature-harness-matrix.ps1')
         }
         'chat-switch-speed' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-switch-speed.ps1')

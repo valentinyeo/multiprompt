@@ -86,6 +86,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Inbox](inbox.md): open the cross-workspace list, change a session's unread state and return.
 - [Inbox order](inbox-order.md): recent sessions lead the Inbox and a newer notification moves the older session above it, checked against app-published timestamps and a visual review of both captures.
 - [Command palette](command-palette.md): search and execute UI Size actions, prove persistence and reset.
+- [Harness matrix](harness-matrix.md): live chat and shell CLI for every harness on both servers, plus shell resize, font, and keystroke echo. The journeys and the report are generated from tools/harness-matrix.json.
 - [Status card](status-card.md): measure the one-line sidebar status card on all three pages after real Ctrl+Shift+G presses and capture its hover view; fail outside 20 to 30 px.
 - [Title bar](title-bar.md): native caption glyph identity and app-black caption-facing masks with mismatched Chrome themes at real 100%, 125% and 150% monitor scaling.
 | [Window controls](window-controls.md) | App-owned buttons, dragging, snapping and reclaimed chat height |

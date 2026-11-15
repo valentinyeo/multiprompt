@@ -1,0 +1,88 @@
+{
+  "stand_in": {
+    "what": "On a GitHub runner each host is a local process that speaks the app terminal channel. The vps1 row is the remote-1 argument and the vps2 row is the remote-2 argument.",
+    "skips": [
+      "the real servers, their network, accounts, and home directories",
+      "a Unix pty and a bash login on those servers",
+      "harness CLIs and their credentials on those servers",
+      "live model catalogs and skill lists from those CLIs"
+    ]
+  },
+  "harnesses": [
+    {
+      "id": "claude",
+      "live_query": "New Claude session",
+      "live_target": 5100,
+      "version_command": "claude --version",
+      "models": ["Opus", "Sonnet", "Haiku", "Fable"],
+      "model_ids": [12003, 12004, 12005, 12011],
+      "pick_model": "Sonnet",
+      "pick_target": 12004,
+      "skills": false
+    },
+    {
+      "id": "codex",
+      "live_query": "New Codex chat",
+      "live_target": 6253,
+      "version_command": "codex --version",
+      "models": ["Sol", "Terra", "Luna", "Astra"],
+      "model_ids": [12012, 12013, 12014, 12015],
+      "pick_model": "Terra",
+      "pick_target": 12013,
+      "skills": false
+    },
+    {
+      "id": "pi",
+      "live_query": "New Pi chat",
+      "live_target": 5101,
+      "version_command": "pi --version",
+      "models": [],
+      "model_ids": [],
+      "pick_model": "",
+      "pick_target": 0,
+      "skills": true
+    },
+    {
+      "id": "cursor",
+      "live_query": "New Cursor chat",
+      "live_target": 5108,
+      "version_command": "cursor --version",
+      "models": [],
+      "model_ids": [],
+      "pick_model": "",
+      "pick_target": 0,
+      "skills": true
+    }
+  ],
+  "hosts": [
+    {"id": "vps1", "query": "Open shell on VPS 1", "target": 2003, "ssh": "remote-1"},
+    {"id": "vps2", "query": "Open shell on VPS 2", "target": 2004, "ssh": "remote-2"}
+  ],
+  "modes": ["live_chat", "shell_cli"],
+  "shell_quality": [
+    {
+      "id": "fit_on_resize",
+      "kind": "shell",
+      "journey": "Ctrl+K, choose Open shell on VPS 1, resize the window, and require the tab cols and rows to change with the window.",
+      "pass": "The logged cols and rows change in proportion to the terminal window and are not 80x24.",
+      "evidence": "fit_on_resize.json",
+      "screenshot": "fit_on_resize.png"
+    },
+    {
+      "id": "font_change_changes_grid",
+      "kind": "shell",
+      "journey": "On that shell tab, press Ctrl+Plus and require the grid to change while the window size stays the same.",
+      "pass": "The logged cols or rows change after the console font change and the window width does not.",
+      "evidence": "font_change_changes_grid.json",
+      "screenshot": "font_change_changes_grid.png"
+    },
+    {
+      "id": "keystroke_echo_ms",
+      "kind": "shell",
+      "journey": "Type 40 characters on that shell tab and measure the time from each keystroke to the character appearing.",
+      "pass": "The p95 keystroke-to-echo time is 50 ms or less, and the measured number is recorded.",
+      "evidence": "keystroke_echo_ms.json",
+      "screenshot": "keystroke_echo_ms.png"
+    }
+  ]
+}

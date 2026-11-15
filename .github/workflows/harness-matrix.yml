@@ -1,0 +1,202 @@
+name: Harness matrix
+run-name: harness matrix ${{ inputs.part || 'all' }} ${{ inputs.app_revision || github.head_ref || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      part:
+        description: shell, cells, or all
+        required: false
+        default: all
+        type: string
+      app_revision:
+        description: App commit to build. 2de7e8277c5eece49241b0be43539fe54a0c1482 is the shell-quality red proof.
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - 'src/**/*chat*'
+      - 'src/**/*terminal*'
+      - 'src/**/*palette*'
+      - 'src/terminal_window.c'
+      - 'src/terminal_window.h'
+      - 'src/native_session.zig'
+      - 'src/command_palette.zig'
+      - 'src/console.zig'
+      - 'tools/harness-matrix.js'
+      - 'tools/harness-matrix.json'
+      - 'tools/harness-matrix.test.js'
+      - 'tools/harness-matrix/**'
+      - '.claude/skills/verify-multiprompt/features/harness-matrix.md'
+      - '.claude/skills/verify-multiprompt/control-feature-harness-matrix.ps1'
+      - '.claude/skills/verify-multiprompt/control.ps1'
+      - '.github/workflows/harness-matrix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-matrix-${{ github.event.pull_request.number || github.ref }}-${{ inputs.part || 'all' }}-${{ inputs.app_revision || 'head' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contract:
+    if: github.event_name == 'pull_request' || inputs.part != 'shell' || inputs.app_revision == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - run: node --test tools/harness-matrix.test.js
+  build:
+    if: github.event_name == 'pull_request' || inputs.part != ''
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Use the requested app commit
+        if: github.event_name == 'workflow_dispatch' && inputs.app_revision != ''
+        shell: pwsh
+        run: |
+          if ($env:APP_REVISION -notmatch '^[0-9a-f]{40}$') { throw 'app revision must be a full commit' }
+          if (Test-Path src) { Remove-Item -Recurse -Force src }
+          git checkout $env:APP_REVISION -- src build.zig build.zig.zon
+          if ($LASTEXITCODE -ne 0) { throw 'app revision checkout failed' }
+        env:
+          APP_REVISION: ${{ inputs.app_revision }}
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
+            $zip = "$env:RUNNER_TEMP\zig.zip"
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+            tar -xf $zip -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
+          }
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Identify the executable revision
+        id: identity
+        shell: pwsh
+        run: |
+          $revision = if ($env:APP_REVISION) { $env:APP_REVISION } else { (git rev-parse HEAD).Trim() }
+          $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 $revision).Trim()
+          if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
+          "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        env:
+          APP_REVISION: ${{ inputs.app_revision }}
+      - name: Build the Windows app and the local ssh stand-in
+        shell: pwsh
+        run: |
+          zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="$env:VERIFY_VERSION" -Drevision="$env:VERIFY_REVISION"
+          if ($LASTEXITCODE -ne 0) { throw 'app build failed' }
+          zig cc -target x86_64-windows-gnu -O2 tools/harness-matrix/ssh.c -o zig-out/bin/harness-ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'ssh stand-in build failed' }
+          $exe = 'zig-out/bin/multiprompt.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          @{ version = $env:VERIFY_VERSION; revision = $env:VERIFY_REVISION; sha256 = $hash } | ConvertTo-Json | Set-Content zig-out/bin/identity.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: harness-matrix-app
+          path: zig-out/bin/
+          retention-days: 7
+          if-no-files-found: error
+  shell:
+    needs: build
+    if: needs.build.result == 'success' && (github.event_name == 'pull_request' || inputs.part != 'cells')
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: harness-matrix-app
+          path: app
+      - name: Drive the shell-quality journeys
+        shell: powershell
+        env:
+          HARNESS_SSH_EXE: ${{ github.workspace }}\app\harness-ssh.exe
+          HARNESS_MATRIX_PART: shell
+        run: |
+          $meta = Get-Content app/identity.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature harness-matrix -Exe "$pwd/app/multiprompt.exe" -ExpectedVersion $meta.version -ExpectedHash $meta.sha256 -Evidence "$pwd/evidence"
+      - name: Publish the shell grid
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path evidence/report.md) { Get-Content evidence/report.md -Raw | Add-Content $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: harness-matrix-shell
+          path: evidence/
+          retention-days: 14
+          if-no-files-found: error
+  cells:
+    needs: [build, shell]
+    if: always() && needs.build.result == 'success' && (github.event_name == 'pull_request' || inputs.part != 'shell')
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: harness-matrix-app
+          path: app
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.shell.result != 'skipped'
+        continue-on-error: true
+        with:
+          name: harness-matrix-shell
+          path: shell-evidence
+      - name: Drive the harness cells
+        shell: powershell
+        env:
+          HARNESS_SSH_EXE: ${{ github.workspace }}\app\harness-ssh.exe
+          HARNESS_MATRIX_PART: cells
+        run: |
+          $meta = Get-Content app/identity.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature harness-matrix -Exe "$pwd/app/multiprompt.exe" -ExpectedVersion $meta.version -ExpectedHash $meta.sha256 -Evidence "$pwd/evidence"
+      - name: Write the full grid
+        if: always()
+        shell: pwsh
+        run: |
+          $files = @('evidence/matrix-results.json', 'shell-evidence/matrix-results.json') | Where-Object { Test-Path $_ }
+          if ($files.Count -eq 0) { throw 'no matrix results' }
+          if (Test-Path shell-evidence) { Copy-Item shell-evidence/*.png evidence/ -ErrorAction SilentlyContinue }
+          node tools/harness-matrix.js report @files | Set-Content evidence/report.md -Encoding utf8
+          Get-Content evidence/report.md -Raw | Add-Content $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: harness-matrix-cells
+          path: evidence/
+          retention-days: 14
+          if-no-files-found: error
