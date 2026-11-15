@@ -234,7 +234,11 @@ fn modelFromStatus(text: []const u16) chat_live.Model {
 }
 
 fn modelOf(selected: chat_live.Settings, status: []const u16) chat_live.Model {
-    return if (selected.model != .unknown) selected.model else modelFromStatus(status);
+    if (selected.model != .unknown) return selected.model;
+    const named = modelFromStatus(status);
+    if (named != .unknown) return named;
+    if (status.len == 0) return .opus;
+    return .unknown;
 }
 
 fn snapshot(state: *State) void {
@@ -260,7 +264,7 @@ fn snapshot(state: *State) void {
         state.active[@intFromEnum(Item.model_haiku)] = model == .haiku;
         state.active[@intFromEnum(Item.model_fable)] = model == .fable;
         state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
-        state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
+        state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium or selected.effort == .unknown;
         state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
     }
     const identity = session.chatFileIdentityForShell(app_state.active_shell);
@@ -283,7 +287,7 @@ test "IGSH-1861 the model falls back to the transcript name and never guesses" {
     try std.testing.expectEqual(chat_live.Model.sonnet, modelOf(.{}, raw));
     try std.testing.expectEqual(chat_live.Model.fable, modelOf(.{}, fable));
     try std.testing.expectEqual(chat_live.Model.unknown, modelOf(.{}, other));
-    try std.testing.expectEqual(chat_live.Model.unknown, modelOf(.{}, empty));
+    try std.testing.expectEqual(chat_live.Model.opus, modelOf(.{}, empty));
     try std.testing.expectEqual(chat_live.Model.haiku, modelOf(.{ .model = .haiku }, opus));
 }
 

@@ -636,11 +636,102 @@ pub const ChatTitleLayout = struct {
     icon: RECT,
     has_icon: bool,
     text: RECT,
+    model_text: RECT,
+    model_line: []const u16,
+    model_amber: bool,
     meta_pill: RECT,
     meta_text: RECT,
     meta: []const u16,
     meta_warn: bool,
 };
+
+var g_chat_header_model: [160]u16 = @splat(0);
+
+fn appendHeaderWide(out: []u16, len: *usize, text: []const u16) void {
+    const n = @min(text.len, out.len - len.*);
+    @memcpy(out[len.*..][0..n], text[0..n]);
+    len.* += n;
+}
+
+fn appendHeaderAscii(out: []u16, len: *usize, text: []const u8) void {
+    const n = @min(text.len, out.len - len.*);
+    for (text[0..n], 0..) |ch, i| out[len.* + i] = ch;
+    len.* += n;
+}
+
+pub fn joinHeaderModel(model: []const u16, effort: []const u8, out: []u16) []const u16 {
+    var len: usize = 0;
+    if (model.len > 0) appendHeaderWide(out, &len, model);
+    if (model.len > 0 and effort.len > 0) appendHeaderWide(out, &len, std.unicode.utf8ToUtf16LeStringLiteral(" · "));
+    if (effort.len > 0 and (model.len == 0 or len > model.len)) appendHeaderAscii(out, &len, effort);
+    return out[0..len];
+}
+
+pub fn headerLineAmber(model: []const u16) bool {
+    const titled = std.unicode.utf8ToUtf16LeStringLiteral("Fable");
+    const lower = std.unicode.utf8ToUtf16LeStringLiteral("fable");
+    const raw = std.unicode.utf8ToUtf16LeStringLiteral("claude-fable");
+    return (model.len >= titled.len and std.mem.eql(u16, model[0..titled.len], titled)) or (model.len >= lower.len and std.mem.eql(u16, model[0..lower.len], lower)) or (model.len >= raw.len and std.mem.eql(u16, model[0..raw.len], raw));
+}
+
+fn chatHeaderModel(shell_index: u32) struct { line: []const u16, amber: bool } {
+    const empty = .{ .line = &.{}, .amber = false };
+    if (shell_index >= app_state.shell_count) return empty;
+    const shell = &app_state.shells[shell_index];
+    var model: []const u16 = &.{};
+    if (shell.ai_agent != 0 and shell.shell_id != 0) {
+        const key = @import("chat_session.zig").chatFileIdentityForShell(shell_index);
+        const history = @import("chat_history.zig");
+        for (app_state.g_chat_histories.items) |entry| {
+            if (!entry.retired and history.sameSession(entry.key, key) and entry.history.status.model_len > 0) {
+                model = entry.history.status.model[0..entry.history.status.model_len];
+                break;
+            }
+        }
+    }
+    const selected = if (shell.shell_id != 0) (@import("chat_live.zig").settings(shell.shell_id) orelse .{}) else .{};
+    var fallback: []const u8 = "";
+    if (model.len == 0) {
+        fallback = switch (selected.model) {
+            .opus => "Opus",
+            .sonnet => "Sonnet",
+            .haiku => "Haiku",
+            .fable => "Fable",
+            .sol => "Sol",
+            .terra => "Terra",
+            .luna => "Luna",
+            .astra => "Astra",
+            .unknown => if (shell.ai_agent == 1) "Opus" else "",
+        };
+    }
+    const effort: []const u8 = switch (selected.effort) {
+        .low => "low",
+        .medium => "medium",
+        .high => "high",
+        .unknown => if (shell.ai_agent == 1 and (model.len > 0 or fallback.len > 0)) "medium" else "",
+    };
+    var wide_fallback: [16]u16 = undefined;
+    var model_text = model;
+    if (model_text.len == 0 and fallback.len > 0) {
+        const n = @min(fallback.len, wide_fallback.len);
+        for (fallback[0..n], 0..) |ch, i| wide_fallback[i] = ch;
+        model_text = wide_fallback[0..n];
+    }
+    if (model_text.len == 0 and effort.len == 0) return empty;
+    return .{ .line = joinHeaderModel(model_text, effort, &g_chat_header_model), .amber = headerLineAmber(model_text) };
+}
+
+test "SOFT-2466 header line joins the running model and effort" {
+    const model = std.unicode.utf8ToUtf16LeStringLiteral("Fable 5.2");
+    var out: [64]u16 = undefined;
+    const line = joinHeaderModel(model, "medium", &out);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Fable 5.2 · medium"), line);
+    try std.testing.expect(headerLineAmber(model));
+    try std.testing.expect(headerLineAmber(std.unicode.utf8ToUtf16LeStringLiteral("claude-fable-5-2")));
+    try std.testing.expect(!headerLineAmber(std.unicode.utf8ToUtf16LeStringLiteral("Opus 5.5")));
+    var plain: [64]u16 = undefined;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Opus 5.5"), joinHeaderModel(std.unicode.utf8ToUtf16LeStringLiteral("Opus 5.5"), "", &plain));
+}
 
 fn measureTitleText(font: HANDLE, text: []const u16) i32 {
     if (app_state.g_main_hwnd == null or text.len == 0) return 0;
@@ -678,7 +769,8 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     _ = GetClientRect(app_state.g_main_hwnd, &client);
     column.right = @min(column.right, @import("window_frame.zig").controlsRect(client.right).left - uiScaled(8));
     const title_top = threadTitleTop();
-    const pill_h = th - uiScaled(10);
+    const header_model = chatHeaderModel(app_state.active_shell);
+    const pill_h = if (header_model.line.len > 0) th - uiScaled(4) else th - uiScaled(10);
     const pill_top = title_top + @divTrunc(th - pill_h, 2);
     const pad = uiScaled(16);
     const margin = uiScaled(12);
@@ -702,7 +794,8 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const center = @divTrunc(column.left + column.right, 2);
     const icon_w: i32 = uiScaled(34);
     const name = shell.name[0..shell.name_len];
-    const text_w = measureTitleText(uiFontTitle(), name);
+    const model_w = if (header_model.line.len > 0) measureTitleText(uiFontSubtitle(), header_model.line) else 0;
+    const text_w = @max(measureTitleText(uiFontTitle(), name), model_w);
     const max_w = right_limit - column.left - margin;
     if (max_w < pad * 2 + uiScaled(40)) return null;
     const width = std.math.clamp(icon_w + text_w + pad * 2, pad * 2 + uiScaled(40), max_w);
@@ -712,8 +805,23 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const icon_size = uiScaled(28);
     const icon_top = pill_top + @divTrunc(pill_h - icon_size, 2);
     layout.icon = .{ .left = layout.pill.left + uiScaled(8), .top = icon_top, .right = layout.pill.left + uiScaled(8) + icon_size, .bottom = icon_top + icon_size };
-    layout.text = .{ .left = layout.pill.left + pad + icon_w, .top = pill_top, .right = layout.pill.right - pad, .bottom = pill_top + pill_h };
+    if (header_model.line.len > 0) {
+        const name_h = @max(uiScaled(16), @divTrunc(pill_h * 56, 100));
+        layout.text = .{ .left = layout.pill.left + pad + icon_w, .top = pill_top + uiScaled(1), .right = layout.pill.right - pad, .bottom = pill_top + name_h };
+        layout.model_text = .{ .left = layout.text.left, .top = layout.text.bottom - uiScaled(1), .right = layout.text.right, .bottom = layout.pill.bottom - uiScaled(2) };
+        layout.model_line = header_model.line;
+        layout.model_amber = header_model.amber;
+    } else {
+        layout.text = .{ .left = layout.pill.left + pad + icon_w, .top = pill_top, .right = layout.pill.right - pad, .bottom = pill_top + pill_h };
+    }
     return layout;
+}
+
+pub fn chatTitleModelHit(x: i32, y: i32) bool {
+    const layout = chatTitleLayout() orelse return false;
+    if (layout.model_line.len == 0) return false;
+    const r = layout.model_text;
+    return x >= r.left and x < r.right and y >= r.top and y < r.bottom;
 }
 
 pub fn chatTitleInboxHit(x: i32, y: i32) bool {
@@ -830,6 +938,13 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255));
         var text = layout.text;
         _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    if (layout.model_line.len > 0) {
+        _ = SelectObject(hdc, uiFontSubtitle());
+        const grey: DWORD = if (app_state.g_light_theme) RGB(110, 110, 110) else RGB(138, 138, 138);
+        _ = SetTextColor(hdc, if (layout.model_amber) RGB(0xF0, 0xB4, 0x5A) else grey);
+        var model_rc = layout.model_text;
+        _ = @import("dwrite_text.zig").draw(hdc, layout.model_line.ptr, @intCast(layout.model_line.len), &model_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
     paintTitleInboxButton(hdc, layout.inbox, border, fill, edge);
     paintMoreButton(hdc, layout.more, border, fill, edge);

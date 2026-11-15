@@ -1181,6 +1181,7 @@ const selectedChangelogTicket = @import("changelog.zig").selectedChangelogTicket
 const firstChangelogSelection = @import("changelog.zig").firstChangelogSelection;
 const chatTitleLayout = @import("drawing.zig").chatTitleLayout;
 const chatTitleInboxHit = @import("drawing.zig").chatTitleInboxHit;
+const chatTitleModelHit = @import("drawing.zig").chatTitleModelHit;
 const chatTitleRestartHit = @import("drawing.zig").chatTitleRestartHit;
 const resetPaintBackbuffer = @import("drawing.zig").resetPaintBackbuffer;
 const ensurePaintBackbuffer = @import("drawing.zig").ensurePaintBackbuffer;
@@ -1933,6 +1934,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     openInbox(hwnd);
                     return 0;
                 }
+                if (chatTitleModelHit(mx, my)) {
+                    plus_menu.open();
+                    return 0;
+                }
                 if (chatTitleRestartHit(mx, my)) {
                     _ = @import("chat_send.zig").chatRestartAi(app_state.active_shell);
                     return 0;
@@ -2389,7 +2394,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = SetCursor(app_state.g_cursor_sizewe);
                     return 1;
                 }
-                if ((app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(cursor_pt.x, cursor_pt.y) != 0) or inboxButtonHitTest(cursor_pt.x, cursor_pt.y) or chatTitleInboxHit(cursor_pt.x, cursor_pt.y) or chatTitleRestartHit(cursor_pt.x, cursor_pt.y)) {
+                if ((app_state.ISSUE_265_WORKING_BAR and chatViewOwnsInput() and chatButtonAt(cursor_pt.x, cursor_pt.y) != 0) or inboxButtonHitTest(cursor_pt.x, cursor_pt.y) or chatTitleInboxHit(cursor_pt.x, cursor_pt.y) or chatTitleModelHit(cursor_pt.x, cursor_pt.y) or chatTitleRestartHit(cursor_pt.x, cursor_pt.y)) {
                     _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                     return 1;
                 }

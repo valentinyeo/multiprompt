@@ -380,6 +380,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
     .{ .a = "/plan or /permissions in live chat, or Ctrl+K -> Chat View: Plus Menu", .b = "Choose Plan, Ask, Accept edits, or Bypass for this chat; /plan selects Plan first", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Plus Menu\"", .b = "Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes", .header = false },
+    .{ .a = "Click the model under the chat name: change model or effort", .b = "Open the model and effort picker", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
     .{ .a = "Ctrl+K \"Chat View: On Everywhere / Off Everywhere\"", .b = "Switch every session once; Alt+C and tab switches keep each session independent afterwards", .header = false },

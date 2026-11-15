@@ -1120,6 +1120,29 @@ def read_tail(source, size, agent, captured=None, fill=True):
     return base, end, data
 
 
+def display_model_name(model):
+    if not isinstance(model, str) or not model:
+        return ""
+    display = model.removeprefix("claude-")
+    match = re.match(r"(opus|sonnet|fable|haiku)-(\d+)-(\d+)", display)
+    if match:
+        display = f"{match[1].title()} {match[2]}.{match[3]}"
+    return display[:128]
+
+
+def header_model_line(model, effort):
+    name = display_model_name(model)
+    level = effort if isinstance(effort, str) and effort in ("low", "medium", "high") else ""
+    if name and level:
+        return name + " · " + level
+    return name or level
+
+
+def header_model_amber(model):
+    name = display_model_name(model)
+    return name.startswith("Fable") or name.startswith("fable")
+
+
 def status_header(source, size, agent, captured=()):
     key = (str(Path(source.name).resolve()), os.fstat(source.fileno()).st_ino)
     previous = STATUS_CACHE.get(key)
@@ -1217,6 +1240,11 @@ def status_header(source, size, agent, captured=()):
                                 question["provider"] = "codex"
                             question_known = True
                             break
+            if model is None:
+                named = event.get("message") if isinstance(event.get("message"), dict) else None
+                if (isinstance(named, dict) and event.get("type") in ("assistant", "message")
+                        and named.get("role", "assistant") == "assistant" and isinstance(named.get("model"), str)):
+                    model = named["model"]
             if agent == "claude":
                 if event.get("type") != "assistant":
                     continue
@@ -1280,11 +1308,9 @@ def status_header(source, size, agent, captured=()):
     if question is not None or previous is not None and previous[6] is not None:
         result["question"] = question
     if model:
-        display = model.removeprefix("claude-")
-        match = re.match(r"(opus|sonnet|fable|haiku)-(\d+)-(\d+)", display)
-        if match:
-            display = f"{match[1].title()} {match[2]}.{match[3]}"
-        result["model"] = display[:128]
+        display = display_model_name(model)
+        if display:
+            result["model"] = display
         if "[1m]" in model.lower():
             window = 1000000
     if usage is not None:
@@ -3482,7 +3508,7 @@ def host_agent_env(provider, sid):
     if provider == 'codex':
         for key in HOST_CODEX_SECRETS:
             env.pop(key, None)
-    if provider == 'claude' and config.get('model') in ('opus', 'sonnet', 'haiku', 'fable'):
+    if provider == 'claude':
         for key in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL'):
             env.pop(key, None)
     tmux = config.get('tmux')
@@ -3543,6 +3569,44 @@ def host_cursor_argv(provider, sid, base, mode=None):
     if isinstance(native, str) and native:
         return command + ["--resume", native]
     return command
+
+
+def host_argv_flag(parts, key):
+    flag = "--" + key
+    for index, part in enumerate(parts):
+        if part == flag and index + 1 < len(parts) and isinstance(parts[index + 1], str):
+            return parts[index + 1]
+        if isinstance(part, str) and part.startswith(flag + "="):
+            return part[len(flag) + 1:]
+    return None
+
+
+def host_claude_launch_base(base, config):
+    overrides = {}
+    for key, allowed, default in (
+        ("model", ("opus", "sonnet", "haiku", "fable"), "opus"),
+        ("effort", ("low", "medium", "high"), "medium"),
+    ):
+        chosen = config.get(key)
+        if chosen in allowed:
+            overrides[key] = chosen
+        elif host_argv_flag(base, key) is None:
+            overrides[key] = default
+    if not overrides:
+        return base
+    filtered = base[:1]
+    index = 1
+    while index < len(base):
+        part = base[index]
+        matched = next((key for key in overrides if part == "--" + key or (isinstance(part, str) and part.startswith("--" + key + "="))), None)
+        if matched is None:
+            filtered.append(part)
+        elif part == "--" + matched and index + 1 < len(base) and not base[index + 1].startswith("--"):
+            index += 1
+        index += 1
+    for key, value in overrides.items():
+        filtered += ["--" + key, value]
+    return filtered
 
 
 def host_model_name(value):
@@ -3622,23 +3686,7 @@ def host_agent_start(provider, sid, mode=None):
         return None
     if provider == "claude":
         config = host_config(provider, sid) or {}
-        overrides = {key: config[key] for key, values in
-                     (("model", ("opus", "sonnet", "haiku", "fable")), ("effort", ("low", "medium", "high")))
-                     if config.get(key) in values}
-        if overrides:
-            filtered = base[:1]
-            index = 1
-            while index < len(base):
-                part = base[index]
-                key = next((key for key in overrides if part == "--" + key or part.startswith("--" + key + "=")), None)
-                if key is None:
-                    filtered.append(part)
-                elif part == "--" + key and index + 1 < len(base) and not base[index + 1].startswith("--"):
-                    index += 1
-                index += 1
-            base = filtered
-        for key, value in overrides.items():
-            base += ["--" + key, value]
+        base = host_claude_launch_base(base, config)
         command = host_claude_argv(provider, sid, base, mode)
     else:
         command = HOST_ADAPTERS[provider]["argv"](provider, sid, base)
@@ -3654,7 +3702,7 @@ def host_agent_start(provider, sid, mode=None):
         shell = ["/bin/sh", "-l", "-c"]
         folders = ':'.join('$HOME/' + folder[2:] for folder in HOST_BINARY_FOLDERS)
         setup = 'PATH="$HOME/.multiprompt-runtime:' + folders + ':$PATH"; export PATH; '
-        if provider == "claude" and config.get("model") in ("opus", "sonnet", "haiku", "fable"):
+        if provider == "claude":
             setup += 'unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL; '
         source = host_reader_source()
         if not source:

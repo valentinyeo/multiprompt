@@ -54,12 +54,13 @@ with tempfile.TemporaryDirectory() as directory:
     r['host_transcript_exists'] = lambda *args: True
     with patch.object(r['subprocess'], 'Popen', spawn):
         r['host_agent_start'](provider, sid)
-    assert '--model' not in calls[-1] and '--effort' not in calls[-1], calls[-1]
+    assert calls[-1].count('--model') == 1 and calls[-1][calls[-1].index('--model')+1] == 'opus', calls[-1]
+    assert calls[-1].count('--effort') == 1 and calls[-1][calls[-1].index('--effort')+1] == 'medium', calls[-1]
     assert r['host_settings'](provider, sid) == dict(model='', effort='')
     aliases = ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL')
     with patch.dict(r['os'].environ, dict.fromkeys(aliases, 'remapped') | dict(ANTHROPIC_MODEL='custom', ANTHROPIC_API_KEY='secret')):
         env = r['host_agent_env'](provider, sid)
-        assert all(env[key] == 'remapped' for key in aliases)
+        assert all(key not in env for key in aliases)
         config['model'] = 'sonnet'
         r['host_write'](r['host_paths'](provider, sid)['config'], config)
         env = r['host_agent_env'](provider, sid)
