@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll Multibot chat names and rename the linked Hypertask agents
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=50s
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

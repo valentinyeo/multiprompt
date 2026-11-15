@@ -4,7 +4,7 @@ Agent sessions on the server, Claude, Codex, Pi, hax or Cursor, can list the liv
 
 ## Install
 
-Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py` and `mp_helper.py` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions` and `mp-helper` wrappers into `~/.local/bin`. Run it again after a release to update.
+Run `tools/install-mp-talk.sh` from a checkout. It copies `mp_send.py`, `mp_sessions.py`, `mp_helper.py` and `mp_agent_sync.py` to `~/.local/share/multiprompt-talk/` and writes the `mp-send`, `mp-sessions`, `mp-helper` and `mp-agent-sync` wrappers into `~/.local/bin`. On this user's own home it also enables a systemd user timer that runs `mp-agent-sync` at least once a minute. Run it again after a release to update.
 
 ## List chats
 
@@ -66,3 +66,5 @@ mp-helper close "Research A"
 ## Where names come from
 
 The desktop publishes each live chat's tab name to the server through the reader (`chat_names` request). The reader merges them into `~/.local/state/multiprompt/chat-names.json`, keyed by terminal session. The desktop sends the list when tabs, names or workspaces change. Until a desktop with this feature has connected, chats show without names.
+
+Each chat can store one Hypertask agent id on that same record (`agent`, and the `@agents` map in the same file). The id is the link. Names are never used to find an agent. `mp-agent-sync link --tmux SESSION --id AGENT` writes it and refuses an id that another chat already has. A chat with no id is unlinked. The sync does not create, delete or archive agents. Once a minute, and when you run `mp-agent-sync`, each linked agent's display name is set to that chat's exact name with `hypertask agents rename --id ID --name NAME`. A second chat that carries the same id stops the sync before any rename. Republishing a chat name keeps the stored id.
