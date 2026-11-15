@@ -26,8 +26,7 @@ test('a busy chat keeps one working timer across a short idle gap', () => {
   assert.match(sync, /shell\.working_since_ms = 0/);
   const liveSync = body(session, 'fn chatLiveSyncWorking() void {');
   assert.match(liveSync, /const working = live\.running\(shell\.shell_id\)/);
-  assert.match(liveSync, /if \(working\) shell\.working_since_ms = @import\("chat_working\.zig"\)\.workingSince\(shell\.working_since_ms, true, GetTickCount64\(\)\)/);
-  assert.equal(liveSync.includes('workingSince(shell.working_since_ms, working,'), false);
+  assert.match(liveSync, /if \(working\) shell\.working_since_ms = @import\("chat_working\.zig"\)\.workingSince\(shell\.working_since_ms, working, GetTickCount64\(\)\)/);
 });
 
 test('a tab switch drops the working hold immediately', () => {
