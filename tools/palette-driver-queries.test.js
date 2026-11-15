@@ -73,7 +73,9 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   const journey = read('.claude/skills/verify-multiprompt/control-feature-palette-order.ps1');
   assert.doesNotMatch(journey, /6248|use agent or terminal session name/);
   const speed = read('.claude/skills/verify-multiprompt/control-feature-command-palette.ps1');
-  assert.match(speed, /open_ms = 200/);
+  assert.match(speed, /open_ms = 460/);
+  assert.match(speed, /Palette 'powershell' '2005'/);
+  assert.match(updateSearchResultsBody(), /labelsMatchQuery\(&\[_\]\[\]const u8\{"manage snippets"\}[\s\S]*SEARCH_SNIPPET_MANAGE_OFFSET/);
   assert.match(speed, /scroll_ms = 100/);
   assert.match(speed, /close_ms = 100/);
   assert.match(speed, /after_ms = 100/);
