@@ -8,7 +8,7 @@
 - Dark and Light retain visible colour reaction chips and hover emoji.
 - Normal and bold inline code appear in the same transcript before reacting, exercising the code-font cache independently of the emoji font.
 
-## User entry points
+## How to get to it (user POV)
 
 Hover an assistant reply to see React, Reply and More. Right-click the reply and select the thumbs-up reaction. Use Ctrl+K, Themes to switch Dark and Light.
 

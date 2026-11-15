@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { discoverFeatures } = require('./verify-features.cjs');
 const { validateSelection } = require('./pr-verifier.cjs');
 
@@ -28,6 +30,8 @@ test('SOFT-2441 the selectable reaction journey rejects broken emoji pixels', as
   const available = discoverFeatures().available;
   assert.ok(available.includes('reaction-emoji'), 'a runnable journey must prove reaction emoji size and colour');
   assert.deepEqual(validateSelection({ features: ['reaction-emoji'], compare_base: true }, available).features, ['reaction-emoji']);
+  const map = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/features/reaction-emoji.md'), 'utf8');
+  assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
   const { assertEmojiPixels } = await import('./reaction-emoji-pixels.mjs');
 
   await t.test('full-size colour reactions and hover emoji pass', () => {
