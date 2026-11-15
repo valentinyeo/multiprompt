@@ -461,17 +461,17 @@ pub const History = struct {
         var scan = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (scan.next()) |line| {
             if (line.len == 0) continue;
-            const row = rowRoleText(scratch, line) orelse continue;
-            if (std.mem.eql(u8, row.role, "assistant") and row.text.len >= 16) try replies.append(scratch, row.text);
+            const parsed = rowRoleText(scratch, line) orelse continue;
+            if (std.mem.eql(u8, parsed.role, "assistant") and parsed.text.len >= 16) try replies.append(scratch, parsed.text);
         }
         if (replies.items.len == 0) return;
         var assistant_here: std.ArrayList([]const u8) = .empty;
         scan = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (scan.next()) |line| {
             if (line.len == 0) continue;
-            const row = rowRoleText(scratch, line) orelse continue;
-            if (!std.mem.eql(u8, row.role, "assistant")) continue;
-            for (replies.items) |reply| if (std.mem.eql(u8, row.text, reply)) try assistant_here.append(scratch, row.text);
+            const parsed = rowRoleText(scratch, line) orelse continue;
+            if (!std.mem.eql(u8, parsed.role, "assistant")) continue;
+            for (replies.items) |reply| if (std.mem.eql(u8, parsed.text, reply)) try assistant_here.append(scratch, parsed.text);
         }
         var next: std.ArrayList(u8) = .empty;
         errdefer next.deinit(a);
