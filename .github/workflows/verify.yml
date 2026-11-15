@@ -1073,7 +1073,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ env.FEATURE }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls' || inputs.feature == 'bot-photo') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
+          name: verify-${{ matrix.feature }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (matrix.feature == 'title-bar' || matrix.feature == 'window-controls' || inputs.feature == 'bot-photo') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
   tmux-identity-semantics:
