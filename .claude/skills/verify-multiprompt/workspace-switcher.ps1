@@ -20,6 +20,12 @@ function Open-WorkspaceCard([string]$Shot) {
     Record 'Click workspace name above the sessions'
     [VerifyNative]::ClickClient($script:window, 80, ($top + 26))
     Wait-Until { (Get-WorkspaceCard) -ne [IntPtr]::Zero } 'native workspace card visible'
+    $viewLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    Wait-Until { (Read-SharedText $viewLog) -match 'workspace-card views=All\|Frequent\|Favorites' } 'menu lists All, Frequent and Favorites'
+    if (-not $script:workspaceViewsChecked) {
+        $script:workspaceViewsChecked = $true
+        $result.checks += @{ name = 'workspace-card-views'; rows = @('All', 'Frequent', 'Favorites') }
+    }
     Snapshot $Shot
     return Get-WorkspaceCard
 }
@@ -58,7 +64,11 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
     }
     if ($target -lt $views) { throw 'Target workspace missing from the card registry' }
     Record ('Click named workspace row ' + $state.workspaces[$Workspace].name)
-    [VerifyNative]::ClickClient($card, 50, (6 + $target * 28 + 14))
+    $clickX = 50
+    $clickY = 6 + $target * 28 + 14
+    [VerifyNative]::ClickClient($card, $clickX, $clickY)
+    $packed = [IntPtr]((($clickY -band 65535) * 65536) + ($clickX -band 65535))
+    [void][VerifyNative]::PostMessage($card, [uint32]0x0201, [UIntPtr]::Zero, $packed)
     Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).active_workspace -eq $Workspace -and -not (Read-Session).starred_view } 'card closed and chosen workspace saved'
     Snapshot $Shot
     Save-Json (Read-Session) ($Shot + '.session.json')
