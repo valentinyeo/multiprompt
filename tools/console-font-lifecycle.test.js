@@ -171,8 +171,10 @@ const Shell = struct {
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
     hidden: bool = false, inbox_archived: bool = false, needs_attention: bool = false, disconnected: bool = false,
     favorite: bool = false, inbox_excluded: bool = false, muted: bool = false,
+    visits: @import("frequent.zig").Visits = .{}, input: u64 = 0,
     native_terminal: bool = false, console_inflight: bool = false,
 };
+fn nowFileTime() u64 { return 0; }
 fn nativeRestyle(_: u32) void {}
 const NativeSession = struct {
     fn alive(_: u32) bool { return true; }
@@ -264,6 +266,7 @@ var g_chat_browser_swap: struct { shell_id: u32 = 0, fn cancel(_: *@This()) void
 var g_browser_focus_mode = false;
 var g_single_window = true;
 var g_starred_workspace = false;
+var g_view_split: u32 = 2;
 var g_starred_last_shell: u32 = 0;
 var g_inbox_step_context_active = false;
 const TIMER_INBOX_REFRESH = 1;

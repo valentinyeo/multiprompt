@@ -213,6 +213,8 @@ export const screen = {
   "SEARCH_SNIPPET_OFFSET": "menu",
   "SEARCH_SOUND_OFFSET": "window",
   "SEARCH_STARRED_OFFSET": "focus",
+  "SEARCH_VIEW_ALL_OFFSET": "focus",
+  "SEARCH_VIEW_FREQUENT_OFFSET": "focus",
   "SEARCH_SYNC_SIGNOUT_OFFSET": "account",
   "SEARCH_SYNC_STATUS_OFFSET": "account",
   "SEARCH_TABCTX_ADOPT_HOST": "local",

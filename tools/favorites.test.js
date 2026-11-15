@@ -111,7 +111,7 @@ test('IGSH-457 Starred uses shared live membership and digit mapping on every na
   const hook = read('src/shortcuts.zig');
   const main = read('src/main.zig');
   assert.match(inbox, /const favoriteSplitMatches = @import\("workspace_view.zig"\).splitMatches/);
-  assert.match(workspaces, /@import\("workspace_view.zig"\).contains\(true, 0, shell.workspace, shell.favorite\)/);
+  assert.match(workspaces, /@import\("workspace_view.zig"\).includes\(app_state.g_view_split, shell.workspace, shell.favorite/);
   const starredSwitch = workspaces.slice(workspaces.indexOf('if (ws_in == @import("workspace_view.zig").starred)'), workspaces.indexOf('if (ws_in >= app_state.g_lws_count'));
   assert.match(starredSwitch, /updateMainWindowTitle\(\);\s*_ = InvalidateRect\(app_state.g_main_hwnd, null, 0\);\s*if \(!app_state.g_restoring and app_state.g_chat_browser_swap.shell_id == 0\) saveSession\(\);\s*return;/);
   assert.equal((hook.match(/WM_APP_SWITCH_WORKSPACE, @import\("workspace_view.zig"\).fromDigit\(kb.vkCode - 0x30\).\?/g) || []).length, 2);
@@ -180,17 +180,19 @@ const LOOK_UNIFIED = false;
 const DEV_TOP_PAD = 0;
 const GROUP_HEADER_H = 24;
 const Row = struct { kind: enum { section, header, tab, inbox }, gidx: u32, shell_idx: u32, section_tier: SidebarTier = .recent, y: i32 };
-const InboxRow = struct { ws: u32, favorite: bool };
+const InboxRow = struct { ws: u32, favorite: bool, visits: frequent.Visits = .{}, input: u64 = 0, la: u64 = 0, lv: u64 = 0, att: bool = false, act: u8 = 0, sid: u32 = 0 };
+fn nowFileTime() u64 { return 0; }
 pub var local_favorite = true;
 pub const app_state = struct {
     const MAX_SESSION_ROWS = 8;
     var g_starred_workspace = true;
+    var g_view_split: u32 = 2;
     var g_single_window = true;
     var g_sidebar_collapsed = false;
     var g_recents_section_collapsed = false;
     var g_active_workspace: u8 = 0;
     var shell_count: u32 = 1;
-    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0, pinned_top: bool = false, starred_pinned_top: bool = false, last_active: u64 = 0 }{.{}};
+    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0, pinned_top: bool = false, starred_pinned_top: bool = false, last_active: u64 = 0, last_viewed: u64 = 0, needs_attention: bool = false, shell_id: u32 = 0, input: u64 = 0, visits: frequent.Visits = .{} }{.{}};
     var group_count: u32 = 0;
     var groups = [_]struct { id: u32, collapsed: bool }{.{ .id = 17, .collapsed = false }};
     var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);

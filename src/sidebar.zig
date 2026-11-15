@@ -122,6 +122,8 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
+const SEARCH_VIEW_ALL_OFFSET = @import("app_state.zig").SEARCH_VIEW_ALL_OFFSET;
+const SEARCH_VIEW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_VIEW_FREQUENT_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -490,6 +492,7 @@ pub fn isTabHidden(idx: u32) bool {
     if (!app_state.g_starred_workspace and !tabPassesUnreadFilter(idx)) return true;
     const gid = tabGroupId(idx);
     if (gid == 0) return false;
+    if (app_state.g_starred_workspace and frequent.splitKind(app_state.g_view_split) != .favorites) return false;
     if (findGroupIdx(gid)) |gi| return app_state.groups[gi].collapsed;
     return false;
 }
@@ -1268,6 +1271,34 @@ fn sortShellsByRecency(ids: []usize) void {
     }
 }
 
+fn flatViewOrder(local: bool, index: usize) @import("workspace_view.zig").Order {
+    const view = @import("workspace_view.zig");
+    if (local) {
+        const shell = &app_state.shells[index];
+        return .{
+            .la = shell.last_active,
+            .lv = shell.last_viewed,
+            .att = shell.needs_attention,
+            .act = 0,
+            .ws = @as(u32, shell.workspace),
+            .sid = shell.shell_id,
+            .input = shell.input,
+            .visits = view.visitSlice(&shell.visits),
+        };
+    }
+    const row = &app_state.g_inbox_rows[index];
+    return .{
+        .la = row.la,
+        .lv = row.lv,
+        .att = row.att,
+        .act = row.act,
+        .ws = row.ws,
+        .sid = row.sid,
+        .input = row.input,
+        .visits = view.visitSlice(&row.visits),
+    };
+}
+
 pub fn setPinnedTop(i: usize, pinned: bool) void {
     if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top = pinned else app_state.shells[i].pinned_top = pinned;
 }
@@ -1466,6 +1497,44 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
+        if (frequent.splitKind(app_state.g_view_split) != .favorites) {
+            const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+            const view = @import("workspace_view.zig");
+            const Flat = struct { local: bool, index: usize };
+            var flat: [MAX_SHELLS * 3]Flat = undefined;
+            var flat_count: usize = 0;
+            for (0..app_state.shell_count) |i| {
+                if (!@import("workspaces.zig").starredShellVisible(i)) continue;
+                if (flat_count >= flat.len) break;
+                flat[flat_count] = .{ .local = true, .index = i };
+                flat_count += 1;
+            }
+            for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |row, i| {
+                if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) continue;
+                if (!view.includes(app_state.g_view_split, row.ws, row.favorite, view.visitSlice(&row.visits), row.input, now_ms)) continue;
+                if (flat_count >= flat.len) break;
+                flat[flat_count] = .{ .local = false, .index = i };
+                flat_count += 1;
+            }
+            var ii: usize = 1;
+            while (ii < flat_count) : (ii += 1) {
+                const tmp = flat[ii];
+                var jj = ii;
+                while (jj > 0) : (jj -= 1) {
+                    const prev = flat[jj - 1];
+                    if (!view.newer(app_state.g_view_split, flatViewOrder(tmp.local, tmp.index), flatViewOrder(prev.local, prev.index), now_ms)) break;
+                    flat[jj] = prev;
+                }
+                flat[jj] = tmp;
+            }
+            for (flat[0..flat_count]) |item| {
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
+                out[count] = .{ .kind = if (item.local) .tab else .inbox, .gidx = 0, .shell_idx = @intCast(item.index), .y = y };
+                count += 1;
+                y += tabRowH();
+            }
+            return count;
+        }
         const starred_section_headers = !app_state.g_sidebar_collapsed and sidebarHasVisibleSessions();
         for (0..app_state.shell_count) |i| {
             if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
@@ -1526,7 +1595,7 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
         }
         for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |row, i| {
             if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) continue;
-            if (!@import("workspace_view.zig").splitMatches(frequent.favorites_split, row.ws, row.favorite)) continue;
+            if (!@import("workspace_view.zig").includes(app_state.g_view_split, row.ws, row.favorite, row.visits.optional() orelse &.{}, row.input, frequent.unixMs(nowFileTime() / 10_000))) continue;
             if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .inbox, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
@@ -2422,7 +2491,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
             empty_rc.left += 24;
             empty_rc.top += 48;
             var starred_rows: [MAX_ROWS]Row = undefined;
-            const message = if (layoutRows(&starred_rows) == 0) L("No starred sessions. Press Alt+S on a session to star it.") else L("Select a starred session.");
+            const filled = layoutRows(&starred_rows) != 0;
+            const message = if (filled and app_state.g_view_split == frequent.favorites_split) L("Select a starred session.") else if (filled) L("Select a session.") else if (app_state.g_view_split == frequent.frequent_split) L("No frequently visited sessions yet.") else if (app_state.g_view_split == frequent.all_split) L("No sessions here. All caught up.") else L("No starred sessions. Press Alt+S on a session to star it.");
             _ = DrawTextW(hdc, message, -1, &empty_rc, @import("win32.zig").DT_WORDBREAK | DT_NOPREFIX);
         }
 
@@ -3350,6 +3420,16 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L(ui_words.palette_go_starred_workspace), -1, &starred_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         var hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Alt+1"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_VIEW_ALL_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var all_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.palette_view_all), -1, &all_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_VIEW_FREQUENT_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var view_frequent_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.palette_view_frequent), -1, &view_frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_goinbox) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

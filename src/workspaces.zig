@@ -2846,7 +2846,8 @@ test "IGSH-457 Starred is never serialized into session or synced layout" {
 
 pub fn starredShellVisible(idx: usize) bool {
     const shell = &app_state.shells[idx];
-    return @import("workspace_view.zig").contains(true, 0, shell.workspace, shell.favorite) and
+    const now_ms = @import("frequent.zig").unixMs(nowFileTime() / 10_000);
+    return @import("workspace_view.zig").includes(app_state.g_view_split, shell.workspace, shell.favorite, shell.visits.optional() orelse &.{}, shell.input, now_ms) and
         (!shell.inbox_archived or shell.needs_attention) and
         (!app_state.g_single_window or !app_state.g_ws_snoozed[shell.workspace]);
 }
@@ -2960,8 +2961,11 @@ test "IGSH-522 workspace return follows the current session surface, not stale f
     }
 }
 
-pub fn switchToWorkspace(ws_in: u32) void {
+pub fn switchToWorkspace(ws_target: u32) void {
     if (!app_state.g_single_window) return;
+    const view = @import("workspace_view.zig").isView(ws_target);
+    if (view) app_state.g_view_split = @import("workspace_view.zig").viewSplit(ws_target);
+    const ws_in: u32 = if (view) @import("workspace_view.zig").starred else ws_target;
     if (ws_in == @import("workspace_view.zig").starred) {
         captureWorkspaceFocus();
         _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);

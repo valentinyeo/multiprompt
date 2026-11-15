@@ -135,8 +135,11 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
-| Alt+1 | Go to Starred workspace |
-| Alt+1 ... 9 | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
+| Alt+1 | Go to the Favorites view across every workspace |
+| Alt+1 ... 9 | Switch workspace: 1 is the Favorites view, 2-9 are stored workspaces |
+| Ctrl+K -&gt; Workspace view: All sessions | List every session from every workspace, newest first |
+| Ctrl+K -&gt; Workspace view: Favorites | List every favorited session, like the Inbox Favorites tab |
+| Ctrl+K -&gt; Workspace view: Frequent | List the sessions you keep using, like the Inbox Frequent tab |
 | Ctrl+K -&gt; Archive workspace | Hide a workspace without deleting its server sessions |
 | Ctrl+K -&gt; Archived workspaces | Pick an archived workspace to restore its sessions |
 | Ctrl+K -&gt; Delete workspace | Delete an archived workspace; press Enter again to confirm |

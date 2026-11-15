@@ -703,27 +703,31 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
 }
 
 fn inboxFrequent(row: InboxRow, now_ms: u64) bool {
-    return frequent.inFrequent(row.visits.optional() orelse &.{}, now_ms, if (row.input != 0) row.input else null);
+    return @import("workspace_view.zig").includes(frequent.frequent_split, row.ws, row.favorite, row.visits.optional() orelse &.{}, row.input, now_ms);
 }
 
 fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
-    if (app_state.g_inbox_tab == frequent.frequent_split) {
-        const now_ms = frequent.unixMs(nowFileTime() / 10_000);
-        const ka = frequent.orderKey(a.visits.optional() orelse &.{}, now_ms, if (a.input != 0) a.input else null);
-        const kb = frequent.orderKey(b.visits.optional() orelse &.{}, now_ms, if (b.input != 0) b.input else null);
-        if (ka != kb) return frequent.newestFirst(ka, kb);
-    } else {
-        const ka = @max(a.la, a.lv);
-        const kb = @max(b.la, b.lv);
-        if (ka != kb) return ka > kb;
-    }
-    if (a.att != b.att) return a.att;
-    const a_act = (a.act == 1);
-    const b_act = (b.act == 1);
-    if (a_act != b_act) return a_act;
-    if (a.la != b.la) return a.la > b.la;
-    if (a.ws != b.ws) return a.ws < b.ws;
-    return a.sid < b.sid;
+    const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+    const view = @import("workspace_view.zig");
+    return view.newer(app_state.g_inbox_tab, .{
+        .la = a.la,
+        .lv = a.lv,
+        .att = a.att,
+        .act = a.act,
+        .ws = a.ws,
+        .sid = a.sid,
+        .input = a.input,
+        .visits = view.visitSlice(&a.visits),
+    }, .{
+        .la = b.la,
+        .lv = b.lv,
+        .att = b.att,
+        .act = b.act,
+        .ws = b.ws,
+        .sid = b.sid,
+        .input = b.input,
+        .visits = view.visitSlice(&b.visits),
+    }, now_ms);
 }
 
 test "Inbox sorts displayed recency before attention and activity" {
@@ -916,8 +920,7 @@ pub fn inboxRowVisible(r: *const InboxRow) bool {
         if (app_state.shells[idx].muted) return false;
     }
     if (app_state.g_unread_only and !r.att) return false;
-    if (!favoriteSplitMatches(app_state.g_inbox_tab, r.ws, r.favorite)) return false;
-    if (app_state.g_inbox_tab == frequent.frequent_split and !inboxFrequent(r.*, frequent.unixMs(nowFileTime() / 10_000))) return false;
+    if (!@import("workspace_view.zig").includes(app_state.g_inbox_tab, r.ws, r.favorite, r.visits.optional() orelse &.{}, r.input, frequent.unixMs(nowFileTime() / 10_000))) return false;
     return inboxFilterMatches(r);
 }
 

@@ -963,6 +963,7 @@ fn savedStarredView(json: std.json.Value, tabs: []const SavedTab) bool {
 
 fn restoreStarredView(starred: bool) void {
     app_state.g_starred_workspace = false;
+    app_state.g_view_split = @import("frequent.zig").favorites_split;
     if (!starred or !app_state.g_single_window or app_state.active_shell >= app_state.shell_count) return;
     if (!@import("workspaces.zig").starredShellVisible(app_state.active_shell)) return;
     app_state.g_starred_last_shell = app_state.shells[app_state.active_shell].shell_id;

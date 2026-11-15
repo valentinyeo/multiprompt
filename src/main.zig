@@ -575,6 +575,8 @@ const SEARCH_RECONNECT_OFFSET = @import("app_state.zig").SEARCH_RECONNECT_OFFSET
 const SEARCH_SINGLEWIN_OFFSET = @import("app_state.zig").SEARCH_SINGLEWIN_OFFSET;
 const SEARCH_INSTALLHOOK_OFFSET = @import("app_state.zig").SEARCH_INSTALLHOOK_OFFSET;
 const SEARCH_STARRED_OFFSET = @import("app_state.zig").SEARCH_STARRED_OFFSET;
+const SEARCH_VIEW_ALL_OFFSET = @import("app_state.zig").SEARCH_VIEW_ALL_OFFSET;
+const SEARCH_VIEW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_VIEW_FREQUENT_OFFSET;
 const SEARCH_GOINBOX_OFFSET = @import("app_state.zig").SEARCH_GOINBOX_OFFSET;
 const SEARCH_SHOW_FREQUENT_OFFSET = @import("app_state.zig").SEARCH_SHOW_FREQUENT_OFFSET;
 const SEARCH_FREQUENT_FIRST_OFFSET = @import("app_state.zig").SEARCH_FREQUENT_FIRST_OFFSET;
@@ -7095,7 +7097,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_inbox_sel = 0;
                     return 0;
                 }
-                if (target == SEARCH_STARRED_OFFSET) {
+                if (target == SEARCH_STARRED_OFFSET or target == SEARCH_VIEW_ALL_OFFSET or target == SEARCH_VIEW_FREQUENT_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -7103,7 +7105,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (app_state.g_inbox_active) closeInbox(hwnd);
                     const was_room = @import("room_frontend.zig").isActive();
                     @import("room_frontend.zig").leaveForOtherFront();
-                    switchToWorkspace(@import("workspace_view.zig").starred);
+                    const workspace_view = @import("workspace_view.zig");
+                    const view_target: u32 = if (target == SEARCH_VIEW_ALL_OFFSET) workspace_view.all_view else if (target == SEARCH_VIEW_FREQUENT_OFFSET) workspace_view.frequent_view else workspace_view.starred;
+                    switchToWorkspace(view_target);
                     if (was_room) showActiveShellAfterOverlay();
                     return 0;
                 }

@@ -1217,7 +1217,8 @@ pub fn paintWorkspaceStrip(hdc: HANDLE, sidebar_bg: DWORD) void {
     paintInboxButtonTooltip(hdc, false);
     if (app_state.g_workspace_hover) |hover| {
         var name_buf: [32]u8 = undefined;
-        const name = if (hover == @import("workspace_view.zig").starred) "Starred" else if (hover == app_state.WS_NEW_PILL) "New workspace" else @import("workspaces.zig").workspaceDisplayName(hover, &name_buf);
+        const view_split = if (app_state.g_starred_workspace) app_state.g_view_split else @import("frequent.zig").favorites_split;
+        const name = if (hover == @import("workspace_view.zig").starred) @import("workspace_view.zig").viewName(view_split) else if (hover == app_state.WS_NEW_PILL) "New workspace" else @import("workspaces.zig").workspaceDisplayName(hover, &name_buf);
         var label_buf: [80]u8 = undefined;
         const digit: u32 = if (hover == @import("workspace_view.zig").starred) 1 else @as(u32, hover) + 2;
         const label = if (digit <= 9) std.fmt.bufPrint(&label_buf, "{s} (Alt+{d})", .{ name, digit }) catch name else name;
