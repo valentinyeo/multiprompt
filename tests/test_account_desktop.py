@@ -29,7 +29,7 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('launch_cache.restore();', main)
         self.assertNotIn('accountBootstrap(hwnd)', main)
         bootstrap_call = deferred.index('if (!accountBootstrap(hwnd)) {')
-        for call in ('startStaleAltMouseHookThread();', 'CreateJobObjectW(', 'requestAiPaceRefresh();', 'SetParent(adopt_h', 'restoreSession();', 'restoreRegisteredWorkspaceWindows();'):
+        for call in ('startStaleAltMouseHookThread();', 'CreateJobObjectW(', 'std.Thread.spawn(.{}, ensureUsageTelemetryCollector', 'SetParent(adopt_h', 'restoreSession();', 'restoreRegisteredWorkspaceWindows();'):
             self.assertLess(bootstrap_call, deferred.index(call), call)
         self.assertNotIn('maintainTunnelKeepers();', deferred)
         self.assertIn('if (launch_cache.pending) return 0;\n                maintainTunnelKeepers();', function(MAIN, 'wndProc'))
