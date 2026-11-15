@@ -41,7 +41,11 @@ test('SOFT-2460 a plain shell spawn logs each silent refusal', () => {
   const start = consoleSrc.indexOf('pub fn spawnShellWithSession(');
   assert.ok(start >= 0);
   const body = consoleSrc.slice(start, consoleSrc.indexOf('\nfn tmuxHostForMenuIndex', start));
-  for (const reason of ['account locked', 'session already open', 'no shell id', 'no title id', 'native shell', 'command line']) {
+  assert.match(body, /if \(app_state\.g_account_locked\) return false;/);
+  assert.match(body, /if \(isRemoteShellKind\(kind\) and app_state\.g_shared_server_connection\) return spawnNativeShell\(/);
+  for (const reason of ['session already open', 'no shell id', 'no title id', 'command line']) {
     assert.match(body, new RegExp(`spawnShell refused: ${reason}`), reason);
   }
+  const native = consoleSrc.slice(consoleSrc.indexOf('fn spawnNativeShell('), start);
+  assert.match(native, /spawnShell refused: native open/);
 });

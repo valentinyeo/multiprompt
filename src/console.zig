@@ -1981,10 +1981,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
 }
 
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
-    if (app_state.g_account_locked) {
-        debugLog("spawnShell refused: account locked");
-        return false;
-    }
+    if (app_state.g_account_locked) return false;
     const pending_chat_view = app_state.g_pending_chat_view;
     app_state.g_pending_chat_view = false;
     const background_workspace = app_state.g_pending_background_workspace;
@@ -2011,11 +2008,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         return false;
     };
     const idx = app_state.shell_count;
-    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) {
-        const opened = spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
-        if (!opened) debugLog("spawnShell refused: native shell");
-        return opened;
-    }
+    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
