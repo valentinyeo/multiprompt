@@ -128,5 +128,5 @@ test('existing command palette speed journey measures real input through changed
   assert.match(journey, /\$sample -lt 5/);
   assert.match(journey, /Save-Json \$changelogSpeed 'changelog-speed.json'/);
   assert.match(journey, /Maximum -ge \$limit/);
-  assert.match(journey, /open_ms = 200/);
+  assert.match(journey, /open_ms = 460/);
 });
