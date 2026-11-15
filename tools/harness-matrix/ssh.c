@@ -36,14 +36,17 @@ int main(int argc, char **argv) {
     script = getenv("HARNESS_HOST_PY");
     if (!script || !script[0]) return 3;
     SetEnvironmentVariableA("HARNESS_HOST", host);
-    snprintf(launch, sizeof(launch), "py -3 \"%s\"", script);
     memset(&start, 0, sizeof(start));
     start.cb = sizeof(start);
     start.dwFlags = STARTF_USESTDHANDLES;
     start.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     start.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     start.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, 0, NULL, NULL, &start, &process)) return 4;
+    snprintf(launch, sizeof(launch), "py -3 \"%s\"", script);
+    if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, 0, NULL, NULL, &start, &process)) {
+        snprintf(launch, sizeof(launch), "python \"%s\"", script);
+        if (!CreateProcessA(NULL, launch, NULL, NULL, TRUE, 0, NULL, NULL, &start, &process)) return 4;
+    }
     CloseHandle(process.hThread);
     wait = WaitForSingleObject(process.hProcess, INFINITE);
     if (wait != WAIT_OBJECT_0) {

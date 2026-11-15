@@ -88,10 +88,13 @@ function Add-MatrixResult($Row, [bool]$Pass, [string]$Detail) {
 $script:matrixResults = @()
 Snapshot 'action'
 $rows = Get-MatrixRows
+$script:sharedOn = $false
 $shellRows = @($rows | Where-Object { $_.kind -eq 'shell' })
 if ($shellRows.Count -gt 0) {
     $script:shellOpenError = $null
     try {
+        Open-PaletteRow 'remote tabs: share one server connection' 6388
+        $script:sharedOn = $true
         Open-PaletteRow 'Open shell on VPS 1' 2003
         $shellReady = Wait-RealSize 'vps1'
     } catch {
@@ -243,6 +246,10 @@ foreach ($row in @($rows | Where-Object { $_.kind -eq 'cells' })) {
             if ($problems.Count -gt 0) { throw ($problems -join '; ') }
             $detail = 'pong, model, and skills checked'
         } else {
+            if (-not $script:sharedOn) {
+                Open-PaletteRow 'remote tabs: share one server connection' 6388
+                $script:sharedOn = $true
+            }
             Open-PaletteRow $row.shell_query ([int]$row.shell_target)
             $size = Wait-RealSize $row.host
             $terminal = [HarnessGrid]::Find($script:window)
@@ -265,10 +272,12 @@ foreach ($row in @($rows | Where-Object { $_.kind -eq 'cells' })) {
 
 Snapshot 'after'
 $matrixPath = Join-Path $Evidence 'matrix-results.json'
-ConvertTo-Json -InputObject @($script:matrixResults) -Depth 6 | Set-Content -LiteralPath $matrixPath -Encoding utf8
+$utf8 = New-Object Text.UTF8Encoding $false
+[IO.File]::WriteAllText($matrixPath, (ConvertTo-Json -InputObject @($script:matrixResults) -Depth 6), $utf8)
 $reportPath = Join-Path $Evidence 'report.md'
-& node (Join-Path $PSScriptRoot '../../../tools/harness-matrix.js') report $matrixPath | Set-Content -LiteralPath $reportPath -Encoding utf8
+$report = & node (Join-Path $PSScriptRoot '../../../tools/harness-matrix.js') report $matrixPath
 if ($LASTEXITCODE -ne 0) { throw 'Could not generate the harness matrix report' }
+[IO.File]::WriteAllText($reportPath, $report, $utf8)
 if ($env:GITHUB_STEP_SUMMARY) { Get-Content -LiteralPath $reportPath -Raw | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY }
 $failed = @($script:matrixResults | Where-Object { -not $_.pass })
 if ($failed.Count -gt 0) { throw ("harness matrix failed: " + (($failed | ForEach-Object { $_.id }) -join ', ')) }

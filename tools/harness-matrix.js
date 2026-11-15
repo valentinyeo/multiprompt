@@ -95,13 +95,19 @@ function mismatches(source) {
 
 module.exports = { load, cells, select, report, mismatches, MODEL_IDS };
 
+function readResults(file) {
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') return [parsed];
+  throw new Error('matrix results must be a list');
+}
+
 if (require.main === module) {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'journeys') {
     process.stdout.write(JSON.stringify(select(args[0])));
   } else if (command === 'report') {
-    const results = args.flatMap(file => JSON.parse(fs.readFileSync(file, 'utf8')));
-    process.stdout.write(report(results));
+    process.stdout.write(report(args.flatMap(readResults)));
   } else {
     throw new Error('Expected journeys or report');
   }

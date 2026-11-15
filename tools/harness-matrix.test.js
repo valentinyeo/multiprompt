@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const root = path.join(__dirname, '..');
@@ -46,6 +46,13 @@ test('SOFT-2471 the report is generated from the same table', () => {
   assert.equal(text.split('\n').filter(line => line.startsWith('| ') && !line.startsWith('| cell') && !line.startsWith('| ---')).length, 19);
   assert.match(text, /\| fit_on_resize \| pass \| \[fit_on_resize\.png\]\(fit_on_resize\.png\) \|/);
   assert.match(text, /\| claude\.live_chat\.vps1 \| fail still open \|/);
+  const bomDir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-matrix-bom-'));
+  const bomFile = path.join(bomDir, 'results.json');
+  fs.writeFileSync(bomFile, `\uFEFF${JSON.stringify([{ id: 'fit_on_resize', pass: true, screenshot: 'fit_on_resize.png' }])}`);
+  const reported = spawnSync(process.execPath, [path.join(root, 'tools/harness-matrix.js'), 'report', bomFile], { encoding: 'utf8' });
+  assert.equal(reported.status, 0, reported.stderr);
+  assert.match(reported.stdout, /\| fit_on_resize \| pass \|/);
+  fs.rmSync(bomDir, { recursive: true, force: true });
   const map = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/harness-matrix.md'), 'utf8');
   assert.equal(map.includes('claude.live_chat.vps1'), false);
   assert.match(map, /tools\/harness-matrix\.json/);

@@ -297,6 +297,7 @@ try {
         $ssh = Join-Path $scratch 'ssh.exe'
         Copy-Item -LiteralPath $env:HARNESS_SSH_EXE -Destination $ssh
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), '{"tabs":[],"shared_server_connection":true}', (New-Object Text.UTF8Encoding $false))
         $env:HARNESS_MATRIX_LOG = Join-Path $Evidence 'host-log'
         $env:HARNESS_HOST_PY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/harness-matrix/host.py')).Path
         $env:HARNESS_VERSION_COMMANDS = (& node -e "const m=require('./tools/harness-matrix.js'); process.stdout.write(m.load().harnesses.map(item => item.version_command).join('\n'))")
