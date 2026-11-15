@@ -775,15 +775,6 @@ pub fn running(shell_id: u32) bool {
     return false;
 }
 
-pub fn busy(shell_id: u32) bool {
-    mutex.lock();
-    defer mutex.unlock();
-    for (&slots) |*live| {
-        if (live.used and live.shell_id == shell_id) return live.state == .running or live.held;
-    }
-    return false;
-}
-
 pub fn replyPresent(shell_id: u32) bool {
     mutex.lock();
     defer mutex.unlock();
