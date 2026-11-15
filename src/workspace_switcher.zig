@@ -205,7 +205,7 @@ fn paint(dc: w.HANDLE) void {
             _ = w.FillRect(dc, &line, brush);
             _ = w.DeleteObject(brush);
         }
-        if (is_current or selected == index) fillRoundRect(dc, rc, scale(10), if (is_current) divider else @import("chat_scrollbar.zig").blend(panel, divider, 153));
+        if (selected == index) fillRoundRect(dc, rc, scale(10), divider);
         var buf: [12]u8 = undefined;
         const count = countLabel(if (is_action) null else sessionCount(index), &buf);
         var label = rc;
