@@ -237,14 +237,21 @@ jobs:
           sudo loginctl enable-linger mp-agent-journey
           sudo systemctl start "user@$uid.service"
           mkdir -p evidence
-          sudo chown mp-agent-journey evidence
+          sudo mkdir -p /home/mp-agent-journey/product /home/mp-agent-journey/evidence
+          git -C product archive HEAD | sudo tar -x -C /home/mp-agent-journey/product
+          sudo install -m 644 tools/verify-agent-sync.py /home/mp-agent-journey/verify-agent-sync.py
+          sudo install -m 755 "$RUNNER_TEMP/hypertask" /home/mp-agent-journey/hypertask
+          sudo chown -R mp-agent-journey /home/mp-agent-journey
       - name: Drive the installed rename timer through real CLI HTTP
         run: |
           uid=$(id -u mp-agent-journey)
-          sudo -u mp-agent-journey env HOME=/home/mp-agent-journey XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" GITHUB_ACTIONS=true python3 tools/verify-agent-sync.py --root "$PWD/product" --cli "$RUNNER_TEMP/hypertask" --evidence "$PWD/evidence"
+          sudo -u mp-agent-journey env --chdir=/home/mp-agent-journey HOME=/home/mp-agent-journey XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" GITHUB_ACTIONS=true python3 verify-agent-sync.py --root /home/mp-agent-journey/product --cli /home/mp-agent-journey/hypertask --evidence /home/mp-agent-journey/evidence
       - name: Remove the owned user and record cleanup
         if: always()
         run: |
+          if [ -d /home/mp-agent-journey/evidence ]; then
+            sudo cp -a /home/mp-agent-journey/evidence/. evidence/
+          fi
           if id mp-agent-journey >/dev/null 2>&1; then
             uid=$(id -u mp-agent-journey)
             sudo loginctl disable-linger mp-agent-journey
