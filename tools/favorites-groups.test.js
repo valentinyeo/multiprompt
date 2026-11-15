@@ -6,7 +6,7 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
 test('IGSH-556: groups sync behind their own tokens and keep regular and Favorites groups apart', () => {
   const client = read('src/account_client.zig');
-  assert.match(client, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups/);
+  assert.match(client, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,bot_palette8,groups,group_order,starred_groups,workspace_archive/);
   assert.match(client, /starred_groups_supported = layoutSupports\(raw, "starred_groups"\)/);
   const worker = read('service/worker.js');
   assert.match(worker, /if \(!layoutFeature\(request, 'groups'\)\) delete visible\.group/);

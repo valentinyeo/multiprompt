@@ -34,6 +34,10 @@ fn workspaceIndex(workspaces: []const layout.Workspace, name: []const u8) ?usize
     for (workspaces, 0..) |ws, i| if (eq(u8, ws.name, name)) return i;
     return null;
 }
+pub fn workspaceIsArchived(workspaces: []const layout.Workspace, name: []const u8) bool {
+    const i = workspaceIndex(workspaces, name) orelse return false;
+    return workspaces[i].archived orelse false;
+}
 pub const AppliedLayout = struct {
     bytes: ?[]u8 = null,
 
@@ -77,7 +81,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!sameNames(a.group_order orelse &.{}, b.group_order orelse &.{})) return false;
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
-    for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
+    for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color or (x.archived orelse false) != (y.archived orelse false)) return false;
     for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or !eq(u8, x.group orelse "", y.group orelse "") or !eq(u8, x.starred_group orelse "", y.starred_group orelse "") or x.face != y.face or x.color != y.color or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
@@ -210,6 +214,51 @@ pub fn withoutGroupOrder(target: Layout) Layout {
     return result;
 }
 
+pub fn withoutArchived(a: Allocator, target: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| workspace.archived = null;
+    result.workspaces = workspaces;
+    return result;
+}
+
+pub fn visibleLayout(a: Allocator, target: Layout) !Layout {
+    var workspaces: std.ArrayList(layout.Workspace) = .empty;
+    var tabs: std.ArrayList(Tab) = .empty;
+    for (target.workspaces) |workspace| if (!(workspace.archived orelse false)) try workspaces.append(a, workspace);
+    for (target.tabs) |tab| if (!workspaceIsArchived(target.workspaces, tab.workspace)) try tabs.append(a, tab);
+    var result = target;
+    result.workspaces = try workspaces.toOwnedSlice(a);
+    result.tabs = try tabs.toOwnedSlice(a);
+    return result;
+}
+
+pub fn withArchived(a: Allocator, base: Layout, edited: Layout, archived_names: []const []const u8, closed: []const Tab) !Layout {
+    var workspaces: std.ArrayList(layout.Workspace) = .empty;
+    try workspaces.appendSlice(a, edited.workspaces);
+    for (workspaces.items) |*workspace| if (!containsName(archived_names, workspace.name)) workspace.archived = null;
+    var tabs: std.ArrayList(Tab) = .empty;
+    try tabs.appendSlice(a, edited.tabs);
+    for (archived_names) |name| {
+        const bi = workspaceIndex(base.workspaces, name) orelse continue;
+        if (workspaceIndex(workspaces.items, name)) |ei| {
+            workspaces.items[ei].archived = true;
+        } else {
+            var workspace = base.workspaces[bi];
+            workspace.archived = true;
+            try workspaces.append(a, workspace);
+        }
+        for (base.tabs) |tab| {
+            if (!eq(u8, tab.workspace, name) or find(tabs.items, tab) != null or find(closed, tab) != null) continue;
+            try tabs.append(a, tab);
+        }
+    }
+    var result = edited;
+    result.workspaces = try workspaces.toOwnedSlice(a);
+    result.tabs = try tabs.toOwnedSlice(a);
+    return result;
+}
+
 pub fn withoutAppearance(a: Allocator, target: Layout) !Layout {
     var result = target;
     const tabs = try a.dupe(Tab, target.tabs);
@@ -280,9 +329,11 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
         const ei = workspaceIndex(edited.workspaces, workspace.name) orelse continue;
         const bi = workspaceIndex(base.workspaces, workspace.name) orelse {
             if (edited.workspaces[ei].color) |color| workspace.color = color;
+            workspace.archived = if (edited.workspaces[ei].archived orelse false) true else null;
             continue;
         };
         if (edited.workspaces[ei].color != base.workspaces[bi].color) workspace.color = edited.workspaces[ei].color;
+        if ((edited.workspaces[ei].archived orelse false) != (base.workspaces[bi].archived orelse false)) workspace.archived = if (edited.workspaces[ei].archived orelse false) true else null;
     }
     for (remote.tabs) |r| {
         var t = r;
@@ -397,10 +448,11 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
     const old = root.object.get("tabs") orelse std.json.Value{ .array = .init(a) };
     if (old != .array) return error.InvalidLayout;
     var ws: std.ArrayList(layout.Workspace) = .empty;
-    try ws.appendSlice(a, remote.workspaces);
+    for (remote.workspaces) |workspace| if (!(workspace.archived orelse false)) try ws.append(a, workspace);
     var records: std.array_list.Managed(std.json.Value) = .init(a);
     const old_ws = root.object.get("workspaces");
     for (remote.tabs) |t| {
+        if (workspaceIsArchived(remote.workspaces, t.workspace)) continue;
         var record: std.json.Value = .{ .object = .empty };
         for (old.array.items) |r| {
             if (r != .object) continue;
@@ -1406,4 +1458,38 @@ test "IGSH-1890 Favorites groups sync between desktops and an empty first sync n
     const stripped = try withoutStarredGroups(a, pc1);
     try std.testing.expect(stripped.tabs[0].starred_group == null);
     try std.testing.expectEqualStrings("Hypertask", pc1.tabs[0].starred_group.?);
+}
+
+test "SOFT-2295 archive keeps the workspace and its chats, restore clears the flag, and delete removes both" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const work = layout.Workspace{ .name = "Work" };
+    const other = layout.Workspace{ .name = "Other" };
+    const filed = Tab{ .name = "Filed", .tmux_host = 0, .tmux_session = "filed", .workspace = "Work" };
+    const stay = Tab{ .name = "Stay", .tmux_host = 0, .tmux_session = "stay", .workspace = "Other" };
+    const base = Layout{ .workspaces = &.{ other, work }, .tabs = &.{ stay, filed } };
+    const live_only = Layout{ .workspaces = &.{other}, .tabs = &.{stay} };
+    const archived = try withArchived(a, base, live_only, &.{"Work"}, &.{});
+    try std.testing.expect(workspaceIsArchived(archived.workspaces, "Work"));
+    try std.testing.expect(find(archived.tabs, filed) != null);
+    const remote = try rebase(a, base, archived, base);
+    try std.testing.expect(workspaceIsArchived(remote.workspaces, "Work"));
+    try std.testing.expect(find(remote.tabs, filed) != null);
+    const restored_edit = try withArchived(a, remote, base, &.{}, &.{});
+    const restored = try rebase(a, remote, restored_edit, remote);
+    try std.testing.expect(!workspaceIsArchived(restored.workspaces, "Work"));
+    try std.testing.expect(find(restored.tabs, filed) != null);
+    const deleted = try rebase(a, restored, live_only, restored);
+    try std.testing.expect(workspaceIndex(deleted.workspaces, "Work") == null);
+    try std.testing.expect(find(deleted.tabs, filed) == null);
+    const hidden = try visibleLayout(a, archived);
+    try std.testing.expectEqual(@as(usize, 1), hidden.workspaces.len);
+    try std.testing.expect(find(hidden.tabs, filed) == null);
+    const legacy = try withoutArchived(a, archived);
+    try std.testing.expect(legacy.workspaces[1].archived == null);
+    const bytes = try layout.encode(a, archived);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"archived\":true") != null);
+    const plain = try layout.encode(a, legacy);
+    try std.testing.expect(std.mem.indexOf(u8, plain, "archived") == null);
 }

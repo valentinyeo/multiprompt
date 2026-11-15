@@ -33,12 +33,22 @@ function layoutResponse(request, value, status = 200) {
     const { color, ...visible } = workspace;
     return visible;
   });
+  if (value.layout) {
+    const seesArchive = layoutFeature(request, 'workspace_archive');
+    const hidden = new Set(value.layout.workspaces.filter(workspace => workspace.archived === true).map(workspace => workspace.name));
+    value.layout.workspaces = value.layout.workspaces.filter(workspace => seesArchive || workspace.archived !== true).map(workspace => {
+      if (workspace.archived === true) return { ...workspace, archived: true };
+      const { archived, ...visible } = workspace;
+      return visible;
+    });
+    if (!seesArchive) value.layout.tabs = value.layout.tabs.filter(tab => !hidden.has(tab.workspace));
+  }
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   if (value.layout && !layoutFeature(request, 'group_order')) delete value.layout.group_order;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : ''));
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance,bot_photo,bot_palette8,groups' + (layoutFeature(request, 'group_order') ? ',group_order' : '') + (layoutFeature(request, 'starred_groups') ? ',starred_groups' : '') + (layoutFeature(request, 'workspace_archive') ? ',workspace_archive' : ''));
   return response;
 }
 export function validateLayout(x) {
@@ -64,7 +74,8 @@ export function validateLayout(x) {
   }
   const ws = new Set(), ids = new Set();
   for (const w of x.workspaces) {
-    if (!keys(w, ['name', ...(Object.hasOwn(w || {}, 'color') ? ['color'] : [])]) || (Object.hasOwn(w, 'color') && (!Number.isInteger(w.color) || w.color < 0 || w.color >= 8)) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
+    const workspaceOptional = ['color', 'archived'].filter(key => Object.hasOwn(w || {}, key));
+    if (!keys(w, ['name', ...workspaceOptional]) || (Object.hasOwn(w, 'color') && (!Number.isInteger(w.color) || w.color < 0 || w.color >= 8)) || (Object.hasOwn(w, 'archived') && typeof w.archived !== 'boolean') || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
     ws.add(w.name);
   }
   for (const t of x.tabs) {
@@ -439,6 +450,30 @@ export default {
         if (removed.length) layout.removed_hosts = removed;
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
+        const previousWorkspaces = previousLayout?.workspaces || [];
+        if (!layoutFeature(req, 'workspace_archive')) {
+          const incoming = new Set(layout.workspaces.map(workspace => workspace.name));
+          for (const workspace of layout.workspaces) {
+            const previous = previousWorkspaces.find(item => item.name === workspace.name);
+            if (previous?.archived === true) workspace.archived = true;
+            else delete workspace.archived;
+          }
+          for (const previous of previousWorkspaces) {
+            if (previous.archived !== true || incoming.has(previous.name)) continue;
+            layout.workspaces.push(previous);
+            incoming.add(previous.name);
+          }
+          const seen = new Set(layout.tabs.map(tab => `${tab.tmux_host}:${String(tab.tmux_session).toLowerCase()}`));
+          for (const tab of previousLayout?.tabs || []) {
+            if (previousWorkspaces.find(item => item.name === tab.workspace)?.archived !== true) continue;
+            const id = `${tab.tmux_host}:${String(tab.tmux_session).toLowerCase()}`;
+            if (seen.has(id)) continue;
+            layout.tabs.push(tab);
+            seen.add(id);
+          }
+        } else {
+          for (const workspace of layout.workspaces) if (workspace.archived !== true) delete workspace.archived;
+        }
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         const photos = new Map((await db.prepare('SELECT key,revision FROM bot_photos WHERE account=?').bind(device.account).all()).results.map(photo => [photo.key, photo.revision]));
         for (const tab of layout.tabs) {

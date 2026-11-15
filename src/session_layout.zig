@@ -16,7 +16,26 @@ pub fn decodeTransferColor(value: u8) ?u8 {
 pub const max_bytes = 1024 * 1024;
 pub const max_groups = 16;
 pub const Host = @import("account_hosts.zig").Host;
-pub const Workspace = struct { name: []const u8, color: ?u8 = null };
+pub const Workspace = struct {
+    name: []const u8,
+    color: ?u8 = null,
+    archived: ?bool = null,
+
+    pub fn jsonStringify(self: Workspace, json: anytype) !void {
+        try json.beginObject();
+        try json.objectField("name");
+        try json.write(self.name);
+        if (self.color) |color| {
+            try json.objectField("color");
+            try json.write(color);
+        }
+        if (self.archived orelse false) {
+            try json.objectField("archived");
+            try json.write(true);
+        }
+        try json.endObject();
+    }
+};
 
 pub fn workspaceColor(order: usize, override: ?u8) u8 {
     return override orelse @as(u8, @intCast(order % color_count));
@@ -150,6 +169,9 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
         if (workspace.object.get("color")) |color| {
             if (color != .integer or color.integer < 0 or color.integer >= color_count) return error.InvalidLayout;
         }
+        if (workspace.object.get("archived")) |archived| {
+            if (archived != .bool) return error.InvalidLayout;
+        }
     }
     for (value.value.object.get("tabs").?.array.items) |tab| {
         if (tab.object.get("face")) |face| {
@@ -187,6 +209,7 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
         var found = false;
         for (workspaces.items) |*old| if (std.mem.eql(u8, old.name, ws.name)) {
             old.color = ws.color;
+            old.archived = ws.archived;
             found = true;
             break;
         };
@@ -721,4 +744,26 @@ test "IGSH-1890 Favorites group names round trip and reject bad text" {
     var bad = test_tab;
     bad.starred_group = "x" ** 65;
     try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &test_ws, .tabs = &.{bad} }));
+}
+
+test "SOFT-2295 workspace archive is an optional field and stays out of older JSON" {
+    const a = std.testing.allocator;
+    const legacy = try parse(a, "{\"workspaces\":[{\"name\":\"Other\"}],\"tabs\":[]}");
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(?bool, null), legacy.value.workspaces[0].archived);
+    const plain = try encode(a, legacy.value);
+    defer a.free(plain);
+    try std.testing.expect(std.mem.indexOf(u8, plain, "archived") == null);
+    const archived = try parse(a, "{\"workspaces\":[{\"name\":\"Work\",\"archived\":true},{\"name\":\"Other\",\"archived\":false}],\"tabs\":[]}");
+    defer archived.deinit();
+    try std.testing.expectEqual(@as(?bool, true), archived.value.workspaces[0].archived);
+    try std.testing.expectEqual(@as(?bool, false), archived.value.workspaces[1].archived);
+    const bytes = try encode(a, archived.value);
+    defer a.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"archived\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"archived\":false") == null);
+    if (parse(a, "{\"workspaces\":[{\"name\":\"Other\",\"archived\":1}],\"tabs\":[]}")) |parsed| {
+        parsed.deinit();
+        return error.ExpectedRejection;
+    } else |_| {}
 }

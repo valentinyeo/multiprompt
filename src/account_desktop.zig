@@ -331,6 +331,14 @@ pub fn accountRecordClose(idx: u32) void {
     app_state.g_account_closed[app_state.g_account_closed_count] = rec;
     app_state.g_account_closed_count += 1;
 }
+fn archivedWorkspaceNames(a: std.mem.Allocator) ![]const []const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    for (app_state.g_workspaces[0..app_state.g_workspace_count]) |entry| {
+        if (entry.name_len == 0 or entry.name_len > entry.name.len or !entry.archived) continue;
+        try names.append(a, try a.dupe(u8, entry.name[0..entry.name_len]));
+    }
+    return try names.toOwnedSlice(a);
+}
 fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !session_layout.Layout {
     const local = try captureSessionLayout(a, false);
     const closed = try a.alloc(session_layout.Tab, app_state.g_account_closed_count);
@@ -338,7 +346,8 @@ fn accountCapturePush(a: std.mem.Allocator, base: session_layout.Layout) !sessio
         t.* = .{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
     const kept = try account_layout.keepHeld(a, base, local, closed);
     if (kept.tabs.len != local.tabs.len) debugLog("account-sync: kept synced tabs missing locally (not closed here)");
-    return kept;
+    const names = try archivedWorkspaceNames(a);
+    return account_layout.withArchived(a, base, kept, names, closed);
 }
 pub fn publishSessionLayout() void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_applying or app_state.g_restoring) return;
@@ -377,6 +386,11 @@ pub fn publishSessionLayout() void {
         plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
         plain_base = account_layout.withoutColors(arena.allocator(), plain_base) catch return;
         plain_synced = account_layout.withoutColors(arena.allocator(), plain_synced) catch return;
+    }
+    if (!app_state.g_account_workspace_archive_supported) {
+        plain_local = account_layout.withoutArchived(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutArchived(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutArchived(arena.allocator(), plain_synced) catch return;
     }
     if (!g_palette8_supported) {
         plain_local = account_layout.projectPalette7(arena.allocator(), plain_local, plain_base) catch return;
@@ -800,6 +814,7 @@ pub fn accountSignOut() void {
     app_state.g_account_groups_supported = false;
     app_state.g_account_group_order_supported = false;
     app_state.g_account_starred_groups_supported = false;
+    app_state.g_account_workspace_archive_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -1394,6 +1409,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     reply.groups_supported = remote.groups_supported;
     reply.group_order_supported = remote.group_order_supported;
     reply.starred_groups_supported = remote.starred_groups_supported;
+    reply.workspace_archive_supported = remote.workspace_archive_supported;
     reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
@@ -1469,6 +1485,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         if (!remote.starred_groups_supported) rebased = try account_layout.withoutStarredGroups(alloc, rebased);
         if (!remote.palette8_supported) rebased = try account_layout.projectPalette7(alloc, rebased, server.value);
         if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
+        if (!remote.workspace_archive_supported) rebased = try account_layout.withoutArchived(alloc, rebased);
         if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
         const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;
@@ -1500,6 +1517,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     reply.groups_supported = remote.groups_supported;
     reply.group_order_supported = remote.group_order_supported;
     reply.starred_groups_supported = remote.starred_groups_supported;
+    reply.workspace_archive_supported = remote.workspace_archive_supported;
     reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
@@ -1702,6 +1720,38 @@ fn syncedGroupId(current_id: u32, name: []const u8, starred: bool, tabs: []const
     return created;
 }
 
+fn rememberSyncedArchive(a: std.mem.Allocator, layout: session_layout.Layout) void {
+    if (!app_state.g_account_workspace_archive_supported) return;
+    var archived: [64][]const u8 = undefined;
+    var archived_count: usize = 0;
+    var live: [64][]const u8 = undefined;
+    var live_count: usize = 0;
+    for (layout.workspaces) |workspace| {
+        if (workspace.archived orelse false) {
+            if (archived_count < archived.len) {
+                archived[archived_count] = workspace.name;
+                archived_count += 1;
+            }
+        } else if (live_count < live.len) {
+            live[live_count] = workspace.name;
+            live_count += 1;
+        }
+    }
+    var previous: [64][]const u8 = undefined;
+    var previous_count: usize = 0;
+    if (app_state.g_account_base) |bytes| {
+        const parsed = session_layout.parse(a, bytes) catch null;
+        if (parsed) |value| {
+            defer value.deinit();
+            for (value.value.workspaces) |workspace| {
+                if (previous_count >= previous.len) break;
+                previous[previous_count] = a.dupe(u8, workspace.name) catch break;
+                previous_count += 1;
+            }
+        }
+    }
+    @import("workspaces.zig").applySyncedWorkspaceArchive(archived[0..archived_count], live[0..live_count], previous[0..previous_count]);
+}
 pub fn applyServerLayout(json: []const u8) !void {
     const was_starred = app_state.g_starred_workspace;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -1720,6 +1770,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
     }
     desired.tabs = kept.items;
+    const synced_layout = desired;
     app_state.g_account_applying = true;
     defer app_state.g_account_applying = false;
     const old_restoring = app_state.g_restoring;
@@ -1738,12 +1789,18 @@ pub fn applyServerLayout(json: []const u8) !void {
     var i = app_state.shell_count;
     while (i > 0) {
         i -= 1;
-        if (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(server.value.tabs, local.tabs[i]) == null) {
-            debugLog2("account-sync: closing tab removed by another device, session=", app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len]);
-            logSessionAuditAlways("tab-closed:account-sync-removed-elsewhere");
+        const slot = app_state.shells[i].workspace;
+        const slot_name = if (slot < app_state.g_lws_count) app_state.g_ws_names[slot][0..app_state.g_ws_name_len[slot]] else "";
+        const archived_here = account_layout.workspaceIsArchived(synced_layout.workspaces, slot_name);
+        if (archived_here or (app_state.shells[i].sync_owned and app_state.shells[i].tmux_session_len > 0 and account_layout.find(server.value.tabs, local.tabs[i]) == null)) {
+            if (!archived_here) {
+                debugLog2("account-sync: closing tab removed by another device, session=", app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len]);
+                logSessionAuditAlways("tab-closed:account-sync-removed-elsewhere");
+            }
             closeShellRemember(i, false);
         }
     }
+    desired = try account_layout.visibleLayout(a, synced_layout);
     const old_colors = app_state.g_ws_colors;
     const old_names = app_state.g_ws_names;
     const old_name_len = app_state.g_ws_name_len;
@@ -1779,6 +1836,7 @@ pub fn applyServerLayout(json: []const u8) !void {
     }
     for (0..old_ws_count) |oi| {
         if (!old_snoozed[oi] or app_state.g_lws_count >= MAX_LWS) continue;
+        if (account_layout.workspaceIsArchived(synced_layout.workspaces, old_names[oi][0..old_name_len[oi]])) continue;
         var present = false;
         for (0..app_state.g_lws_count) |wi| {
             if (std.mem.eql(u8, app_state.g_ws_names[wi][0..app_state.g_ws_name_len[wi]], old_names[oi][0..old_name_len[oi]])) present = true;
@@ -1873,6 +1931,7 @@ pub fn applyServerLayout(json: []const u8) !void {
     @import("inbox.zig").ensureInboxSplitVisible();
     app_state.g_restoring = old_restoring;
     saveSession();
+    rememberSyncedArchive(a, synced_layout);
     syncInProcessWorkspacesToRegistry();
     @import("inbox.zig").publishInboxStateNow();
     @import("inbox.zig").loadInboxModel();
@@ -2079,6 +2138,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_groups_supported = reply.groups_supported;
     app_state.g_account_group_order_supported = reply.group_order_supported;
     app_state.g_account_starred_groups_supported = reply.starred_groups_supported;
+    app_state.g_account_workspace_archive_supported = reply.workspace_archive_supported;
     app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {
@@ -2217,6 +2277,10 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
             break :blk to_apply;
         };
+        if (session_layout.parse(alloc, to_apply)) |boot| {
+            defer boot.deinit();
+            rememberSyncedArchive(alloc, boot.value);
+        } else |_| {}
     } else if (g_applied_layout.changed(bytes)) {
         app_state.g_account_locked = false;
         applyServerLayout(to_apply) catch {

@@ -268,6 +268,75 @@ pub fn findWorkspace(id: []const u8) ?u32 {
     return null;
 }
 
+fn findWorkspaceByName(name: []const u8) ?u32 {
+    for (0..app_state.g_workspace_count) |wi| {
+        const entry = &app_state.g_workspaces[wi];
+        if (entry.name_len == name.len and std.mem.eql(u8, entry.name[0..entry.name_len], name)) return @intCast(wi);
+    }
+    return null;
+}
+
+fn slotForWorkspaceName(name: []const u8) ?u8 {
+    var slot: u8 = 0;
+    while (slot < app_state.g_lws_count) : (slot += 1) {
+        if (app_state.g_ws_name_len[slot] == name.len and std.mem.eql(u8, app_state.g_ws_names[slot][0..name.len], name)) return slot;
+    }
+    return null;
+}
+
+fn nameInList(names: []const []const u8, name: []const u8) bool {
+    for (names) |item| if (std.mem.eql(u8, item, name)) return true;
+    return false;
+}
+
+pub fn applySyncedWorkspaceArchive(archived: []const []const u8, live: []const []const u8, previously_synced: []const []const u8) void {
+    const registry_lock = lockWorkspaceRegistry() orelse return;
+    defer unlockWorkspaceRegistry(registry_lock);
+    mergeWorkspaceRegistryFromDisk();
+    for (archived) |name| {
+        if (name.len == 0) continue;
+        if (findWorkspaceByName(name)) |wi| {
+            app_state.g_workspaces[wi].archived = true;
+            app_state.g_workspaces[wi].restore = false;
+            app_state.g_workspaces[wi].host_len = 0;
+        } else {
+            var id_buf: [32]u8 = undefined;
+            const n = @min(name.len, id_buf.len);
+            const id = id_buf[0..n];
+            @memcpy(id_buf[0..n], name[0..n]);
+            addOrUpdateWorkspace(id, name, false);
+            if (findWorkspace(id)) |wi| {
+                app_state.g_workspaces[wi].archived = true;
+                app_state.g_workspaces[wi].restore = false;
+            }
+        }
+    }
+    for (live) |name| {
+        const wi = findWorkspaceByName(name) orelse continue;
+        if (!app_state.g_workspaces[wi].archived) continue;
+        app_state.g_workspaces[wi].archived = false;
+        const id = app_state.g_workspaces[wi].id[0..app_state.g_workspaces[wi].id_len];
+        if (slotForWorkspaceName(name)) |slot| {
+            if (id.len > 0 and id.len <= app_state.g_ws_ids[slot].len) {
+                app_state.g_ws_ids[slot] = @splat(0);
+                @memcpy(app_state.g_ws_ids[slot][0..id.len], id);
+                app_state.g_ws_id_len[slot] = @intCast(id.len);
+            }
+        }
+    }
+    var wi: u32 = 0;
+    while (wi < app_state.g_workspace_count) {
+        const entry = &app_state.g_workspaces[wi];
+        const name = entry.name[0..entry.name_len];
+        if (entry.archived and nameInList(previously_synced, name) and !nameInList(archived, name) and !nameInList(live, name)) {
+            removeWorkspaceEntryAt(wi);
+            continue;
+        }
+        wi += 1;
+    }
+    writeWorkspaceRegistryFile();
+}
+
 pub fn addOrUpdateWorkspace(id: []const u8, name: []const u8, restore: bool) void {
     if (id.len == 0) return;
     const idx: u32 = findWorkspace(id) orelse blk: {
@@ -904,13 +973,31 @@ pub fn archiveCurrentWorkspaceOnClose() void {
     }
 }
 
+fn openSyncedWorkspaceSlot(id: []const u8, name: []const u8) bool {
+    if (!app_state.g_single_window or id.len == 0 or id.len > app_state.g_ws_ids[0].len or app_state.g_lws_count >= MAX_LWS) return false;
+    const ws = app_state.g_lws_count;
+    app_state.g_lws_count += 1;
+    app_state.g_ws_names[ws] = @splat(0);
+    const nlen = @min(name.len, app_state.g_ws_names[ws].len);
+    if (nlen > 0) @memcpy(app_state.g_ws_names[ws][0..nlen], name[0..nlen]);
+    app_state.g_ws_name_len[ws] = @intCast(nlen);
+    app_state.g_ws_colors[ws] = null;
+    app_state.g_ws_ids[ws] = @splat(0);
+    @memcpy(app_state.g_ws_ids[ws][0..id.len], id);
+    app_state.g_ws_id_len[ws] = @intCast(id.len);
+    app_state.g_ws_snoozed[ws] = false;
+    app_state.g_ws_last_shell[ws] = 0;
+    app_state.g_ws_focus[ws] = .none;
+    return true;
+}
+
 pub fn restoreArchivedWorkspaceByIndex(wi: u32) bool {
     if (wi >= app_state.g_workspace_count or !app_state.g_workspaces[wi].archived) return false;
     const entry = app_state.g_workspaces[wi];
     const id = entry.id[0..entry.id_len];
     const name = entry.name[0..entry.name_len];
     if (app_state.g_single_window) {
-        if (app_state.g_lws_count >= MAX_LWS or !absorbWorkspaceIntoSlots(id, name)) return false;
+        if (findMyWorkspaceSlot(id) == null and (app_state.g_lws_count >= MAX_LWS or (!absorbWorkspaceIntoSlots(id, name) and !openSyncedWorkspaceSlot(id, name)))) return false;
     } else if (spawnWorkspaceWindowAndWait(id) == null) return false;
     const registry_lock = lockWorkspaceRegistry() orelse return false;
     defer unlockWorkspaceRegistry(registry_lock);
@@ -4283,11 +4370,13 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
         showHeaderNoticeAscii("Could not archive workspace - tabs left open", 4500, true);
         return;
     }
+    const closed_before = app_state.g_account_closed_count;
     var i: u32 = app_state.shell_count;
     while (i > 0) {
         i -= 1;
         if (app_state.shells[i].workspace == slot) hibernateWorkspaceShell(i);
     }
+    app_state.g_account_closed_count = closed_before;
     removeWorkspaceSlot(slot);
     if (app_state.g_active_workspace >= app_state.g_lws_count) app_state.g_active_workspace = 0;
     for (0..app_state.shell_count) |si| {
