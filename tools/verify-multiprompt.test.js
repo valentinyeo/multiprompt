@@ -2257,6 +2257,7 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
 
 test('IGSH-1108 workflow consumes feature-owned matrices without changing required journey names', () => {
   const features = featureMatrix(workflow);
+  assert.ok(features.available.includes('agent-sync'), 'Linux agent sync is selectable independently of desktop journeys');
   assert.match(workflow, /  journeys:\n    if: inputs.feature != 'chat-sync-audit'/);
   assert.match(workflow, /  verify:\n    needs: \[journeys, build-app\]/);
   assert.match(workflow, /pr: \$\{\{ steps.features.outputs.pr \}\}/);

@@ -102,6 +102,8 @@ def main():
         run(["sh", args.root / "tools/install-mp-talk.sh"])
         sync = bin_dir / "mp-agent-sync"
         check("The talk installer exposes the mp-agent-sync command", sync.is_file())
+        installed = home / ".local/share/multiprompt-talk/mp_agent_sync.py"
+        check("The installed sync matches the selected source revision", installed.read_bytes() == (args.root / "src/mp_agent_sync.py").read_bytes())
         systemctl("stop", "mp-agent-sync.timer", "mp-agent-sync.service")
         run([sync, "link", "--tmux", "journey-chat", "--id", AGENT])
         refused = subprocess.run([str(sync), "link", "--tmux", "journey-unlinked", "--id", AGENT], capture_output=True, text=True, timeout=30)
