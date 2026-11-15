@@ -176,7 +176,9 @@
             } 'only chosen snippet removed from disk'
             Snapshot 'snippet-deleted'
             Press @(0x1B) 'Escape: close Manage Snippets'
-            Restart-ChatView 1
+            $shellsBeforeRestart = @((Read-Inbox).shells).Count
+            if ($shellsBeforeRestart -lt 1) { throw 'Restart has no owned shell to restore' }
+            Restart-ChatView $shellsBeforeRestart
             Focus-Palette 'use snippets' 6254
             Press @(0x0D) 'Enter: existing snippet picker after restart'
             Type-Text 'Keep Me'
