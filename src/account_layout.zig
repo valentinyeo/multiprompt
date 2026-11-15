@@ -236,7 +236,9 @@ pub fn visibleLayout(a: Allocator, target: Layout) !Layout {
 pub fn withArchived(a: Allocator, base: Layout, edited: Layout, archived_names: []const []const u8, closed: []const Tab) !Layout {
     var workspaces: std.ArrayList(layout.Workspace) = .empty;
     try workspaces.appendSlice(a, edited.workspaces);
-    for (workspaces.items) |*workspace| if (!containsName(archived_names, workspace.name)) workspace.archived = null;
+    for (workspaces.items) |*workspace| {
+        if (!containsName(archived_names, workspace.name)) workspace.archived = null;
+    }
     var tabs: std.ArrayList(Tab) = .empty;
     try tabs.appendSlice(a, edited.tabs);
     for (archived_names) |name| {
