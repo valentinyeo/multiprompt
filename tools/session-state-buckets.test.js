@@ -34,7 +34,7 @@ test("Waiting and Archived are permanent, disjoint All Sessions destinations", (
   const membership = functionBody("allSessionsRowInTab", "sessionOverviewRowsRamMb");
   assert.match(membership, /AS_TAB_WAITING\) return row\.kind == \.hidden/);
   assert.match(membership, /AS_TAB_ARCHIVED\) return row\.kind == \.archived/);
-  const visibility = functionBody("allSessionsSplitVisible", "allSessionsKindColor");
+  const visibility = functionBody("allSessionsSplitVisible", "drawFavoriteDot");
   assert.match(visibility, /AS_TAB_WAITING/);
   assert.match(visibility, /AS_TAB_ARCHIVED/);
   assert.match(functionBody("allSessionsTabLabel", "allSessionsFilterMatches"), /"Waiting"[\s\S]*"Archived"/);
