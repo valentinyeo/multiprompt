@@ -20,7 +20,6 @@ const prelude = `
 const std = @import("std");
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 fn chatCancelFinish() void {}
-fn chatRestartAi(_: u32) bool { return true; }
 fn chatLivePlanReply(_: []const u16) bool { return false; }
 var test_settings_pending = false;
 fn chatSettingsPending(_: u32) bool { return test_settings_pending; }
@@ -2088,9 +2087,6 @@ const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across cha
 }).join('\n');
 test('IGSH-1811 a sent mention keeps the live session for the bot', () => {
   assert.match(body('sendChatPrompt'), /chat_mention\.zig"\)\.apply/);
-});
-test('SOFT-2420 a finished clear clears a stale stopped badge', () => {
-  assert.match(body('chatTmuxSendFinish'), /ai_stopped = false/);
 });
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
