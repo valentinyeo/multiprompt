@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: release-publication
@@ -375,3 +376,36 @@ jobs:
             exit 0
           fi
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+
+  queue-newer:
+    needs: [prepare, release]
+    if: always() && github.ref == 'refs/heads/master' && needs.prepare.outputs.sha != '' && needs.release.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.tag == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Queue a release for a newer master commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILT: ${{ needs.prepare.outputs.sha }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          SELF_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          tip=$(git rev-parse origin/master)
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow auto-release.yml --limit 30 --json databaseId,headSha,status,conclusion)
+          [ -n "$runs" ] || runs='[]'
+          decision=$(node tools/release-follow.cjs <<EOF
+          {"tip":"$tip","built":"$BUILT","releaseResult":"$RELEASE_RESULT","selfId":"$SELF_ID","runs":$runs}
+          EOF
+          )
+          [ "$decision" = dispatch ] || exit 0
+          gh workflow run auto-release.yml --ref master
