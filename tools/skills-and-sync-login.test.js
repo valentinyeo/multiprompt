@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 
 const root = path.resolve(__dirname, '..');
 const main = require('./app-source').readAppSource();
@@ -20,6 +23,33 @@ test('Ctrl+K exposes grouped native and harness skills with keyboard command bro
   assert.match(skills, /"plugins", "installed_plugins.json"/);
   assert.match(skills, /enabledPlugins/);
   assert.match(skills, /skillOverrides/);
+});
+
+test('SOFT-2476 linked skill folders appear in discovery', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-skills-'));
+  try {
+    const target = path.join(dir, 'installed');
+    const root = path.join(dir, '.claude', 'skills');
+    fs.mkdirSync(target);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(target, 'SKILL.md'), 'Linked instructions.');
+    fs.symlinkSync(target, path.join(root, 'valentin-mode'), process.platform === 'win32' ? 'junction' : 'dir');
+    copyZig(['skills.zig'], dir);
+    const harness = path.join(dir, 'linked-test.zig');
+    fs.writeFileSync(harness, `
+const std = @import("std");
+const skills = @import("skills.zig");
+test "linked skill fixture" {
+    const items = try skills.discover(std.testing.allocator, std.testing.io, ${JSON.stringify(dir)}, &.{});
+    defer skills.deinitAll(std.testing.allocator, items);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    try std.testing.expectEqualStrings("valentin-mode", items[0].name);
+    try std.testing.expectEqualStrings("Linked instructions.", items[0].body);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', harness, '--test-filter', 'linked skill fixture'], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('skill sends use the shared Android-compatible envelope', () => {
