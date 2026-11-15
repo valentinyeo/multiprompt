@@ -65,6 +65,11 @@ jobs:
           ref: ${{ needs.resolve.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: verifier-tools
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -73,7 +78,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.resolve.outputs.number }}
-        run: node tools/pr-verifier.cjs prepare verifier-out
+          FEATURES_DIR: .claude/skills/verify-multiprompt/features
+        run: node verifier-tools/tools/pr-verifier.cjs prepare verifier-out
       - name: Pick the journeys that exercise this change
         id: claude
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
@@ -105,7 +111,8 @@ jobs:
         id: choose
         env:
           SELECTION: ${{ steps.claude.outputs.structured_output }}
-        run: node tools/pr-verifier.cjs select verifier-out
+          FEATURES_DIR: .claude/skills/verify-multiprompt/features
+        run: node verifier-tools/tools/pr-verifier.cjs select verifier-out
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: pr-verifier-selection
@@ -155,6 +162,11 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.head_sha }}
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: verifier-tools
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
@@ -168,15 +180,15 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          node tools/pr-verifier.cjs download verifier-out/selection.json evidence ${{ needs.resolve.outputs.base_sha }}
-          node tools/pr-verifier.cjs summarize evidence verifier-out/selection.json ${{ needs.resolve.outputs.base_sha }} verifier-out
+          node verifier-tools/tools/pr-verifier.cjs download verifier-out/selection.json evidence ${{ needs.resolve.outputs.base_sha }}
+          node verifier-tools/tools/pr-verifier.cjs summarize evidence verifier-out/selection.json ${{ needs.resolve.outputs.base_sha }} verifier-out
       - name: Judge the evidence with DeepSeek
         id: deepseek
         if: needs.resolve.outputs.engine == 'deepseek'
         continue-on-error: true
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: node tools/pr-verifier.cjs judge-deepseek verifier-out evidence
+        run: node verifier-tools/tools/pr-verifier.cjs judge-deepseek verifier-out evidence
       - name: Judge the evidence against the Done-when lines
         id: claude
         if: needs.resolve.outputs.engine != 'deepseek'
@@ -212,7 +224,7 @@ jobs:
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          node tools/pr-verifier.cjs finalize verifier-out/selection.json verifier-out/summary.json verifier-out
+          node verifier-tools/tools/pr-verifier.cjs finalize verifier-out/selection.json verifier-out/summary.json verifier-out
           cat verifier-out/comment.md >> "$GITHUB_STEP_SUMMARY"
       - name: Post the verdict on the pull request
         env:

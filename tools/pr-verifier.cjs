@@ -200,6 +200,10 @@ function resolve(env) {
   setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_sha: baseSha, base_ref: pr.baseRefName, engine: pickEngine(pr.commits) });
 }
 
+function availableFeatures(env) {
+  return (env.FEATURES_DIR ? discoverFeatures(env.FEATURES_DIR) : discoverFeatures()).available;
+}
+
 function prepare(env, outDir) {
   const number = env.PR_NUMBER;
   const repo = env.REPO;
@@ -221,7 +225,7 @@ function prepare(env, outDir) {
     '',
   ].join('\n');
   fs.writeFileSync(path.join(outDir, 'pr.md'), context);
-  const { available } = discoverFeatures();
+  const available = availableFeatures(env);
   fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(selectable(available), null, 2));
 }
 
@@ -302,7 +306,7 @@ async function main(argv, env) {
   if (command === 'prepare') return prepare(env, rest[0]);
   if (command === 'select') {
     const outDir = rest[0];
-    const selection = validateSelection(env.SELECTION, discoverFeatures().available);
+    const selection = validateSelection(env.SELECTION, availableFeatures(env));
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
