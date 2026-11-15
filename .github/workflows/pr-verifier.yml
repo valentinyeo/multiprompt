@@ -15,12 +15,36 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-verifier-${{ inputs.pr || github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  resolve:
+  tests:
     if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Wait until Tests passes for this head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr || github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node tools/pr-verifier.cjs wait-for-tests
+
+  resolve:
+    needs: tests
+    if: needs.tests.result == 'success' && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -142,14 +166,41 @@ jobs:
       feature: ${{ matrix.feature }}
       revision: ${{ needs.resolve.outputs.head_sha }}
 
+  failed-head:
+    needs: [resolve, select, head]
+    if: always() && needs.resolve.result == 'success' && needs.select.result == 'success' && needs.head.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      features: ${{ steps.pick.outputs.features }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - id: pick
+        name: List head journeys that failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          FEATURES: ${{ needs.select.outputs.features }}
+        run: node tools/pr-verifier.cjs failed-head
+
   base:
-    needs: [resolve, select]
-    if: needs.select.result == 'success' && needs.select.outputs.base_features != '[]'
+    needs: [resolve, failed-head]
+    if: needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''
     name: base ${{ matrix.feature }}
     strategy:
       fail-fast: false
       matrix:
-        feature: ${{ fromJSON(needs.select.outputs.base_features) }}
+        feature: ${{ fromJSON(needs.failed-head.outputs.features) }}
     uses: ./.github/workflows/verify.yml
     with:
       feature: ${{ matrix.feature }}
@@ -165,6 +216,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: write
       pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -241,6 +293,18 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.resolve.outputs.number }}
         run: gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file verifier-out/comment.md
+      - name: Record the verdict on the pull request head
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          RESULT: ${{ steps.final.outputs.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          conclusion=success
+          [ "$RESULT" = FAIL ] && conclusion=failure
+          gh api "repos/$REPO/check-runs" -X POST -f name=pstack-verifier -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$conclusion" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
