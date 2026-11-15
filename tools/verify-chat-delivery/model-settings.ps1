@@ -172,12 +172,12 @@ function Header-Proof([string]$Name, [string]$Text, [bool]$Amber) {
 Copy-Item "$profile/home/.claude/settings.json" "$caseDir/saved-settings.json"
 Copy-Item $configPath "$caseDir/config-initial.json"
 Copy-Item "$state/model-argv.jsonl" "$caseDir/argv-initial.jsonl"
-Header-Proof 'fable' 'Fable 5.2 · medium' $true
+Header-Proof 'fable' "Fable 5.2 $([char]0xb7) medium" $true
 Press @(0x1B) 'Escape: close existing-model picker'
 Type-Composer 'Show the model this new process really runs'
 Press @(0x0D) 'Enter: send with the default model' $true
 [void](Wait-For 'default-model response clears the composer' { [ChatDeliveryDesktop]::Text($composer) -ceq '' } 20)
-Header-Proof 'opus' 'Opus 5.5 · medium' $false
+Header-Proof 'opus' "Opus 5.5 $([char]0xb7) medium" $false
 $initialRects = @{}
 foreach ($found in [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
     $initialRects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
