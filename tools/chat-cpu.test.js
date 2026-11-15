@@ -446,6 +446,8 @@ const chat_markdown = @import("chat_markdown.zig");
 var width_calls: usize = 0;
 var draw_hash: u64 = 0;
 fn chatRichFont(_: chat_markdown.Style, _: u3) HANDLE { return 1; }
+fn chatSessionKnown(_: []const u16) bool { return false; }
+fn chatAgentBubbleColor() u32 { return 0; }
 fn CreateSolidBrush(_: u32) HANDLE { return 1; }
 fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
 fn DeleteObject(_: HANDLE) i32 { return 1; }

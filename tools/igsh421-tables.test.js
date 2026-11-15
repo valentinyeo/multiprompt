@@ -92,6 +92,8 @@ var last_x: i32 = 0;
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
 fn SelectObject(_: HANDLE, handle: HANDLE) HANDLE { const old: HANDLE = @ptrFromInt(font); font = @intFromPtr(handle); return old; }
 fn chatRichFont(style: chat_markdown.Style, _: u3) HANDLE { return @ptrFromInt(if (style.bold) @as(usize, 2) else if (style.code) @as(usize, 3) else 1); }
+fn chatSessionKnown(_: []const u16) bool { return false; }
+fn chatAgentBubbleColor() u32 { return 0; }
 fn ensureChatFont() HANDLE { return @ptrFromInt(1); }
 fn chatTextWidth(_: HANDLE, text: []const u16) i32 { return @as(i32, @intCast(text.len)) * (if (font == 2) @as(i32, 9) else 8); }
 fn GetTextExtentExPointW(dc: HANDLE, text: [*]const u16, len: i32, available: i32, fit: *i32, _: ?*anyopaque, size: *SIZE) i32 {
@@ -328,6 +330,7 @@ function execute(control) {
   try {
     copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_table_measure.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig', 'chat_reaction.zig', 'chat_reply.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
+    fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatTableLayoutIn', 'chatFlowTableIn', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY', 'chatReplyLineHeight'].map(name => body(name)).join('\n');
     const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
     const displayStart = render.indexOf('pub const ChatDisplay = struct {');

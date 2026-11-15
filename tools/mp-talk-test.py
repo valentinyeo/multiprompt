@@ -77,8 +77,8 @@ class ChatsTalkTest(unittest.TestCase):
         self.assertEqual(chats["live-alpha"]["state"], "idle")
         self.assertEqual(chats["live-beta"]["state"], "busy")
         self.assertIsNone(chats["live-gamma"]["name"])
-        self.assertEqual(chats["live-alpha"]["link"], "@Alpha Lead{live-alpha}")
-        self.assertEqual(chats["live-gamma"]["link"], "live-gamma{live-gamma}")
+        self.assertEqual(chats["live-alpha"].get("link"), "@Alpha Lead{live-alpha}")
+        self.assertEqual(chats["live-gamma"].get("link"), "live-gamma{live-gamma}")
 
     def test_IGSH_1865_sessions_prints_a_readable_table(self):
         done = self.run_tool(MP_SESSIONS)
