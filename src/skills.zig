@@ -261,6 +261,35 @@ test "skill-only sends match Android" {
     try std.testing.expectEqualStrings("/i-have-adhd\n\n<skill name=\"i-have-adhd\">\nbody of i-have-adhd\n</skill>", message);
 }
 
+test "SOFT-2476 linked skill folders are discovered without following nested links" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, ".claude/skills/ordinary");
+    try tmp.dir.createDirPath(io, "installed/nested");
+    try tmp.dir.createDirPath(io, "hidden");
+    try tmp.dir.writeFile(io, .{ .sub_path = ".claude/skills/ordinary/SKILL.md", .data = "Ordinary skill." });
+    try tmp.dir.writeFile(io, .{ .sub_path = "installed/SKILL.md", .data = "---\ndescription: Linked skill.\n---\nLinked instructions." });
+    try tmp.dir.writeFile(io, .{ .sub_path = "hidden/SKILL.md", .data = "Hidden instructions." });
+    try tmp.dir.symLink(io, "../../installed", ".claude/skills/valentin-mode", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "../hidden", "installed/hidden-link", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "..", "installed/nested/loop", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "../../../hidden", ".claude/skills/ordinary/hidden-link", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "missing", ".claude/skills/broken", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "self-loop", ".claude/skills/self-loop", .{ .is_directory = true });
+    const home = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home);
+    const items = try discover(allocator, io, home, &.{});
+    defer deinitAll(allocator, items);
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expectEqualStrings("ordinary", items[0].name);
+    try std.testing.expectEqualStrings("valentin-mode", items[1].name);
+    try std.testing.expectEqualStrings("Linked skill.", items[1].description);
+    try std.testing.expectEqualStrings("Linked instructions.", items[1].body);
+    try std.testing.expectEqual(Source.harness, items[1].source);
+}
+
 test "off skill overrides are excluded" {
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"inactive\":\"off\",\"disabled\":false,\"active\":\"on\"}", .{});
     defer parsed.deinit();
