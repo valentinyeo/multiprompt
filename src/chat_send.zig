@@ -2367,8 +2367,8 @@ fn chatRestartAiPost(shell_id: u32, text: []const u8, busy: bool) void {
     const a = std.heap.page_allocator;
     const notice = a.dupeZ(u8, text) catch return;
     const marker: usize = @as(usize, shell_id) + 1;
-    const packed = if (busy) marker | (@as(usize, 1) << 32) else marker;
-    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, packed, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+    const posted = if (busy) marker | (@as(usize, 1) << 32) else marker;
+    if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, posted, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
 }
 
 pub fn chatRestartAiApplyRefusal(shell_id: u32, busy: bool) void {
