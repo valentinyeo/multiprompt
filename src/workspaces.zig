@@ -497,57 +497,70 @@ fn unlockWorkspaceRegistry(mutex: HANDLE) void {
     _ = CloseHandle(mutex);
 }
 
+fn registryDocument(out: []u8) usize {
+    var pos: usize = 0;
+    const head = "{\"version\":1,\"windows\":[";
+    @memcpy(out[pos .. pos + head.len], head);
+    pos += head.len;
+    for (0..app_state.g_workspace_count) |wi| {
+        if (pos >= out.len - 256) break;
+        if (wi > 0) {
+            out[pos] = ',';
+            pos += 1;
+        }
+        const e = &app_state.g_workspaces[wi];
+        const p1 = "{\"id\":\"";
+        @memcpy(out[pos .. pos + p1.len], p1);
+        pos += p1.len;
+        appendJsonEscaped(&out, &pos, e.id[0..e.id_len]);
+        const p2 = "\",\"name\":\"";
+        @memcpy(out[pos .. pos + p2.len], p2);
+        pos += p2.len;
+        appendJsonEscaped(&out, &pos, e.name[0..e.name_len]);
+        const p3 = "\",\"restore\":";
+        @memcpy(out[pos .. pos + p3.len], p3);
+        pos += p3.len;
+        const rv = if (e.restore) "true" else "false";
+        @memcpy(out[pos .. pos + rv.len], rv);
+        pos += rv.len;
+        if (e.archived) {
+            const flag = ",\"archived\":true";
+            @memcpy(out[pos .. pos + flag.len], flag);
+            pos += flag.len;
+        }
+        if (e.host_len > 0) {
+            const p4 = ",\"host\":\"";
+            @memcpy(out[pos .. pos + p4.len], p4);
+            pos += p4.len;
+            appendJsonEscaped(&out, &pos, e.host[0..e.host_len]);
+            out[pos] = '"';
+            pos += 1;
+        }
+        out[pos] = '}';
+        pos += 1;
+    }
+    const tail = "]}";
+    @memcpy(out[pos .. pos + tail.len], tail);
+    pos += tail.len;
+    return pos;
+}
+
 fn writeWorkspaceRegistryFile() void {
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
     var path_buf: [512]u8 = undefined;
     const path = getWorkspaceRegistryPath(&path_buf) orelse return;
     var json: [8192]u8 = undefined;
-    var pos: usize = 0;
-    const head = "{\"version\":1,\"windows\":[";
-    @memcpy(json[pos .. pos + head.len], head);
-    pos += head.len;
-    for (0..app_state.g_workspace_count) |wi| {
-        if (pos >= json.len - 256) break;
-        if (wi > 0) {
-            json[pos] = ',';
-            pos += 1;
-        }
-        const e = &app_state.g_workspaces[wi];
-        const p1 = "{\"id\":\"";
-        @memcpy(json[pos .. pos + p1.len], p1);
-        pos += p1.len;
-        appendJsonEscaped(&json, &pos, e.id[0..e.id_len]);
-        const p2 = "\",\"name\":\"";
-        @memcpy(json[pos .. pos + p2.len], p2);
-        pos += p2.len;
-        appendJsonEscaped(&json, &pos, e.name[0..e.name_len]);
-        const p3 = "\",\"restore\":";
-        @memcpy(json[pos .. pos + p3.len], p3);
-        pos += p3.len;
-        const rv = if (e.restore) "true" else "false";
-        @memcpy(json[pos .. pos + rv.len], rv);
-        pos += rv.len;
-        if (e.archived) {
-            const flag = ",\"archived\":true";
-            @memcpy(json[pos .. pos + flag.len], flag);
-            pos += flag.len;
-        }
-        if (e.host_len > 0) {
-            const p4 = ",\"host\":\"";
-            @memcpy(json[pos .. pos + p4.len], p4);
-            pos += p4.len;
-            appendJsonEscaped(&json, &pos, e.host[0..e.host_len]);
-            json[pos] = '"';
-            pos += 1;
-        }
-        json[pos] = '}';
-        pos += 1;
+    const pos = registryDocument(&json);
+    var existing: [8192]u8 = undefined;
+    if (readWorkspaceRegistryBytes(path, &existing)) |old| {
+        if (!registryWriteNeeded(existing[0..old], json[0..pos])) return;
     }
-    const tail = "]}";
-    @memcpy(json[pos .. pos + tail.len], tail);
-    pos += tail.len;
     _ = writeFileAtomicW(path, json[0..pos]);
+}
+
+fn registryWriteNeeded(previous: []const u8, next: []const u8) bool {
+    return !std.mem.eql(u8, previous, next);
 }
 
 pub fn workspaceCanDelete(wi: u32) bool {
@@ -1092,6 +1105,49 @@ fn upsertMySlotEntries() void {
         const nm = workspaceDisplayName(ws, &nbuf);
         addOrUpdateWorkspaceHosted(app_state.g_ws_ids[ws][0..app_state.g_ws_id_len[ws]], nm, false, me);
     }
+}
+
+const menu_registry_wait_ms: u32 = 0;
+var menu_registry_seen = false;
+var menu_registry_len: usize = 0;
+var menu_registry_hash: u64 = 0;
+
+fn menuKeepsMemory(seen: bool, previous_len: usize, previous_hash: u64, disk: []const u8) bool {
+    if (!seen or previous_len != disk.len) return false;
+    return previous_hash == std.hash.Wyhash.hash(0, disk);
+}
+
+pub fn refreshMenuEntries() void {
+    const registry_lock = lockWorkspaceRegistryWithTimeout(menu_registry_wait_ms) orelse return;
+    defer unlockWorkspaceRegistry(registry_lock);
+    var path_buf: [512]u8 = undefined;
+    const path = getWorkspaceRegistryPath(&path_buf) orelse return;
+    var buf: [8192]u8 = undefined;
+    const n = readWorkspaceRegistryBytes(path, &buf) orelse return;
+    if (n == 0) return;
+    const disk = buf[0..n];
+    if (menuKeepsMemory(menu_registry_seen, menu_registry_len, menu_registry_hash, disk)) return;
+    app_state.g_workspace_count = 0;
+    parseWorkspaceRegistryJson(disk);
+    syncCurrentWorkspaceToRegistry();
+    upsertMySlotEntries();
+    writeWorkspaceRegistryFile();
+    var mine: [8192]u8 = undefined;
+    const pos = registryDocument(&mine);
+    menu_registry_hash = std.hash.Wyhash.hash(0, mine[0..pos]);
+    menu_registry_len = pos;
+    menu_registry_seen = true;
+}
+
+test "SOFT-2374 the workspace menu keeps memory when the registry is unchanged and never waits" {
+    const disk = "{\"version\":1,\"windows\":[]}";
+    const hash = std.hash.Wyhash.hash(0, disk);
+    try std.testing.expect(menuKeepsMemory(true, disk.len, hash, disk));
+    try std.testing.expect(!menuKeepsMemory(false, disk.len, hash, disk));
+    try std.testing.expect(!menuKeepsMemory(true, disk.len, hash, "{\"version\":1,\"windows\":[{\"id\":\"a\"}]}"));
+    try std.testing.expect(!registryWriteNeeded(disk, disk));
+    try std.testing.expect(registryWriteNeeded(disk, "{\"version\":2}"));
+    try std.testing.expectEqual(@as(u32, 0), menu_registry_wait_ms);
 }
 
 pub fn syncInProcessWorkspacesToRegistry() void {

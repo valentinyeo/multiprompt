@@ -22,7 +22,8 @@ test('IGSH-1664 archive survives registry reload without changing old workspace 
   assert.match(state, /archived: bool = false/);
   assert.match(body(workspaces, 'addOrUpdateWorkspace'), /g_workspaces\[ni\]\.archived = false/);
   assert.match(body(workspaces, 'parseWorkspaceRegistryJson'), /archived = json_reader\.boolTrue\(obj, "archived"\)/);
-  assert.match(body(workspaces, 'writeWorkspaceRegistryFile'), /if \(e\.archived\)[\s\S]*archived/);
+  assert.match(body(workspaces, 'registryDocument'), /if \(e\.archived\)[\s\S]*archived/);
+  assert.match(body(workspaces, 'writeWorkspaceRegistryFile'), /registryDocument\(/);
   assert.match(body(workspaces, 'reconcileWorkspaceRegistry'), /if \(e\.archived\) \{\s*wi \+= 1;\s*continue;/);
 });
 

@@ -262,8 +262,7 @@ pub fn headerClick(x: i32, y: i32) bool {
     }
     focus.cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
-    workspaces.syncInProcessWorkspacesToRegistry();
-    workspaces.mergeWorkspaceRegistryFromDisk();
+    workspaces.refreshMenuEntries();
     loadEntries();
     selected = 0;
     for (0..entry_count) |i| {
