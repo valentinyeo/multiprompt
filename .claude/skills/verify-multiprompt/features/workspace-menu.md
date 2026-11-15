@@ -11,7 +11,7 @@ The workspace name above the sessions opens a native card. This journey exercise
 - Both real in-process CMD sessions and workspace identities survive every menu open and switch.
 - Opening an unchanged registry never changes its last-write timestamp. An exclusively opened registry file does not prevent the cached menu from painting or responding.
 
-## User entry points
+## How to get to it (user POV)
 
 Click the workspace name above the sidebar sessions. Ctrl+N creates the second local workspace used here. This journey does not use account sync, SSH, real agents, or a user's saved workspaces.
 
