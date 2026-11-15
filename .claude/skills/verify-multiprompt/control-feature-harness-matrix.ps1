@@ -55,12 +55,11 @@ function Open-PaletteRow([string]$Query, [int]$Target) {
     Press @(0x0D) ("Enter: " + $Query)
 }
 
-function Enable-SharedConnection {
+function Assert-SharedConnection {
     if ($script:sharedOn) { return }
-    Open-PaletteRow 'remote tabs: share one server connection' 6388
     Wait-Until {
         (Get-Content -LiteralPath (Join-Path $scratch 'roaming/ZigShell/session.json') -Raw) -match '"shared_server_connection"\s*:\s*true'
-    } 'shared server connection is on' 10
+    } 'saved session keeps the shared server connection on' 10
     $script:sharedOn = $true
 }
 
@@ -102,7 +101,7 @@ $shellRows = @($rows | Where-Object { $_.kind -eq 'shell' })
 if ($shellRows.Count -gt 0) {
     $script:shellOpenError = $null
     try {
-        Enable-SharedConnection
+        Assert-SharedConnection
         Open-PaletteRow 'Open shell on VPS 1' 2003
         $shellReady = Wait-RealSize 'vps1'
     } catch {
@@ -254,7 +253,7 @@ foreach ($row in @($rows | Where-Object { $_.kind -eq 'cells' })) {
             if ($problems.Count -gt 0) { throw ($problems -join '; ') }
             $detail = 'pong, model, and skills checked'
         } else {
-            Enable-SharedConnection
+            Assert-SharedConnection
             Open-PaletteRow $row.shell_query ([int]$row.shell_target)
             $size = Wait-RealSize $row.host
             $terminal = [HarnessGrid]::Find($script:window)
