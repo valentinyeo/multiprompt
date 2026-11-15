@@ -11,7 +11,7 @@
                 $changelogSpeed.after_ms += [VerifyNative]::ChangelogResponse($script:window)
             }
             Save-Json $changelogSpeed 'changelog-speed.json'
-            $changelogBudget = @{ open_ms = 460; scroll_ms = 100; close_ms = 100; after_ms = 100 }
+            $changelogBudget = @{ open_ms = 200; scroll_ms = 100; close_ms = 100; after_ms = 100 }
             foreach ($kind in @('open_ms', 'scroll_ms', 'close_ms', 'after_ms')) {
                 $limit = [int]$changelogBudget[$kind]
                 if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge $limit) { throw ('Changelog ' + $kind + ' reached ' + $limit + ' milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
