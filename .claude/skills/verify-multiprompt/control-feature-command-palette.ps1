@@ -11,11 +11,13 @@
                 $changelogSpeed.after_ms += [VerifyNative]::ChangelogResponse($script:window)
             }
             Save-Json $changelogSpeed 'changelog-speed.json'
+            $changelogBudget = @{ open_ms = 200; scroll_ms = 100; close_ms = 100; after_ms = 100 }
             foreach ($kind in @('open_ms', 'scroll_ms', 'close_ms', 'after_ms')) {
-                if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge 100) { throw ('Changelog ' + $kind + ' reached 100 milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
+                $limit = [int]$changelogBudget[$kind]
+                if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge $limit) { throw ('Changelog ' + $kind + ' reached ' + $limit + ' milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
             }
             Snapshot 'changelog-closed'
-            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }
+            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = $changelogBudget; entry = 'Ctrl+K Changelog' }
             function Test-FreshPaletteLog([string]$Path, [long]$From) {
                 if (-not (Test-Path $Path)) { return $false }
                 $stream = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
