@@ -16,11 +16,11 @@ test('shared Windows verifier builds use a portable CPU', () => {
 test('sessions installs the SSH boundary before launch', () => {
   assert.ok(existsSync('tools/verify-repo-picker/ssh.c'), 'repository picker boundary source must exist');
   const ssh = readFileSync('tools/verify-repo-picker/ssh.c', 'utf8');
-  const setup = control.indexOf("if ($Feature -eq 'sessions') {");
+  const setup = control.indexOf("if ($Feature -in @('sessions', 'all-sessions')) {");
   const launch = control.indexOf('$process = $job.Start(');
   assert.ok(setup > 0 && setup < launch);
   assert.match(control.slice(setup, launch), /zig cc[\s\S]*ssh-path\.txt[\s\S]*active_tab = 1; active_workspace = 0; single_window = \$true[\s\S]*tmux_host = 0[\s\S]*tmux_host = 2[\s\S]*session\.json[\s\S]*seed-session\.json/);
-  assert.match(control, /'sessions', 'browser-own-profile'[\s\S]*'--single-window'/);
+  assert.match(control, /'sessions', 'all-sessions', 'browser-own-profile'[\s\S]*'--single-window'/);
   assert.match(ssh, /invocation-%lu\.txt/);
   assert.match(ssh, /\/work\/projects\/alpha/);
   assert.match(ssh, /\/work\/projects\/beta/);

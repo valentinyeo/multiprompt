@@ -49,7 +49,8 @@ test('every pull_request workflow cancels only a superseded pull request run', (
   assert.ok(triggered.includes('pr-verifier.yml'));
   for (const name of triggered) {
     const concurrency = topConcurrency(read(name));
-    assert.ok(concurrency.includes(group), `${name} group`);
+    const expected = name === 'pr-verifier.yml' ? group.replace(' || github.ref', ' || inputs.pr || github.ref') : group;
+    assert.ok(concurrency.includes(expected), `${name} group`);
     assert.ok(concurrency.includes(cancel), `${name} cancel-in-progress`);
   }
 });
@@ -77,4 +78,14 @@ test('a newer master commit still gets a release when this run is not the tip', 
     assert.match(read(name), /node tools\/release-follow\.cjs/);
     assert.match(read(name), /gh workflow run auto-release\.yml --ref master/);
   }
+});
+
+test('manual verifier runs for different pull requests do not replace each other in the pending queue', () => {
+  const template = read('pr-verifier.yml').match(/^  group: (.+)$/m)[1];
+  function group(pr, eventNumber) {
+    const context = { github: { workflow: 'PR verifier', ref: 'refs/heads/master', event: { pull_request: { number: eventNumber } } }, inputs: { pr } };
+    return template.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => expression.trim().split(' || ').map(key => key.split('.').reduce((value, part) => value?.[part], context)).find(Boolean) || '');
+  }
+  assert.notEqual(group('1038'), group('1039'));
+  assert.equal(group('1038'), group(undefined, 1038));
 });

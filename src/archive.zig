@@ -2210,7 +2210,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         var wide: [48]u16 = undefined;
         var wn: usize = 0;
         asPushAscii(&wide, &wn, pill_text);
-        const pill_w = asMeasure(hdc, wide[0..wn]) + uiScaled(22);
+        const pill_w = asMeasure(hdc, wide[0..wn]) + uiScaled(if (tabid == AS_TAB_ALL) 22 else 32);
         const pill_rc = RECT{ .left = tx, .top = chrome.tab_y, .right = tx + pill_w, .bottom = chrome.tab_y + chrome.tab_h };
         const selected_tab = app_state.g_all_sessions_tab == tabid;
         if (selected_tab) fillRoundRect(hdc, pill_rc, uiScaled(14), if (light) RGB(220, 220, 226) else RGB(43, 43, 51));
