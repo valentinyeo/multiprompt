@@ -15,7 +15,7 @@ function All-Step([string]$Name, [scriptblock]$InputAction, [string[]]$Expected)
         $frame = All-Frame
         foreach ($pattern in $Expected) { if ($frame -notmatch $pattern) { return $false } }
         return $trace.Substring($offset) -match '\[all-sessions\] view '
-    } "All sessions $Name"
+    } "All sessions $Name" 90
     [IO.File]::WriteAllText((Join-Path $Evidence ($Name + '.txt')), (All-Frame))
     Snapshot $Name
 }
@@ -42,7 +42,7 @@ function All-Row([string]$SessionName, [string]$Action) {
     [void][VerifyNative]::DwmFlush()
     [VerifyNative]::ClickClient($script:window, $x, $y)
 }
-[void][VerifyNative]::MoveWindow($script:window, 0, 0, 1280, 900, $true)
+[void][VerifyNative]::MoveWindow($script:window, 0, 0, 1000, 700, $true)
 Wait-Until { $s = Read-Session; $s -and @($s.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq 3 } 'three restored remote tabs'
 All-Step 'before' { Palette 'show all sessions' '6290'; Press @(0x0D) 'Enter: Show all sessions' } @(
     'view tab=200 host=255 visible=6 selected=0 marks=0 running=3 servers=2 archived=1',
@@ -92,6 +92,10 @@ All-Step 'search' { Press @(0x11,0x46) 'Ctrl+F: search'; Type-Text 'Second' } @(
 Press @(0x0D) 'Enter: open Second'
 Wait-Until { $s = Read-Session; $s -and $s.tabs[$s.active_tab].tmux_session -eq 'second' } 'selected session opened'
 Snapshot 'opened'
+All-Step 'before-open-action' { Palette 'show all sessions' '6290'; Press @(0x0D) 'Enter: reopen list' } @('view tab=200 host=255 visible=6')
+All-Row 'first' 'open'
+Wait-Until { $s = Read-Session; $s -and $s.tabs[$s.active_tab].tmux_session -eq 'first' } 'hover Open selected First'
+Snapshot 'open-action'
 All-Step 'search-again' { Palette 'show all sessions' '6290'; Press @(0x0D) 'Enter: reopen list'; Press @(0x11,0x46) 'Ctrl+F'; Type-Text 'spare' } @('row session=spare state=No window', 'visible=1')
 All-Step 'search-cancel' { Press @(0x1B) 'Esc: clear search' } @('view tab=200 host=255 visible=6')
 All-Step 'archive-action' { All-Row 'spare' 'archive' } @('row session=spare state=Archived', 'archived=2')
@@ -100,15 +104,18 @@ Wait-Until {
     @($archive | Where-Object { $_.tmux_session -eq 'spare' -and $_.host -eq 0 }).Count -eq 1 -and (Test-Path (Join-Path $env:MP_VERIFY_STATE 'closed-spare'))
 } 'Archive action persisted identity and reached SSH end boundary'
 All-Step 'unattached-after-archive' { Press @(0x55) 'U: remaining unattached session' } @('view tab=205 host=255 visible=1', 'row session=remote-one state=No window')
-Press @(0x20) 'Space: mark remaining session'
+All-Step 'close-action-confirm' { All-Row 'remote-one' 'close' } @('confirm=1')
+All-Step 'close-action-cancel' { Press @(0x1B) 'Esc: cancel hover Close' } @('confirm=0')
+if (Test-Path (Join-Path $env:MP_VERIFY_STATE 'closed-remote-one')) { throw 'Canceled hover Close ended remote-one' }
+All-Step 'marked-remaining' { Press @(0x20) 'Space: mark remaining session' } @('visible=1 selected=0 marks=1')
 All-Step 'close-marked-confirm' {
     $match = [regex]::Match((All-Frame), 'footer_y=(\d+)')
     Doctor; Wait-Foreground; Record 'Click Close marked'
     [VerifyNative]::ClickClient($script:window, 224, [int]$match.Groups[1].Value)
-} @('marks=1')
+} @('marks=1', 'confirm=1')
 Snapshot 'close-marked'
 Press @(0x0D) 'Enter: confirm Close marked'
-Wait-Until { Test-Path (Join-Path $env:MP_VERIFY_STATE 'closed-remote-one') } 'Close marked reached SSH end boundary'
+Wait-Until { (Test-Path (Join-Path $env:MP_VERIFY_STATE 'closed-remote-one')) -and (All-Frame) -match 'tab id=200 count=5' } 'Close marked reached SSH end boundary and removed its row'
 All-Step 'after' { All-Click 'tab id=200 count=5' } @('view tab=200 host=255 visible=5', 'running=3 servers=2 archived=2')
 $result.checks += @{ name = 'existing-actions'; passed = $true; evidence = 'move-down, move-up, tab-next, tab-previous, waiting, unattached, marked, clear-marks, close-confirm, search, opened, archive-action, close-marked, after'; persistedArchive = 'spare'; ended = 'remote-one' }
 Press @(0x1B) 'Esc: close All sessions'

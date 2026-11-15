@@ -175,6 +175,16 @@ test('a missing or invalid verdict is FAIL and evidence stops at eight lines', (
   assert.ok(lines.every(line => !line.includes('\r')));
 });
 
+test('manual verifier runs for different pull requests do not replace each other in the pending queue', () => {
+  const template = workflow.match(/^  group: (.+)$/m)[1];
+  function group(pr, eventNumber) {
+    const context = { github: { workflow: 'PR verifier', ref: 'refs/heads/master', event: { pull_request: { number: eventNumber } } }, inputs: { pr } };
+    return template.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => expression.trim().split(' || ').map(key => key.split('.').reduce((value, part) => value?.[part], context)).find(Boolean) || '');
+  }
+  assert.notEqual(group('1038'), group('1039'));
+  assert.equal(group('1038'), group(undefined, 1038));
+});
+
 test('the workflow starts on same-repository pull requests and on a dispatched pull request number', () => {
   const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
   assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review\]/);

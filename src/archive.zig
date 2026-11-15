@@ -2416,7 +2416,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
     _ = SetTextColor(hdc, if (close_enabled) fg else muted);
     _ = drawUtf16(hdc, L("Clear marks"), -1, &clear_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
-    if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] view tab={d} host={d} visible={d} selected={d} marks={d} running={d} servers={d} archived={d} footer_y={d}", .{ app_state.g_all_sessions_tab, app_state.g_all_sessions_host_filter, vis, app_state.g_all_sessions_sel, marked_n, global_counts.running, running_hosts, global_counts.archived, @divTrunc(close_rc.top + close_rc.bottom, 2) });
+    if (verboseLoggingEnabled()) allSessionsCloseLog("[all-sessions] view tab={d} host={d} visible={d} selected={d} marks={d} running={d} servers={d} archived={d} footer_y={d} confirm={d}", .{ app_state.g_all_sessions_tab, app_state.g_all_sessions_host_filter, vis, app_state.g_all_sessions_sel, marked_n, global_counts.running, running_hosts, global_counts.archived, @divTrunc(close_rc.top + close_rc.bottom, 2), @intFromBool(app_state.g_all_sessions_confirm) });
     _ = SelectObject(hdc, old_font);
 }
 
