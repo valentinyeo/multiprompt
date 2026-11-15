@@ -245,7 +245,7 @@ jobs:
       - name: Drive the installed rename timer through real CLI HTTP
         run: |
           uid=$(id -u mp-agent-journey)
-          sudo -u mp-agent-journey env --chdir=/home/mp-agent-journey HOME=/home/mp-agent-journey XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" GITHUB_ACTIONS=true python3 verify-agent-sync.py --root /home/mp-agent-journey/product --cli /home/mp-agent-journey/hypertask --evidence /home/mp-agent-journey/evidence
+          sudo -u mp-agent-journey env -i --chdir=/home/mp-agent-journey HOME=/home/mp-agent-journey PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 XDG_CONFIG_HOME=/home/mp-agent-journey/.config XDG_DATA_HOME=/home/mp-agent-journey/.local/share XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" GITHUB_ACTIONS=true python3 verify-agent-sync.py --root /home/mp-agent-journey/product --cli /home/mp-agent-journey/hypertask --evidence /home/mp-agent-journey/evidence
       - name: Remove the owned user and record cleanup
         if: always()
         run: |

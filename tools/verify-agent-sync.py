@@ -99,7 +99,7 @@ def main():
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(json.dumps(dict(token="journey-fixture", managementKey="journey-fixture", apiUrl=f"http://127.0.0.1:{server.server_port}/api", error_reports=False)))
         publish("Chat before")
-        run(["sh", args.root / "tools/install-mp-talk.sh"])
+        run(["sh", "-x", args.root / "tools/install-mp-talk.sh"])
         sync = bin_dir / "mp-agent-sync"
         check("The talk installer exposes the mp-agent-sync command", sync.is_file())
         installed = home / ".local/share/multiprompt-talk/mp_agent_sync.py"
@@ -146,6 +146,7 @@ def main():
         units = home / ".config/systemd/user"
         installed = home / ".local/share/multiprompt-talk/mp_agent_sync.py"
         doctor = dict(source=str(args.root), installedHash=hashlib.sha256(installed.read_bytes()).hexdigest() if installed.exists() else None, cliHash=hashlib.sha256(args.cli.read_bytes()).hexdigest(), timer=(units / "mp-agent-sync.timer").read_text() if (units / "mp-agent-sync.timer").exists() else None)
+        doctor["environment"] = {key: os.environ.get(key) for key in ("HOME", "PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR")}
         journal = subprocess.run(["journalctl", "--user", "-u", "mp-agent-sync.service", "--no-pager"], capture_output=True, text=True, timeout=30)
         server.shutdown()
         server.server_close()
