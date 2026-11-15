@@ -23,12 +23,17 @@ test('SOFT-2442 double-click toggles a thumbs up and drag still selects text', (
   const toggle = render.slice(render.indexOf('pub fn chatToggleReaction('), render.indexOf('pub fn chatReactLatestAgent('));
   assert.match(toggle, /if \(!show\) \{\s*chatImageReady\(\);\s*return;\s*\}/);
   assert.ok(toggle.indexOf('if (!show)') < toggle.indexOf('chatReactToMessage('));
+  assert.match(toggle, /if \(!chatReactToMessage\(reference, quote, emoji\)\) \{\s*if \(emoji == \.like\) g_reaction_view\.wishLike\(reference, !show\);\s*return;\s*\}\s*if \(emoji == \.like\) chatImageReady\(\);/);
+  const shown = render.slice(render.indexOf('fn likeShown('), render.indexOf('pub fn chatToggleReaction('));
+  assert.match(shown, /if \(g_reaction_view\.wishedLike\(reference\)\) \|wanted\| return wanted;/);
+  assert.ok(shown.indexOf('wishedLike(reference)') < shown.indexOf('.mask('));
   const react = render.slice(render.indexOf('pub fn chatReactToMessage('), render.indexOf('fn likeShown('));
   assert.match(react, /if \(!@import\("chat_send\.zig"\)\.sendChatMessage\(line\)\) \{\s*showHeaderNoticeAscii\("Could not send the reaction; try again", 3500, true\);\s*return false;\s*\}/);
   assert.doesNotMatch(render, /fn chatSendReaction\(/);
   const menu = render.slice(render.indexOf('switch (cmd)'), render.indexOf('var g_reply_jump'));
   assert.match(menu, /8 => if \(reply_text\) \|quote\| \{\s*chatToggleReaction\(reaction_reference, quote, \.like\);/);
   const reaction = read('src/chat_reaction.zig');
+  assert.match(reaction, /pub fn wishedLike\(self: \*const View, message: u64\) \?bool/);
   assert.match(reaction, /fn noteLike\(self: \*View, target: usize, emoji: Emoji, pending: bool\) void/);
   assert.match(reaction, /self\.badges\.items\[target\] \^= emoji\.bit\(\)/);
   assert.match(reaction, /test "SOFT-2442 a second thumbs up removes the badge and one pending copy does not"/);

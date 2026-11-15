@@ -4286,6 +4286,7 @@ pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reacti
 
 fn likeShown(reference: u64) bool {
     if (reference == 0) return false;
+    if (g_reaction_view.wishedLike(reference)) |wanted| return wanted;
     for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
         if (block.reaction_reference == reference and (g_reaction_view.mask(index) & chat_reaction.Emoji.like.bit()) != 0) return true;
     }
@@ -4300,7 +4301,11 @@ pub fn chatToggleReaction(reference: u64, quote: []const u16, emoji: chat_reacti
         chatImageReady();
         return;
     }
-    if (!chatReactToMessage(reference, quote, emoji) and emoji == .like) g_reaction_view.wishLike(reference, !show);
+    if (!chatReactToMessage(reference, quote, emoji)) {
+        if (emoji == .like) g_reaction_view.wishLike(reference, !show);
+        return;
+    }
+    if (emoji == .like) chatImageReady();
 }
 
 pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
