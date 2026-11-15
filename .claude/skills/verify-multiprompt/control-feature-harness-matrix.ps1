@@ -168,46 +168,79 @@ foreach ($row in @($rows | Where-Object { $_.kind -eq 'cells' })) {
     $pass = $false
     try {
         if ($row.mode -eq 'live_chat') {
+            $problems = @()
             $sshLog = Join-Path $env:HARNESS_MATRIX_LOG ("ssh-" + $row.host + ".log")
             $sshBefore = if (Test-Path -LiteralPath $sshLog) { (Get-Item -LiteralPath $sshLog).Length } else { 0 }
             Open-PaletteRow $row.live_query ([int]$row.live_target)
-            Wait-Until {
-                (Test-Path -LiteralPath $sshLog) -and (Get-Item -LiteralPath $sshLog).Length -gt $sshBefore -and (Get-Content -LiteralPath $sshLog -Raw) -match 'python3'
-            } ("chat opens on " + $row.host) 12
+            try {
+                Wait-Until {
+                    (Test-Path -LiteralPath $sshLog) -and (Get-Item -LiteralPath $sshLog).Length -gt $sshBefore -and (Get-Content -LiteralPath $sshLog -Raw) -match 'python3'
+                } ("chat opens on " + $row.host) 12
+            } catch {
+                $problems += $_.Exception.Message
+            }
             Type-Text 'reply with the word pong'
             Press @(0x0D) 'send pong'
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $start = (Get-Content -LiteralPath $log -Raw).Length
-            Wait-Until {
-                $slice = ((Get-Content -LiteralPath $log -Raw).Substring($start))
-                $slice -match 'pong' -and $slice -notmatch 'reply with the word pong'
-            } 'reply contains pong' 12
-            $ids = @(Get-PaletteIds 'Chat View: Model')
-            $known = @(12003, 12004, 12005, 12011, 12012, 12013, 12014, 12015)
-            $shown = @($ids | Where-Object { $known -contains $_ })
-            $required = @()
-            if ($null -ne $row.model_ids) { $required = @($row.model_ids) }
-            if ($required.Count -eq 0) {
-                if ($shown.Count -lt 1) { throw 'model picker listed no models for this harness' }
-            } else {
-                $missing = @($required | Where-Object { $shown -notcontains $_ })
-                if ($missing.Count -gt 0) { throw ("model picker missing " + ($missing -join ',')) }
+            try {
+                Wait-Until {
+                    $slice = ((Get-Content -LiteralPath $log -Raw).Substring($start))
+                    $slice -match 'pong' -and $slice -notmatch 'reply with the word pong'
+                } 'reply contains pong' 12
+            } catch {
+                $problems += $_.Exception.Message
+            }
+            try {
+                $ids = @(Get-PaletteIds 'Chat View: Model')
+                $known = @(12003, 12004, 12005, 12011, 12012, 12013, 12014, 12015)
+                $shown = @($ids | Where-Object { $known -contains $_ })
+                $required = @()
+                if ($null -ne $row.model_ids) { $required = @($row.model_ids) }
+                if ($required.Count -eq 0) {
+                    if ($shown.Count -lt 1) { throw 'model picker listed no models for this harness' }
+                } else {
+                    $missing = @($required | Where-Object { $shown -notcontains $_ })
+                    if ($missing.Count -gt 0) { throw ("model picker missing " + ($missing -join ',')) }
+                }
+            } catch {
+                $problems += $_.Exception.Message
             }
             if ([int]$row.pick_target -gt 0) {
-                Open-PaletteRow ("Chat View: Model " + $row.pick_model) ([int]$row.pick_target)
-                Type-Text 'reply with the word pong'
-                Press @(0x0D) 'send on the picked model'
-                $hostLog = Join-Path $env:HARNESS_MATRIX_LOG (($row.host) + '-version.jsonl')
-                $debug = Get-Content -LiteralPath $log -Raw
-                $named = $debug -match [regex]::Escape([string]$row.pick_model)
-                if (-not $named -and (Test-Path -LiteralPath $hostLog)) { $named = (Get-Content -LiteralPath $hostLog -Raw) -match [regex]::Escape([string]$row.pick_model) }
-                if (-not $named) { throw ("reply did not run on " + $row.pick_model) }
+                try {
+                    Open-PaletteRow ("Chat View: Model " + $row.pick_model) ([int]$row.pick_target)
+                    Type-Text 'reply with the word pong'
+                    Press @(0x0D) 'send on the picked model'
+                    $mark = (Get-Content -LiteralPath $log -Raw).Length
+                    $modelName = [string]$row.pick_model
+                    $hostLog = Join-Path $env:HARNESS_MATRIX_LOG (($row.host) + '-version.jsonl')
+                    $hostBefore = if (Test-Path -LiteralPath $hostLog) { Get-Content -LiteralPath $hostLog -Raw } else { '' }
+                    Wait-Until {
+                        $slice = (Get-Content -LiteralPath $log -Raw).Substring($mark)
+                        $header = $slice -match [regex]::Escape($modelName) -and $slice -notmatch 'Chat View: Model' -and $slice -notmatch 'reply with the word pong'
+                        $hostNamed = $false
+                        if (Test-Path -LiteralPath $hostLog) {
+                            $hostText = Get-Content -LiteralPath $hostLog -Raw
+                            $hostNamed = $hostText.Length -gt $hostBefore.Length -and $hostText.Substring($hostBefore.Length) -match [regex]::Escape($modelName)
+                        }
+                        $header -or $hostNamed
+                    } ("reply ran on " + $modelName) 12
+                } catch {
+                    $problems += $_.Exception.Message
+                }
+            } elseif ($row.models.Count -eq 0) {
+                $problems += 'model picker has no model to pick for this harness'
             }
             if ($row.skills) {
-                $skillIds = @(Get-PaletteIds 'skills')
-                $entries = @($skillIds | Where-Object { $_ -ge 4100 -and $_ -lt 4612 })
-                if ($entries.Count -lt 1) { throw 'skill list has no entries' }
+                try {
+                    $skillIds = @(Get-PaletteIds 'skills')
+                    $entries = @($skillIds | Where-Object { $_ -ge 4100 -and $_ -lt 4612 })
+                    if ($entries.Count -lt 1) { throw 'skill list has no entries' }
+                } catch {
+                    $problems += $_.Exception.Message
+                }
             }
+            if ($problems.Count -gt 0) { throw ($problems -join '; ') }
             $detail = 'pong, model, and skills checked'
         } else {
             Open-PaletteRow $row.shell_query ([int]$row.shell_target)
