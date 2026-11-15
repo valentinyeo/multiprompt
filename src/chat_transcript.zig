@@ -448,7 +448,6 @@ pub fn messageBlocks(bytes: []const u8, wide: []u16, offset: usize, role: md.Rol
             actual_role = .injected;
         }
     }
-    len = @import("chat_mention.zig").revealChatNames(wide, len);
     const n = md.blocks(wide[0..len], offset, actual_role, out);
     if (n > 0 and actual_role == .injected) out[0].sender = sender;
     return .{ .len = len, .count = n };
@@ -874,48 +873,6 @@ test "IGSH-1030 labels match Android and disclosure identity ignores buffer move
     after.source_offset = 1;
     try std.testing.expect(noteKey(before, w("body")) != noteKey(after, w("xxbody")));
     try std.testing.expect(!before.note_open);
-}
-
-test "SOFT-2430 a bot reply shows the chat name instead of a raw mention token" {
-    const app = @import("app_state.zig");
-    const count = app.shell_count;
-    const prior_name = app.shells[0].name;
-    const prior_name_len = app.shells[0].name_len;
-    const prior_session = app.shells[0].tmux_session;
-    const prior_session_len = app.shells[0].tmux_session_len;
-    const prior_view = app.shells[0].chat_view_on;
-    defer {
-        app.shell_count = count;
-        app.shells[0].name = prior_name;
-        app.shells[0].name_len = prior_name_len;
-        app.shells[0].tmux_session = prior_session;
-        app.shells[0].tmux_session_len = prior_session_len;
-        app.shells[0].chat_view_on = prior_view;
-    }
-    app.shell_count = 1;
-    const shell = &app.shells[0];
-    shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, "Poteto 2 LC") catch 0);
-    @memset(&shell.tmux_session, 0);
-    const session = "live-8bc7bac";
-    @memcpy(shell.tmux_session[0..session.len], session);
-    shell.tmux_session_len = @intCast(session.len);
-    shell.chat_view_on = false;
-    const w = std.unicode.utf8ToUtf16LeStringLiteral;
-    var text: [512]u16 = undefined;
-    var blocks: [8]md.Block = undefined;
-    const coded = try messageBlocks("Noted, Another session, `LC{live-8bc7bac}`, is fixing the credential guard.", &text, 0, .prose, &blocks);
-    const shown = text[0..coded.len];
-    try std.testing.expect(std.mem.indexOf(u16, shown, w("{live-8bc7bac}")) == null);
-    try std.testing.expectEqualSlices(u16, w("Noted, Another session, Poteto 2 LC, is fixing the credential guard."), shown);
-    var spans: [16]md.Span = undefined;
-    const n = md.inlineSpans(shown, &spans);
-    for (spans[0..n]) |span| try std.testing.expect(!span.style.code or std.mem.indexOf(u16, shown[span.text.start..span.text.end], w("live-")) == null);
-    const ask = try messageBlocks("Ask @Poteto 2 LC{live-8bc7bac} about the guard.", &text, 0, .prose, &blocks);
-    try std.testing.expectEqualSlices(u16, w("Ask @Poteto 2 LC about the guard."), text[0..ask.len]);
-    const mixed = try messageBlocks("Use `zig build` and `LC{live-8bc7bac}`.", &text, 0, .prose, &blocks);
-    try std.testing.expectEqualSlices(u16, w("Use `zig build` and Poteto 2 LC."), text[0..mixed.len]);
-    const user = try messageBlocks("see `LC{live-8bc7bac}`", &text, 0, .user, &blocks);
-    try std.testing.expectEqualSlices(u16, w("see Poteto 2 LC"), text[0..user.len]);
 }
 
 test "IGSH-1010 host receipts keep exact identities and reject other clients" {
