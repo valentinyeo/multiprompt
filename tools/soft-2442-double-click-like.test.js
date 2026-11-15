@@ -20,6 +20,12 @@ test('SOFT-2442 double-click toggles a thumbs up and drag still selects text', (
   assert.match(dbl, /chatDoubleClickThumbs\(hwnd, GET_X\(lp\), GET_Y\(lp\)\)/);
   assert.match(dbl, /chatTranscriptMouseDown\(hwnd, GET_X\(lp\), GET_Y\(lp\)\)/);
   assert.match(render, /pub fn chatToggleReaction\(reference: u64, quote: \[\]const u16, emoji: chat_reaction\.Emoji\) void/);
+  const toggle = render.slice(render.indexOf('pub fn chatToggleReaction('), render.indexOf('pub fn chatReactLatestAgent('));
+  assert.match(toggle, /if \(!show\) \{\s*chatImageReady\(\);\s*return;\s*\}/);
+  assert.ok(toggle.indexOf('if (!show)') < toggle.indexOf('chatReactToMessage('));
+  const react = render.slice(render.indexOf('pub fn chatReactToMessage('), render.indexOf('fn likeShown('));
+  assert.match(react, /if \(!@import\("chat_send\.zig"\)\.sendChatMessage\(line\)\) \{\s*showHeaderNoticeAscii\("Could not send the reaction; try again", 3500, true\);\s*return false;\s*\}/);
+  assert.doesNotMatch(render, /fn chatSendReaction\(/);
   const menu = render.slice(render.indexOf('switch (cmd)'), render.indexOf('var g_reply_jump'));
   assert.match(menu, /8 => if \(reply_text\) \|quote\| \{\s*chatToggleReaction\(reaction_reference, quote, \.like\);/);
   const reaction = read('src/chat_reaction.zig');
