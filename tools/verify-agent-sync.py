@@ -115,11 +115,12 @@ def main():
         names.write_text(json.dumps(corrupt))
         patches = lambda: [request for request in requests if request["method"] == "PATCH"]
         before = len(patches())
+        remote[AGENT] = "Hypertask before"
         output = run([sync], expected=1)
         check("A legacy shared-id clash blocks every HTTP rename", "clash\t" in output and len(patches()) == before)
         names.write_text(json.dumps(stored))
         output = run([sync, "--dry-run"])
-        check("Dry-run and unlinked chats leave Hypertask unchanged", "unlinked\tUnlinked chat" in output and len(patches()) == before)
+        check("Dry-run and unlinked chats leave Hypertask unchanged", "rename\tChat before" in output and "unlinked\tUnlinked chat" in output and len(patches()) == before and remote[AGENT] == "Hypertask before")
         systemctl("start", "mp-agent-sync.timer")
         wait_for(lambda: remote[AGENT] == "Chat before", 60)
         first = patches()[-1]["at"]
