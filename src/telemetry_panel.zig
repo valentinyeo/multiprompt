@@ -154,6 +154,15 @@ pub fn ensureUsageTelemetryCollector() void {
     }
 }
 
+pub fn syncUsageTelemetryCollector() void {
+    const footprint = @import("idle_footprint.zig");
+    if (footprint.usageCollectorWanted()) {
+        ensureUsageTelemetryCollector();
+        return;
+    }
+    if (usage_telemetry_mode.isRunning()) usage_telemetry_mode.stopForRelaunch();
+}
+
 fn aiPaceJsonString(value: ?std.json.Value) ?[]const u8 {
     const actual = value orelse return null;
     return if (actual == .string) actual.string else null;
@@ -709,6 +718,8 @@ pub fn cycleSidebarStatusCard(direction: i32) void {
         @intCast((@as(usize, app_state.g_sidebar_status_card) + 1) % 3)
     else
         @intCast((@as(usize, app_state.g_sidebar_status_card) + 2) % 3);
+    @import("idle_footprint.zig").setUsageCollectorHold(true);
+    syncUsageTelemetryCollector();
     saveSidebarStatusCard();
     invalidateSidebar();
 }
