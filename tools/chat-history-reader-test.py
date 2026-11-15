@@ -4804,11 +4804,13 @@ class IGSH_1652_LeftoverBoxTest(unittest.TestCase):
         draft = 'draft stays here'
         for emoji in ('👍', '👎', '❤️'):
             with self.subTest(emoji=emoji):
-                self.text = emoji + ' to: Same first words [mp:6d8e353d25c5fe23]'
+                spoken = emoji + ' to: Same first words'
+                self.text = spoken + ' [mp:6d8e353d25c5fe23]'
                 reader.draft_note('fixture', typed=draft, sent='')
                 result, state = self.send(draft)
                 self.assertEqual(result['status'], 'sent')
-                self.assertEqual(state['sent'], [self.text])
+                self.assertEqual(state['sent'], [spoken])
+                self.assertNotIn('[mp:', spoken)
                 self.assertEqual(state['box'], draft)
                 self.assertEqual(reader.draft_record('fixture').get('restored'), draft)
 

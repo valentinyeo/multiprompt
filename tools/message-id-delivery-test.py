@@ -103,5 +103,29 @@ class MessageIdDeliveryTest(unittest.TestCase):
         self.assertEqual(self.request('status', message_id='message_fixture_0001')['message']['state'], 'cancelled')
 
 
+    def test_two_thumbs_ups_keep_distinct_codes_out_of_the_text(self):
+        import hashlib
+        shared = 'd3d4702804e351e8'
+        texts = [
+            '👍 to: Should the build keep going while you look at the design? My [mp:' + shared + ']',
+            '👍 to: Run the Prototype playbook with the next steps now [mp:' + shared + ']',
+        ]
+        tokens, buffers = [], []
+        for index, text in enumerate(texts):
+            token = hashlib.sha256(f'desktop-{index}\nattempt-{index}\n0'.encode()).hexdigest()[:16]
+            tokens.append(token)
+            state, run = self.pane()
+            with patch.object(reader.subprocess, 'run', side_effect=run):
+                result = reader.send_response_preserve_draft(dict(tmux='fixture', sid='sid', text=text, token=token))
+            self.assertEqual(result['status'], 'sent')
+            buffers.append(state['buffer'])
+        self.assertNotEqual(tokens[0], tokens[1])
+        for token, buffer in zip(tokens, buffers):
+            self.assertNotIn('[mp:', buffer)
+            self.assertNotIn(token, buffer)
+            self.assertNotIn(shared, buffer)
+            self.assertTrue(buffer.startswith('👍 to: '))
+
+
 if __name__ == '__main__':
     unittest.main()

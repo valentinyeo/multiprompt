@@ -132,8 +132,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const clean = json('cleanup.json');
       assert.equal(clean.remaining_owned_processes, 0);
       assert.equal(clean.scratch_removed, true);
-      const prefix = 'Same first words ' + 'for this example '.repeat(8);
-      const expected = `👍 to: ${prefix.trim().slice(0, 80)} [mp:6d8e353d25c5fe23]`;
+      const expected = '👍 to: Same first words for this example for this example for this example for this…';
       const events = fs.readFileSync(path.join(root, 'reactions/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(JSON.parse);
       const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
       assert.deepEqual(sends.map(e => e.content), [expected], 'exactly one genuine transport submission');

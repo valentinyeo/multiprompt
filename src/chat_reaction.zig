@@ -73,21 +73,98 @@ fn normalized(text: []const u16, out: []u16) []const u16 {
     return out[0..n];
 }
 
-pub fn format(emoji: Emoji, target: u64, text: []const u16, out: []u16) ?[]const u16 {
+fn quoteText(text: []const u16, out: []u16) []const u16 {
+    const cap = @min(out.len, 80);
+    var n: usize = 0;
+    var space = false;
+    var i: usize = 0;
+    var more = false;
+    while (i < text.len) {
+        const c = text[i];
+        if (whitespace(c)) {
+            space = n > 0;
+            i += 1;
+            continue;
+        }
+        const units: usize = if (c >= 0xd800 and c <= 0xdbff and i + 1 < text.len) 2 else 1;
+        if (n + units + @intFromBool(space) > cap) {
+            more = true;
+            break;
+        }
+        if (space) {
+            out[n] = ' ';
+            n += 1;
+        }
+        @memcpy(out[n..][0..units], text[i..][0..units]);
+        n += units;
+        i += units;
+        space = false;
+    }
+    if (!more) {
+        while (i < text.len) : (i += 1) if (!whitespace(text[i])) {
+            more = true;
+            break;
+        };
+    }
+    if (!more) return out[0..n];
+    if (n == 0) {
+        var cut: usize = 0;
+        i = 0;
+        while (i < text.len and cut + 1 < cap) {
+            const c = text[i];
+            if (whitespace(c)) break;
+            const units: usize = if (c >= 0xd800 and c <= 0xdbff and i + 1 < text.len) 2 else 1;
+            if (cut + units + 1 > cap) break;
+            @memcpy(out[cut..][0..units], text[i..][0..units]);
+            cut += units;
+            i += units;
+        }
+        if (cut == 0) return out[0..0];
+        out[cut] = 0x2026;
+        return out[0 .. cut + 1];
+    }
+    if (n < cap) {
+        out[n] = 0x2026;
+        return out[0 .. n + 1];
+    }
+    var boundary = n;
+    while (boundary > 0 and out[boundary - 1] != ' ') boundary -= 1;
+    if (boundary > 1) {
+        out[boundary - 1] = 0x2026;
+        return out[0..boundary];
+    }
+    var cut: usize = cap - 1;
+    if (cut > 0 and out[cut - 1] >= 0xd800 and out[cut - 1] <= 0xdbff) cut -= 1;
+    out[cut] = 0x2026;
+    return out[0 .. cut + 1];
+}
+
+fn writeQuote(emoji: Emoji, text: []const u16, out: []u16) ?usize {
     var quote: [80]u16 = undefined;
-    const shown = normalized(text, &quote);
+    const shown = quoteText(text, &quote);
     if (shown.len == 0) return null;
-    var suffix: [32]u8 = undefined;
-    const tail = std.fmt.bufPrint(&suffix, " [mp:{x:0>16}]", .{target}) catch unreachable;
     const glyph = emoji.text();
     const join = std.unicode.utf8ToUtf16LeStringLiteral(" to: ");
-    const len = glyph.len + join.len + shown.len + tail.len;
-    if (len > out.len) return null;
+    if (glyph.len + join.len + shown.len > out.len) return null;
     var n: usize = 0;
     for ([_][]const u16{ glyph, join, shown }) |part| {
         @memcpy(out[n..][0..part.len], part);
         n += part.len;
     }
+    return n;
+}
+
+pub fn spoken(emoji: Emoji, text: []const u16, out: []u16) ?[]const u16 {
+    const n = writeQuote(emoji, text, out) orelse return null;
+    return out[0..n];
+}
+
+pub fn format(emoji: Emoji, target: u64, text: []const u16, out: []u16) ?[]const u16 {
+    const wrote = writeQuote(emoji, text, out) orelse return null;
+    var suffix: [32]u8 = undefined;
+    const tail = std.fmt.bufPrint(&suffix, " [mp:{x:0>16}]", .{target}) catch unreachable;
+    if (wrote + tail.len > out.len) return null;
+    var n = wrote;
     for (tail) |c| {
         out[n] = c;
         n += 1;
@@ -124,6 +201,30 @@ pub fn parse(text: []const u16) ?Reaction {
     return null;
 }
 
+pub fn parseSpoken(text: []const u16) ?Reaction {
+    if (std.mem.indexOfScalar(u16, text, '\n') != null or std.mem.indexOfScalar(u16, text, '\r') != null) return null;
+    const join = std.unicode.utf8ToUtf16LeStringLiteral(" to: ");
+    for (std.enums.values(Emoji)) |emoji| {
+        const prefix = emoji.text();
+        if (!std.mem.startsWith(u16, text, prefix)) continue;
+        const rest = text[prefix.len..];
+        if (!std.mem.startsWith(u16, rest, join)) return null;
+        const quote = rest[join.len..];
+        if (quote.len == 0 or quote.len > 80 or whitespace(quote[0]) or whitespace(quote[quote.len - 1])) return null;
+        var previous_space = false;
+        for (quote) |c| {
+            if ((whitespace(c) and c != ' ') or (c == ' ' and previous_space)) return null;
+            previous_space = c == ' ';
+        }
+        return .{ .emoji = emoji, .reference = 0, .quote = quote };
+    }
+    return null;
+}
+
+fn readReaction(text: []const u16) ?Reaction {
+    return parse(text) orelse parseSpoken(text);
+}
+
 pub const View = struct {
     hidden: std.ArrayList(bool) = .empty,
     badges: std.ArrayList(u8) = .empty,
@@ -146,8 +247,29 @@ pub const View = struct {
 
     const Target = struct { first: usize, last: usize, message_id: u64, ambiguous: bool = false };
 
+    fn quoteNeedle(quote: []const u16) []const u16 {
+        if (quote.len > 0 and quote[quote.len - 1] == 0x2026) return quote[0 .. quote.len - 1];
+        return quote;
+    }
+
+    fn resolveQuote(a: std.mem.Allocator, quote: []const u16, blocks: []const md.Block, text: []const u16, before: usize) !?usize {
+        const needle = quoteNeedle(quote);
+        if (needle.len == 0) return null;
+        var found: ?usize = null;
+        for (blocks[0..@min(before, blocks.len)], 0..) |block, i| {
+            if ((block.role != .prose and block.role != .code) or block.reaction_reference == 0) continue;
+            const body = text[block.start..][0..block.len];
+            const buffer = try a.alloc(u16, body.len);
+            defer a.free(buffer);
+            if (!std.mem.startsWith(u16, normalized(body, buffer), needle)) continue;
+            if (found != null) return null;
+            found = i;
+        }
+        return found;
+    }
+
     fn resolve(a: std.mem.Allocator, reaction: Reaction, targets: *const std.AutoHashMap(u64, Target), blocks: []const md.Block, text: []const u16, before: usize) !?usize {
-        if (reaction.reference == 0) return null;
+        if (reaction.reference == 0) return try resolveQuote(a, reaction.quote, blocks, text, before);
         const target = targets.get(reaction.reference) orelse return null;
         if (target.ambiguous or target.last >= before) return null;
         const from = blocks[target.first].start;
@@ -155,7 +277,8 @@ pub const View = struct {
         const body = text[from .. last.start + last.len];
         const buffer = try a.alloc(u16, body.len);
         defer a.free(buffer);
-        if (std.mem.indexOf(u16, normalized(body, buffer), reaction.quote) == null) return null;
+        const needle = quoteNeedle(reaction.quote);
+        if (needle.len == 0 or std.mem.indexOf(u16, normalized(body, buffer), needle) == null) return null;
         return target.last;
     }
 
@@ -285,7 +408,7 @@ pub const View = struct {
         for (blocks, 0..) |block, i| {
             if (block.role != .user) continue;
             const body = text[block.start..][0..block.len];
-            if (parse(body)) |reaction| {
+            if (readReaction(body)) |reaction| {
                 if (try resolve(a, reaction, &targets, blocks, text, i)) |target| {
                     self.hidden.items[i] = true;
                     self.badges.items[target] |= reaction.emoji.bit();
@@ -314,7 +437,7 @@ pub const View = struct {
             }
         }
         for (pending) |item| {
-            if (parse(item.text)) |reaction| {
+            if (readReaction(item.text)) |reaction| {
                 if (try resolve(a, reaction, &targets, blocks, text, blocks.len)) |target| {
                     try self.pending.append(a, item.id);
                     self.badges.items[target] |= reaction.emoji.bit();
@@ -485,6 +608,39 @@ test "IGSH-1132 build preserves mixed answers and confirms pending eligibility" 
     try std.testing.expect(!view.hides(2));
     try std.testing.expect(view.projectedPending(3) == null);
     try std.testing.expect(!view.hidesPending(3));
+}
+
+test "SOFT-2448 a long thumbs-up quote ends on a whole word" {
+    const a = std.testing.allocator;
+    const first = std.unicode.utf8ToUtf16LeStringLiteral("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho");
+    const second = std.unicode.utf8ToUtf16LeStringLiteral("omega psi chi phi upsilon tau sigma rho pi omicron xi nu mu lambda kappa iota theta eta zeta");
+    var first_line: [256]u16 = undefined;
+    var second_line: [256]u16 = undefined;
+    const like = spoken(.like, first, &first_line).?;
+    const dislike = spoken(.dislike, second, &second_line).?;
+    try std.testing.expect(std.mem.indexOfScalar(u16, like, '[') == null);
+    try std.testing.expect(std.mem.indexOfScalar(u16, dislike, '[') == null);
+    try std.testing.expect(like[like.len - 1] == 0x2026);
+    try std.testing.expect(like[like.len - 2] != ' ');
+    try std.testing.expect(dislike[dislike.len - 1] == 0x2026);
+    const source = try std.unicode.utf8ToUtf16LeAlloc(a, "Same first words " ++ ("for this example " ** 8) ++ "\n\nFIRST REPLY");
+    defer a.free(source);
+    var transport: [256]u16 = undefined;
+    const sent = spoken(.like, source, &transport).?;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("👍 to: Same first words for this example for this example for this example for this…"), sent);
+    const capture = try std.mem.concat(a, u16, &.{ first, second });
+    defer a.free(capture);
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = first.len, .role = .prose, .first = true, .message_id = 1, .reaction_reference = reference("msg_first") },
+        .{ .start = first.len, .len = second.len, .role = .prose, .first = true, .message_id = 2, .reaction_reference = reference("msg_second") },
+    };
+    var view: View = .{};
+    defer view.deinit(a);
+    _ = try view.build(a, &blocks, capture, &.{ .{ .id = 1, .text = like }, .{ .id = 2, .text = dislike } });
+    try std.testing.expect(view.hidesPending(1));
+    try std.testing.expect(view.hidesPending(2));
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    try std.testing.expectEqual(Emoji.dislike.bit(), view.mask(1));
 }
 
 test "IGSH-975 wire format preserves quote and stable provider identity for all reactions" {

@@ -1,0 +1,1 @@
+Thumbs-up replies keep their own delivery and a whole-word quote

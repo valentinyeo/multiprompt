@@ -7294,6 +7294,12 @@ def prompt_rows_close(target, opened):
         pass
 
 
+def reaction_text(text):
+    if isinstance(text, str) and re.fullmatch(r'(?:👍|👎|❤️) to: [^\r\n]+(?: \[mp:[0-9a-f]{16}\])?', text):
+        return re.sub(r' \[mp:[0-9a-f]{16}\]$', '', text)
+    return None
+
+
 def send_response_preserve_draft(q):
     import uuid
     name, sid, text = q.get('tmux'), q.get('sid'), q.get('text')
@@ -7302,7 +7308,11 @@ def send_response_preserve_draft(q):
     if not isinstance(sid, str) or not SESSION_ID.fullmatch(sid) or not isinstance(text, str) or not text.strip() or '\x00' in text:
         return dict(status='not_sent', reason='invalid_identity_or_text')
     token = q.get('token')
-    payload = text + '\n[mp:' + token + ']' if isinstance(token, str) and re.fullmatch(r'[0-9a-f]{16}', token) else text
+    spoken = reaction_text(text)
+    if spoken is not None:
+        payload = spoken
+    else:
+        payload = text + '\n[mp:' + token + ']' if isinstance(token, str) and re.fullmatch(r'[0-9a-f]{16}', token) else text
     target = '=' + name + ':'
     buffer = 'mp-send-' + uuid.uuid4().hex
     try:
@@ -7322,7 +7332,7 @@ def send_response_preserve_draft(q):
         typed, sent = record.get('typed'), record.get('sent')
         typed = typed if isinstance(typed, str) else ''
         sent = sent if isinstance(sent, str) else ''
-        if re.fullmatch(r'(?:👍|👎|❤️) to: [^\r\n]+ \[mp:[0-9a-f]{16}\]', text):
+        if spoken is not None:
             typed = ''
         displaced = draft if draft and not own_draft(draft, text, typed, sent) else ''
         if displaced:
@@ -7360,7 +7370,7 @@ def send_response_preserve_draft(q):
                 return dict(status='not_sent', reason='input_not_submitted')
         except (OSError, subprocess.SubprocessError):
             return dict(status='uncertain', reason='handoff_interrupted')
-        draft_note(name, typed='', sent=text, sent_at=time.time())
+        draft_note(name, typed='', sent=spoken if spoken is not None else text, sent_at=time.time())
         if displaced:
             restore_displaced_draft(name, target, displaced)
         return dict(status='sent', reason=None)
