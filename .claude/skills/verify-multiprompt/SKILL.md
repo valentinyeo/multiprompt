@@ -74,6 +74,8 @@ The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session
 
 The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictation`, branch build only) drives Ctrl+D, Enter, repeated Ctrl+D and a real mic click. Recorded PCM and offline provider-response replay traverse the production worker/parser/draft delivery; exact native composer text must appear within 1000 ms, while listening-time typing and active/idle microphone pixels are checked independently. This does not verify acoustic recognition or microphone hardware.
 
+The focused [workspace menu](features/workspace-menu.md) journey (`feature=workspace-menu`) holds the production registry mutex on a separate native thread, requires first painted selection pixels and window responses within 200 ms, checks mouse and arrow-key highlight pixels, and switches between two real local CMD workspaces. It also opens the menu with an exclusively held registry file and requires unchanged registry write time. It injects no workspace data. The worker serves completed registry snapshots on later menu opens, with newer local saves taking precedence.
+
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:

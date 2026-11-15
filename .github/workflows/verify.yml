@@ -9,6 +9,10 @@ on:
         required: true
         default: appearance
         type: string
+      app_revision:
+        description: Optional app commit to run with this revision's journey driver
+        required: false
+        type: string
       dictation_stall:
         description: Deliberately stall dictation capture or the browser-pane-stuck driver to prove timeout evidence
         required: false
