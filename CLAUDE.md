@@ -23,6 +23,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 
 ## Hard rules
 
+- **Asked how to do something, answer with the Multibot way first:** the Ctrl+K row or shortcut from `openwiki/operations/keyboard-shortcuts.md`. Generic OS commands only when Multibot has no way, and then say so.
 - Every inner reader edit increments `RUNTIME_GENERATION` in `src/chat_history_reader.py`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
 - Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 2060's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
 - **Never restart multiprompt without asking the user.** Use the in-app updater.

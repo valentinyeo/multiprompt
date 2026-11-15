@@ -1,0 +1,1 @@
+- The shortcut list now shows Open shell on VPS 1 and Open shell on VPS 2.

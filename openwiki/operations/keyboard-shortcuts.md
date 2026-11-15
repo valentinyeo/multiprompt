@@ -221,6 +221,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Log in | Log in to a Pi provider from this Pi chat. Same as /login |
 | Ctrl+K -&gt; New Cursor chat | Start a Cursor CLI live chat in this workspace folder, same chat view as Claude |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
+| Ctrl+K -&gt; Open shell on VPS 1 | Open a plain shell on server 1, no agent |
+| Ctrl+K -&gt; Open shell on VPS 2 | Open a plain shell on server 2, no agent |
 | Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
 | Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
