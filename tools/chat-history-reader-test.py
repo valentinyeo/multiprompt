@@ -8129,7 +8129,7 @@ class SOFT_2348_PiLoginAnswerTest(unittest.TestCase):
 
     def test_login_answer_arrives_as_data_and_a_late_retry_is_not_a_prompt(self):
         started = self.serve(op='login')
-        self.assertEqual(started['result'], dict(status='busy', reason='login_busy'))
+        self.assertEqual(started.get('result'), dict(status='busy', reason='login_busy'))
         self.ask()
         refused = self.serve(op='login_answer', command=dict(type='prompt', message=self.code))
         self.assertEqual(refused['result'], dict(status='refused', reason='invalid_answer'))
