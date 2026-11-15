@@ -168,6 +168,111 @@ pub fn copyVisible(text: []const u16, chats: []const Chat, out: []u16) []const u
     return out[0..w];
 }
 
+fn liveBrace(text: []const u16, open: usize) ?usize {
+    if (open >= text.len or text[open] != '{') return null;
+    var j = open + 1;
+    while (j < text.len and text[j] != '}' and j - open <= 65) : (j += 1) {}
+    if (j >= text.len or text[j] != '}' or !sessionOk(text[open + 1 .. j])) return null;
+    const session = text[open + 1 .. j];
+    if (session.len < 5 or session[0] != 'l' or session[1] != 'i' or session[2] != 'v' or session[3] != 'e' or session[4] != '-') return null;
+    return j;
+}
+
+fn nameChar(c: u16) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '@' or c == '_' or c == '-' or c > 0x7f;
+}
+
+const ShownToken = struct { start: usize, end: usize, keep: usize, at: bool };
+
+fn mentionToken(text: []const u16, open: usize, close: usize) ShownToken {
+    var start = open;
+    var at = false;
+    var p: usize = open;
+    while (p > 0 and open - (p - 1) <= 192) {
+        const c = text[p - 1];
+        if (c == '@') {
+            if (p == 1 or space(text[p - 2]) or text[p - 2] == '`') {
+                start = p - 1;
+                at = true;
+            }
+            break;
+        }
+        if (c == '`' or c == '{' or c == '}' or c == '\n' or c == '\r') break;
+        p -= 1;
+    }
+    if (!at) {
+        start = open;
+        while (start > 0 and nameChar(text[start - 1])) start -= 1;
+    }
+    const keep = start;
+    var end = close + 1;
+    var ticks: usize = 0;
+    while (start >= ticks + 1 and text[start - ticks - 1] == '`' and end + ticks < text.len and text[end + ticks] == '`') ticks += 1;
+    if (ticks > 0) {
+        start -= ticks;
+        end += ticks;
+        at = false;
+    }
+    return .{ .start = start, .end = end, .keep = keep, .at = at };
+}
+
+fn liveName(session: []const u16) ?[]const u16 {
+    var i: u32 = 0;
+    while (i < app.shell_count) : (i += 1) {
+        const shell = &app.shells[i];
+        if (shell.name_len == 0 or shell.name_len > shell.name.len or shell.tmux_session_len == 0 or shell.tmux_session_len > shell.tmux_session.len) continue;
+        const tmux = shell.tmux_session[0..shell.tmux_session_len];
+        if (!(@import("chat_view.zig").isLive(tmux) or shell.chat_view_on) or !sessionOkUtf8(tmux) or tmux.len != session.len) continue;
+        var match = true;
+        for (tmux, 0..) |byte, k| if (session[k] != @as(u16, byte)) {
+            match = false;
+        };
+        if (match) return shell.name[0..shell.name_len];
+    }
+    return null;
+}
+
+pub fn revealChatNames(buf: []u16, len: usize) usize {
+    if (len == 0 or len > buf.len or std.mem.indexOfScalar(u16, buf[0..len], '{') == null) return len;
+    const tmp = std.heap.page_allocator.alloc(u16, buf.len) catch return len;
+    defer std.heap.page_allocator.free(tmp);
+    const text = buf[0..len];
+    var w: usize = 0;
+    var i: usize = 0;
+    while (i < len) {
+        if (liveBrace(text, i)) |close| {
+            const token = mentionToken(text, i, close);
+            const already = i - token.start;
+            if (w < already) return len;
+            w -= already;
+            if (liveName(text[i + 1 .. close])) |name| {
+                var next = w;
+                if (token.at) {
+                    if (next >= tmp.len) return len;
+                    tmp[next] = '@';
+                    next += 1;
+                }
+                if (next + name.len > tmp.len) return len;
+                @memcpy(tmp[next..][0..name.len], name);
+                w = next + name.len;
+            } else {
+                const piece = text[token.keep..i];
+                if (w + piece.len > tmp.len) return len;
+                if (piece.len > 0) @memcpy(tmp[w..][0..piece.len], piece);
+                w += piece.len;
+            }
+            i = if (token.end > i) token.end else i + 1;
+            continue;
+        }
+        if (w >= tmp.len) return len;
+        tmp[w] = text[i];
+        w += 1;
+        i += 1;
+    }
+    @memcpy(buf[0..w], tmp[0..w]);
+    return w;
+}
+
 pub fn remember(name: []const u8, session: []const u8) void {
     if (pick_count >= picks.len or name.len == 0 or name.len >= picks[0].name.len or !sessionOkUtf8(session)) return;
     const slot = &picks[pick_count];
@@ -300,36 +405,37 @@ fn appendUtf8(out: []u16, w: usize, text: []const u8) ?usize {
     return w + n;
 }
 
-fn escapeReadName(name: []const u8, out: []u8) []const u8 {
-    var w: usize = 0;
-    for (name) |c| {
-        if (c == '\\' or c == '"') {
-            if (w + 2 > out.len) return out[0..w];
-            out[w] = '\\';
-            w += 1;
-        }
-        if (w + 1 > out.len) return out[0..w];
-        out[w] = c;
-        w += 1;
-    }
-    return out[0..w];
+pub fn providerName(agent: u8) []const u8 {
+    return switch (agent) {
+        1 => "claude",
+        2 => "codex",
+        3 => "pi",
+        5 => "hax",
+        6 => "grok",
+        7 => "cursor",
+        else => "",
+    };
 }
 
-pub fn mentionNote(source_name: []const u8, visible: []const u16, out: []u16) ?[]const u16 {
-    var escaped: [512]u8 = undefined;
-    const read_name = escapeReadName(source_name, &escaped);
+const mention_read_line = "List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl";
+
+pub fn mentionNote(source_name: []const u8, provider: []const u8, sid: []const u8, visible: []const u16, out: []u16) ?[]const u16 {
     const lead = "Valentin mentioned you in ";
-    const mid = ": ";
-    const tail = ". Answer his question first. Read that chat for context with mp-send read \"";
-    const end = "\".";
-    var head: [512]u16 = undefined;
+    const ask = ". Answer his question first. ";
+    var head: [768]u16 = undefined;
     var w: usize = appendAscii(&head, 0, lead) orelse return null;
     w = appendUtf8(&head, w, source_name) orelse return null;
-    w = appendAscii(&head, w, mid) orelse return null;
+    if (provider.len > 0 or sid.len > 0) {
+        w = appendAscii(&head, w, " (") orelse return null;
+        if (provider.len > 0) w = appendUtf8(&head, w, provider) orelse return null;
+        if (provider.len > 0 and sid.len > 0) w = appendAscii(&head, w, ", ") orelse return null;
+        if (sid.len > 0) w = appendUtf8(&head, w, sid) orelse return null;
+        w = appendAscii(&head, w, ")") orelse return null;
+    }
+    w = appendAscii(&head, w, ": ") orelse return null;
     var foot: [512]u16 = undefined;
-    var t: usize = appendAscii(&foot, 0, tail) orelse return null;
-    t = appendUtf8(&foot, t, read_name) orelse return null;
-    t = appendAscii(&foot, t, end) orelse return null;
+    var t: usize = appendAscii(&foot, 0, ask) orelse return null;
+    t = appendAscii(&foot, t, mention_read_line) orelse return null;
     if (w + t > out.len) return null;
     var quote_len = @min(visible.len, out.len - w - t);
     if (quote_len > 0 and quote_len < visible.len) {
@@ -498,8 +604,8 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     var visible_buf: [640]u16 = undefined;
     const visible = copyVisible(typed, &.{}, &visible_buf);
     var note_buf: [640]u16 = undefined;
-    const note = mentionNote("Factory", visible, &note_buf).?;
-    const expected = w(&storage, &slot, "Valentin mentioned you in Factory: ask @Design Lead and @Design Lead and @Notes and @Factory and @Missing and @Term. Answer his question first. Read that chat for context with mp-send read \"Factory\".");
+    const note = mentionNote("Factory", "claude", "11111111-2222-3333-4444-555555555555", visible, &note_buf).?;
+    const expected = w(&storage, &slot, "Valentin mentioned you in Factory (claude, 11111111-2222-3333-4444-555555555555): ask @Design Lead and @Design Lead and @Notes and @Factory and @Missing and @Term. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
     try std.testing.expectEqualSlices(u16, expected, note);
     try std.testing.expect(isMentionNote(note));
     var echoed: [900]u16 = undefined;
@@ -508,10 +614,13 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     @memcpy(echoed[note.len..][0..extra.len], extra);
     try std.testing.expectEqual(@as(usize, 0), mentionTargets(echoed[0 .. note.len + extra.len], "live-factory", &chats, &targets).len);
     const hello = w(&storage, &slot, "hello");
-    const quoted = mentionNote("Say \"hi\"", hello, &note_buf).?;
-    const quoted_expected = w(&storage, &slot, "Valentin mentioned you in Say \"hi\": hello. Answer his question first. Read that chat for context with mp-send read \"Say \\\"hi\\\"\".");
+    const quoted = mentionNote("Say \"hi\"", "claude", "abc", hello, &note_buf).?;
+    const quoted_expected = w(&storage, &slot, "Valentin mentioned you in Say \"hi\" (claude, abc): hello. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
+    const plain = mentionNote("Factory", "", "", hello, &note_buf).?;
+    const plain_expected = w(&storage, &slot, "Valentin mentioned you in Factory: hello. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
+    try std.testing.expectEqualSlices(u16, plain_expected, plain);
     try std.testing.expectEqualSlices(u16, quoted_expected, quoted);
-    try std.testing.expect(mentionNote("Factory", visible, note_buf[0..8]) == null);
+    try std.testing.expect(mentionNote("Factory", "claude", "abc", visible, note_buf[0..8]) == null);
     mentionForgetDelivered();
     try std.testing.expect(!mentionDelivered(9, "live-design"));
     mentionMarkDelivered(9, "live-design");
@@ -534,4 +643,45 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     try std.testing.expect(mentionDelivered(65, "live-65"));
     try std.testing.expect(mentionDelivered(2, "live-2"));
     mentionForgetDelivered();
+}
+
+test "SOFT-2430 a bot reply shows the chat name instead of a raw mention token" {
+    const count = app.shell_count;
+    const prior_name = app.shells[0].name;
+    const prior_name_len = app.shells[0].name_len;
+    const prior_session = app.shells[0].tmux_session;
+    const prior_session_len = app.shells[0].tmux_session_len;
+    const prior_view = app.shells[0].chat_view_on;
+    defer {
+        app.shell_count = count;
+        app.shells[0].name = prior_name;
+        app.shells[0].name_len = prior_name_len;
+        app.shells[0].tmux_session = prior_session;
+        app.shells[0].tmux_session_len = prior_session_len;
+        app.shells[0].chat_view_on = prior_view;
+    }
+    app.shell_count = 1;
+    const shell = &app.shells[0];
+    shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, "Poteto 2 LC") catch 0);
+    @memset(&shell.tmux_session, 0);
+    const session = "live-8bc7bac";
+    @memcpy(shell.tmux_session[0..session.len], session);
+    shell.tmux_session_len = @intCast(session.len);
+    shell.chat_view_on = false;
+    const cases = [_]struct { in: []const u8, out: []const u8 }{
+        .{ .in = "Noted, Another session, `LC{live-8bc7bac}`, is fixing the credential guard.", .out = "Noted, Another session, Poteto 2 LC, is fixing the credential guard." },
+        .{ .in = "Ask @Poteto 2 LC{live-8bc7bac} about the guard.", .out = "Ask @Poteto 2 LC about the guard." },
+        .{ .in = "Use `zig build` and `LC{live-8bc7bac}`.", .out = "Use `zig build` and Poteto 2 LC." },
+        .{ .in = "see `LC{live-8bc7bac}`", .out = "see Poteto 2 LC" },
+    };
+    var raw: [256]u16 = undefined;
+    var want: [256]u16 = undefined;
+    const hidden = std.unicode.utf8ToUtf16LeStringLiteral("{live-8bc7bac}");
+    for (cases) |case| {
+        const n = std.unicode.utf8ToUtf16Le(&raw, case.in) catch unreachable;
+        const got = revealChatNames(&raw, n);
+        const m = std.unicode.utf8ToUtf16Le(&want, case.out) catch unreachable;
+        try std.testing.expectEqualSlices(u16, want[0..m], raw[0..got]);
+        try std.testing.expect(std.mem.indexOf(u16, raw[0..got], hidden) == null);
+    }
 }
