@@ -78,7 +78,8 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   assert.match(speed, /\$shellsBeforeRestart = @\(\(Read-Inbox\)\.shells\)\.Count[\s\S]*Restart-ChatView \$shellsBeforeRestart/);
   const terminal = read('src/main.zig');
   const terminalHandler = terminal.slice(terminal.indexOf('if (target == SEARCH_NEW_TERMINAL_OFFSET)'), terminal.indexOf('if (target == SEARCH_OPEN_SESSION_MENU_OFFSET'));
-  assert.match(terminalHandler, /g_search_pick_repo_mode[\s\S]*WM_APP_SEARCH_OPEN/);
+  assert.match(terminalHandler, /spawnWorkspaceTerminalSession\(\)[\s\S]*g_search_pick_repo_mode[\s\S]*requestAllRepoRefresh\(\)/);
+  assert.doesNotMatch(terminalHandler, /WM_APP_SEARCH_OPEN/);
   assert.match(updateSearchResultsBody(), /labelsMatchQuery\(&\[_\]\[\]const u8\{"manage snippets"\}[\s\S]*SEARCH_SNIPPET_MANAGE_OFFSET/);
   assert.match(speed, /scroll_ms = 100/);
   assert.match(speed, /close_ms = 100/);
