@@ -616,10 +616,10 @@ test "SOFT-2430 a mention reaches that live chat once and the note does not fan 
     const hello = w(&storage, &slot, "hello");
     const quoted = mentionNote("Say \"hi\"", "claude", "abc", hello, &note_buf).?;
     const quoted_expected = w(&storage, &slot, "Valentin mentioned you in Say \"hi\" (claude, abc): hello. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
+    try std.testing.expectEqualSlices(u16, quoted_expected, quoted);
     const plain = mentionNote("Factory", "", "", hello, &note_buf).?;
     const plain_expected = w(&storage, &slot, "Valentin mentioned you in Factory: hello. Answer his question first. List chats with mp-sessions --json; a Claude chat's history is ~/.claude/projects/<cwd with every non-alphanumeric character as ->/<sid>.jsonl");
     try std.testing.expectEqualSlices(u16, plain_expected, plain);
-    try std.testing.expectEqualSlices(u16, quoted_expected, quoted);
     try std.testing.expect(mentionNote("Factory", "claude", "abc", visible, note_buf[0..8]) == null);
     mentionForgetDelivered();
     try std.testing.expect(!mentionDelivered(9, "live-design"));
