@@ -272,6 +272,37 @@ pub fn close() void {
     _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+fn clickAt(x: i32, y: i32) void {
+    if (hit(x, y)) |index| activate(index) else close();
+}
+
+fn clientPoint(x: i32, y: i32) w.POINT {
+    var client: w.RECT = undefined;
+    if (hwnd == null or w.GetClientRect(hwnd, &client) == 0) return .{ .x = x, .y = y };
+    if (x >= 0 and y >= 0 and x < client.right and y < client.bottom) return .{ .x = x, .y = y };
+    var pt = w.POINT{ .x = x, .y = y };
+    if (w.ScreenToClient(hwnd, &pt) == 0) return .{ .x = x, .y = y };
+    return pt;
+}
+
+pub fn parentClick(x: i32, y: i32) bool {
+    if (!opened or hwnd == null or app_state.g_main_hwnd == null) return false;
+    var origin = w.POINT{ .x = 0, .y = 0 };
+    if (w.ClientToScreen(hwnd, &origin) == 0) return false;
+    var screen = w.POINT{ .x = x, .y = y };
+    if (w.ClientToScreen(app_state.g_main_hwnd, &screen) == 0) return false;
+    var client: w.RECT = undefined;
+    if (w.GetClientRect(hwnd, &client) == 0) return false;
+    const local_x = screen.x - origin.x;
+    const local_y = screen.y - origin.y;
+    if (local_x < 0 or local_y < 0 or local_x >= client.right or local_y >= client.bottom) {
+        close();
+        return true;
+    }
+    clickAt(local_x, local_y);
+    return true;
+}
+
 fn activate(index: usize) void {
     close();
     const was_room = @import("room_frontend.zig").isActive();
@@ -323,6 +354,13 @@ pub fn headerClick(x: i32, y: i32) bool {
     if (hwnd == null) hwnd = w.CreateWindowExW(0x00000004, L("MultiPromptWorkspaceSwitcher"), L("Workspaces"), w.WS_CHILD | w.WS_CLIPSIBLINGS, anchor.left, top, width, height, app_state.g_main_hwnd, null, null, null);
     if (hwnd == null) return true;
     opened = true;
+    var view_line: [80]u8 = undefined;
+    const view_text = std.fmt.bufPrint(&view_line, "workspace-card views={s}|{s}|{s}", .{
+        workspace_view.viewName(viewSplitAt(0)),
+        workspace_view.viewName(viewSplitAt(1)),
+        workspace_view.viewName(viewSplitAt(2)),
+    }) catch "workspace-card views";
+    @import("diagnostics.zig").debugLog(view_text);
     _ = w.MoveWindow(hwnd, anchor.left, top, width, height, 0);
     _ = focus.SetWindowPos(hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(hwnd);
@@ -369,8 +407,9 @@ fn wndProc(window: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w
             _ = w.EndPaint(window, &ps);
             return 0;
         },
-        w.WM_LBUTTONDOWN => {
-            if (hit(startup.GET_X(lp), startup.GET_Y(lp))) |index| activate(index) else close();
+        w.WM_LBUTTONDOWN, w.WM_LBUTTONDBLCLK => {
+            const pt = clientPoint(startup.GET_X(lp), startup.GET_Y(lp));
+            clickAt(pt.x, pt.y);
             return 0;
         },
         w.WM_MOUSEMOVE => {
