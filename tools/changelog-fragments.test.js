@@ -64,7 +64,7 @@ test('pending fragment tickets stamp from the shared title catalog', async () =>
   };
   const ids = [];
   for (const name of names) {
-    const id = /^([A-Z][A-Z0-9]*-\d+)-/.exec(name)[1];
+    const id = require('./ticket-id.js').fragmentTicketId(`changelog.d/${name}`);
     if (!ids.includes(id)) ids.push(id);
     ticketRecord(id, catalog[id]);
     files[`changelog.d/${name}`] = fs.readFileSync(path.join(root, 'changelog.d', name), 'utf8');
