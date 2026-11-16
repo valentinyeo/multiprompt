@@ -2,7 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+import positionProof from './verify-chat-delivery/chat-open-position.cjs';
+
 const modulePath = new URL('./chat-working-live-proof.mjs', import.meta.url);
+
+test('steady chat observations reject movement, missing counters and short evidence', () => {
+  const row = (tick, paints, layouts, y = -24, message = 42) => `[chat] position ms=2000 shell=9 first=0 message=${message} offset=0 y=${y} scroll=80 height=3000 pad=52 opening=0 paints=${paints} layouts=${layouts} tick=${tick}`;
+  const trace = [row(1000, 5, 2), row(2500, 5, 2), row(4000, 5, 2), row(5500, 5, 2)].join('\n');
+  const result = positionProof.steadyPosition(trace, 1000, 6000);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.sampled_ms, 4500);
+  assert.equal(result.paints, 0);
+  assert.equal(result.layouts, 0);
+  const churn = positionProof.steadyPosition(trace + '\n' + row(5900, 20, 11), 1000, 6000);
+  assert.equal(churn.paints, 15);
+  assert.equal(churn.layouts, 9);
+  assert.equal(positionProof.steadyPosition(trace + '\n' + row(5900, 5, 2, -23), 1000, 6000).status, 'failed');
+  assert.equal(positionProof.steadyPosition(trace + '\n' + row(5900, 5, 2, -24, 43), 1000, 6000).status, 'failed');
+  assert.equal(positionProof.steadyPosition(trace + '\n' + row(7000, 8, 6, 20), 1000, 6000).status, 'passed');
+  assert.throws(() => positionProof.steadyPosition(trace, 1000, 2000), /multi-second observation/);
+  assert.throws(() => positionProof.steadyPosition(row(2500, 5, 2), 1000, 6000), /missing multi-second/);
+  assert.throws(() => positionProof.steadyPosition(trace.replaceAll(/ paints=\d+ layouts=\d+/g, ''), 1000, 6000), /missing multi-second/);
+});
 
 test('hosted working evidence keeps animated dots through reply and two queued messages', async () => {
   assert.ok(fs.existsSync(modulePath), 'Hosted working evidence checker must exist');

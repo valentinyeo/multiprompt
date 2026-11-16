@@ -27,13 +27,32 @@ def install(namespace, root, record):
         except FileExistsError:
             return
         os.close(fd)
-        session = {'turn': 'standin-initial-turn'}
-        try:
-            namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.started')
-            record('working-host.jsonl', stage='initial-turn.started', sid=SID, turn=session['turn'])
-        finally:
-            if session.get('db') is not None:
-                session['db'].close()
+        session = {'turn': 'standin-seed-turn', 'state': {'display_history': True}}
+        namespace['host_state_write']('claude', SID, session['state'])
+        for index in range(50):
+            namespace['host_history_append']('claude', SID, session,
+                dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10))
+        namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended')
+        record('working-host.jsonl', stage='idle-history-ready', sid=SID)
+        if session.get('db') is not None:
+            session['db'].close()
+            del session['db']
+
+        def initial_turn():
+            deadline = time.monotonic() + 60
+            while not (root / 'working-initial-start').exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not (root / 'working-initial-start').exists():
+                return
+            initial = {'turn': 'standin-initial-turn'}
+            try:
+                namespace['host_event']('claude', SID, 'verify-agent', initial, 'turn.started')
+                record('working-host.jsonl', stage='initial-turn.started', sid=SID, turn=initial['turn'])
+            finally:
+                if initial.get('db') is not None:
+                    initial['db'].close()
+
+        threading.Thread(target=initial_turn, daemon=True).start()
 
     def matches(provider, sid):
         return provider == 'claude' and sid == SID
@@ -76,6 +95,16 @@ def install(namespace, root, record):
                 namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
                                         dict(text=text, done=False), 'standin-reply')
                 record('working-host.jsonl', stage='streaming-delta', sid=sid, segment=index)
+            deadline = time.monotonic() + 60
+            while not (root / 'working-steady-stream').exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if (root / 'working-steady-stream').exists():
+                for index in range(8, 16):
+                    text += f' Reading-time stream segment {index}.'
+                    namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
+                                            dict(text=text, done=False), 'standin-reply')
+                    record('working-host.jsonl', stage='reading-stream-delta', sid=sid, segment=index)
+                    time.sleep(0.4)
             if session.get('db') is not None:
                 session['db'].close()
 

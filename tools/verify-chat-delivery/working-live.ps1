@@ -13,7 +13,18 @@ function Get-WorkingTurnPush([string]$turn) {
         }
     }
 }
+$observation.paintWindows = @{}
+[void](Wait-For 'completed server history seeded through the production archive' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "idle-history-ready"' } 30)
+[void](Wait-For 'known server history painted' { (Read-Shared "$settings/debug.log") -match '\[switch\] chat content shown shell=\d+ blocks=[1-9]' } 30)
+$idleReady = [ChatDeliveryDesktop]::GetTickCount64() + 1500
+[void](Wait-For 'server history settled before idle observation' { [ChatDeliveryDesktop]::GetTickCount64() -ge $idleReady } 5)
+$observation.paintWindows.idleStart = [ChatDeliveryDesktop]::GetTickCount64()
+[void](Wait-For 'five seconds of idle server chat' { [ChatDeliveryDesktop]::GetTickCount64() -ge $observation.paintWindows.idleStart + 5000 } 10)
+$observation.paintWindows.idleEnd = [ChatDeliveryDesktop]::GetTickCount64()
+Shot 'working-idle'
+[IO.File]::WriteAllText("$state/working-initial-start", '')
 $initialPush = Wait-For 'initial live turn subscription push' { Get-WorkingTurnPush 'standin-initial-turn' } 30
+[void](Scroll-Transcript -12000)
 $precondition = Wait-For 'initial live turn paints working dots before sending' {
     $bitmap = [Drawing.Bitmap]::new($area.right, $area.bottom)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -51,7 +62,6 @@ function Capture-Working([string]$phase, [int]$index) {
         $frames.Add(@{name=$name; phase=$phase; startMs=$start; endMs=$end; startWallMs=$startWall})
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
-$observation.paintWindows = @{}
 try {
     $observation.paintWindows.busyStart = [ChatDeliveryDesktop]::GetTickCount64()
     for ($i = 0; $clock.ElapsedMilliseconds -lt 4000; $i++) {
@@ -117,8 +127,20 @@ try {
         Capture-Working 'queued' $i
         Start-Sleep -Milliseconds 100
     }
-} finally {
     $observation.paintWindows.queuedEnd = [ChatDeliveryDesktop]::GetTickCount64()
+    [void](Scroll-Transcript 1200)
+    $readingReady = [ChatDeliveryDesktop]::GetTickCount64() + 1000
+    [void](Wait-For 'reader scroll settled before streamed reply' { [ChatDeliveryDesktop]::GetTickCount64() -ge $readingReady } 5)
+    $observation.paintWindows.readingStart = [ChatDeliveryDesktop]::GetTickCount64()
+    [IO.File]::WriteAllText("$state/working-steady-stream", '')
+    $readingClock = [Diagnostics.Stopwatch]::StartNew()
+    for ($i = 0; $readingClock.ElapsedMilliseconds -lt 5000; $i++) {
+        Capture-Working 'reading' $i
+        Start-Sleep -Milliseconds 100
+    }
+    $observation.paintWindows.readingEnd = [ChatDeliveryDesktop]::GetTickCount64()
+    Shot 'working-reading-stream'
+} finally {
     $observation.sendMs = $sendMs
     $observation.frames = $frames.ToArray()
     Save $observation "$caseDir/timing.json"

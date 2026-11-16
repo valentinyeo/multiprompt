@@ -246,6 +246,13 @@
                     $idleTrace = Read-SharedLog $log $idleOffset
                     $idleTrace | Set-Content -Encoding UTF8 (Join-Path $Evidence "$mode-idle-debug.log")
                     Save-Json @{ shell = $shellIds[$current]; start_tick = $idleStart; end_tick = $idleEnd } "$mode-idle-window.json"
+                    if (-not $env:RELEASE_TAG) {
+                        $idleFile = Join-Path $Evidence "$mode-idle-position.json"
+                        & node (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-open-position.cjs') --steady (Join-Path $Evidence "$mode-idle-debug.log") $idleStart $idleEnd $idleFile
+                        if ($LASTEXITCODE -ne 0) { throw 'Idle chat moved; inspect the position samples' }
+                        $idle = Get-Content -LiteralPath $idleFile -Raw | ConvertFrom-Json
+                        if ($idle.layouts -ne 0 -or $idle.paints -gt 1) { throw "Idle chat did unnecessary work: $($idle.layouts) layouts and $($idle.paints) paints" }
+                    }
                     $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
                     $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum
                     $timings[$mode].max_hang_ms = ($timings[$mode].hang_ms | Measure-Object -Maximum).Maximum
