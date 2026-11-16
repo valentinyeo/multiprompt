@@ -147,6 +147,7 @@ jobs:
         id: choose
         env:
           SELECTION: ${{ steps.claude.outputs.structured_output || steps.deepseek-pick.outputs.structured_output }}
+          BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           FEATURES_DIR: .claude/skills/verify-multiprompt/features
         run: node verifier-tools/tools/pr-verifier.cjs select verifier-out
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

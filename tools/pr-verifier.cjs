@@ -21,7 +21,7 @@ function oneLine(value, limit = MAX_LINE) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
-function validateSelection(raw, available) {
+function validateSelection(raw, available, changedPaths = []) {
   let parsed;
   try {
     parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -31,6 +31,10 @@ function validateSelection(raw, available) {
   if (!parsed || typeof parsed !== 'object') throw new Error('Selection must be an object');
   const allowed = new Set(selectable(available));
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
+  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
+    if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
+    requested.unshift('chat-still');
+  }
   const features = [];
   const dropped = [];
   for (const name of requested) {
@@ -587,7 +591,8 @@ async function main(argv, env) {
   if (command === 'prepare') return prepare(env, rest[0]);
   if (command === 'select') {
     const outDir = rest[0];
-    const selection = validateSelection(env.SELECTION, availableFeatures(env));
+    const changedPaths = execFileSync('git', ['diff', '--name-only', `${env.BASE_SHA}...HEAD`], { encoding: 'utf8' }).trim().split('\n');
+    const selection = validateSelection(env.SELECTION, availableFeatures(env), changedPaths);
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
