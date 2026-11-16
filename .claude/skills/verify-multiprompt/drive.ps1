@@ -21,7 +21,7 @@ if ($text -match '(?m)^Journeys: (.+)\r?$') {
 $Evidence = [IO.Path]::GetFullPath($Evidence)
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 if (Test-Path "$Evidence/journey.json") { throw 'Use a fresh evidence folder for each journey' }
-$record = [ordered]@{ feature=$Feature; journey=$Journey; revision=$env:GITHUB_SHA; status='failed'; error=$null }
+$record = [ordered]@{ feature=$Feature; journey=$Journey; revision=(git rev-parse HEAD).Trim(); status='failed'; error=$null }
 $video = $null
 try {
     $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate 8 -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
