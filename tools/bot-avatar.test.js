@@ -89,9 +89,9 @@ test('pinned tile hit testing measures both coordinates, shared with the painted
 const MAX_ROWS = 16;
 const MAX_SESSION_ROWS = 16;
 const SidebarTier = enum {recent, pinned};
-const Kind = enum {section, header, tab, inbox, room_header, room};
+${block(read('src/app_state.zig'), 'const RowKind = enum').replace('RowKind', 'Kind')};
 const Row = struct {kind: Kind = .tab, gidx: u32 = 0, shell_idx: u32 = 0, section_tier: SidebarTier = .recent, y: i32 = 0, x: i32 = 0, width: i32 = 0, tile: bool = false, room_idx: u32 = 0};
-pub const HitTarget = union(enum) {none: void, section: SidebarTier, header: u32, tab: u32, inbox: u32, buttons: void, room_header: void, room: struct { index: u32, generation: u64, id: [36]u8, store_uuid: [36]u8 }};
+${block(read('src/app_state.zig'), 'pub const HitTarget = union(enum)')};
 const app_state = @This();
 var g_sidebar_collapsed = false;
 var g_starred_workspace = false;
@@ -164,6 +164,54 @@ test "tiles wrap and every mouse target remains the painted session" {
   assert.match(block(sidebar, 'fn paintChatSidebarRow('), /agent_second_line\.zig/);
 });
 
+
+test('Rooms rows stay absent for an empty catalog and contain only existing rooms', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rooms-layout-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'room_frontend.zig'), `pub var enabled = true;
+pub var room_count: usize = 0;
+const rooms = [_]u8{0, 1};
+pub fn catalog() []const u8 { return rooms[0..room_count]; }
+`);
+    fs.writeFileSync(path.join(dir, 'rooms.zig'), `const std = @import("std");
+const MAX_ROWS = 4;
+${block(read('src/app_state.zig'), 'const RowKind = enum')};
+const Row = struct { kind: RowKind, gidx: u32, shell_idx: u32, room_idx: u32 = 0, y: i32 };
+fn sectionHeaderHeight() i32 { return 24; }
+fn tabRowH() i32 { return 58; }
+${block(read('src/sidebar.zig'), 'fn appendRoomRows(')}
+test "empty and populated room catalogs determine the visible rows" {
+    const room = @import("room_frontend.zig");
+    var rows: [MAX_ROWS]Row = undefined;
+    var count: u32 = 0;
+    var y: i32 = 20;
+    appendRoomRows(&rows, &count, &y);
+    try std.testing.expectEqual(@as(u32, 0), count);
+    try std.testing.expectEqual(@as(i32, 20), y);
+    for (1..3) |n| {
+        room.room_count = n;
+        count = 0;
+        y = 20;
+        appendRoomRows(&rows, &count, &y);
+        try std.testing.expectEqual(@as(u32, @intCast(n + 1)), count);
+        try std.testing.expectEqual(RowKind.room_header, rows[0].kind);
+        for (rows[1..count], 0..) |row, index| {
+            try std.testing.expectEqual(RowKind.room, row.kind);
+            try std.testing.expectEqual(@as(u32, @intCast(index)), row.room_idx);
+            try std.testing.expectEqual(@as(i32, 44) + @as(i32, @intCast(index)) * 58, row.y);
+        }
+    }
+    room.enabled = false;
+    count = 0;
+    y = 20;
+    appendRoomRows(&rows, &count, &y);
+    try std.testing.expectEqual(@as(u32, 0), count);
+}
+`);
+    const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'rooms.zig')], {encoding: 'utf8', timeout: 120000});
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});
 
 test('robot proof observes accepted palette actions and retries readable state snapshots', () => {
   const main = read('src/main.zig');
