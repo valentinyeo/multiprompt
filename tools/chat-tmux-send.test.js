@@ -48,7 +48,7 @@ var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
 const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
 const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, pi: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0), pub fn provider(self: @This()) []const u8 { return if (self.pi) "pi" else if (self.codex) "codex" else "claude"; } };
-var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1 }{.{}};
+var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0 }{.{}};
 const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;
 var shell_count: u32 = 1;
@@ -167,6 +167,12 @@ test "IGSH-1640 host upgrade captures admission before persistence and never ref
     try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 1), admission_captures);
 }
+test "SOFT-2548 existing terminals send while an unidentified live chat stays queued" {
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.tmux, 0, false, false));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false, false));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true, false));
+}
 test "VPS tmux routing ignores console visibility lock and busy status" {
     reset();
     try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
@@ -262,6 +268,7 @@ test "channel write failure falls back once but a written request or retry never
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
+    fs.copyFileSync('src/chat_view.zig', path.join(dir, 'chat_view.zig'));
     const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "IGSH-1640')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
