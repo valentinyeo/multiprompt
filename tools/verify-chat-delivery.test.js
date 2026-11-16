@@ -6,7 +6,7 @@ assert.equal(typeof readControlSource, 'function', 'Control readers must follow 
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 
 function featureMatrix(source) {
@@ -367,6 +367,18 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
   assert.match(source, /text = "\\r\\n".join\(lines\) \+ "\\r\\n"/);
 });
 
+test('persistent reader evidence requires the supplied bootstrap and a real shared serve channel', () => {
+  const bootstrap = ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'];
+  const supplied = { kind: 'reader', argv: bootstrap };
+  const channel = { kind: 'reader', argv: ['--serve'], channel: 2 };
+  assert.equal(persistentReader([{ kind: 'reader', argv: [...bootstrap, '--serve'] }]), true);
+  assert.equal(persistentReader([supplied, channel]), true);
+  assert.equal(persistentReader([supplied]), false);
+  assert.equal(persistentReader([channel]), false);
+  assert.equal(persistentReader([supplied, { ...channel, channel: 0 }]), false);
+  assert.equal(persistentReader([supplied, { ...channel, argv: ['--watch'] }]), false);
+});
+
 test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux writes without fabricating text', () => {
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
@@ -411,6 +423,7 @@ test('background host probes are explicitly declined and unknown remote commands
   }
   probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
   const unknown = [
+    ['-G', 'unexpected-host'],
     ['-T', 'remote-1', 'uname -a'],
     ['-T', 'remote-1', relayCommand + '; unexpected-operation'],
     ['-T', 'remote-2', ladder + '.unknown'],
@@ -447,6 +460,13 @@ with tempfile.TemporaryDirectory() as directory:
         assert row["case"] == "busy-send" and row["ms"] > 0 and row["pid"] > 0, row
     assert len(rows("declined.jsonl")) == len(fixtures["probes"])
     assert not rows("unsupported.jsonl")
+    for host in ("remote-1", "remote-2", "remote-3"):
+        namespace["ARGS"] = ["-G", host]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert namespace["ssh"]() == 0
+        assert output.getvalue() == "hostname " + host + "\nuser verify\nport 22\n"
+        assert rows("invocations.jsonl")[-1]["argv"] == ["-G", host]
     for argv in fixtures["unknown"]:
         namespace["ARGS"] = argv
         assert namespace["declined_remote"](argv) is None, argv

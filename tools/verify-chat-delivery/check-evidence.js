@@ -41,6 +41,13 @@ const sendSteps = [
 ];
 const agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server';
 
+function persistentReader(invocations) {
+  const bootstrap = 'python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))';
+  return invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === `${bootstrap} --serve`)
+    || (invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === bootstrap)
+      && invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === '--serve' && Number.isSafeInteger(row.channel) && row.channel > 0));
+}
+
 function evaluateDelivery(observation, events) {
   assert.equal(observation.error, null, observation.error || 'driver error');
   assert.ok(names.includes(observation.name));
@@ -189,7 +196,7 @@ function evaluateQueueCase(context) {
   assert.ok(captures.length > 0 && captures.every(row => row.case === name), 'production reader inspected fake tmux input box');
   const invocations = lines(`${stand}/invocations.jsonl`);
   assert.ok(invocations.some(row => row.kind === 'attach' && row.session === 'verify-agent'));
-  assert.ok(invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === "python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline())) --serve"), 'app-supplied persistent reader bootstrap');
+  assert.ok(persistentReader(invocations), 'app-supplied persistent reader bootstrap');
   assert.equal(lines(`${stand}/unsupported.jsonl`).length, 0, 'no silently unsupported boundary operations');
   const doctor = json(`${name}/doctor.json`);
   const build = json('build.json');
@@ -261,7 +268,7 @@ function evaluateEvidence(root) {
       } else assert.ok(captures.every(row => row.screen === ready.screen && row.case === name));
       const invocations = lines(`${name}/stand-in/invocations.jsonl`);
       assert.ok(invocations.some(row => row.kind === 'attach' && row.session === 'verify-agent'));
-      assert.ok(invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === "python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline())) --serve"), 'app-supplied persistent reader bootstrap');
+      assert.ok(persistentReader(invocations), 'app-supplied persistent reader bootstrap');
       assert.equal(lines(`${name}/stand-in/unsupported.jsonl`).length, 0, 'no silently unsupported boundary operations');
       const doctor = json(`${name}/doctor.json`);
       const build = json('build.json');
@@ -317,4 +324,4 @@ if (require.main === module) {
   process.exitCode = result.status === 'passed' ? 0 : 1;
 }
 
-module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence };
+module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, evaluateDelivery, evaluateEvidence };

@@ -1150,9 +1150,8 @@ def reader_namespace():
                     return child
 
             namespace["subprocess"] = WorkerDiagnostics()
-        if state().get("name") == "reactions":
-            install_reaction_tmux(namespace)
         if state().get("name") in ("reactions", "queue-draft-sync", "send-stays-gone"):
+            install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
@@ -1612,6 +1611,10 @@ def watch_reader():
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
+        return 0
+    if len(ARGS) == 2 and ARGS[0] == "-G" and ARGS[1] in ("remote-1", "remote-2", "remote-3"):
+        record("invocations.jsonl", kind="config", argv=ARGS)
+        print("hostname " + ARGS[1] + "\nuser verify\nport 22")
         return 0
     if (ROOT / "connection-held").exists():
         record("connection-waits.jsonl", operation="connect held")
