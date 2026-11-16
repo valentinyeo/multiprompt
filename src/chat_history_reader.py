@@ -201,7 +201,9 @@ def command_reply(command, arguments):
     while index < len(lines) and not lines[index].strip():
         index += 1
     own = "\n".join(lines[index:]).strip()
-    body = command if not own else command + (" " if "\n" not in own else "\n") + own
+    if not own:
+        return (command + " " + arguments).strip()
+    body = command + (" " if "\n" not in own else "\n") + own
     return "\n".join(quote).rstrip() + "\n\n" + body
 
 def quote_skill_key(text):
@@ -8170,7 +8172,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 128
+RUNTIME_GENERATION = 129
 
 if __name__ == '__main__':
     import base64 as _base64
