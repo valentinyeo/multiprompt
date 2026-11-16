@@ -141,11 +141,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else assertBadge(frame, name === 'fallback' ? 2 : 1);
   } else if (process.argv[3] === '--double-click') {
     try {
+      const observation = json('reactions/observation.json');
+      assert.equal(observation.error, null);
       const area = json('reactions/area.json');
       const stages = { before: 'before', added: 'double-click-added', removed: 'double-click-removed', delivered: 'double-click-delivered' };
       const frames = Object.fromEntries(Object.entries(stages).map(([key, stage]) => [key, inspect(readBmp(path.join(root, `reactions-${stage}.bmp`)), area)]));
       const events = fs.readFileSync(path.join(root, 'reactions/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(JSON.parse);
-      assertDoubleClick(frames, events, json('reactions/observation.json'), json('cleanup.json'));
+      assertDoubleClick(frames, events, observation, json('cleanup.json'));
       fs.writeFileSync(path.join(root, 'double-click-proof.json'), JSON.stringify(frames, null, 2));
       fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-double-click', status: 'passed', transportCount: 1, checks: ['double-click-add', 'double-click-remove-without-send', 'removed-after-delivery', 'draft-preserved'], cleanup: 'zero owned processes; scratch removed' }, null, 2));
     } catch (error) {
