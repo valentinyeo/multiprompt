@@ -287,7 +287,7 @@ test('the DeepSeek key reaches the picker and the judge and the engine comes fro
   assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
   assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
-  assert.match(workflow, /name: pstack-verifier report\n    needs: \[tests, resolve, select, head, base\]/);
+  assert.match(workflow, /name: pstack-verifier report\n    needs: \[tests, resolve, select, head, failed-head, base\]/);
 });
 
 for (const problem of ['Evidence lost during cleanup: action.png', 'The journey timed out', 'Harness error: driver crashed', 'Runner queue timeout', 'Job cancelled']) {
@@ -335,7 +335,7 @@ for (const conclusion of ['cancelled', 'timed_out', 'startup_failure', 'action_r
 }
 
 test('job cancellation and missing prerequisites block an otherwise passing verdict', () => {
-  for (const jobs of [{ head: { result: 'cancelled' } }, { select: { result: 'failure' } }, { tests: { result: 'failure' } }]) {
+  for (const jobs of [{ head: { result: 'cancelled' } }, { select: { result: 'failure' } }, { 'failed-head': { result: 'failure' } }, { tests: { result: 'failure' } }]) {
     const result = verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary: { head: {}, base: {} }, selection: selection([]), jobs });
     assert.equal(result.final, 'BLOCKED');
   }
@@ -353,7 +353,7 @@ test('the CLI reports lost selection as BLOCKED with a failing check conclusion'
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-lost-'));
   try {
     const outputFile = path.join(out, 'outputs');
-    execFileSync(process.execPath, [modulePath, 'finalize', path.join(out, 'selection.json'), path.join(out, 'summary.json'), out], { encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputFile, JOB_RESULTS: '{}', VERDICT: '{"verdict":"PASS+NOTES"}', HEAD_SHA: head } });
+    execFileSync(process.execPath, [modulePath, 'finalize', path.join(out, 'selection.json'), path.join(out, 'summary.json'), out], { encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputFile, RUN_ID: '', JUDGE_RESULT: '', JOB_RESULTS: '{}', VERDICT: '{"verdict":"PASS+NOTES"}', HEAD_SHA: head } });
     const output = fs.readFileSync(outputFile, 'utf8');
     assert.match(output, /result=BLOCKED/);
     assert.match(output, /conclusion=failure/);
@@ -476,4 +476,22 @@ test('recovery never grants success or trusts a verdict from an unrelated author
     assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'someone' }, body }]).result, 'BLOCKED');
     if (verdict !== 'FAIL') assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'github-actions[bot]' }, body }]).result, 'BLOCKED');
   }
+});
+
+test('late harness failures cannot reuse a passed journey result as success', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']), jobs: { head: { result: 'failure' } } }).final, 'BLOCKED');
+});
+
+test('job timeouts and cancellations block even when product result files passed', () => {
+  assert.equal(typeof verifier.infrastructureJobs, 'function');
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance'], base);
+  for (const conclusion of ['timed_out', 'cancelled', 'startup_failure', 'action_required']) {
+    const infrastructure = verifier.infrastructureJobs([{ name: 'head appearance / verify', conclusion }]);
+    assert.equal(infrastructure.length, 1);
+    const result = verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']), infrastructure });
+    assert.equal(result.final, 'BLOCKED');
+    assert.match(result.body, new RegExp(conclusion));
+  }
+  assert.deepEqual(verifier.infrastructureJobs([{ conclusion: 'success' }, { conclusion: 'failure' }, { conclusion: 'skipped' }, { conclusion: null }]), []);
 });

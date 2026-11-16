@@ -212,7 +212,7 @@ jobs:
 
   verdict:
     name: pstack-verifier report
-    needs: [tests, resolve, select, head, base]
+    needs: [tests, resolve, select, head, failed-head, base]
     if: always() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -292,7 +292,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
           JOB_RESULTS: ${{ toJSON(needs) }}
+          JUDGE_RESULT: ${{ needs.resolve.outputs.engine == 'deepseek' && steps.deepseek.outcome || steps.claude.outcome }}
           VERDICT: ${{ steps.claude.outputs.structured_output || steps.deepseek.outputs.structured_output }}
           ENGINE: ${{ needs.resolve.outputs.engine }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha || github.event.pull_request.head.sha }}

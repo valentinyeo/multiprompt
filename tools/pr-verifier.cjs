@@ -139,6 +139,11 @@ function journeyRows(summary, compareBase, features = Object.keys(summary.head))
   });
 }
 
+function infrastructureJobs(jobs) {
+  return jobs.filter(job => ['cancelled', 'timed_out', 'startup_failure', 'action_required'].includes(job.conclusion))
+    .map(job => `${oneLine(job.name)} job ${job.conclusion}; verification could not complete.`);
+}
+
 function checkConclusion(verdict) {
   return verdict === 'PASS' || verdict === 'PASS+NOTES' ? 'success' : 'failure';
 }
@@ -200,7 +205,8 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const regressed = failedHead.filter(row => row.head === 'failed' && !row.inherited && (row.base === 'passed' || row.base === 'failed' || !compareBase));
   const blocked = rows.filter(row => row.blocked || (row.head !== 'passed' && !row.inherited && !regressed.includes(row)));
   const prerequisites = Object.entries(jobs).filter(([name, job]) =>
-    (['tests', 'resolve', 'select'].includes(name) && job.result !== 'success') || job.result === 'cancelled');
+    (['tests', 'resolve', 'select', 'failed-head'].includes(name) && job.result !== 'success') || job.result === 'cancelled' ||
+    (['head', 'base'].includes(name) && job.result === 'failure' && !rows.some(row => row[name] === 'failed')));
   if (blocked.length || prerequisites.length || infrastructure.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
@@ -565,6 +571,15 @@ async function main(argv, env) {
       summary = { head: Object.fromEntries(selection.features.map(feature => [feature, []])), base: {} };
     }
     const jobs = JSON.parse(env.JOB_RESULTS || '{}');
+    if (env.JUDGE_RESULT && env.JUDGE_RESULT !== 'success') infrastructure.push(`Judge harness ${oneLine(env.JUDGE_RESULT)}; verification is BLOCKED.`);
+    if (env.RUN_ID) {
+      try {
+        const raw = gh(['api', '--paginate', `repos/${env.REPO}/actions/runs/${env.RUN_ID}/jobs`, '--jq', '.jobs[] | {name,conclusion}']);
+        infrastructure.push(...infrastructureJobs(raw.split('\n').filter(Boolean).map(line => JSON.parse(line))));
+      } catch {
+        infrastructure.push('Could not read verifier job outcomes; verification is BLOCKED.');
+      }
+    }
     if (jobs.tests?.result === 'success') {
       try {
         const gate = testsGate(testsRuns(env, env.HEAD_SHA));
@@ -589,7 +604,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport };
+module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
