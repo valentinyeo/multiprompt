@@ -1,12 +1,18 @@
 $captures = @()
-function Save-SkillPill([string]$Name, [string]$Theme, [IntPtr]$Control, [bool]$Expected) {
+function Save-SkillPill([string]$Name, [string]$Theme, [IntPtr]$Control, [bool]$Expected, [IntPtr]$Composer = [IntPtr]::Zero) {
     Snapshot $Name
     $frame = New-Object VerifyNative+Rect
     $client = New-Object VerifyNative+Rect
     $origin = New-Object VerifyNative+Point
     if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($Control, [ref]$client) -or -not [VerifyNative]::ClientToScreen($Control, [ref]$origin)) { throw 'Skill pill control geometry unavailable' }
     [VerifyNative]::Bmp((Join-Path $Evidence ($Name + '.png')), (Join-Path $Evidence ($Name + '.bmp')))
-    return @{ name = $Name; theme = $Theme; expected = $Expected; rect = @{ left = $origin.X + $client.Left - $frame.Left; top = $origin.Y + $client.Top - $frame.Top; right = $origin.X + $client.Right - $frame.Left; bottom = $origin.Y + $client.Bottom - $frame.Top } }
+    $capture = @{ name = $Name; theme = $Theme; expected = $Expected; rect = @{ left = $origin.X + $client.Left - $frame.Left; top = $origin.Y + $client.Top - $frame.Top; right = $origin.X + $client.Right - $frame.Left; bottom = $origin.Y + $client.Bottom - $frame.Top } }
+    if ($Composer -ne [IntPtr]::Zero) {
+        $composerFrame = New-Object VerifyNative+Rect
+        if ([VerifyNative]::GetAncestor($Composer, 2) -ne $script:window -or -not [VerifyNative]::GetWindowRect($Composer, [ref]$composerFrame)) { throw 'Skill pill composer geometry unavailable' }
+        $capture.composerTop = $composerFrame.Top - $frame.Top
+    }
+    return $capture
 }
 foreach ($theme in @('dark', 'light')) {
     Select-Theme $theme ('skill-theme-' + $theme)
@@ -46,13 +52,13 @@ foreach ($theme in @('dark', 'light')) {
     $captures += Save-SkillPill ($theme + '-plain-draft') $theme $edit $false
     Press @(0x11, 0x0D) 'Ctrl+Enter: send ordinary message'
     Wait-Until { [VerifyNative]::EditText($edit) -ceq '' } 'ordinary message left composer'
-    $captures += Save-SkillPill ($theme + '-plain-sent') $theme $thread $false
+    $captures += Save-SkillPill ($theme + '-plain-sent') $theme $thread $false $edit
     Assert-ChatTyping '/pill-proof arguments stay normal' ($theme + '-skill')
     $captures += Save-SkillPill ($theme + '-skill-draft') $theme $edit $true
     if ($theme -eq 'dark') { Snapshot 'action' }
     Press @(0x11, 0x0D) 'Ctrl+Enter: send known skill message'
     Wait-Until { [VerifyNative]::EditText($edit) -ceq '' } 'known skill message left composer'
-    $captures += Save-SkillPill ($theme + '-skill-sent') $theme $thread $true
+    $captures += Save-SkillPill ($theme + '-skill-sent') $theme $thread $true $edit
 }
 Snapshot 'after'
 Save-Json @{ captures = $captures; boundary = 'A real discovered skill file in the isolated home, native keyboard input and local CMD delivery; no external AI provider or remote skill execution.' } 'skill-pill.json'
