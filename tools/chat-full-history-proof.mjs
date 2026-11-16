@@ -27,6 +27,11 @@ try {
     assert.ok(Number.isInteger(gg.logStart) && gg.logStart > 0);
     const log = fs.readFileSync(path.join(root, 'full-history/debug.log'), 'utf8').replace(/^\uFEFF/, '');
     assert.match(log.slice(gg.logStart), /\[chat\] scroll ui thumb=-?\d+,-?\d+ button=0/);
+    assert.ok(Number.isInteger(gg.paletteLogStart) && gg.paletteLogStart > gg.logStart);
+    assert.match(log.slice(gg.paletteLogStart), /\[palette\] ready chars=22 count=1 target=6465(?:\s|$)/);
+    const paletteImage = fs.readFileSync(path.join(root, `full-history-${stage}-newest-palette.png`));
+    assert.equal(paletteImage.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.ok(paletteImage.length > 10000);
     const actions = json('actions.json');
     assert.ok(actions.some(action => action.input === 'type composer text' && action.text === 'GG'));
     for (const edge of ['before', 'after', 'draft']) {

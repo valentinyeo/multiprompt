@@ -448,7 +448,29 @@ function Assert-FullHistory([string]$Stage) {
         $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0' -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
     })
     Shot "full-history-$Stage-gg-after"
-    Save @{stage=$Stage; existingDraft=$existingDraft; plainDraft=$plainDraft; slowDraft=$slowDraft; finalDraft=[ChatDeliveryDesktop]::Text($composer); logStart=$ggStart; scrolledBefore=$true} "$caseDir/$Stage-gg.json"
+    $paletteScrollStart = Scroll-Transcript 1200
+    [void](Wait-For 'older messages visible before palette jump' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($paletteScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+        $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '1'
+    })
+    Press @(0x11, 0x4B) 'Ctrl+K: jump to newest message'
+    [void](Wait-For 'owned palette ready for newest query' { (Read-Shared "$settings/debug.log").Substring($paletteScrollStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    $query = 'jump to newest message'
+    $actions.Add(@{case=$plan.name; input='type palette query'; text=$query})
+    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+    [void](Wait-For 'Jump to newest message is the selected palette row' {
+        (Read-Shared "$settings/debug.log").Substring($paletteScrollStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6465(?:\s|$)')
+    })
+    Shot "full-history-$Stage-newest-palette"
+    $paletteJumpStart = (Read-Shared "$settings/debug.log").Length
+    Press @(0x0D) 'Enter: jump to newest message'
+    [void](Wait-For 'palette command returns to newest' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($paletteJumpStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+        $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0'
+    })
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Doctor $true
+    Save @{stage=$Stage; existingDraft=$existingDraft; plainDraft=$plainDraft; slowDraft=$slowDraft; finalDraft=[ChatDeliveryDesktop]::Text($composer); logStart=$ggStart; paletteLogStart=$paletteScrollStart; scrolledBefore=$true} "$caseDir/$Stage-gg.json"
     Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
