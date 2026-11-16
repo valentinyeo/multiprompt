@@ -731,7 +731,11 @@ foreach ($plan in $plans) {
             [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
             $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
         } elseif ($isReaction) {
-            . "$PSScriptRoot/reactions.ps1"
+            if ($env:CHAT_REACTION_REPLIES_PROOF -eq '1') {
+                . "$PSScriptRoot/reaction-replies.ps1"
+            } else {
+                . "$PSScriptRoot/reactions.ps1"
+            }
         } elseif ($isSwitch) {
             . "$PSScriptRoot/remote-switch.ps1"
         } elseif ($isLiveDelivery) {
@@ -1514,6 +1518,10 @@ if ($env:CHAT_NOTES_PROOF -eq '1') {
 }
 if ($env:CHAT_HAX_PROOF -eq '1') {
     & node "$PSScriptRoot/../hax-sessions-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_REACTION_REPLIES_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-reaction-replies-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {

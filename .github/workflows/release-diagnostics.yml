@@ -2,7 +2,7 @@ name: Release diagnostics
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 5 * * *'
+    - cron: '48 4 * * *'
 permissions:
   contents: read
 jobs:
