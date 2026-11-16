@@ -2072,6 +2072,35 @@ class HistoryReaderTest(unittest.TestCase):
         _, rows = self.read()
         self.assertEqual([r['text'] for r in rows], ['queued', '/test foo', 'answer'])
 
+    def test_soft_2529_skill_arguments_stay_visible_live_and_after_reload(self):
+        arguments = '> Earlier answer\n>\n> … Check every chat, not just this one.\n> Keep the full paragraph visible.'
+        for command in ('/pstack:correct', '/correct'):
+            for as_blocks in (False, True):
+                with self.subTest(command=command, as_blocks=as_blocks):
+                    self.query.update(cached_sid='', inode=0, offset=0)
+                    self.write(self.event('Earlier answer'))
+                    self.read()
+                    markup = ('<command-message>' + command[1:] + '</command-message>\n'
+                              '<command-name>' + command + '</command-name>\n'
+                              '<command-args>' + arguments + '</command-args>')
+                    content = [dict(type='text', text=markup)] if as_blocks else markup
+                    events = [dict(type='user', uuid='skill-command', timestamp='2026-11-16T14:21:42Z',
+                                   message=dict(role='user', content=content)),
+                              dict(type='user', isMeta=True, message=dict(role='user', content='skill body'))]
+                    with self.path.open('a') as output:
+                        for event in events:
+                            output.write(json.dumps(event) + '\n')
+                    _, live = self.read()
+                    expected = command + ' ' + arguments
+                    self.assertEqual([(row['id'], row['text']) for row in live if row.get('role') == 'user'],
+                                     [('skill-command', expected)])
+                    self.query.update(cached_sid='', inode=0, offset=0)
+                    _, reloaded = self.read()
+                    self.assertEqual([(row['id'], row['text']) for row in reloaded if row.get('role') == 'user'],
+                                     [('skill-command', expected)])
+                    settled = reader.settle_response(dict(self.query, op='settle', texts=[expected], after_ms=0)).splitlines()
+                    self.assertEqual(json.loads(settled[1])['line'], 2)
+
     def test_soft_2423_skill_quote_shows_as_user_bubble(self):
         self.path.write_text((ROOT / 'tools/fixtures/SOFT-2423/skill-quote.jsonl').read_text())
         _, rows = self.read()
