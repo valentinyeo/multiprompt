@@ -177,11 +177,11 @@ test "IGSH-1924 relayout retains position but clamps to the real bottom" {
 }
 `;
 
-function run(scroll, historySource = history) {
+function run(scroll, historySource = history, extra = '', filter = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-anchor-'));
   try {
-    fs.writeFileSync(path.join(dir, 'test.zig'), harness(scroll, historySource));
-    return spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 90000 });
+    fs.writeFileSync(path.join(dir, 'test.zig'), harness(scroll, historySource) + extra);
+    return spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig', ...(filter ? ['--test-filter', filter] : [])], { cwd: dir, encoding: 'utf8', timeout: 90000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -223,4 +223,28 @@ test('IGSH-1924 removing the content clamp recreates empty space', () => {
   const result = run(current, unsafeHistory);
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /holds never leave blank space after content shrinks[^]*?FAIL \(TestExpectedEqual\)/);
+});
+
+const openingPosition = `
+test "SOFT-2557 caught-up first visible row stays still while header measurements settle" {
+  openTab(40);
+  app_state.has_unread = false;
+  app_state.g_chat_content_h = 0;
+  chatRelayoutPreservingScroll(800, 600);
+  const first = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y).?.index;
+  const screen_y = app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y;
+  for ([_]i32{ 48, 82, 20, 60, 20 }) |pad| {
+    app_state.g_chat_top_pad = pad;
+    chatRelayoutPreservingScroll(800, 600);
+    try std.testing.expectEqual(first, chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y).?.index);
+    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
+  }
+}
+`;
+
+test('SOFT-2557 caught-up opening keeps the first visible row through header relayouts', () => {
+  const result = run(current, history, openingPosition, 'SOFT-2557');
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
 });
