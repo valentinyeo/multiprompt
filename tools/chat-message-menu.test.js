@@ -105,7 +105,7 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.match(control, /Press @\(0x1B\) 'Esc: dismiss message menu'/);
   assert.match(control, /\$menuLook = \[VerifyNative\]::MenuLook\(/);
   assert.match(control, /\$menuLook\.cornerShown\) \{ throw/);
-  assert.match(control, /\$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
+  assert.match(control, /\$menuLook\.fill -ne '1F1F1F' -or \$menuLook\.leftEdge -ne '2E2E2E' -or \$menuLook\.rightEdge -ne '2E2E2E'\) \{ throw/);
   assert.match(control, /class -eq 'MultiPromptMessageMenu' -and \$_.visible \}\).Count -eq 0/);
   for (const name of ['message-menu', 'grey-buttons']) assert.ok(control.includes(`name = '${name}'; passed = $false; reason = 'not reached'`));
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);

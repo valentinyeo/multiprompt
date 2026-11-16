@@ -292,7 +292,7 @@
                                 $menuCheck.look = $menuLook
                                 Snapshot 'message-menu'
                                 if ($menuLook.cornerShown) { throw 'IGSH-892: message menu corner is still drawn, so the menu is square' }
-                                if ($menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
+                                if ($menuLook.fill -ne '1F1F1F' -or $menuLook.leftEdge -ne '2E2E2E' -or $menuLook.rightEdge -ne '2E2E2E') { throw ('IGSH-1019: message menu differs from the approved style: fill ' + $menuLook.fill + ', edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge) }
                                 Press @(0x1B) 'Esc: dismiss message menu'
                                 Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
                                 $menuCheck.passed = $true
