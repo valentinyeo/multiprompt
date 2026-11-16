@@ -95,6 +95,18 @@ test('SOFT-2489 pending release note resolves from the committed catalog', async
   });
 });
 
+test('SOFT-2485 pending release note resolves from the committed catalog', async () => {
+  const { stampTree } = await import('./version-stamp.mjs');
+  assert.doesNotThrow(() => {
+    const stamp = stampTree({
+      'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
+      'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
+      'changelog.d/SOFT-2485-release.md': 'Rooms appear in the sidebar only when a room exists.\n',
+    });
+    assert.deepEqual(stamp.tickets, ['IGSH-2485']);
+  });
+});
+
 test('SOFT fragments pass checks and release stamps resolve the canonical ticket title', async () => {
   await assert.doesNotReject(async () => {
     const { checkFragments, stampTree, buildChangelog } = await import('./version-stamp.mjs');

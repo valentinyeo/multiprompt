@@ -2197,11 +2197,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = InvalidateRect(hwnd, null, 0);
                         return 0;
                     },
-                    .room_new => {
-                        @import("room_frontend.zig").openCreate();
-                        _ = InvalidateRect(hwnd, null, 0);
-                        return 0;
-                    },
                     .room_header => return 0,
                     .inbox => |ri| {
                         if (@import("room_frontend.zig").isActive()) @import("inbox.zig").jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
@@ -2460,7 +2455,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {
                 const hit = hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll);
-                break :blk if (hit == .room or hit == .room_new) hit else null;
+                break :blk if (hit == .room) hit else null;
             } else null;
             if (!std.meta.eql(room_hover, app_state.g_room_hover)) {
                 app_state.g_room_hover = room_hover;
