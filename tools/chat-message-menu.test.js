@@ -106,7 +106,7 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.match(control, /\$menuLook = \[VerifyNative\]::MenuLook\(/);
   assert.match(control, /\$menuLook\.cornerShown\) \{ throw/);
   assert.match(control, /\$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
-  assert.match(control, /class -eq '#32768' -and \$_.visible \}\).Count -eq 0/);
+  assert.match(control, /class -eq 'MultiPromptMessageMenu' -and \$_.visible \}\).Count -eq 0/);
   for (const name of ['message-menu', 'grey-buttons']) assert.ok(control.includes(`name = '${name}'; passed = $false; reason = 'not reached'`));
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);
   assert.match(control, /Math.Max\(c.R, Math.Max\(c.G, c.B\)\) - Math.Min\(c.R, Math.Min\(c.G, c.B\)\) > 12 \|\| c.ToArgb\(\) == bg.ToArgb\(\)/);

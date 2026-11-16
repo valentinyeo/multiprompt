@@ -286,15 +286,15 @@
                                 $menuLines = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] message menu items=' })
                                 if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
                                 $menuCheck.items = 'Reply,Copy'
-                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
-                                $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
+                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
+                                $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible })[0]
                                 $menuLook = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menuWindow.handle))
                                 $menuCheck.look = $menuLook
                                 Snapshot 'message-menu'
                                 if ($menuLook.cornerShown) { throw 'IGSH-892: message menu corner is still drawn, so the menu is square' }
                                 if ($menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
                                 Press @(0x1B) 'Esc: dismiss message menu'
-                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
+                                Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq 'MultiPromptMessageMenu' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
                                 $menuCheck.passed = $true
                                 $menuCheck.reason = ''
                             } catch {
