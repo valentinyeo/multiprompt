@@ -3663,9 +3663,6 @@ pub const VoiceFrame = struct {
 
 pub const ISSUE_265_WORKING_BAR = true;
 pub var g_chat_working_timer_running: bool = false;
-pub var g_chat_working_hold_until: u64 = 0;
-pub var g_chat_working_hold_shell: usize = 0;
-pub var g_chat_working_was_shown: bool = false;
 
 pub const CHAT_WORKING_GENERIC = [_]u16{ 'W', 'o', 'r', 'k', 'i', 'n', 'g', 0x2026 };
 
