@@ -33,6 +33,44 @@ test('only missing titles are fetched and invalid responses fail closed', async 
   await assert.rejects(resolveTicketTitles(['IGSH-1'], { 'IGSH-1': '' }, '', request), /title/);
 });
 
+test('SOFT inputs reuse canonical catalog entries and fetch each ticket once', async () => {
+  const { ticketRecord, ticketTitleFile, resolveTicketTitles } = await load();
+  assert.deepEqual(ticketRecord('SOFT-2489', 'Saved chats'), { id: 'IGSH-2489', title: 'Saved chats' });
+  assert.equal(ticketTitleFile('SOFT-2489'), 'IGSH-2489.txt');
+  assert.deepEqual(await resolveTicketTitles(['SOFT-2489'], { 'IGSH-2489': 'Saved chats' }), { 'IGSH-2489': 'Saved chats' });
+  assert.deepEqual(await resolveTicketTitles(['IGSH-2489'], { 'SOFT-2489': 'Saved chats' }), { 'IGSH-2489': 'Saved chats' });
+  let calls = 0;
+  const request = async () => {
+    calls++;
+    return { ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-2489', uniqueIndex: 2489, title: 'Saved chats' }] }) };
+  };
+  assert.deepEqual(await resolveTicketTitles(['SOFT-2489', 'IGSH-2489'], {}, 'token', request), { 'IGSH-2489': 'Saved chats' });
+  assert.equal(calls, 1);
+  for (const task of [
+    { boardId: 11514, ticketNumber: 'SOFT-2489' },
+    { boardId: 2060, ticketNumber: 'HYCI-2489' },
+    { boardId: 2060, ticketNumber: 'SOFT-2488' },
+    { boardId: 2060, ticketNumber: 'SOFT-2489', uniqueIndex: 2488 },
+  ]) {
+    await assert.rejects(resolveTicketTitles(['SOFT-2489'], {}, 'token', async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ title: 'Wrong ticket', ...task }] }) })), /Unresolved title for IGSH-2489/);
+  }
+});
+
+test('SOFT title files load under the canonical ID and conflicting aliases fail', async t => {
+  const { loadTicketTitles } = await load();
+  const os = require('node:os');
+  const { pathToFileURL } = require('node:url');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ticket-titles-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const url = pathToFileURL(`${dir}${path.sep}`);
+  fs.writeFileSync(path.join(dir, 'SOFT-2489.txt'), 'Saved chats\n');
+  assert.deepEqual(loadTicketTitles(url), { 'IGSH-2489': 'Saved chats' });
+  fs.writeFileSync(path.join(dir, 'IGSH-2489.txt'), 'Saved chats\n');
+  assert.deepEqual(loadTicketTitles(url), { 'IGSH-2489': 'Saved chats' });
+  fs.writeFileSync(path.join(dir, 'IGSH-2489.txt'), 'Different title\n');
+  assert.throws(() => loadTicketTitles(url), /Conflicting titles for IGSH-2489/);
+});
+
 test('a board 2060 ticket renumbered to SOFT still resolves under its IGSH id', async () => {
   const { resolveTicketTitles } = await load();
   const request = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-1920', title: 'Renamed board title' }] }) });

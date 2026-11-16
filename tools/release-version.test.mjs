@@ -30,7 +30,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh'];
+  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'ticket-id.js', 'auto-release-admit.sh'];
   if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs');
   for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   assert.ok(fs.existsSync(path.join(root, 'tools/ticket-titles')), 'title catalog folder exists');
@@ -502,7 +502,7 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
   fs.mkdirSync(path.join(f.dir, 'changelog.d'));
-  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/IGSH-1-chat.md'), 'Your chats keep their saved order.\n');
   f.git('add', 'changelog.d');
   f.git('commit', '-m', 'tested improvement');
   const tested = f.git('rev-parse', 'HEAD');
@@ -536,7 +536,7 @@ for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${r
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
   fs.mkdirSync(path.join(f.dir, 'changelog.d'));
-  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/IGSH-1-chat.md'), 'Your chats keep their saved order.\n');
   f.git('add', 'changelog.d');
   f.git('commit', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
   const tested = f.git('rev-parse', 'HEAD');

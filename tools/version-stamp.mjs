@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tokenize } from './strip-comments.mjs';
 import { ticketRecord, ticketLine, resolveTicketTitles, loadTicketTitles } from './ticket-titles.mjs';
+import { canonicalTicketId, fragmentTicketId } from './ticket-id.js';
 const titleCatalog = loadTicketTitles();
 
 const reviewedReleases = {
@@ -42,8 +43,6 @@ const reviewedCommits = {
   '303734dbef8add073075166d2ea8e0d4a091646c': ['IGSH-1544', 'IGSH-1545', 'IGSH-1546'],
 };
 
-const releaseTicket = /^(?:IGSH|HYCI)-\d+$/;
-
 const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
 const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
@@ -63,7 +62,7 @@ export function productChange(line) {
 }
 
 export function fragmentLines(file, text) {
-  if (!/^changelog\.d\/[A-Z][A-Z0-9]*-\d+-[^/]+\.md$/.test(file)) throw new Error(`Bad fragment filename: ${file}`);
+  fragmentTicketId(file);
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (!lines.length) throw new Error(`Fragment has no text: ${file}`);
   if (lines.some(line => !plainChange(line))) throw new Error(`${file}: write plain product lines without ticket ids, file names, paths or PR numbers`);
@@ -116,13 +115,12 @@ export function stampTree(files, requestedVersion, titles = titleCatalog) {
   const bullets = [];
   const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
   for (const file of removed) {
-    const match = /^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-([^/]+)\.md$/.exec(file);
-    if (!match) throw new Error(`Bad fragment filename: ${file}`);
     fragmentLines(file, files[file]);
-    if (!tickets.includes(match[1])) {
-      tickets.push(match[1]);
-      const text = ticketLine(ticketRecord(match[1], titles[match[1]]));
-      bullets.push(`        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`);
+    const ticket = fragmentTicketId(file);
+    if (!tickets.includes(ticket)) {
+      tickets.push(ticket);
+      const text = ticketLine(ticketRecord(ticket, titles[ticket]));
+      bullets.push(`        .{ .text = "${escape(text)}", .ticket = "${ticket}" },`);
     }
   }
   if (!bullets.length) throw new Error('No unpublished product changes; wait for the next useful update');
@@ -167,8 +165,7 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
       const tickets = new Set();
       for (const [file, text] of Object.entries(fragments).sort(([a], [b]) => a.localeCompare(b))) {
         fragmentLines(file, text);
-        const ticket = /^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-/.exec(file)[1];
-        if (!releaseTicket.test(ticket)) throw new Error(`${stepTag}: invalid ticket ID ${ticket}`);
+        const ticket = fragmentTicketId(file);
         tickets.add(ticket);
       }
       if (!tickets.size && current) throw new Error('No unpublished product changes; wait for the next useful update');
@@ -185,21 +182,18 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
         const lead = /^([A-Z][A-Z0-9]*-\d+(?:,\s*[A-Z][A-Z0-9]*-\d+)*)(?::|,|\s)/.exec(commit.subject)?.[1];
         const tickets = reviewedCommits[commit.sha] ? [reviewedCommits[commit.sha]].flat() : (lead?.split(/,\s*/) || []);
         if (!tickets.length) throw new Error(`${stepTag}: commit ${commit.sha} lacks a leading ticket ID; add reviewed attribution before releasing`);
-        for (const ticket of tickets.map(id => id.replace(/^SOFT-/, 'IGSH-'))) {
+        for (const ticket of tickets.map(canonicalTicketId)) {
           if (!notes.has(ticket)) notes.set(ticket, null);
         }
       }
     }
     for (const [file, text] of Object.entries(fragments).sort(([a], [b]) => a.localeCompare(b))) {
       fragmentLines(file, text);
-      const ticket = /^changelog\.d\/([A-Z][A-Z0-9]*-\d+)-/.exec(file)[1];
+      const ticket = fragmentTicketId(file);
       if (!reviewed && !notes.has(ticket)) throw new Error(`${stepTag}: ${ticket} fragment has no matching commit ticket`);
       if (!notes.has(ticket)) notes.set(ticket, null);
     }
     if (!notes.size) throw new Error(`${stepTag}: no ticketed release lines; add a ticketed commit before releasing`);
-    for (const ticket of notes.keys()) {
-      if (!releaseTicket.test(ticket)) throw new Error(`${stepTag}: invalid ticket ID ${ticket}`);
-    }
     if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
     const escape = text => text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\t', '\\t');
     const bullets = [...notes.keys()].map(ticket => `        .{ .text = "", .ticket = "${escape(ticket)}" },`);
@@ -217,12 +211,13 @@ function buildUnresolvedChangelog(files, tag, history = [], commits = []) {
 
 
 export function changelogTicketIds(source) {
-  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => match[1]).filter(Boolean))];
+  return [...new Set([...source.matchAll(/\.text\s*=\s*"(?:\\.|[^"\\])*",\s*\.ticket\s*=\s*"([^"\\]*)"/g)].map(match => match[1]).filter(Boolean).map(canonicalTicketId))];
 }
 
 export function applyTicketTitles(source, titles) {
   return source.replace(/^[ \t]*\.\{ \.text = "(?:\\.|[^"\\])*", \.ticket = "([^"\\]*)" \},\r?\n/gm, (row, id) => {
     if (!id) throw new Error('Unidentified changelog row; remove pre-ticket legacy rows before release');
+    id = canonicalTicketId(id);
     const line = ticketLine(ticketRecord(id, titles[id]));
     const literal = JSON.stringify(line).replace(/\\u([0-9a-f]{4})/gi, (_, hex) => `\\u{${hex}}`);
     return `        .{ .text = ${literal}, .ticket = "${id}" },\n`;

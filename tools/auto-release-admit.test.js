@@ -31,7 +31,7 @@ function fixture(t) {
   git('config', 'tag.gpgsign', 'false');
   git('config', 'core.autocrlf', 'false');
   fs.mkdirSync(path.join(dir, 'tools'));
-  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs'];
+  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'ticket-id.js'];
   if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs');
   for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   assert.ok(fs.existsSync(path.join(root, 'tools/ticket-titles')), 'title catalog folder exists');
@@ -44,7 +44,7 @@ function fixture(t) {
   const commit = (message, note = 'Your chats keep their saved order.') => {
     if (note) {
       fs.mkdirSync(path.join(dir, 'changelog.d'), { recursive: true });
-      fs.writeFileSync(path.join(dir, `changelog.d/DEMO-${++sequence}-chat.md`), note);
+      fs.writeFileSync(path.join(dir, `changelog.d/IGSH-${++sequence}-chat.md`), note);
       git('add', 'changelog.d');
     }
     git('commit', '--allow-empty', '-m', message);
