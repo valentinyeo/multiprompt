@@ -368,6 +368,7 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
 });
 
 test('persistent reader evidence requires the supplied bootstrap and a real shared serve channel', () => {
+  assert.equal(typeof persistentReader, 'function', 'shared channel provenance is checked');
   const bootstrap = ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'];
   const supplied = { kind: 'reader', argv: bootstrap };
   const channel = { kind: 'reader', argv: ['--serve'], channel: 2 };
