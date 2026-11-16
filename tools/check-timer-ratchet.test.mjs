@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 const checker = fileURLToPath(new URL('./check-timer-ratchet.mjs', import.meta.url));
 
 function fixture(t, sources, baseline) {
+  assert.ok(fs.existsSync(checker), 'The timer ratchet CLI must exist to block new wait-based quick fixes.');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'timer-ratchet-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
