@@ -85,13 +85,14 @@
             try {
                 Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $sessionCount -and @($state.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq $sessionCount } 'five seeded remote sessions restored'
                 $gapCase.phase = 'idle-close-fixture'
-                Focus-Palette 'browser auto suspend' 6240
-                Press @(0x0D) 'Enter: disable timed browser closing while measuring'
+                Invoke-JourneyCommand 'Browser: Auto-Suspend Idle Panes' -Confirm {
+                    Press @(0x0D) 'Enter: disable timed browser closing while measuring'
+                }
                 Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
                 $gapCase.phase = 'manual-tab-order'
-                Focus-Palette 'tab order' 6217
-                Press @(0x28) 'Down: Tab Order Manual'
-                Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
+                Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+                    Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
+                }
                 Wait-Until {
                     $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
                     if (-not (Test-Path $path)) { return $false }

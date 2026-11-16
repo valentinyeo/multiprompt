@@ -1,8 +1,8 @@
 
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard creation' 60
-            Focus-Palette 'tab order' 6217
-            Press @(0x28) 'Down: Tab Order Manual'
-            Press @(0x0D) 'Enter: keep creation order before grouping restore sessions'
+            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+                Press @(0x0D) 'Enter: keep creation order before grouping restore sessions'
+            }
             $before = (Read-Session).workspace_count
             Press @(0x11, 0x4E) 'Ctrl+N: create a different workspace with its first CMD session'
             Wait-Until { $script:createdSession = Read-Session; $null -ne $script:createdSession -and $script:createdSession.workspace_count -eq $before + 1 } 'new workspace persisted'
@@ -13,8 +13,9 @@
             for ($i = 0; $i -lt $names.Count; $i++) {
                 if ($i -gt 0) {
                     $tabsBefore = @((Read-Session).tabs).Count
-                    Focus-Palette 'new cmd' 2000
-                    Press @(0x0D) 'Enter: New CMD shell for restore'
+                    Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                        Press @(0x0D) 'Enter: New CMD shell for restore'
+                    }
                     Wait-Until { @((Read-Session).tabs).Count -eq $tabsBefore + 1 } 'new local CMD session saved'
                 }
                 Press @(0x71) 'F2: name the restore session'
@@ -23,8 +24,9 @@
                 Press @(0x0D) 'Enter: save restore session name'
                 Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq $names[$i] -and $_.kind -ceq 'cmd' }).Count -eq 1 } 'unique local CMD name persisted'
                 if ($i -lt 2) {
-                    Focus-Palette 'move to group' 6301
-                    Press @(0x0D) 'Enter: Move to Group submenu for the active restore session'
+                    Invoke-JourneyCommand 'Move to Group' -Confirm {
+                        Press @(0x0D) 'Enter: Move to Group submenu for the active restore session'
+                    }
                     $groupQuery = if ($i -eq 0) { 'new group' } else { 'Group 1' }
                     $groupTarget = if ($i -eq 0) { 6303 } else { 6320 }
                     Type-Text $groupQuery
@@ -45,14 +47,16 @@
             $middleIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
             if ($middleIndex -lt 0) { throw 'Middle session missing from saved tabs' }
-            Focus-Palette 'Restore middle' $middleIndex
-            Press @(0x0D) 'Enter: select the middle session by name'
+            Invoke-JourneyCommand 'Restore middle' -Session -Confirm {
+                Press @(0x0D) 'Enter: select the middle session by name'
+            }
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId
             Press @(0x12, 0x53) 'Alt+S: favorite the middle restore session'
             Wait-Until { @((Read-Session).tabs | Where-Object { $_.name -ceq 'Restore middle' -and $_.favorite -eq $true }).Count -eq 1 } 'middle favorite persisted'
             Press @(0x12, 0x31) 'Alt+1: open the Starred workspace'
-            Focus-Palette 'Restore middle' $middleIndex
-            Press @(0x0D) 'Enter: select the favorite in Starred'
+            Invoke-JourneyCommand 'Restore middle' -Session -Confirm {
+                Press @(0x0D) 'Enter: select the favorite in Starred'
+            }
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
             Snapshot 'action'
             Press @(0x12, 0x32) 'Alt+2: open workspace A before updater restart'
@@ -63,8 +67,9 @@
                     $saved.active_workspace -eq 0 -and $state.starred_view -eq $false -and $saved.starred_view -eq $false
             } 'workspace A active before updater Starred selection'
             Press @(0x12, 0x31) 'Alt+1: open Starred from workspace A before updater restart'
-            Focus-Palette 'Restore middle' $middleIndex
-            Press @(0x0D) 'Enter: select the workspace B favorite by name before updater restart'
+            Invoke-JourneyCommand 'Restore middle' -Session -Confirm {
+                Press @(0x0D) 'Enter: select the workspace B favorite by name before updater restart'
+            }
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
             Prepare-SessionRestoreGroupOrder 'update-restart'
             Snapshot 'update-restart-action'
@@ -98,8 +103,9 @@
             $middleIndex = -1
             for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
             if ($middleIndex -lt 0) { throw 'Favorite session missing after normal close' }
-            Focus-Palette 'Restore middle' $middleIndex
-            Press @(0x0D) 'Enter: select the same favorite in its home workspace'
+            Invoke-JourneyCommand 'Restore middle' -Session -Confirm {
+                Press @(0x0D) 'Enter: select the same favorite in its home workspace'
+            }
             Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $false
             Snapshot 'favorite-home-action'
             Restart-SessionRestore 'favorite-home-kill' $true
@@ -117,8 +123,9 @@
                 Doctor
                 [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
             } 'favorite-home-kill hook-ready owned foreground before palette input'
-            Focus-Palette 'Restore first' $firstIndex
-            Press @(0x0D) 'Enter: select a different named session before the kill'
+            Invoke-JourneyCommand 'Restore first' -Session -Confirm {
+                Press @(0x0D) 'Enter: select a different named session before the kill'
+            }
             Assert-SessionRestoreSelection 'Restore first' $workspace $workspaceId
             Snapshot 'kill-action'
             Restart-SessionRestore 'process-kill' $true
@@ -143,8 +150,9 @@
                 $middleIndex = -1
                 for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq 'Restore middle') { $middleIndex = $i } }
                 if ($middleIndex -lt 0) { throw 'Cross-workspace favorite missing from saved tabs' }
-                Focus-Palette 'Restore middle' $middleIndex
-                Press @(0x0D) 'Enter: select the workspace B favorite by name in Starred'
+                Invoke-JourneyCommand 'Restore middle' -Session -Confirm {
+                    Press @(0x0D) 'Enter: select the workspace B favorite by name in Starred'
+                }
                 Assert-SessionRestoreSelection 'Restore middle' $workspace $workspaceId $true
                 Prepare-SessionRestoreGroupOrder $stage
                 Restart-SessionRestore $stage ($stage -eq 'favorite-cross-workspace-kill')

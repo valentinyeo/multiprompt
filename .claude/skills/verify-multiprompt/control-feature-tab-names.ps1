@@ -30,17 +30,18 @@
             }
             Assert-TabNamesHold 'names-launch' $expected
             $result.checks += @{ name = 'names-launch'; names = $expected; samples = $script:holdSamples; settledSeconds = 45 }
-            Focus-Palette 'tab order' 6217
-            Press @(0x28) 'Down: Tab Order Manual'
-            Press @(0x0D) 'Enter: keep the seeded order'
+            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+                Press @(0x0D) 'Enter: keep the seeded order'
+            }
             Wait-Until {
                 $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
                 if (-not (Test-Path $path)) { return $false }
                 $launch = Get-Content $path -Raw | ConvertFrom-Json
                 $launch.PSObject.Properties['sort_auto'] -and -not $launch.sort_auto
             } 'manual tab order saved before reordering'
-            Focus-Palette $seedNames[2] 2
-            Press @(0x0D) 'Enter: select the last seeded tab by name'
+            Invoke-JourneyCommand $seedNames[2] -Session -Confirm {
+                Press @(0x0D) 'Enter: select the last seeded tab by name'
+            }
             Wait-Until { $saved = Read-Session; $null -ne $saved -and $saved.active_tab -eq 2 -and $saved.tabs[2].name -ceq $seedNames[2] } 'last seeded tab selected'
             Press @(0x11, 0x10, 0x26) 'Ctrl+Shift+Up: move the last tab above the middle one'
             $custom = @($seedNames[0], $seedNames[2], $seedNames[1])

@@ -4,25 +4,27 @@
 
             Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             Select-Theme 'dark' 'group-rail-dark'
-            Focus-Palette 'tab order' 6217
-            Press @(0x28) 'Down: Tab Order Manual'
-            Press @(0x0D) 'Enter: keep stable manual sidebar order'
+            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+                Press @(0x0D) 'Enter: keep stable manual sidebar order'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.active_workspace -eq 0 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD session'
             Press @(0x71) 'F2: rename first session'
             Press @(0x11, 0x41) 'Ctrl+A: replace first session name'
             Type-Text 'Rail A'
             Press @(0x0D) 'Enter: save first session name'
             Wait-Until { (Read-Session).tabs[0].name -eq 'Rail A' } 'short synthetic first name saved'
-            Palette 'new cmd'
-            Press @(0x0D) 'Enter: create second CMD session'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Press @(0x0D) 'Enter: create second CMD session'
+            }
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD session saved and selected'
             Press @(0x71) 'F2: rename second session'
             Press @(0x11, 0x41) 'Ctrl+A: replace second session name'
             Type-Text 'Rail B'
             Press @(0x0D) 'Enter: save second session name'
             Wait-Until { (Read-Session).tabs[1].name -eq 'Rail B' } 'short synthetic second name saved'
-            Focus-Palette 'move to group' 6301
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text 'new group'
             Snapshot 'action'
             Press @(0x0D) 'Enter: create group for second session'
@@ -31,14 +33,16 @@
             $group = (Read-Session).groups[0]
             Press @(0x11, 0x31) 'Ctrl+1: select the original session in manual order'
             Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
-            Focus-Palette 'move to group' 6301
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text $group.name
             Press @(0x0D) 'Enter: move first session into same group'
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.tabs[0].group_id -eq $group.id -and $state.tabs[1].group_id -eq $group.id -and $state.active_tab -eq 0 } 'two real sessions saved in one group'
             foreach ($index in @(2, 3, 4, 5)) {
-                Palette 'new cmd'
-                Press @(0x0D) ('Enter: create CMD session ' + ($index + 1))
+                Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                    Press @(0x0D) ('Enter: create CMD session ' + ($index + 1))
+                }
                 Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($index + 1) -and $state.active_tab -eq $index } 'new CMD session saved and selected'
                 Press @(0x71) 'F2: rename session'
                 Press @(0x11, 0x41) 'Ctrl+A: replace session name'
@@ -49,8 +53,9 @@
             }
             Press @(0x11, 0x33) 'Ctrl+3: select third session for second group'
             Wait-Until { (Read-Session).active_tab -eq 2 } 'third session selected'
-            Focus-Palette 'move to group' 6301
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text 'new group'
             Press @(0x0D) 'Enter: create adjacent second group'
             Wait-Until { $state = Read-Session; @($state.groups).Count -eq 2 -and $state.tabs[2].group_id -eq $state.groups[1].id } 'third session in second saved group'
@@ -58,8 +63,9 @@
             $secondGroup = (Read-Session).groups[1]
             Press @(0x11, 0x34) 'Ctrl+4: select fourth session'
             Wait-Until { (Read-Session).active_tab -eq 3 } 'fourth session selected'
-            Focus-Palette 'move to group' 6301
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text $secondGroup.name
             Press @(0x0D) 'Enter: move fourth session into second group'
             Wait-Until {
