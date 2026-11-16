@@ -42,6 +42,10 @@ jobs:
           BASE: ${{ github.event.before || '' }}
           HEAD: ${{ github.sha }}
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
+      - name: Test the timer ratchet
+        run: node --test tools/check-timer-ratchet.test.mjs
+      - name: Block new timer and sleep quick fixes
+        run: node tools/check-timer-ratchet.mjs
       - name: Run the complete chat reader suite
         run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
       - name: Verify shared reader engine startup
