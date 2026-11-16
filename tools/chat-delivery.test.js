@@ -20,7 +20,6 @@ const prelude = `
 const std = @import("std");
 const launch_cache = struct { var pending = false; var tabs_restored = true; };
 fn chatCancelFinish() void {}
-fn chatRestartAi(_: u32) bool { return true; }
 fn chatLivePlanReply(_: []const u16) bool { return false; }
 var test_settings_pending = false;
 fn chatSettingsPending(_: u32) bool { return test_settings_pending; }
@@ -56,7 +55,7 @@ const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 const ChatPendingReset = struct { key: chat_transcript.Identity = .{}, nonce: u64 = 0, request_nonce: u64 = 0, unconfirmed: u8 = 0 };
 var g_chat_pending_reset: ?ChatPendingReset = null;
 var g_chat_reset_next: u64 = 0;
-const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{}, ai_stopped: bool = false, ai_restart_tick: u64 = 0 };
+const Shell = struct { tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
 const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
 const send_latency = struct {
@@ -150,10 +149,6 @@ const ChatTmuxSendJob = struct {
     written: bool = true,
     rejected: bool = false,
     box_not_clear: bool = false,
-    clear_chat: bool = false,
-    needs_restart: bool = false,
-    clear_notice: [96]u8 = @splat(0),
-    clear_notice_len: u8 = 0,
     finished: std.atomic.Value(bool) = .init(false),
 };
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
@@ -2092,9 +2087,6 @@ const sourceOutboxTests = ['IGSH-1831 load drops old confirmed echoes across cha
 }).join('\n');
 test('IGSH-1811 a sent mention keeps the live session for the bot', () => {
   assert.match(body('sendChatPrompt'), /chat_mention\.zig"\)\.apply/);
-});
-test('SOFT-2420 a finished clear clears a stale stopped badge', () => {
-  assert.match(body('chatTmuxSendFinish'), /ai_stopped = false/);
 });
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-'));
