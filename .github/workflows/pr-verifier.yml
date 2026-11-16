@@ -15,14 +15,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ inputs.pr || github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   tests:
+    needs: resolve
     if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 80
+    outputs:
+      result: ${{ steps.tests.outputs.result }}
     permissions:
       contents: read
       actions: read
@@ -35,16 +38,16 @@ jobs:
         with:
           node-version: 22
       - name: Wait until Tests passes for this head
+        id: tests
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr || github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
         run: node tools/pr-verifier.cjs wait-for-tests
 
   resolve:
-    needs: tests
-    if: needs.tests.result == 'success' && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -73,8 +76,8 @@ jobs:
         run: node tools/pr-verifier.cjs resolve
 
   select:
-    needs: resolve
-    if: needs.resolve.outputs.eligible == 'true'
+    needs: [resolve, tests]
+    if: needs.resolve.outputs.eligible == 'true' && needs.tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -195,7 +198,7 @@ jobs:
 
   base:
     needs: [resolve, failed-head]
-    if: needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''
+    if: always() && !cancelled() && needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''
     name: base ${{ matrix.feature }}
     strategy:
       fail-fast: false
@@ -208,9 +211,12 @@ jobs:
       app_revision: ${{ needs.resolve.outputs.base_sha }}
 
   verdict:
-    name: pstack-verifier
-    needs: [resolve, select, head, base]
-    if: always() && needs.select.result == 'success'
+    name: pstack-verifier report
+    concurrency:
+      group: pstack-verdict-${{ format('verify PR {0}', inputs.pr || github.event.pull_request.number) }}
+      cancel-in-progress: false
+    needs: [tests, resolve, select, head, failed-head, base]
+    if: always() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -221,7 +227,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ needs.resolve.outputs.head_sha }}
+          ref: ${{ needs.resolve.outputs.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -232,10 +238,14 @@ jobs:
         with:
           node-version: 22
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        id: selection
+        continue-on-error: true
         with:
           name: pr-verifier-selection
           path: verifier-out
       - name: Download the journey evidence
+        id: evidence
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -245,14 +255,15 @@ jobs:
           node verifier-tools/tools/pr-verifier.cjs summarize evidence verifier-out/selection.json ${{ needs.resolve.outputs.base_sha }} verifier-out
       - name: Judge the evidence with DeepSeek
         id: deepseek
-        if: needs.resolve.outputs.engine == 'deepseek'
+        if: steps.evidence.outcome == 'success' && needs.tests.result == 'success' && needs.resolve.outputs.engine == 'deepseek'
         continue-on-error: true
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: node verifier-tools/tools/pr-verifier.cjs judge-deepseek verifier-out evidence
       - name: Judge the evidence against the Done-when lines
         id: claude
-        if: needs.resolve.outputs.engine != 'deepseek'
+        if: steps.evidence.outcome == 'success' && needs.tests.result == 'success' && needs.resolve.outputs.engine != 'deepseek'
+        continue-on-error: true
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -269,49 +280,63 @@ jobs:
             Judge each Done-when line from what the evidence shows.
             PASS: every Done-when line is shown by head evidence, and where a base run exists the base run fails or shows the old behaviour for the same journey.
             PASS+NOTES: head is clean but a Done-when line is not shown, a journey does not separate base from head, or no journey covered part of the change. Say which.
-            FAIL: a head journey failed, a screenshot contradicts a Done-when line, or cleanup is missing.
+            FAIL: a product regression on head or a screenshot contradicting a Done-when line. An identical failure on head and base is inherited, not a PR failure. Name it in a note and judge the remaining evidence.
+            BLOCKED: timeout, cancellation, missing evidence, harness error, runner queue or missing cleanup evidence prevented verification. These are not product failures.
 
             Return the verdict and at most 8 evidence lines. Each line is one plain sentence that names the file or journey it comes from. Return structured output only.
           claude_args: |
             --model sonnet
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
-            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","PASS+NOTES","FAIL"]},"evidence":{"type":"array","items":{"type":"string"},"maxItems":8}},"required":["verdict","evidence"]}'
+            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","PASS+NOTES","FAIL","BLOCKED"]},"evidence":{"type":"array","items":{"type":"string"},"maxItems":8}},"required":["verdict","evidence"]}'
       - name: Compose the verdict comment
         id: final
+        if: always()
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          JUDGE_RESULT: ${{ needs.resolve.outputs.engine == 'deepseek' && steps.deepseek.outcome || steps.claude.outcome }}
           VERDICT: ${{ steps.claude.outputs.structured_output || steps.deepseek.outputs.structured_output }}
           ENGINE: ${{ needs.resolve.outputs.engine }}
-          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha || github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           node verifier-tools/tools/pr-verifier.cjs finalize verifier-out/selection.json verifier-out/summary.json verifier-out
           cat verifier-out/comment.md >> "$GITHUB_STEP_SUMMARY"
       - name: Post the verdict on the pull request
+        if: always() && steps.final.outputs.result != ''
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ needs.resolve.outputs.number }}
+          PR_NUMBER: ${{ needs.resolve.outputs.number || inputs.pr || github.event.pull_request.number }}
         run: gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file verifier-out/comment.md
       - name: Record the verdict on the pull request head
-        if: github.event_name == 'workflow_dispatch'
+        if: always() && steps.final.outputs.result != ''
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha || github.event.pull_request.head.sha }}
           RESULT: ${{ steps.final.outputs.result }}
+          CONCLUSION: ${{ steps.final.outputs.conclusion }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          conclusion=success
-          [ "$RESULT" = FAIL ] && conclusion=failure
-          gh api "repos/$REPO/check-runs" -X POST -f name=pstack-verifier -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$conclusion" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
+          blocked_conclusion=neutral
+          [ "$RESULT" != BLOCKED ] || blocked_conclusion=failure
+          gh api "repos/$REPO/check-runs" -X POST -f 'name=pstack-verifier (BLOCKED)' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$blocked_conclusion" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
+          gh api "repos/$REPO/check-runs" -X POST -f name=pstack-verifier -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$CONCLUSION" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: pr-verifier-verdict
           path: verifier-out/
           retention-days: 7
-      - name: Fail the check on a FAIL verdict
+      - name: BLOCKED - verification could not complete
+        if: always() && steps.final.outputs.result == 'BLOCKED'
+        run: exit 1
+      - name: Fail the check unless verification passed
         env:
           RESULT: ${{ steps.final.outputs.result }}
-        run: test "$RESULT" != FAIL
+        if: always()
+        run: test "$RESULT" = PASS || test "$RESULT" = PASS+NOTES
