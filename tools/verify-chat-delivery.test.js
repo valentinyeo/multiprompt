@@ -578,7 +578,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /actions\/setup-python@[a-f0-9]{40}/);
   assert.match(workflow, /gh release download \$env:RELEASE_TAG/);
   assert.match(workflow, /Release checksum mismatch/);
-  assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /verify-chat-delivery\/drive.ps1[\s\S]*errors.Count/);
   assert.ok(read('.github/workflows/click-through.yml').includes('-- src'));
 });
