@@ -1156,10 +1156,10 @@ def reader_namespace():
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
-        if state().get("name") in ("accepted-message", "recall-handed"):
+        if state().get("name") in ("accepted-message", "recall-handed", "model-settings"):
             import threading
 
-            worker_name = 'recall' if state().get('name') == 'recall-handed' else 'accepted'
+            worker_name = {'recall-handed': 'recall', 'model-settings': 'model'}.get(state().get('name'), 'accepted')
 
             def start_worker(query, source, only_if_work=False):
                 if source is None:
