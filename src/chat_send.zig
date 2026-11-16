@@ -721,6 +721,10 @@ pub fn sendChatPrompt() void {
     if (text_len_i > 0 and app_state.g_chat_skill_name_len == 0 and app_state.g_chat_reply_len == 0) {
         const text = text_buf[0..@intCast(text_len_i)];
         const shell = &app_state.shells[app_state.active_shell];
+        if (shell.kind == .tmux and shell.ai_agent == 1 and @import("chat_slash.zig").clearWithArguments(text)) {
+            showHeaderNoticeAscii("Use /clear without arguments.", 4000, false);
+            return;
+        }
         const live = !@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len]);
         const selected_skill = app_state.g_chat_ac_skill_shell_id == shell.shell_id and app_state.g_chat_ac_skill_command_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len]);
         const interactive = app_state.g_chat_ac_dialog_shell_id == shell.shell_id and app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]);

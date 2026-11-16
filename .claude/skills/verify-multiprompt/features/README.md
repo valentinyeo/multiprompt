@@ -134,3 +134,4 @@ Keep these implementation anchors here, not in the user-facing recipes. Refresh 
 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
+- [Clear a server chat](chat-server-clear.md): native `/clear`, a new production-host context and the next rendered answer.

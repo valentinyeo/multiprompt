@@ -134,7 +134,7 @@ function failedHeadFeatures(jobs, features) {
     const prefix = `head ${feature} /`;
     const mine = list.filter(job => job && (job.name === `head ${feature}` || String(job.name || '').startsWith(prefix)));
     const finished = mine.filter(job => job.conclusion && job.conclusion !== 'skipped');
-    if (finished.some(job => job.conclusion !== 'success')) failed.push(feature);
+    if (feature === 'chat-server-clear' || mine.length === 0 || finished.some(job => job.conclusion !== 'success')) failed.push(feature);
   }
   return failed;
 }
@@ -436,7 +436,7 @@ async function waitForTests(env) {
 
 function failedHead(env) {
   const features = JSON.parse(env.FEATURES || '[]');
-  const raw = gh(['api', '--paginate', `repos/${env.REPO}/actions/runs/${env.RUN_ID}/jobs`, '--jq', '.jobs[] | {name,conclusion}']);
+  const raw = gh(['api', '--paginate', `repos/${env.REPO}/actions/runs/${env.RUN_ID}/jobs?filter=all`, '--jq', '.jobs[] | {name,conclusion}']);
   const jobs = raw.split('\n').map(line => line.trim()).filter(Boolean).map(line => JSON.parse(line));
   setOutputs({ features: JSON.stringify(failedHeadFeatures(jobs, features)) });
 }

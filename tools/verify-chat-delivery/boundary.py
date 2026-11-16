@@ -906,6 +906,10 @@ def tmux(argv, input, output):
     fake = state().get("fake")
     if fake and argv[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
         return tmux_buffer(argv, input)
+    if state().get("name") == "server-clear" and (ROOT / "restart-probe").exists() and argv[:1] in (["display"], ["display-message"]) and argv[-1:] == ["#{pane_current_command}"]:
+        record("restart-pane.jsonl", argv=argv, command="claude")
+        output.write("claude\n")
+        return 0
     if argv[:1] == ["capture-pane"]:
         shown = capture_screen("-e" in argv)
         record("capture.jsonl", argv=argv, screen=shown)
@@ -1097,7 +1101,7 @@ def reader_namespace():
     except Exception:
         pass
     namespace["start_held_worker"] = lambda *args: None
-    if os.name == "nt" and state().get("name") == "model-settings":
+    if os.name == "nt" and state().get("name") in ("model-settings", "server-clear"):
         namespace["events_wake"] = lambda: None
     if state().get("slashProof"):
         spec = importlib.util.spec_from_file_location("slash_host", Path(__file__).with_name("slash_host.py"))
@@ -1188,6 +1192,25 @@ def reader_namespace():
 
             namespace['start_message_worker'] = start_worker
             record(worker_name + '-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
+    if state().get("name") == "server-clear":
+        install_reaction_tmux(namespace)
+        install_reaction_worker(namespace)
+        previous_restart = namespace["restart_ai_response"]
+
+        def restart(query):
+            import threading
+            record("restart-request.jsonl", query=query)
+            (ROOT / "restart-requested").touch()
+            deadline = time.monotonic() + 60
+            while not (ROOT / "restart-release").exists():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("restart screenshot gate")
+                threading.Event().wait(0.05)
+            wire = previous_restart(query)
+            record("restart-reply.jsonl", wire=wire)
+            return wire
+
+        namespace["restart_ai_response"] = restart
     if state().get("name") == "working-live":
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1531,7 +1554,7 @@ def transport_reader():
 
 def serve_reader():
     namespace = reader_namespace()
-    if state().get("name") == "model-settings":
+    if state().get("name") in ("model-settings", "server-clear"):
         import hashlib
         sid = state()["sid"]
         record("model-reader.jsonl", inner_sha256=hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest(), generation=namespace.get("RUNTIME_GENERATION"))
@@ -1620,6 +1643,13 @@ def ssh():
     declined = declined_remote(ARGS)
     if declined:
         kind, output, exit_code = declined
+        if kind == "capacity-poll" and state().get("name") == "server-clear" and (ROOT / "restart-probe").exists():
+            output = "verify-agent|1700000000|0|/verify/work|bash|Claude\n"
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("restart-inventory.jsonl", pane_command="bash", snapshot="cached shell before the agent resumed")
+            sys.stdout.write(output)
+            return 0
         if kind == "capacity-poll" and state().get("hax"):
             output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
             if "vps" in ARGS:
