@@ -5,7 +5,7 @@ const path = require('node:path');
 const names = ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover'];
 const queueName = 'queue-draft-sync';
 const sendName = 'send-stays-gone';
-const allNames = [...names, queueName, sendName];
+const allNames = [...names, queueName, sendName, 'skill-echo', 'plain-echo'];
 const queueTexts = {
   a: 'shell queued alpha',
   b: 'chat queued beta',
@@ -40,6 +40,38 @@ const sendSteps = [
   'outbox-snapshot',
 ];
 const agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server';
+
+function evaluateEchoCase({ root, json, lines, png }, name) {
+  const observation = json(`${name}/observation.json`);
+  assert.equal(observation.error, null, observation.error || 'driver error');
+  assert.equal(observation.composerText, '', 'composer cleared after send');
+  const input = lines(`${name}/stand-in/echo-input.jsonl`);
+  assert.deepEqual(input.map(row => [row.original, row.sent]), [[observation.text, observation.sentText]], 'one real composer message reached the source');
+  const events = lines(`${name}/transcript.jsonl`);
+  assert.equal(events.filter(row => row.type === 'queue-operation' && row.operation === 'enqueue' && row.content === observation.sentText).length, 1);
+  assert.equal(events.filter(row => row.type === 'attachment' && row.attachment?.prompt === observation.sentText).length, 1);
+  const outbox = json(`${name}/outbox-final.json`);
+  assert.ok(outbox.queues.flatMap(queue => queue.messages).every(message => message.t !== observation.text), 'no leftover pending copy');
+  const copied = fs.readFileSync(path.join(root, name, 'copied.txt'), 'utf8');
+  const needle = name === 'skill-echo' ? 'make it simpler' : observation.text;
+  assert.equal(copied.split(needle).length - 1, 1, 'native transcript shows the message exactly once');
+  assert.ok(copied.includes(observation.sentText), 'native transcript contains the source message');
+  if (name === 'skill-echo') {
+    assert.equal(observation.text, 'make it simpler /pstack:poteto-mode confirm that');
+    assert.equal(observation.sentText, '/pstack:poteto-mode make it simpler confirm that');
+  } else assert.equal(observation.sentText, observation.text);
+  const doctor = json(`${name}/doctor.json`);
+  const build = json('build.json');
+  assert.equal(doctor.sha256.toLowerCase(), build.sha256.toLowerCase());
+  assert.equal(doctor.version, build.version);
+  assert.ok(doctor.chat && doctor.pid > 0 && doctor.hwnd > 0);
+  const cleanup = json(`${name}/cleanup.json`);
+  assert.equal(cleanup.remaining_owned_processes, 0);
+  assert.equal(cleanup.scratch_removed, true);
+  assert.equal(cleanup.evidence_preserved, true);
+  for (const stage of ['action', 'queued', 'after', 'final']) png(`${name}-${stage}.png`);
+  return { original: observation.text, sent: observation.sentText, copies: 1, pending: 0 };
+}
 
 function evaluateDelivery(observation, events) {
   assert.equal(observation.error, null, observation.error || 'driver error');
@@ -305,6 +337,13 @@ function evaluateEvidence(root) {
   } catch (error) {
     cases.push({ name: sendName, passed: false, detail: error.message });
   }
+  for (const name of ['skill-echo', 'plain-echo']) {
+    try {
+      cases.push({ name, passed: true, detail: evaluateEchoCase({ root, json, lines, png }, name) });
+    } catch (error) {
+      cases.push({ name, passed: false, detail: error.message });
+    }
+  }
   return { feature: 'chat-delivery', status: cases.every(row => row.passed) ? 'passed' : 'failed', agentBoundary, cases };
 }
 
@@ -317,4 +356,4 @@ if (require.main === module) {
   process.exitCode = result.status === 'passed' ? 0 : 1;
 }
 
-module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence };
+module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEchoCase, evaluateEvidence };

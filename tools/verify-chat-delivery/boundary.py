@@ -187,6 +187,9 @@ def fake_queue_event(operation, content=None, **extra):
 
 
 def fake_submit(claude, text):
+    if state().get("name") in ("skill-echo", "plain-echo"):
+        record("echo-input.jsonl", original=text, sent=state()["echoText"])
+        text = state()["echoText"]
     if claude["mode"] == "busy":
         claude["queue"].append(text)
         fake_queue_event("enqueue", text)
@@ -1156,7 +1159,7 @@ def reader_namespace():
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
-        if state().get("name") in ("accepted-message", "recall-handed"):
+        if state().get("name") in ("accepted-message", "recall-handed", "skill-echo", "plain-echo"):
             import threading
 
             worker_name = 'recall' if state().get('name') == 'recall-handed' else 'accepted'

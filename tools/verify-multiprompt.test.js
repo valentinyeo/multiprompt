@@ -325,7 +325,7 @@ function assertsOwnedInput(source) {
   assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-(?:Until|Foreground)|\b(?:while|do|until)\b/);
   assert.match(wait, /^function Wait-Foreground \{\s+try \{ Assert-Foreground; return \} catch \{\}\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
   assert.doesNotMatch(wait, /Wait-Until|while\s*\(/);
-  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
+  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+if \(-not \(Test-Path \(Join-Path \$Evidence 'action.png'\)\)\) \{ Snapshot 'action' \}\s+\}\s*$/);
   assert.match(press, /Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
@@ -2330,7 +2330,7 @@ test('IGSH-1033 shared tracked quarantine protects rollback and release executio
   assert.deepEqual(Object.keys(JSON.parse(read('tools/journey-policy.json')).quarantined), ['browser-pane-stuck']);
   const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
   assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
-  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \|\| inputs.app_revision != '' \}\}/);
   assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
   assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
   assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
@@ -2521,7 +2521,7 @@ Write-Host 'OWNED_SLOW_BROWSER_TRANSITION_OK'
 test('IGSH-1176 browser warning times out before its job cancellation boundary', () => {
   const driver = workflow.slice(workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup'), workflow.indexOf('      - name: Check real-shape observations'));
   assert.match(driver, /timeout-minutes: \$\{\{ env\.FEATURE == 'browser-pane-stuck' && 8 \|\|/);
-  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs\.journeys\.outputs\.quarantined\), matrix\.feature\) \}\}/);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs\.journeys\.outputs\.quarantined\), matrix\.feature\) \|\| inputs\.app_revision != '' \}\}/);
   assert.match(driver, /if \(\$env:FEATURE -eq 'browser-pane-stuck' -and \$env:VERIFY_BROWSER_STALL -eq '1'\)/);
   assert.match(driver, /Start-Sleep -Seconds 900/);
   assert.match(workflow, /if: always\(\) && env\.FEATURE == 'browser-pane-stuck' && steps\.desktop-driver\.outcome == 'failure' && contains/);

@@ -743,6 +743,21 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     for (const suffix of ['before', 'action', 'after', 'final']) files.set(path.join(base, `${name}-${suffix}.png`), png);
     for (const input of ['Ctrl+1: select saved tmux tab', 'Alt+C: open Chat View', 'type composer text', ...(name === 'steer-chord' ? ['Ctrl+X: steer prefix', 'Ctrl+S: steer send'] : ['Enter: send composer'])]) actions.push({ case: name, input, text: observation.text });
   }
+  for (const name of ['skill-echo', 'plain-echo']) {
+    const text = name === 'skill-echo' ? 'make it simpler /pstack:poteto-mode confirm that' : 'plain message confirms once';
+    const sentText = name === 'skill-echo' ? '/pstack:poteto-mode make it simpler confirm that' : text;
+    put(`${name}/observation.json`, { error: null, text, sentText, composerText: '' });
+    log(`${name}/stand-in/echo-input.jsonl`, [{ original: text, sent: sentText }]);
+    log(`${name}/transcript.jsonl`, [
+      { type: 'queue-operation', operation: 'enqueue', content: sentText },
+      { type: 'attachment', attachment: { type: 'queued_command', prompt: sentText } },
+    ]);
+    put(`${name}/outbox-final.json`, { queues: [] });
+    files.set(path.join(base, name, 'copied.txt'), sentText);
+    put(`${name}/doctor.json`, { version: '0.0.1', sha256: 'a'.repeat(64), chat: true, pid: 1, hwnd: 2 });
+    put(`${name}/cleanup.json`, { remaining_owned_processes: 0, evidence_preserved: true, scratch_removed: true });
+    for (const stage of ['action', 'queued', 'after', 'final']) files.set(path.join(base, `${name}-${stage}.png`), png);
+  }
   const queue = queueFiles(base);
   for (const [file, value] of queue.files) files.set(file, value);
   const send = sendFiles(base);
@@ -766,6 +781,11 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
   }
   for (const [file, value] of positive) files.set(file, value);
   const mutations = [
+    () => files.delete(path.join(base, 'skill-echo/copied.txt')),
+    () => files.set(path.join(base, 'skill-echo/copied.txt'), '/pstack:poteto-mode make it simpler confirm that\nmake it simpler /pstack:poteto-mode confirm that'),
+    () => put('skill-echo/outbox-final.json', { queues: [{ messages: [{ t: 'make it simpler /pstack:poteto-mode confirm that' }] }] }),
+    () => log('skill-echo/stand-in/echo-input.jsonl', []),
+    () => log('skill-echo/transcript.jsonl', []),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('asking', 'answering') }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace(saved.suggestion, '') }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('\u001b[2m', '\u001b[2K') }]),

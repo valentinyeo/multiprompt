@@ -189,3 +189,7 @@ Full native reaction journey https://github.com/valentinyeo/multiprompt/actions/
 ## IGSH-1228 server runner group
 
 `server-open-group` is a dispatchable Windows journey. It publishes one mocked account shell tab in group Runners, checks that the saved session gives that tab the same non-zero group id, then imports the same tab again and requires the tab count and group count to stay put. GitHub Windows execution of this journey is still pending. Dispatch `gh workflow run verify.yml --ref <branch> -f feature=server-open-group` and inspect `before.png` and `after.png` before treating the desktop proof as passed.
+
+## SOFT-2384 skill echo
+
+The `chat-delivery` journey now includes skill-command reordering and an unchanged plain-message control. Each requires real composer input, source enqueue and consumed attachment, exactly one message copied from the native transcript, no pending outbox copy, screenshots, Doctor identity and cleanup. Hosted results are pending. A differing skill command remains a unit-test-only case.

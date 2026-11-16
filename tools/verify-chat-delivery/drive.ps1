@@ -37,7 +37,9 @@ $plans = @(
     @{name='steer-chord'; mode='busy'; text='steer delivery gamma'},
     @{name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'}
     @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'},
-    @{name='send-stays-gone'; mode='busy'; text='send stays gone'}
+    @{name='send-stays-gone'; mode='busy'; text='send stays gone'},
+    @{name='skill-echo'; mode='busy'; text='make it simpler /pstack:poteto-mode confirm that'},
+    @{name='plain-echo'; mode='busy'; text='plain message confirms once'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
@@ -532,6 +534,7 @@ foreach ($plan in $plans) {
     $isResync = $plan.name -eq 'resync' -or $isRecovery
     $isReaction = $plan.name -eq 'reactions'
     $isAccepted = $plan.name -eq 'accepted-message'
+    $isEcho = $plan.name -in @('skill-echo', 'plain-echo')
     $isSwitch = $plan.name -eq 'remote-switch'
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
     $isQueue = $plan.name -eq 'queue-draft-sync'
@@ -549,7 +552,7 @@ foreach ($plan in $plans) {
     $isModel = $plan.name -eq 'model-settings'
     $isRecall = $plan.name -eq 'recall-handed'
     $socketTemp = $null
-    $hasTranscript = $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isEcho -or $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -571,6 +574,10 @@ foreach ($plan in $plans) {
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
+        if ($isEcho) {
+            $seed.echoText = if ($plan.name -eq 'skill-echo') { '/pstack:poteto-mode make it simpler confirm that' } else { $plan.text }
+            $observation.sentText = $seed.echoText
+        }
         $standIn = $seed
         if ($isLiveDelivery) { $standIn.sessions = @('verify-agent', 'verify-background') }
         if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
@@ -1142,6 +1149,8 @@ foreach ($plan in $plans) {
             Save $dividerProof "$caseDir/unread-divider.json"
             $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-retained', 'bottom-retain', 'send-retain', 'all-read-absent')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } elseif ($isEcho) {
+            . "$PSScriptRoot/skill-echo.ps1"
         } elseif ($isAccepted) {
             [void](Wait-For 'initial transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Type-Composer $plan.text

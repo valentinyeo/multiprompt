@@ -9,6 +9,9 @@
 - `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
 - `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and every sent text reached Claude's queue exactly once, in send order, within the same 10 seconds.
 
+- `skill-echo` (SOFT-2384): type `make it simpler /pstack:poteto-mode confirm that` in the real composer and send it. The simulated Claude moves the skill token to the front in its queue event and consumed transcript attachment. Require exactly one message in the copied native transcript and no remaining pending copy in the app-written outbox.
+- `plain-echo`: repeat the same queued-to-transcript path without a skill command. Require one copied message and no pending copy.
+
 ### Hosted feedback boundary
 
 The GitHub Linux reader suite runs `tools/chat-history-reader-test.py`. Its Claude, Codex and Pi process stand-ins capture the startup guidance and child environment. Its feedback cases run the real command against a fake Hypertask executable, including denial and failed-vote controls. These cases do not prove the Windows build's embedded version, a live provider, real board writes or the existing desktop delivery journey. Those require separate exact-build and authorized-agent evidence.
@@ -166,3 +169,9 @@ The same driver must first reject the checksum-pinned released v0.28.946 app bec
 Inspect all eight notes-<theme>-<state>.png screenshots and the independent pixel probes. Five compact painted labels must occupy at most 180 scaled pixels; expanded body spacing must exceed that span and remain after a source turn/poll. app-cache.jsonl retains all five full source notes. Check actions.json for four owned native clicks, doctor.json for exact app identity, result.json for passed, and cleanup.json for zero owned processes and removed scratch data. No screenshot alone certifies working body links or remote account synchronization.
 
 Use the Android IGSH-1005 native chip screenshots beside desktop: the label is `sender to recipient · TICKET`, with existing dim text and an expansion arrow. Only viewport sizing differs. No Android product change is needed for this desktop parity ticket.
+
+### Skill command echo (SOFT-2384)
+
+The default `chat-delivery` journey includes `skill-echo` and `plain-echo`, each in its own isolated app lifetime. Inspect their action, queued, after and final screenshots, `copied.txt`, both outbox snapshots, `transcript.jsonl` and `stand-in/echo-input.jsonl`. The independent checker rejects a second copied message, an unretired pending copy, missing transport input or missing transcript confirmation. It also verifies executable identity and owned-process cleanup.
+
+The simulated agent rewrites only its own incoming text, before emitting Claude queue events. The Windows app, composer, outbox, embedded reader and native transcript copy remain production code. This does not prove real Claude execution or skill discovery. A different skill command remaining unmatched is covered by the Zig regression test, not this desktop journey.

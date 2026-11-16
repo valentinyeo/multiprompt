@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseTicketId } from './ticket-id.js';
 import { ticketLine, ticketRecord } from './ticket-titles.mjs';
 import { compareTags } from './version-stamp.mjs';
 
@@ -19,12 +20,18 @@ export function releaseNotes(source, tag) {
     const kept = items;
     for (const item of kept) {
       const prefix = `${item.ticket} `;
-      if (!item.text.startsWith(prefix) || ticketLine(ticketRecord(item.ticket, item.text.slice(prefix.length))) !== item.text) throw new Error(`Release ${match[1]} has an invalid ticket title for ${item.ticket}`);
+      if (!item.text.startsWith(prefix)) throw new Error(`Release ${match[1]} has an invalid ticket title for ${item.ticket}`);
+      const record = ticketRecord(item.ticket, item.text.slice(prefix.length));
+      item.ticket = record.id;
+      item.text = ticketLine(record);
     }
     return {
       version: match[1],
       changes: kept.map(item => item.text),
-      tickets: kept.map(item => `https://app.hypertask.ai/detail/project-${item.ticket.startsWith('IGSH-') ? '2060' : '11514'}/${item.ticket.split('-')[1]}`),
+      tickets: kept.map(item => {
+        const ticket = parseTicketId(item.ticket);
+        return `https://app.hypertask.ai/detail/project-${ticket.boardId}/${ticket.number}`;
+      }),
     };
   });
   const version = tag.replace(/^v/, '');
