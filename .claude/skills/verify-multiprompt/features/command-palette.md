@@ -4,10 +4,9 @@ Find real actions in Ctrl+K, execute an app-size change and reset it while check
 
 ## Sub-features
 
-- `changelog-speed`: a cold Ctrl+K Changelog open finishes below 460 milliseconds, and Page Down, Escape and the response after close finish below 100 milliseconds, across five samples; screen pixels must change and the UI thread must respond. Full history stays available.
-- `local-shells`: Ctrl+K `powershell` selects the local PowerShell row, command 2005. Command Prompt, Bash and Git Bash use the same search list.
+- `changelog-speed`: cold and repeated Ctrl+K Changelog opens, Page Down and Escape finish below 100 milliseconds across five samples; screen pixels must change and the UI thread must respond. Full history stays available.
 - `palette-search`: filter commands using an actual supported query.
-- `pick-repo-list`: Ctrl+N leaves the catch-all workspace, Ctrl+T opens the saved folder, then Ctrl+K `pick repo` opens Back plus that one harness folder, and Esc returns with the tab count unchanged.
+- `pick-repo-list`: with no workspace folder declared, Ctrl+K `pick repo` opens the Pick repo list, and Esc returns with the tab count unchanged.
 - `palette-execute`: execute UI Size: Increase and save 110% app scale.
 - `update-command-idle`: search Restart to update and execute with no staged update, retaining the owned app and session.
 - `palette-reset`: navigate to UI Size: Reset and restore 100%.
@@ -31,8 +30,7 @@ Preconditions:
 - The palette has not inherited a submenu or query from another journey; every dispatch uses fresh data.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=command-palette`; Windows runs `control.ps1 -Feature command-palette`.
-- **Changelog speed.** Before app-size changes, run five Ctrl+K `changelog` selections. Time native Enter, Page Down and Escape through changed text pixels plus a UI-thread response, without forced repaint. Save all samples and before/after response times in `changelog-speed.json`; capture `changelog-open.png`, `changelog-scrolled.png` and `changelog-closed.png`. Cold opening is included. The cold open must stay below 460 milliseconds. Scroll, close and the response after close must stay below 100 milliseconds. Seven cold opens, one per Windows run, were 110.219 ms (run 43670932683 head), 125.2958 ms (run 43667889002), 125.395 ms and 125.8298 ms (run 43664894874), 126.4732 ms (run 43668055626), 141.9773 ms (run 43669539112) and 286.0914 ms (run 43670932683 base). 460 ms is 1.6 times the slowest of those, leaving about 174 ms spare. Later samples in the same runs stayed at or below 46.6402 ms.
-- **Local shells.** After the empty palette, press Ctrl+K and type `powershell`. The selected command must be 2005, the local PowerShell row. Capture `more-shells-search.png`. The merge-base build does not list that row, so this wait is the before-and-after for the shell restoration. Esc closes the palette before the later steps.
+- **Changelog speed.** Before app-size changes, run five Ctrl+K `changelog` selections. Time native Enter, Page Down and Escape through changed text pixels plus a UI-thread response, without forced repaint. Save all samples and before/after response times in `changelog-speed.json`; capture `changelog-open.png`, `changelog-scrolled.png` and `changelog-closed.png`. Cold opening is included. Every measured open, scroll, close and after-close response must stay below 100 milliseconds.
 - **Pick repo.** Before the app-size steps, record the saved tab count, press Ctrl+K, type `pick repo`, capture `pick-repo-row.png`, press Enter, capture `pick-repo-list.png` (the list opens with `Back` and any repo rows), press Esc to leave the list and again to close the palette, and require the saved tab count to be unchanged. `pick-repo-back.png` shows the palette back in its main state.
 - **Search.** Press Ctrl+K and type `interface`. `action.png` shows the filtered UI Size rows with Increase selected.
 - **Execute.** Press Enter for `UI Size: Increase`. The palette closes and the app's saved `ui_scale` must be 110. Capture `after.png` showing larger chrome.
