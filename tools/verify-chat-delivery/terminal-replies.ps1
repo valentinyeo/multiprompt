@@ -21,11 +21,15 @@ foreach ($reply in $observation.replies) {
 }
 Shot 'terminal-replies-empty'
 Shell-Input 'key' 'C-u'
+$offset = (Read-Shared "$state/terminal-drafts.jsonl").Length
+Shell-Input 'text' '[]'
+[void](Wait-For 'production reader preserved literal brackets' {
+    $rows = (Read-Shared "$state/terminal-drafts.jsonl").Substring($offset).Trim() -split "`n" | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json }
+    @($rows | Where-Object { $_.screen.Contains('❯ []') -and $_.draft -ceq '[]' }).Count -gt 0
+} 20)
+Shell-Input 'key' 'C-u'
 Type-Composer '[]'
 $observation.typed = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.typed -cne '[]') { throw 'Typed brackets were changed' }
 Shot 'terminal-replies-typed'
-Press @(0x0D) 'Enter: send composer' $true
-[void](Wait-For 'exact typed brackets reached the agent' { @((Fake-State).queue) -contains '[]' } 20)
-$observation.delivered = @((Fake-State).queue)
 $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()

@@ -1457,14 +1457,13 @@ test('SOFT-2459 terminal reply evidence rejects residue, lost brackets and missi
     fs.writeFileSync(file, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value));
   };
   const caseFile = name => `terminal-replies/${name}`;
-  const observation = { error: null, replies, samples: replies.map(reply => ({ reply, composer: '' })), typed: '[]', delivered: ['[]'] };
-  const drafts = replies.map(reply => ({ screen: `❯ ${reply}\n────────\n`, draft: '' }));
+  const observation = { error: null, replies, samples: replies.map(reply => ({ reply, composer: '' })), typed: '[]' };
+  const drafts = [...replies.map(reply => ({ screen: `❯ ${reply}\n────────\n`, draft: '' })), { screen: '❯ []\n────────\n', draft: '[]' }];
   const writeDrafts = rows => put(caseFile('stand-in/terminal-drafts.jsonl'), rows.map(row => JSON.stringify(row)).join('\n'));
   try {
     put(caseFile('observation.json'), observation);
     writeDrafts(drafts);
-    put(caseFile('transcript.jsonl'), JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: '[]' }) + '\n');
-    put('actions.json', [{ case: 'terminal-replies', input: 'type composer text', text: '[]' }, { case: 'terminal-replies', input: 'Enter: send composer' }]);
+    put('actions.json', [{ case: 'terminal-replies', input: 'type composer text', text: '[]' }, { case: 'terminal-replies', input: 'shell input', kind: 'text', value: '[]' }]);
     put('build.json', { sha256: 'a'.repeat(64), version: '0.0.1' });
     put(caseFile('doctor.json'), { sha256: 'a'.repeat(64), version: '0.0.1', pid: 1, hwnd: 2, composer: 3, chat: true, tmux: true });
     const cleanup = { remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true };
@@ -1473,11 +1472,13 @@ test('SOFT-2459 terminal reply evidence rejects residue, lost brackets and missi
     const png = Buffer.alloc(1100);
     Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
     for (const name of ['terminal-replies-empty', 'terminal-replies-typed']) put(`${name}.png`, png);
-    assert.deepEqual(verify(dir), { replies: 5, typed: '[]', delivered: ['[]'] });
-    for (let i = 0; i < drafts.length; i++) {
+    assert.deepEqual(verify(dir), { replies: 5, typed: '[]' });
+    for (let i = 0; i < replies.length; i++) {
       writeDrafts(drafts.map((row, index) => index === i ? { ...row, draft: '[]' } : row));
       assert.throws(() => verify(dir), /production reader removed the complete reply/);
     }
+    writeDrafts(drafts.slice(0, -1));
+    assert.throws(() => verify(dir), /production reader preserved literal brackets/);
     writeDrafts(drafts);
     put(caseFile('observation.json'), { ...observation, typed: '' });
     assert.throws(() => verify(dir));

@@ -101,7 +101,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remove a stuck Not sent message](chat-not-sent-remove.md): Up then Delete removes a Not sent message from an old session.
 - [Browser typing](browser-typing.md): real page and address typing, plus one controlled lost Alt release.
 - [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
-- [Terminal reply filtering](chat-terminal-replies.md): production reader draft observations, an empty native message box and exact typed-bracket delivery through the chat-delivery boundary.
+- [Terminal reply filtering](chat-terminal-replies.md): production reader draft observations, an empty native message box and literal typed brackets through the chat-delivery boundary.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
 - [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.

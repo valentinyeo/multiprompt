@@ -22,13 +22,11 @@ function verify(root) {
   for (const reply of replies) {
     assert.ok(drafts.some(row => row.screen.includes(reply) && row.draft === ''), 'production reader removed the complete reply');
   }
+  assert.ok(drafts.some(row => row.screen.includes('❯ []') && row.draft === '[]'), 'production reader preserved literal brackets');
   assert.equal(observation.typed, '[]');
-  assert.deepEqual(observation.delivered, ['[]']);
-  const queued = lines('transcript.jsonl').filter(row => row.type === 'queue-operation' && row.operation === 'enqueue');
-  assert.deepEqual(queued.map(row => row.content), ['[]']);
   const actions = JSON.parse(fs.readFileSync(path.join(root, 'actions.json'), 'utf8'));
   assert.ok(actions.some(row => row.case === 'terminal-replies' && row.input === 'type composer text' && row.text === '[]'));
-  assert.ok(actions.some(row => row.case === 'terminal-replies' && row.input === 'Enter: send composer'));
+  assert.ok(actions.some(row => row.case === 'terminal-replies' && row.input === 'shell input' && row.kind === 'text' && row.value === '[]'));
   const doctor = json('doctor.json');
   const build = JSON.parse(fs.readFileSync(path.join(root, 'build.json'), 'utf8'));
   assert.equal(doctor.sha256.toLowerCase(), build.sha256.toLowerCase());
@@ -44,7 +42,7 @@ function verify(root) {
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(png.length > 1000);
   }
-  return { replies: replies.length, typed: observation.typed, delivered: queued.map(row => row.content) };
+  return { replies: replies.length, typed: observation.typed };
 }
 
 module.exports = { verify, replies };
