@@ -1097,7 +1097,7 @@ def reader_namespace():
     except Exception:
         pass
     namespace["start_held_worker"] = lambda *args: None
-    if os.name == "nt" and state().get("name") == "model-settings":
+    if os.name == "nt" and state().get("name") in ("model-settings", "server-clear"):
         namespace["events_wake"] = lambda: None
     if state().get("slashProof"):
         spec = importlib.util.spec_from_file_location("slash_host", Path(__file__).with_name("slash_host.py"))
@@ -1188,6 +1188,9 @@ def reader_namespace():
 
             namespace['start_message_worker'] = start_worker
             record(worker_name + '-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
+    if state().get("name") == "server-clear":
+        install_reaction_tmux(namespace)
+        install_reaction_worker(namespace)
     if state().get("name") == "working-live":
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
@@ -1531,7 +1534,7 @@ def transport_reader():
 
 def serve_reader():
     namespace = reader_namespace()
-    if state().get("name") == "model-settings":
+    if state().get("name") in ("model-settings", "server-clear"):
         import hashlib
         sid = state()["sid"]
         record("model-reader.jsonl", inner_sha256=hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest(), generation=namespace.get("RUNTIME_GENERATION"))
