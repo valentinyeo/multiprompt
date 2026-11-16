@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const root = path.resolve(__dirname, '..');
-const fragment = 'changelog.d/DEMO-1-change.md';
+const fragment = path.posix.join('changelog.d', 'IGSH-1-change.md');
 
 for (const line of ['Fix IGSH-123.', 'Fix ABC-9.', 'Fix src/main.zig.', 'Fix main.zig.', 'Fix C:\\app\\settings.', 'Fix PR #123.', 'Fix PR 123.', 'Fix pull request 123.', 'Fix #123.', 'Fix `renderer`.', 'A\ttab.']) {
   test(`fragment red case: ${JSON.stringify(line)}`, async () => {
@@ -64,7 +64,7 @@ test('pending fragment tickets stamp from the shared title catalog', async () =>
   };
   const ids = [];
   for (const name of names) {
-    const id = /^([A-Z][A-Z0-9]*-\d+)-/.exec(name)[1];
+    const id = require('./ticket-id.js').fragmentTicketId(`changelog.d/${name}`);
     if (!ids.includes(id)) ids.push(id);
     ticketRecord(id, catalog[id]);
     files[`changelog.d/${name}`] = fs.readFileSync(path.join(root, 'changelog.d', name), 'utf8');
@@ -81,6 +81,43 @@ test('pending fragment tickets stamp from the shared title catalog', async () =>
     }
   }
   console.log('HYCI-270 fragment titles ready');
+});
+
+test('SOFT-2485 pending release note resolves from the committed catalog', async () => {
+  const { stampTree } = await import('./version-stamp.mjs');
+  assert.doesNotThrow(() => {
+    const stamp = stampTree({
+      'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
+      'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
+      'changelog.d/SOFT-2485-release.md': 'Rooms appear in the sidebar only when a room exists.\n',
+    });
+    assert.deepEqual(stamp.tickets, ['IGSH-2485']);
+  });
+});
+
+test('SOFT fragments pass checks and release stamps resolve the canonical ticket title', async () => {
+  await assert.doesNotReject(async () => {
+    const { checkFragments, stampTree, buildChangelog } = await import('./version-stamp.mjs');
+    const { resolveTicketTitles } = await import('./ticket-titles.mjs');
+    const file = 'changelog.d/SOFT-2489-x.md';
+    const files = {
+      'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
+      'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
+      [file]: 'Saved chats open in their own tabs.\n',
+      [path.posix.join('changelog.d', 'IGSH-2489-legacy.md')]: 'Saved chats keep their names.\n',
+    };
+    checkFragments({}, files, ['src/example.zig', file]);
+    const request = async () => ({ ok: true, json: async () => ({ success: true, tasks: [{ boardId: 2060, ticketNumber: 'SOFT-2489', title: 'Saved chats open in their own tabs' }] }) });
+    const titles = await resolveTicketTitles(['SOFT-2489', 'IGSH-2489'], {}, 'token', request);
+    const stamp = stampTree(files, undefined, titles);
+    assert.deepEqual(stamp.tickets, ['IGSH-2489']);
+    assert.equal(stamp.removed.length, 2);
+    assert.match(stamp.files['src/changelog.zig'], /\.text = "IGSH-2489 Saved chats open in their own tabs", \.ticket = "IGSH-2489"/);
+    for (const subject of ['SOFT-2489: Open saved chats', 'IGSH-2489: Open saved chats', 'SOFT-2489, IGSH-2489: Open saved chats']) {
+      const source = buildChangelog(files, 'v1.0.1', [], [{ sha: 'change', subject }], titles);
+      assert.equal((source.match(/\.ticket = "IGSH-2489"/g) || []).length, 1);
+    }
+  });
 });
 
 test('existing CI version check enforces fragments for code but preserves generated stamps', () => {

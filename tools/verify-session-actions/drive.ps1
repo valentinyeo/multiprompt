@@ -218,8 +218,8 @@ try {
     Press @(0x11,0x57)
     Start-Sleep -Milliseconds 1500
     Check 'ctrl-w-does-not-quit' (!$app.HasExited)
-    Press @(0x11,0x10,0x57)
-    [void](Wait-For 'Ctrl+Shift+W quits' { $app.HasExited })
+    Palette 'quit' 6202
+    [void](Wait-For 'Ctrl+K quit closes the app' { $app.HasExited })
     Check 'quit-keeps-both-server-agents' (!$servers[0].process.HasExited -and !$servers[1].process.HasExited)
     Stop-AppJob
     Start-App
@@ -231,7 +231,7 @@ try {
     $localId=[Windows.Forms.Clipboard]::GetText()
     Check 'local-chat-id-minted' ($localId -match '^session:#[0-9a-f]{16}$' -and $localId -ne 'session:#0000000000000000')
     [void](Wait-For 'local chat id saved' { $s=Session; $tab=@($s.tabs | Where-Object { $_.kind -eq 'cmd' }); $tab.Count -eq 1 -and $tab[0].chat_id -gt 0 })
-    Press @(0x11,0x10,0x57)
+    Palette 'quit' 6202
     [void](Wait-For 'local ID restart quits' { $app.HasExited })
     Stop-AppJob
     Start-App
