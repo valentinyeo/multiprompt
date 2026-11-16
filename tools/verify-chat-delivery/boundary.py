@@ -1081,6 +1081,15 @@ def reader_namespace():
     source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
+    if state().get("name") == "terminal-replies":
+        original_draft = namespace["box_draft_text"]
+
+        def observed_draft(shown):
+            draft = original_draft(shown)
+            record("terminal-drafts.jsonl", screen=shown, draft=draft)
+            return draft
+
+        namespace["box_draft_text"] = observed_draft
     if state().get("name") == "resync-recovery":
         import hashlib
         full = hashlib.sha256(source.encode("utf-8")).hexdigest()

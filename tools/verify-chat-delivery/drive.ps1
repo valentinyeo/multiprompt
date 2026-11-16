@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-terminal-replies')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -63,6 +63,7 @@ if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; 
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
+if ($Feature -eq 'chat-terminal-replies') { $plans = @(@{name='terminal-replies'; mode='busy'; text='[]'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
@@ -534,6 +535,7 @@ foreach ($plan in $plans) {
     $isAccepted = $plan.name -eq 'accepted-message'
     $isSwitch = $plan.name -eq 'remote-switch'
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
+    $isTerminalReplies = $plan.name -eq 'terminal-replies'
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isHax = $env:CHAT_HAX_PROOF -eq '1'
     $isSendStays = $plan.name -eq 'send-stays-gone'
@@ -549,7 +551,7 @@ foreach ($plan in $plans) {
     $isModel = $plan.name -eq 'model-settings'
     $isRecall = $plan.name -eq 'recall-handed'
     $socketTemp = $null
-    $hasTranscript = $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isTerminalReplies -or $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -1347,6 +1349,8 @@ foreach ($plan in $plans) {
             Shot 'cancel-held-taken-menu'
             [ChatDeliveryDesktop]::Type(0x1B)
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } elseif ($isTerminalReplies) {
+            . "$PSScriptRoot/terminal-replies.ps1"
         } elseif ($isQueue) {
             $t = $queueTexts
             [void](Step 'chat-view-read-transcript' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
@@ -1476,6 +1480,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($Feature -eq 'chat-terminal-replies') {
+    & node "$PSScriptRoot/../chat-terminal-replies-proof.cjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-working-live-proof.mjs" $Evidence
     exit $LASTEXITCODE
