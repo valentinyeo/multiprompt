@@ -279,6 +279,7 @@ test('reaction proof measures the painted transcript, excluding the floating com
 });
 
 test('double-click proof rejects a retained badge, a second send, a changed draft and missing cleanup', () => {
+  assert.equal(typeof proof.assertDoubleClick, 'function');
   const f = fixture();
   const added = inspect(f.image, area);
   f.fill(28, 120, 68, 142, 0x444444);
