@@ -65,7 +65,7 @@ test('IGSH-820 commands expose pin protection and bulk views without removed row
 
 function journeyContract(source, restartSource = restart) {
   const steps = [
-    "Invoke-JourneyCommand 'Tab order: manual' -Confirm {", "'manual tab order saved before creating sessions'",
+    "Invoke-JourneyCommand 'Tab order: auto' -Confirm {", "'manual tab order saved before creating sessions'",
     "Invoke-JourneyCommand 'new cmd shell' -SelectOnly", "Invoke-JourneyCommand 'Pin' -Confirm {",
     "Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'",
     "Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'",

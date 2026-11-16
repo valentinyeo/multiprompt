@@ -4,7 +4,7 @@
                 Press @(0x0D) 'Enter: persist initial session through UI Size: Reset'
             }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 } 'one initial saved CMD session'
-            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+            Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                 Press @(0x0D) 'Enter: keep creation order for Ctrl+1/2/3'
             }
             Wait-Until {

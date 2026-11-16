@@ -4,7 +4,7 @@
 
             Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             Select-Theme 'dark' 'group-rail-dark'
-            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+            Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                 Press @(0x0D) 'Enter: keep stable manual sidebar order'
             }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.active_workspace -eq 0 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD session'

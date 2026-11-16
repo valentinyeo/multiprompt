@@ -1,6 +1,6 @@
 
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'initial restore finished before keyboard creation' 60
-            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+            Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                 Press @(0x0D) 'Enter: keep creation order before grouping restore sessions'
             }
             $before = (Read-Session).workspace_count

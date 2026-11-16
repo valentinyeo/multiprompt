@@ -90,7 +90,7 @@
                 }
                 Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
                 $gapCase.phase = 'manual-tab-order'
-                Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+                Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                     Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
                 }
                 Wait-Until {

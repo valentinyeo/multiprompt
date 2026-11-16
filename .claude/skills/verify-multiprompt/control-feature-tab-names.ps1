@@ -30,7 +30,7 @@
             }
             Assert-TabNamesHold 'names-launch' $expected
             $result.checks += @{ name = 'names-launch'; names = $expected; samples = $script:holdSamples; settledSeconds = 45 }
-            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+            Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                 Press @(0x0D) 'Enter: keep the seeded order'
             }
             Wait-Until {

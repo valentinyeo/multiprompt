@@ -20,7 +20,7 @@ const rows = [
   ['Restart to Update', 'SEARCH_UPDATE_OFFSET', 'restart to update'],
   ['Manage snippets', 'SEARCH_SNIPPET_MANAGE_OFFSET', 'manage snippets'],
   ['Use snippets', 'SEARCH_SNIPPETS_MENU_OFFSET', 'use snippets'],
-  ['Tab order: manual', 'SEARCH_TABSORT_MANUAL_OFFSET', 'tab order'],
+  ['Tab order: auto', 'SEARCH_TABSORT_INBOX_OFFSET', 'tab order'],
   ['Sign in to Google in this profile', 'SEARCH_TABCTX_GOOGLE_SIGNIN', 'sign in to google'],
   ['Show Workspace Switcher', 'SEARCH_HIDEPILLS_OFFSET', 'workspace switcher'],
   ['Chat View on everywhere', 'SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET', 'chat view on everywhere'],

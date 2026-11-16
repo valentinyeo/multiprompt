@@ -76,7 +76,7 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
             $logPath = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $logStart = if (Test-Path $logPath) { (Get-Content $logPath -Raw).Length } else { 0 }
-            Invoke-JourneyCommand 'Tab order: manual' -Confirm {
+            Invoke-JourneyCommand 'Tab order: auto' -Confirm {
                 Press @(0x0D) 'Enter: use manual tab order'
             }
             Wait-Until { (Test-Path $logPath) -and (Get-Content $logPath -Raw).Substring($logStart) -match '\[confirm\].*target=6218' } 'manual order command selected'

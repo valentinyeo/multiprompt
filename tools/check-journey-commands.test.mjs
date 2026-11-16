@@ -54,6 +54,16 @@ test('routing renumbering follows production source without editing a journey', 
   assert.throws(() => commandCatalog(file => file === 'app_state.zig' ? read(file) : read(file).replace(/changelog/gi, 'release history')), /command name is no longer.*Changelog/);
 });
 
+test('tab-order commands resolve to a row the live palette actually produces', () => {
+  const state = fs.readFileSync(path.join(root, 'src/app_state.zig'), 'utf8');
+  const offsets = new Map([...state.matchAll(/pub const (SEARCH_\w+): usize = (\d+);/g)].map(([, symbol, value]) => [symbol, Number(value)]));
+  const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
+  const produced = [...palette.matchAll(/g_search_results\[[^\]]+\] = (SEARCH_TABSORT_\w+);/g)].map(([, symbol]) => offsets.get(symbol));
+  for (const entry of Object.values(catalog).filter(entry => entry.query === 'tab order')) {
+    assert.ok(produced.includes(entry.target), `${entry.name} must select a produced palette row`);
+  }
+});
+
 test('catalog entries keep the row name separate from its search query', () => {
   assert.equal(catalog['archive chat'].query, 'archive chat');
   assert.equal(catalog['ui size: reset'].query, 'ui');
