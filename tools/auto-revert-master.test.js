@@ -9,7 +9,7 @@ function featureMatrix(source) {
   return require('./verify-features.cjs').discoverFeatures();
 }
 const { decide } = require('./auto-revert-master.js');
-const ticketModule = require('./ticket-id.js');
+const loadTicketModule = () => require('./ticket-id.js');
 
 const repository = 'valentinyeo/multiprompt';
 const sha = 'a'.repeat(40);
@@ -57,7 +57,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: '/summary' }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
-    if (name === './ticket-id.js') return ticketModule;
+    if (name === './ticket-id.js') return loadTicketModule();
     if (name === './journey-policy.json') return input.policy || JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8'));
     if (name === 'node:fs') return { appendFileSync(file, text) { assert.equal(file, '/summary'); summaries.push(text); } };
     assert.equal(name, 'node:child_process');

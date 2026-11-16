@@ -62,7 +62,7 @@ test('SOFT and IGSH lookups share fragments and released entries', t => {
     'changelog.d/SOFT-2489-x.md': 'New text.\n',
     'src/changelog.zig': '.{ .text = "Released text.", .ticket = "IGSH-2489" },\n',
   });
-  for (const id of ['SOFT-2489', 'IGSH-2489']) assert.equal(readChangelogEntry(id, root), 'New text.\n');
+  for (const id of ['SOFT-2489', 'IGSH-2489']) assert.doesNotThrow(() => assert.equal(readChangelogEntry(id, root), 'New text.\n'));
   fs.unlinkSync(path.join(root, 'changelog.d/SOFT-2489-x.md'));
-  for (const id of ['SOFT-2489', 'IGSH-2489']) assert.equal(readChangelogEntry(id, root), 'Released text.\n');
+  for (const id of ['SOFT-2489', 'IGSH-2489']) assert.doesNotThrow(() => assert.equal(readChangelogEntry(id, root), 'Released text.\n'));
 });

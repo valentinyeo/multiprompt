@@ -35,7 +35,7 @@ test('only missing titles are fetched and invalid responses fail closed', async 
 
 test('SOFT inputs reuse canonical catalog entries and fetch each ticket once', async () => {
   const { ticketRecord, ticketTitleFile, resolveTicketTitles } = await load();
-  assert.deepEqual(ticketRecord('SOFT-2489', 'Saved chats'), { id: 'IGSH-2489', title: 'Saved chats' });
+  assert.doesNotThrow(() => assert.deepEqual(ticketRecord('SOFT-2489', 'Saved chats'), { id: 'IGSH-2489', title: 'Saved chats' }));
   assert.equal(ticketTitleFile('SOFT-2489'), 'IGSH-2489.txt');
   assert.deepEqual(await resolveTicketTitles(['SOFT-2489'], { 'IGSH-2489': 'Saved chats' }), { 'IGSH-2489': 'Saved chats' });
   assert.deepEqual(await resolveTicketTitles(['IGSH-2489'], { 'SOFT-2489': 'Saved chats' }), { 'IGSH-2489': 'Saved chats' });
@@ -64,9 +64,9 @@ test('SOFT title files load under the canonical ID and conflicting aliases fail'
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const url = pathToFileURL(`${dir}${path.sep}`);
   fs.writeFileSync(path.join(dir, 'SOFT-2489.txt'), 'Saved chats\n');
-  assert.deepEqual(loadTicketTitles(url), { 'IGSH-2489': 'Saved chats' });
+  assert.doesNotThrow(() => assert.deepEqual(loadTicketTitles(url), { 'IGSH-2489': 'Saved chats' }));
   fs.writeFileSync(path.join(dir, 'IGSH-2489.txt'), 'Saved chats\n');
-  assert.deepEqual(loadTicketTitles(url), { 'IGSH-2489': 'Saved chats' });
+  assert.doesNotThrow(() => assert.deepEqual(loadTicketTitles(url), { 'IGSH-2489': 'Saved chats' }));
   fs.writeFileSync(path.join(dir, 'IGSH-2489.txt'), 'Different title\n');
   assert.throws(() => loadTicketTitles(url), /Conflicting titles for IGSH-2489/);
 });

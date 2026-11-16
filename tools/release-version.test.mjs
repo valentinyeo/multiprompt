@@ -30,8 +30,9 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'ticket-id.js', 'auto-release-admit.sh'];
+  const dependencies = ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh'];
   if (fs.readFileSync(path.join(root, 'tools/version-stamp.mjs'), 'utf8').includes("'./ticket-titles.mjs'")) dependencies.push('ticket-titles.mjs');
+  if (fs.existsSync(path.join(root, 'tools/ticket-id.js'))) dependencies.push('ticket-id.js');
   for (const file of dependencies) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   assert.ok(fs.existsSync(path.join(root, 'tools/ticket-titles')), 'title catalog folder exists');
   fs.cpSync(path.join(root, 'tools/ticket-titles'), path.join(dir, 'tools/ticket-titles'), { recursive: true });
@@ -738,4 +739,17 @@ test('unavailable master baselines fail closed without GitHub reads', async t =>
   await assert.rejects(f.run('1'.repeat(40), f.workflow));
   assert.equal(f.tokenCalls(), 0);
   assert.equal(f.calls.length, 0);
+});
+
+test('SOFT fragment names stamp the existing canonical release title', async () => {
+  const { stampTree } = await import('./version-stamp.mjs');
+  let stamp;
+  assert.doesNotThrow(() => {
+    stamp = stampTree({
+      'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
+      'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
+      'changelog.d/SOFT-2489-x.md': 'Saved chats open in their own tabs.\n',
+    }, undefined, { 'IGSH-2489': 'Saved chats open in their own tabs' });
+  });
+  assert.deepEqual(stamp.tickets, ['IGSH-2489']);
 });
