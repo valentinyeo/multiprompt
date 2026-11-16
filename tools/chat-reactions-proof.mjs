@@ -82,8 +82,11 @@ export function assertDoubleClick({ before, added, removed, delivered }, events,
   }
   assert.equal(observation.doubleClickDelivered, true);
   const expected = `👍 to: ${('Same first words ' + 'for this example '.repeat(8)).trim().slice(0, 80)} [mp:6d8e353d25c5fe23]`;
-  assert.deepEqual(events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue').map(e => e.content), [expected]);
-  assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === expected).length, 1);
+  const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
+  assert.equal(sends.length, 1, 'exactly one reaction transport submission');
+  assert.match(sends[0].content, /\n\[mp:[0-9a-f]{16}\]$/);
+  assert.equal(sends[0].content.replace(/\n\[mp:[0-9a-f]{16}\]$/, ''), expected);
+  assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === sends[0].content).length, 1);
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
 }
