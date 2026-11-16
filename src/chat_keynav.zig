@@ -48,59 +48,68 @@ pub fn step(current: ?usize, up: bool, eligible: []const bool) Step {
 pub const NewestChord = struct {
     first_ms: ?u64 = null,
 
-    pub fn character(self: *NewestChord, char: usize, text: []const u16, now_ms: u64, plain: bool, repeated: bool) bool {
+    pub fn character(self: *NewestChord, char: usize, text: []const u16, now_ms: u64, shift_only: bool, repeated: bool) bool {
         const first = self.first_ms;
         self.first_ms = null;
-        if (char != 'g' or !plain or repeated) return false;
+        if (char != 'G' or !shift_only or repeated) return false;
         if (text.len == 0) {
             self.first_ms = now_ms;
             return false;
         }
-        return if (first) |start| text.len == 1 and text[0] == 'g' and now_ms -| start <= 600 else false;
+        return if (first) |start| text.len == 1 and text[0] == 'G' and now_ms -| start <= 600 else false;
     }
 };
 
-test "SOFT-2489 gg from an empty composer jumps within 600 ms and consumes the chord" {
+test "SOFT-2489 GG from an empty composer jumps within 600 ms and consumes the chord" {
     for ([_]u64{ 0, 599, 600 }) |delay| {
         var chord: NewestChord = .{};
-        try std.testing.expect(!chord.character('g', &.{}, 100, true, false));
-        try std.testing.expect(chord.character('g', &.{'g'}, 100 + delay, true, false));
-        try std.testing.expect(!chord.character('g', &.{'g'}, 101 + delay, true, false));
+        try std.testing.expect(!chord.character('G', &.{}, 100, true, false));
+        try std.testing.expect(chord.character('G', &.{'G'}, 100 + delay, true, false));
+        try std.testing.expect(!chord.character('G', &.{'G'}, 101 + delay, true, false));
     }
 }
 
-test "SOFT-2489 slow gg and gg in an existing draft type normally" {
-    var chord: NewestChord = .{};
-    try std.testing.expect(!chord.character('g', &.{}, 100, true, false));
-    try std.testing.expect(!chord.character('g', &.{'g'}, 701, true, false));
-    try std.testing.expect(!chord.character('g', &.{ 'g', 'g' }, 702, true, false));
-    try std.testing.expect(!chord.character('g', &.{'g'}, 800, true, false));
-    try std.testing.expect(!chord.character('g', &.{ 'h', 'i' }, 900, true, false));
-    try std.testing.expect(!chord.character('g', &.{ 'h', 'i', 'g' }, 950, true, false));
+test "SOFT-2489 plain g and gg always type normally" {
+    for ([_]bool{ false, true }) |shift_only| {
+        var chord: NewestChord = .{};
+        try std.testing.expect(!chord.character('g', &.{}, 100, shift_only, false));
+        try std.testing.expect(!chord.character('g', &.{'g'}, 200, shift_only, false));
+        try std.testing.expect(!chord.character('g', &.{ 'g', 'g' }, 300, shift_only, false));
+    }
 }
 
-test "SOFT-2489 modifiers repeats and intervening characters cancel gg" {
-    for ([_]struct { char: usize = 'g', plain: bool = true, repeated: bool = false }{
-        .{ .plain = false }, .{ .repeated = true }, .{ .char = 'x' }, .{ .char = 'G' },
+test "SOFT-2489 slow GG and GG in an existing draft type normally" {
+    var chord: NewestChord = .{};
+    try std.testing.expect(!chord.character('G', &.{}, 100, true, false));
+    try std.testing.expect(!chord.character('G', &.{'G'}, 701, true, false));
+    try std.testing.expect(!chord.character('G', &.{ 'G', 'G' }, 702, true, false));
+    try std.testing.expect(!chord.character('G', &.{'G'}, 800, true, false));
+    try std.testing.expect(!chord.character('G', &.{ 'h', 'i' }, 900, true, false));
+    try std.testing.expect(!chord.character('G', &.{ 'h', 'i', 'G' }, 950, true, false));
+}
+
+test "SOFT-2489 modifiers repeats and intervening characters cancel GG" {
+    for ([_]struct { char: usize = 'G', shift_only: bool = true, repeated: bool = false }{
+        .{ .shift_only = false }, .{ .repeated = true }, .{ .char = 'x' }, .{ .char = 'g' },
     }) |input| {
         var chord: NewestChord = .{};
-        try std.testing.expect(!chord.character('g', &.{}, 100, true, false));
-        try std.testing.expect(!chord.character(input.char, &.{'g'}, 200, input.plain, input.repeated));
-        try std.testing.expect(!chord.character('g', &.{'g'}, 300, true, false));
+        try std.testing.expect(!chord.character('G', &.{}, 100, true, false));
+        try std.testing.expect(!chord.character(input.char, &.{'G'}, 200, input.shift_only, input.repeated));
+        try std.testing.expect(!chord.character('G', &.{'G'}, 300, true, false));
         chord = .{};
-        try std.testing.expect(!chord.character(input.char, &.{}, 400, input.plain, input.repeated));
-        try std.testing.expect(!chord.character('g', &.{'g'}, 500, true, false));
+        try std.testing.expect(!chord.character(input.char, &.{}, 400, input.shift_only, input.repeated));
+        try std.testing.expect(!chord.character('G', &.{'G'}, 500, true, false));
     }
 }
 
-test "SOFT-2489 a changed draft or reset cannot consume an old first g" {
+test "SOFT-2489 a changed draft or reset cannot consume an old first G" {
     var chord: NewestChord = .{};
-    try std.testing.expect(!chord.character('g', &.{}, 100, true, false));
-    try std.testing.expect(!chord.character('g', &.{ 'g', 'x' }, 200, true, false));
-    try std.testing.expect(!chord.character('g', &.{'g'}, 300, true, false));
-    try std.testing.expect(!chord.character('g', &.{}, 400, true, false));
+    try std.testing.expect(!chord.character('G', &.{}, 100, true, false));
+    try std.testing.expect(!chord.character('G', &.{ 'G', 'x' }, 200, true, false));
+    try std.testing.expect(!chord.character('G', &.{'G'}, 300, true, false));
+    try std.testing.expect(!chord.character('G', &.{}, 400, true, false));
     chord = .{};
-    try std.testing.expect(!chord.character('g', &.{'g'}, 500, true, false));
+    try std.testing.expect(!chord.character('G', &.{'G'}, 500, true, false));
 }
 
 pub const Anchor = struct { source: u64, segment: u64, stamp: i64 };

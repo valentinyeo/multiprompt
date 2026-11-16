@@ -70,22 +70,23 @@ test('IGSH-992 shortcut, Ctrl+K entry and doc row ship together', () => {
   assert.match(read('src/sidebar.zig'), /is_chat_focus_messages/);
 });
 
-test('SOFT-2489 gg consumes the second character, clears the first and reuses newest scrolling', () => {
+test('SOFT-2489 Shift+G twice consumes the second character, clears the first and reuses newest scrolling', () => {
   const sub = fn(read('src/chat_composer.zig'), 'chatComposerSubclassProc');
-  assert.match(sub, /if \(msg == 0x0102\) \{[^]*?chat_newest_chord\.character\(wp, text\[0\.\.len\], GetTickCount64\(\), plain, \(lp & 0x40000000\) != 0 or \(lp & 0xFFFF\) > 1\)\) \{\s*_ = SetWindowTextW\(hwnd, L\(""\)\);\s*@import\("chat_render\.zig"\)\.chatJumpToNewest\(\);\s*return 0;/);
-  for (const key of ['0x11', '0x10', 'VK_MENU', '0x5B', '0x5C']) {
-    assert.ok(sub.includes(`GetKeyState(${key === 'VK_MENU' ? '@as(i32, VK_MENU)' : key}) & down) == 0`), `${key} must disable gg`);
+  assert.match(sub, /if \(msg == 0x0102\) \{[^]*?chat_newest_chord\.character\(wp, text\[0\.\.len\], GetTickCount64\(\), shift_only, \(lp & 0x40000000\) != 0 or \(lp & 0xFFFF\) > 1\)\) \{\s*_ = SetWindowTextW\(hwnd, L\(""\)\);\s*@import\("chat_render\.zig"\)\.chatJumpToNewest\(\);\s*return 0;/);
+  assert.match(sub, /GetKeyState\(0x10\) & down\) != 0/);
+  for (const key of ['0x11', 'VK_MENU', '0x5B', '0x5C']) {
+    assert.ok(sub.includes(`GetKeyState(${key === 'VK_MENU' ? '@as(i32, VK_MENU)' : key}) & down) == 0`), `${key} must disable GG`);
   }
-  assert.match(sub, /msg == WM_KILLFOCUS[^]*?msg == 0x000C[^]*?msg == 0x0302[^]*?msg == WM_KEYDOWN and wp != 0x47\)\) chat_newest_chord = \.\{\};/);
+  assert.match(sub, /msg == WM_KILLFOCUS[^]*?msg == 0x000C[^]*?msg == 0x0302[^]*?msg == WM_KEYDOWN and wp != 0x47 and wp != 0x10\)\) chat_newest_chord = \.\{\};/);
 });
 
-test('SOFT-2489 palette and documented gg share the existing newest-message routing ID', () => {
+test('SOFT-2489 palette and documented GG share the existing newest-message routing ID', () => {
   assert.match(read('src/command_palette.zig'), /SEARCH_CHAT_NEWEST_OFFSET => "Jump to newest message/);
   assert.match(read('src/command_palette.zig'), /labelsMatchQuery\(&\[_\]\[\]const u8\{ "Jump to newest message"[^]*?= SEARCH_CHAT_NEWEST_OFFSET;/);
   assert.match(read('src/sidebar.zig'), /is_chat_newest\) L\("Jump to newest message"\)/);
   assert.match(read('src/main.zig'), /target == SEARCH_CHAT_NEWEST_OFFSET[^]*?chatJumpToNewest\(\)/);
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
-    assert.match(read(file), /gg \/ End \/ Ctrl\+K/);
+    assert.match(read(file), /Shift\+G twice \/ End \/ Ctrl\+K/);
     assert.match(read(file), /empty message box[^\n]*600 ms[^\n]*leaves the box empty/);
   }
 });
