@@ -753,15 +753,14 @@ def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
         return None
     cwd = read_process_cwd(pid)
     if agent == "claude":
-        opened = open_claude_transcript(pid)
-        if opened is not None:
-            return opened.stem, opened
         sid, mapped_cwd = claude_session_metadata(pid)
         cwd = mapped_cwd or cwd
         if sid:
             path = conversation_path("claude", sid, cwd) if cwd else None
-            if path is not None:
-                return sid, path
+            return (sid, path) if path is not None else None
+        opened = open_claude_transcript(pid)
+        if opened is not None:
+            return opened.stem, opened
         for index, argument in enumerate(argv[:-1]):
             if argument == "--resume" and SESSION_ID.fullmatch(argv[index + 1]):
                 resumed = argv[index + 1]
@@ -8229,7 +8228,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 130
 
 if __name__ == '__main__':
     import base64 as _base64

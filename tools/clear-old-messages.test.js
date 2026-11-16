@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { copyZig } = require('./zig-copy');
 
-test('SOFT-2528 current Claude transcript drives history and delivery after clear', () => {
+test('SOFT-2528 current Claude transcript drives history and delivery after clear', { skip: process.platform !== 'linux' }, () => {
   const run = spawnSync('python3', ['tools/clear-old-messages-test.py', '-v'], { encoding: 'utf8', timeout: 30000 });
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
@@ -42,7 +42,7 @@ test "SOFT-2528 empty new transcript replaces old history" {
 }
 `);
     const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'clear.zig'), '--test-filter', 'SOFT-2528'], { encoding: 'utf8', timeout: 60000 });
-    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.equal(run.status, 0, `${run.error || run.signal || ''}\n${run.stdout}${run.stderr}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

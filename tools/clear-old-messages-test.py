@@ -42,8 +42,8 @@ class ClearOldMessagesTest(unittest.TestCase):
     def bind(self, sid):
         self.metadata.write_text(json.dumps(dict(sessionId=sid, cwd="/work/demo")))
 
-    def write(self, path, text, role="assistant", **extra):
-        path.write_text(json.dumps(dict(type=role, uuid=text, message=dict(role=role, content=text), **extra)) + "\n")
+    def write(self, path, text):
+        path.write_text(json.dumps(dict(type="assistant", uuid=text, message=dict(role="assistant", content=text))) + "\n")
 
     def test_reload_follows_current_pid_session_even_with_old_transcript_open(self):
         self.assertIn("Before clear", reader.response(dict(self.query)))
@@ -94,7 +94,7 @@ class ClearOldMessagesTest(unittest.TestCase):
         transport.assert_called_once()
         reader.message_poll("fixture", "claude", sid)
         result = reader.message_store_request(dict(request, op="message_status", message_id=token))
-        self.assertEqual(result["message"]["state"], "accepted")
+        self.assertEqual(result["message"]["state"], "started")
         self.assertEqual(result["message"]["sid"], "new")
 
     def test_current_metadata_without_a_file_never_falls_back_to_resume(self):

@@ -801,7 +801,8 @@ pub const History = struct {
             next.deinit(a);
             return;
         }
-        if (!append and !prepend and next.rows.items.len == 0 and self.rows.items.len > 0) return error.EmptyReset;
+        if (!append and !prepend and next.rows.items.len == 0 and self.rows.items.len > 0 and
+            std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0))) return error.EmptyReset;
         if (append and next.rows.items.len == 0) {
             if (!std.meta.eql(self.status, next.status)) self.revision +%= 1;
             self.updateCursor(next);
