@@ -133,7 +133,8 @@ function journeyRows(summary, compareBase, features = Object.keys(summary.head))
     const inherited = head === 'failed' && base === 'failed' && failures.every(run => run.error && baseRuns.some(other =>
       runOutcome(other) === 'failed' && other.error === run.error &&
       other.artifact.replace(/-[0-9a-f]{40}(?=-|$)/, '') === run.artifact));
-    const blocked = headRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup));
+    const requiredRuns = [...headRuns, ...(head === 'failed' && compareBase ? baseRuns : [])];
+    const blocked = requiredRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);
     return { feature, head, base, inherited, blocked };
   });
 }
@@ -248,6 +249,14 @@ function recoveryNeeded(run, headSha, checks) {
   ));
 }
 
+function recoveryReport(run, headSha, comments) {
+  const failure = comments.find(comment => comment.user?.login === 'github-actions[bot]' &&
+    comment.body?.startsWith(`pstack-verifier: FAIL @ ${headSha}\n`) &&
+    comment.body.includes(`\nRun: ${run.html_url}\n`) && comment.body.includes(MARKER));
+  if (failure) return { result: 'FAIL', body: failure.body };
+  return { result: 'BLOCKED', body: `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n` };
+}
+
 function recover(env) {
   const run = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).workflow_run;
   if (!run || run.head_repository?.full_name !== env.REPO || !['pull_request', 'workflow_dispatch'].includes(run.event)) return;
@@ -260,11 +269,14 @@ function recover(env) {
   const checks = gh(['api', '--paginate', `repos/${env.REPO}/commits/${headSha}/check-runs?per_page=100`, '--jq', '.check_runs[]'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
   if (!recoveryNeeded(run, headSha, checks)) return;
-  const body = `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n`;
+  const comments = gh(['api', '--paginate', `repos/${env.REPO}/issues/${number}/comments?per_page=100`, '--jq', '.[] | {body,user:{login:.user.login}}'])
+    .split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const { result, body } = recoveryReport(run, headSha, comments);
   for (const name of ['pstack-verifier (BLOCKED)', 'pstack-verifier']) {
-    gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', `name=${name}`, '-f', `head_sha=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=failure', '-f', `details_url=${run.html_url}`, '-f', 'output[title]=pstack-verifier: BLOCKED', '-f', `output[summary]=${body}`]);
+    const conclusion = name.endsWith('(BLOCKED)') && result !== 'BLOCKED' ? 'neutral' : 'failure';
+    gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', `name=${name}`, '-f', `head_sha=${headSha}`, '-f', 'status=completed', '-f', `conclusion=${conclusion}`, '-f', `details_url=${run.html_url}`, '-f', `output[title]=pstack-verifier: ${result}`, '-f', `output[summary]=${body}`]);
   }
-  gh(['pr', 'comment', String(number), '--repo', env.REPO, '--body', body]);
+  if (result === 'BLOCKED') gh(['pr', 'comment', String(number), '--repo', env.REPO, '--body', body]);
 }
 
 function gh(args) {
@@ -577,7 +589,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded };
+module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

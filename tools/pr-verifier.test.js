@@ -440,3 +440,33 @@ test('recovery uses trusted default-branch tools and never runs pull request cod
   assert.doesNotMatch(recovery, /ref:.*(?:head_sha|head_branch)/);
   assert.match(recovery, /node tools\/pr-verifier.cjs recover/);
 });
+
+for (const artifact of ['verify-appearance', `verify-appearance-${base}`]) {
+  test(`inherited failures cannot pass after screenshots are lost from ${artifact}`, () => {
+    const dir = evidenceDir({
+      'verify-appearance': { status: 'failed', error: 'wrong ring' },
+      [`verify-appearance-${base}`]: { status: 'failed', error: 'wrong ring' },
+    });
+    fs.unlinkSync(path.join(dir, artifact, 'after.png'));
+    const summary = verifier.summarize(dir, ['appearance'], base);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+  });
+}
+
+test('recovery preserves a product FAIL already posted for the same head and run', () => {
+  const run = { conclusion: 'failure', html_url: 'https://example.test/actions/runs/12' };
+  const body = `pstack-verifier: FAIL @ ${head}\n\n- screenshot contradicts the labels\n\nRun: ${run.html_url}\n${verifier.MARKER}\n`;
+  const comment = { user: { login: 'github-actions[bot]' }, body };
+  assert.deepEqual(verifier.recoveryReport(run, head, [comment]), { result: 'FAIL', body });
+  assert.equal(verifier.recoveryReport(run, base, [comment]).result, 'BLOCKED');
+  assert.equal(verifier.recoveryReport({ ...run, html_url: 'https://example.test/actions/runs/13' }, head, [comment]).result, 'BLOCKED');
+});
+
+test('recovery never grants success or trusts a verdict from an unrelated author', () => {
+  const run = { conclusion: 'cancelled', html_url: 'https://example.test/actions/runs/12' };
+  for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL']) {
+    const body = `pstack-verifier: ${verdict} @ ${head}\n\nRun: ${run.html_url}\n${verifier.MARKER}\n`;
+    assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'someone' }, body }]).result, 'BLOCKED');
+    if (verdict !== 'FAIL') assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'github-actions[bot]' }, body }]).result, 'BLOCKED');
+  }
+});
