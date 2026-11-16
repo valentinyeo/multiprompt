@@ -5512,11 +5512,6 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
     if (app_state.active_shell < app_state.shell_count) {
         const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
         const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
-        if (verboseLoggingEnabled() and GetTickCount64() -| app_state.g_chat_switch_started <= 1500 and first < app_state.g_chat_block_count) {
-            const block = app_state.g_chat_blocks[first];
-            var log: [256]u8 = undefined;
-            debugLog(std.fmt.bufPrint(&log, "[chat] position ms={d} shell={d} first={d} message={d} offset={d} y={d} scroll={d} height={d} pad={d}", .{ GetTickCount64() -| app_state.g_chat_switch_started, app_state.g_chat_cache_shell_id, first, block.message_id, block.source_offset, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y, app_state.g_chat_scroll_y, app_state.g_chat_content_h, app_state.g_chat_top_pad }) catch "");
-        }
         const nav_index = chatNavIndex();
         for (first..app_state.g_chat_block_count) |i| {
             if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) continue;
@@ -6055,6 +6050,21 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
     }
 }
 
+fn chatLogPaintPosition() void {
+    if (!verboseLoggingEnabled() or app_state.g_chat_layout_dirty or app_state.active_shell >= app_state.shell_count) return;
+    const elapsed = GetTickCount64() -| app_state.g_chat_switch_started;
+    if (elapsed > 5000) return;
+    const edge = app_state.g_chat_scroll_y + app_state.g_chat_top_pad;
+    const anchor = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], edge) orelse return;
+    for (anchor.index..app_state.g_chat_block_count) |first| {
+        const block = app_state.g_chat_blocks[first];
+        if (block.role == .tool or g_reaction_view.hides(first)) continue;
+        var log: [256]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] position ms={d} shell={d} first={d} message={d} offset={d} y={d} scroll={d} height={d} pad={d}", .{ elapsed, app_state.g_chat_cache_shell_id, first, block.message_id, block.source_offset, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y, app_state.g_chat_scroll_y, app_state.g_chat_content_h, app_state.g_chat_top_pad }) catch "");
+        return;
+    }
+}
+
 var transcript_paint_dc: HANDLE = null;
 var transcript_paint_bitmap: HANDLE = null;
 var transcript_paint_old_bitmap: HANDLE = null;
@@ -6130,6 +6140,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 _ = EndPaint(hwnd, &ps);
                 if (painted) chatSwitchDidPaint();
                 if (painted) chatSwitchContentPainted();
+                if (painted) chatLogPaintPosition();
                 if (painted) chatBenchPaint();
                 if (painted) @import("launch_cache.zig").painted(true);
             }

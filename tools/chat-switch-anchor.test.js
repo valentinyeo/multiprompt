@@ -48,6 +48,12 @@ const app_state = struct {
   var g_chat_read_divider_y: i32 = 0;
   var g_chat_block_count: usize = 0;
   var g_chat_layout_rects: [128]RECT = undefined;
+  var g_chat_layout_reuse: usize = 0;
+  var g_chat_layout_dirty = false;
+  var g_chat_echo_layout_count: usize = 0;
+  var g_chat_echo_layout: [128]RECT = undefined;
+  var g_chat_batch_boundary: chat_history.ReadBoundary = .{};
+  var g_chat_batch_divider_y: i32 = 0;
 };
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{}; }
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
@@ -77,7 +83,10 @@ fn chatRelayout(_: i32) void {
   }
   app_state.g_chat_content_h = y + app_state.tail_h;
   app_state.g_chat_layout_top_pad = app_state.g_chat_top_pad;
+  app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
 }
+fn chatMinScroll() i32 { return @min(0, app_state.g_chat_content_h - 600); }
+fn chatMaxScroll() i32 { return @max(0, app_state.g_chat_content_h - 600); }
 ${scroll.replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect')}
 fn openTab(blocks: usize) void {
   app_state.g_chat_content_h = 0;
@@ -246,5 +255,49 @@ test "SOFT-2557 caught-up first visible row stays still while header measurement
 
 test('SOFT-2557 caught-up opening keeps the first visible row through header relayouts', () => {
   const result = run(current, history, openingPosition, 'SOFT-2557');
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
+});
+
+test('SOFT-2557 the opening oracle detects message movement, not just window movement', () => {
+  const { openingPosition } = require('./verify-chat-delivery/chat-open-position.cjs');
+  const shown = '[switch] chat content shown shell=7 blocks=40 ms=16\n';
+  const frame = (ms, message = '18446744073709551611', y = 0, scroll = 3420, first = 34) =>
+    `[chat] position ms=${ms} shell=7 first=${first} message=${message} offset=512 y=${y} scroll=${scroll} height=4020 pad=20\n`;
+  const stable = shown + frame(16) + frame(500) + frame(1016);
+  assert.equal(openingPosition(stable, 7, 1200).status, 'passed');
+  assert.equal(openingPosition(shown + frame(16) + frame(500, undefined, 28), 7, 1200).status, 'failed');
+  assert.equal(openingPosition(shown + frame(16) + frame(500, '18446744073709551612'), 7, 1200).status, 'failed');
+  assert.equal(openingPosition(shown + frame(16) + frame(500, undefined, 0, 4020, 40), 7, 1200).status, 'passed');
+  assert.throws(() => openingPosition(stable, 7, 999), /full second/);
+  assert.throws(() => openingPosition(shown, 7, 1200), /no visible-row/);
+  assert.throws(() => openingPosition(frame(16), 7, 1200), /never painted/);
+  assert.throws(() => openingPosition(shown + frame(500), 7, 1200), /first painted row/);
+});
+
+test('SOFT-2557 before 520b7666d the caught-up row stays still through header relayouts', () => {
+  const beforeHistory = history.slice(0, history.indexOf('pub fn openScroll(')) + beforeOpen + history.slice(history.indexOf('pub const MISSING_RETRY_MS'));
+  const result = run(beforeScroll, beforeHistory, openingPosition, 'SOFT-2557');
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
+});
+
+test('SOFT-2557 incremental header updates preserve the first visible row too', () => {
+  const topPad = between(read('chat_render.zig'), 'pub fn chatSetTopPad(', 'pub fn chatTopPad(');
+  const checks = `
+test "SOFT-2557 incremental header updates keep the displayed message still" {
+  openTab(40);
+  app_state.has_unread = false;
+  app_state.g_chat_content_h = 0;
+  chatRelayoutPreservingScroll(800, 600);
+  const first = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y).?.index;
+  const screen_y = app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y;
+  for ([_]i32{ 48, 82, 20, 60, 20 }) |pad| {
+    chatSetTopPad(pad);
+    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
+  }
+}
+`;
+  const result = run(current, history, topPad + checks, 'SOFT-2557');
   assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
 });

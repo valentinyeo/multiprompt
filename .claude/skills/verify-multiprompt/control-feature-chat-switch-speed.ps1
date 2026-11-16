@@ -177,7 +177,7 @@
                             $jobCpu = ([double]$jobAfter.UserTime + $jobAfter.KernelTime - $jobBefore.UserTime - $jobBefore.KernelTime) / 10000
                             $shapeSample.owned_job = @{ cpu_ms = $jobCpu; elapsed_ms = $jobClock.Elapsed.TotalMilliseconds; cpu_one_core_percent = 100 * $jobCpu / $jobClock.Elapsed.TotalMilliseconds; active_before = $jobBefore.ActiveProcesses; active_after = $jobAfter.ActiveProcesses }
                             $shapeSample.hang_ms = [VerifyNative]::HangProbeMax()
-                            $measured = @($shapeSample.shown_ms, $shapeSample.hang_ms)
+                            $measured = @($shapeSample.shown_ms, $shapeSample.hang_ms, ($shapeSample.elapsed_ms - $shapeSample.shown_ms))
                         } else {
                             $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
                         }
@@ -201,7 +201,14 @@
                         $timings[$mode].samples_ms += $(if ($measured[0] -lt 0) { $settleMs } else { [Math]::Round($measured[0], 1) })
                         $timings[$mode].app_ms += $appMs
                         $timings[$mode].hang_ms += [Math]::Round($measured[1], 1)
-                        $range | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample))
+                        $sampleLog = Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample)
+                        $range | Set-Content -Encoding UTF8 $sampleLog
+                        if (-not $env:RELEASE_TAG) {
+                            $observedMs = ([double]$measured[2]).ToString([Globalization.CultureInfo]::InvariantCulture)
+                            $positionFile = Join-Path $Evidence ("{0}-{1}-position.json" -f $mode, $sample)
+                            & node (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-open-position.cjs') $sampleLog $shellIds[$target] $observedMs $positionFile
+                            if ($LASTEXITCODE -ne 0) { throw 'Chat messages moved during the first second after opening; inspect the position samples' }
+                        }
                         if ($shapeProof) {
                             if (-not $widths.Success -or $shapeSample.shown_ms -lt 0) { throw 'Shape sample needs a completed target paint with geometry' }
                             $shapeSample.index = $sample

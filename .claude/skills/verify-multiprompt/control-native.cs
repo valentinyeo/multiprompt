@@ -305,7 +305,7 @@ public static class VerifyNative {
         double shown = -1;
         long position = offset;
         string carry = "";
-        while (timer.ElapsedMilliseconds < settleMs) {
+        while (timer.ElapsedMilliseconds < settleMs || (shown >= 0 && timer.Elapsed.TotalMilliseconds < shown + 1000)) {
             if (shown < 0) {
                 using (var stream = new System.IO.FileStream(log, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete)) {
                     if (stream.Length > position) {
@@ -321,7 +321,7 @@ public static class VerifyNative {
             }
             Thread.Sleep(1);
         }
-        return new double[] { shown, HangProbeMax() };
+        return new double[] { shown, HangProbeMax(), timer.Elapsed.TotalMilliseconds - shown };
     }
     public static IntPtr DockedPaneWindow(IntPtr owner) {
         Rect frame;
