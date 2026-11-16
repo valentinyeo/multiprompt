@@ -1,1 +1,1 @@
-After /clear in a server chat, old messages disappear and new messages send normally.
+After clearing a server chat, old messages disappear and new messages send normally.

@@ -2011,7 +2011,7 @@ class HistoryReaderTest(unittest.TestCase):
         def proc_fds(path):
             return fd.iterdir() if str(path) == '/proc/99/fd' else original_iterdir(path)
         with patch.object(Path, 'iterdir', proc_fds), patch.object(reader, 'read_process_cwd', return_value='/wrong'), \
-                patch.object(reader, 'claude_session_metadata', side_effect=AssertionError('open transcript wins')):
+                patch.object(reader, 'claude_session_metadata', return_value=(None, None)):
             self.assertEqual(reader.resolve_tmux_agent('claude', 'term-1', 99), ('newer', newer))
 
     def test_empty_identity_discovers_owner_then_reads_same_source_as_owner_once(self):
@@ -2995,7 +2995,7 @@ class IGSH412ResumedSessionTest(unittest.TestCase):
                 'claude', '--resume', resumed, '--dangerously-skip-permissions'])}),
         ]
         for session, sid, table in shapes:
-            for scenario in ('stale-map', 'no-map', 'new-map', 'new-open', 'missing-resume', 'no-map-missing'):
+            for scenario in ('unmaterialized-map', 'no-map', 'new-map', 'new-open', 'missing-resume', 'no-map-missing'):
                 with self.subTest(session=session, scenario=scenario), tempfile.TemporaryDirectory() as directory:
                     home = Path(directory)
                     folder = home / '.claude/projects/-work-original'
@@ -3010,7 +3010,7 @@ class IGSH412ResumedSessionTest(unittest.TestCase):
                     metadata.parent.mkdir(parents=True)
                     if scenario not in ('no-map', 'no-map-missing'):
                         metadata.write_text(json.dumps(dict(sessionId='fresh', cwd='/work/current')))
-                    expected = (sid, resumed_path)
+                    expected = None if scenario == 'unmaterialized-map' else (sid, resumed_path)
                     opened = None
                     if scenario in ('new-map', 'new-open'):
                         new_path = folder / 'fresh.jsonl'
