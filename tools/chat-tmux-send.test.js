@@ -168,7 +168,10 @@ test "IGSH-1640 host upgrade captures admission before persistence and never ref
     try std.testing.expectEqual(@as(usize, 1), admission_captures);
 }
 test "SOFT-2548 existing terminals send while an unidentified live chat stays queued" {
-    reset(); shells[0].ai_agent = 0; test_key.tmux[0..9].* = "live-test".*;
+    reset(); shells[0].ai_agent = 0; test_key.tmux[0] = 0;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 0), starts + pastes + local_pastes + enters);
+    test_key.tmux[0..9].* = "live-test".*;
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 0), starts + pastes + local_pastes + enters);
     test_key.tmux[0..9].* = "term-test".*;
