@@ -9,14 +9,6 @@ on:
         required: true
         default: appearance
         type: string
-      revision:
-        description: Optional harness revision for commit bisection
-        required: false
-        type: string
-      app_revision:
-        description: Optional independent application revision for commit bisection
-        required: false
-        type: string
       dictation_stall:
         description: Deliberately stall dictation capture or the browser-pane-stuck driver to prove timeout evidence
         required: false
