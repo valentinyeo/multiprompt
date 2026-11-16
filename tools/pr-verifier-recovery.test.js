@@ -6,7 +6,6 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const verifier = require('./pr-verifier.cjs');
 
-const root = path.resolve(__dirname, '..');
 const recovery = require('./fixtures/SOFT-2498/recovery.json');
 const artifacts = require('./fixtures/SOFT-2498/artifacts.json');
 
@@ -17,10 +16,10 @@ for (const verdict of ['PASS', 'PASS+NOTES']) {
     assert.equal(verifier.recoveryNeeded(recovery.run, recovery.headSha, [check]), false);
   });
 
-  test(`a later ${verdict} wins over an older recovery BLOCKED`, () => {
+  test(`a later ${verdict} can repair an older recovery BLOCKED`, () => {
     const check = structuredClone(recovery.checks[1]);
     check.output.summary = check.output.summary.replace('PASS+NOTES', verdict).replace(String(recovery.run.id), String(recovery.run.id + 1));
-    assert.equal(verifier.recoveryNeeded(recovery.run, recovery.headSha, [recovery.checks[0], check]), false);
+    assert.equal(verifier.recoveryNeeded(recovery.run, recovery.headSha, [recovery.checks[0], check]), true);
   });
 
   test(`a later posted ${verdict} supersedes an earlier FAIL and recovery BLOCKED`, () => {
@@ -32,6 +31,7 @@ for (const verdict of ['PASS', 'PASS+NOTES']) {
 test('an older verdict or a different head cannot suppress genuine recovery', () => {
   const check = structuredClone(recovery.checks[1]);
   check.output.summary = check.output.summary.replace(String(recovery.run.id), String(recovery.run.id - 1));
+  check.completed_at = '2026-11-16T15:00:00Z';
   assert.equal(verifier.recoveryNeeded(recovery.run, recovery.headSha, [check]), true);
   assert.equal(verifier.recoveryNeeded(recovery.run, 'a'.repeat(40), recovery.checks), true);
 });
@@ -95,4 +95,66 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a later successful retry of an older run suppresses recovery', () => {
+  const check = structuredClone(recovery.checks[1]);
+  check.output.summary = check.output.summary.replace(String(recovery.run.id), String(recovery.run.id - 1));
+  assert.equal(verifier.recoveryNeeded(recovery.run, recovery.headSha, [check]), false);
+});
+
+test('verdict and recovery writers share a non-cancelling publication lock', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
+  const observer = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier-blocked.yml'), 'utf8');
+  assert.match(workflow, /run-name: verify PR \$\{\{ inputs.pr \|\| github.event.pull_request.number \}\}/);
+  assert.match(workflow, /group: pstack-verdict-\$\{\{ format\('verify PR \{0\}', inputs.pr \|\| github.event.pull_request.number\) \}\}\n      cancel-in-progress: false/);
+  assert.match(observer, /group: pstack-verdict-\$\{\{ github.event.workflow_run.display_title \}\}\n      cancel-in-progress: false/);
+});
+
+for (const gate of ['success', 'success-after-blocked', 'success-after-blocked-history', 'failure', 'queued', 'api-error']) {
+  test(`recovering a published PASS+NOTES with Tests ${gate} stays fail-closed`, { skip: process.platform !== 'linux' }, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-publish-'));
+    try {
+      const bin = path.join(dir, 'bin');
+      fs.mkdirSync(bin);
+      const requests = path.join(dir, 'requests.jsonl');
+      const event = path.join(dir, 'event.json');
+      fs.writeFileSync(event, JSON.stringify({ workflow_run: { ...recovery.run, event: 'workflow_dispatch', head_repository: { full_name: 'valentinyeo/multiprompt' }, display_title: 'verify PR 1052', pull_requests: [{ number: 1052, head: { sha: recovery.headSha } }] } }));
+      fs.writeFileSync(path.join(bin, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_REQUESTS, JSON.stringify(args) + '\\n');
+const head = process.env.HEAD_SHA;
+const repo = 'valentinyeo/multiprompt';
+const fixture = JSON.parse(fs.readFileSync(process.env.GH_RECOVERY, 'utf8'));
+const endpoint = args.find(arg => arg.startsWith('repos/')) || '';
+if (args[0] === 'pr' || args.includes('POST')) process.stdout.write('{}');
+else if (endpoint.endsWith('/pulls/1052')) process.stdout.write(JSON.stringify({ state: 'open', head: { sha: head, repo: { full_name: repo } } }));
+else if (endpoint.includes('/commits/')) process.stdout.write(process.env.GH_BLOCKED === 'true' ? fixture.checks.slice(0, process.env.GH_HISTORY === 'true' ? 2 : 1).map(check => JSON.stringify(check)).join('\\n') + '\\n' : '');
+else if (endpoint.includes('/comments')) process.stdout.write(JSON.stringify({ user: { login: 'github-actions[bot]' }, body: fixture.checks[1].output.summary }) + '\\n');
+else if (endpoint.includes('/test.yml/runs')) {
+  if (process.env.GH_GATE === 'api-error') process.exit(1);
+  process.stdout.write(JSON.stringify([{ id: 1, status: process.env.GH_GATE === 'queued' ? 'queued' : 'completed', conclusion: process.env.GH_GATE }]));
+} else process.exit(2);
+`, { mode: 0o755 });
+      const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'recover'], { encoding: 'utf8', env: {
+        ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, REPO: 'valentinyeo/multiprompt', HEAD_SHA: recovery.headSha,
+        GITHUB_EVENT_PATH: event, GH_REQUESTS: requests, GH_GATE: gate.startsWith('success') ? 'success' : gate, GH_BLOCKED: String(gate.startsWith('success-after-blocked')), GH_HISTORY: String(gate.endsWith('-history')), GH_RECOVERY: path.join(__dirname, 'fixtures/SOFT-2498/recovery.json'),
+      } });
+      assert.equal(result.status, 0, result.stderr);
+      const calls = fs.readFileSync(requests, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const check = calls.find(args => args.includes('name=pstack-verifier'));
+      assert.ok(check, 'Recovery published the required head check');
+      assert.ok(check.includes(`conclusion=${gate.startsWith('success') ? 'success' : 'failure'}`));
+      assert.ok(check.includes(`output[title]=pstack-verifier: ${gate.startsWith('success') ? 'PASS+NOTES' : 'BLOCKED'}`));
+      assert.ok(calls.some(args => args[1]?.includes('/test.yml/runs')));
+      assert.ok(calls.some(args => args.some(arg => arg.includes('check-runs?filter=all'))));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('an existing recovery BLOCKED is not a terminal verdict that hides later proof', () => {
+  assert.equal(verifier.recoveryNeeded(recovery.run, recovery.headSha, [recovery.checks[0]]), true);
 });
