@@ -127,6 +127,10 @@ test('the base side is only the head journeys that failed', () => {
   assert.deepEqual(verifier.failedHeadFeatures(jobs, ['appearance', 'chat-view', 'palette-order']), ['appearance']);
 });
 
+test('server clear compares against base even when its head passes', () => {
+  assert.deepEqual(verifier.failedHeadFeatures([{ name: 'head chat-server-clear / verify (chat-server-clear)', conclusion: 'success' }], ['chat-server-clear']), ['chat-server-clear']);
+});
+
 test('missing reusable head jobs still receive a baseline comparison', () => {
   assert.deepEqual(verifier.failedHeadFeatures([], ['chat-slash', 'chat-delivery']), ['chat-slash', 'chat-delivery']);
   assert.deepEqual(verifier.failedHeadFeatures([{ name: 'failed-head', conclusion: 'success' }], ['chat-slash']), ['chat-slash']);

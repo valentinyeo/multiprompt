@@ -25,13 +25,16 @@ function fixture() {
     { pid: 20, argv: ['--session-id', 'new-context'] },
   ].map(JSON.stringify).join('\n'));
   write('outbox.json', { queues: [] });
+  write('arguments.json', { draft: '/clear extra', contextUnchanged: true, agentUnchanged: true, beforeArgs: 2, afterArgs: 2 });
+  write('headers.json', { arguments: 'Verify agent Use /clear without arguments.', stopped: 'AI stopped. Click to restart', pending: 'Restarting the AI', refused: 'The AI is still running, so it was not restarted.', settled: 'Verify agent', requestedMs: 1, releasedMs: 2, settledMs: 3 });
+  write('restart-reply.jsonl', JSON.stringify({ wire: '@mp\t1\trestart_ai\terror\tpane_busy\t0' }));
   fs.writeFileSync(path.join(root, 'actions.json'), JSON.stringify([
     { input: 'type composer', text: '/clear' },
     { input: 'Enter: clear the server chat', keys: [13] },
     { input: 'type composer', text: 'A new question after clearing.' },
     { input: 'Enter: send after clearing', keys: [13] },
   ]));
-  for (const stage of ['clear-before', 'clear-after', 'clear-reply']) {
+  for (const stage of ['clear-before', 'clear-after', 'clear-reply', 'clear-arguments', 'restart-stopped', 'restart-pending', 'restart-refused', 'restart-settled']) {
     const png = Buffer.alloc(1024);
     Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
     fs.writeFileSync(path.join(root, `${stage}.png`), png);
@@ -52,6 +55,8 @@ for (const [name, file, broken] of [
   ['Not sent row', 'after-clear-history.txt', 'The fake session is ready.\nNot sent'],
   ['delivery tag', 'after-reply-history.txt', 'A new question after clearing. [mp:0123456789abcdef]\nSynthetic fixture response.'],
   ['missing follow-up', 'after-reply-history.txt', 'The fake session is ready.'],
+  ['arguments delivered', 'arguments.json', { draft: '', contextUnchanged: true, agentUnchanged: true, beforeArgs: 2, afterArgs: 3 }],
+  ['stuck restart badge', 'headers.json', { arguments: 'Use /clear without arguments.', stopped: 'AI stopped', pending: 'Restarting the AI', refused: 'The AI is still running', settled: 'Restarting the AI', requestedMs: 1, releasedMs: 2, settledMs: 3 }],
   ['leaked process', 'cleanup.json', { remaining_owned_processes: 1, scratch_removed: true, evidence_preserved: true }],
 ]) {
   test(`server clear rejects ${name}`, t => {

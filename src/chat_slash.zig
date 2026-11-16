@@ -47,6 +47,23 @@ pub fn bareClear(text: []const u16) bool {
     return trimmed.len == 6 and trimmed[0] == '/' and equals(trimmed[1..], "clear");
 }
 
+pub fn clearWithArguments(text: []const u16) bool {
+    const trimmed = std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' });
+    return trimmed.len > 6 and bareClear(trimmed[0..6]) and switch (trimmed[6]) {
+        ' ', '\t', '\r', '\n' => true,
+        else => false,
+    };
+}
+
+test "clear arguments are refused without matching other commands" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expect(clearWithArguments(w("/clear extra")));
+    try std.testing.expect(clearWithArguments(w("  /clear\textra\n")));
+    try std.testing.expect(!clearWithArguments(w("/clear  ")));
+    try std.testing.expect(!clearWithArguments(w("/cleared extra")));
+    try std.testing.expect(!clearWithArguments(w("clear extra")));
+}
+
 test "a bare clear is only the command" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expect(bareClear(w("/clear")));

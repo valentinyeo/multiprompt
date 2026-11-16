@@ -134,7 +134,7 @@ function failedHeadFeatures(jobs, features) {
     const prefix = `head ${feature} /`;
     const mine = list.filter(job => job && (job.name === `head ${feature}` || String(job.name || '').startsWith(prefix)));
     const finished = mine.filter(job => job.conclusion && job.conclusion !== 'skipped');
-    if (mine.length === 0 || finished.some(job => job.conclusion !== 'success')) failed.push(feature);
+    if (feature === 'chat-server-clear' || mine.length === 0 || finished.some(job => job.conclusion !== 'success')) failed.push(feature);
   }
   return failed;
 }

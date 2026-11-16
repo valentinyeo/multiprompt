@@ -15,6 +15,20 @@ function verify(root) {
   const doctor = json('doctor.json');
   assert.ok(doctor.pid > 0 && doctor.hwnd > 0 && doctor.chat);
   assert.match(doctor.sha256, /^[a-f0-9]{64}$/i);
+  const argumentsProof = json('arguments.json');
+  assert.equal(argumentsProof.draft, '/clear extra');
+  assert.equal(argumentsProof.contextUnchanged, true);
+  assert.equal(argumentsProof.agentUnchanged, true);
+  assert.equal(argumentsProof.afterArgs, argumentsProof.beforeArgs);
+  const headers = json('headers.json');
+  assert.match(headers.arguments, /without arguments/i);
+  assert.match(headers.stopped, /AI stopped/i);
+  assert.match(headers.pending, /Restarting the AI/i);
+  assert.match(headers.refused, /still running/i);
+  assert.match(headers.settled, /Verify agent/i);
+  assert.doesNotMatch(headers.settled, /Restarting|AI stopped|still running/i);
+  assert.ok(headers.requestedMs < headers.releasedMs && headers.releasedMs < headers.settledMs);
+  assert.ok(lines('restart-reply.jsonl').some(row => row.wire.includes('\trestart_ai\terror\tpane_busy\t')));
   const before = json('before-state.json');
   const after = json('after-state.json');
   assert.ok(before.agent_pid > 0 && after.agent_pid > 0);
@@ -38,12 +52,12 @@ function verify(root) {
   for (const input of ['Enter: clear the server chat', 'Enter: send after clearing']) {
     assert.ok(actions.some(row => row.input === input && row.keys.includes(13)), input);
   }
-  for (const stage of ['clear-before', 'clear-after', 'clear-reply']) {
+  for (const stage of ['clear-before', 'clear-after', 'clear-reply', 'clear-arguments', 'restart-stopped', 'restart-pending', 'restart-refused', 'restart-settled']) {
     const png = fs.readFileSync(path.join(root, `${stage}.png`));
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(png.length > 1000);
   }
-  return { newContext: true, agentReplaced: true, historyRetained: true, followupReply: true, notSent: false, deliveryTag: false };
+  return { argumentsRefused: true, restartReasonVisible: true, restartingBadgeCleared: true, newContext: true, agentReplaced: true, historyRetained: true, followupReply: true, notSent: false, deliveryTag: false };
 }
 
 module.exports = { verify };

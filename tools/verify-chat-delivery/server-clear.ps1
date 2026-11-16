@@ -21,10 +21,58 @@ function Clear-Copy([string]$Stage, [string]$Required) {
     Press @(0x1B) 'Escape: clear transcript selection'
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 }
+. "$PSScriptRoot/header-ocr.ps1"
+$headers = @{}
 Clear-Copy 'before' 'The fake session is ready.'
 $before = Read-Shared $statePath | ConvertFrom-Json
 Copy-Item $statePath "$caseDir/before-state.json"
 Shot 'clear-before'
+try {
+    $oldArgs = @((Read-Shared "$state/model-argv.jsonl") -split "`n" | Where-Object { $_.Trim() }).Count
+    Type-Composer '/clear extra'
+    Press @(0x1B) 'Escape: dismiss completion before the argument refusal' $true
+    Press @(0x0D) 'Enter: refuse clear with arguments' $true
+    $headers.arguments = Wait-For 'visible plain argument refusal' { $text = Read-Header 'clear-arguments'; if ($text -match 'without arguments') { $text } } 15
+    $argumentState = Read-Shared $statePath | ConvertFrom-Json
+    $argsAfter = @((Read-Shared "$state/model-argv.jsonl") -split "`n" | Where-Object { $_.Trim() }).Count
+    Save @{draft=[ChatDeliveryDesktop]::Text($composer); contextUnchanged=($argumentState.native_session -ceq $before.native_session); agentUnchanged=($argumentState.agent_pid -eq $before.agent_pid); beforeArgs=$oldArgs; afterArgs=$argsAfter} "$caseDir/arguments.json"
+} catch {
+    $observation.argumentsError = $_.ToString()
+} finally {
+    Clear-Composer
+    Save $headers "$caseDir/headers.json"
+}
+try {
+    [IO.File]::WriteAllText("$state/restart-probe", '')
+    $headers.stopped = Wait-For 'cached shell inventory exposes the real restart action' { $text = Read-Header 'restart-stopped'; if ($text -match 'AI stopped') { $text } } 60
+    $offset = (Read-Shared "$settings/debug.log").Length
+    Press @(0x11, 0x4B) 'Ctrl+K: restart the AI'
+    [void](Wait-For 'restart palette open' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    $query = 'chat view restart the ai'
+    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'real restart command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=7199(?:\s|$)') })
+    Press @(0x0D) 'Enter: restart after the agent resumed'
+    [void](Wait-For 'production restart request reaches the SSH boundary' { Test-Path "$state/restart-requested" })
+    $headers.requestedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $headers.pending = Wait-For 'Restarting the AI is visibly painted before the refusal' { $text = Read-Header 'restart-pending'; if ($text -match 'Restarting the AI') { $text } } 15
+    [IO.File]::WriteAllText("$state/restart-release", '')
+    $headers.releasedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $headers.refused = Wait-For 'plain refusal reason is visibly painted' { $text = Read-Header 'restart-refused'; if ($text -match 'still running') { $text } } 15
+    $headers.settled = Wait-For 'refusal notice expires without leaving the restarting badge' {
+        $text = Read-Header 'restart-settled'
+        if ($text -match 'Verify agent' -and $text -notmatch 'still running|Restarting|AI stopped|not restarted') { $text }
+    } 15
+    $headers.settledMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Save $headers "$caseDir/headers.json"
+    Copy-Item "$state/restart-reply.jsonl" "$caseDir/restart-reply.jsonl"
+} catch {
+    $observation.restartError = $_.ToString()
+} finally {
+    [IO.File]::WriteAllText("$state/restart-release", '')
+    Remove-Item "$state/restart-probe" -ErrorAction SilentlyContinue
+    Save $headers "$caseDir/headers.json"
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+}
 Type-Composer '/clear'
 [void](Wait-For 'bare clear in the real composer' { [ChatDeliveryDesktop]::Text($composer) -ceq '/clear' })
 Press @(0x1B) 'Escape: dismiss slash completion without changing the command' $true
@@ -47,4 +95,5 @@ if ($hostLog.Count -ne 1) { throw 'Expected exactly one isolated production host
 Copy-Item $hostLog[0].FullName "$caseDir/host-events.jsonl"
 if (Test-Path "$settings/chat-outbox.json") { Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox.json" } else { Save @{queues=@()} "$caseDir/outbox.json" }
 $observation.newContext = $true
+[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 Doctor $true
