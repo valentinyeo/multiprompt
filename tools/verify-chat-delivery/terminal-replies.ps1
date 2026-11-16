@@ -25,7 +25,7 @@ $offset = (Read-Shared "$state/terminal-drafts.jsonl").Length
 Shell-Input 'text' '[]'
 [void](Wait-For 'production reader preserved literal brackets' {
     $rows = (Read-Shared "$state/terminal-drafts.jsonl").Substring($offset).Trim() -split "`n" | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json }
-    @($rows | Where-Object { $_.screen.Contains('❯ []') -and $_.draft -ceq '[]' }).Count -gt 0
+    @($rows | Where-Object { $_.screen.Contains("$([char]0x276f) []") -and $_.draft -ceq '[]' }).Count -gt 0
 } 20)
 Shell-Input 'key' 'C-u'
 Type-Composer '[]'
