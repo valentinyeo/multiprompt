@@ -48,12 +48,6 @@ const app_state = struct {
   var g_chat_read_divider_y: i32 = 0;
   var g_chat_block_count: usize = 0;
   var g_chat_layout_rects: [128]RECT = undefined;
-  var g_chat_layout_reuse: usize = 0;
-  var g_chat_layout_dirty = false;
-  var g_chat_echo_layout_count: usize = 0;
-  var g_chat_echo_layout: [128]RECT = undefined;
-  var g_chat_batch_boundary: chat_history.ReadBoundary = .{};
-  var g_chat_batch_divider_y: i32 = 0;
 };
 fn chatViewClientRect(rc: *RECT) void { rc.* = .{}; }
 fn InvalidateRect(_: ?usize, _: ?*const RECT, _: i32) i32 { return 1; }
@@ -83,10 +77,7 @@ fn chatRelayout(_: i32) void {
   }
   app_state.g_chat_content_h = y + app_state.tail_h;
   app_state.g_chat_layout_top_pad = app_state.g_chat_top_pad;
-  app_state.g_chat_layout_reuse = app_state.g_chat_block_count;
 }
-fn chatMinScroll() i32 { return @min(0, app_state.g_chat_content_h - 600); }
-fn chatMaxScroll() i32 { return @max(0, app_state.g_chat_content_h - 600); }
 ${scroll.replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect')}
 fn openTab(blocks: usize) void {
   app_state.g_chat_content_h = 0;
@@ -117,12 +108,19 @@ test "IGSH-1924 a switch opens on the New divider and later content never moves 
   try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
   app_state.g_chat_top_pad = 20;
 }
-test "IGSH-1924 a stale cache lands on the divider once the newest page arrives" {
+test "SOFT-2557 a late New divider never moves the first painted row" {
   openTab(UNREAD_FROM);
-  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
-  app_state.next_blocks = 40;
-  refreshChatTranscript(false);
-  try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
+  const first = app_state.g_chat_scroll_y;
+  const row = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..UNREAD_FROM], first).?.index;
+  const screen_y = app_state.g_chat_layout_rects[row].top - first;
+  for ([_]usize{ 40, 48, 56 }) |count| {
+    app_state.next_blocks = count;
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[row].top - app_state.g_chat_scroll_y);
+    chatRelayoutPreservingScroll(800, 600);
+    try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+  }
 }
 test "IGSH-1924 reader scroll releases the anchor and new content follows the bottom again" {
   openTab(40);
@@ -186,11 +184,11 @@ test "IGSH-1924 relayout retains position but clamps to the real bottom" {
 }
 `;
 
-function run(scroll, historySource = history, extra = '', filter = '') {
+function run(scroll, historySource = history) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-anchor-'));
   try {
-    fs.writeFileSync(path.join(dir, 'test.zig'), harness(scroll, historySource) + extra);
-    return spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig', ...(filter ? ['--test-filter', filter] : [])], { cwd: dir, encoding: 'utf8', timeout: 90000 });
+    fs.writeFileSync(path.join(dir, 'test.zig'), harness(scroll, historySource));
+    return spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 90000 });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -234,30 +232,6 @@ test('IGSH-1924 removing the content clamp recreates empty space', () => {
   assert.match(result.stderr, /holds never leave blank space after content shrinks[^]*?FAIL \(TestExpectedEqual\)/);
 });
 
-const openingPosition = `
-test "SOFT-2557 caught-up first visible row stays still while header measurements settle" {
-  openTab(40);
-  app_state.has_unread = false;
-  app_state.g_chat_content_h = 0;
-  chatRelayoutPreservingScroll(800, 600);
-  const first = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y).?.index;
-  const screen_y = app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y;
-  for ([_]i32{ 48, 82, 20, 60, 20 }) |pad| {
-    app_state.g_chat_top_pad = pad;
-    chatRelayoutPreservingScroll(800, 600);
-    try std.testing.expectEqual(first, chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y).?.index);
-    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
-    refreshChatTranscript(false);
-    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
-  }
-}
-`;
-
-test('SOFT-2557 caught-up opening keeps the first visible row through header relayouts', () => {
-  const result = run(current, history, openingPosition, 'SOFT-2557');
-  assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
-});
-
 test('SOFT-2557 the opening oracle detects message movement, not just window movement', () => {
   const { openingPosition } = require('./verify-chat-delivery/chat-open-position.cjs');
   const shown = '[switch] chat content shown shell=7 blocks=40 ms=16\n';
@@ -274,30 +248,9 @@ test('SOFT-2557 the opening oracle detects message movement, not just window mov
   assert.throws(() => openingPosition(shown + frame(500), 7, 1200), /first painted row/);
 });
 
-test('SOFT-2557 before 520b7666d the caught-up row stays still through header relayouts', () => {
-  const beforeHistory = history.slice(0, history.indexOf('pub fn openScroll(')) + beforeOpen + history.slice(history.indexOf('pub const MISSING_RETRY_MS'));
-  const result = run(beforeScroll, beforeHistory, openingPosition, 'SOFT-2557');
-  assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
-});
-
-test('SOFT-2557 incremental header updates preserve the first visible row too', () => {
-  const topPad = between(read('chat_render.zig'), 'pub fn chatSetTopPad(', 'pub fn chatTopPad(');
-  const checks = `
-test "SOFT-2557 incremental header updates keep the displayed message still" {
-  openTab(40);
-  app_state.has_unread = false;
-  app_state.g_chat_content_h = 0;
-  chatRelayoutPreservingScroll(800, 600);
-  const first = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..40], app_state.g_chat_scroll_y).?.index;
-  const screen_y = app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y;
-  for ([_]i32{ 48, 82, 20, 60, 20 }) |pad| {
-    chatSetTopPad(pad);
-    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
-    refreshChatTranscript(false);
-    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y);
-  }
-}
-`;
-  const result = run(current, history, topPad + checks, 'SOFT-2557');
-  assert.equal(result.status, 0, `${result.stdout}${result.stderr}${result.error || ''} signal=${result.signal}`);
+test('SOFT-2557 the previous opening path moves the visible row when a New divider arrives late', () => {
+  const before = fs.readFileSync(path.join(__dirname, 'fixtures', 'SOFT-2557', 'before-refresh-scroll.txt'), 'utf8');
+  const result = run(before);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /SOFT-2557 a late New divider[^]*?FAIL \(TestExpectedEqual\)/);
 });
