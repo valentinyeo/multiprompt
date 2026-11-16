@@ -51,6 +51,14 @@ function verify(root) {
   const queuedFollowups = rows.filter(row => row.stage === 'queued-followup');
   assert.ok(queuedFollowups.some(row => observation.followups.every(text => row.events.some(({event}) => event.state === 'queued' && event.text === text))), 'Real message store did not retain both follow-up messages');
   assert.ok(!rows.some(row => row.stage === 'dispatch-error' || row.stage === 'reply-timeout'), 'Stand-in dispatch failed');
+  for (const [stage, count] of [['working-final', 1], ['working-second', 2]]) {
+    const saved = rows.find(row => row.stage === stage);
+    assert.equal(saved?.rows.length, count, 'Provider archive must retain each real reply');
+    assert.equal(observation[stage]?.split(reply).length - 1, count, 'Each real reply must be copied once after history arrives');
+    assert.equal(observation[stage]?.split('pstack: verified').length - 1, count, 'Final text must replace the growing reply');
+    assert.deepEqual(saved.rows.map(row => row.id), ['standin-reply', 'standin-reply-two'].slice(0, count), 'Archive and live items must share identities');
+    assert.ok(fs.statSync(path.join(root, `${stage}.png`)).size > 0, 'Final reply screenshot missing');
+  }
   const area = json('area.json');
   const frames = observation.frames.map(frame => {
     const image = readBmp(path.join(dir, frame.name));
