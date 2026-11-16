@@ -93,6 +93,7 @@ test('a journey that fails on head and base is noted, not a FAIL', () => {
   const { final, body } = verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['diff matches the ticket'] }, headSha: head, summary, selection: selection(['appearance']), runUrl: 'u' });
   assert.equal(final, 'PASS+NOTES');
   assert.match(body, /Already failing on the merge base, so not caused by this change: appearance\./);
+  assert.match(body, /appearance: head failed, base failed \(inherited\)/);
 });
 
 test('a journey that passes on base and fails on head is FAIL', () => {
@@ -350,7 +351,9 @@ test('the CLI reports lost selection as BLOCKED with a failing check conclusion'
   const { execFileSync } = require('node:child_process');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-lost-'));
   try {
-    const output = execFileSync(process.execPath, [modulePath, 'finalize', path.join(out, 'selection.json'), path.join(out, 'summary.json'), out], { encoding: 'utf8', env: { ...process.env, VERDICT: '{"verdict":"PASS+NOTES"}', HEAD_SHA: head } });
+    const outputFile = path.join(out, 'outputs');
+    execFileSync(process.execPath, [modulePath, 'finalize', path.join(out, 'selection.json'), path.join(out, 'summary.json'), out], { encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: outputFile, JOB_RESULTS: '{}', VERDICT: '{"verdict":"PASS+NOTES"}', HEAD_SHA: head } });
+    const output = fs.readFileSync(outputFile, 'utf8');
     assert.match(output, /result=BLOCKED/);
     assert.match(output, /conclusion=failure/);
     assert.match(fs.readFileSync(path.join(out, 'comment.md'), 'utf8'), /missing or unreadable/);

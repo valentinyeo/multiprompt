@@ -193,7 +193,7 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
   const ran = rows.filter(row => row.head !== 'missing');
   const notes = [];
   let final = VERDICTS.includes(verdict?.verdict) ? verdict.verdict : 'BLOCKED';
-  if (!VERDICTS.includes(verdict?.verdict)) notes.push('The verifier returned no valid verdict, so verification is BLOCKED.');
+  if (!VERDICTS.includes(verdict?.verdict)) notes.push('The verifier returned no valid assessment.');
   const failedHead = rows.filter(row => row.head !== 'passed');
   const brokenOnBase = failedHead.filter(row => row.inherited);
   const regressed = failedHead.filter(row => row.head === 'failed' && !row.inherited && (row.base === 'passed' || row.base === 'failed' || !compareBase));
@@ -223,14 +223,14 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
     final = 'PASS+NOTES';
     notes.push(`Not covered by any journey: ${selection.uncovered}`);
   }
-  const evidence = [...(Array.isArray(verdict?.evidence) ? verdict.evidence : []).map(line => oneLine(line)).filter(Boolean), ...notes].slice(0, MAX_EVIDENCE_LINES);
+  const evidence = [...notes, ...(Array.isArray(verdict?.evidence) ? verdict.evidence : []).map(line => oneLine(line)).filter(Boolean)].slice(0, MAX_EVIDENCE_LINES);
   const body = [
     `pstack-verifier: ${final} @ ${headSha}`,
     '',
     ...evidence.map(line => `- ${line}`),
     '',
     'Journeys (head against merge base):',
-    ...(rows.length ? rows.map(row => `- ${row.feature}: head ${row.head}, base ${row.base}`) : ['- none ran']),
+    ...(rows.length ? rows.map(row => `- ${row.feature}: head ${row.head}, base ${row.base}${row.inherited ? ' (inherited)' : ''}`) : ['- none ran']),
     '',
     `Judge: ${judgeLabel(engine)}`,
     `Run: ${runUrl}`,

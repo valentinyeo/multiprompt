@@ -399,7 +399,7 @@ function WindowShot([string]$Name) {
 }
 
 function Snapshot([string]$Name) {
-    trap { $result.failureKind = 'infrastructure'; throw }
+    trap { if (-not $result.error) { $result.failureKind = 'infrastructure' }; throw }
     Write-Host "Evidence: snapshot $Name, focused UI Automation element"
     $foreground = [VerifyNative]::GetForegroundWindow()
     $focus = @{ foreground = $foreground.ToInt64(); capturedAt = [DateTime]::UtcNow.ToString('o') }

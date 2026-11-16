@@ -49,8 +49,13 @@ test('every pull_request workflow cancels only a superseded pull request run', (
   assert.ok(triggered.includes('pr-verifier.yml'));
   for (const name of triggered) {
     const concurrency = topConcurrency(read(name));
-    assert.ok(concurrency.includes(group) || concurrency.includes("github.event.pull_request.number || github.ref }}"), `${name} group`);
-    assert.ok(concurrency.includes(cancel), `${name} cancel-in-progress`);
+    if (name === 'pr-verifier.yml') {
+      assert.ok(concurrency.includes('group: ${{ github.workflow }}-${{ inputs.pr || github.event.pull_request.number }}'), `${name} group`);
+      assert.ok(concurrency.includes('cancel-in-progress: true'), `${name} cancel-in-progress`);
+    } else {
+      assert.ok(concurrency.includes(group) || concurrency.includes("github.event.pull_request.number || github.ref }}"), `${name} group`);
+      assert.ok(concurrency.includes(cancel), `${name} cancel-in-progress`);
+    }
   }
 });
 
