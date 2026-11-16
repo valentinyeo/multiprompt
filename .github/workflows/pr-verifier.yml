@@ -10,6 +10,10 @@ on:
         description: Number of an open pull request from this repository to verify
         required: true
         type: string
+      inspect_failed_tests:
+        description: Run independent journeys on known failures without allowing a passing verdict
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,7 +81,7 @@ jobs:
 
   select:
     needs: [resolve, tests]
-    if: needs.resolve.outputs.eligible == 'true' && needs.tests.result == 'success'
+    if: always() && !cancelled() && needs.resolve.outputs.eligible == 'true' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -159,7 +163,7 @@ jobs:
 
   head:
     needs: [resolve, select]
-    if: needs.select.result == 'success' && needs.select.outputs.features != '[]'
+    if: always() && !cancelled() && needs.select.result == 'success' && needs.select.outputs.features != '[]'
     name: head ${{ matrix.feature }}
     strategy:
       fail-fast: false
@@ -256,14 +260,14 @@ jobs:
           node verifier-tools/tools/pr-verifier.cjs summarize evidence verifier-out/selection.json ${{ needs.resolve.outputs.base_sha }} verifier-out
       - name: Judge the evidence with DeepSeek
         id: deepseek
-        if: steps.evidence.outcome == 'success' && needs.tests.result == 'success' && needs.resolve.outputs.engine == 'deepseek'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine == 'deepseek'
         continue-on-error: true
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: node verifier-tools/tools/pr-verifier.cjs judge-deepseek verifier-out evidence
       - name: Judge the evidence against the Done-when lines
         id: claude
-        if: steps.evidence.outcome == 'success' && needs.tests.result == 'success' && needs.resolve.outputs.engine != 'deepseek'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && needs.resolve.outputs.engine != 'deepseek'
         continue-on-error: true
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:

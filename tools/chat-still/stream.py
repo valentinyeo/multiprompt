@@ -5,9 +5,10 @@ import sys
 import time
 import uuid
 
-state, session, receipt = map(pathlib.Path, sys.argv[1:])
+state = pathlib.Path(sys.argv[1])
+name = sys.argv[2]
+receipt = pathlib.Path(sys.argv[3])
 seed = json.loads((state / "state.json").read_text(encoding="utf-8-sig"))
-name = str(session)
 index = seed["sessions"].index(name)
 folder = "C--verify-work" + str(index)
 transcript = pathlib.Path(seed["home"]) / ".claude/projects" / folder / (seed["sids"][name] + ".jsonl")

@@ -285,8 +285,8 @@ test('the DeepSeek key reaches the picker and the judge and the engine comes fro
   assert.match(workflow, /id: deepseek-pick\n        if: needs\.resolve\.outputs\.engine == 'deepseek'\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /pr-verifier\.cjs pick-deepseek /);
   assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
-  assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base\]/);
 });
 
@@ -505,4 +505,17 @@ test('chat changes cannot omit the stillness journey or exceed the journey limit
   }
   assert.deepEqual(verifier.validateSelection(raw, maps, ['docs/readme.md']).features, raw.features);
   assert.throws(() => verifier.validateSelection(raw, available, ['src/chat_render.zig']), /require the chat-still journey/);
+});
+
+
+test('inspecting known failed tests can never turn an independent PASS into a green gate', () => {
+  const summary = { head: { 'chat-still': [{ status: 'passed' }] }, base: {} };
+  for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL']) {
+    const result = verifier.finalize({ verdict: { verdict, evidence: [] }, headSha: head, summary,
+      selection: selection(['chat-still'], { compareBase: false }), runUrl: 'u',
+      jobs: { tests: { result: 'failure', outputs: { result: 'FAIL' } } } });
+    assert.equal(result.final, 'FAIL');
+  }
+  assert.match(workflow, /inspect_failed_tests:[\s\S]*?default: false/);
+  assert.match(workflow, /inputs\.inspect_failed_tests && needs\.tests\.outputs\.result == 'FAIL'/);
 });
