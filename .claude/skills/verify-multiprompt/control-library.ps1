@@ -466,6 +466,7 @@ function Press([int[]]$Keys, [string]$Label) {
     Record $Label
     Assert-Foreground
     [VerifyNative]::Chord($Keys)
+    if (-not (Test-Path (Join-Path $Evidence 'action.png'))) { Snapshot 'action' }
 }
 
 function Type-Text([string]$Text) {
