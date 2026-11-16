@@ -672,7 +672,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
   assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
-    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: \[journeys, build-app\]\r?\n    if: inputs\.feature != 'chat-sync-audit' && inputs\.feature != 'agent-sync'\r?\n    runs-on: windows-latest/);
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: \[journeys, build-app\]\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
   assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
@@ -2257,7 +2257,6 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
 
 test('IGSH-1108 workflow consumes feature-owned matrices without changing required journey names', () => {
   const features = featureMatrix(workflow);
-  assert.ok(features.available.includes('agent-sync'), 'Linux agent sync is selectable independently of desktop journeys');
   assert.match(workflow, /  journeys:\n    if: inputs.feature != 'chat-sync-audit'/);
   assert.match(workflow, /  verify:\n    needs: \[journeys, build-app\]/);
   assert.match(workflow, /pr: \$\{\{ steps.features.outputs.pr \}\}/);
@@ -2269,7 +2268,6 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
   const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ inputs\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
-  proofOnly.push('agent-sync');
   assert.ok(proofOnly.includes('chat-model') && proofOnly.includes('chat-working-live'));
   assert.deepEqual(features.available.filter(feature => !proofOnly.includes(feature)), registered.filter(feature => !proofOnly.includes(feature)));
   assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);
