@@ -151,6 +151,7 @@
     "sendChatPrompt: showHeaderNoticeAscii(\"The selected skill contains invalid text\",3500,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"The skill prompt contains invalid text\",3500,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"This quoted reply is too large to send\",3500,true)",
+    "sendChatPrompt: showHeaderNoticeAscii(\"Use /clear without arguments.\",4000,false)",
     "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)"
   ],
   "command_palette.zig": [
