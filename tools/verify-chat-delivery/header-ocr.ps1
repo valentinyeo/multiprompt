@@ -24,6 +24,8 @@ function Read-Header([string]$Name) {
         $bitmap = Wait-OcrOperation ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
         try { $result = Wait-OcrOperation ($script:ocrEngine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult]) } finally { $bitmap.Dispose() }
     } finally { $stream.Dispose() }
+    $words = @($result.Lines | ForEach-Object { $_.Words } | ForEach-Object { @{text=$_.Text; x=$_.BoundingRect.X; y=$_.BoundingRect.Y; width=$_.BoundingRect.Width; height=$_.BoundingRect.Height} })
+    Save $words "$caseDir/$Name-words.json"
     [IO.File]::WriteAllText("$caseDir/$Name-header.txt", $result.Text)
     return $result.Text
 }

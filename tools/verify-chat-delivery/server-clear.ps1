@@ -45,13 +45,15 @@ try {
 try {
     [IO.File]::WriteAllText("$state/restart-probe", '')
     $headers.stopped = Wait-For 'cached shell inventory exposes the real restart action' { $text = Read-Header 'restart-stopped'; if ($text -match 'AI stopped') { $text } } 60
-    $offset = (Read-Shared "$settings/debug.log").Length
-    Press @(0x11, 0x4B) 'Ctrl+K: restart the AI'
-    [void](Wait-For 'restart palette open' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    $query = 'chat view restart the ai'
-    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-    [void](Wait-For 'real restart command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=7199(?:\s|$)') })
-    Press @(0x0D) 'Enter: restart after the agent resumed'
+    $word = @(Get-Content "$caseDir/restart-stopped-words.json" -Raw | ConvertFrom-Json | Where-Object { $_.text -match '^stopped' })
+    if ($word.Count -ne 1) { throw 'The visible stopped badge has no unique click target' }
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    $x = [int](300 + $word[0].x + $word[0].width / 2 - $origin.X)
+    $y = [int]($word[0].y + $word[0].height / 2 - $origin.Y)
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Doctor $true
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='click Restart AI badge'; x=$x; y=$y})
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, $x, $y)
     [void](Wait-For 'production restart request reaches the SSH boundary' { Test-Path "$state/restart-requested" })
     $headers.requestedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $headers.pending = Wait-For 'Restarting the AI is visibly painted before the refusal' { $text = Read-Header 'restart-pending'; if ($text -match 'Restarting the AI') { $text } } 15
@@ -70,6 +72,7 @@ try {
 } finally {
     [IO.File]::WriteAllText("$state/restart-release", '')
     Remove-Item "$state/restart-probe" -ErrorAction SilentlyContinue
+    Press @(0x1B) 'Escape: close any remaining restart overlay'
     Save $headers "$caseDir/headers.json"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
 }

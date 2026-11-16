@@ -29,6 +29,9 @@ function fixture() {
   write('headers.json', { arguments: 'Verify agent Use /clear without arguments.', stopped: 'AI stopped. Click to restart', pending: 'Restarting the AI', refused: 'The AI is still running, so it was not restarted.', settled: 'Verify agent', requestedMs: 1, releasedMs: 2, settledMs: 3 });
   write('restart-reply.jsonl', JSON.stringify({ wire: '@mp\t1\trestart_ai\terror\tpane_busy\t0' }));
   fs.writeFileSync(path.join(root, 'actions.json'), JSON.stringify([
+    { input: 'type composer', text: '/clear extra' },
+    { input: 'Enter: refuse clear with arguments', keys: [13] },
+    { input: 'click Restart AI badge', x: 500, y: 40 },
     { input: 'type composer', text: '/clear' },
     { input: 'Enter: clear the server chat', keys: [13] },
     { input: 'type composer', text: 'A new question after clearing.' },

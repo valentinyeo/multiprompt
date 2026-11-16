@@ -49,6 +49,9 @@ function verify(root) {
   assert.doesNotMatch(read('outbox.json'), /\/clear/);
   const actions = JSON.parse(fs.readFileSync(path.join(root, 'actions.json'), 'utf8').replace(/^\uFEFF/, ''));
   assert.ok(actions.some(row => row.text === '/clear'));
+  assert.ok(actions.some(row => row.text === '/clear extra'));
+  assert.ok(actions.some(row => row.input === 'click Restart AI badge'));
+  assert.ok(actions.some(row => row.input === 'Enter: refuse clear with arguments' && row.keys.includes(13)));
   for (const input of ['Enter: clear the server chat', 'Enter: send after clearing']) {
     assert.ok(actions.some(row => row.input === input && row.keys.includes(13)), input);
   }
