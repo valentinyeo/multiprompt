@@ -456,6 +456,9 @@ jobs:
       - name: Check accepted message pixel oracle
         continue-on-error: true
         run: node --test tools/chat-accepted-proof.test.mjs tools/chat-reactions-proof.test.mjs
+      - name: Check repeated reaction evidence oracle
+        if: env.FEATURE == 'chat-reaction-replies'
+        run: node --test tools/chat-reaction-replies-proof.test.mjs
       - name: Check inline working pixel oracle
         continue-on-error: true
         run: node --test tools/chat-working-proof.test.mjs tools/live-working-proof.test.mjs
