@@ -180,7 +180,18 @@ function Shell-Input([string]$Kind, [string]$Value = '') {
 function Fake-State {
     $text = & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell show
     if ($LASTEXITCODE -ne 0) { throw 'Fake shell state read failed' }
-    ($text -join "`n") | ConvertFrom-Json
+    $view = ($text -join "`n") | ConvertFrom-Json
+    foreach ($line in ((Read-Shared "$state/message-dispatch.jsonl") -split "`n" | Where-Object { $_.Trim() })) {
+        $message = ($line | ConvertFrom-Json).result.message
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $hash.ComputeHash([Text.Encoding]::UTF8.GetBytes("$($message.id)`n$($message.attempt)`n$($message.epoch)")) }
+        finally { $hash.Dispose() }
+        $token = ([BitConverter]::ToString($digest) -replace '-', '').Substring(0, 16).ToLowerInvariant()
+        $payload = $message.text + "`n[mp:$token]"
+        $view.queue = @($view.queue | ForEach-Object { $_.Replace($payload, $message.text) })
+        $view.box = $view.box.Replace($payload, $message.text)
+    }
+    $view
 }
 function Queue-View {
     $views = [regex]::Matches((Read-Shared "$settings/debug.log"), 'CHAT_QUEUE items=(\[[^\r\n]*\])')

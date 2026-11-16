@@ -6,7 +6,7 @@ assert.equal(typeof readControlSource, 'function', 'Control readers must follow 
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, nativeText, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 
 function featureMatrix(source) {
@@ -367,6 +367,21 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
   assert.match(source, /text = "\\r\\n".join\(lines\) \+ "\\r\\n"/);
 });
 
+test('native correlation IDs are removed only when the exact text and production dispatch identity match', () => {
+  assert.equal(typeof nativeText, 'function', 'native dispatch receipts are checked');
+  const message = { id: 'desktop-proof', attempt: 'test-attempt', epoch: 0, text: 'typed message' };
+  const dispatches = [{ result: { message } }];
+  const payload = 'typed message\n[mp:fd2993712c1ba84d]';
+  assert.equal(nativeText(payload, dispatches), message.text);
+  assert.equal(nativeText(payload, []), payload);
+  assert.equal(nativeText(payload, [{ result: { message: { ...message, epoch: 1 } } }]), payload);
+  assert.equal(nativeText(payload.replace('typed', 'changed'), dispatches), payload.replace('typed', 'changed'));
+  assert.equal(nativeText(payload.replace('fd2993712c1ba84d', '0000000000000000'), dispatches), payload.replace('fd2993712c1ba84d', '0000000000000000'));
+  assert.notEqual(nativeText(payload + '\n[mp:fd2993712c1ba84d]', dispatches), message.text);
+  assert.notEqual(nativeText(payload + '\n' + payload, dispatches), message.text);
+  assert.equal(nativeText('ordinary [mp:fd2993712c1ba84d] user text', dispatches), 'ordinary [mp:fd2993712c1ba84d] user text');
+});
+
 test('persistent reader evidence requires the supplied bootstrap and a real shared serve channel', () => {
   assert.equal(typeof persistentReader, 'function', 'shared channel provenance is checked');
   const bootstrap = ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'];
@@ -480,7 +495,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert row["operation"] == "remote command" and row["hasPython"] is False, row
     assert len(rows("unsupported.jsonl")) == len(fixtures["unknown"])
     assert len(rows("declined.jsonl")) == len(fixtures["probes"])
-    assert not rows("invocations.jsonl") and not rows("capture.jsonl")
+    assert len(rows("invocations.jsonl")) == 3
+    assert all(row["kind"] == "config" for row in rows("invocations.jsonl"))
+    assert not rows("capture.jsonl")
     assert (root / "agent-buffer.jsonl").read_text(encoding="utf-8") == "existing delivery evidence\n"
 print("probe classification passed")
 `;

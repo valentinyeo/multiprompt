@@ -884,8 +884,11 @@ def tmux_buffer(argv, input):
     directory.mkdir(exist_ok=True)
     path = directory / name
     operation = argv[0]
+    text = None
     if operation == "load-buffer":
-        path.write_bytes(input.read())
+        payload = input.read()
+        path.write_bytes(payload)
+        text = payload.decode("utf-8")
     elif operation == "paste-buffer":
         if not path.exists():
             return 1
@@ -898,7 +901,7 @@ def tmux_buffer(argv, input):
         path.unlink()
     else:
         return 1
-    record("tmux-buffers.jsonl", argv=argv)
+    record("tmux-buffers.jsonl", argv=argv, text=text)
     return 0
 
 
@@ -906,6 +909,10 @@ def tmux(argv, input, output):
     fake = state().get("fake")
     if fake and argv[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
         return tmux_buffer(argv, input)
+    if fake and len(argv) == 5 and argv[:3] == ["display-message", "-p", "-t"] and argv[3] in ["=" + name + ":" for name in session_names()] and argv[4] == "#{window_height}":
+        record("invocations.jsonl", kind="dimensions", argv=argv, height=24)
+        output.write("24\n")
+        return 0
     if argv[:1] == ["capture-pane"]:
         shown = capture_screen("-e" in argv)
         record("capture.jsonl", argv=argv, screen=shown)
@@ -1056,7 +1063,9 @@ def install_reaction_worker(namespace):
                 while True:
                     wake.clear()
                     namespace['message_poll'](query['tmux'], *key)
-                    namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    dispatched = namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    if dispatched.get('message') is not None:
+                        record('message-dispatch.jsonl', result=dispatched)
                     with closing(namespace['message_store_db'](query['tmux'])) as db:
                         pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
                     with lock:
