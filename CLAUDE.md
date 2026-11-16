@@ -47,6 +47,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
 | Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
+| Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |
