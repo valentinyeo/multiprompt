@@ -178,6 +178,10 @@ The view-switch branch run https://github.com/valentinyeo/multiprompt/actions/ru
 | IGSH-928 | Skill pills | `chat-skill-pill` | Dark/light draft and sent-history pixels, plain and unknown controls; pre-fix release control required. |
 | IGSH-984 | Clickable answer options and question prompts | `chat-options` | Real mouse click on a reply option card and on a question prompt card; the console must receive the lettered answer and the option number; pre-change master control required. |
 
+## SOFT-2441 reaction emoji size and colour
+
+The `reaction-emoji` journey uses native reaction-menu input and measures colour-ink size in both the reaction chip and hover react button on Dark and Light. Normal and bold inline code share the transcript to exercise the separate font slots. Node controls reject tiny, monochrome and absent emoji. GitHub desktop evidence is pending; this map does not claim a passed run.
+
 ## IGSH-1590 reaction follow-up parity
 
 Full native reaction journey https://github.com/valentinyeo/multiprompt/actions/runs/41996386948 passes at c34a14dd, preserving every original badge, identity, restart, fallback, emoji-copy and 140-wheel assertion. The ordinary composer follow-up reaches newest and its painted answer copies exactly. Actual restart and copied-answer screenshots were inspected; source counts and zero-process cleanup were independently read. Published1500 baseline https://github.com/valentinyeo/multiprompt/actions/runs/41980637867 loses the untouched draft; focused reader red https://github.com/valentinyeo/multiprompt/actions/runs/41981531151 reproduces all three glyphs. Latest full checks at26f8dcd6 passed https://github.com/valentinyeo/multiprompt/actions/runs/41987260930; final integrated checks and published replay remain required. Android1551 published0.1.390 proof is https://github.com/valentinyeo/multiprompt-android/actions/runs/41580387063. Reaction wire format and old/new client compatibility remain unchanged. Simulated SSH/tmux and agent events are explicit boundaries; no real provider/network claim.
