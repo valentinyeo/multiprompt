@@ -7976,8 +7976,6 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         try std.testing.expect(layout.chatStopVisible());
         app_state.g_chat_outbox.items[0].state = .delivered;
         layout.chatWorkingIndicatorSync();
-        w.Sleep(1200);
-        layout.chatWorkingIndicatorSync();
         try liveWorkingProofFrame(dc, case.files[6], bytes, info.header, started, case.name, "idle");
         try std.testing.expect(g_working_rect == null);
         try std.testing.expect(!layout.chatStopVisible());
@@ -8040,8 +8038,6 @@ test "IGSH-924 working dots reserve the next reply rectangle and disappear for i
     app_state.g_chat_screen_working = false;
     app_state.g_chat_blocks[1] = .{ .start = 8, .len = 6, .role = .prose, .first = true };
     app_state.g_chat_block_count = 2;
-    chatRelayout(800);
-    w.Sleep(1200);
     chatRelayout(800);
     const reply = app_state.g_chat_layout_rects[1];
     try std.testing.expect(g_working_rect == null);
