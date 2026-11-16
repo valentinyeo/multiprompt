@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { releaseNotes } from './release-notes.mjs';
+import { parseTicketId } from './ticket-id.js';
 import { ticketLine, ticketRecord } from './ticket-titles.mjs';
 const emptyRelease = '.{ .ver = "0.28.1027", .items = &.{\n    } },';
 const guard = { fixture: 'synthetic strict-version empty items', rejected: false };
@@ -33,11 +34,11 @@ for (const release of manifest.releases) {
   assert.ok(release.changes.every(change => typeof change === 'string' && change.trim()), `Blank change in ${release.version}`);
   assert.ok(Array.isArray(release.tickets) && release.tickets.length === release.changes.length, `Ticket count mismatch in ${release.version}`);
   for (const [index, line] of release.changes.entries()) {
-    const match = /^((?:IGSH|HYCI)-[1-9]\d*) (.+)$/.exec(line);
+    const match = /^(\S+) (.+)$/.exec(line);
     assert.ok(match, `Missing ticket title in ${release.version}`);
     assert.equal(ticketLine(ticketRecord(match[1], match[2])), line);
-    const board = match[1].startsWith('IGSH-') ? 2060 : 11514;
-    assert.equal(release.tickets[index], `https://app.hypertask.ai/detail/project-${board}/${match[1].split('-')[1]}`);
+    const ticket = parseTicketId(match[1]);
+    assert.equal(release.tickets[index], `https://app.hypertask.ai/detail/project-${ticket.boardId}/${ticket.number}`);
   }
   versions++;
   tickets += release.tickets.length;

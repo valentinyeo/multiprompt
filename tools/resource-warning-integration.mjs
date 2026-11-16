@@ -1,3 +1,4 @@
+import { parseTicketId } from './ticket-id.js';
 import { writeFile } from 'node:fs/promises';
 import board from './auto-revert-board.js';
 import { fileLatencyWarning } from './resource-warning-ticket.mjs';
@@ -18,7 +19,7 @@ try {
       if (method === 'POST' && path === '/tasks/create') {
         entry.creates++;
         const task = response.task ?? response.tasks?.[0];
-        if (task?.ticketNumber && /^HYCI-\d+$/.test(task.ticketNumber)) owned.push({ ticket: task.ticketNumber, title: body.title });
+        if (parseTicketId(task?.ticketNumber)?.prefix === 'HYCI') owned.push({ ticket: task.ticketNumber, title: body.title });
       }
       return response;
     };
