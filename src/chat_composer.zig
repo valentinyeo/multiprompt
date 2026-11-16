@@ -10,6 +10,7 @@ const chat_history = @import("chat_history.zig");
 const chat_style = @import("chat_style.zig");
 const chat_shell_sync = @import("chat_shell_sync.zig");
 const chat_transcript = @import("chat_transcript.zig");
+const dictation_live = @import("dictation_live.zig");
 const WINAPI = @import("win32.zig").WINAPI;
 const BOOL = @import("win32.zig").BOOL;
 const DWORD = @import("win32.zig").DWORD;
@@ -2380,7 +2381,10 @@ pub fn chatDraftCloseForShell(idx: u32) void {
     if (idx >= app_state.shell_count or app_state.shells[idx].chat_id == 0) return;
     var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const id = chatDraftKeyForShell(idx, &buf);
-    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) chatDraftNoteEdit();
+    if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) {
+        chatDictationLiveDiscard();
+        chatDraftNoteEdit();
+    }
     if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = true;
     chatDraftFlush();
     if (std.mem.eql(u8, id, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) {
@@ -2419,6 +2423,128 @@ pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+const LiveDraft = struct {
+    active: bool = false,
+    owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined,
+    owner_len: usize = 0,
+    range: dictation_live.Range = .{ .start = 0, .len = 0 },
+    snap: [16400]u16 = undefined,
+    snap_len: usize = 0,
+};
+var live_draft: LiveDraft = .{};
+
+fn chatLiveOwnerMatches(owner: []const u8) bool {
+    if (app_state.g_chat_composer_hwnd == null or owner.len == 0) return false;
+    return std.mem.eql(u8, owner, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+}
+
+fn chatLiveCurrentRange(cur: []const u16) dictation_live.Range {
+    return dictation_live.adjustRange(live_draft.snap[0..live_draft.snap_len], cur, live_draft.range);
+}
+
+fn chatLiveWrite(cur: []const u16, range: dictation_live.Range, words: []const u16, caret_end: bool) bool {
+    var piece: [4200]u16 = undefined;
+    const before: ?u16 = if (range.start > 0) cur[range.start - 1] else null;
+    const after: ?u16 = if (range.start + range.len < cur.len) cur[range.start + range.len] else null;
+    const piece_len = dictation_live.compose(before, after, words, &piece);
+    if (cur.len - range.len + piece_len >= live_draft.snap.len) return false;
+    const hwnd = app_state.g_chat_composer_hwnd;
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = SendMessageW(hwnd, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    var out: [16400]u16 = undefined;
+    @memcpy(out[0..range.start], cur[0..range.start]);
+    @memcpy(out[range.start..][0..piece_len], piece[0..piece_len]);
+    const tail = cur[range.start + range.len ..];
+    @memcpy(out[range.start + piece_len ..][0..tail.len], tail);
+    const total = range.start + piece_len + tail.len;
+    out[total] = 0;
+    chat_draft_loading = true;
+    _ = SetWindowTextW(hwnd, @ptrCast(&out));
+    chat_draft_loading = false;
+    var new_start: usize = dictation_live.mapCaret(sel_start, range, piece_len);
+    var new_end: usize = dictation_live.mapCaret(sel_end, range, piece_len);
+    if (caret_end and sel_start == sel_end and sel_start >= range.start and sel_start <= range.start + range.len) {
+        new_start = range.start + piece_len;
+        new_end = new_start;
+    }
+    _ = SendMessageW(hwnd, 0x00B1, new_start, @intCast(new_end));
+    @memcpy(live_draft.snap[0..total], out[0..total]);
+    live_draft.snap_len = total;
+    live_draft.range = .{ .start = range.start, .len = piece_len };
+    chatComposerAutoGrow();
+    return true;
+}
+
+pub fn chatDictationLiveApply(owner: []const u8, words: []const u16) void {
+    if (!chatLiveOwnerMatches(owner)) {
+        live_draft.active = false;
+        return;
+    }
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    if (!live_draft.active or !std.mem.eql(u8, live_draft.owner[0..live_draft.owner_len], owner)) {
+        if (owner.len > live_draft.owner.len) return;
+        var sel_start: u32 = 0;
+        var sel_end: u32 = 0;
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+        const at: usize = @min(@as(usize, sel_end), cur.len);
+        @memcpy(live_draft.owner[0..owner.len], owner);
+        live_draft.owner_len = owner.len;
+        @memcpy(live_draft.snap[0..cur.len], cur);
+        live_draft.snap_len = cur.len;
+        live_draft.range = .{ .start = at, .len = 0 };
+        live_draft.active = true;
+    }
+    const range = chatLiveCurrentRange(cur);
+    if (!chatLiveWrite(cur, range, words, true)) live_draft.active = false;
+}
+
+pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
+    if (!live_draft.active or !chatLiveOwnerMatches(owner) or !std.mem.eql(u8, live_draft.owner[0..live_draft.owner_len], owner)) {
+        live_draft.active = false;
+        return false;
+    }
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    const range = chatLiveCurrentRange(cur);
+    const ok = chatLiveWrite(cur, range, words, true);
+    live_draft.active = false;
+    if (!ok) return false;
+    chatDraftNoteEdit();
+    chatDraftFlush();
+    shell_draft.onComposerEdit(GetTickCount64());
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
+}
+
+pub fn chatDictationLiveDiscard() void {
+    if (!live_draft.active) return;
+    live_draft.active = false;
+    if (!chatLiveOwnerMatches(live_draft.owner[0..live_draft.owner_len])) return;
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    const range = chatLiveCurrentRange(cur);
+    if (range.len == 0) return;
+    _ = chatLiveWrite(cur, range, &.{}, false);
+}
+
+fn chatLiveStripFromStore() void {
+    if (!live_draft.active) return;
+    defer live_draft.active = false;
+    const id = live_draft.owner[0..live_draft.owner_len];
+    if (!chatLiveOwnerMatches(id)) return;
+    if (chat_drafts.entries.getPtr(id) == null) return;
+    var buf: [16400]u16 = undefined;
+    const cur = composerText(&buf);
+    const range = chatLiveCurrentRange(cur);
+    var out: [16400]u16 = undefined;
+    @memcpy(out[0..range.start], cur[0..range.start]);
+    const tail = cur[range.start + range.len ..];
+    @memcpy(out[range.start..][0..tail.len], tail);
+    chat_drafts.set(id, out[0 .. range.start + tail.len], true) catch return;
+}
+
 pub fn chatDraftBindToActive() void {
     const ReplyStash = struct {
         var drafts = std.StringHashMap([]u8).init(std.heap.page_allocator);
@@ -2437,6 +2563,7 @@ pub fn chatDraftBindToActive() void {
     if (id.len == 0) return;
     if (chat_drafts.entries.getPtr(id)) |draft| draft.evict = false;
     if (app_state.g_chat_draft_owner_len == id.len and std.mem.eql(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len], id)) return;
+    chatLiveStripFromStore();
     if (app_state.g_chat_draft_owner_len > 0 and app_state.g_chat_reply_len > 0) {
         const a = std.heap.page_allocator;
         const owner = a.dupe(u8, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]) catch return;
