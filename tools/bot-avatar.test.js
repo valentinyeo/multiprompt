@@ -89,9 +89,9 @@ test('pinned tile hit testing measures both coordinates, shared with the painted
 const MAX_ROWS = 16;
 const MAX_SESSION_ROWS = 16;
 const SidebarTier = enum {recent, pinned};
-const Kind = enum {section, header, tab, inbox, room_header, room, room_new};
+const Kind = enum {section, header, tab, inbox, room_header, room};
 const Row = struct {kind: Kind = .tab, gidx: u32 = 0, shell_idx: u32 = 0, section_tier: SidebarTier = .recent, y: i32 = 0, x: i32 = 0, width: i32 = 0, tile: bool = false, room_idx: u32 = 0};
-pub const HitTarget = union(enum) {none: void, section: SidebarTier, header: u32, tab: u32, inbox: u32, buttons: void, room_header: void, room: struct { index: u32, generation: u64, id: [36]u8, store_uuid: [36]u8 }, room_new: void};
+pub const HitTarget = union(enum) {none: void, section: SidebarTier, header: u32, tab: u32, inbox: u32, buttons: void, room_header: void, room: struct { index: u32, generation: u64, id: [36]u8, store_uuid: [36]u8 }};
 const app_state = @This();
 var g_sidebar_collapsed = false;
 var g_starred_workspace = false;
