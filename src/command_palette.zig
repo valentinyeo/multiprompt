@@ -998,7 +998,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_TODO_OFFSET => "Chat View: Toggle todo list",
         SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
-        SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
+        SEARCH_CHAT_NEWEST_OFFSET => "Jump to newest message jump to bottom end",
         SEARCH_CHAT_RESYNC_OFFSET => "Chat View: Resync chat reload refresh repair messages",
         SEARCH_CHAT_FRESH_START_OFFSET => "Chat View: Fresh start handover clear context same chat picture address",
         SEARCH_CHAT_SWITCH_CLAUDE_OFFSET => "Chat View: Switch AI to Claude keep chat name picture address history subscription",
@@ -4315,7 +4315,7 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "Chat View: Scroll to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{ "Jump to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_NEWEST_OFFSET;
         app_state.g_search_result_count += 1;
