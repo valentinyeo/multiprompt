@@ -114,7 +114,7 @@ function Observe-Plus([hashtable]$plusRects, [string[]]$plusActive, [string]$Scr
                 for ($x = $left + 10; $x -lt $right - 10; $x++) {
                     if ($x -ge $plusWidth) { break }
                     $pixel = $plusShot.GetPixel($x, $y)
-                    if ($pixel.B -ge 150 -and ($pixel.B - $pixel.R) -ge 70) { $accent++ }
+                    if ([Math]::Abs([int]$pixel.R - 100) -le 3 -and [Math]::Abs([int]$pixel.G - 160) -le 3 -and [Math]::Abs([int]$pixel.B - 240) -le 3) { $accent++ }
                     if ($x -ge $right - 40 -and $x -lt $right - 14 -and ([Math]::Abs($pixel.R - $background.R) + [Math]::Abs($pixel.G - $background.G) + [Math]::Abs($pixel.B - $background.B)) -gt 90) { $mark++ }
                 }
             }
