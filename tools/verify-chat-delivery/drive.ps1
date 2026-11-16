@@ -416,6 +416,39 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; wheel_notch_px=$moved; browser_notch_px=$browserNotch; thumb_height=[int]$scrollUi.Groups[2].Value; button_click=@($clickX, $clickY)} "$caseDir/$Stage-scroll-ui.json"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
+    $ggScrollStart = Scroll-Transcript 1200
+    [void](Wait-For 'older messages visible before gg' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+        $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '1'
+    })
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Type-Composer 'draftGG'
+    [void](Wait-For 'gg preserves an existing draft' { [ChatDeliveryDesktop]::Text($composer) -ceq 'draftGG' })
+    $existingDraft = [ChatDeliveryDesktop]::Text($composer)
+    Shot "full-history-$Stage-gg-draft"
+    Clear-Composer
+    Type-Composer 'gg'
+    [void](Wait-For 'lowercase gg remains ordinary text' { [ChatDeliveryDesktop]::Text($composer) -ceq 'gg' })
+    $plainDraft = [ChatDeliveryDesktop]::Text($composer)
+    Clear-Composer
+    Type-Composer 'G'
+    $slowStart = [DateTime]::UtcNow
+    [void](Wait-For 'ordinary g typing exceeds the shortcut interval' { ([DateTime]::UtcNow - $slowStart).TotalMilliseconds -gt 650 })
+    Type-Composer 'G'
+    [void](Wait-For 'slow GG remains ordinary text' { [ChatDeliveryDesktop]::Text($composer) -ceq 'GG' })
+    $slowDraft = [ChatDeliveryDesktop]::Text($composer)
+    $beforeGg = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+    if ($beforeGg.Count -eq 0 -or $beforeGg[$beforeGg.Count - 1].Groups[3].Value -ne '1') { throw 'Ordinary gg typing unexpectedly jumped to newest' }
+    Clear-Composer
+    Shot "full-history-$Stage-gg-before"
+    $ggStart = (Read-Shared "$settings/debug.log").Length
+    Type-Composer 'GG'
+    [void](Wait-For 'GG jumps to newest and leaves an empty composer' {
+        $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+        $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0' -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
+    })
+    Shot "full-history-$Stage-gg-after"
+    Save @{stage=$Stage; existingDraft=$existingDraft; plainDraft=$plainDraft; slowDraft=$slowDraft; finalDraft=[ChatDeliveryDesktop]::Text($composer); logStart=$ggStart; scrolledBefore=$true} "$caseDir/$Stage-gg.json"
     Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {

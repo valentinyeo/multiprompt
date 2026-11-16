@@ -6,6 +6,7 @@
 - The same 50 messages remain available after a normal owned-app restart with the same profile and app-written cache.
 - All 24 tool blocks reach layout but remain invisible under the existing messages-only policy.
 - Chat View shows a thin scrollbar and, once scrolled up, a round down-arrow button; one wheel notch moves at least as far as a browser notch, and one click on the button returns to the newest message.
+- SOFT-2489: pressing Shift+G twice quickly in an empty composer jumps to the newest message without leaving either letter. Existing drafts and lowercase `gg` and slow capital `GG` typing remain unchanged.
 
 ## How to get to it (user POV)
 
@@ -18,6 +19,8 @@ Dispatch `gh workflow run verify.yml --ref ceo/IGSH-815 -f feature=chat-full-his
 The existing delivery boundary creates its own ordinary Claude transcript: two initial messages, then 24 user/assistant pairs interleaved with large synthetic tool results. The source exceeds the reader's tail window. The harness seeds only its documented isolated remote tab and agent boundary, never the app's message cache.
 
 On open, Ctrl+0 requires the production renderer to lay out 74 blocks. Ownership-checked visible transcript identity followed by genuine Ctrl+K, `chat view select all`, Enter and Ctrl+C must copy all 50 messages exactly once in source order. Capture the visible transcript after this assertion; no scroll input may repair a failing open. Close the owned app normally, stop its owned descendants, restart the identical executable/profile, and repeat the identical count, copy and screenshot assertions.
+
+After each restart/open scroll check, scroll up again. Type `draftGG`, lowercase `gg`, then capital `GG` with more than 650 ms between presses. Require the exact native composer text and no jump. Clear the draft and press Shift+G twice quickly. Require a newly logged bottom position, no jump button and an empty native composer. Retain `full-history-<stage>-gg-before.png`, `-after.png`, `-draft.png` and `<stage>-gg.json`.
 
 `tools/chat-full-history-proof.mjs` independently compares the copied text against the retained source transcript, checks both measured stages, build/Doctor identity and zero-process cleanup. Inspect the open/restart screenshots, copied text, debug log, `result.json`, `cleanup.json`, and the cache retained before restart.
 
