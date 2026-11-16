@@ -236,6 +236,10 @@ foreach ($choice in $choices) {
     Copy-Item "$state/model-argv.jsonl" "$caseDir/argv-$($choice.name).jsonl"
     Shot "model-after-$($choice.name)"
 }
+[void](Wait-For 'app header acknowledges high effort' {
+    $headers = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] header model [^\r\n]* text=([^\r\n]+)')
+    $headers.Count -gt 0 -and $headers[$headers.Count - 1].Groups[1].Value -ceq "Opus 5.5 $([char]0xb7) high"
+} 20)
 $plusOffset = (Read-Shared "$settings/debug.log").Length
 Model-Palette 'plus attach file' 'model-palette-active'
 $plusLog = Wait-For 'plus menu opened for active rows' { $t = (Read-Shared "$settings/debug.log").Substring($plusOffset); if ($t -match '\[chat\] plus menu model_opus rect=') { $t } }
