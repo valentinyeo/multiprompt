@@ -156,3 +156,18 @@ test('report-only triggers reject automatic pushes and preserve legacy branch ch
   }
   assert.throws(() => verifyPushBranches(legacy.replace('branches: [master,', 'branches: [master, unrelated,')), assert.AssertionError);
 });
+
+test('speed baseline walks back to the newest earlier commit that builds', () => {
+  const step = workflow.split('      - name: Build baseline\n')[1]?.split(/\n      - name: /)[0];
+  assert.ok(step, 'baseline build step exists');
+  assert.match(step, /\$requested = \(git merge-base \$env:BASE HEAD\)\.Trim\(\)/);
+  assert.match(step, /for \(\$attempt = 0; \$attempt -lt 12; \$attempt \+= 1\)/);
+  assert.match(step, /git rev-parse "\$base\^"/);
+  assert.match(step, /\$base = \$parent/);
+  assert.match(step, /"SPEED_BASE=\$base"/);
+  assert.match(step, /"SPEED_REQUESTED_BASE=\$requested"/);
+  const record = workflow.split('      - name: Record baseline commit\n')[1]?.split(/\n      - name: /)[0];
+  assert.ok(record, 'baseline record step exists');
+  assert.match(record, /evidence\/base\/baseline\.txt/);
+  assert.match(record, /walked back because/);
+});
