@@ -1237,12 +1237,27 @@ test "palette recency bands cannot be overpowered by lifetime frequency" {
     try std.testing.expect(paletteFrecencyAt(same_band_often, now) > paletteFrecencyAt(same_band_once, now));
 }
 
+fn paletteQueryPrefersDeleteSession(target: usize) bool {
+    if (target != SEARCH_TABCTX_END_TMUX) return false;
+    const label = "delete session";
+    const query = app_state.g_search_buf[0..app_state.g_search_len];
+    if (query.len < 3 or query.len > label.len) return false;
+    for (query, 0..) |qc, i| {
+        const lc: u16 = label[i];
+        if (u16ToLower(qc) != lc) return false;
+    }
+    return true;
+}
+
 fn paletteResultOutranks(key: usize, prev: usize, key_kind: u8, prev_kind: u8, now: u64) bool {
     if (key_kind != prev_kind) return key_kind < prev_kind;
     if (app_state.g_search_len > 0) {
         const key_match = paletteQueryRank(key);
         const prev_match = paletteQueryRank(prev);
         if (key_match != prev_match) return key_match > prev_match;
+        const key_delete = paletteQueryPrefersDeleteSession(key);
+        const prev_delete = paletteQueryPrefersDeleteSession(prev);
+        if (key_delete != prev_delete) return key_delete;
         const key_open = key < app_state.shell_count;
         const prev_open = prev < app_state.shell_count;
         if (key_open != prev_open and (paletteRowIsArchived(key) or paletteRowIsArchived(prev))) return key_open;
@@ -1369,6 +1384,36 @@ test "session and workspace ranking beats exact matches and frecency" {
     try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, closed, 0, 2, 100));
     try std.testing.expect(paletteResultOutranks(SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, 0, 0, 100));
     try std.testing.expect(!paletteResultOutranks(SEARCH_THEME_MENU_OFFSET, SEARCH_SOUND_OFFSET, 0, 0, 100));
+}
+
+test "SOFT-2355 typing del ranks Delete session before Delete workspace" {
+    const old_search = app_state.g_search_buf;
+    const old_len = app_state.g_search_len;
+    const old_usage = app_state.g_palette_usage;
+    const old_usage_count = app_state.g_palette_usage_count;
+    const old_results = app_state.g_search_results;
+    const old_result_count = app_state.g_search_result_count;
+    const old_shell_count = app_state.shell_count;
+    defer {
+        app_state.g_search_buf = old_search;
+        app_state.g_search_len = old_len;
+        app_state.g_palette_usage = old_usage;
+        app_state.g_palette_usage_count = old_usage_count;
+        app_state.g_search_results = old_results;
+        app_state.g_search_result_count = old_result_count;
+        app_state.shell_count = old_shell_count;
+    }
+    app_state.shell_count = 0;
+    for ("del", 0..) |c, i| app_state.g_search_buf[i] = c;
+    app_state.g_search_len = 3;
+    app_state.g_palette_usage_count = 1;
+    app_state.g_palette_usage[0] = .{ .key = SEARCH_WORKSPACE_DELETE_MENU_OFFSET, .count = 1000, .last_used = std.math.maxInt(u64) };
+    app_state.g_search_results[0] = SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
+    app_state.g_search_results[1] = SEARCH_TABCTX_END_TMUX;
+    app_state.g_search_result_count = 2;
+    sortSearchResultsByRank();
+    try std.testing.expectEqual(SEARCH_TABCTX_END_TMUX, app_state.g_search_results[0]);
+    try std.testing.expectEqual(SEARCH_WORKSPACE_DELETE_MENU_OFFSET, app_state.g_search_results[1]);
 }
 
 fn promoteSearchTargetToFront(results: []usize, target: usize) bool {
@@ -5654,7 +5699,7 @@ pub const chat_actions = [_]struct { target: usize, label: []const u8 }{
     .{ .target = app_state.SEARCH_TABCTX_RENAME, .label = "Rename" },
     .{ .target = app_state.SEARCH_TABCTX_COPY_ID, .label = "Copy chat ID" },
     .{ .target = SEARCH_TABCTX_ARCHIVE, .label = "Archive chat" },
-    .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete" },
+    .{ .target = SEARCH_TABCTX_END_TMUX, .label = "Delete session" },
 };
 
 pub fn chatActionLabel(target: usize, pinned: bool) ?[]const u8 {
