@@ -375,3 +375,65 @@ test('the first real key action captures missing action evidence before cleanup'
   assert.match(controller, /'before.png', 'action.png', 'after.png', 'doctor.json', 'actions.json'/);
   assert.match(controller, /Evidence lost during cleanup/);
 });
+
+for (const conclusion of ['cancelled', 'timed_out', 'failure', 'startup_failure']) {
+  test(`a verifier run ending ${conclusion} without its verdict needs BLOCKED recovery`, () => {
+    const run = { id: 12, status: 'completed', conclusion, html_url: 'https://example.test/actions/runs/12' };
+    assert.equal(verifier.recoveryNeeded(run, head, []), true);
+    for (const productConclusion of ['success', 'failure']) {
+      const checks = [{ name: 'pstack-verifier', head_sha: head, status: 'completed', conclusion: productConclusion, details_url: run.html_url }];
+      assert.equal(verifier.recoveryNeeded(run, head, checks), false);
+    }
+    const newer = [{ name: 'pstack-verifier', head_sha: head, status: 'completed', details_url: 'https://example.test/actions/runs/13' }];
+    assert.equal(verifier.recoveryNeeded(run, head, newer), false);
+  });
+}
+
+test('a successful or unfinished verifier run does not need recovery', () => {
+  assert.equal(verifier.recoveryNeeded({ status: 'completed', conclusion: 'success' }, head, []), false);
+  assert.equal(verifier.recoveryNeeded({ status: 'queued', conclusion: null }, head, []), false);
+});
+
+test('a product regression remains FAIL when its cleanup also loses evidence', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-appearance': { status: 'failed', error: 'wrong ring', cleanup: 'Evidence lost during cleanup: action.png' },
+    [`verify-appearance-${base}`]: { status: 'passed' },
+  }), ['appearance'], base);
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'FAIL');
+});
+
+test('inherited product failures do not hide lost cleanup evidence', () => {
+  const summary = verifier.summarize(evidenceDir({
+    'verify-appearance': { status: 'failed', error: 'wrong ring', cleanup: 'Evidence lost during cleanup: action.png' },
+    [`verify-appearance-${base}`]: { status: 'failed', error: 'wrong ring' },
+  }), ['appearance'], base);
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
+
+test('losing every screenshot blocks a supposedly passing result', () => {
+  const dir = evidenceDir({ 'verify-appearance': { status: 'passed' } });
+  fs.unlinkSync(path.join(dir, 'verify-appearance', 'after.png'));
+  const summary = verifier.summarize(dir, ['appearance'], base);
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
+
+test('selected journeys absent from a partial summary cannot pass', () => {
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary: { head: {}, base: {} }, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
+
+test('a product FAIL from the judge survives unrelated infrastructure trouble', () => {
+  assert.equal(verifier.finalize({ verdict: { verdict: 'FAIL', evidence: ['after.png contradicts the promised labels'] }, summary: { head: {}, base: {} }, selection: selection([]), jobs: { head: { result: 'cancelled' } } }).final, 'FAIL');
+});
+
+test('typed harness errors are BLOCKED without relying on their message', () => {
+  const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'failed', failureKind: 'infrastructure', error: 'UI Automation threw an exception' } }), ['appearance'], base);
+  assert.equal(verifier.finalize({ verdict: { verdict: 'PASS+NOTES' }, summary, selection: selection(['appearance']) }).final, 'BLOCKED');
+});
+
+test('recovery uses trusted default-branch tools and never runs pull request code', () => {
+  const recovery = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier-blocked.yml'), 'utf8');
+  assert.match(recovery, /workflows: \[PR verifier\]\n    types: \[completed\]/);
+  assert.match(recovery, /ref: \$\{\{ github.event.repository.default_branch \}\}/);
+  assert.doesNotMatch(recovery, /ref:.*(?:head_sha|head_branch)/);
+  assert.match(recovery, /node tools\/pr-verifier.cjs recover/);
+});

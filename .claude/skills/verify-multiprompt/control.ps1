@@ -753,6 +753,7 @@ try {
         }
     } catch {
         $result.status = 'failed'
+        if (-not $result.error) { $result.failureKind = 'infrastructure' }
         $result.cleanup = $_.Exception.Message
     }
     if ($null -ne $warmup) { $warmup.Dispose() }

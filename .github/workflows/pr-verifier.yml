@@ -290,6 +290,8 @@ jobs:
         id: final
         if: always()
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           JOB_RESULTS: ${{ toJSON(needs) }}
           VERDICT: ${{ steps.claude.outputs.structured_output || steps.deepseek.outputs.structured_output }}
           ENGINE: ${{ needs.resolve.outputs.engine }}
@@ -315,10 +317,10 @@ jobs:
           CONCLUSION: ${{ steps.final.outputs.conclusion }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          blocked_conclusion=neutral
+          [ "$RESULT" != BLOCKED ] || blocked_conclusion=failure
+          gh api "repos/$REPO/check-runs" -X POST -f 'name=pstack-verifier (BLOCKED)' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$blocked_conclusion" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
           gh api "repos/$REPO/check-runs" -X POST -f name=pstack-verifier -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$CONCLUSION" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
-          if [ "$RESULT" = BLOCKED ]; then
-            gh api "repos/$REPO/check-runs" -X POST -f 'name=pstack-verifier (BLOCKED)' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion=failure -f details_url="$RUN_URL" -f 'output[title]=Verification BLOCKED by infrastructure' -F "output[summary]=@verifier-out/comment.md" >/dev/null
-          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
