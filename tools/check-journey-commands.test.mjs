@@ -4,9 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { commandCatalog, root } from './journey-commands.mjs';
-import { checkJourneyCommands, checkJourneys } from './check-journey-commands.mjs';
-
+for (const file of ['journey-commands.mjs', 'check-journey-commands.mjs']) {
+  assert.ok(fs.existsSync(new URL(file, import.meta.url)), `Stable journey command runner requires tools/${file}`);
+}
+const { commandCatalog, root } = await import('./journey-commands.mjs');
+const { checkJourneyCommands, checkJourneys } = await import('./check-journey-commands.mjs');
 const catalog = commandCatalog();
 
 test('PowerShell helper rejects unchanged screens and wrong commands', context => {
