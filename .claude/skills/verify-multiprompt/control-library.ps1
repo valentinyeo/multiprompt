@@ -1,3 +1,6 @@
+$script:journeyCommands = $null
+$script:journeyCommandSequence = 0
+
 function ConvertTo-PlainValue($Value, [int]$Level = 0) {
     if ($null -eq $Value) { return $null }
     if ($Value -is [string]) { return [string]$Value }

@@ -12,7 +12,7 @@ const { checkJourneyCommands, checkJourneys } = await import('./check-journey-co
 const catalog = commandCatalog();
 
 test('PowerShell helper rejects unchanged screens and wrong commands', context => {
-  const result = spawnSync('pwsh', ['-NoProfile', '-File', path.join(root, 'tools/test-journey-commands.ps1')], { encoding: 'utf8' });
+  const result = spawnSync(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-File', path.join(root, 'tools/test-journey-commands.ps1')], { encoding: 'utf8' });
   if (result.error?.code === 'ENOENT') return context.skip('PowerShell runs on GitHub-hosted runners');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /NAMED_COMMAND_ROW_SCREEN_AND_IDENTITY_VERIFIED/);
@@ -44,25 +44,14 @@ test('the CLI rejects a sample old-style journey', () => {
 });
 
 test('routing renumbering follows production source without editing a journey', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'journey-catalog-'));
-  try {
-    fs.mkdirSync(path.join(directory, 'src'));
-    for (const file of ['app_state.zig', 'command_palette.zig', 'sidebar.zig', 'ui_words.zon', 'shortcuts.zig']) {
-      fs.copyFileSync(path.join(root, 'src', file), path.join(directory, 'src', file));
-    }
-    const state = path.join(directory, 'src/app_state.zig');
-    fs.writeFileSync(state, fs.readFileSync(state, 'utf8').replace(/(pub const SEARCH_NEW_OFFSET: usize = )\d+;/, '$19000;'));
-    assert.equal(commandCatalog(directory)['new cmd shell'].target, 9000);
-    assert.equal(commandCatalog(directory)['new powershell'].target, 9005);
-    assert.equal(commandCatalog(directory).changelog.target, catalog.changelog.target);
-    for (const file of ['command_palette.zig', 'sidebar.zig', 'ui_words.zon', 'shortcuts.zig']) {
-      const source = path.join(directory, 'src', file);
-      fs.writeFileSync(source, fs.readFileSync(source, 'utf8').replace(/changelog/gi, 'release history'));
-    }
-    assert.throws(() => commandCatalog(directory), /command name is no longer.*Changelog/);
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
+  const read = file => fs.readFileSync(path.join(root, 'src', file), 'utf8');
+  const renumbered = commandCatalog(file => file === 'app_state.zig'
+    ? read(file).replace(/(pub const SEARCH_NEW_OFFSET: usize = )\d+;/, '$19000;')
+    : read(file));
+  assert.equal(renumbered['new cmd shell'].target, 9000);
+  assert.equal(renumbered['new powershell'].target, 9005);
+  assert.equal(renumbered.changelog.target, catalog.changelog.target);
+  assert.throws(() => commandCatalog(file => file === 'app_state.zig' ? read(file) : read(file).replace(/changelog/gi, 'release history')), /command name is no longer.*Changelog/);
 });
 
 test('catalog entries keep the row name separate from its search query', () => {

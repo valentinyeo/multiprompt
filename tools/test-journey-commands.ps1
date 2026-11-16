@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot '../.claude/skills/verify-multiprompt/control-library.ps1')
 Add-Type @'
 public static class VerifyNative {

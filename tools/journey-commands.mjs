@@ -49,8 +49,7 @@ const rows = [
   ['Sidebar: expand', 'SEARCH_HIDESIDEBAR_OFFSET', 'show sidebar'],
 ];
 
-export function commandCatalog(directory = root) {
-  const read = file => fs.readFileSync(path.join(directory, 'src', file), 'utf8');
+export function commandCatalog(read = file => fs.readFileSync(path.join(root, 'src', file), 'utf8')) {
   const state = read('app_state.zig');
   const palette = read('command_palette.zig');
   const sources = [palette, read('sidebar.zig'), read('ui_words.zon'), read('shortcuts.zig')].join('\n').toLowerCase();
