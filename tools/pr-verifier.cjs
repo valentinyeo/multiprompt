@@ -249,17 +249,35 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
 
 function recoveryNeeded(run, headSha, checks) {
   if (run.status !== 'completed' || run.conclusion === 'success') return false;
-  return !checks.some(check => check.name === 'pstack-verifier' && check.head_sha === headSha && (
-    (check.details_url === run.html_url && check.status === 'completed') ||
-    Number(check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1]) > Number(run.id)
-  ));
+  const headChecks = checks.filter(check => check.name === 'pstack-verifier' && check.head_sha === headSha)
+    .sort((left, right) => Number(right.id || 0) - Number(left.id || 0));
+  const latest = headChecks[0];
+  if (latest?.output?.summary?.startsWith(`pstack-verifier: BLOCKED @ ${headSha}\n`)) {
+    const blockedRun = Number(latest.output.summary.match(/^Run: .+\/actions\/runs\/(\d+)$/m)?.[1]);
+    if (blockedRun <= Number(run.id) || headChecks.some(check =>
+      !check.output?.summary?.startsWith('pstack-verifier: BLOCKED @') &&
+      Number(check.output?.summary?.match(/^Run: .+\/actions\/runs\/(\d+)$/m)?.[1]) >= blockedRun)) return true;
+  }
+  return !headChecks.some(check => {
+    const source = check.output?.summary?.match(/^Run: (.+\/actions\/runs\/(\d+))$/m);
+    const verdict = check.output?.summary?.match(/^pstack-verifier: (PASS(?:\+NOTES)?|FAIL|BLOCKED) @ ([0-9a-f]{40})\n/);
+    const laterPass = check.conclusion === 'success' && verdict && verdict[2] === headSha &&
+      ['PASS', 'PASS+NOTES'].includes(verdict[1]) &&
+      Date.parse(check.completed_at) >= Date.parse(run.created_at);
+    return source && ((source[1] === run.html_url && check.status === 'completed' && !check.output.summary.startsWith('pstack-verifier: BLOCKED @')) || Number(source[2]) > Number(run.id) || laterPass);
+  });
 }
 
 function recoveryReport(run, headSha, comments) {
-  const failure = comments.find(comment => comment.user?.login === 'github-actions[bot]' &&
-    comment.body?.startsWith(`pstack-verifier: FAIL @ ${headSha}\n`) &&
-    comment.body.includes(`\nRun: ${run.html_url}\n`) && comment.body.includes(MARKER));
-  if (failure) return { result: 'FAIL', body: failure.body };
+  const published = comments.flatMap(comment => {
+    if (comment.user?.login !== 'github-actions[bot]' || !comment.body?.includes(MARKER)) return [];
+    const verdict = comment.body.match(/^pstack-verifier: (PASS(?:\+NOTES)?|FAIL) @ ([0-9a-f]{40})\n/);
+    const source = comment.body.match(/^Run: (.+\/actions\/runs\/(\d+))$/m);
+    const runId = Number(run.id || run.html_url?.match(/\/runs\/(\d+)$/)?.[1]);
+    if (!verdict || verdict[2] !== headSha || !source || (source[1] !== run.html_url && Number(source[2]) <= runId)) return [];
+    return [{ result: verdict[1], body: comment.body }];
+  });
+  if (published.length) return published[published.length - 1];
   return { result: 'BLOCKED', body: `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n` };
 }
 
@@ -272,14 +290,26 @@ function recover(env) {
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
   const headSha = run.pull_requests?.[0]?.head?.sha || pr.head.sha;
   if (headSha !== pr.head.sha) return;
-  const checks = gh(['api', '--paginate', `repos/${env.REPO}/commits/${headSha}/check-runs?per_page=100`, '--jq', '.check_runs[]'])
+  const checks = gh(['api', '--paginate', `repos/${env.REPO}/commits/${headSha}/check-runs?filter=all&per_page=100`, '--jq', '.check_runs[]'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
   if (!recoveryNeeded(run, headSha, checks)) return;
   const comments = gh(['api', '--paginate', `repos/${env.REPO}/issues/${number}/comments?per_page=100`, '--jq', '.[] | {body,user:{login:.user.login}}'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
-  const { result, body } = recoveryReport(run, headSha, comments);
+  let { result, body } = recoveryReport(run, headSha, comments);
+  if (checkConclusion(result) === 'success') {
+    let gate;
+    try { gate = testsGate(testsRuns(env, headSha)); }
+    catch { gate = { reason: 'Tests could not be confirmed' }; }
+    if (gate.action !== 'pass') {
+      ({ result, body } = recoveryReport(run, headSha, []));
+      body = body.replace('\n\nRun:', `\n\n${gate.reason}; success requires green Tests.\n\nRun:`);
+    }
+  }
+  if (result === 'BLOCKED' && checks.some(check => check.name === 'pstack-verifier' && check.head_sha === headSha &&
+    check.status === 'completed' && check.output?.summary?.startsWith(`pstack-verifier: BLOCKED @ ${headSha}\n`) &&
+    check.output.summary.includes(`\nRun: ${run.html_url}\n`))) return;
   for (const name of ['pstack-verifier (BLOCKED)', 'pstack-verifier']) {
-    const conclusion = name.endsWith('(BLOCKED)') && result !== 'BLOCKED' ? 'neutral' : 'failure';
+    const conclusion = name.endsWith('(BLOCKED)') ? (result === 'BLOCKED' ? 'failure' : 'neutral') : checkConclusion(result);
     gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', `name=${name}`, '-f', `head_sha=${headSha}`, '-f', 'status=completed', '-f', `conclusion=${conclusion}`, '-f', `details_url=${run.html_url}`, '-f', `output[title]=pstack-verifier: ${result}`, '-f', `output[summary]=${body}`]);
   }
   if (result === 'BLOCKED') gh(['pr', 'comment', String(number), '--repo', env.REPO, '--body', body]);
@@ -336,18 +366,41 @@ function prepare(env, outDir) {
   fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(selectable(available), null, 2));
 }
 
+function latestArtifacts(artifacts, selection, baseSha) {
+  const latest = new Map();
+  for (const artifact of artifacts) {
+    if (!selection.features.some(feature => {
+      const match = artifact.name.match(featureDirPattern(feature));
+      return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
+    })) continue;
+    const previous = latest.get(artifact.name);
+    if (!previous || artifact.created_at > previous.created_at ||
+      (artifact.created_at === previous.created_at && Number(artifact.id) > Number(previous.id))) latest.set(artifact.name, artifact);
+  }
+  return [...latest.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
 function download(env, selectionFile, evidenceDir, baseSha) {
   const selection = JSON.parse(fs.readFileSync(selectionFile, 'utf8'));
   const repo = env.REPO;
-  const runId = env.RUN_ID;
-  const listed = gh(['api', `repos/${repo}/actions/runs/${runId}/artifacts`, '--paginate', '--jq', '.artifacts[].name']).split('\n').map(line => line.trim()).filter(Boolean);
-  const wanted = listed.filter(name => selection.features.some(feature => {
-    const match = name.match(featureDirPattern(feature));
-    return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
-  }));
+  const listed = gh(['api', `repos/${repo}/actions/runs/${env.RUN_ID}/artifacts`, '--paginate', '--jq', '.artifacts[] | {id,name,created_at,expired}'])
+    .split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const wanted = latestArtifacts(listed, selection, baseSha);
   fs.mkdirSync(evidenceDir, { recursive: true });
-  for (const name of wanted) {
-    gh(['run', 'download', runId, '--repo', repo, '--name', name, '--dir', path.join(evidenceDir, name)]);
+  for (const artifact of wanted) {
+    const scratch = fs.mkdtempSync(path.join(evidenceDir, '.download-'));
+    try {
+      const archive = path.join(scratch, 'artifact.zip');
+      const fd = fs.openSync(archive, 'w');
+      try {
+        execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', fd, 'inherit'] });
+      } finally { fs.closeSync(fd); }
+      const content = path.join(scratch, 'content');
+      execFileSync('unzip', ['-q', archive, '-d', content], { stdio: 'inherit' });
+      const target = path.join(evidenceDir, artifact.name);
+      fs.rmSync(target, { recursive: true, force: true });
+      fs.renameSync(content, target);
+    } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
   }
   process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
 }
@@ -604,7 +657,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs };
+module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

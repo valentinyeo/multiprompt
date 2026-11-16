@@ -287,7 +287,7 @@ test('the DeepSeek key reaches the picker and the judge and the engine comes fro
   assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
   assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && needs\.tests\.result == 'success' && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
-  assert.match(workflow, /name: pstack-verifier report\n    needs: \[tests, resolve, select, head, failed-head, base\]/);
+  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base\]/);
 });
 
 for (const problem of ['Evidence lost during cleanup: action.png', 'The journey timed out', 'Harness error: driver crashed', 'Runner queue timeout', 'Job cancelled']) {
@@ -386,10 +386,10 @@ for (const conclusion of ['cancelled', 'timed_out', 'failure', 'startup_failure'
     const run = { id: 12, status: 'completed', conclusion, html_url: 'https://example.test/actions/runs/12' };
     assert.equal(verifier.recoveryNeeded(run, head, []), true);
     for (const productConclusion of ['success', 'failure']) {
-      const checks = [{ name: 'pstack-verifier', head_sha: head, status: 'completed', conclusion: productConclusion, details_url: run.html_url }];
+      const checks = [{ name: 'pstack-verifier', head_sha: head, status: 'completed', conclusion: productConclusion, details_url: 'https://example.test/runs/check', output: { summary: `Run: ${run.html_url}` } }];
       assert.equal(verifier.recoveryNeeded(run, head, checks), false);
     }
-    const newer = [{ name: 'pstack-verifier', head_sha: head, status: 'completed', details_url: 'https://example.test/actions/runs/13' }];
+    const newer = [{ name: 'pstack-verifier', head_sha: head, status: 'completed', details_url: 'https://example.test/runs/check', output: { summary: 'Run: https://example.test/actions/runs/13' } }];
     assert.equal(verifier.recoveryNeeded(run, head, newer), false);
   });
 }
@@ -468,13 +468,13 @@ test('recovery preserves a product FAIL already posted for the same head and run
   assert.equal(verifier.recoveryReport({ ...run, html_url: 'https://example.test/actions/runs/13' }, head, [comment]).result, 'BLOCKED');
 });
 
-test('recovery never grants success or trusts a verdict from an unrelated author', () => {
+test('recovery only restores trusted published verdicts', () => {
   assert.equal(typeof verifier.recoveryReport, 'function');
   const run = { conclusion: 'cancelled', html_url: 'https://example.test/actions/runs/12' };
   for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL']) {
     const body = `pstack-verifier: ${verdict} @ ${head}\n\nRun: ${run.html_url}\n${verifier.MARKER}\n`;
     assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'someone' }, body }]).result, 'BLOCKED');
-    if (verdict !== 'FAIL') assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'github-actions[bot]' }, body }]).result, 'BLOCKED');
+    assert.equal(verifier.recoveryReport(run, head, [{ user: { login: 'github-actions[bot]' }, body }]).result, verdict);
   }
 });
 
