@@ -4,6 +4,7 @@ $case = @{ name = 'chat-still'; status = 'failed'; detail = 'Chat stillness obse
 $result.checks += $case
 $observations = @{}
 $streamJob = $null
+$writer = $null
 try {
     Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 5 } 'five long-chat sessions restored'
     Wait-Until { (Get-Content $log -Raw) -match '\[chat-still\] row message=' } 'initial native chat geometry'
@@ -33,7 +34,7 @@ try {
     $receipt = Join-Path $Evidence 'chat-still-stream-receipt.json'
     $arguments = '"' + $scriptPath + '" "' + $remoteState + '" "' + $target.tmux_session + '" "' + $receipt + '"'
     Record 'Observe a streaming reply without any scroll input'
-    $writer = $streamJob.Start($env:MP_VERIFY_PYTHON, $scratch, (Join-Path $Evidence 'stream.stdout.log'), (Join-Path $Evidence 'stream.stderr.log'), $arguments)
+    $writer = $streamJob.Start($env:MP_VERIFY_PYTHON, $scratch, (Join-Path $Evidence 'stream.stdout.log'), (Join-Path $Evidence 'stream.stderr.log'), $arguments, $true)
     $observations.streaming = $stream.Finish()
     Save-Json $observations.streaming 'chat-still-streaming.json'
     if (-not $writer.WaitForExit(10000) -or $writer.ExitCode -ne 0) { throw 'Streaming boundary did not complete' }
@@ -59,6 +60,8 @@ try {
         $stopped = $streamJob.Stop()
         Save-Json @{ activeAfterStop = $stopped.ActiveProcesses } 'chat-still-stream-cleanup.json'
         $streamJob.Dispose()
+        if ($null -ne $writer) { $writer.Dispose() }
+        if ($stopped.ActiveProcesses -ne 0) { throw 'Streaming boundary left owned processes running' }
     }
     if (Test-Path $log) { Copy-Item $log (Join-Path $Evidence 'chat-still-debug.log') }
 }

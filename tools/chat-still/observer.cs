@@ -9,6 +9,7 @@ using System.Threading;
 
 public sealed class ChatStillObserver {
     [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
     delegate bool EnumProc(IntPtr window, IntPtr state);
     [DllImport("dwmapi.dll")] static extern int DwmFlush();
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr owner, EnumProc callback, IntPtr state);
@@ -16,6 +17,7 @@ public sealed class ChatStillObserver {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
     readonly List<Dictionary<string, object>> samples = new List<Dictionary<string, object>>();
     readonly Dictionary<string, int[]> rows = new Dictionary<string, int[]>();
     readonly Stopwatch clock = new Stopwatch();
@@ -66,6 +68,10 @@ public sealed class ChatStillObserver {
         samples.Add(new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "kind", kind }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } });
         if (baseline == null) baseline = screen;
         AssertFrame(baseline, screen, dirty, width, layout);
+        Rect client;
+        if (!GetClientRect(view, out client)) throw new InvalidOperationException("Transcript client rectangle unavailable");
+        AssertFrame(baseline, screen, dirty, client.Right - client.Left, layout);
+        if (rect[3] <= 0 || rect[1] >= client.Bottom) throw new InvalidOperationException("Newest initially visible message is no longer on screen");
     }
     void Read(string log, string shell, IntPtr view, bool seed) {
         using (var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {

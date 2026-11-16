@@ -7,11 +7,16 @@ on:
       - 'src/app_state.zig'
       - 'src/main.zig'
       - 'src/layout.zig'
+      - 'src/window_layout.zig'
+      - 'src/browser_pane.zig'
+      - 'src/drawing.zig'
       - 'tools/chat-still/**'
       - 'tools/verify-chat-still'
       - 'tools/pr-verifier*'
       - '.claude/skills/verify-multiprompt/**'
       - '.github/workflows/chat-still.yml'
+      - '.github/workflows/verify.yml'
+      - '.github/workflows/pr-verifier.yml'
   workflow_dispatch:
     inputs:
       comment_review:
@@ -59,7 +64,7 @@ jobs:
       revision: ${{ github.event.pull_request.head.sha || github.sha }}
       feature: chat-still
   comment-review:
-    if: always() && github.event_name == 'workflow_dispatch' && inputs.comment_review
+    if: always() && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || inputs.comment_review)
     needs: [formal, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 15
