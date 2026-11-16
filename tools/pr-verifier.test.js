@@ -342,6 +342,7 @@ test('job cancellation and missing prerequisites block an otherwise passing verd
 });
 
 test('only PASS and PASS+NOTES can produce a successful head check', () => {
+  assert.equal(typeof verifier.checkConclusion, 'function');
   for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED', '', undefined]) {
     assert.equal(verifier.checkConclusion(verdict), ['PASS', 'PASS+NOTES'].includes(verdict) ? 'success' : 'failure');
   }
@@ -381,6 +382,7 @@ test('the first real key action captures missing action evidence before cleanup'
 
 for (const conclusion of ['cancelled', 'timed_out', 'failure', 'startup_failure']) {
   test(`a verifier run ending ${conclusion} without its verdict needs BLOCKED recovery`, () => {
+    assert.equal(typeof verifier.recoveryNeeded, 'function');
     const run = { id: 12, status: 'completed', conclusion, html_url: 'https://example.test/actions/runs/12' };
     assert.equal(verifier.recoveryNeeded(run, head, []), true);
     for (const productConclusion of ['success', 'failure']) {
@@ -393,6 +395,7 @@ for (const conclusion of ['cancelled', 'timed_out', 'failure', 'startup_failure'
 }
 
 test('a successful or unfinished verifier run does not need recovery', () => {
+  assert.equal(typeof verifier.recoveryNeeded, 'function');
   assert.equal(verifier.recoveryNeeded({ status: 'completed', conclusion: 'success' }, head, []), false);
   assert.equal(verifier.recoveryNeeded({ status: 'queued', conclusion: null }, head, []), false);
 });
@@ -434,7 +437,9 @@ test('typed harness errors are BLOCKED without relying on their message', () => 
 });
 
 test('recovery uses trusted default-branch tools and never runs pull request code', () => {
-  const recovery = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier-blocked.yml'), 'utf8');
+  const recoveryPath = path.join(root, '.github/workflows/pr-verifier-blocked.yml');
+  assert.ok(fs.existsSync(recoveryPath), 'Interrupted runs have a recovery workflow');
+  const recovery = fs.readFileSync(recoveryPath, 'utf8');
   assert.match(recovery, /workflows: \[PR verifier\]\n    types: \[completed\]/);
   assert.match(recovery, /ref: \$\{\{ github.event.repository.default_branch \}\}/);
   assert.doesNotMatch(recovery, /ref:.*(?:head_sha|head_branch)/);
@@ -454,6 +459,7 @@ for (const artifact of ['verify-appearance', `verify-appearance-${base}`]) {
 }
 
 test('recovery preserves a product FAIL already posted for the same head and run', () => {
+  assert.equal(typeof verifier.recoveryReport, 'function');
   const run = { conclusion: 'failure', html_url: 'https://example.test/actions/runs/12' };
   const body = `pstack-verifier: FAIL @ ${head}\n\n- screenshot contradicts the labels\n\nRun: ${run.html_url}\n${verifier.MARKER}\n`;
   const comment = { user: { login: 'github-actions[bot]' }, body };
@@ -463,6 +469,7 @@ test('recovery preserves a product FAIL already posted for the same head and run
 });
 
 test('recovery never grants success or trusts a verdict from an unrelated author', () => {
+  assert.equal(typeof verifier.recoveryReport, 'function');
   const run = { conclusion: 'cancelled', html_url: 'https://example.test/actions/runs/12' };
   for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL']) {
     const body = `pstack-verifier: ${verdict} @ ${head}\n\nRun: ${run.html_url}\n${verifier.MARKER}\n`;
