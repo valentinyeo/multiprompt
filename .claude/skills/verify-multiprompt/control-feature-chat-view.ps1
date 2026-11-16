@@ -149,7 +149,6 @@
                                 $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
                                 Focus-Palette 'switch to terminal' 6305
                                 Snapshot $(if ($chat) { 'running-claude-palette-chat' } else { 'running-claude-palette-shell' })
-                                $paintBoundary = @(Get-Content $debugLog).Count
                                 Press @(0x0D) "Enter: $label for the current tab"
                                 & $checkJourney $(if ($chat) { 'palette-chat' } else { 'palette-shell' }) $chat
                             }
@@ -165,21 +164,14 @@
                                 if ($indices.Count -ne 1) { throw 'Context target SID is not unique' }
                                 $targetIndex = [int]$indices[0]
                                 $shot = if ($chat) { 'running-claude-pre-context-chat' } else { 'running-claude-pre-context-shell' }
-                                Doctor
-                                $paintBoundary = @(Get-Content $debugLog).Count
-                                if (-not [VerifyNative]::RedrawWindow($script:window, [IntPtr]::Zero, [IntPtr]::Zero, 0x185)) { throw 'Context target repaint failed' }
                                 Snapshot $shot
-                                $lines = @(Get-Content $debugLog)
-                                if ($lines.Count -lt $paintBoundary) { throw 'Debug log changed across the paint boundary' }
                                 $pair = $null
-                                for ($i = $paintBoundary; $i -lt $lines.Count; $i++) {
-                                    if ($lines[$i] -match ('\[sidebar-avatar\] target=' + $targetIndex + ' face=(\d+) color=(\d+)$')) {
-                                        $face = $Matches[1]; $color = $Matches[2]
-                                        if ($i + 1 -ge $lines.Count -or $lines[$i + 1] -notmatch ('\[bots\] face=' + $face + ' color=' + $color + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { throw 'Context target paint pair is incomplete or ambiguous' }
-                                        $pair = @{ avatar = $lines[$i]; bots = $lines[$i + 1]; left = [int]$Matches[1]; top = [int]$Matches[2]; right = [int]$Matches[3]; bottom = [int]$Matches[4] }
+                                foreach ($line in @(Get-Content $debugLog)) {
+                                    if ($line -match ('\[photo-proof\] expanded target=' + $targetIndex + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) {
+                                        $pair = @{ geometry = $line; left = [int]$Matches[1]; top = [int]$Matches[2]; right = [int]$Matches[3]; bottom = [int]$Matches[4] }
                                     }
                                 }
-                                if ($null -eq $pair) { throw 'No fresh SID-qualified context target paint pair' }
+                                if ($null -eq $pair) { throw 'No SID-qualified context target geometry' }
                                 $client = New-Object VerifyNative+Rect
                                 $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
                                 if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or -not (Test-Path $snapshotPath)) { throw 'Context target client or sidebar geometry unavailable' }
@@ -191,7 +183,7 @@
                                 if ($dpi -eq 0 -or $scale -le 0 -or $pair.left -lt $client.Left -or $pair.top -lt $client.Top -or $pair.right -le $pair.left -or $pair.bottom -le $pair.top -or $pair.right -gt $client.Right -or $pair.bottom -gt $client.Bottom -or $pair.right -gt $sidebarRight) { throw 'Context target rectangle outside the client sidebar' }
                                 $x = [int][Math]::Floor(($pair.left + $pair.right) / 2.0)
                                 $y = [int][Math]::Floor(($pair.top + $pair.bottom) / 2.0)
-                                $journey.contextTargets += @{ shellId = $journeyId; index = $targetIndex; avatarLine = $pair.avatar; botsLine = $pair.bots; rect = @($pair.left, $pair.top, $pair.right, $pair.bottom); center = @($x, $y); screenshot = ($shot + '.png') }
+                                $journey.contextTargets += @{ shellId = $journeyId; index = $targetIndex; geometryLine = $pair.geometry; rect = @($pair.left, $pair.top, $pair.right, $pair.bottom); center = @($x, $y); screenshot = ($shot + '.png') }
                                 Save-Json $journey 'running-claude-switch.json'
                                 Doctor
                                 Assert-Foreground
@@ -211,7 +203,6 @@
                                     @(Get-Content $debugLog | Where-Object { $_ -match ('\[palette\] ready chars=' + $label.Length + ' count=\d+ target=7114$') }).Count -gt $readyBefore
                                 } 'current tab switch action selected'
                                 Snapshot $(if ($chat) { 'running-claude-context-chat' } else { 'running-claude-context-shell' })
-                                $paintBoundary = @(Get-Content $debugLog).Count
                                 Press @(0x0D) "Enter: $label from the tab menu"
                                 & $checkJourney $(if ($chat) { 'context-chat' } else { 'context-shell' }) $chat
                             }
