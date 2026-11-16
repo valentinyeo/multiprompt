@@ -261,14 +261,29 @@ function download(env, selectionFile, evidenceDir, baseSha) {
   const selection = JSON.parse(fs.readFileSync(selectionFile, 'utf8'));
   const repo = env.REPO;
   const runId = env.RUN_ID;
-  const listed = gh(['api', `repos/${repo}/actions/runs/${runId}/artifacts`, '--paginate', '--jq', '.artifacts[].name']).split('\n').map(line => line.trim()).filter(Boolean);
-  const wanted = listed.filter(name => selection.features.some(feature => {
-    const match = name.match(featureDirPattern(feature));
+  const listed = gh(['api', `repos/${repo}/actions/runs/${runId}/artifacts`, '--paginate', '--jq', '.artifacts[] | {id,name}']).split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const latest = new Map();
+  for (const artifact of listed) {
+    if (!latest.has(artifact.name) || artifact.id > latest.get(artifact.name).id) latest.set(artifact.name, artifact);
+  }
+  const wanted = [...latest.values()].filter(artifact => selection.features.some(feature => {
+    const match = artifact.name.match(featureDirPattern(feature));
     return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
   }));
   fs.mkdirSync(evidenceDir, { recursive: true });
-  for (const name of wanted) {
-    gh(['run', 'download', runId, '--repo', repo, '--name', name, '--dir', path.join(evidenceDir, name)]);
+  for (const artifact of wanted) {
+    const archive = path.join(evidenceDir, `${artifact.id}.zip`);
+    try {
+      const output = fs.openSync(archive, 'w');
+      try {
+        execFileSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifact.id}/zip`], { stdio: ['ignore', output, 'inherit'] });
+      } finally {
+        fs.closeSync(output);
+      }
+      execFileSync('unzip', ['-q', archive, '-d', path.join(evidenceDir, artifact.name)]);
+    } finally {
+      fs.rmSync(archive, { force: true });
+    }
   }
   process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
 }
