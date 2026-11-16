@@ -1448,6 +1448,7 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
 
 
 test('SOFT-2459 terminal reply evidence rejects residue, lost brackets and missing cleanup', () => {
+  assert.ok(fs.existsSync(path.join(__dirname, 'chat-terminal-replies-proof.cjs')), 'terminal reply journey evaluator is available');
   const { verify, replies } = require('./chat-terminal-replies-proof.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'terminal-replies-proof-'));
   const put = (name, value) => {
