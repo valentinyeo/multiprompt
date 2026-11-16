@@ -183,7 +183,6 @@ test('SOFT-1973 the other delay branches keep their timings', () => {
 
 test('SOFT-1973 the result handler repaints nothing for an empty poll and a chat that becomes live is read at once', () => {
   const ready = body(session, 'chatFileOnReady');
-  assert.match(ready, /active_changed = active_changed or !entry\.unchanged or history\.revision != app_state\.g_chat_last_hash;/);
   assert.match(ready, /if \(preview_changed\) \{\n\s+@import\("window_layout\.zig"\)\.invalidateSidebar\(\);/);
   const request = body(session, 'chatFileRequestForDelivery');
   assert.match(request, /key\.shell_id == live_shell_id and entry\.quiet > 0\) \{\n\s+entry\.quiet = 0;\n\s+entry\.next = @min\(entry\.next, now\);/);

@@ -1532,7 +1532,7 @@ pub fn chatFileOnReady() void {
             entry.quiet = if (entry.unchanged and background and !disk) entry.quiet +| 1 else 0;
             entry.next = GetTickCount64() + chatHistoryNextDelay(disk, entry.prepended, entry.before, history.more, chatPollingPending(entry.key.shell_id), entry.stream != null, entry.unchanged, background, entry.quiet -| 1);
             if (belongs_to_active) {
-                active_changed = active_changed or !entry.unchanged or history.revision != app_state.g_chat_last_hash;
+                active_changed = active_changed or !entry.unchanged or history.revision != (app_state.g_chat_last_hash ^ (g_chat_live_drawn_revision *% 0x9E3779B97F4A7C15));
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
                 app_state.g_chat_switch_loading = history.more and entry.history.blocks.items.len == 0;
                 const idx = findShellById(key.shell_id) orelse continue;

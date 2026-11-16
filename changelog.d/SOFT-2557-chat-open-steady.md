@@ -1,1 +1,1 @@
-Opening a chat keeps its messages steady while it finishes loading.
+Chats stay steady while opening, sitting idle, and showing a reply as it arrives.
