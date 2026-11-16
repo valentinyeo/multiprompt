@@ -694,27 +694,14 @@ pub const TableCache = struct {
     const Entry = struct { hash: u64, key: TableKey, layout: TableLayout };
     entries: std.AutoHashMapUnmanaged(usize, Entry) = .empty,
     builds: usize = 0,
-    lists: std.AutoHashMapUnmanaged(usize, u8) = .empty,
 
     pub fn clear(self: *TableCache, a: std.mem.Allocator) void {
         var values = self.entries.valueIterator();
         while (values.next()) |entry| entry.layout.deinit(a);
         self.entries.clearRetainingCapacity();
-        self.lists.clearRetainingCapacity();
-    }
-
-    pub fn list(self: *TableCache, a: std.mem.Allocator, offset: usize, depth: u8) bool {
-        const slot = self.lists.getOrPut(a, offset) catch return false;
-        if (slot.found_existing and slot.value_ptr.* == depth) return false;
-        slot.value_ptr.* = depth;
-        return true;
     }
 
     pub fn clearFrom(self: *TableCache, a: std.mem.Allocator, offset: usize) void {
-        var lists = self.lists.iterator();
-        while (lists.next()) |entry| {
-            if (entry.key_ptr.* >= offset) _ = self.lists.remove(entry.key_ptr.*);
-        }
         var it = self.entries.iterator();
         while (it.next()) |entry| {
             if (entry.key_ptr.* < offset) continue;
@@ -808,7 +795,6 @@ pub const TableCache = struct {
     pub fn deinit(self: *TableCache, a: std.mem.Allocator) void {
         self.clear(a);
         self.entries.deinit(a);
-        self.lists.deinit(a);
     }
 
     pub fn layout(self: *TableCache, a: std.mem.Allocator, text: []const u16, offset: usize, key: TableKey, context: anytype, comptime measure: fn (@TypeOf(context), []const u16, bool) TableSize) !*TableLayout {
