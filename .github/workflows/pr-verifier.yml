@@ -212,6 +212,9 @@ jobs:
 
   verdict:
     name: pstack-verifier report
+    concurrency:
+      group: pstack-verdict-${{ format('verify PR {0}', inputs.pr || github.event.pull_request.number) }}
+      cancel-in-progress: false
     needs: [tests, resolve, select, head, failed-head, base]
     if: always() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest

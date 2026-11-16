@@ -1,0 +1,36 @@
+{
+  "run": {
+    "id": 43897620051,
+    "status": "completed",
+    "conclusion": "failure",
+    "html_url": "https://github.com/valentinyeo/multiprompt/actions/runs/43897620051",
+    "created_at": "2026-11-16T15:33:30Z"
+  },
+  "headSha": "c56ad44472493121785a53436b509a386efa5043",
+  "checks": [
+    {
+      "id": 133428778431,
+      "name": "pstack-verifier",
+      "head_sha": "c56ad44472493121785a53436b509a386efa5043",
+      "status": "completed",
+      "conclusion": "failure",
+      "details_url": "https://github.com/valentinyeo/multiprompt/runs/133428778431",
+      "completed_at": "2026-11-16T16:09:03Z",
+      "output": {
+        "summary": "pstack-verifier: BLOCKED @ c56ad44472493121785a53436b509a386efa5043\n\nRun: https://github.com/valentinyeo/multiprompt/actions/runs/43897620051\n<!-- pstack-verifier -->\n"
+      }
+    },
+    {
+      "id": 133428201727,
+      "name": "pstack-verifier",
+      "head_sha": "c56ad44472493121785a53436b509a386efa5043",
+      "status": "completed",
+      "conclusion": "success",
+      "details_url": "https://github.com/valentinyeo/multiprompt/runs/133428201727",
+      "completed_at": "2026-11-16T16:08:11Z",
+      "output": {
+        "summary": "pstack-verifier: PASS+NOTES @ c56ad44472493121785a53436b509a386efa5043\n\nRun: https://github.com/valentinyeo/multiprompt/actions/runs/43897620051\n<!-- pstack-verifier -->\n"
+      }
+    }
+  ]
+}
