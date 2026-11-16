@@ -1814,20 +1814,22 @@ pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
 
 pub const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 
-pub fn chatSendRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8, sid_present: bool) ChatSendRoute {
+pub fn chatSendRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8, sid_present: bool, live: bool) ChatSendRoute {
     if (chatMessageGoesToHost(kind, ai_agent)) return if (sid_present) .host_message else .wait_for_start;
-    if (kind == .tmux and ai_agent == 0) return .wait_for_start;
+    if (kind == .tmux and ai_agent == 0 and live) return .wait_for_start;
     return .terminal_send;
 }
 
 test "IGSH-1266 a chat typed before the tab finished starting still goes to the host" {
-    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true));
-    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 2, true));
-    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false));
-    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, true));
-    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false));
-    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.cmd, 0, false));
-    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, false));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true, true));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 2, true, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, true, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false, true));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.cmd, 0, false, true));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, false, true));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.tmux, 0, false, false));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false, false));
 }
 
 pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
@@ -2599,7 +2601,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
-    const route = chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
+    const route = chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0, @import("chat_view.zig").isLive(shell.tmux_session[0..shell.tmux_session_len]));
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
         chatLogSendPath(shell_index, entry, route, "enter");

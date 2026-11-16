@@ -1152,6 +1152,7 @@ def reader_namespace():
             namespace["subprocess"] = WorkerDiagnostics()
         if state().get("name") == "reactions":
             install_reaction_tmux(namespace)
+        if state().get("name") in ("reactions", "queue-draft-sync", "send-stays-gone"):
             install_reaction_worker(namespace)
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None

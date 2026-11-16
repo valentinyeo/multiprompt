@@ -39,11 +39,11 @@ const CONSOLE_SCREEN_BUFFER_INFO = struct {
     dwCursorPosition: Coord = .{ .y = 1 },
     srWindow: struct { bottom: i16 = 1 } = .{},
 };
-const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, ai_agent: u8 = 0, activity: enum { idle, active } = .idle };
+const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, ai_agent: u8 = 0, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, activity: enum { idle, active } = .idle };
 const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
 fn chatFileIdentityForShell(_: u32) chat_transcript.Identity { return .{}; }
 fn chatMessageGoesToHost(_: ShellKind, _: u8) bool { return false; }
-fn chatSendRoute(_: ShellKind, _: u8, _: bool) ChatSendRoute { return .terminal_send; }
+fn chatSendRoute(_: ShellKind, _: u8, _: bool, _: bool) ChatSendRoute { return .terminal_send; }
 fn chatLogSendPath(_: u32, _: ?*const anyopaque, _: ChatSendRoute, _: []const u8) void {}
 fn chatUpgradeToHostMessage(_: u32, _: *ChatOutboxEntry) bool { return true; }
 fn chatMessageCaptureAdmission(_: u32, _: *ChatOutboxEntry) void {}
@@ -249,7 +249,7 @@ test "correctness unreadable: readable held prompt retries only Enter, readable 
 function run(mode, control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-correctness-'));
   try {
-    copyZig(['chat_echo.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig'], dir);
+    copyZig(['chat_echo.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_view.zig'], dir);
     const replaced = control && mode === 'newline' ? ['chatArmSendVerify', 'chatSendVerifyTick', 'sendTextToShellVerifiedAt', 'chatPromptStillInInputBox'] :
       control && mode === 'unreadable' ? ['chatSendVerifyTick', 'chatPromptStillInInputBox'] : [];
     const names = ['chatArmSendVerify', 'chatVerifyClear', 'chatPromptStillInInputBox', 'chatSendVerifyTick', 'chatSendVerifyDelayMs',
