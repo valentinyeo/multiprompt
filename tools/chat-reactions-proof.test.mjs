@@ -277,3 +277,22 @@ test('reaction proof measures the painted transcript, excluding the floating com
   assert.throws(() => assertBadge(inspect(f.image, area)));
   assertBadge(inspect(f.image, { ...area, bottom: 235 }));
 });
+
+test('double-click proof rejects a retained badge, a second send, a changed draft and missing cleanup', () => {
+  const f = fixture();
+  const added = inspect(f.image, area);
+  f.fill(28, 120, 68, 142, 0x444444);
+  const empty = inspect(f.image, area);
+  const frames = { before: empty, added, removed: empty, delivered: empty };
+  const content = `👍 to: ${('Same first words ' + 'for this example '.repeat(8)).trim().slice(0, 80)} [mp:6d8e353d25c5fe23]`;
+  const events = [{ type: 'queue-operation', operation: 'enqueue', content }, { type: 'attachment', attachment: { prompt: content } }];
+  const observation = { error: null, 'double-click-added': { queueCount: 1, composerText: 'draft stays here' }, 'double-click-removed': { queueCount: 1, composerText: 'draft stays here' }, doubleClickDelivered: true };
+  const cleanup = { remaining_owned_processes: 0, scratch_removed: true };
+  proof.assertDoubleClick(frames, events, observation, cleanup);
+  assert.throws(() => proof.assertDoubleClick({ ...frames, removed: added }, events, observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick({ ...frames, added: empty }, events, observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick({ ...frames, delivered: added }, events, observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, [...events, events[0]], observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, events, { ...observation, 'double-click-removed': { queueCount: 1, composerText: '' } }, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, events, observation, { ...cleanup, remaining_owned_processes: 1 }));
+});

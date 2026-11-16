@@ -1517,7 +1517,11 @@ if ($env:CHAT_HAX_PROOF -eq '1') {
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {
-    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    if ($env:CHAT_DOUBLE_CLICK_PROOF -eq '1') {
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --double-click
+    } else {
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    }
     exit $LASTEXITCODE
 }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
