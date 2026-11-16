@@ -89,7 +89,7 @@ test('IGSH-1828 recall proof accepts a kept answer and two targeted recalls', ()
   assert.equal(handed.includes("($raw -split '\\r?\\n')"), true);
   assert.equal(handed.includes('ConvertFrom-Json -InputObject $line'), true);
   const adapter = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/sitecustomize.py'), 'utf8');
-  assert.match(adapter, /os\.name == "nt" and \(os\.environ\.get\("CHAT_MODEL_PROOF"\) == "1" or os\.environ\.get\("CHAT_RECALL_PROOF"\) == "1"\)/);
+  assert.match(adapter, /os\.name == "nt" and \(os\.environ\.get\("CHAT_MODEL_PROOF"\) == "1" or os\.environ\.get\("CHAT_RECALL_PROOF"\) == "1" or os\.environ\.get\("CHAT_CLEAR_PROOF"\) == "1"\)/);
   const verify = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   assert.match(verify, /  workflow_call:[\s\S]*?chat_recall_proof:\n        required: false\n        default: false\n        type: boolean/);
   const recallWorkflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/recall-handed.yml'), 'utf8');

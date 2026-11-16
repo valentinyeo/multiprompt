@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+assert.ok(fs.existsSync(path.join(__dirname, 'chat-server-clear-proof.cjs')), 'server clear requires its independent evidence checker');
 const { verify } = require('./chat-server-clear-proof.cjs');
 
 function fixture() {

@@ -5,7 +5,7 @@ $statePath = Wait-For 'running production host agent' {
     $files = @(Get-ChildItem "$hostDir/*.state.json" -ErrorAction SilentlyContinue)
     if ($files.Count -ne 1) { return $null }
     $value = Read-Shared $files[0].FullName | ConvertFrom-Json
-    if ($value.agent_pid -gt 0 -and (Read-Shared "$state/model-argv.jsonl")) { $files[0].FullName }
+    if ($value.PSObject.Properties['agent_pid'] -and $value.agent_pid -gt 0 -and (Read-Shared "$state/model-argv.jsonl")) { $files[0].FullName }
 } 60
 function Clear-Copy([string]$Stage, [string]$Required) {
     [void](Wait-For 'owned app foreground for transcript copy' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) })
@@ -31,7 +31,7 @@ Press @(0x1B) 'Escape: dismiss slash completion without changing the command' $t
 Press @(0x0D) 'Enter: clear the server chat' $true
 [void](Wait-For 'clear starts a new production agent context' {
     $next = Read-Shared $statePath | ConvertFrom-Json
-    $next.PSObject.Properties['context_session'] -and $next.context_session -and $next.agent_pid -gt 0 -and $next.agent_pid -ne $before.agent_pid -and $next.native_session -ceq $next.context_session
+    $next.PSObject.Properties['context_session'] -and $next.PSObject.Properties['agent_pid'] -and $next.PSObject.Properties['native_session'] -and $next.context_session -and $next.agent_pid -gt 0 -and $next.agent_pid -ne $before.agent_pid -and $next.native_session -ceq $next.context_session
 } 60)
 Copy-Item $statePath "$caseDir/after-state.json"
 [void](Wait-For 'clear send has completed without a failed outbox entry' { (Read-Shared "$settings/debug.log") -match '\[chat\] send legacy reply=ok' })
