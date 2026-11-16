@@ -49,8 +49,13 @@ test('every pull_request workflow cancels only a superseded pull request run', (
   assert.ok(triggered.includes('pr-verifier.yml'));
   for (const name of triggered) {
     const concurrency = topConcurrency(read(name));
-    assert.ok(concurrency.includes(group), `${name} group`);
-    assert.ok(concurrency.includes(cancel), `${name} cancel-in-progress`);
+    if (name === 'pr-verifier.yml') {
+      assert.ok(concurrency.includes('group: ${{ github.workflow }}-${{ inputs.pr || github.event.pull_request.number }}'), `${name} group`);
+      assert.ok(concurrency.includes('cancel-in-progress: true'), `${name} cancel-in-progress`);
+    } else {
+      assert.ok(concurrency.includes(group) || concurrency.includes("github.event.pull_request.number || github.ref }}"), `${name} group`);
+      assert.ok(concurrency.includes(cancel), `${name} cancel-in-progress`);
+    }
   }
 });
 
@@ -77,4 +82,10 @@ test('a newer master commit still gets a release when this run is not the tip', 
     assert.match(read(name), /node tools\/release-follow\.cjs/);
     assert.match(read(name), /gh workflow run auto-release\.yml --ref master/);
   }
+});
+
+test('a release-called secret scan never shares a concurrency group with another release', () => {
+  const text = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '.github', 'workflows', 'gitleaks.yml'), 'utf8');
+  const group = text.match(/^concurrency:\n  group: (.+)$/m)[1];
+  require('node:assert').match(group, /inputs\.release_scan && github\.run_id/);
 });
