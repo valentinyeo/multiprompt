@@ -2106,7 +2106,7 @@ class HistoryReaderTest(unittest.TestCase):
         _, rows = self.read()
         shown = [(row['role'], row['text']) for row in rows if row.get('role') in ('user', 'assistant')]
         self.assertEqual(shown, [
-            ('user', '> quoted note\n\n/pstack:poteto-mode'),
+            ('user', '/pstack:poteto-mode > quoted note'),
             ('assistant', 'bot note'),
             ('user', '> quoted note\n> second line\n\n/pstack:correct own note'),
             ('user', '/pstack:correct plain note'),
