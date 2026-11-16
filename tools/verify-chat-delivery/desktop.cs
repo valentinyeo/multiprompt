@@ -124,8 +124,12 @@ public static class ChatDeliveryDesktop {
         var point = ScreenPoint(hwnd, x, y);
         if (WindowFromPoint(point) != hwnd || !SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Hover target is not the owned HWND");
         var inputs = new Input[1];
-        inputs[0].Data.Mouse = new Mouse { Flags = 1 };
+        inputs[0].Data.Mouse = new Mouse { X = 1, Flags = 1 };
         if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Hover SendInput failed");
+        System.Threading.Thread.Sleep(100);
+        inputs[0].Data.Mouse = new Mouse { X = -1, Flags = 1 };
+        if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Hover return SendInput failed");
+        System.Threading.Thread.Sleep(100);
         var info = new CursorInfo { Size = (uint)Marshal.SizeOf(typeof(CursorInfo)) };
         if (!GetCursorInfo(ref info)) throw new InvalidOperationException("GetCursorInfo failed");
         return new long[] { info.Flags, info.Cursor.ToInt64(), LoadCursor(IntPtr.Zero, (IntPtr)32649).ToInt64(), info.Position.X, info.Position.Y };

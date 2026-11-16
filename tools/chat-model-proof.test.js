@@ -152,7 +152,7 @@ test('rejects a plus menu that keeps a check mark or loses the active style', t 
 test('journey chooses model and effort from the shipped plus menu, not the retired palette rows', () => {
   const journey = source('tools/verify-chat-delivery/model-settings.ps1');
   assert.doesNotMatch(journey, /[^\x00-\x7f]/);
-  assert.match(source('tools/verify-chat-delivery/desktop.cs'), /public static long\[\] HoverCursor[\s\S]*?SendInput\(1, inputs/);
+  assert.match(source('tools/verify-chat-delivery/desktop.cs'), /public static long\[\] HoverCursor[\s\S]*?X = 1, Flags = 1[\s\S]*?SendInput\(1, inputs[\s\S]*?X = -1, Flags = 1[\s\S]*?SendInput\(1, inputs[\s\S]*?GetCursorInfo/);
   assert.match(journey, /header-\$Name-cursor\.json/);
   assert.match(journey, /function Plus-Click/);
   assert.match(journey, /PressClient\(\$menu, \$app\.Id, \$x, \$y\)/);
