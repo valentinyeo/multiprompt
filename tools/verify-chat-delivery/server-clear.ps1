@@ -45,7 +45,8 @@ try {
 try {
     [IO.File]::WriteAllText("$state/restart-probe", '')
     $headers.stopped = Wait-For 'cached shell inventory exposes the real restart action' { $text = Read-Header 'restart-stopped'; if ($text -match 'AI stopped') { $text } } 60
-    $word = @(Get-Content "$caseDir/restart-stopped-words.json" -Raw | ConvertFrom-Json | Where-Object { $_.text -match '^stopped' })
+    $ocrWords = Get-Content "$caseDir/restart-stopped-words.json" -Raw | ConvertFrom-Json
+    $word = @($ocrWords | Where-Object { $_.text -match '^stopped' })
     if ($word.Count -ne 1) { throw 'The visible stopped badge has no unique click target' }
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
     $x = [int](300 + $word[0].x + $word[0].width / 2 - $origin.X)
