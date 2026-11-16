@@ -238,6 +238,14 @@
                         }
                         $current = $target
                     }
+                    $idleStart = [VerifyNative]::GetTickCount64()
+                    $idleOffset = (Get-Item -LiteralPath $log).Length
+                    Record "Observe $mode chat without input for five seconds"
+                    Wait-Until { [VerifyNative]::GetTickCount64() -ge $idleStart + 5000 } 'five-second idle chat observation' 10
+                    $idleEnd = [VerifyNative]::GetTickCount64()
+                    $idleTrace = Read-SharedLog $log $idleOffset
+                    $idleTrace | Set-Content -Encoding UTF8 (Join-Path $Evidence "$mode-idle-debug.log")
+                    Save-Json @{ shell = $shellIds[$current]; start_tick = $idleStart; end_tick = $idleEnd } "$mode-idle-window.json"
                     $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
                     $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum
                     $timings[$mode].max_hang_ms = ($timings[$mode].hang_ms | Measure-Object -Maximum).Maximum

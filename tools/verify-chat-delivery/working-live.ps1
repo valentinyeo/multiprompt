@@ -51,11 +51,14 @@ function Capture-Working([string]$phase, [int]$index) {
         $frames.Add(@{name=$name; phase=$phase; startMs=$start; endMs=$end; startWallMs=$startWall})
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
+$observation.paintWindows = @{}
 try {
+    $observation.paintWindows.busyStart = [ChatDeliveryDesktop]::GetTickCount64()
     for ($i = 0; $clock.ElapsedMilliseconds -lt 4000; $i++) {
         Capture-Working 'busy' $i
         Start-Sleep -Milliseconds 60
     }
+    $observation.paintWindows.busyEnd = [ChatDeliveryDesktop]::GetTickCount64()
     $dispatchPush = Wait-For 'dispatched live turn subscription push' { Get-WorkingTurnPush 'standin-turn' } 20
     $animationClock = [Diagnostics.Stopwatch]::StartNew()
     for (; $animationClock.ElapsedMilliseconds -lt 1600; $i++) {
@@ -87,11 +90,13 @@ try {
     $observation.dispatchAnimation = @{pushedMs=$dispatchPush.ms; frames=$animated}
     [IO.File]::WriteAllText("$state/working-reply", '')
     [void](Wait-For 'stand-in emitted live text delta' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "text.delta"' } 20)
+    $observation.paintWindows.streamStart = [ChatDeliveryDesktop]::GetTickCount64()
     $replyClock = [Diagnostics.Stopwatch]::StartNew()
     for ($i = 0; $replyClock.ElapsedMilliseconds -lt 4000; $i++) {
         Capture-Working 'reply' $i
         Start-Sleep -Milliseconds 100
     }
+    $observation.paintWindows.streamEnd = [ChatDeliveryDesktop]::GetTickCount64()
     $observation.followups = @('First queued follow-up', 'Second queued follow-up')
     foreach ($followup in $observation.followups) {
         Type-Composer $followup
@@ -106,12 +111,14 @@ try {
         }
     } 20)
     $observation.queuedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $observation.paintWindows.queuedStart = [ChatDeliveryDesktop]::GetTickCount64()
     $queuedClock = [Diagnostics.Stopwatch]::StartNew()
     for ($i = 0; $queuedClock.ElapsedMilliseconds -lt 1600; $i++) {
         Capture-Working 'queued' $i
         Start-Sleep -Milliseconds 100
     }
 } finally {
+    $observation.paintWindows.queuedEnd = [ChatDeliveryDesktop]::GetTickCount64()
     $observation.sendMs = $sendMs
     $observation.frames = $frames.ToArray()
     Save $observation "$caseDir/timing.json"

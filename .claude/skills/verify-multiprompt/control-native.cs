@@ -292,6 +292,7 @@ public static class VerifyNative {
     public static void ResetHangProbe() { lock (probeLock) { probeWindowStarted = System.Diagnostics.Stopwatch.GetTimestamp(); probeMax = 0; } }
     public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
     public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
+    [DllImport("kernel32.dll")] public static extern ulong GetTickCount64();
     public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
         Input[] inputs = new Input[4];
         for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;

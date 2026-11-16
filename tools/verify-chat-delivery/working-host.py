@@ -69,6 +69,13 @@ def install(namespace, root, record):
             namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
                                     dict(text=REPLY, done=False), 'standin-reply')
             record('working-host.jsonl', stage='text.delta', sid=sid, text=REPLY)
+            text = REPLY
+            for index in range(1, 8):
+                time.sleep(0.4)
+                text += f' Streaming segment {index}.'
+                namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
+                                        dict(text=text, done=False), 'standin-reply')
+                record('working-host.jsonl', stage='streaming-delta', sid=sid, segment=index)
             if session.get('db') is not None:
                 session['db'].close()
 

@@ -136,7 +136,8 @@ fn paintLogRule(msg: []const u8) ?PaintLogRule {
     }
     if (std.mem.startsWith(u8, msg, "[chat] position ")) {
         const state = std.mem.indexOf(u8, msg, " shell=") orelse return null;
-        return .{ .id = "[chat] position", .line = msg[state..], .heartbeat_ms = 1000 };
+        const end = std.mem.indexOf(u8, msg, " paints=") orelse msg.len;
+        return .{ .id = "[chat] position", .line = msg[state..end], .heartbeat_ms = 1000 };
     }
     if (std.mem.startsWith(u8, msg, "[chat] unread divider ")) {
         return .{ .id = "[chat] unread divider", .line = msg, .heartbeat_ms = PAINT_LOG_DIVIDER_HEARTBEAT_MS };
