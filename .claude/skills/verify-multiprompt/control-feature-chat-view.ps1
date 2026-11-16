@@ -165,6 +165,9 @@
                                 if ($indices.Count -ne 1) { throw 'Context target SID is not unique' }
                                 $targetIndex = [int]$indices[0]
                                 $shot = if ($chat) { 'running-claude-pre-context-chat' } else { 'running-claude-pre-context-shell' }
+                                Doctor
+                                $paintBoundary = @(Get-Content $debugLog).Count
+                                if (-not [VerifyNative]::RedrawWindow($script:window, [IntPtr]::Zero, [IntPtr]::Zero, 0x185)) { throw 'Context target repaint failed' }
                                 Snapshot $shot
                                 $lines = @(Get-Content $debugLog)
                                 if ($lines.Count -lt $paintBoundary) { throw 'Debug log changed across the paint boundary' }

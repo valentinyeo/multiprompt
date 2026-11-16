@@ -819,7 +819,6 @@ foreach ($plan in $plans) {
             $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
@@ -827,6 +826,7 @@ foreach ($plan in $plans) {
             }
             Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
             . "$PSScriptRoot/../verify-chat-reply.ps1"
