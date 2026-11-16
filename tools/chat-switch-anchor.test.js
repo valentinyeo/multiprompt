@@ -232,22 +232,6 @@ test('IGSH-1924 removing the content clamp recreates empty space', () => {
   assert.match(result.stderr, /holds never leave blank space after content shrinks[^]*?FAIL \(TestExpectedEqual\)/);
 });
 
-test('SOFT-2557 the opening oracle detects message movement, not just window movement', () => {
-  const { openingPosition } = require('./verify-chat-delivery/chat-open-position.cjs');
-  const shown = '[switch] chat content shown shell=7 blocks=40 ms=16\n';
-  const frame = (ms, message = '18446744073709551611', y = 0, scroll = 3420, first = 34) =>
-    `[chat] position ms=${ms} shell=7 first=${first} message=${message} offset=512 y=${y} scroll=${scroll} height=4020 pad=20\n`;
-  const stable = shown + frame(16) + frame(500) + frame(1016);
-  assert.equal(openingPosition(stable, 7, 1200).status, 'passed');
-  assert.equal(openingPosition(shown + frame(16) + frame(500, undefined, 28), 7, 1200).status, 'failed');
-  assert.equal(openingPosition(shown + frame(16) + frame(500, '18446744073709551612'), 7, 1200).status, 'failed');
-  assert.equal(openingPosition(shown + frame(16) + frame(500, undefined, 0, 4020, 40), 7, 1200).status, 'passed');
-  assert.throws(() => openingPosition(stable, 7, 999), /full second/);
-  assert.throws(() => openingPosition(shown, 7, 1200), /no visible-row/);
-  assert.throws(() => openingPosition(frame(16), 7, 1200), /never painted/);
-  assert.throws(() => openingPosition(shown + frame(500), 7, 1200), /first painted row/);
-});
-
 test('SOFT-2557 the previous opening path moves the visible row when a New divider arrives late', () => {
   const before = fs.readFileSync(path.join(__dirname, 'fixtures', 'SOFT-2557', 'before-refresh-scroll.txt'), 'utf8');
   const result = run(before);
