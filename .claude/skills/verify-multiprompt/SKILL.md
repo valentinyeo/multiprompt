@@ -17,7 +17,7 @@ Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit
 - `control-feature-<name>.ps1` owns each extracted feature body.
 - Existing dedicated scripts keep their names.
 - `control-library.ps1` holds shared PowerShell helpers.
-- Run palette actions with `Invoke-JourneyCommand 'new cmd shell'`. Names come from the current palette or shortcut rows in `tools/journey-commands.mjs`. The helper reads routing numbers from source, selects the matching row, confirms that command, and requires changed screen pixels. Existing journey assertions still check the command's result.
+- Run palette actions with `Invoke-JourneyCommand 'new cmd shell'`. Names come from the current palette or shortcut rows in `tools/journey-commands.mjs`. The helper reads routing numbers from source, selects the matching row, presses Enter, and requires changed screen pixels. Existing journey assertions still check the command's result.
 - Use `-Confirm { Snapshot 'action'; Press @(0x0D) 'Enter: New CMD shell' }` to retain a pre-action capture. Use `-SelectOnly` only to inspect a row or measure Enter separately. Use `Invoke-JourneyCommand 'Restore middle' -Session` for a uniquely named saved session.
 - `node --test tools/check-journey-commands.test.mjs` proves that old-style calls fail. `node tools/check-journey-commands.mjs` rejects raw `Palette`/`Focus-Palette` calls and names missing from the catalog.
 - `control-native.cs` holds unchanged native types.

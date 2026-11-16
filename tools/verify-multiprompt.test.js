@@ -924,7 +924,7 @@ function assertsFocusJourneyReadiness(source) {
   assert.match(palette, /GetFocusedWindow\(\$script:window\) -eq \$script:window/);
   assert.match(palette, /\$query.Length/);
   assert.match(palette, /\$target/);
-  assert.equal((palette.match(/Wait-Until \{/g) || []).length, 4);
+  assert.equal((palette.match(/Wait-Until \{/g) || []).length, 3);
   for (const field of ['active_workspace', 'active_tab', 'kind', 'cv']) assert.ok(surface.includes(`$state.${field}`) || surface.includes(`].${field}`));
   assert.match(surface, /IsOffscreen/);
   assert.match(surface, /NativeWindowHandle -eq \$Composer/);

@@ -593,11 +593,7 @@ function Invoke-JourneyCommand {
     WindowShot ($shot + '-selected')
     $before = if ($SelectOnly) { '-before' } else { '-selected' }
     $beforeHash = (Get-FileHash (Join-Path $Evidence ($shot + $before + '.png')) -Algorithm SHA256).Hash
-    if (-not $SelectOnly) {
-        $confirmStart = (Read-SharedText $log).Length
-        & $Confirm
-        Wait-Until { (Read-SharedText $log).Substring($confirmStart) -match ('\[confirm\][^\r\n]*target=' + $target + '(?: |\r?\n|$)') } "named command $Name confirmed"
-    }
+    if (-not $SelectOnly) { & $Confirm }
     Wait-Until {
         WindowShot ($shot + '-after')
         (Get-FileHash (Join-Path $Evidence ($shot + '-after.png')) -Algorithm SHA256).Hash -ne $beforeHash

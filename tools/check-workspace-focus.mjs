@@ -29,7 +29,7 @@ function nativePaletteFocusContract(source) {
   assert.match(palette, /\} 'command palette initialized and owned frame focused' 20\s+Type-Text \$query[\s\S]*Wait-Until \{/);
   assert.ok(palette.includes("-contains [string]$target"), 'query must still contain the resolved command');
   assert.match(palette, /\$query.Length/);
-  assert.equal((palette.match(/Wait-Until \{/g) || []).length, 4);
+  assert.equal((palette.match(/Wait-Until \{/g) || []).length, 3);
   const activation = '        [void][VerifyNative]::SetForegroundWindow($script:window)\n';
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.doesNotMatch(palette.replace(activation, ''), /FocusedElement|SetFocus|SetForegroundWindow|ClickClient/);

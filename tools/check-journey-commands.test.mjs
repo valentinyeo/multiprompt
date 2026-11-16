@@ -11,11 +11,11 @@ const { commandCatalog, root } = await import('./journey-commands.mjs');
 const { checkJourneyCommands, checkJourneys } = await import('./check-journey-commands.mjs');
 const catalog = commandCatalog();
 
-test('PowerShell helper rejects unchanged screens and wrong commands', context => {
+test('PowerShell helper selects the named row and rejects unchanged screens without a confirmation log', context => {
   const result = spawnSync(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-File', path.join(root, 'tools/test-journey-commands.ps1')], { encoding: 'utf8' });
   if (result.error?.code === 'ENOENT') return context.skip('PowerShell runs on GitHub-hosted runners');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /NAMED_COMMAND_ROW_SCREEN_AND_IDENTITY_VERIFIED/);
+  assert.match(result.stdout, /NAMED_COMMAND_ROW_AND_SCREEN_VERIFIED/);
 });
 
 test('all desktop journeys use current stable names', () => {

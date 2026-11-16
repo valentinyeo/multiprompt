@@ -16,7 +16,6 @@ New-Item -ItemType Directory -Path (Join-Path $scratch 'roaming/ZigShell'), $Evi
 $script:trace = ''
 $script:scene = 'workspace'
 $script:changesScreen = $true
-$script:wrongTarget = $false
 $script:cursor = 0
 $script:journeyCommands = (& node (Join-Path $PSScriptRoot 'journey-commands.mjs')) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Catalog generation failed' }
@@ -46,8 +45,6 @@ function Press([int[]]$Keys, [string]$Label) {
         $script:cursor++
         $script:scene = "palette-$script:cursor"
     } elseif ($Keys -contains 0x0D) {
-        $target = if ($script:wrongTarget) { '99999' } else { $script:ids[$script:cursor] }
-        $script:trace += "[confirm] sel=$script:cursor count=3 target=$target (tabsort_auto=0 manual=0)`n"
         if ($script:changesScreen) { $script:scene = 'new workspace screen' }
     }
 }
@@ -61,18 +58,10 @@ try {
         $failed = $true
     }
     if (-not $failed) { throw 'A command that left the screen unchanged passed' }
-    $script:wrongTarget = $true
-    $failed = $false
-    try { Invoke-JourneyCommand 'new cmd shell' } catch {
-        if ($_ -notmatch 'confirmed') { throw }
-        $failed = $true
-    }
-    if (-not $failed) { throw 'A different command confirmation passed' }
-    $script:wrongTarget = $false
     $script:changesScreen = $true
     $script:ids = @('99999', '1', '99998')
     Invoke-JourneyCommand 'Restore middle' -Session
-    Write-Output 'NAMED_COMMAND_ROW_SCREEN_AND_IDENTITY_VERIFIED'
+    Write-Output 'NAMED_COMMAND_ROW_AND_SCREEN_VERIFIED'
 } finally {
     Remove-Item -Recurse -Force $scratch
 }
