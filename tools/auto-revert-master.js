@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const { parseTicketId, ticketIds } = require('./ticket-id.js');
 const { quarantined } = require('./journey-policy.json');
 
 const journeyKey = name => name.slice(8, -1).split(',')[0].trim();
@@ -32,7 +33,8 @@ function decide({ run, repository, commits, jobs, history = [] }) {
   if (commits.some(commit => commit.commit.message.split('\n').includes(`This reverts commit ${target.sha}.`) || commit.commit.message.split('\n').includes(`This reverts commit ${target.sha}, reversing`))) {
     return { action: 'skip', reason: `Commit ${target.sha} already has a revert on master` };
   }
-  const ticket = subject.match(/\b(IGSH-\d+):(?:\s|$)/)?.[1];
+  const parsed = parseTicketId(subject.match(/\b([A-Z][A-Z0-9]*-\d+):(?:\s|$)/)?.[1]);
+  const ticket = parsed?.prefix === 'IGSH' ? parsed.id : null;
   if (!ticket) return { action: 'ignore', reason: 'Run head subject has no IGSH ticket id' };
   if (!failed.length) return refuse('No failed verify journey found in the run');
   const baselines = new Map();
@@ -111,7 +113,7 @@ function main() {
   }
   const marker = `Auto-Revert-Run: ${runId}`;
   const failing = jobs.filter(job => job.conclusion === 'failure').map(job => job.name).join(', ') || 'Unknown failed job';
-  const ticket = decision.ticket || commits.find(commit => commit.sha === run.head_sha)?.commit.message.split('\n')[0].match(/\bIGSH-\d+\b/)?.[0] || 'Unknown ticket';
+  const ticket = decision.ticket || ticketIds(commits.find(commit => commit.sha === run.head_sha)?.commit.message.split('\n')[0] || '').find(id => parseTicketId(id).prefix === 'IGSH') || 'Unknown ticket';
   const notify = detail => {
     const title = `${ticket}: master verify failure (run ${runId})`;
     const body = `${marker}\n\n${detail}\n\nFailed journeys/jobs: ${failing}\n\nRun: ${run.html_url}\nHead: ${run.head_sha}\n\nThe board ticket was not reopened by this run. Manually reopen ${ticket} and post the failing journeys above.`;
@@ -128,7 +130,7 @@ function main() {
     }
   };
   if (decision.action === 'skip') {
-    const key = decision.duplicate?.match(/\bIGSH-\d+\b/)?.[0];
+    const key = ticketIds(decision.duplicate || '').find(id => parseTicketId(id).prefix === 'IGSH');
     const journeys = decision.duplicate?.match(/^Failed journeys: (.+)$/m)?.[1];
     if (key && journeys) reopenBoard(key, journeys, decision.reason);
     return;

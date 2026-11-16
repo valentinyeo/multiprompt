@@ -1,3 +1,4 @@
+const { parseTicketId, canonicalTicketId } = require('./ticket-id.js');
 const boardBase = 'https://api.hypertask.ai/api/mcp';
 const reopenable = ['Todo', 'Doing', 'AI Review', 'Done'];
 
@@ -23,6 +24,7 @@ function boardApi(credential, base = boardBase) {
 }
 
 async function reopenTicket({ api, ticket, runUrl, journeys }) {
+  ticket = canonicalTicketId(ticket);
   const tasks = (await api('GET', `/tasks?ticket_number=${encodeURIComponent(ticket)}`)).tasks;
   if (tasks?.length !== 1 || !reopenable.includes(tasks[0].section)) throw new Error(`Unexpected board task: ${ticket}`);
   const comments = [];
@@ -56,7 +58,7 @@ async function main() {
   const [ticket, runUrl, journeys] = process.argv.slice(2);
   const credential = process.env.HYPERTASK_AGENT_TOKEN;
   if (!credential) throw new Error('HYPERTASK_AGENT_TOKEN is not set');
-  if (!/^IGSH-\d+$/.test(ticket || '') || !/^https:\/\/github\.com\/valentinyeo\/multiprompt\/actions\/runs\/[1-9]\d*$/.test(runUrl || '') || !journeys) throw new Error('Usage: auto-revert-board.js IGSH-N RUN_URL JOURNEYS');
+  if (parseTicketId(ticket)?.prefix !== 'IGSH' || !/^https:\/\/github\.com\/valentinyeo\/multiprompt\/actions\/runs\/[1-9]\d*$/.test(runUrl || '') || !journeys) throw new Error('Usage: auto-revert-board.js TICKET RUN_URL JOURNEYS');
   const outcome = await reopenTicket({ api: boardApi(credential, process.env.HYPERTASK_API_BASE || boardBase), ticket, runUrl, journeys });
   console.log(`${ticket} ${outcome}`);
 }
