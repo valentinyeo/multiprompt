@@ -13,7 +13,7 @@
             Type-Text 'Rail A'
             Press @(0x0D) 'Enter: save first session name'
             Wait-Until { (Read-Session).tabs[0].name -eq 'Rail A' } 'short synthetic first name saved'
-            Palette 'new cmd'
+            Palette 'command prompt' '5100'
             Press @(0x0D) 'Enter: create second CMD session'
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD session saved and selected'
             Press @(0x71) 'F2: rename second session'
@@ -37,7 +37,7 @@
             Press @(0x0D) 'Enter: move first session into same group'
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.tabs[0].group_id -eq $group.id -and $state.tabs[1].group_id -eq $group.id -and $state.active_tab -eq 0 } 'two real sessions saved in one group'
             foreach ($index in @(2, 3, 4, 5)) {
-                Palette 'new cmd'
+                Palette 'command prompt' '5100'
                 Press @(0x0D) ('Enter: create CMD session ' + ($index + 1))
                 Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($index + 1) -and $state.active_tab -eq $index } 'new CMD session saved and selected'
                 Press @(0x71) 'F2: rename session'

@@ -205,7 +205,7 @@ fn paint(dc: w.HANDLE) void {
             _ = w.FillRect(dc, &line, brush);
             _ = w.DeleteObject(brush);
         }
-        if (is_current or selected == index) fillRoundRect(dc, rc, scale(10), if (is_current) divider else @import("chat_scrollbar.zig").blend(panel, divider, 153));
+        if (selected == index) fillRoundRect(dc, rc, scale(10), divider);
         var buf: [12]u8 = undefined;
         const count = countLabel(if (is_action) null else sessionCount(index), &buf);
         var label = rc;
@@ -260,6 +260,8 @@ pub fn headerClick(x: i32, y: i32) bool {
         close();
         return true;
     }
+    const started = w.GetTickCount64();
+    @import("diagnostics.zig").debugLog("workspace-menu open begin");
     focus.cancelShellRefocus(app_state.g_main_hwnd);
     app_state.g_shell_focused = false;
     workspaces.refreshMenuEntries();
@@ -288,6 +290,8 @@ pub fn headerClick(x: i32, y: i32) bool {
     _ = focus.SetWindowPos(hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(hwnd);
     _ = w.InvalidateRect(hwnd, null, 0);
+    var log: [80]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "workspace-menu open ready elapsed_ms={d}", .{w.GetTickCount64() - started}) catch "workspace-menu open ready");
     return true;
 }
 
