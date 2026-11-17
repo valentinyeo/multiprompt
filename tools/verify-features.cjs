@@ -7,7 +7,7 @@ function discoverFeatures(directory = path.join(__dirname, '../.claude/skills/ve
     if (!/^[a-z][a-z0-9-]*\.md$/.test(file)) continue;
     const text = fs.readFileSync(path.join(directory, file), 'utf8');
     const metadata = text.match(/^Verify on: (.+)$/m);
-    if (!/^## Driving it with (?:control\.ps1|verify-agent-sync\.py)\r?$/m.test(text)) {
+    if (!/^## Driving it with control\.ps1\r?$/m.test(text)) {
       if (metadata) throw new Error(`Automatic journey needs a control.ps1 recipe: ${file}`);
       continue;
     }
