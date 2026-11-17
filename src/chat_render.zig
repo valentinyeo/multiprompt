@@ -4274,11 +4274,39 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
     return chatViewOwnsInput() and chat_code.copyKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
 }
 
-pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) void {
-    if (@import("chat_composer.zig").chatAcAgent() != .claude) return;
+pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) bool {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
     var out: [256]u16 = undefined;
-    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return;
-    if (!@import("chat_send.zig").sendChatMessage(line)) showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
+    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return false;
+    if (!@import("chat_send.zig").sendChatMessage(line)) {
+        showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
+        return false;
+    }
+    return true;
+}
+
+fn likeShown(reference: u64) bool {
+    if (reference == 0) return false;
+    if (g_reaction_view.wishedLike(reference)) |wanted| return wanted;
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
+        if (block.reaction_reference == reference and (g_reaction_view.mask(index) & chat_reaction.Emoji.like.bit()) != 0) return true;
+    }
+    return false;
+}
+
+pub fn chatToggleReaction(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) void {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return;
+    const show = emoji != .like or !likeShown(reference);
+    if (emoji == .like) g_reaction_view.wishLike(reference, show);
+    if (!show) {
+        chatImageReady();
+        return;
+    }
+    if (!chatReactToMessage(reference, quote, emoji)) {
+        if (emoji == .like) g_reaction_view.wishLike(reference, !show);
+        return;
+    }
+    if (emoji == .like) chatImageReady();
 }
 
 pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
@@ -4289,10 +4317,38 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
             const block = app_state.g_chat_blocks[i];
             const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
             const display = chatBlockDisplayRange(buf, block);
-            chatReactToMessage(block.reaction_reference, buf[display.start..][0..display.len], emoji);
+            const quote = buf[display.start..][0..display.len];
+            if (emoji == .like) chatToggleReaction(block.reaction_reference, quote, emoji) else _ = chatReactToMessage(block.reaction_reference, quote, emoji);
             return;
         }
     }
+}
+
+fn chatDoubleClickThumbs(hwnd: HANDLE, x: i32, y: i32) bool {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
+    const index = chatTranscriptBlockAtPoint(y) orelse return false;
+    if (index >= app_state.g_chat_block_count) return false;
+    const block = app_state.g_chat_blocks[index];
+    if ((block.role != .prose and block.role != .code) or block.reaction_reference == 0) return false;
+    const rc = chatMessageRect(index);
+    const content_y = y + app_state.g_chat_scroll_y;
+    if (x < rc.left or x >= rc.right or content_y < rc.top or content_y >= rc.bottom) return false;
+    const quote = chatMessageTextAlloc(std.heap.page_allocator, index, true) catch return false;
+    defer std.heap.page_allocator.free(quote);
+    if (quote.len == 0) return false;
+    _ = KillTimer(hwnd, selection_offer_timer);
+    _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+    app_state.g_chat_sel_dragging = false;
+    selection_completion_pending = false;
+    chatSelectionClear();
+    app_state.g_chat_sel_click_count = 2;
+    app_state.g_chat_sel_last_click = GetTickCount64();
+    app_state.g_chat_sel_last_x = x;
+    app_state.g_chat_sel_last_y = y;
+    _ = ReleaseCapture();
+    chatToggleReaction(block.reaction_reference, quote, .like);
+    _ = InvalidateRect(hwnd, null, 0);
+    return true;
 }
 
 fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
@@ -5759,8 +5815,11 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
         }
     }
     switch (cmd) {
-        8, 9, 10 => if (reply_text) |quote| {
-            chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
+        8 => if (reply_text) |quote| {
+            chatToggleReaction(reaction_reference, quote, .like);
+        },
+        9, 10 => if (reply_text) |quote| {
+            _ = chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
         },
         11 => if (request_id) |id| chatCopyTextToClipboard(id),
         7 => if (link_text) |text| chatCopyTextToClipboard(text),
@@ -6388,6 +6447,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 openClickedLink(app_state.g_chat_capture[link.start..link.end]);
                 return 0;
             }
+            if (chatDoubleClickThumbs(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             const toggle = @import("dblclick_toggle.zig");
             if (toggle.ISSUE_355_DOUBLE_CLICK_TOGGLE and toggle.chatTargetBlank(
                 app_state.g_chat_layout_rects[0..app_state.g_chat_block_count],

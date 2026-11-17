@@ -106,7 +106,7 @@ test('pending settings block sends before draft or outbox changes', () => {
     }
   }
   const reaction = read('src/chat_render.zig').split('pub fn chatReactToMessage(')[1].split('\n}')[0];
-  assert.match(reaction, /if \(!@import\("chat_send\.zig"\)\.sendChatMessage\(line\)\) showHeaderNoticeAscii\("Could not send the reaction; try again", 3500, true\);/);
+  assert.match(reaction, /if \(!@import\("chat_send\.zig"\)\.sendChatMessage\(line\)\) \{\s*showHeaderNoticeAscii\("Could not send the reaction; try again", 3500, true\);\s*return false;\s*\}/);
   const session = read('src/chat_session.zig');
   const write = session.split('pub fn chatLiveWrite(')[1].split('\n}')[0];
   assert.ok(write.indexOf('pending_settings.start()') < write.indexOf('transport.write('));
