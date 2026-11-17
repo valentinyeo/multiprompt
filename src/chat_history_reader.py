@@ -45,8 +45,7 @@ TAIL_CACHE = {}
 QUEUE_SCAN_BYTES = 4 * 1024 * 1024
 QUEUE_SHOWN = 8
 QUEUE_TEXT = 500
-_TRACKED_ID = re.compile(r"(?:\n| )\[mp:([0-9a-f]{16})\]\s*\Z")
-_REACTION_TAG = re.compile(r"(?:👍|👎|❤️) to: [^\r\n]*\[mp:[0-9a-f]{16}\]\s*\Z")
+_TRACKED_ID = re.compile(r"\n\[mp:([0-9a-f]{16})\]\s*\Z")
 DRAFT_TEXT = 4000
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b(?:\[[0-9;:?]*[ -/]*[@-~]|[@-Z\\-_])")
@@ -176,9 +175,7 @@ def missing_response(q, reason):
     return f"@mp\t{q['id']}\thistory\tmissing\t-\t0\t{reason}\n{END}\n"
 
 def visible_prompt(text):
-    if not isinstance(text, str) or _REACTION_TAG.search(text):
-        return text
-    return _TRACKED_ID.sub("", text)
+    return _TRACKED_ID.sub("", text) if isinstance(text, str) else text
 
 def clean_command_markup(text):
     if re.search(r"</?pasted_content\b", text, re.I):
@@ -776,10 +773,7 @@ def conversation_event(event, agent):
     if role == "user":
         if text.lstrip().startswith("<task-notification>") or text.strip() in _INTERRUPT_MARKERS:
             return None
-        text = clean_command_markup(text)
-    text = visible_prompt(text)
-    if event.get("type") == "assistant" and role == "user":
-        role = "assistant"
+        text = visible_prompt(clean_command_markup(text))
     if not text.strip():
         return None
     identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
@@ -988,30 +982,10 @@ def tool_events(event, agent, search=False):
     return rows
 
 
-def keep_reply_side(rows):
-    replies = set()
-    for row in rows:
-        text = row.get("text")
-        if row.get("role") == "assistant" and isinstance(text, str) and len(text.strip()) >= 16:
-            replies.add(text.strip())
-    kept = []
-    for row in rows:
-        text = row.get("text")
-        if row.get("role") == "user" and isinstance(text, str) and not text.lstrip().startswith("/") and text.strip() in replies:
-            continue
-        kept.append(row)
-    return kept
-
-
 def conversation_rows(event, agent, offset=0, search=False):
     if isinstance(event, dict) and event.get("type") == "multiprompt_history":
         row = event.get("row")
-        if not isinstance(row, dict) or row.get("role") not in ("user", "assistant", "tool", "tool_result"):
-            return []
-        shown = dict(row)
-        if isinstance(shown.get("text"), str):
-            shown["text"] = visible_prompt(shown["text"])
-        return [shown]
+        return [dict(row)] if isinstance(row, dict) and row.get("role") in ("user", "assistant", "tool", "tool_result") else []
     message = conversation_event(event, agent)
     if message and event.get("kind") in ("user", "assistant"):
         message["id"] = "hax:" + str(offset) + ":" + hashlib.sha256(wire_row(event).encode("utf-8")).hexdigest()[:16]
@@ -2120,7 +2094,7 @@ def response(q, source=None, as_owner=False, resolved=None):
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
-        paired = keep_reply_side(pair_tool_rows(rows))
+        paired = pair_tool_rows(rows)
         if mode == "tail" and tail_fill is not None and tail_reuse != "exact":
             remember_tail(path, info, q, agent, tail_fill, base, end, oldest, paired, probe)
     shown_agent = q.get("_asked_provider") if q.get("_asked_provider") in HOST_PROVIDERS else agent
@@ -2192,14 +2166,14 @@ def restart_ai_response(q):
         command = restart_ai_command(q.get("sid"), q.get("cwd"))
         if command is None:
             reason = "invalid_session"
-    if reason in (None, "invalid_session") and isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name):
-        running = None
-        if host_pane_is_shell(name):
-            try:
-                running = resolve_tmux_agent("claude", name)
-            except (OSError, ValueError):
-                running = None
-        if not host_pane_is_shell(name) or running:
+    if reason is None and not host_pane_is_shell(name):
+        reason = "pane_busy"
+    if reason is None:
+        try:
+            running = resolve_tmux_agent("claude", name)
+        except (OSError, ValueError):
+            running = None
+        if running:
             reason = "pane_busy"
     if reason is None and not host_terminal_send(name, command):
         reason = "pane_input_failed"
@@ -2919,7 +2893,7 @@ def host_list_lines():
         physical = set()
     lines = []
     for chat in host_chats():
-        if not chat["visible"] or (chat["name"] in physical and not host_alive(chat["provider"], chat["sid"])):
+        if chat["name"] in physical or not chat["visible"]:
             continue
         cwd = chat["cwd"]
         if any(c in cwd for c in "|\r\n"):
@@ -3124,7 +3098,7 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
-    if query.get("op") in ("login", "login_answer") and provider != "pi":
+    if query.get("op") == "login" and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
@@ -3168,7 +3142,7 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -4736,10 +4710,6 @@ def host_handle_request(provider, sid, tmux, session, request):
         if provider != "pi":
             return host_refuse("unsupported_provider")
         return host_pi_login(provider, sid, tmux, session, request)
-    if operation == "login_answer":
-        if provider != "pi":
-            return host_refuse("unsupported_provider")
-        return host_pi_login_answer_op(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
         if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
@@ -5406,23 +5376,6 @@ def host_pi_login(provider, sid, tmux, session, request):
         session.pop("pi_login", None)
         return dict(status="error", reason="stdin_write_failed")
     return dict(status="ok")
-
-
-def host_pi_login_answer_op(provider, sid, tmux, session, request):
-    if "command" in request or "text" in request:
-        return host_refuse("invalid_answer")
-    data = request.get("data")
-    if not isinstance(data, str) or not data.strip() or "\x00" in data:
-        return host_refuse("invalid_answer")
-    dialog = session.get("pi_login_dialog")
-    if not isinstance(dialog, dict) or not isinstance(dialog.get("id"), str):
-        reason = "already_answered" if session.get("pi_login_answered") else "no_dialog"
-        return dict(status="final", reason=reason)
-    sent = host_pi_login_answer(provider, sid, tmux, session, dialog, data)
-    if sent.get("status") != "ok":
-        return sent
-    session["pi_login_answered"] = True
-    return dict(status="final")
 
 
 def host_pi_login_answer(provider, sid, tmux, session, dialog, text):
@@ -8077,7 +8030,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "interrupt", "fresh_start", "switch_ai"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
@@ -8185,7 +8138,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 127
 
 if __name__ == '__main__':
     import base64 as _base64
