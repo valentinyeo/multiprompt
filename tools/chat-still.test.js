@@ -62,6 +62,52 @@ test('comment review rejects an unfinished or merely launched Comment Sicko', t 
   }
 });
 
+test('both formal CI gates compare against the event baseline after mutations and replay', () => {
+  for (const name of ['test.yml', 'chat-still.yml']) {
+    const workflow = read(`.github/workflows/${name}`);
+    assert.match(workflow, /CHAT_STILL_BASE: \$\{\{ github\.event\.pull_request\.base\.sha/);
+    assert.match(workflow, /tools\/verify-chat-still --self-test --replay --inherit-from "\$CHAT_STILL_BASE"/);
+  }
+});
+
+test('formal findings inherit only from byte-identical modeled source', { skip: process.platform === 'win32' }, t => {
+  read('tools/chat-still/verify.py');
+  const root = path.join(__dirname, '..');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-still-inherited-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'zig'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
+  for (const variant of ['changed', 'drift']) {
+    const source = path.join(dir, variant, 'src');
+    fs.mkdirSync(source, { recursive: true });
+    fs.writeFileSync(path.join(source, 'chat_session.zig'), read('src/chat_session.zig').replace(
+      'if (old_content_h <= viewport_h) null else if (anchor_top)',
+      variant === 'changed' ? 'if (old_content_h >= 0) null else if (anchor_top)' : 'if (old_content_h <= viewport_h) null else if (anchor_top)'));
+    fs.writeFileSync(path.join(source, 'chat_history.zig'), read('src/chat_history.zig').replace(
+      'pub fn scrollAnchor(', variant === 'drift' ? 'pub fn renamedScrollAnchor(' : 'pub fn scrollAnchor('));
+  }
+  for (const [name, args, expected] of [
+    ['raw findings remain failures', [], 1],
+    ['unchanged source is inherited', ['--inherit-from', 'HEAD'], 0],
+    ['changed source is not inherited', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'changed')], 1],
+    ['model drift still fails', ['--inherit-from', 'HEAD', '--source-root', path.join(dir, 'drift')], 2],
+    ['replay errors cannot inherit', ['--inherit-from', 'HEAD', '--replay'], 2],
+    ['missing baseline still fails', ['--inherit-from', 'refs/heads/nonexistent-chat-still-test'], 2],
+  ]) {
+    const output = path.join(dir, 'report.json');
+    fs.rmSync(output, { force: true });
+    const result = spawnSync('bash', ['tools/verify-chat-still', ...args, '--output', output], {
+      cwd: root, encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, expected, `${name}\n${result.stdout}\n${result.stderr}`);
+    if (expected < 2) {
+      const report = JSON.parse(fs.readFileSync(output, 'utf8'));
+      assert.ok(report.failures.length > 0 && report.counterexamples.length > 0, name);
+      assert.equal(Boolean(report.inherited_from), expected === 0, name);
+    }
+  }
+});
+
 test('the measurement probe belongs only to the verification build', () => {
   assert.doesNotMatch(read('src/chat_render.zig'), /fn chatStillFrame\(/);
   assert.doesNotMatch(read('tools/chat-still/paint.zig'), /app_state\.\w+\s*(?:=(?!=)|[+\-*\/]=)/, 'the probe must not mutate product state');

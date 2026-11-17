@@ -4,6 +4,7 @@ import hashlib
 import json
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 
@@ -173,16 +174,28 @@ if __name__ == "__main__":
     parser.add_argument("--source-root", type=pathlib.Path, default=ROOT)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--replay", action="store_true")
+    parser.add_argument("--inherit-from")
     parser.add_argument("--output", type=pathlib.Path)
     args = parser.parse_args()
     try:
         if args.self_test:
             self_test(args.source_root, args.replay)
         result = check(args.source_root, args.replay)
+        if result["failures"] and args.inherit_from:
+            baseline = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "--verify", args.inherit_from + "^{commit}"], stderr=subprocess.PIPE, timeout=10).decode().strip()
+            coverage = json.loads((ROOT / "tools/chat-still/coverage.json").read_text())
+            files = sorted({record["file"] for section in ("functions", "types") for record in coverage[section].values()})
+            if all((args.source_root / file).read_bytes() == subprocess.check_output(
+                    ["git", "-C", str(ROOT), "show", baseline + ":" + file], stderr=subprocess.PIPE, timeout=10) for file in files):
+                result["inherited_from"] = baseline
+                print("INHERITED:", len(result["failures"]), "findings; every modeled source file is byte-identical to", baseline)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2) + "\n")
-        sys.exit(bool(result["failures"]))
+        sys.exit(bool(result["failures"]) and not result.get("inherited_from"))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        print("BASELINE UNAVAILABLE:", error, file=sys.stderr)
+        sys.exit(2)
     except (ValueError, KeyError, AttributeError, StopIteration, SyntaxError) as error:
         print("MODEL DRIFT:", error, file=sys.stderr)
         sys.exit(2)

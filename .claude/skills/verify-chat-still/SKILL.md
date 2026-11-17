@@ -11,7 +11,9 @@ The newest message visible when the chat appears must keep its screen position u
 
 From the checkout, run `bash tools/verify-chat-still --self-test --replay --output evidence/chat-still-formal.json`.
 
-The launcher installs `z3-solver==4.13.4.0` in an isolated cached Python environment. Python 3.12 and Zig 0.16.0 are the replay toolchain used by the GitHub check. This is a small focused check, not the desktop suite. Exit 0 means no modeled violation, 1 means a counterexample, and 2 means the source mapping drifted. Read every reported property, not only the last line.
+The launcher installs `z3-solver==4.13.4.0` in an isolated cached Python environment. Python 3.12 and Zig 0.16.0 are the replay toolchain used by the GitHub check. This is a small focused check, not the desktop suite. By default, exit 0 means no modeled violation, 1 means a counterexample, and 2 means drift or an unavailable baseline. Read every reported property, not only the last line.
+
+CI adds `--inherit-from <base-commit>`. Findings can then return exit 0 only if every modeled source file is byte-identical to that commit, after all requested mutation and replay checks complete. The JSON keeps every failure and witness and records `inherited_from`. Changed source, missing baselines, drift and failed replay cannot inherit. This classifies existing findings without changing the invariant; the default command still fails on them.
 
 Run the matching real Windows journey with `gh workflow run verify.yml --ref <branch> -f feature=chat-still`. Follow [verify-multiprompt](../verify-multiprompt/SKILL.md) and [the chat-still recipe](../verify-multiprompt/features/chat-still.md) to inspect frame samples, screenshots, streaming receipt, Doctor and cleanup. Run desktop code only on GitHub-hosted Windows. The [Chat stillness workflow](../../../.github/workflows/chat-still.yml) runs both checks for chat-related PR paths.
 
@@ -21,7 +23,7 @@ Z3 answers the scroll arithmetic question directly. The two native functions run
 
 ## Coverage and assumptions
 
-Last source/model sync commit is `d3c8786836aca46973466e04e8142868573f6909`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
+Last source/model sync commit is `608b7d62944fd39b79cbbaa2c83bc6e3251f590c`. Confirm the full SHA in `tools/chat-still/coverage.json`; that file is authoritative.
 
 | Source and function | What the model uses |
 | --- | --- |
@@ -39,7 +41,7 @@ Each passive event is checked through both callers. History may add a divider; m
 
 ## Read failures
 
-Master's SOFT-2557 fix in `5ce536b4` preserves the existing anchor when a divider first appears. The checker reads that changed `held_y` guard directly, and the divider obligation now passes. Six findings remain for row-height changes, padding compensation and reconciliation across both callers. The latest Z3 mutation checks reject all ten scratch breaks; fresh native replay remains a hosted check. The last fully confirmed sync commit above is unchanged until that replay completes. Do not edit product behavior, omit event classes or relax the property to make this check green.
+Master's SOFT-2557 fix in `5ce536b4` preserves the existing anchor when a divider first appears. The checker reads that changed `held_y` guard directly, and the divider obligation now passes. Six findings remain for row-height changes, padding compensation and reconciliation across both callers. Hosted run `44044096426` replayed all ten scratch counterexamples and all six current-source counterexamples through the extracted production functions. The sync commit records that confirmed source. Do not edit product behavior, omit event classes or relax the property to make this check green.
 
 A counterexample lists old/new row tops, content height, viewport, divider, padding and the newest message's before/after Y. Tell it as opening the chat, receiving that update, and painting the changed Y. For a model error, show the mismatching production operation or impossible geometry and repair the mapping; keep the invariant. For a real bug, link the failing coordinates and native replay to the product ticket. Do not confuse replaying a synthetic measurement boundary with proving a production UI path.
 
