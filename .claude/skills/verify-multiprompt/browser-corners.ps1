@@ -99,8 +99,9 @@ $html = '<title>Corner control</title><body style="margin:0;background:white;hei
 Type-Text ('data:text/html,' + [Uri]::EscapeDataString($html))
 Press @(0x0D) 'Enter: render white corner control page'
 Wait-Until { [VerifyNative]::Title($browser) -match 'Corner control' } 'synthetic white page loaded' 20
-Focus-Palette 'new cmd' 2000
-Press @(0x0D) 'Enter: create second session for real chat switches'
+Invoke-JourneyCommand 'new cmd shell' -Confirm {
+    Press @(0x0D) 'Enter: create second session for real chat switches'
+}
 Wait-Until { @((Read-Session).tabs).Count -eq 2 } 'two real sessions for switching'
 Press @(0x11, 0x09) 'Ctrl+Tab: return to browser-owning session'
 Wait-Until { [VerifyNative]::PaneWindow($script:window) -eq $browser } 'original browser visible'

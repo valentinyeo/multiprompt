@@ -91,8 +91,9 @@ try {
     Wait-Until { (Servers-Window 'MultipromptSettings') -ne [IntPtr]::Zero } 'back to Settings'
     Press @(0x1B) 'Escape: close Settings'
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'main window after Settings'
-    Palette 'Servers' '4004'
-    Press @(0x0D) 'Enter: Servers from Ctrl+K'
+    Invoke-JourneyCommand 'Servers' -Confirm {
+        Press @(0x0D) 'Enter: Servers from Ctrl+K'
+    }
     Wait-Until { (Servers-Window 'MultipromptSettingsServers') -ne [IntPtr]::Zero } 'Servers from Ctrl+K'
     $script:serversWindow = Servers-Window 'MultipromptSettingsServers'
     Wait-Until { Servers-Ready } 'Servers ready'

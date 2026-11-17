@@ -199,9 +199,10 @@
             Press @(0x12, (0x32 + $stableWorkspace)) 'Return to the sign-in workspace'
             $first = Assert-WorkspaceBrowser 'signin-first' $stableRoot $stableWorkspace
             $firstShell = (Read-Inbox).active_shell_id
-            Focus-Palette 'new cmd' 2000
-            Snapshot 'signin-new-shell-action'
-            Press @(0x0D) 'Enter: New CMD Shell in the sign-in workspace'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Snapshot 'signin-new-shell-action'
+                Press @(0x0D) 'Enter: New CMD Shell in the sign-in workspace'
+            }
             Wait-Until {
                 $state = Read-Inbox
                 $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
@@ -245,9 +246,10 @@
             $storageBefore = & $storageBridge $secondWindowId 'before-write' 'eval' $writeStorage
             Save-Json $storageBefore 'signin-storage-before.json'
             if ($storageBefore.url -cne $storageUrl -or $storageBefore.value -cne $marker -or $storageBefore.cookie -notmatch ('(?:^|;\s*)mp_signin_proof=' + [regex]::Escape($marker) + '(?:;|$)')) { throw 'Synthetic storage marker or cookie was not set before sign-in' }
-            Focus-Palette 'sign in to google' 7191
-            Snapshot 'signin-action'
-            Press @(0x0D) 'Enter: Sign in to Google in this profile'
+            Invoke-JourneyCommand 'Sign in to Google in this profile' -Confirm {
+                Snapshot 'signin-action'
+                Press @(0x0D) 'Enter: Sign in to Google in this profile'
+            }
             $script:signinWindow = $null
             try {
             Wait-Until {
