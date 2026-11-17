@@ -2,11 +2,16 @@ name: PR checks
 
 on:
   workflow_dispatch:
+    inputs:
+      agent:
+        required: false
+        type: string
   schedule:
     - cron: '28 3 * * *'
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -80,3 +85,50 @@ jobs:
       - name: Check extension changes against the default branch on manual runs
         if: github.event_name == 'workflow_dispatch'
         run: node tools/check-extension-version.mjs origin/${{ github.event.repository.default_branch }}
+
+  comment-sicko:
+    if: github.event_name == 'workflow_dispatch' && inputs.agent != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: soft-2557-chat-open-steady
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run pstack Comment Sicko on the scoped diff
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AGENT: ${{ inputs.agent }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request
+          diff = subprocess.check_output(['git', 'diff', 'origin/master...HEAD'], text=True)
+          payload = {'model': 'deepseek-flash', 'messages': [
+              {'role': 'system', 'content': os.environ['AGENT']},
+              {'role': 'user', 'content': 'Goal: Multiprompt chat must stay steady while opening, idle and streaming. Scope is PR 1062, only the supplied diff. Report comment deletions, MUST KILL flags, restores, skips and open constraints. Do not review application behavior or write application code.\n\n' + diff}], 'max_tokens': 2500}
+          for budget in (2500, 8192):
+              payload['max_tokens'] = budget
+              request = urllib.request.Request('https://api.deepseek.com/chat/completions', data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + os.environ['DEEPSEEK_API_KEY'], 'Content-Type': 'application/json'})
+              with urllib.request.urlopen(request, timeout=180) as response:
+                  result = json.load(response)
+              choice = result['choices'][0]
+              text = choice['message']['content']
+              print(json.dumps(dict(finish_reason=choice.get('finish_reason'), usage=result.get('usage'))))
+              print(text)
+              if choice.get('finish_reason') != 'length':
+                  break
+          if not text.startswith('Yes... Ha ha ha... Yes!'):
+              raise RuntimeError('Comment Sicko did not follow its supplied agent definition')
+          open('comment-sicko.md', 'w').write(text + '\n')
+          print(text)
+          PY
+      - name: Post the cleanup report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment 1062 --repo "$GITHUB_REPOSITORY" --body-file comment-sicko.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: soft-2557-comment-sicko
+          path: comment-sicko.md
+          if-no-files-found: error
