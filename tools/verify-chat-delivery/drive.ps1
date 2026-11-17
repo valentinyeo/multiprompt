@@ -567,11 +567,6 @@ foreach ($plan in $plans) {
             New-Item -ItemType Directory $socketTemp | Out-Null
             $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
         }
-        if ($isModel) {
-            New-Item -ItemType Directory -Force "$profile/home/.claude" | Out-Null
-            Save @{model='fable'} "$profile/home/.claude/settings.json"
-            foreach ($family in @('OPUS', 'SONNET', 'HAIKU', 'FABLE')) { [Environment]::SetEnvironmentVariable("ANTHROPIC_DEFAULT_${family}_MODEL", 'fable', 'Process') }
-        }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
