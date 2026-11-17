@@ -34,6 +34,18 @@ test('each ordinary feature dispatches to its own file, keeping aliases and dele
   const features = [...source.match(/ValidateSet\(([^)]*)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]);
   const delegated = [...source.slice(0, source.indexOf('$Evidence = [IO.Path]::GetFullPath($Evidence)', source.indexOf('switch ($Feature)'))).matchAll(/'([a-z0-9-]+)'\s*\{/g)].map(match => match[1]);
   const registered = new Set([...routes.map(match => match[1]), ...delegated, 'composer-buttons']);
+  const generatedPath = path.join(directory, 'generated-journeys.json');
+  if (fs.existsSync(generatedPath)) {
+    const rows = JSON.parse(fs.readFileSync(generatedPath, 'utf8'));
+    assert.match(main, /default \{\s*if \(\$Feature -notlike 'generated-\*'\) \{ throw[^\n]+\n\s*\. \(Join-Path \$PSScriptRoot 'control-feature-generated\.ps1'\)/);
+    assert.equal(new Set(rows.map(row => row.feature)).size, rows.length);
+    for (const row of rows) {
+      assert.match(row.feature, /^generated-[a-z0-9-]+$/);
+      assert.ok(features.includes(row.feature), row.feature);
+      assert.ok(['theme-color', 'sidebar-cycle', 'sidebar-expand'].includes(row.shape), row.shape);
+      registered.add(row.feature);
+    }
+  }
   for (const name of features) assert.ok(registered.has(name), `${name} lost its dispatch`);
   assert.match(source, /'composer-buttons' \{ \$driveFeature = 'chat-view' \}/);
   assert.doesNotMatch(source, /^function /m);
@@ -42,6 +54,22 @@ test('each ordinary feature dispatches to its own file, keeping aliases and dele
   const graph = spawnSync(process.execPath, ['tools/split-feature-controls.mjs', '--check'], { cwd: root, encoding: 'utf8', timeout: 30000 });
   assert.equal(graph.status, 0, graph.stdout + graph.stderr);
   assert.match(graph.stdout, /CONTROL_SOURCE_GRAPH_VERIFIED/);
+});
+
+test('generated rows resolve exactly once through a shared behavioral assertion', () => {
+  assert.ok(fs.existsSync(path.join(directory, 'generated-journeys.json')), 'Generated row dispatch needs its source-derived manifest');
+  const rows = JSON.parse(read('generated-journeys.json'));
+  const driver = read('control-feature-generated.ps1');
+  assert.ok(rows.length > 0);
+  assert.match(driver, /Where-Object \{ \$_\.feature -ceq \$Feature \}/);
+  assert.match(driver, /if \(\$selectedRows\.Count -ne 1\) \{ throw/);
+  assert.match(driver, /No live assertion for generated shape/);
+  for (const row of rows) {
+    assert.ok(driver.includes(`'${row.shape}'`), row.shape);
+    const map = read(`features/${row.feature}.md`);
+    assert.ok(map.split('\n').includes(`Covers: ${row.id}`), row.id);
+    assert.match(map, /^## Driving it with control\.ps1$/m);
+  }
 });
 
 test('source contracts follow edited feature files instead of a stale monolithic copy', t => {

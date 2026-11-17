@@ -24,6 +24,8 @@ Use palette expansion as the initial open state. Select the owned CMD tab. Read 
 
 Require the saved sidebar flags at each step and the actual console HWND left edge to move as the sidebar collapses, hides, and expands. Require the restored edge to match its baseline. Inspect `result.json`, the saved data, and before/action/after screenshots. Each input and assertion is retained; a missing state fails rather than skips. Require zero owned processes and scratch removal after cleanup.
 
+For branch builds, the workflow also disables this shortcut in a separate executable. The same journey must fail on the missing collapsed sidebar, not launch or cleanup. Require `shortcut-break-proof.json` with the clean pass, planted failure, distinct binary hash, and zero-process cleanup.
+
 ## Gotchas
 
 This row does not cover other palette entries or shortcut alternatives. Offline sign-in is explicit; account sync and remote agents are not exercised. Run `node tools/generate-feature-journeys.mjs --gaps` for source entries without a generated assertion.
