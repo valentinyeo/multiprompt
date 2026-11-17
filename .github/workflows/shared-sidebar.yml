@@ -56,7 +56,7 @@ permissions:
 
 concurrency:
   group: shared-sidebar-${{ github.ref }}-${{ inputs.tag }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   badge-geometry:
