@@ -74,7 +74,7 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   assert.doesNotMatch(journey, /6248|use agent or terminal session name/);
   const speed = read('.claude/skills/verify-multiprompt/control-feature-command-palette.ps1');
   assert.match(speed, /open_ms = 200/);
-  assert.match(speed, /Palette 'powershell' '2005'/);
+  assert.match(speed, /Invoke-JourneyCommand 'new powershell' -SelectOnly/);
   assert.match(speed, /\$shellsBeforeRestart = @\(\(Read-Inbox\)\.shells\)\.Count[\s\S]*Restart-ChatView \$shellsBeforeRestart/);
   const terminal = read('src/main.zig');
   const terminalHandler = terminal.slice(terminal.indexOf('if (target == SEARCH_NEW_TERMINAL_OFFSET)'), terminal.indexOf('if (target == SEARCH_OPEN_SESSION_MENU_OFFSET'));
@@ -85,7 +85,7 @@ test('SOFT-2385 local shells stay searchable and the empty-palette fixture match
   assert.match(speed, /close_ms = 100/);
   assert.match(speed, /after_ms = 100/);
   assert.match(speed, /Ctrl\+N: leave Other so the saved folder can start a tab[\s\S]*\$repoTabsBefore[\s\S]*Ctrl\+T: new tab in the harness folder/);
-  assert.match(speed, /Palette 'close tab' '7110'/);
+  assert.match(speed, /Invoke-JourneyCommand 'Archive chat' -Confirm {/);
   const setup = read('.claude/skills/verify-multiprompt/control.ps1');
   const paletteSetup = setup.indexOf("if ($Feature -eq 'command-palette') {");
   const launch = setup.indexOf('$process = $job.Start(');

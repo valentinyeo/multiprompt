@@ -76,8 +76,9 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
             $logPath = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $logStart = if (Test-Path $logPath) { (Get-Content $logPath -Raw).Length } else { 0 }
-            Palette 'manual'
-            Press @(0x0D) 'Enter: use manual tab order'
+            Invoke-JourneyCommand 'Tab order: auto' -Confirm {
+                Press @(0x0D) 'Enter: use manual tab order'
+            }
             Wait-Until { (Test-Path $logPath) -and (Get-Content $logPath -Raw).Substring($logStart) -match '\[confirm\].*target=6218' } 'manual order command selected'
             $confirmedAt = [DateTime]::UtcNow
             Press @(0x11, 0x09) 'Ctrl+Tab: refresh manual session export'
@@ -99,7 +100,7 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $targetName = [string]$target.name
             if (-not $targetId -or -not $targetName -or @($order.shells | Where-Object { [string]$_.sid -ceq $targetId -and $_.name -ceq $targetName }).Count -ne 1) { throw 'Last manual session identity is ambiguous' }
             $orderedIds = @($savedOrder.tabs | ForEach-Object { [string]$_.shell_id }) -join ','
-            Palette $targetName
+            Invoke-JourneyCommand $targetName -Session -SelectOnly
             $selectedAt = [DateTime]::UtcNow
             Press @(0x0D) 'Enter: select last manual session'
             Wait-Until {
