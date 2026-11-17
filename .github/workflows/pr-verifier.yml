@@ -228,6 +228,7 @@ jobs:
       contents: read
       actions: read
       checks: write
+      statuses: write
       pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -331,6 +332,9 @@ jobs:
           [ "$RESULT" != BLOCKED ] || blocked_conclusion=failure
           gh api "repos/$REPO/check-runs" -X POST -f 'name=pstack-verifier (BLOCKED)' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$blocked_conclusion" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
           gh api "repos/$REPO/check-runs" -X POST -f name=pstack-verifier -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$CONCLUSION" -f details_url="$RUN_URL" -f "output[title]=pstack-verifier: $RESULT" -F "output[summary]=@verifier-out/comment.md" >/dev/null
+          status_state=failure
+          [ "$CONCLUSION" != success ] || status_state=success
+          gh api "repos/$REPO/statuses/$HEAD_SHA" -X POST -f context=pstack-verifier -f state="$status_state" -f target_url="$RUN_URL" -f "description=pstack-verifier: $RESULT" >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
