@@ -27,4 +27,7 @@ Inspect `chat-newest-before.png`, `chat-newest-after.png`, `chat-newest-draft.pn
 
 ## Gotchas
 
+The current keyboard evidence independently checks the slow G interval, not the fast pair timing. The palette draft-preservation case starts empty; a nonempty-draft palette case remains unexercised. Keep those limits separate from the successful jump assertions.
+
+
 Run only on GitHub Windows. This proves native keyboard, draft and palette behavior, not a real provider, account sync or live SSH server. No restart or latency promise belongs to this shortcut. The existing `chat-full-history`, `chat-focus` and broad `command-palette` recipes remain unchanged; their unrelated baseline failures do not replace this focused proof. Shortcut documentation remains covered by the hosted shortcut-row and documentation checks.

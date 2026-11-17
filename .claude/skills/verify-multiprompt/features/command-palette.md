@@ -46,6 +46,9 @@ Preconditions:
 
 ## Gotchas
 
+The current driver resolves source action IDs instead of relying on a literal interface query and fixed Down count. It also opens a repo after the cancellation check, reads its saved cwd/selection and archives the created tabs. The plain-terminal Move chat exclusion is a separate negative assertion.
+
+
 - UI Size affects app chrome, not console font zoom. Ctrl+Plus is a different feature and is not a valid substitute.
 - Use `interface`, not a guessed full display label: these size commands accept a fixed set of search keywords and then show Increase, Decrease and Reset in that order.
 - Enter executes and closes these actions; unlike Themes, no Esc is needed afterward.
