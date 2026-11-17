@@ -1220,13 +1220,13 @@ def reader_namespace():
             return wire
 
         namespace["restart_ai_response"] = restart
-    if state().get("name") == "working-live":
+    if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
         spec = importlib.util.spec_from_file_location("working_host", fixture_path)
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
-        fixture.install(namespace, ROOT, record)
+        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live")
         original_push = namespace["events_push"]
 
         def working_push(subscriptions):
