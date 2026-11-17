@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { discoverFeatures } = require('./verify-features.cjs');
-const { touchedJourneys } = require('./touched-journeys.cjs');
+const { touchedJourneysForDiff } = require('./touched-journeys.cjs');
 
 const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
@@ -417,7 +417,7 @@ function availableFeatures(env) {
   return (env.FEATURES_DIR ? discoverFeatures(env.FEATURES_DIR) : discoverFeatures()).available;
 }
 
-function prepare(env, outDir) {
+async function prepare(env, outDir) {
   const number = env.PR_NUMBER;
   const repo = env.REPO;
   fs.mkdirSync(outDir, { recursive: true });
@@ -439,8 +439,7 @@ function prepare(env, outDir) {
   ].join('\n');
   fs.writeFileSync(path.join(outDir, 'pr.md'), context);
   fs.writeFileSync(path.join(outDir, 'pr.json'), JSON.stringify(pr));
-  const files = execFileSync('git', ['diff', '--name-only', '-z', `${env.BASE_SHA}...HEAD`], { encoding: 'utf8' }).split('\0').filter(Boolean);
-  const mapped = touchedJourneys(files, env.FEATURES_DIR);
+  const mapped = await touchedJourneysForDiff(env.BASE_SHA, 'HEAD', env.FEATURES_DIR);
   fs.writeFileSync(path.join(outDir, 'mapped.json'), JSON.stringify(mapped, null, 2));
   fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(mapped.features, null, 2));
 }
@@ -450,7 +449,7 @@ function latestArtifacts(artifacts, selection, baseSha) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
+      return match && (!match[1] || match[1] === baseSha);
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||
@@ -484,9 +483,16 @@ function download(env, selectionFile, evidenceDir, baseSha) {
   process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
 }
 
-function readCapped(file) {
-  const text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
-  return text.length > MAX_FILE_CHARS ? `${text.slice(0, MAX_FILE_CHARS)}\n[truncated]` : text;
+function readCapped(file, limit = MAX_FILE_CHARS) {
+  let text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
+  if (file.endsWith('.json')) {
+    try {
+      const { status, error, failureKind, cleanup, files, ...rest } = JSON.parse(text);
+      text = JSON.stringify({ status, error, failureKind, cleanup, ...rest, files });
+    } catch { /* Keep malformed evidence visible to the judge. */ }
+  }
+  const marker = '\n[truncated]';
+  return text.length > limit ? `${text.slice(0, limit - marker.length)}${marker}` : text;
 }
 
 function judgeInputs(outDir, evidenceDir) {
@@ -498,11 +504,18 @@ function judgeInputs(outDir, evidenceDir) {
   const selection = path.join(outDir, 'selection.json');
   if (fs.existsSync(selection)) parts.push(`### selection.json\n${readCapped(selection)}`);
   if (fs.existsSync(evidenceDir)) {
-    for (const file of listFiles(evidenceDir)) {
-      if (/(^|\/)(result|doctor)\.json$/.test(file)) parts.push(`### evidence/${file}\n${readCapped(path.join(evidenceDir, file))}`);
+    const files = listFiles(evidenceDir)
+      .filter(file => /(^|\/)(result|doctor|cleanup|fixture-manifest|journey)\.json$/.test(file))
+      .map(file => ({ file, heading: `### evidence/${file}\n`, weight: /(^|\/)result\.json$/.test(file) ? 2 : 1 }));
+    const weight = files.reduce((sum, file) => sum + file.weight, 0);
+    const remaining = 60000 - parts.join('\n\n').length - files.reduce((sum, file) => sum + file.heading.length + 2, 0);
+    if (weight && remaining < weight * 32) throw new Error('Too many evidence files for the judge input budget');
+    const share = Math.floor(remaining / (weight || 1));
+    for (const file of files) {
+      parts.push(file.heading + readCapped(path.join(evidenceDir, file.file), Math.min(MAX_FILE_CHARS, share * file.weight)));
     }
   }
-  return parts.join('\n\n').slice(0, 60000);
+  return parts.join('\n\n');
 }
 
 function judgeMessages(material) {
