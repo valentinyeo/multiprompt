@@ -1,5 +1,7 @@
 # Native tab actions
 
+Source files: src/sidebar.zig, src/command_palette.zig, src/search*, src/shortcuts.zig, src/app_state.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-tab-actions.ps1
+
 Covers: palette:SEARCH_TABCTX_RENAME, palette:SEARCH_TABCTX_COPY_ID, palette:SEARCH_TABCTX_UNREAD, palette:SEARCH_TABCTX_PIN_TOP, palette:SEARCH_TABCTX_FAVORITE, palette:SEARCH_FAVORITE_OFFSET, palette:SEARCH_INBOX_EXCLUDE_OFFSET
 Covers: palette:SEARCH_TABCTX_BOT_FACE, palette:SEARCH_TABCTX_BOT_COLOR, palette:SEARCH_BOT_FACE_OFFSET, palette:SEARCH_BOT_COLOR_OFFSET, palette:SEARCH_TABCTX_BACK
 Covers: palette:SEARCH_GROUPMOVE_MENU_OFFSET, palette:SEARCH_GROUPMOVE_BACK_OFFSET, palette:SEARCH_GROUPMOVE_NEW_OFFSET, palette:SEARCH_GROUPMOVE_GROUP_OFFSET, palette:SEARCH_GROUPMOVE_NONE_OFFSET
