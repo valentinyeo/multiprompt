@@ -2070,6 +2070,21 @@ fn enter() bool {
     @import("voice.zig").leavePrivateVoiceTarget();
     app_state.g_chat_browser_swap.cancel();
     _ = w.KillTimer(app_state.g_main_hwnd, w.TIMER_CHAT_BROWSER_SWAP);
+    if (@import("focus.zig").foregroundIsOurs() and w.GetForegroundWindow() != app_state.g_main_hwnd) {
+        app_state.g_focus_authorized_hwnd = app_state.g_main_hwnd;
+        app_state.g_focus_authorized_until = w.GetTickCount64() + 1500;
+        @import("focus.zig").unlockBrowserForeground();
+        const our_thread = w.GetCurrentThreadId();
+        const fg_thread = w.GetWindowThreadProcessId(w.GetForegroundWindow(), null);
+        const attached = fg_thread != 0 and fg_thread != our_thread and @import("focus.zig").AttachThreadInput(our_thread, fg_thread, 1) != 0;
+        _ = @import("focus.zig").SetForegroundWindow(app_state.g_main_hwnd);
+        if (attached) _ = @import("focus.zig").AttachThreadInput(our_thread, fg_thread, 0);
+        const parked = w.GetForegroundWindow() == app_state.g_main_hwnd;
+        app_state.g_focus_authorized_hwnd = null;
+        app_state.g_focus_authorized_until = 0;
+        if (!parked) return false;
+    }
+    @import("focus.zig").cancelShellRefocus(app_state.g_main_hwnd);
     @import("rename.zig").hideShellsForOverlay();
     return true;
 }
