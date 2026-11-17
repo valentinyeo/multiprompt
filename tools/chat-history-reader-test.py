@@ -1,6 +1,8 @@
+import atexit
 import base64
 import importlib.util
 import hashlib
+import functools
 import json
 import io
 import os
@@ -50,7 +52,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
 """
         tmux = shutil.which('tmux')
         neighbor = 'cleanup-neighbor-' + uuid.uuid4().hex
-        self.addCleanup(lambda: subprocess.run([tmux, '-L', neighbor, 'kill-server'], capture_output=True))
+        HistoryReaderTest.own_tmux_server(self, tmux, neighbor)
         subprocess.run([tmux, '-L', neighbor, '-f', '/dev/null', 'new-session', '-d', '-s', 'neighbor', 'cat'], check=True)
         for mode in ('SIGTERM', 'SIGINT', 'assertion'):
             with self.subTest(mode=mode):
@@ -91,6 +93,12 @@ class HistoryReaderTest(unittest.TestCase):
         self.path.parent.mkdir(parents=True)
         self.query = dict(id=7, codex=False, sid='sid', tmux='term-1', cwd='/work/demo',
                           cached_sid='', inode=0, offset=0)
+
+    def own_tmux_server(self, tmux, socket):
+        cleanup = functools.partial(subprocess.run, [tmux, '-L', socket, 'kill-server'], capture_output=True)
+        atexit.register(cleanup)
+        self.addCleanup(atexit.unregister, cleanup)
+        self.addCleanup(cleanup)
 
     def event(self, text='hello', **extra):
         return dict(type='assistant', message=dict(role='assistant', content=[dict(type='text', text=text)]), **extra)
@@ -2733,8 +2741,8 @@ class HistoryReaderTest(unittest.TestCase):
     def test_watch_reuses_control_capture_without_spawning_tmux_per_update(self):
         real_tmux = shutil.which('tmux')
         socket = 'push-' + self.home.name
+        self.own_tmux_server(real_tmux, socket)
         subprocess.run([real_tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
-        self.addCleanup(lambda: subprocess.run([real_tmux, '-L', socket, 'kill-server'], capture_output=True))
         log = self.home / 'tmux-calls.jsonl'
         tools = self.home / 'bin'
         tools.mkdir()
@@ -2783,7 +2791,7 @@ class HistoryReaderTest(unittest.TestCase):
         wrapper.write_text('#!' + sys.executable + '\nimport os,sys\n' +
                            'os.execv(' + repr(real_tmux) + ', [' + repr(real_tmux) + ', "-L", ' + repr(socket) + '] + sys.argv[1:])\n')
         wrapper.chmod(0o755)
-        self.addCleanup(lambda: subprocess.run([real_tmux, '-L', socket, 'kill-server'], capture_output=True))
+        self.own_tmux_server(real_tmux, socket)
         with patch.dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH']):
             server = self.start_server('--watch')
         reply = self.server_request(server, self.query)
@@ -2803,8 +2811,8 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
         tmux = shutil.which('tmux')
         socket = 'delta-' + self.home.name
+        self.own_tmux_server(tmux, socket)
         subprocess.run([tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
-        self.addCleanup(lambda: subprocess.run([tmux, '-L', socket, 'kill-server'], capture_output=True))
         self.write(self.event('original reply'))
         self.query.update(live=True)
         calls = []
@@ -8270,4 +8278,6 @@ def load_tests(loader, tests, pattern):
 
 
 if __name__ == '__main__':
+    if os.name == 'posix':
+        signal.signal(signal.SIGTERM, signal.default_int_handler)
     unittest.main()
