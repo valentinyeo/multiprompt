@@ -699,7 +699,7 @@ foreach ($plan in $plans) {
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
         if ($env:MP_BREAK_IT_VARIATION -in @('resize', 'maximize', 'fast-switch')) {
-            Invoke-BreakItWindow $main $app.Id { param($keys) [ChatDeliveryDesktop]::Chord($keys) } { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
+            Invoke-BreakItWindow $main $app.Id { param($keys) Press $keys 'Break-it: native window or session variation' } { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
         }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {

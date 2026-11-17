@@ -67,6 +67,15 @@ test('the historical experiment cannot turn a feature PR into a claimed repair',
   assert.equal(finishHistory([run]).final, 'FAIL');
 });
 
+test('window variations keep the Doctor-guarded input path on both entry points', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const file of ['.claude/skills/verify-multiprompt/control.ps1', 'tools/verify-chat-delivery/drive.ps1']) {
+    const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+    assert.match(source, /Invoke-BreakItWindow[^\n]+\{ param\(\$keys\) Press \$keys /, file);
+  }
+});
+
 test('chat journeys require streaming, busy-send and reconnect variations too', () => {
   assert.equal(typeof verifier.breakItVariations, 'function');
   assert.deepEqual(verifier.breakItVariations('chat-delivery'), ['resize', 'maximize', 'fast-switch', 'long-chat', 'stream-scroll', 'busy-send', 'reconnect']);

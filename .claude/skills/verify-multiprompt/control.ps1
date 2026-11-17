@@ -526,7 +526,7 @@ try {
     Doctor
     Record 'Launch complete; read-only Doctor passed'
     Snapshot 'before'
-    Invoke-BreakItWindow $script:window $process.Id { param($keys) [VerifyNative]::Chord($keys) } { Read-Session }
+    Invoke-BreakItWindow $script:window $process.Id { param($keys) Press $keys 'Break-it: native window or session variation' } { Read-Session }
     Write-Host "Drive: $Feature"
     $driveFeature = $Feature
     switch ($Feature) {
