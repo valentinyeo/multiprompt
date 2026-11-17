@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: palette-dialog-design-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   red-control:
