@@ -77,6 +77,7 @@ $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '0'
 foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl', 'debug.log')) { [IO.File]::WriteAllText("$Evidence/$file", '') }
+. "$PSScriptRoot/../../.claude/skills/verify-multiprompt/break-it-input.ps1"
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false)) }
 if ($env:CHAT_RESYNC_PROOF -eq '1') {
     Save @{recovery_required=$recoveryPair; cases=@($plans | ForEach-Object { $_.name }); app=@{version=$ExpectedVersion; sha256=$ExpectedHash}; harness=@{source=$env:GITHUB_SHA}} "$Evidence/resync-plan.json"
@@ -668,12 +669,19 @@ foreach ($plan in $plans) {
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-seed.json"
             Save $mapping "$caseDir/mapping.json"
         }
+        if ($env:MP_BREAK_IT_VARIATION -eq 'fast-switch' -and $expectedShells -eq 1) {
+            $savedSession.tabs += @{kind='cmd'; name='Break-it switch target'; manual=$true; cv=$false; pid=0}
+            $expectedShells = 2
+        }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
             $saved.tabs[0].tmux_host = 2
             if ($isSwitch) { $saved.single_window = $true }
             Save $saved "$settings/session.json"
+        }
+        if ($env:MP_BREAK_IT_VARIATION) {
+            & "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $profile -HomePath $env:HOME -Evidence $Evidence
         }
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
         if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable embedded version mismatch' }
@@ -690,6 +698,10 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
+        if ($env:MP_BREAK_IT_VARIATION -in @('resize', 'maximize', 'fast-switch')) {
+            Invoke-BreakItWindow $main $app.Id { param($keys) [ChatDeliveryDesktop]::Chord($keys) } { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+        }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
             . "$PSScriptRoot/working-live.ps1"
         } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {

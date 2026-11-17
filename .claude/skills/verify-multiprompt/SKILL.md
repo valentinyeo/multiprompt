@@ -115,6 +115,22 @@ For these PRs, the named journey takes priority over the picker and runs against
 
 Other PRs retain the existing failed-head baseline comparison. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
 
+### Try to bring the bug back
+
+After a repair's named repro passes on head, the same GitHub Windows job replays that journey with adversarial input. It uses the same executable and retains the original assertions. No additional workflow is dispatched. Master still runs the ordinary repro required above.
+
+`break-it.ps1` records each replay under `break-it/<variation>/` in the original head artifact. Each replay has its own disposable profile, screenshots, input receipt, cleanup evidence, `journey.mp4`, and an `ffprobe` receipt. The required variations are resize by snapping, maximize, rapid session switches, and long seeded chats. Chat journeys also require scrolling during reply streaming, sending while busy, and reconnecting the server chat.
+
+The hosted `chat-working-live` adapter drives all seven variations. The long-chat replay reads the synthetic generator from PR 1070, seeds 64 sessions with eight 2,400-message chats, loads the production host archive, sends, and checks the copied native transcript. The other replays retain its timing, reply, queue, idle and streaming-position assertions. This remains a simulated provider and SSH boundary, not a real provider claim.
+
+Every repair must supply adapters for its own journey. An unsupported variation or missing second session is BLOCKED, never a skipped pass. Do not replace the named repro with an unrelated journey, waive an assertion, or hide a failed variation behind an identical master failure. Add the missing adapter in that repair PR.
+
+`tools/pr-verifier.cjs` independently rejects incomplete evidence even if the model says PASS. Any product failure in a variation makes `pstack-verifier` FAIL and names its video. Recorder, runner, adapter and cleanup failures block approval. A passing ordinary repro cannot override either result.
+
+Changes to the break-it scripts force a hosted `chat-working-live` replay and a historical experiment against past fix PR 1062 at `5ce536b45569e8cb4394e8e967067f19bf3d49d0`. The historical experiment succeeds only if the ordinary journey passes and a variation produces a product assertion failure with video and completed cleanup. An ordinary failure or an infrastructure failure does not prove regression detection. Inspect the artifact before claiming this experiment passed.
+
+Run `node --test tools/pr-verifier-break-it.test.js tools/pr-verifier-repro.test.js` for the focused approval-gate regression. The seed generator and wrapper are copied unchanged from PR 1070 at `5d6449bdea8316a5ff145648adde9df6b432943e`; the live archive adapter reuses that generator without changing its counts.
+
 ## Doctor
 
 For ordinary desktop journeys, `control.ps1` runs `Doctor` after launch, before each input, and after the journey. Doctor is read-only and cheap: the original Process object must be alive, its path and SHA256 must match the selected executable, its HWND must belong to that PID and class `ZigShell`, its title must be `Multi Bot` or carry the expected legacy version, UI Automation must see that window, and its published Inbox state must contain a usable initial shell. It writes only evidence (`doctor.json`), never app state; it does not build, seed, authenticate, invoke actions or repair preconditions.

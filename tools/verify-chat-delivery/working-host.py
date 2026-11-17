@@ -1,4 +1,6 @@
 import hashlib
+import importlib.util
+from pathlib import Path
 import json
 import os
 import threading
@@ -10,6 +12,7 @@ REPLY = 'The hosted stand-in reply is visible.'
 
 
 def install(namespace, root, record, steady=False):
+    real_size = os.environ.get('MP_BREAK_IT_VARIATION') == 'long-chat' and not steady
     previous_switch = namespace['host_dispatch_switch']
     previous_owned = namespace['host_owned']
     previous_deliver = namespace['host_deliver']
@@ -27,11 +30,18 @@ def install(namespace, root, record, steady=False):
         except FileExistsError:
             return
         os.close(fd)
-        if steady:
+        if steady or real_size:
             session = {'turn': 'standin-seed-turn', 'state': {'display_history': True}}
-            for index in range(50):
-                namespace['host_history_append']('claude', SID, session,
-                    dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10))
+            if real_size:
+                generator = Path(__file__).resolve().parents[2] / '.claude/skills/verify-multiprompt/seed-profile.py'
+                spec = importlib.util.spec_from_file_location('profile_fixture', generator)
+                fixture = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(fixture)
+                rows = fixture.messages(0)
+            else:
+                rows = (dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10) for index in range(50))
+            for row in rows:
+                namespace['host_history_append']('claude', SID, session, row)
             namespace['host_state_write']('claude', SID, session['state'])
             namespace['host_write'](namespace['host_paths']('claude', SID)['config'], dict(enabled=True, tmux='verify-agent'))
             namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended')

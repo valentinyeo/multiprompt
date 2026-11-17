@@ -45,7 +45,7 @@ jobs:
           HEAD: ${{ github.sha }}
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
       - name: Test required before-and-after repro evidence
-        run: node --test tools/pr-verifier-repro.test.js
+        run: node --test tools/pr-verifier-repro.test.js tools/pr-verifier-break-it.test.js
       - name: Test stable desktop journey command names
         run: node --test tools/check-journey-commands.test.mjs
       - name: Reject raw desktop journey commands

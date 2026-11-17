@@ -44,7 +44,9 @@ function validateSelection(raw, available, pr = {}) {
     if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
     requested.unshift('chat-still');
   }
-  if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
+  const breakItFeatures = requirement.bugFix && requirement.reproJourney ? [requirement.reproJourney] :
+    changedPaths.some(file => /(?:^|\/)(?:break-it[^/]*|pr-verifier-break-it\.test\.js)$/.test(file)) ? ['chat-working-live'] : [];
+  requested.unshift(...breakItFeatures);
   const features = [];
   const dropped = [];
   for (const name of requested) {
@@ -56,6 +58,8 @@ function validateSelection(raw, available, pr = {}) {
     features,
     dropped,
     ...requirement,
+    breakItFeatures,
+    breakItHistory: breakItFeatures.includes('chat-working-live') && !requirement.bugFix ? '5ce536b45569e8cb4394e8e967067f19bf3d49d0' : '',
     compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
@@ -86,6 +90,30 @@ function listFiles(directory) {
     .sort();
 }
 
+function breakItVariations(feature) {
+  return ['resize', 'maximize', 'fast-switch', 'long-chat', ...(/^chat-/.test(feature) ? ['stream-scroll', 'busy-send', 'reconnect'] : [])];
+}
+
+function describeBreakIt(directory) {
+  const root = path.join(directory, 'break-it');
+  if (!fs.existsSync(path.join(root, 'result.json'))) return undefined;
+  const result = readResult(root);
+  return { ...result, variations: (result.variations || []).map(item => {
+    const name = String(item.name);
+    if (!breakItVariations('chat-delivery').includes(name)) return { name, status: 'blocked' };
+    const folder = path.join(root, name);
+    const files = fs.existsSync(folder) ? listFiles(folder) : [];
+    let videoVerified = false;
+    try {
+      const probe = JSON.parse(fs.readFileSync(path.join(folder, 'video.json'), 'utf8').replace(/^﻿/, ''));
+      videoVerified = probe.streams?.length === 1 && probe.streams[0].width > 0 && probe.streams[0].height > 0 &&
+        fs.statSync(path.join(folder, 'journey.mp4')).size > 0;
+    } catch {}
+    return { ...item, screenshots: files.filter(file => /\.png$/i.test(file)),
+      video: `break-it/${name}/journey.mp4`, videoVerified };
+  }) };
+}
+
 function describeRun(directory, name) {
   const result = readResult(directory);
   const files = listFiles(directory);
@@ -102,6 +130,7 @@ function describeRun(directory, name) {
       .map(item => JSON.stringify([item.name, item.detail])))].sort() : [],
     screenshots: files.filter(file => /\.png$/i.test(file)),
     files: files.slice(0, 60),
+    breakIt: describeBreakIt(directory),
   };
 }
 
@@ -259,6 +288,36 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
       notes.unshift(`Repro journey ${selection.reproJourney || '(not named)'} must show master failed and head passed with complete evidence; bug-fix PRs cannot pass without it.`);
     }
   }
+  for (const feature of new Set([...(selection.breakItFeatures || []), ...(selection.bugFix ? [selection.reproJourney] : [])])) {
+    if (rows.find(row => row.feature === feature)?.head !== 'passed') continue;
+    const runs = summary.head[feature] || [];
+    const failures = [];
+    const missing = [];
+    for (const run of runs) {
+      const proof = run.breakIt;
+      for (const name of breakItVariations(feature)) {
+        const matches = proof?.variations?.filter(item => item.name === name) || [];
+        const item = matches[0];
+        if (proof?.feature !== feature || matches.length !== 1 || !item.videoVerified || !item.video ||
+            !item.screenshots?.length || !(item.actions > 0) || item.cleanup !== 'complete' ||
+            item.failureKind === 'infrastructure' || infrastructureError(item.error)) missing.push(name);
+        else if (item.status === 'failed') failures.push(`${name}: ${oneLine(item.error)}; video ${run.artifact}/${item.video}`);
+        else if (item.status !== 'passed') missing.push(name);
+      }
+    }
+    if (missing.length && final !== 'FAIL') {
+      final = 'BLOCKED';
+      notes.unshift(`Break-it evidence incomplete for ${[...new Set(missing)].join(', ')}; no passing repair verdict is allowed.`);
+    }
+    if (failures.length) {
+      final = 'FAIL';
+      notes.unshift(...failures.map(line => `Break-it ${line}`));
+    }
+  }
+  if (selection.breakItHistory && jobs.history?.result !== 'success') {
+    final = 'FAIL';
+    notes.unshift('The historical break-it proof did not demonstrate a passing ordinary repro followed by a product failure with video.');
+  }
   const evidence = [...notes, ...(Array.isArray(verdict?.evidence) ? verdict.evidence : []).map(line => oneLine(line)).filter(Boolean)].slice(0, MAX_EVIDENCE_LINES);
   const body = [
     `pstack-verifier: ${final} @ ${headSha}`,
@@ -404,7 +463,7 @@ function latestArtifacts(artifacts, selection, baseSha) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
+      return match && (!match[1] || (selection.compareBase && match[1] === baseSha) || match[1] === selection.breakItHistory);
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||
@@ -627,7 +686,7 @@ async function main(argv, env) {
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
     const base = selection.compareBase ? selection.features : [];
-    setOutputs({ features: JSON.stringify(selection.features), base_features: JSON.stringify(base), repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
+    setOutputs({ features: JSON.stringify(selection.features), base_features: JSON.stringify(base), break_it_features: JSON.stringify(selection.breakItFeatures.filter(name => selection.features.includes(name))), break_it_history: selection.breakItHistory, repro_features: JSON.stringify(selection.bugFix && selection.features.includes(selection.reproJourney) ? [selection.reproJourney] : []) });
     return undefined;
   }
   if (command === 'pick-deepseek') return pickDeepseek(env, rest[0]);
@@ -699,7 +758,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { breakItVariations, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

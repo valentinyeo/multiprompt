@@ -122,6 +122,7 @@ $updateMutex = $null
 $updateMutexHeld = $false
 
 . (Join-Path $PSScriptRoot 'control-library.ps1')
+. (Join-Path $PSScriptRoot 'break-it-input.ps1')
 try {
     if ($Feature -in @('title-bar', 'window-controls')) {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
@@ -453,6 +454,7 @@ try {
         $updateMutexHeld = $true
         $env:IGSH_246 = '1'
     }
+    if ($env:MP_BREAK_IT_VARIATION) { & "$PSScriptRoot/seed-profile.ps1" -Root $scratch -HomePath $env:HOME -Evidence $Evidence }
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
@@ -524,6 +526,7 @@ try {
     Doctor
     Record 'Launch complete; read-only Doctor passed'
     Snapshot 'before'
+    Invoke-BreakItWindow $script:window $process.Id { param($keys) [VerifyNative]::Chord($keys) } { Read-Session }
     Write-Host "Drive: $Feature"
     $driveFeature = $Feature
     switch ($Feature) {

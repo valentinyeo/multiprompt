@@ -241,7 +241,8 @@ test('Claude output reaches scripts through environment variables, never inline'
 });
 
 test('the verifier reuses verify.yml for head and for the merge base build', () => {
-  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 3);
+  assert.match(workflow, /history:[\s\S]*?break_it_expect_regression: true/);
   assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      app_revision: \$\{\{ needs\.resolve\.outputs\.base_sha \}\}/);
   assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
   assert.match(verify, /app-revision: \$\{\{ inputs\.app_revision && fromJSON\(format\('\["\{0\}"\]', inputs\.app_revision\)\)/);
@@ -315,7 +316,7 @@ test('the DeepSeek key reaches the picker and the judge and the engine comes fro
   assert.match(workflow, /SELECTION: \$\{\{ steps\.claude\.outputs\.structured_output \|\| steps\.deepseek-pick\.outputs\.structured_output \}\}/);
   assert.match(workflow, /id: deepseek\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine == 'deepseek'\n        continue-on-error: true\n        env:\n          DEEPSEEK_API_KEY: /);
   assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && needs\.resolve\.outputs\.engine != 'deepseek'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
-  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base\]/);
+  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, failed-head, base, history\]/);
 });
 
 for (const problem of ['Evidence lost during cleanup: action.png', 'The journey timed out', 'Harness error: driver crashed', 'Runner queue timeout', 'Job cancelled']) {

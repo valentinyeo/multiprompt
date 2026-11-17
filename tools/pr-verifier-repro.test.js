@@ -4,7 +4,7 @@ const verifier = require('./pr-verifier.cjs');
 
 function finish(pr, baseStatus, headStatus = 'passed', extra = {}) {
   const selection = verifier.validateSelection({ features: ['appearance'], compare_base: false }, ['appearance'], pr);
-  const run = status => ({ status, artifact: 'verify-appearance', error: status === 'failed' ? 'wrong visible appearance' : '', screenshots: ['after.png'], ...extra });
+  const run = status => ({ status, artifact: 'verify-appearance', error: status === 'failed' ? 'wrong visible appearance' : '', screenshots: ['after.png'], breakIt: { feature: 'appearance', variations: verifier.breakItVariations('appearance').map(name => ({ name, status: 'passed', screenshots: ['after.png'], video: 'journey.mp4', videoVerified: true, actions: 1, cleanup: 'complete' })) }, ...extra });
   return verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: 'a'.repeat(40),
     summary: { head: { appearance: [run(headStatus)] }, base: { appearance: baseStatus ? [run(baseStatus)] : [] } }, selection, runUrl: 'https://example.test/run' });
 }

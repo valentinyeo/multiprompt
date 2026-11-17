@@ -1,4 +1,10 @@
 [void](Wait-For 'production live subscription' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "subscribed"' } 30)
+if ($env:MP_BREAK_IT_VARIATION -eq 'long-chat' -and $plan.name -eq 'working-live') {
+    [void](Wait-For 'seeded production archive is ready' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "idle-history-ready"' } 60)
+}
+function Record-BreakItInput([string]$InputLabel) {
+    @{ mode=$env:MP_BREAK_IT_VARIATION; inputs=@($InputLabel); pid=$app.Id; hwnd=$main.ToInt64(); case=$plan.name } | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/break-it-input.json"
+}
 Bind-Transcript
 $bounds = $views[0].Current.BoundingRectangle
 $area = @{left=0; top=0; right=[int]$bounds.Width; bottom=[int]$bounds.Height}
@@ -54,6 +60,7 @@ $clock = [Diagnostics.Stopwatch]::StartNew()
 $sendMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $actions.Add(@{case=$plan.name; ms=$sendMs; input='Enter: send composer'; keys=@(13)})
 [ChatDeliveryDesktop]::Chord(@(0x0D))
+if ($env:MP_BREAK_IT_VARIATION -eq 'long-chat') { Record-BreakItInput 'Enter: send with the PR 1070 long archive loaded' }
 if ($steady) { [void](Scroll-Transcript -12000) }
 function Capture-Working([string]$phase, [int]$index) {
     $bitmap = [Drawing.Bitmap]::new($area.right, $area.bottom)
@@ -106,6 +113,13 @@ try {
     $observation.dispatchAnimation = @{pushedMs=$dispatchPush.ms; frames=$animated}
     [IO.File]::WriteAllText("$state/working-reply", '')
     [void](Wait-For 'stand-in emitted live text delta' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "text.delta"' } 20)
+    if ($env:MP_BREAK_IT_VARIATION -eq 'stream-scroll') {
+        [void](Scroll-Transcript 1200)
+        Record-BreakItInput 'Wheel up during production text.delta streaming'
+        Shot 'break-it-reading-stream'
+        [void](Scroll-Transcript -12000)
+        [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    }
     $observation.paintWindows.streamStart = [ChatDeliveryDesktop]::GetTickCount64()
     $replyClock = [Diagnostics.Stopwatch]::StartNew()
     for ($i = 0; $replyClock.ElapsedMilliseconds -lt 4000; $i++) {
@@ -117,6 +131,7 @@ try {
     foreach ($followup in $observation.followups) {
         Type-Composer $followup
         Press @(0x0D) 'Enter: queue follow-up while the reply is still working' $true
+        if ($env:MP_BREAK_IT_VARIATION -eq 'busy-send') { Record-BreakItInput 'Enter: rapid follow-up while production turn is busy' }
     }
     [void](Wait-For 'both follow-up messages retained by the real message store' {
         $rows = @((Read-Shared "$state/working-host.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -153,6 +168,15 @@ try {
     $observation.frames = $frames.ToArray()
     Save $observation "$caseDir/timing.json"
 }
+if ($env:MP_BREAK_IT_VARIATION -eq 'reconnect') {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    Press @(0x11, 0x10, 0x52) 'Ctrl+Shift+R: reconnect the server chat'
+    Record-BreakItInput 'Ctrl+Shift+R: reconnect the server chat'
+    [void](Wait-For 'reconnected server chat publishes a fresh transcript load' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[chat\] transcript load shell=\d+ ok' } 60)
+    $composer = [ChatDeliveryDesktop]::Composer($main)
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    Shot 'break-it-reconnected'
+}
 Press @(0x11, 0x4B) 'Ctrl+K: select live conversation'
 $paletteStart = (Read-Shared "$settings/debug.log").Length
 $query = 'chat view select all'
@@ -161,5 +185,7 @@ foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16]
 Press @(0x0D) 'Enter: select live conversation'
 Press @(0x11, 0x43) 'Ctrl+C: copy live conversation'
 $observation.copied = [Windows.Forms.Clipboard]::GetText()
+if ($env:MP_BREAK_IT_VARIATION -eq 'long-chat' -and $plan.name -eq 'working-live' -and -not $observation.copied.Contains('Synthetic chat 00 answer 1199')) { throw 'Break-it: the long seeded chat disappeared after sending' }
+if ($env:MP_BREAK_IT_VARIATION -eq 'reconnect' -and ([regex]::Matches($observation.copied, [regex]::Escape('The hosted stand-in reply is visible.'))).Count -ne 1) { throw 'Break-it: reconnect lost or duplicated the reply' }
 Press @(0x1B) 'Esc: clear live selection'
 [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
