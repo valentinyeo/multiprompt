@@ -21,8 +21,10 @@ if ($steady) {
     $idleReady = [ChatDeliveryDesktop]::GetTickCount64() + 1500
     [void](Wait-For 'server history settled before idle observation' { [ChatDeliveryDesktop]::GetTickCount64() -ge $idleReady } 5)
     $observation.paintWindows.idleStart = [ChatDeliveryDesktop]::GetTickCount64()
+    $observation.paintWindows.idleStartWallMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     [void](Wait-For 'five seconds of idle server chat' { [ChatDeliveryDesktop]::GetTickCount64() -ge $observation.paintWindows.idleStart + 5000 } 10)
     $observation.paintWindows.idleEnd = [ChatDeliveryDesktop]::GetTickCount64()
+    $observation.paintWindows.idleEndWallMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     Shot 'working-idle'
     [IO.File]::WriteAllText("$state/working-initial-start", '')
 }

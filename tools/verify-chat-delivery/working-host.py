@@ -43,7 +43,15 @@ def install(namespace, root, record, steady=False):
         def initial_turn():
             if steady:
                 deadline = time.monotonic() + 60
+                next_flush = time.monotonic() + 0.5
                 while not (root / 'working-initial-start').exists() and time.monotonic() < deadline:
+                    if time.monotonic() >= next_flush:
+                        with namespace['host_paths']('claude', SID)['history'].open('ab') as stream:
+                            stream.write(b'\n')
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        record('working-host.jsonl', stage='unchanged-history-refresh', sid=SID)
+                        next_flush = time.monotonic() + 0.5
                     time.sleep(0.05)
                 if not (root / 'working-initial-start').exists():
                     return

@@ -78,6 +78,7 @@ function verifyCase(root, name) {
     const idle = positionProof.steadyPosition(trace, windows.idleStart, windows.idleEnd);
     const streaming = positionProof.steadyPosition(trace, windows.readingStart, windows.readingEnd);
     fs.writeFileSync(path.join(dir, 'steady-position.json'), JSON.stringify({ idle, streaming }, null, 2) + '\n');
+    assert.ok(rows.filter(row => row.stage === 'unchanged-history-refresh' && row.ms >= windows.idleStartWallMs && row.ms <= windows.idleEndWallMs).length >= 6, 'Unchanged server history was not refreshed during the idle observation');
     assert.equal(idle.status, 'passed', 'Idle chat moved');
     assert.equal(idle.layouts, 0, 'Idle chat repeatedly laid out unchanged history');
     assert.ok(idle.paints <= 1, `Idle chat repainted ${idle.paints} times without input`);
@@ -103,14 +104,25 @@ function verifyCase(root, name) {
 }
 
 function verify(root) {
-  verifyCase(root, 'working-live');
-  verifyCase(root, 'steady-live');
-  return {feature:'chat-working-live', status:'passed', boundary:'Simulated provider and SSH; production composer, message store dispatch, event pages and Windows painter.'};
+  const cases = ['working-live', 'steady-live'].map(name => {
+    try {
+      verifyCase(root, name);
+      return {name, passed:true, detail:'Passed'};
+    } catch (error) {
+      return {name, passed:false, detail:error.message};
+    }
+  });
+  return {feature:'chat-working-live', status:cases.every(item => item.passed) ? 'passed' : 'failed', cases, boundary:'Simulated provider and SSH; production composer, message store dispatch, event pages and Windows painter.'};
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    fs.writeFileSync(path.join(process.argv[2], 'result.json'), JSON.stringify(verify(process.argv[2]), null, 2) + '\n');
-    console.log('WORKING_LIVE_OK');
+    const result = verify(process.argv[2]);
+    fs.writeFileSync(path.join(process.argv[2], 'result.json'), JSON.stringify(result, null, 2) + '\n');
+    if (result.status === 'passed') console.log('WORKING_LIVE_OK');
+    else {
+      for (const item of result.cases.filter(item => !item.passed)) console.error(`${item.name}: ${item.detail}`);
+      process.exitCode = 1;
+    }
   } catch (error) { console.error(error.stack); process.exitCode = 1; }
 }
