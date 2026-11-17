@@ -95,25 +95,26 @@ test('tracked current repository passes the same parser-only checker', { skip: u
 
 test('PR job preserves existing guards and independently runs each new test and checker', () => {
   const workflow = fs.readFileSync(join(__dirname, '../.github/workflows/no-comments.yml'), 'utf8');
-  const job = workflow.split('\n  extension-version:')[0];
-  assert.match(job, /^name: PR checks/m);
-  assert.match(job, /\n  no-comments:\n    name: no-comments/);
+  const job = workflow.split('\n  no-comments:')[1].split('\n  extension-version:')[0];
+  assert.match(workflow, /^name: PR checks/m);
+  assert.match(job, /^\n    name: no-comments/);
   assert.match(job, /actions\/checkout@[^\n]+\n        with:\n          fetch-depth: 0/);
   const oldSteps = ['Lint GitHub workflows', 'Test the comment checker', 'Fail on any code comment'];
   let previous = -1;
   for (const step of oldSteps) { const index = job.indexOf(`- name: ${step}`); assert.ok(index > previous); previous = index; }
   const steps = job.split('      - name: ').slice(1 + oldSteps.length);
-  assert.equal(steps.length, 6);
   const commands = [
     'node --test tools/check-routing-ids.test.js', 'node tools/check-routing-ids.mjs',
     'node --test tools/check-regression-inputs.test.js', 'node tools/check-regression-inputs.mjs origin/${{ github.base_ref }}',
+    'node --test tools/check-runtime-generation.test.js', 'node tools/check-runtime-generation.mjs "${BASE}" HEAD',
     'node --test tools/check-powershell-host-names.test.js', './tools/check-powershell-host-names.ps1 -Root .'
   ];
+  assert.equal(steps.length, commands.length);
   for (const [i, step] of steps.entries()) {
     assert.ok(step.includes(`run: ${commands[i]}`), step);
     if (i === 3) assert.ok(step.includes("if: (success() || failure()) && github.event_name == 'pull_request'"));
     else assert.ok(step.includes('if: success() || failure()'));
-    if (i >= 4) assert.ok(step.includes('shell: pwsh'));
+    if (i >= 6) assert.ok(step.includes('shell: pwsh'));
   }
 });
 

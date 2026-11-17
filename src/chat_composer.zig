@@ -1634,7 +1634,12 @@ fn dropPendingActivationChar(hwnd: HANDLE, key: WPARAM) void {
     }
 }
 
+var chat_newest_chord: chat_keynav.NewestChord = .{};
+
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == WM_KILLFOCUS or msg == 0x0002 or msg == 0x0201 or msg == 0x0203 or msg == 0x0204 or
+        msg == 0x000C or msg == 0x00C2 or msg == 0x0300 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304 or msg == 0x00C7 or
+        msg == 0x0104 or (msg == WM_KEYDOWN and wp != 0x47 and wp != 0x10)) chat_newest_chord = .{};
     if (@import("message_menu.zig").suppressComposerActivation(msg, wp, lp)) {
         if (msg == WM_KEYUP or msg == 0x0105) dropPendingActivationChar(hwnd, wp);
         return 0;
@@ -1697,6 +1702,18 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         }
         if (nav_action == .none and wp == 0x2E and GetWindowTextLengthW(hwnd) == 0 and !isCtrlDown() and (GetAsyncKeyState(0x10) & key_down) == 0 and (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) == 0) {
             if (@import("chat_render.zig").chatRemoveActiveTabNotSent()) return 0;
+        }
+    }
+    if (msg == 0x0102) {
+        const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+        const shift_only = (GetKeyState(0x11) & down) == 0 and (GetKeyState(0x10) & down) != 0 and
+            (GetKeyState(@as(i32, VK_MENU)) & down) == 0 and (GetKeyState(0x5B) & down) == 0 and (GetKeyState(0x5C) & down) == 0;
+        var text: [3]u16 = undefined;
+        const len: usize = @intCast(@max(0, GetWindowTextW(hwnd, &text, text.len)));
+        if (chat_newest_chord.character(wp, text[0..len], GetTickCount64(), shift_only, (lp & 0x40000000) != 0 or (lp & 0xFFFF) > 1)) {
+            _ = SetWindowTextW(hwnd, L(""));
+            @import("chat_render.zig").chatJumpToNewest();
+            return 0;
         }
     }
     if (msg == WM_KEYDOWN and wp == 0x1B and app_state.g_chat_reply_len > 0 and GetWindowTextLengthW(hwnd) == 0 and !app_state.g_chat_ac.open) {
@@ -3511,4 +3528,41 @@ test "IGSH-1761 long pasted text leaves the composer scrolled so the caret line 
     _ = SendMessageW(edit, 0x00B1, 0, 0);
     chatComposerKeepCaretVisible();
     try std.testing.expectEqual(@as(i32, 0), chatComposerLines(edit).first);
+}
+
+test "SOFT-2489 gg types gg in the composer" {
+    const w = @import("win32.zig");
+    const saved = .{
+        .composer = app_state.g_chat_composer_hwnd,
+        .orig = app_state.g_chat_composer_orig_proc,
+        .chord = chat_newest_chord,
+        .count = app_state.shell_count,
+        .ac = app_state.g_chat_ac,
+        .nav = app_state.g_chat_nav_active,
+    };
+    defer {
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+        chat_newest_chord = saved.chord;
+        app_state.shell_count = saved.count;
+        app_state.g_chat_ac = saved.ac;
+        app_state.g_chat_nav_active = saved.nav;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 600, 400, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L(""), WS_CHILD | ES_MULTILINE, 0, 0, 400, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    app_state.g_chat_composer_hwnd = null;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{};
+    app_state.g_chat_nav_active = false;
+    chat_newest_chord = .{};
+    _ = chatComposerSubclassProc(edit, 0x0102, 'g', 1);
+    var text: [4]u16 = undefined;
+    try std.testing.expectEqual(@as(i32, 1), GetWindowTextW(edit, &text, text.len));
+    try std.testing.expectEqualSlices(u16, &.{'g'}, text[0..1]);
+    _ = chatComposerSubclassProc(edit, 0x0102, 'g', 1);
+    try std.testing.expectEqual(@as(i32, 2), GetWindowTextW(edit, &text, text.len));
+    try std.testing.expectEqualSlices(u16, &.{ 'g', 'g' }, text[0..2]);
 }
