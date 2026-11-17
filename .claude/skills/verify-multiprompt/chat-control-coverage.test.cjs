@@ -129,6 +129,12 @@ if (process.argv[2]) {
     for (const name of ['Chat permission mode: Plan', 'Chat permission mode: Ask', 'Chat permission mode: Accept edits', 'Chat permission mode: Bypass', 'Chat View: Plus Menu', 'Chat View: Allow', 'Chat View: Always allow', 'Chat View: Deny', 'Chat View: Stop the agent']) {
       assert.ok(Number.isInteger(catalog[name.toLowerCase()]?.target), name);
     }
+    const palette = fs.readFileSync('src/command_palette.zig', 'utf8');
+    for (const name of ['Chat View: Allow', 'Chat View: Always allow', 'Chat View: Deny']) {
+      const label = palette.match(new RegExp(`asciiContainsQueryInsensitive\\("(${name})"`))?.[1];
+      assert.ok(label, name);
+      assert.ok(label.toLowerCase().includes(catalog[name.toLowerCase()].query.toLowerCase()), `${name} query reaches its actual result-insertion condition`);
+    }
   });
 
   function fixture(run) {
