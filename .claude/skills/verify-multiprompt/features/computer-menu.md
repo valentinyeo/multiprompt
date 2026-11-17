@@ -37,6 +37,9 @@ The initial keyboard-only baseline [41968849113](https://github.com/valentinyeo/
 
 ## Gotchas
 
+Choosing Computer again toggles back to Browser. This journey proves selection and draft retention using an offline remote identity, not live Computer input/control or Android parity.
+
+
 This proves desktop menu routing, pane selection, and draft preservation, not remote desktop pixels.
 There are no SSH credentials, VNC service, real agent, account sign-in or live chat delivery.
 The synthetic remote tab can report a disconnected transport; that is not the menu assertion.

@@ -29,6 +29,9 @@ Dispatch `gh workflow run verify.yml -f feature=relaunch-saved-sessions` (or `--
 
 ## Gotchas
 
+The driver performs one initial launch plus two relaunches. Its 14 local CMD processes and six identity-less tmux records come from a synthetic seed; this is not Part A real-size or Part B real-SSH proof. Other legacy journeys also seed state. Neither verify.yml nor release-gate.yml has a direct push trigger at this revision.
+
+
 - Red control: `origin/master` before the IGSH-890 fix publishes the cached copies, so step 2 fails with `sessions listed twice in the sidebar` or the relaunch never finishes restoring. The red and green run links are on the IGSH-900 ticket.
 - The journey adds no app startup limit, timeout or blocking state; its waits live in the GitHub script only.
 - Remote tmux reconnection, account sync and browser panes stay outside it. A missing, cancelled or red result for this job blocks the release; other journeys keep their own auto-revert path.

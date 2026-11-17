@@ -148,9 +148,9 @@ try {
     $env:MP_STATE = $statePath
     $env:MP_URL = "https://$accountHost"
     $bumpPath = Join-Path $workRoot 'bump.mjs'
-    [IO.File]::WriteAllText($bumpPath, "const fs = require('node:fs');`nconst state = JSON.parse(fs.readFileSync(process.env.MP_STATE, 'utf8'));`nconst headers = { Authorization: 'Bearer ' + state.admin_key, 'X-Layout-Features': 'groups,favorite' };`nconst current = await fetch(process.env.MP_URL + '/v1/layout', { headers });`nif (!current.ok) throw new Error('read failed');`nconst body = await current.json();`nconst saved = await fetch(process.env.MP_URL + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: body.revision, layout: body.layout }) });`nif (!saved.ok) throw new Error('write failed');`n")
+    [IO.File]::WriteAllText($bumpPath, "import fs from 'node:fs';`nconst state = JSON.parse(fs.readFileSync(process.env.MP_STATE, 'utf8'));`nconst headers = { Authorization: 'Bearer ' + state.admin_key, 'X-Layout-Features': 'groups,favorite' };`nconst current = await fetch(process.env.MP_URL + '/v1/layout', { headers });`nif (!current.ok) throw new Error('read failed');`nconst body = await current.json();`nconst saved = await fetch(process.env.MP_URL + '/v1/layout', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision: body.revision, layout: body.layout }) });`nif (!saved.ok) throw new Error('write failed');`n")
     $appliedBefore = (Read-ServerGroupText $logPath).Length
-    [void](Invoke-ServerGroupNode @('--input-type=module', $bumpPath))
+    [void](Invoke-ServerGroupNode @($bumpPath))
     Remove-Item Env:\MP_STATE, Env:\MP_URL -ErrorAction SilentlyContinue
     Wait-ServerGroup 'second grouped import' { (Read-ServerGroupText $logPath).Length -gt $appliedBefore -and (Read-ServerGroupText $logPath).Substring($appliedBefore) -match 'account-sync: applied' }
     $second = Get-ServerGroupSession

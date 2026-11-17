@@ -38,6 +38,9 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 
 ## Gotchas
 
+No new UI means no profile opt-in UI, not absence of the Google sign-in action. A rejected Google sign-in URL can automatically offer the handoff once; local synthetic cookie continuity does not prove real Google authentication.
+
+
 - The branded phase warms the own profile once through the bridge before the app restarts, because a first-run branded Chrome on a loaded runner needs longer than the pane's opening budget.
 - Branded Google Chrome refuses its DevTools pipe when `USERPROFILE` is redirected, so this journey keeps `USERPROFILE` real while `APPDATA` and `LOCALAPPDATA` stay in the scratch.
 - A released executable without this feature is expected to fail at step 4 with `Opted-in workspace has no own browser profile`, because its second pane opens in the shared profile.
