@@ -4400,10 +4400,6 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPETS_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
-    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{"manage snippets"}, app_state.g_search_buf[0..app_state.g_search_len])) {
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_MANAGE_OFFSET;
-        app_state.g_search_result_count += 1;
-    }
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "create snippet", "new snippet", "snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_CREATE_OFFSET;
         app_state.g_search_result_count += 1;
