@@ -103,6 +103,11 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     const summary = path.join(dir, 'summary.json');
     fs.writeFileSync(summary, JSON.stringify({ head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] }, base: {} }));
     assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=FAIL/);
+    fs.writeFileSync(summary, JSON.stringify({
+      head: { appearance: [{ status: 'passed', screenshots: ['after.png'] }] },
+      base: { appearance: [{ status: 'failed', error: 'wrong visible appearance', screenshots: ['after.png'] }] },
+    }));
+    assert.match(run(['finalize', selectionFile, summary, dir], { VERDICT: '{"verdict":"PASS"}', RUN_ID: '', JOB_RESULTS: '{}' }), /result=BLOCKED/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
