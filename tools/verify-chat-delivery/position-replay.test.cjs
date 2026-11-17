@@ -147,7 +147,7 @@ print(json.dumps(actual))
 
 test('the hosted replay completes the actual mixed steady and real-size provider protocol', () => {
   const { spawnSync } = require('node:child_process');
-  const script = `import importlib.util, json, re, sys, tempfile, threading, time
+  const script = `import ast, hashlib, importlib.util, json, re, sys, tempfile, threading, time
 from pathlib import Path
 root = Path(sys.argv[1])
 spec = importlib.util.spec_from_file_location('working', root / 'working-host.py')
@@ -158,7 +158,14 @@ stream = source.split("Observe-HostedPosition 'stream-while-reading'", 1)[1].spl
 gates = re.findall(r'WriteAllText\\("\\$state/([^"/]+)"', stream)
 complete = threading.Event()
 stages = []
-namespace = {key: lambda *a, **k: None for key in ('host_dispatch_switch', 'host_owned', 'host_deliver', 'start_message_worker', 'serve_request', 'host_accept', 'host_event')}
+namespace = {key: lambda *a, **k: None for key in ('host_dispatch_switch', 'host_owned', 'host_deliver', 'start_message_worker', 'serve_request', 'host_event')}
+reader = ast.parse((root.parents[1] / 'src/chat_history_reader.py').read_text())
+reader = ast.parse(ast.literal_eval(reader.body[0].value))
+accept = next(node for node in reader.body if isinstance(node, ast.FunctionDef) and node.name == 'host_accept')
+rows = []
+dependencies = dict(hashlib=hashlib, HOST_ADAPTERS={'claude': dict(provenance='test')}, host_written=lambda state: {}, host_history_append=lambda provider, sid, session, row: rows.append(row), host_apply=lambda *args: True, host_log=lambda *args: None, host_state_write=lambda *args: None)
+exec(compile(ast.Module(body=[accept], type_ignores=[]), '<production-host-accept>', 'exec'), dependencies)
+namespace['host_accept'] = dependencies['host_accept']
 def record(file, **data):
     stages.append(data['stage'])
     if data['stage'] == 'real-size-complete': complete.set()
@@ -168,7 +175,8 @@ with tempfile.TemporaryDirectory() as directory:
     for gate in gates: (state / gate).touch()
     working.time.sleep = lambda seconds: original_sleep(min(seconds, 0.001))
     working.install(namespace, state, record, steady=True, real_size=True)
-    namespace['host_deliver']('claude', working.SID, 'id', 1, 1, 'reader send')
+    namespace['host_deliver']('claude', working.SID, 'id', 'attempt1', 1, 'reader send')
+    assert rows == [dict(role='user', text='reader send', id='id')], rows
     assert complete.wait(2), dict(gates=gates, stages=stages)
     assert stages.count('streaming-delta') == 7
     assert stages.count('reading-stream-delta') == 8

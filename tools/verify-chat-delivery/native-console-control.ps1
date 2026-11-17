@@ -13,9 +13,16 @@ function Wait-Control([scriptblock]$Check) {
     } while ($watch.Elapsed.TotalSeconds -lt 10)
     throw 'Native console positive control event missing'
 }
+$stage = 'create'
 try {
-    $handles = [NativeConsoleControl]::Create()
+    [NativeConsoleControl]::Create()
+    $stage = 'adopt-owned-console'
+    Wait-Control { [NativeConsoleControl]::Attach() }
+    $handles = [NativeConsoleControl]::Handles()
+    @{pid=$PID; hwnd=$handles[0]; console=$handles[1]} | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/doctor.json"
+    $stage = 'observe-chat'
     Wait-Control { (Get-Content "$Evidence/windows/windows.tsv" -Raw) -match 'window\tshow\t[^\r\n]+\tZigShellChatTranscript\t' }
+    $stage = 'observe-flash'
     $start = [NativeConsoleControl]::GetTickCount64()
     [NativeConsoleControl]::Flash()
     Wait-Control {
@@ -23,11 +30,12 @@ try {
         'show' -in $events -and 'hide' -in $events
     }
     $end = [NativeConsoleControl]::GetTickCount64()
-    @{pid=$PID; hwnd=$handles[0]} | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/doctor.json"
     ConvertTo-Json -InputObject @(@{name='native-child-console-positive-control'; start=$start; end=$end}) | Set-Content -Encoding UTF8 "$Evidence/position-phases.json"
+} catch {
+    @{stage=$stage; error=$_.Exception.Message} | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/failure.json"
+    throw
 } finally {
-    [NativeConsoleControl]::Close()
-    $recorder.Dispose()
+    try { [NativeConsoleControl]::Close() } finally { $recorder.Dispose() }
 }
 & node "$PSScriptRoot/native-console.test.cjs" $Evidence
 $result = Get-Content "$Evidence/native-console.json" -Raw | ConvertFrom-Json
