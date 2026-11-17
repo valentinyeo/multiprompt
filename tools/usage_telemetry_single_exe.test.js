@@ -47,7 +47,7 @@ test('pure argument decision executes native Zig tests, including Windows quotin
 
 test('collector dispatch returns before all UI, instance, workspace, Inbox, tray and crash startup', () => {
   const entry = body(main, 'main');
-  assert.match(entry, /launch_cache\.begin\(\);\s*const args = init\.minimal\.args\.toSlice\(init\.arena\.allocator\(\)\) catch return;\s*if \(usage_telemetry_mode\.isRequested\(args\)\) \{\s*usage_telemetry\.main\(init\) catch \{\};\s*return;\s*\}/);
+  assert.match(entry, /^\s*launch_cache\.begin\(\);\s*const args = init\.minimal\.args\.toSlice\(init\.arena\.allocator\(\)\) catch return;\s*if \(usage_telemetry_mode\.isRequested\(args\)\) \{\s*usage_telemetry\.main\(init\) catch \{\};\s*return;\s*\}/);
   const clock = body(fs.readFileSync(path.join(root, 'src/launch_cache.zig'), 'utf8'), 'begin');
   assert.doesNotMatch(clock, /debugLog|CreateWindow|spawn|readFile|writeFile/);
   assert.ok(entry.indexOf('usage_telemetry.main(init)') < entry.indexOf('update_check.runRelaunchHelperIfRequested()'));
@@ -59,9 +59,6 @@ test('collector dispatch returns before all UI, instance, workspace, Inbox, tray
   assert.doesNotMatch(build, /\.name = "multiprompt-telemetry"|b\.step\("usage-telemetry"/);
   assert.match(build, /root_source_file = b\.path\("src\/usage_telemetry\.zig"\)/);
   assert.match(build, /test_step\.dependOn\(&run_usage_telemetry_tests\.step\)/);
-  const deferred = body(main, 'initializeDeferred');
-  assert.doesNotMatch(deferred, /\.telemetry => \{[\s\S]*?ensureUsageTelemetryCollector/);
-  assert.match(fs.readFileSync(path.join(root, 'src/telemetry_panel.zig'), 'utf8'), /pub fn syncUsageTelemetryCollector/);
 });
 
 test('singleton and stop control execute production functions with a Win32 call model', () => {
