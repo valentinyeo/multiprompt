@@ -288,9 +288,16 @@ jobs:
         if: inputs.tag == ''
         run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: inputs.tag == ''
+        if: inputs.tag == '' && inputs.feature != 'chat-still'
         with:
-          name: verify-app${{ inputs.feature == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ inputs.app_revision && '-compare' || '' }}
+          path: zig-out/bin/
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.tag == '' && inputs.feature == 'chat-still'
+        with:
+          name: verify-app-chat-still${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
