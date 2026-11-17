@@ -112,7 +112,7 @@ public static class ChatSwitchObserver {
             string carry = "";
             double shown = -1, cpuAtShown = -1, captureStarted = -1, capturePixels = -1, captureCompleted = -1;
             double nextCpu = 25;
-            while (clock.Elapsed.TotalMilliseconds < intervalMs) {
+            while (clock.Elapsed.TotalMilliseconds < intervalMs || (shown >= 0 && clock.Elapsed.TotalMilliseconds < shown + 1000)) {
                 if (target >= 0 && shown < 0) {
                     using (var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
                         if (stream.Length < position) throw new InvalidOperationException("Switch log was truncated");

@@ -1,0 +1,55 @@
+name: Verify steady chat
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-chat-steady.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  before:
+    uses: ./.github/workflows/verify.yml
+    with:
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
+      app_revision: 596e3261e9e77ce193ab7addbfd3001892242331
+      feature: chat-working-live
+  after:
+    uses: ./.github/workflows/verify.yml
+    with:
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
+      feature: chat-working-live
+  counters:
+    needs: [before, after]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-chat-delivery-596e3261e9e77ce193ab7addbfd3001892242331
+          path: before
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-chat-delivery
+          path: after
+      - name: Require a reproduced idle regression and a passing candidate
+        run: |
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          before = json.loads(Path('before/steady-live/steady-position.json').read_text())
+          after = json.loads(Path('after/steady-live/steady-position.json').read_text())
+          result = json.loads(Path('after/result.json').read_text())
+          assert before['idle']['paints'] > 1 or before['idle']['layouts'] > 0, 'The baseline did not reproduce unnecessary idle work'
+          assert result['status'] == 'passed', result
+          assert after['idle']['paints'] <= 1 and after['idle']['layouts'] == 0, after['idle']
+          assert after['streaming']['status'] == 'passed', after['streaming']
+          print(json.dumps(dict(before_idle=before['idle']['paints'], after_idle=after['idle']['paints'], streaming_paints=after['streaming']['paints'], streaming_layouts=after['streaming']['layouts'])))
+          PYCODE
