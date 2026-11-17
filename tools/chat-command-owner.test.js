@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -16,7 +17,7 @@ function fn(name) {
 test('SOFT-2584 an inne-account tab loads its own catalog on both transports', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'command-owner-'));
   try {
-    fs.copyFileSync(path.join(root, 'src/chat_complete.zig'), path.join(dir, 'chat_complete.zig'));
+    copyZig(['chat_complete.zig'], dir, path.join(root, 'src'));
     const program = `const std = @import("std");
 const chat_complete = @import("chat_complete.zig");
 const Slot = struct {

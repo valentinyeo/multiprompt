@@ -1395,7 +1395,6 @@ pub fn chatAcOnFetchDone(id: u32, slot_index: usize) void {
         const n = @min(detail.len, slot.error_text.len - prefix.len);
         for (detail[0..n], 0..) |c, i| slot.error_text[prefix.len + i] = if (c >= 32 and c < 127) c else ' ';
         slot.error_len = prefix.len + n;
-        debugLog(slot.error_text[0..slot.error_len]);
     }
     _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 0);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
