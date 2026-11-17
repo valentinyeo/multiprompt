@@ -496,6 +496,14 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Guard chat stillness before accepting chat changes
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        env:
+          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+        run: |
+          if grep -zEq '^(src/(chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.(zig|py)|tools/chat-still/|tools/verify-chat-still$)' "$RUNNER_TEMP/changed-paths"; then
+            bash tools/verify-chat-still --self-test --replay --inherit-from "$CHAT_STILL_BASE" --output "$RUNNER_TEMP/chat-still-formal.json"
+          fi
       - name: Test remote browser command list
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         run: node --test tools/zsb-remote-commands.test.js

@@ -2,7 +2,7 @@
 
 Read conversations, compose replies, attach files, search, dictate, and switch supported terminal tabs between chat and shell.
 
-Journeys: chat-focus, chat-view, chat-composer-text
+Journeys: chat-focus, chat-view, chat-composer-text, chat-still
 Release paths: src/chat*, src/agent*.zig, src/live*.zig, src/terminal*, src/skills*, src/voice*.zig, src/main.zig, src/app_state.zig, build.zig
 
 ## Sub-features
