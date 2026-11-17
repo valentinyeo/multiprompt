@@ -1203,7 +1203,7 @@ def reader_namespace():
         spec = importlib.util.spec_from_file_location("working_host", fixture_path)
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
-        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live")
+        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live", real_size=state().get("realSize", False))
         original_push = namespace["events_push"]
 
         def working_push(subscriptions):

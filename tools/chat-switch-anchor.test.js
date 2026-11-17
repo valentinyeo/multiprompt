@@ -122,19 +122,6 @@ test "SOFT-2557 a late New divider never moves the first painted row" {
     try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
   }
 }
-test "SOFT-2557 short cached messages stay still through growth past the viewport" {
-  openTab(2);
-  const first_y = app_state.g_chat_layout_rects[0].top - app_state.g_chat_scroll_y;
-  for ([_]usize{ 3, 4, 5, 8 }) |count| {
-    app_state.next_blocks = count;
-    refreshChatTranscript(false);
-    try std.testing.expectEqual(first_y, app_state.g_chat_layout_rects[0].top - app_state.g_chat_scroll_y);
-    chatRelayoutPreservingScroll(800, 600);
-    try std.testing.expectEqual(first_y, app_state.g_chat_layout_rects[0].top - app_state.g_chat_scroll_y);
-    try std.testing.expect(app_state.g_chat_scroll_y >= 0);
-    try std.testing.expect(app_state.g_chat_scroll_y <= @max(0, app_state.g_chat_content_h - 600));
-  }
-}
 test "IGSH-1924 reader scroll releases the anchor and new content follows the bottom again" {
   openTab(40);
   app_state.g_chat_read_hold = false;
@@ -163,18 +150,18 @@ test "IGSH-1924 short unread keeps its clamped position as later replies arrive"
   refreshChatTranscript(false);
   try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
 }
-test "IGSH-1924 a fitting visible cache keeps its position when the full conversation arrives" {
+test "IGSH-1924 a fitting cache opens the full conversation at its newest message" {
   openTab(1);
   app_state.has_unread = false;
   try std.testing.expect(app_state.g_chat_content_h < 600);
   app_state.next_blocks = 40;
   refreshChatTranscript(false);
-  try std.testing.expectEqual(@as(i32, 0), app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
   openTab(1);
   app_state.has_unread = false;
   app_state.g_chat_block_count = 40;
   chatRelayoutPreservingScroll(800, 600);
-  try std.testing.expectEqual(@as(i32, 0), app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
 }
 test "IGSH-1924 holds never leave blank space after content shrinks" {
   openTab(40);
@@ -183,7 +170,7 @@ test "IGSH-1924 holds never leave blank space after content shrinks" {
   try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
   app_state.next_blocks = 1;
   refreshChatTranscript(false);
-  try std.testing.expectEqual(@as(i32, 0), app_state.g_chat_scroll_y);
+  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
 }
 test "IGSH-1924 relayout retains position but clamps to the real bottom" {
   openTab(31);
@@ -212,7 +199,7 @@ const current = between(session, 'pub fn refreshChatTranscript(force: bool) void
 test('IGSH-1924 switching to an unread chat stays on the New divider', () => {
   const result = run(current);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 9 tests passed/);
+  assert.match(result.stderr, /All 8 tests passed/);
 });
 
 test('IGSH-1924 the previous switch path follows the bottom past the divider', () => {

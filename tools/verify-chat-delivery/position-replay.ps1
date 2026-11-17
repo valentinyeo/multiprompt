@@ -9,7 +9,7 @@ function Read-ReplayLog {
 }
 function Observe-Replay([string]$Name, [string]$Policy, [scriptblock]$Action, [int]$Tab) {
     Doctor
-    $phase = @{ name=$Name; policy=$Policy; start=[VerifyNative]::GetTickCount64(); shell=0; end=0 }
+    $phase = @{ name=$Name; policy=$Policy; requirePaint=($Name -notlike 'idle-*'); start=[VerifyNative]::GetTickCount64(); shell=0; end=0 }
     $phases.Add($phase)
     Save-Json $phases.ToArray() 'position-phases.json'
     & $Action
@@ -49,6 +49,7 @@ try {
             Wait-Until { (Read-ReplayLog) -match ('\[switch\] chat content shown shell=' + $sid + ' blocks=[1-9]') } 'actual session history painted' 60
         } $tab
     }
+    Observe-Replay 'idle-long-open' 'stable' {} 4
     Snapshot 'before'
     foreach ($tab in @(0, 1, 4, 2, 0, 3, 1, 4, 0, 2, 4, 1)) {
         $target = $tab
@@ -63,10 +64,11 @@ try {
     if ($composer -eq [IntPtr]::Zero) { throw 'No owned visible composer' }
     Observe-Replay 'scroll-to-history' 'user-scroll' {
         Press @(0x21) 'Page Up into old history'
-        Press @(0x21) 'Page Up farther into old history'
+        for ($page = 0; $page -lt 40; $page++) { Press @(0x21) 'Page Up through the real-size archive' }
     } 1
     $latestFrame = @(Get-Content (Join-Path $env:MULTIPROMPT_FRAME_PROBE 'frames.tsv') | Where-Object { $_.StartsWith("frame`t") })[-1] -split "`t"
     if ($latestFrame[14] -ne '1') { throw 'Reader must actually be scrolled above the newest messages' }
+    Observe-Replay 'idle-long-reading' 'stable' {} 1
     Observe-Replay 'receive-while-reading' 'stable' {
         Add-ReplayAnswer 1 ("A streamed answer arrives below the reader. " * 80)
     } 1

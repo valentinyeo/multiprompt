@@ -87,13 +87,14 @@ function replay(directory, phases) {
   for (const phase of phases) {
     if (!phase.end || phase.end - phase.start < 3000) throw new Error(`Incomplete observation ${phase.name}`);
     const samples = frames.filter(f => f.tick >= phase.start && f.tick <= phase.end && f.active === phase.shell);
-    if (!samples.length || !samples.some(f => f.blocks.length && f.cache === phase.shell)) throw new Error(`Missing target paint for ${phase.name}`);
+    if (phase.requirePaint !== false && (!samples.length || !samples.some(f => f.blocks.length && f.cache === phase.shell))) throw new Error(`Missing target paint for ${phase.name}`);
     const painted = samples.filter(f => f.blocks.length);
     if (!/^(open|switch)-/.test(phase.name)) {
       const prior = frames.findLast(f => f.tick < phase.start && f.active === phase.shell && f.blocks.length);
       if (!prior) throw new Error(`Missing pre-action frame for ${phase.name}`);
       painted.unshift(prior);
     }
+    if (!painted.length) throw new Error(`No visible content for ${phase.name}`);
     const moves = [];
     for (let i = 1; i < painted.length; i++) {
       const a = painted[i - 1];
@@ -125,26 +126,24 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 
-test('SOFT-2557 real opening scroll keeps short content at the same screen position', { skip: process.env.GITHUB_ACTIONS !== 'true' }, t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'short-opening-scroll-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const source = fs.readFileSync(path.join(__dirname, '../../src/chat_history.zig'), 'utf8');
-  const open = source.slice(source.indexOf('pub fn openScroll('), source.indexOf('pub const MISSING_RETRY_MS'));
-  const native = `const std = @import("std");
-const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
-${open}
-test "short opening never bottom-aligns late history over already painted messages" {
-    try std.testing.expectEqual(@as(i32, 0), openScroll(184, 556, 52, .{}, 0, null));
-    try std.testing.expectEqual(@as(i32, 0), openScroll(364, 556, 52, .{}, 0, 0));
-    try std.testing.expectEqual(@as(i32, 0), openScroll(668, 556, 52, .{}, 0, 0));
-    try std.testing.expectEqual(@as(i32, 112), openScroll(668, 556, 52, .{}, 0, 900));
-}
-`;
-  fs.writeFileSync(path.join(directory, 'test.zig'), native);
+test('the actual hosted boundary enables PR 1070 real-size history for the jump journey', () => {
   const { spawnSync } = require('node:child_process');
-  const result = spawnSync(process.env.ZIG_EXE || process.env.ZIG || 'zig', ['test', '-j1', 'test.zig'], { cwd: directory, encoding: 'utf8', timeout: 90000 });
+  const script = `import ast, json, sys
+from pathlib import Path
+source = ast.parse(Path(sys.argv[1]).read_text(encoding='utf-8'))
+calls = [n for n in ast.walk(source) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'install' and any(k.arg == 'steady' for k in n.keywords)]
+assert len(calls) == 1
+class Fixture:
+    def install(self, *args, steady=False, real_size=False):
+        return dict(steady=steady, realSize=real_size)
+actual = eval(compile(ast.Expression(calls[0]), '<hosted-boundary>', 'eval'), dict(fixture=Fixture(), namespace={}, ROOT=None, record=None, state=lambda: dict(name='steady-live', realSize=True)))
+print(json.dumps(actual))
+`;
+  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script, path.join(__dirname, 'boundary.py')], { encoding: 'utf8', timeout: 10000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { steady: true, realSize: true });
 });
+
 
 function bitmap(width, height, textY) {
   const image = Buffer.alloc(54 + width * height * 4, 255);

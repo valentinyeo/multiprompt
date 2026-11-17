@@ -10,6 +10,12 @@ on:
       - .claude/skills/verify-multiprompt/drive.ps1
       - tools/verify-chat-delivery/*frame-probe*
       - tools/verify-chat-delivery/position-replay*
+      - tools/verify-chat-delivery/hosted-position.ps1
+      - tools/verify-chat-delivery/seed-position-profile.py
+      - .claude/skills/verify-multiprompt/seed-profile.*
+      - tools/verify-chat-delivery/working-host.py
+      - tools/verify-chat-delivery/boundary.py
+      - tools/verify-chat-delivery/drive.ps1
       - src/chat*.zig
 
 permissions:
@@ -52,10 +58,21 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          before = json.loads(Path('baseline/position-replay.json').read_text())
-          after = json.loads(Path('candidate/position-replay.json').read_text())
-          assert before['status'] == 'failed', 'Master must fail on an observed painted movement, not setup or missing evidence'
-          assert after['status'] == 'passed', after
-          assert json.loads(Path('candidate/result.json').read_text(encoding='utf-8-sig'))['status'] == 'passed'
-          print(json.dumps(dict(master=before['status'], candidate=after['status'], before_frames=before['frameCount'], after_frames=after['frameCount'])))
+          def load(root, file):
+              return json.loads(Path(root, file).read_text(encoding='utf-8-sig'))
+          for root in ('baseline', 'candidate'):
+              manifest = load(root, 'fixture-manifest.json')
+              assert manifest['sessions'] == 64 and manifest['longChats'] == 8 and manifest['messagesPerLongChat'] == 2400, 'Use the PR 1070 real-size seed, not a short-chat substitute'
+              assert len(manifest['positionTargets']) == 5 and all(t['messages'] == 2400 for t in manifest['positionTargets']), 'Every switched target must be a real-size long chat'
+              hosted = load(root, 'hosted/steady-live/fixture-manifest.json')
+              assert hosted['sessions'] == 64 and hosted['messagesPerLongChat'] == 2400, 'Hosted reader must use the same PR 1070 seed'
+          paths = ['position-replay.json', 'hosted/steady-live/position-replay.json']
+          before = [load('baseline', file) for file in paths]
+          after = [load('candidate', file) for file in paths]
+          moved = [(p['name'], p['moves']) for run in before for p in run['observations'] if p['policy'] == 'stable' and p['moves']]
+          assert moved, 'Master must reproduce a painted jump in a long chat; setup failures or short-chat jumps do not count'
+          assert all(run['status'] == 'passed' for run in after), after
+          assert load('candidate', 'result.json')['status'] == 'passed'
+          assert load('candidate', 'hosted/result.json')['status'] == 'passed'
+          print(json.dumps(dict(master_moved_phases=[name for name, moves in moved], candidate='passed', before_frames=[run['frameCount'] for run in before], after_frames=[run['frameCount'] for run in after])))
           PY

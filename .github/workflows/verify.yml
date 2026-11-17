@@ -1074,6 +1074,13 @@ jobs:
           } else {
             & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
+      - name: Record the same real-size hosted chat while it stays open
+        if: always() && inputs.chat_position_replay && !cancelled()
+        shell: powershell
+        env:
+          CHAT_WORKING_LIVE_PROOF: '1'
+        run: |
+          & .claude/skills/verify-multiprompt/drive.ps1 -Feature chat-delivery -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/hosted"
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |
@@ -1109,12 +1116,15 @@ jobs:
         shell: powershell
         run: |
           Add-Type -AssemblyName System.Drawing
-          foreach ($file in Get-ChildItem evidence/paints -Filter '*.bmp') {
-            $image = [Drawing.Image]::FromFile($file.FullName)
-            try { $image.Save(($file.FullName -replace '\.bmp$', '.png'), [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+          foreach ($directory in @('evidence/paints', 'evidence/hosted/steady-live/paints')) {
+            if (-not (Test-Path $directory)) { continue }
+            foreach ($file in Get-ChildItem $directory -Filter '*.bmp') {
+              $image = [Drawing.Image]::FromFile($file.FullName)
+              try { $image.Save(($file.FullName -replace '\.bmp$', '.png'), [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+            }
+            Compress-Archive -Path "$directory/*.bmp" -DestinationPath "$directory/paint-bitmaps.zip"
+            Remove-Item "$directory/*.bmp"
           }
-          Compress-Archive -Path evidence/paints/*.bmp -DestinationPath evidence/paint-bitmaps.zip
-          Remove-Item evidence/paints/*.bmp
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

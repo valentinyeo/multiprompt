@@ -63,6 +63,7 @@ if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; 
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1' -and $env:CHAT_POSITION_REPLAY -eq '1') { $plans = @(@{name='steady-live'; mode='idle'; text='Read the real-size reply without moving the history'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
@@ -583,6 +584,7 @@ foreach ($plan in $plans) {
         }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
+        if ($env:CHAT_POSITION_REPLAY -eq '1') { $seed.realSize = $true }
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
@@ -675,6 +677,11 @@ foreach ($plan in $plans) {
             if ($isSwitch) { $saved.single_window = $true }
             Save $saved "$settings/session.json"
         }
+        if ($env:CHAT_POSITION_REPLAY -eq '1') {
+            & "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $profile -HomePath $env:HOME -Evidence $caseDir
+            $env:MULTIPROMPT_FRAME_PROBE = "$caseDir/paints"
+            New-Item -ItemType Directory -Force $env:MULTIPROMPT_FRAME_PROBE | Out-Null
+        }
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
         if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable embedded version mismatch' }
         $job = [VerifyJob]::new()
@@ -686,11 +693,14 @@ foreach ($plan in $plans) {
         Shot "$($plan.name)-before"
         if ($plan.name -eq 'busy-send') { Shot 'before' }
         $latestClock = [Diagnostics.Stopwatch]::StartNew()
+        if ($env:CHAT_POSITION_REPLAY -eq '1') { $observation.positionOpenStart = [ChatDeliveryDesktop]::GetTickCount64() }
         Press @(0x12, 0x43) 'Alt+C: open Chat View'
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1' -and $env:CHAT_POSITION_REPLAY -eq '1') {
+            . "$PSScriptRoot/hosted-position.ps1"
+        } elseif ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
             . "$PSScriptRoot/working-live.ps1"
         } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
@@ -1554,6 +1564,13 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1' -and $env:CHAT_POSITION_REPLAY -eq '1') {
+    $observed = Get-Content "$Evidence/steady-live/observation.json" -Raw | ConvertFrom-Json
+    $clean = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+    if ($observed.error -or -not $observed.positionPassed -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed) { throw "Hosted long-chat position journey failed: $($observed.error)" }
+    Save @{feature=$Feature; status='passed'; checks=@{name='hosted-long-chat-position'; status='passed'}} "$Evidence/result.json"
+    exit 0
+}
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-working-live-proof.mjs" $Evidence
     exit $LASTEXITCODE

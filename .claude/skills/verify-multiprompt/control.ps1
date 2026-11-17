@@ -343,6 +343,8 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Measured-shape transcript seeding failed' }
             Copy-Item -LiteralPath $shapeFile (Join-Path $Evidence 'chat-shapes.json')
             Copy-Item -LiteralPath (Join-Path $remoteState 'chat-shape-manifest.json') (Join-Path $Evidence 'chat-shape-manifest.json')
+        } elseif ($env:CHAT_POSITION_REPLAY -eq '1') {
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 0
         } elseif ($Feature -in @('chat-options', 'chat-slash')) {
             & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 1
         } else {
@@ -350,11 +352,8 @@ try {
         }
         if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
         if ($env:CHAT_POSITION_REPLAY -eq '1') {
-            $shortPath = Join-Path $scratch ('profile/.claude/projects/C--verify-work0/' + $remoteSids[$remoteNames[0]] + '.jsonl')
-            $shortRows = @(Get-Content $shortPath -TotalCount 2 | ForEach-Object { $_ | ConvertFrom-Json })
-            $shortRows[0].message.content = 'A short session question.'
-            $shortRows[1].message.content[0].text = 'A short session answer.'
-            [IO.File]::WriteAllLines($shortPath, @($shortRows | ForEach-Object { $_ | ConvertTo-Json -Depth 8 -Compress }), [Text.UTF8Encoding]::new($false))
+            & $env:MP_VERIFY_PYTHON (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/seed-position-profile.py') $scratch $Evidence
+            if ($LASTEXITCODE -ne 0) { throw 'PR 1070 real-size position seed failed' }
         }
         if ($Feature -eq 'chat-options') {
             $remoteDocument.name = 'chat-options'
@@ -522,7 +521,11 @@ try {
         Snapshot 'startup-maximized'
     }
     [void][VerifyNative]::ShowWindow($script:window, 9)
-    [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+    if ($env:CHAT_POSITION_REPLAY -eq '1') {
+        [void][VerifyNative]::MoveWindow($script:window, 0, 0, 2560, 1560, $true)
+    } else {
+        [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+    }
     [void][VerifyNative]::SetForegroundWindow($script:window)
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'foreground main window'
     Doctor

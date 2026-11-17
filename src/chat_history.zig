@@ -890,7 +890,7 @@ pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bot
 
 pub fn openScroll(content_h: i32, viewport_h: i32, top_pad: i32, boundary: ReadBoundary, divider_y: i32, anchor: ?i32) i32 {
     const bottom = content_h - viewport_h;
-    if (bottom <= 0) return 0;
+    if (bottom <= 0) return bottom;
     const target = anchor orelse if (boundary.index != null and !boundary.unknown) divider_y - top_pad else bottom;
     return std.math.clamp(target, 0, bottom);
 }

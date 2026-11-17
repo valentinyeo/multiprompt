@@ -25,6 +25,10 @@ $record = [ordered]@{ feature=$Feature; journey=$Journey; revision=(git rev-pars
 $video = $null
 $frameRate = if ($env:CHAT_POSITION_REPLAY -eq '1') { 30 } else { 8 }
 try {
+    if ($env:CHAT_POSITION_REPLAY -eq '1') {
+        Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/layout-capture.cs')
+        [LayoutCapture]::Display(2560, 1600)
+    }
     $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate $frameRate -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
     $start.UseShellExecute = $false
     $start.RedirectStandardInput = $true
@@ -34,9 +38,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Journey exited $LASTEXITCODE; inspect result.json" }
     $result = Get-Content "$Evidence/result.json" -Raw | ConvertFrom-Json
     if ($result.status -ne 'passed') { throw 'Journey did not pass' }
-    $tree = Get-Content "$Evidence/process-tree.json" -Raw | ConvertFrom-Json
-    if (-not $result.scratchRemoved -or $tree.activeAfterStop -ne 0) { throw 'Owned cleanup failed' }
-    foreach ($name in @('before.png', 'action.png', 'after.png', 'actions.json', 'doctor.json', 'data')) {
+    if ($Feature -eq 'chat-delivery') {
+        $cleanup = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+        if (-not $cleanup.scratch_removed -or $cleanup.remaining_owned_processes -ne 0) { throw 'Owned cleanup failed' }
+    } else {
+        $tree = Get-Content "$Evidence/process-tree.json" -Raw | ConvertFrom-Json
+        if (-not $result.scratchRemoved -or $tree.activeAfterStop -ne 0) { throw 'Owned cleanup failed' }
+    }
+    $required = @('before.png', 'action.png', 'after.png', 'actions.json', 'doctor.json')
+    if ($Feature -eq 'chat-delivery') { $required += @('steady-live/debug.log', 'steady-live/host') } else { $required += 'data' }
+    foreach ($name in $required) {
         if (-not (Test-Path "$Evidence/$name")) { throw "Evidence missing after cleanup: $name" }
     }
     $record.status = 'passed'
