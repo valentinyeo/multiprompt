@@ -49,7 +49,7 @@ function stepEvidence(step, before, after, inbox, groupId) {
   const old = tab(before, step.id), current = tab(after, step.id);
   assert.ok(old, `${step.name} starts with the real target`);
   assert.ok(Number.isSafeInteger(step.id) && step.id > 0);
-  if (step.route === 'context') {
+  if (step.route === 'context' || step.name === 'disconnected-global') {
     assert.equal(after.tabs[after.active_tab].chat_id, before.tabs[before.active_tab].chat_id, `${step.name} preserves the active identity`);
     if (step.name !== 'workspace-existing') assert.equal(after.active_workspace, before.active_workspace);
   } else {
@@ -198,10 +198,13 @@ else if (process.argv[2] === '--evidence') {
     assert.throws(() => stepEvidence(step, before, after, {}, undefined), assert.AssertionError);
   });
   test('local close needs a removed identity and an exited process while the other tab survives', () => {
-    const before = { active_tab: 0, active_workspace: 0, tabs: [{ chat_id: 101, name: 'Control' }, { chat_id: 202, name: 'Victim', pinned_top: true }] };
-    const after = { ...before, tabs: [before.tabs[0]] };
+    const before = { active_tab: 0, active_workspace: 0, tabs: [{ chat_id: 101, name: 'Control' }, { chat_id: 202, name: 'Victim', pinned_top: true }, { chat_id: 303, name: 'Peer' }] };
+    const after = { ...before, tabs: [before.tabs[0], before.tabs[2]] };
     const step = { name: 'disconnected-context', route: 'context', id: 202, extra: { pid: 42, exited: true } };
     stepEvidence(step, before, after, {}, undefined);
+    const globalStep = { ...step, name: 'disconnected-global', route: 'global' };
+    stepEvidence(globalStep, before, after, {}, undefined);
+    assert.throws(() => stepEvidence(globalStep, before, { ...after, active_tab: 1 }, {}, undefined), assert.AssertionError);
     step.extra.exited = false;
     assert.throws(() => stepEvidence(step, before, after, {}, undefined), assert.AssertionError);
     step.extra.exited = true;
