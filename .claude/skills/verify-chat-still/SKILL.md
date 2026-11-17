@@ -27,7 +27,7 @@ Last source/model sync commit is `d3c8786836aca46973466e04e8142868573f6909`. Con
 | --- | --- |
 | `src/chat_session.zig`, `refreshChatTranscript` | Existing first-visible-row anchor, synchronous refresh/layout, padding compensation, final held-scroll selection. |
 | `src/chat_session.zig`, `chatRelayoutPreservingScroll` | Existing first-visible-row anchor, remeasurement and final held-scroll selection. |
-| `src/chat_history.zig`, `openScroll` | Exact bottom calculation, divider fallback and content clamp. |
+| `src/chat_history.zig`, `scrollAnchor`, `followBottom`, `scrollAfterLayout`, `openScroll`, `Anchor`, `ReadBoundary` | Anchor definition, exact bottom calculation, divider fallback, content clamp and replay types. |
 | `tools/chat-still/verify.py`, `symbolic`, `held`, `check` | Restricted scalar translation and Z3 obligations. |
 | `tools/chat-still/replay.py`, `replay` | Extracted production `scrollAnchor`, `followBottom`, `scrollAfterLayout`, `openScroll` and both callers, with a deterministic measurement boundary. |
 

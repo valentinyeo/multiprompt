@@ -82,6 +82,10 @@ def check(root, replay_code=False):
         digest = hashlib.sha256(normalized(body).encode()).hexdigest()
         if digest != recorded["functions"][name]["sha256"]:
             raise ValueError(name + " changed outside the translated expression; review the model and coverage record")
+    for name, record in recorded["types"].items():
+        line = next((line for line in history.splitlines() if line.startswith("pub const " + name + " = struct")), "")
+        if hashlib.sha256(normalized(line).encode()).hexdigest() != record["sha256"]:
+            raise ValueError(name + " changed; review the model and replay types")
     failures = []
     witnesses = []
     for name, body in bodies.items():
@@ -179,6 +183,6 @@ if __name__ == "__main__":
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, indent=2) + "\n")
         sys.exit(bool(result["failures"]))
-    except (ValueError, KeyError, AttributeError) as error:
+    except (ValueError, KeyError, AttributeError, StopIteration, SyntaxError) as error:
         print("MODEL DRIFT:", error, file=sys.stderr)
         sys.exit(2)

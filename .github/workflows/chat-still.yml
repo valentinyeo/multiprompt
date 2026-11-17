@@ -11,6 +11,7 @@ on:
       - 'src/browser_pane.zig'
       - 'src/drawing.zig'
       - 'tools/chat-still/**'
+      - 'tools/verify-chat-delivery/**'
       - 'tools/verify-chat-still'
       - 'tools/pr-verifier*'
       - '.claude/skills/verify-multiprompt/**'
@@ -64,7 +65,7 @@ jobs:
       revision: ${{ github.event.pull_request.head.sha || github.sha }}
       feature: chat-still
   comment-review:
-    if: always() && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || inputs.comment_review)
+    if: always() && !cancelled() && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || inputs.comment_review)
     needs: [formal, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 15

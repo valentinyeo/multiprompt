@@ -500,7 +500,7 @@ test('job timeouts and cancellations block even when product result files passed
 test('chat changes cannot omit the stillness journey or exceed the journey limit', () => {
   const maps = [...available, 'chat-still'];
   const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
-  for (const file of ['src/chat_render.zig', 'src/chat_session.zig', 'src/chat_history_reader.py', 'src/main.zig', 'src/browser_pane.zig', 'src/window_layout.zig', 'tools/chat-still/observer.cs', '.claude/skills/verify-multiprompt/control-feature-chat-still.ps1']) {
+  for (const file of ['src/chat_render.zig', 'src/chat_session.zig', 'src/chat_history_reader.py', 'src/main.zig', 'src/browser_pane.zig', 'src/window_layout.zig', 'tools/chat-still/observer.cs', 'tools/verify-chat-delivery/boundary.py', '.claude/skills/verify-multiprompt/control-feature-chat-still.ps1']) {
     assert.deepEqual(verifier.validateSelection(raw, maps, [file]).features, ['chat-still', 'appearance', 'command-palette']);
   }
   assert.deepEqual(verifier.validateSelection(raw, maps, ['docs/readme.md']).features, raw.features);

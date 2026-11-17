@@ -651,7 +651,10 @@ jobs:
       - name: Prove the per-frame stillness oracle rejects broken frames
         if: env.FEATURE == 'chat-still'
         shell: powershell
-        run: . tools/chat-still/observer.test.ps1
+        run: |
+          python tools/chat-still/host_test.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Live streaming boundary contracts failed' }
+          . tools/chat-still/observer.test.ps1
       - name: Check measured chat shape contracts
         if: env.FEATURE == 'chat-switch-speed'
         run: |

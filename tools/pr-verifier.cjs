@@ -31,7 +31,7 @@ function validateSelection(raw, available, changedPaths = []) {
   if (!parsed || typeof parsed !== 'object') throw new Error('Selection must be an object');
   const allowed = new Set(selectable(available));
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
-  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
+  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
     if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
     requested.unshift('chat-still');
   }

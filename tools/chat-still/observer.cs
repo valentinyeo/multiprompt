@@ -24,7 +24,8 @@ public sealed class ChatStillObserver {
     Thread thread;
     string error, key, latest;
     int[] baseline;
-    double first = -1;
+    double first = -1, streaming = -1;
+    long streamStartedUtc;
     long position;
     string carry = "";
     bool target, building;
@@ -65,7 +66,7 @@ public sealed class ChatStillObserver {
         var origin = new Point();
         if (!ClientToScreen(view, ref origin)) throw new InvalidOperationException("Transcript screen origin unavailable");
         var screen = new int[] { rect[0] + origin.X, rect[1] + origin.Y, rect[2] + origin.X, rect[3] + origin.Y };
-        samples.Add(new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "kind", kind }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } });
+        samples.Add(new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } });
         if (baseline == null) baseline = screen;
         AssertFrame(baseline, screen, dirty, width, layout);
         Rect client;
@@ -73,7 +74,7 @@ public sealed class ChatStillObserver {
         AssertFrame(baseline, screen, dirty, client.Right - client.Left, layout);
         if (rect[3] <= 0 || rect[1] >= client.Bottom) throw new InvalidOperationException("Newest initially visible message is no longer on screen");
     }
-    void Read(string log, string shell, IntPtr view, bool seed) {
+    void Read(string log, string shell, IntPtr view) {
         using (var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
             if (stream.Length < position) throw new InvalidOperationException("Paint log truncated during observation");
             stream.Position = position;
@@ -88,42 +89,52 @@ public sealed class ChatStillObserver {
             carry = carry.Substring(end + 1);
             var header = Regex.Match(line, @"\[chat-still\] begin shell=(\d+) dirty=(\d+) width=(\d+) layout=(\d+) height=(\d+)");
             if (header.Success) {
+                if (building) throw new InvalidOperationException("Native paint geometry was incomplete before the next paint");
                 target = header.Groups[1].Value == shell;
                 building = true;
                 rows.Clear(); latest = null;
                 dirty = Int32.Parse(header.Groups[2].Value); width = Int32.Parse(header.Groups[3].Value); layout = Int32.Parse(header.Groups[4].Value); height = Int32.Parse(header.Groups[5].Value);
             }
             var row = Regex.Match(line, @"\[chat-still\] row message=(\d+) offset=(\d+) rect=(-?\d+,-?\d+,-?\d+,-?\d+)");
+            if (!building && first >= 0 && row.Success) throw new InvalidOperationException("Native message geometry arrived outside a complete paint");
             if (building && target && row.Success) {
-                latest = row.Groups[1].Value + "/" + row.Groups[2].Value;
+                latest = row.Groups[1].Value == "0" ? "offset/" + row.Groups[2].Value : "message/" + row.Groups[1].Value;
                 rows[latest] = ParseRect(row.Groups[3].Value);
             }
             if (line.Contains("[chat-still] end")) {
                 building = false;
-                if (target && !seed) {
-                    paints++; heights.Add(height);
+                if (target) {
+                    if (streaming >= 0) { paints++; heights.Add(height); }
                     if (first >= 0 && latest == null) throw new InvalidOperationException("Transcript flickered blank after being shown");
                     Sample(view, "paint");
                 }
             }
         }
     }
-    public void Start(int pid, IntPtr owner, string log, long offset, string shell, bool seed) {
+    public void Start(int pid, IntPtr owner, string log, long offset, string shell, string state) {
         if (thread != null) throw new InvalidOperationException("Observer already started");
         thread = new Thread(delegate() {
             try {
                 IntPtr view = Transcript(pid, owner);
+                position = offset;
                 clock.Start();
-                if (seed) { Read(log, shell, view, true); Sample(view, "first-frame"); }
-                else position = offset;
-                while (!stop && clock.Elapsed.TotalMilliseconds < 20000 && (first < 0 || clock.Elapsed.TotalMilliseconds - first < 2100)) {
+                while (!stop && clock.Elapsed.TotalMilliseconds < 30000 && (streaming < 0 || clock.Elapsed.TotalMilliseconds - streaming < 4200 || building)) {
                     if (DwmFlush() != 0) throw new InvalidOperationException("DWM frame sampling unavailable");
-                    Read(log, shell, view, false);
+                    Read(log, shell, view);
                     Sample(view, "display-frame");
+                    if (first >= 0 && streaming < 0 && clock.Elapsed.TotalMilliseconds - first >= 2100 && File.Exists(Path.Combine(state, "still-subscribed"))) {
+                        streaming = clock.Elapsed.TotalMilliseconds;
+                        streamStartedUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        File.WriteAllText(Path.Combine(state, "still-stream-start"), "start");
+                    }
                 }
                 if (first < 0) throw new InvalidOperationException("No first content frame was observed");
-                if (clock.Elapsed.TotalMilliseconds - first < 2000) throw new InvalidOperationException("Observation shorter than two seconds");
-                if (samples.FindAll(s => (string)s["kind"] == "display-frame").Count < 30) throw new InvalidOperationException("Too few display frames sampled");
+                if (streaming < 0) throw new InvalidOperationException("No production live subscription was observed");
+                if (clock.Elapsed.TotalMilliseconds - streaming < 4000) throw new InvalidOperationException("Streaming observation was incomplete");
+                foreach (string phase in new string[] { "idle", "streaming" }) {
+                    if (samples.FindAll(s => (string)s["kind"] == "display-frame" && (string)s["phase"] == phase).Count < 30)
+                        throw new InvalidOperationException("Too few display frames sampled during " + phase);
+                }
                 if (building) throw new InvalidOperationException("Incomplete paint geometry at observation end");
             } catch (Exception failure) { error = failure.Message; }
         });
@@ -131,7 +142,7 @@ public sealed class ChatStillObserver {
         thread.Start();
     }
     public Dictionary<string, object> Finish() {
-        if (thread == null || !thread.Join(25000)) { stop = true; throw new InvalidOperationException("Observer did not finish"); }
-        return new Dictionary<string, object> { { "status", error == null ? "passed" : "failed" }, { "error", error }, { "samples", samples }, { "paints", paints }, { "distinct_content_heights", heights.Count }, { "elapsed_ms", clock.Elapsed.TotalMilliseconds }, { "observed_ms", first < 0 ? 0 : clock.Elapsed.TotalMilliseconds - first } };
+        if (thread == null || !thread.Join(35000)) { stop = true; throw new InvalidOperationException("Observer did not finish"); }
+        return new Dictionary<string, object> { { "status", error == null ? "passed" : "failed" }, { "error", error }, { "message", key }, { "baseline", baseline }, { "samples", samples }, { "streaming_paints", paints }, { "distinct_streaming_heights", heights.Count }, { "elapsed_ms", clock.Elapsed.TotalMilliseconds }, { "idle_ms", first < 0 || streaming < 0 ? 0 : streaming - first }, { "streaming_ms", streaming < 0 ? 0 : clock.Elapsed.TotalMilliseconds - streaming }, { "stream_started_utc_ms", streamStartedUtc } };
     }
 }

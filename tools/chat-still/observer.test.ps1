@@ -27,6 +27,6 @@ Reject { $observer.GetType().GetMethod('Sample', $flags).Invoke($observer, @([In
 $log = Join-Path $env:RUNNER_TEMP 'chat-still-oracle.log'
 try {
     [IO.File]::WriteAllText($log, "[chat-still] begin shell=7 dirty=0 width=800 layout=800 height=2000`n[chat-still] end`n")
-    Reject { $observer.GetType().GetMethod('Read', $flags).Invoke($observer, @($log, '7', [IntPtr]::Zero, $false)) } 'flickered blank'
+    Reject { $observer.GetType().GetMethod('Read', $flags).Invoke($observer, @($log, '7', [IntPtr]::Zero)) } 'flickered blank'
 } finally { Remove-Item $log -ErrorAction SilentlyContinue }
 Write-Host 'PASS: exact rectangle, first-frame dirty layout, width mismatch, missing identity and blank paint controls'
