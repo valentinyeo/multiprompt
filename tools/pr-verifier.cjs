@@ -755,7 +755,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { describeRun, runOutcome, waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
