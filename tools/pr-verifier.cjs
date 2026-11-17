@@ -450,7 +450,7 @@ function latestArtifacts(artifacts, selection, baseSha) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && (!match[1] || (selection.compareBase && match[1] === baseSha));
+      return match && (!match[1] || match[1] === baseSha);
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||
