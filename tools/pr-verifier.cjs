@@ -39,6 +39,11 @@ function validateSelection(raw, available, pr = {}) {
   const allowed = new Set(selectable(available));
   const requirement = reproRequirement(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
+  const changedPaths = (pr.files || []).map(file => file.path);
+  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
+    if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
+    requested.unshift('chat-still');
+  }
   if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
@@ -372,7 +377,7 @@ function prepare(env, outDir) {
   const number = env.PR_NUMBER;
   const repo = env.REPO;
   fs.mkdirSync(outDir, { recursive: true });
-  const pr = JSON.parse(gh(['pr', 'view', number, '--repo', repo, '--json', 'number,title,labels,body,url,headRefName,baseRefName,commits']));
+  const pr = JSON.parse(gh(['pr', 'view', number, '--repo', repo, '--json', 'number,title,labels,body,url,headRefName,baseRefName,commits,files']));
   const context = [
     `# Pull request ${pr.number}: ${pr.title}`,
     '',
