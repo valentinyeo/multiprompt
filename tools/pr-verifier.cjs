@@ -44,8 +44,10 @@ function validateSelection(raw, available, pr = {}) {
     if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
     requested.unshift('chat-still');
   }
-  const breakItFeatures = requirement.bugFix && requirement.reproJourney ? [requirement.reproJourney] :
-    changedPaths.some(file => /(?:^|\/)(?:break-it[^/]*|pr-verifier-break-it\.test\.js)$/.test(file)) ? ['chat-working-live'] : [];
+  const breakItFeatures = requirement.bugFix && requirement.reproJourney ? [requirement.reproJourney] : [];
+  const breakItHistory = changedPaths.some(file => /(?:^|\/)(?:break-it[^/]*|pr-verifier-break-it\.test\.js)$/.test(file))
+    ? '5ce536b45569e8cb4394e8e967067f19bf3d49d0' : '';
+  if (breakItHistory) requested.unshift('chat-working-live');
   requested.unshift(...breakItFeatures);
   const features = [];
   const dropped = [];
@@ -59,7 +61,7 @@ function validateSelection(raw, available, pr = {}) {
     dropped,
     ...requirement,
     breakItFeatures,
-    breakItHistory: breakItFeatures.includes('chat-working-live') && !requirement.bugFix ? '5ce536b45569e8cb4394e8e967067f19bf3d49d0' : '',
+    breakItHistory,
     compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
@@ -134,9 +136,10 @@ function describeRun(directory, name) {
   };
 }
 
-function summarize(evidenceDir, features, baseSha) {
+function summarize(evidenceDir, features, baseSha, historySha = '') {
   const names = fs.existsSync(evidenceDir) ? fs.readdirSync(evidenceDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) : [];
   const summary = { head: {}, base: {} };
+  if (historySha) summary.history = [];
   for (const feature of features) {
     const pattern = featureDirPattern(feature);
     summary.head[feature] = [];
@@ -147,6 +150,7 @@ function summarize(evidenceDir, features, baseSha) {
       const run = describeRun(path.join(evidenceDir, name), name);
       if (!match[1]) summary.head[feature].push(run);
       else if (match[1] === baseSha) summary.base[feature].push(run);
+      if (historySha && match[1] === historySha) summary.history.push({ feature, ...run });
     }
   }
   return summary;
@@ -314,9 +318,15 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
       notes.unshift(...failures.map(line => `Break-it ${line}`));
     }
   }
-  if (selection.breakItHistory && jobs.history?.result !== 'success') {
-    final = 'FAIL';
-    notes.unshift('The historical break-it proof did not demonstrate a passing ordinary repro followed by a product failure with video.');
+  if (selection.breakItHistory) {
+    const historical = (summary.history || []).find(run => run.feature === 'chat-working-live' && runOutcome(run) === 'passed');
+    const rejection = historical?.breakIt?.feature === 'chat-working-live' && historical.breakIt.variations.find(item =>
+      breakItVariations('chat-working-live').includes(item.name) && item.status === 'failed' && item.failureKind !== 'infrastructure' &&
+      !infrastructureError(item.error) && item.error && item.videoVerified && item.video && item.screenshots?.length && item.actions > 0 && item.cleanup === 'complete');
+    if (jobs.history?.result !== 'success' || !rejection) {
+      final = 'FAIL';
+      notes.unshift('The historical break-it proof did not demonstrate a passing ordinary repro followed by a product failure with video.');
+    } else notes.push(`Past fix ${selection.breakItHistory} passed its ordinary repro, then failed ${rejection.name}; video ${historical.artifact}/${rejection.video}.`);
   }
   const evidence = [...notes, ...(Array.isArray(verdict?.evidence) ? verdict.evidence : []).map(line => oneLine(line)).filter(Boolean)].slice(0, MAX_EVIDENCE_LINES);
   const body = [
@@ -699,7 +709,7 @@ async function main(argv, env) {
   if (command === 'summarize') {
     const [evidenceDir, selectionFile, baseSha, outDir] = rest;
     const selection = JSON.parse(fs.readFileSync(selectionFile, 'utf8'));
-    const summary = summarize(evidenceDir, selection.features, baseSha);
+    const summary = summarize(evidenceDir, selection.features, baseSha, selection.breakItHistory);
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
     fs.writeFileSync(path.join(outDir, 'evidence.md'), evidenceMarkdown(summary, selection.compareBase));

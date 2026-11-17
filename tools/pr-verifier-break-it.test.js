@@ -49,6 +49,25 @@ test('a runner failure is blocked, not a product failure', () => {
   assert.equal(finish(proof).final, 'BLOCKED');
 });
 
+test('the historical experiment cannot turn a feature PR into a claimed repair', () => {
+  const selection = verifier.validateSelection({ features: [] }, ['chat-working-live'], {
+    title: 'Challenge repair journeys', files: [{ path: '.claude/skills/verify-multiprompt/break-it.ps1' }],
+  });
+  assert.deepEqual(selection.features, ['chat-working-live']);
+  assert.deepEqual(selection.breakItFeatures, []);
+  assert.equal(selection.breakItHistory, '5ce536b45569e8cb4394e8e967067f19bf3d49d0');
+  const run = { feature: 'chat-working-live', status: 'passed', screenshots: ['after.png'], breakIt: {
+    feature: 'chat-working-live', variations: [{ ...passed().variations[0], status: 'failed', error: 'Reply disappeared after resizing' }],
+  } };
+  const finishHistory = history => verifier.finalize({ verdict: { verdict: 'PASS' }, selection,
+    summary: { head: { 'chat-working-live': [{ status: 'passed', screenshots: ['after.png'] }] }, base: {}, history }, jobs: { history: { result: 'success' } } });
+  assert.equal(finishHistory([]).final, 'FAIL');
+  assert.equal(finishHistory([run]).final, 'PASS');
+  run.breakIt.variations[0].videoVerified = false;
+  assert.equal(finishHistory([run]).final, 'FAIL');
+});
+
 test('chat journeys require streaming, busy-send and reconnect variations too', () => {
+  assert.equal(typeof verifier.breakItVariations, 'function');
   assert.deepEqual(verifier.breakItVariations('chat-delivery'), ['resize', 'maximize', 'fast-switch', 'long-chat', 'stream-scroll', 'busy-send', 'reconnect']);
 });
