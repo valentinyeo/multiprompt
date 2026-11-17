@@ -1487,8 +1487,10 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
 
 test('SOFT-2459 terminal reply evidence rejects residue, lost brackets and missing cleanup', () => {
   assert.ok(fs.existsSync(path.join(__dirname, 'chat-terminal-replies-proof.cjs')), 'terminal reply journey evaluator is available');
+  const desktopWorkflow = workflow.split('\n  verify:\n')[1];
+  assert.ok(desktopWorkflow, 'desktop verification job exists');
   for (const step of ['Install Zig 0.16.0', 'Compile chat delivery remote-shell boundary']) {
-    const block = workflow.split(`- name: ${step}\n`)[1]?.split('\n      - ')[0];
+    const block = desktopWorkflow.split(`- name: ${step}\n`)[1]?.split('\n      - ')[0];
     assert.ok(block?.includes("env.FEATURE == 'chat-terminal-replies'"), `${step} prepares terminal reply journeys in reusable verifier calls`);
   }
   assert.match(workflow, /uses: actions\/setup-python@[^\n]+\n\s+if: [^\n]*env\.FEATURE == 'chat-terminal-replies'/, 'terminal reply journeys install the remote-shell Python runtime');
