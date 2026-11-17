@@ -30,7 +30,7 @@ jobs:
       - run: python3 tools/chat-history-reader-test.py TmuxCleanupTest -v
   deepseek:
     needs: regression
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/soft-2576-tmux-cleanup'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
