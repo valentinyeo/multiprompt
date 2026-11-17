@@ -61,7 +61,15 @@ $permissionKeyOffset = (Read-SharedText $keys).Length
 $permissionKeyDowns = @([regex]::Matches((Read-SharedText $events), 'KEY .*down=1')).Count
 function Read-PermissionKeys { (Read-SharedText $keys).Substring($permissionKeyOffset) }
 $expectedKeys = ''
-foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; index=1; digit='2' }, @{ entry='click'; index=2; digit='4' }, @{ entry='key'; index=0; digit='1' }, @{ entry='key'; index=1; digit='2' }, @{ entry='key'; index=2; digit='4' })) {
+$permissionCases = @(
+    foreach ($entry in @('click', 'key', 'alt', 'palette')) {
+        @{ entry=$entry; index=0; digit='1'; alt=0x59; command='Chat View: Allow' }
+        @{ entry=$entry; index=1; digit='2'; alt=0x4F; command='Chat View: Always allow' }
+        @{ entry=$entry; index=2; digit='4'; alt=0x44; command='Chat View: Deny' }
+    }
+)
+$permissionInputs = @()
+foreach ($case in $permissionCases) {
     $choices = Read-PermissionChoices
     $card = $choices.cards[$case.index]
     if ($card.index -ne $case.index -or $card.right -le $card.left -or $card.bottom -le $card.top) { throw 'Invalid permission card rectangle' }
@@ -70,16 +78,22 @@ foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; in
         Assert-Foreground
         Record ('Click permission row ' + $case.index)
         [VerifyNative]::ClickClient($transcript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
+    } elseif ($case.entry -eq 'palette') {
+        Invoke-JourneyCommand $case.command
     } else {
         [VerifyNative]::ClickClient($composer, 8, 8)
         Wait-ChatFocus 'Edit' 'permission-shortcut'
-        Press @((0x31 + $case.index)) ('Permission shortcut ' + ($case.index + 1))
+        if ($case.entry -eq 'alt') {
+            Press @(0x12, $case.alt) ('Permission Alt shortcut ' + ($case.index + 1))
+        } else {
+            Press @((0x31 + $case.index)) ('Permission shortcut ' + ($case.index + 1))
+        }
     }
     $expectedKeys += $case.digit
     Wait-Until { [string]::Equals((Read-PermissionKeys), $expectedKeys, [StringComparison]::Ordinal) } 'exact provider digit received' 45
     Wait-Until { $c = Read-PermissionChoices; $null -ne $c -and $c.chosen -eq $case.index } 'picked row recorded' 45
     Snapshot ($case.entry + '-' + ($case.index + 1) + '-picked')
-    if ($case.entry -eq 'click' -and [VerifyNative]::EditText($composer) -cne 'Keep this draft') { throw 'Click changed the existing draft' }
+    if ($case.entry -ne 'key' -and [VerifyNative]::EditText($composer) -cne 'Keep this draft') { throw 'Click changed the existing draft' }
     Doctor
     Assert-Foreground
     [VerifyNative]::ClickClient($transcript, [int](($card.left + $card.right) / 2), [int](($card.top + $card.bottom) / 2))
@@ -87,6 +101,7 @@ foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; in
     if (-not [string]::Equals((Read-PermissionKeys), $expectedKeys, [StringComparison]::Ordinal)) { throw 'Picked permission sent twice' }
     $keyDowns = @([regex]::Matches((Read-SharedText $events), 'KEY .*down=1'))
     if ($keyDowns.Count -ne $permissionKeyDowns + $expectedKeys.Length) { throw 'Unexpected extra console keydown' }
+    $permissionInputs += @{ entry=$case.entry; choice=$case.index; digit=$case.digit; received=Read-PermissionKeys; draft=[VerifyNative]::EditText($composer); screenshot=($case.entry + '-' + ($case.index + 1) + '-picked.png') }
     if ($case.entry -eq 'click' -and $case.index -eq 2) {
         [VerifyNative]::ClickClient($composer, 8, 8)
         Press @(0x11, 0x41) 'Select draft'
@@ -94,6 +109,12 @@ foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; in
         Wait-Until { [VerifyNative]::EditText($composer) -ceq '' } 'composer empty'
     }
     if ($case.entry -eq 'key' -and [VerifyNative]::EditText($composer) -cne '') { throw 'Permission shortcut changed the composer' }
+    if ($case.entry -eq 'key' -and $case.index -eq 2) {
+        [VerifyNative]::ClickClient($composer, 8, 8)
+        Wait-ChatFocus 'Edit' 'permission-draft-before-alt'
+        Type-Text 'Keep this draft'
+        Wait-Until { [VerifyNative]::EditText($composer) -ceq 'Keep this draft' } 'draft restored before Alt and palette paths'
+    }
     $logBefore = (Read-SharedText $log).Length
     [IO.File]::WriteAllText((Join-Path $scratch 'permission-clear.txt'), 'clear')
     Wait-Until { (Read-SharedText $log).Substring($logBefore) -match '\[chat\] permission cleared' } 'old permission cleared' 45
@@ -103,4 +124,7 @@ foreach ($case in @(@{ entry='click'; index=0; digit='1' }, @{ entry='click'; in
 Snapshot 'action'
 Snapshot 'after'
 Copy-Item $keys, $events $Evidence
-$result.checks += @{ name = 'permission-input'; providerDigits = $expectedKeys; clicks = 3; composerKeys = 3; draftPreserved = $true; boundary = 'synthetic Claude console; no live provider' }
+Save-Json @{ keyOffset=$permissionKeyOffset; keyDownOffset=$permissionKeyDowns; inputs=$permissionInputs; providerDigits=$expectedKeys } 'permission-inputs.json'
+& node (Join-Path $PSScriptRoot 'chat-control-coverage.test.cjs') --permission-evidence $Evidence
+if ($LASTEXITCODE -ne 0) { throw 'Permission route receipts do not cover the declared input matrix' }
+$result.checks += @{ name = 'permission-input'; providerDigits = $expectedKeys; clicks = 3; composerKeys = 3; altKeys = 3; palette = 3; draftPreserved = $true; boundary = 'synthetic Claude console; no live provider' }

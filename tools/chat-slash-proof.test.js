@@ -27,15 +27,15 @@ with tempfile.TemporaryDirectory() as folder:
     (root / 'state.json').write_text(json.dumps({'sids': {'live-slash': sid}}))
     records = []
     fixture.install(reader.__dict__, root, lambda file, **row: records.append((file, row)))
-    for mode in ('plan', 'manual', 'acceptEdits'):
+    for mode in ('plan', 'manual', 'acceptEdits', 'bypassPermissions'):
         reply = reader.host_reply(dict(op='set_permission_mode', provider='claude', sid=sid, mode=mode))
         assert reply['status'] == 'ok', reply
         assert json.loads((root / 'slash-mode.json').read_text())['mode'] == mode
     controls = [row['request'] for file, row in records if file == 'slash-control.jsonl']
-    assert controls == [dict(subtype='set_permission_mode', mode=mode) for mode in ('plan', 'manual', 'acceptEdits')], controls
+    assert controls == [dict(subtype='set_permission_mode', mode=mode) for mode in ('plan', 'manual', 'acceptEdits', 'bypassPermissions')], controls
     reply = reader.host_reply(dict(op='set_permission_mode', provider='claude', sid=sid, mode='unsupported'))
     assert reply['status'] == 'refused', reply
-    assert json.loads((root / 'slash-mode.json').read_text())['mode'] == 'acceptEdits'
+    assert json.loads((root / 'slash-mode.json').read_text())['mode'] == 'bypassPermissions'
     assert not reader.host_owned('claude', 'other-session')
 print('SLASH_HOST_TRANSPORT_OK')
 `;
@@ -50,8 +50,8 @@ test('live slash screenshot journey drives every requested command and checks in
   const text = fs.readFileSync(driver, 'utf8');
   for (const command of ['/plan', '/permissions', '/model', '/resume', '/rewind']) assert.ok(text.includes(`'${command}'`), command);
   for (const receipt of ['slash-control.jsonl', 'slash-mode.json', 'slash-replies.jsonl']) assert.ok(text.includes(receipt), receipt);
-  assert.match(text, /controls\.Count -ne 3/);
-  assert.match(text, /plan,manual,acceptEdits/);
+  assert.match(text, /controls\.Count -ne 12/);
+  assert.match(text, /plan,manual,acceptEdits,bypassPermissions,plan,manual,acceptEdits,bypassPermissions,plan,manual,acceptEdits,bypassPermissions/);
   assert.match(text, /ordinarySends = 0/);
   assert.match(text, /Snapshot 'slash-plan-picker'/);
   assert.match(text, /Snapshot 'slash-permissions-picker'/);

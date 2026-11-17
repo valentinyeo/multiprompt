@@ -353,6 +353,14 @@
             $result.checks += $stopCheck
             $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $stopPrefix = Join-Path $scratch 'local-route-working'
+            function Read-StopInput {
+                $inputStream = [IO.File]::Open($stopPrefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                try {
+                    $buffer = New-Object IO.MemoryStream
+                    try { $inputStream.CopyTo($buffer); return ,($buffer.ToArray()) } finally { $buffer.Dispose() }
+                } finally { $inputStream.Dispose() }
+            }
+            $stopInputs = @()
             $readStopFrame = {
                 $frame = @{ card = $null; size = 0; send = $null; stop = $null; attach = $null; mic = $null; anyStop = $null }
                 if (-not (Test-Path $debugLog)) { return $frame }
@@ -487,21 +495,58 @@
                 Press @(0x11, 0x41) 'Ctrl+A: select the multiline proof draft'
                 Press @(0x08) 'Backspace: restore the earlier single-line proof state'
                 Type-Text 'x'
+                $stopBefore = (Read-StopInput).Length
+                $stopDraft = [VerifyNative]::EditText([VerifyNative]::GetFocusedWindow($script:window))
                 Press @(0x1B) 'Esc: stop the working agent from the composer'
                 Wait-Until {
-                    $stdin = [IO.File]::Open($stopPrefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-                    try {
-                        $buffer = New-Object IO.MemoryStream
-                        try {
-                            $stdin.CopyTo($buffer)
-                            $stopBytes = $buffer.ToArray()
-                        } finally { $buffer.Dispose() }
-                    } finally { $stdin.Dispose() }
+                    $stopBytes = Read-StopInput
                     $stopCheck.receivedBytes = $stopBytes.Length
-                    $stopBytes -contains [byte]0x1B
-                } 'Esc reached the working stand-in stdin'
+                    $stopBytes.Length -eq $stopBefore + 1 -and $stopBytes[$stopBefore] -eq 0x1B
+                } 'exactly one Escape reached the working stand-in stdin'
+                $stopDraftAfter = [VerifyNative]::EditText([VerifyNative]::GetFocusedWindow($script:window))
+                if ($stopDraftAfter -cne $stopDraft) { throw 'Escape changed the unsent draft' }
+                Snapshot 'stop-escape-received'
+                $stopInputs += @{ entry='escape'; before=$stopBefore; after=(Read-StopInput).Length; draftBefore=$stopDraft; draftAfter=$stopDraftAfter; screenshot='stop-escape-received.png' }
                 $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
                 if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Send click proof lost the owned composer' }
+                if ($Feature -eq 'chat-view') {
+                    Press @(0x11, 0x41) 'Ctrl+A: select the draft before the empty-composer Stop button'
+                    Press @(0x08) 'Backspace: clear without sending before Stop'
+                    Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq '' } 'Stop button has an empty composer'
+                    foreach ($entry in @('click', 'palette')) {
+                        [VerifyNative]::ClickClient($composerHandle, 8, 8)
+                        Wait-ChatFocus 'Edit' ('stop-' + $entry + '-composer')
+                        if ($entry -eq 'palette') {
+                            Type-Text 'Keep stop draft'
+                            Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq 'Keep stop draft' } 'palette Stop starts with the sentinel draft'
+                        }
+                        $stopDraft = [VerifyNative]::EditText($composerHandle)
+                        $stopBefore = (Read-StopInput).Length
+                        if ($entry -eq 'click') {
+                            Wait-Until { $null -ne (& $readStopFrame).stop } 'Stop button returns for the empty working composer'
+                            $button = (& $readStopFrame).stop
+                            Snapshot 'stop-button-before'
+                            Doctor
+                            Assert-Foreground
+                            Record 'Click: Stop the working agent in the owned composer'
+                            [VerifyNative]::ClickClient($script:window, [int](($button[0] + $button[2]) / 2), [int](($button[1] + $button[3]) / 2))
+                        } else {
+                            Invoke-JourneyCommand 'Chat View: Stop the agent'
+                        }
+                        Wait-Until { $bytes = Read-StopInput; $bytes.Length -eq $stopBefore + 1 -and $bytes[$stopBefore] -eq 0x1B } 'Stop route delivers exactly one new Escape to the receiving console'
+                        $stopDraftAfter = [VerifyNative]::EditText($composerHandle)
+                        if ($stopDraftAfter -cne $stopDraft) { throw 'Stop route changed the unsent draft' }
+                        Snapshot ('stop-' + $entry + '-received')
+                        $stopInputs += @{ entry=$entry; before=$stopBefore; after=(Read-StopInput).Length; draftBefore=$stopDraft; draftAfter=$stopDraftAfter; screenshot=('stop-' + $entry + '-received.png') }
+                    }
+                    [IO.File]::WriteAllBytes((Join-Path $Evidence 'stop-stdin.bin'), (Read-StopInput))
+                    Save-Json @($stopInputs) 'stop-inputs.json'
+                    if ((Get-Item ($typedPrefix + '-stdin.bin')).Length -ne 0) { throw "Stop sent another tab's queued draft" }
+                    $queued = Get-Content $outboxPath -Raw | ConvertFrom-Json
+                    if (@($queued.queues.messages | Where-Object { $_.t -ceq $typedMessage -and $_.s -eq 0 -and $_.x -eq 0 }).Count -ne 1) { throw "Stop changed another tab's queued message" }
+                    & node (Join-Path $PSScriptRoot 'chat-control-coverage.test.cjs') --stop-evidence $Evidence
+                    if ($LASTEXITCODE -ne 0) { throw 'Stop route receipts do not cover Escape, button and palette' }
+                }
                 $sendFrame = & $readStopFrame
                 if ($null -eq $sendFrame.send -or $null -ne $sendFrame.stop) { throw 'Send is not the only action button before the click' }
                 if ([VerifyNative]::EditText($composerHandle).Length -eq 0) { throw 'Composer draft is empty before the Send click' }
