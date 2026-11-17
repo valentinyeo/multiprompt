@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { verify } from './chat-newest-proof.mjs';
+
+const moduleUrl = new URL('./chat-newest-proof.mjs', import.meta.url);
+assert.ok(fs.existsSync(moduleUrl), 'The newest-message journey needs its evidence checker');
+const { verify } = await import(moduleUrl.href);
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-newest-proof-'));
