@@ -28,10 +28,10 @@ def install(namespace, root, record):
             return
         os.close(fd)
         session = {'turn': 'standin-seed-turn', 'state': {'display_history': True}}
-        namespace['host_state_write']('claude', SID, session['state'])
         for index in range(50):
             namespace['host_history_append']('claude', SID, session,
                 dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10))
+        namespace['host_state_write']('claude', SID, session['state'])
         namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended')
         record('working-host.jsonl', stage='idle-history-ready', sid=SID)
         if session.get('db') is not None:
