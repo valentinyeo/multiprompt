@@ -32,7 +32,7 @@ public sealed class ChatStillObserver {
     long position;
     string carry = "";
     bool target, building;
-    int dirty, width, layout, paints, height;
+    int dirty, width, layout, paints, height, viewHeight, viewTop;
     readonly HashSet<int> heights = new HashSet<int>();
     volatile bool stop;
     string evidence;
@@ -57,7 +57,7 @@ public sealed class ChatStillObserver {
             if (baseline[i] != current[i]) throw new InvalidOperationException("Newest message pixels changed after the first frame");
     }
     void CapturePixels(int[] screen, Rect client, Point origin, Dictionary<string, object> sample) {
-        var clip = new int[] { Math.Max(screen[0], origin.X), Math.Max(screen[1], origin.Y), Math.Min(screen[2], origin.X + client.Right), Math.Min(screen[3], origin.Y + client.Bottom) };
+        var clip = new int[] { Math.Max(screen[0], origin.X), Math.Max(screen[1], origin.Y + viewTop), Math.Min(screen[2], origin.X + client.Right), Math.Min(screen[3], origin.Y + Math.Min(client.Bottom, viewHeight)) };
         if (clip[2] <= clip[0] || clip[3] <= clip[1]) throw new InvalidOperationException("Newest message has no on-screen pixel area");
         if (pixelImage == null) {
             pixelRect = clip;
@@ -113,14 +113,14 @@ public sealed class ChatStillObserver {
         var origin = new Point();
         if (!ClientToScreen(view, ref origin)) throw new InvalidOperationException("Transcript screen origin unavailable");
         var screen = new int[] { rect[0] + origin.X, rect[1] + origin.Y, rect[2] + origin.X, rect[3] + origin.Y };
-        var sample = new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } };
+        var sample = new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "view_height", viewHeight }, { "view_top", viewTop }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } };
         samples.Add(sample);
         if (baseline == null) baseline = screen;
         AssertFrame(baseline, screen, dirty, width, layout);
         Rect client;
         if (!GetClientRect(view, out client)) throw new InvalidOperationException("Transcript client rectangle unavailable");
         AssertFrame(baseline, screen, dirty, client.Right - client.Left, layout);
-        if (rect[3] <= 0 || rect[1] >= client.Bottom) throw new InvalidOperationException("Newest initially visible message is no longer on screen");
+        if (rect[3] <= viewTop || rect[1] >= Math.Min(client.Bottom, viewHeight)) throw new InvalidOperationException("Newest initially visible message is no longer on screen");
         if (kind == "display-frame") CapturePixels(screen, client, origin, sample);
     }
     void Read(string log, string shell, IntPtr view) {
@@ -136,13 +136,13 @@ public sealed class ChatStillObserver {
         while ((end = carry.IndexOf('\n')) >= 0) {
             string line = carry.Substring(0, end);
             carry = carry.Substring(end + 1);
-            var header = Regex.Match(line, @"\[chat-still\] begin shell=(\d+) dirty=(\d+) width=(\d+) layout=(\d+) height=(\d+)");
+            var header = Regex.Match(line, @"\[chat-still\] begin shell=(\d+) dirty=(\d+) width=(\d+) layout=(\d+) height=(\d+) view_h=(\d+) view_top=(\d+)");
             if (header.Success) {
                 if (building) throw new InvalidOperationException("Native paint geometry was incomplete before the next paint");
                 target = header.Groups[1].Value == shell;
                 building = true;
                 rows.Clear(); latest = null;
-                dirty = Int32.Parse(header.Groups[2].Value); width = Int32.Parse(header.Groups[3].Value); layout = Int32.Parse(header.Groups[4].Value); height = Int32.Parse(header.Groups[5].Value);
+                dirty = Int32.Parse(header.Groups[2].Value); width = Int32.Parse(header.Groups[3].Value); layout = Int32.Parse(header.Groups[4].Value); height = Int32.Parse(header.Groups[5].Value); viewHeight = Int32.Parse(header.Groups[6].Value); viewTop = Int32.Parse(header.Groups[7].Value);
             }
             var row = Regex.Match(line, @"\[chat-still\] row message=(\d+) offset=(\d+) rect=(-?\d+,-?\d+,-?\d+,-?\d+)");
             if (!building && first >= 0 && row.Success) throw new InvalidOperationException("Native message geometry arrived outside a complete paint");

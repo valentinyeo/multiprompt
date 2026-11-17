@@ -108,27 +108,26 @@ jobs:
         run: |
           python3 - <<'PYTHON'
           import json, os, pathlib
-          text = pathlib.Path(os.environ['EXECUTION']).read_text()
-          try:
-              execution = json.loads(text)
-          except json.JSONDecodeError:
-              execution = [json.loads(line) for line in text.splitlines() if line.strip()]
-          calls = []
+          execution = json.loads(pathlib.Path(os.environ['EXECUTION']).read_text())
+          calls, completed = {}, set()
           def walk(value):
               if isinstance(value, dict):
                   if value.get('type') == 'tool_use' and value.get('name') in ('Agent', 'Task'):
                       role = value.get('input', {}).get('subagent_type', '')
                       if role.split(':')[-1] == 'comment-sicko':
-                          calls.append(role)
+                          calls[value['id']] = role
+                  if value.get('type') == 'tool_result' and not value.get('is_error', False):
+                      completed.add(value.get('tool_use_id'))
                   for child in value.values():
                       walk(child)
               elif isinstance(value, list):
                   for child in value:
                       walk(child)
           walk(execution)
-          assert calls, 'pstack no-comments did not spawn Comment Sicko'
+          agents = [role for call, role in calls.items() if call in completed]
+          assert agents, 'pstack no-comments did not successfully spawn Comment Sicko'
           review = json.loads(os.environ['REVIEW'])
-          review['agents'] = calls
+          review['agents'] = agents
           pathlib.Path('comment-review.json').write_text(json.dumps(review, indent=2))
           print(json.dumps(review, indent=2))
           PYTHON
