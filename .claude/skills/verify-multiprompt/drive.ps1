@@ -8,6 +8,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Use verify.yml on GitHub Windows' }
+& node --test "$PSScriptRoot/check-feature-map.test.cjs"
+if ($LASTEXITCODE -ne 0) { throw 'Feature map is incomplete; repair the source-action or recipe links before driving' }
 $map = Join-Path $PSScriptRoot "features/$Feature.md"
 $text = Get-Content -LiteralPath $map -Raw
 if ($text -match '(?m)^Journeys: (.+)\r?$') {

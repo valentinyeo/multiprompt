@@ -32,6 +32,9 @@ The final side-by-side reference is approved Figma frame49-596: https://www.figm
 
 ## Gotchas
 
+The panel also exposes per-workspace color controls and Auto. The ten-button list is not the entire interactive surface. Outside-click dismissal is exercised; presence of Servers does not mean this journey opened or tested its sheet.
+
+
 - The two keys are existing desktop configuration. Never print real keys or use the laptop's stores as fixtures.
 - Terminal details reuses the existing Chat/Terminal choice. It is not a new preference or a new terminal renderer.
 - Owned native browser surfaces must remain behind the modal; opening Settings must not close or restart a browser session.

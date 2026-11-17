@@ -29,6 +29,9 @@ A real Windows OpenSSH positive-control login must work before removal. The nati
 
 ## Gotchas
 
+Remote key removal is attempted only for Connected slots. Local-only removal or a failed remote revoke removes the saved slot but warns that its key remains. Keep that warning and rejection proof separate; do not assert that every Remove click revoked a remote key.
+
+
 - Only the remote server is replaced: a loopback Paramiko endpoint executes the production POSIX commands using Git Bash in an isolated home. It accepts only public-key authentication, `true` and the revocation command, and never edits an existing Windows or remote connection.
 - The released app, form, setup and removal commands, crypto authentication and Windows OpenSSH are real.
 - Production migration and 1Password isolation need the separate read-only live check on existing servers.
