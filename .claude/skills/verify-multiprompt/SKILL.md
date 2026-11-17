@@ -219,3 +219,7 @@ Use `/maintain-verification-skill` when menus, keyboard routing, persistence or 
 
 - [Skill pills](features/chat-skill-pill.md): native draft and sent-history colors on dark and light themes.
 - [Chat options](features/chat-options.md): clickable answer cards for lettered or numbered options and terminal pick lists.
+
+## Chat stillness
+
+Chat changes also run [verify-chat-still](../verify-chat-still/SKILL.md) and the [chat-still journey](features/chat-still.md). The newest initially visible message must keep its exact screen rectangle from the first content frame, idle and during a streaming reply. Read the recipe for its native paint diagnostic and frame-by-frame evidence.
