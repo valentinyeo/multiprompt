@@ -1,11 +1,13 @@
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,6 +59,34 @@ ConvertTo-Json -InputObject $values -Compress
         paths = json.loads(subprocess.check_output([shell, '-NoProfile', '-Command', command], env=env, text=True))
         self.assertEqual(paths, [r'D:\a path\multiprompt', r'D:\key path\id_ed25519.pub', r'D:\a path\multiprompt', r'D:\evidence path'])
 
+
+    def test_seed_waits_for_persisted_provider_readiness(self):
+        seed = ROOT / 'tools/verify-server-chat/seed.py'
+        execute = runpy.run_path
+        for will_be_ready in (True, False):
+            with self.subTest(ready=will_be_ready), tempfile.TemporaryDirectory() as home:
+                transcript = Path(home) / '.claude/projects/fixture/sid.jsonl'
+                transcript.parent.mkdir(parents=True)
+                transcript.write_text('Server received: server seed')
+                observed = []
+                def events(*args):
+                    observed.append('poll')
+                    if will_be_ready and len(observed) > 1:
+                        observed.append('ready')
+                        return dict(events=[dict(seq=2, event=dict(kind='host.status', payload=dict(state='ready')))])
+                    return dict(events=[])
+                def send(*args):
+                    self.assertIn('ready', observed, 'The seed was sent before provider readiness')
+                    return dict(status='sent')
+                reader = dict(host_cli=Mock(return_value=dict(status='enabled')), host_paths=Mock(return_value=dict(config=Path(home) / 'config.json')), host_read=Mock(return_value={}), host_write=Mock(), host_start=Mock(return_value=dict(status='started')), message_events_page=events, host_send=Mock(side_effect=send))
+                with patch('runpy.run_path', return_value=reader), patch('subprocess.run'), patch('time.sleep'), patch.object(Path, 'home', return_value=Path(home)), patch.object(sys, 'argv', [str(seed), str(ROOT)]):
+                    if will_be_ready:
+                        execute(str(seed))
+                        reader['host_send'].assert_called_once()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'provider.*ready'):
+                            execute(str(seed))
+                        reader['host_send'].assert_not_called()
 
     def test_startup_preserves_full_stderr_and_uses_the_process_exit_code(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')

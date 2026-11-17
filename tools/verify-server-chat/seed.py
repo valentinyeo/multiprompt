@@ -19,6 +19,14 @@ config['command'] = ['python3', '-u', str(root / 'tools/verify-server-chat/provi
 reader['host_write'](paths['config'], config)
 result = reader['host_start']('claude', sid)
 assert result['status'] in ('started', 'already'), result
+for _ in range(200):
+    events = reader['message_events_page']('claude', sid, 0)['events']
+    ready = next((entry for entry in events if entry['event'].get('kind') == 'host.status' and entry['event'].get('payload', {}).get('state') == 'ready'), None)
+    if ready is not None:
+        break
+    time.sleep(0.1)
+else:
+    raise RuntimeError('The server provider did not become ready')
 result = reader['host_send']('claude', sid, 'server seed', 'live-ci')
 assert result['status'] in ('sent', 'queued', 'ok', 'accepted'), result
 for _ in range(200):
@@ -27,4 +35,4 @@ for _ in range(200):
     time.sleep(0.1)
 else:
     raise RuntimeError('Real host did not persist the seeded reply')
-print(json.dumps(dict(sid=sid, tmux='live-ci', home=str(Path.home()), seed=result)))
+print(json.dumps(dict(sid=sid, tmux='live-ci', home=str(Path.home()), ready=ready, seed=result)))
