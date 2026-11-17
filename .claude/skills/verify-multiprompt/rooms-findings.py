@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import sys
 
-ACTIONS = ('create-room', 'add-agents', 'send-message', 'replies-in-order', 'switch-rooms', 'leave-or-close')
+ACTIONS = ('create-room', 'add-agents', 'send-message', 'replies-in-order', 'switch-rooms', 'leave-or-close', 'to-one-and-everyone', 'leave-and-undo', 'delete-confirmation')
 
 
 def read(root, name, default=None):

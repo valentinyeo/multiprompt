@@ -182,6 +182,7 @@ try {
     Audit-Step 'switch-rooms' {
         Press @(0x1B) 'Escape: dismiss any room dialog'
         Open-RoomByName 'Rooms history 00'
+        if ([VerifyNative]::Title((Room-Window)) -cne 'Rooms history 00') { throw 'Switching rooms did not publish the selected title' }
         Snapshot 'long-seeded-room'
         Open-RoomByName 'Rooms history 01'
         Snapshot 'second-seeded-room'
@@ -200,6 +201,62 @@ try {
         $seed=Get-Content "$fixture/manifest.json" -Raw | ConvertFrom-Json
         $room=@(Read-RoomStore | Where-Object id -eq $seed.rooms[0].id)[0]
         if (@($room.events).Count -ne $seed.largestRoomEvents) { throw 'Leaving or reopening changed the seeded history' }
+    }
+    Audit-Step 'to-one-and-everyone' {
+        Open-RoomByName 'Rooms history 01'
+        Invoke-JourneyCommand 'Room recipients'
+        Press @(0x24) 'Home: everyone'
+        Press @(0x28) 'Down: first session'
+        Press @(0x0D) 'Enter: target just that session'
+        [void](Focused-RoomEdit)
+        Type-Text 'ROOMS TO ONE SESSION'
+        Press @(0x0D) 'Enter: send to one without adding a mention'
+        Wait-Until {
+            $room=@(Read-RoomStore | Where-Object name -eq 'Rooms history 01')[0]
+            $sent=@($room.events | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'ROOMS TO ONE SESSION' })
+            $sent.Count -eq 1 -and @($sent[0].recipients).Count -eq 1
+        } 'one delivery for the selected session'
+        Invoke-JourneyCommand 'Room recipients'
+        Press @(0x24) 'Home: everyone'
+        Press @(0x0D) 'Enter: everyone'
+        Type-Text 'ROOMS TO EVERYONE @ordinary-text'
+        Press @(0x0D) 'Enter: send to everyone regardless of punctuation'
+        Wait-Until {
+            $room=@(Read-RoomStore | Where-Object name -eq 'Rooms history 01')[0]
+            $sent=@($room.events | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'ROOMS TO EVERYONE @ordinary-text' })
+            $sent.Count -eq 1 -and @($sent[0].recipients).Count -eq 2
+        } 'everyone selected by the To chip'
+        Snapshot 'to-everyone'
+    }
+    Audit-Step 'leave-and-undo' {
+        Open-RoomByName 'Rooms history 01'
+        $before=@(Read-RoomStore | Where-Object name -eq 'Rooms history 01')[0]
+        Invoke-JourneyCommand 'Leave room'
+        Wait-Until { (Room-Window) -eq [IntPtr]::Zero } 'left room hidden'
+        Wait-Until {
+            $file=@(Get-ChildItem $settings -Filter 'room-ui-*.json')[0]
+            $saved=Get-Content $file.FullName -Raw | ConvertFrom-Json
+            @($saved.record.left | Where-Object room_id -eq $before.id).Count -eq 1
+        } 'left room durably hidden for this account'
+        Invoke-JourneyCommand 'Undo leave room'
+        Wait-Until { (Room-Window) -ne [IntPtr]::Zero -and [VerifyNative]::Title((Room-Window)) -ceq 'Rooms history 01' } 'undo reopens the same room'
+        $after=@(Read-RoomStore | Where-Object id -eq $before.id)[0]
+        if (@($after.members).Count -ne 2 -or @($after.events).Count -lt @($before.events).Count) { throw 'Leave or undo removed sessions or history' }
+        Snapshot 'leave-undone'
+    }
+    Audit-Step 'delete-confirmation' {
+        Open-RoomByName 'Rooms history 02'
+        $target=@(Read-RoomStore | Where-Object name -eq 'Rooms history 02')[0]
+        Invoke-JourneyCommand 'Delete room'
+        Snapshot 'delete-confirmation'
+        Press @(0x1B) 'Escape: cancel deletion'
+        if (@(Read-RoomStore | Where-Object id -eq $target.id).Count -ne 1) { throw 'Cancel deleted the room' }
+        Invoke-JourneyCommand 'Delete room'
+        Press @(0x27) 'Right: select Delete room instead of Cancel'
+        Press @(0x0D) 'Enter: confirm room deletion'
+        Wait-Until { @(Read-RoomStore | Where-Object id -eq $target.id).Count -eq 0 } 'only the confirmed room deleted'
+        if (@(Read-RoomStore | Where-Object name -eq 'Rooms history 00').Count -ne 1) { throw 'Deletion removed another room' }
+        Snapshot 'room-deleted'
     }
     Snapshot 'after'
     $result.findings=@($result.checks | Where-Object status -ne 'passed')
