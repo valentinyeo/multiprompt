@@ -349,6 +349,13 @@ try {
             & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
         }
         if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
+        if ($env:CHAT_POSITION_REPLAY -eq '1') {
+            $shortPath = Join-Path $scratch ('profile/.claude/projects/C--verify-work0/' + $remoteSids[$remoteNames[0]] + '.jsonl')
+            $shortRows = @(Get-Content $shortPath -TotalCount 2 | ForEach-Object { $_ | ConvertFrom-Json })
+            $shortRows[0].message.content = 'A short session question.'
+            $shortRows[1].message.content[0].text = 'A short session answer.'
+            [IO.File]::WriteAllLines($shortPath, @($shortRows | ForEach-Object { $_ | ConvertTo-Json -Depth 8 -Compress }), [Text.UTF8Encoding]::new($false))
+        }
         if ($Feature -eq 'chat-options') {
             $remoteDocument.name = 'chat-options'
             $remoteDocument.mode = 'busy'
@@ -680,7 +687,11 @@ try {
             . (Join-Path $PSScriptRoot 'control-feature-command-palette.ps1')
         }
         'chat-switch-speed' {
-            . (Join-Path $PSScriptRoot 'control-feature-chat-switch-speed.ps1')
+            if ($env:CHAT_POSITION_REPLAY -eq '1') {
+                . (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/position-replay.ps1')
+            } else {
+                . (Join-Path $PSScriptRoot 'control-feature-chat-switch-speed.ps1')
+            }
         }
     }
     if ($Feature -in @('title-bar', 'window-controls')) {

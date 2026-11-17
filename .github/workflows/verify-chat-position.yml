@@ -1,0 +1,60 @@
+name: Verify chat positions
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-chat-position.yml
+      - .github/workflows/verify.yml
+      - .claude/skills/verify-multiprompt/control.ps1
+      - .claude/skills/verify-multiprompt/drive.ps1
+      - tools/verify-chat-delivery/*frame-probe*
+      - tools/verify-chat-delivery/position-replay*
+      - src/chat*.zig
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    uses: ./.github/workflows/verify.yml
+    with:
+      revision: ${{ github.event.pull_request.head.sha }}
+      app_revision: 608b7d62944fd39b79cbbaa2c83bc6e3251f590c
+      feature: chat-switch-speed
+      chat_position_replay: true
+  candidate:
+    uses: ./.github/workflows/verify.yml
+    with:
+      revision: ${{ github.event.pull_request.head.sha }}
+      feature: chat-switch-speed
+      chat_position_replay: true
+  compare:
+    if: ${{ always() }}
+    needs: [baseline, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-chat-switch-speed-608b7d62944fd39b79cbbaa2c83bc6e3251f590c
+          path: baseline
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-chat-switch-speed
+          path: candidate
+      - name: Require a reproduced master jump and a stable candidate
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          before = json.loads(Path('baseline/position-replay.json').read_text())
+          after = json.loads(Path('candidate/position-replay.json').read_text())
+          assert before['status'] == 'failed', 'Master must fail on an observed painted movement, not setup or missing evidence'
+          assert after['status'] == 'passed', after
+          assert json.loads(Path('candidate/result.json').read_text(encoding='utf-8-sig'))['status'] == 'passed'
+          print(json.dumps(dict(master=before['status'], candidate=after['status'], before_frames=before['frameCount'], after_frames=after['frameCount'])))
+          PY

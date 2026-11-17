@@ -23,8 +23,9 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 if (Test-Path "$Evidence/journey.json") { throw 'Use a fresh evidence folder for each journey' }
 $record = [ordered]@{ feature=$Feature; journey=$Journey; revision=(git rev-parse HEAD).Trim(); status='failed'; error=$null }
 $video = $null
+$frameRate = if ($env:CHAT_POSITION_REPLAY -eq '1') { 30 } else { 8 }
 try {
-    $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate 8 -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
+    $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate $frameRate -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
     $start.UseShellExecute = $false
     $start.RedirectStandardInput = $true
     $start.CreateNoWindow = $true

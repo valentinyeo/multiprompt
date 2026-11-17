@@ -129,6 +129,10 @@ on:
         type: string
   workflow_call:
     inputs:
+      chat_position_replay:
+        required: false
+        default: false
+        type: boolean
       revision:
         required: false
         type: string
@@ -281,6 +285,9 @@ jobs:
           "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Install identical read-only paint recorder
+        if: inputs.chat_position_replay
+        run: python tools/verify-chat-delivery/install-frame-probe.py .
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
         run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
@@ -393,6 +400,7 @@ jobs:
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_INSTANT_PROOF: ${{ inputs.feature == 'chat-instant' && '1' || '' }}
       CHAT_MODEL_PROOF: ${{ inputs.feature == 'chat-model' && '1' || '' }}
+      CHAT_POSITION_REPLAY: ${{ inputs.chat_position_replay && '1' || '' }}
       CHAT_WORKING_LIVE_PROOF: ${{ inputs.feature == 'chat-working-live' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
@@ -460,6 +468,9 @@ jobs:
       - name: Check inline working pixel oracle
         continue-on-error: true
         run: node --test tools/chat-working-proof.test.mjs tools/live-working-proof.test.mjs
+      - name: Test frame-by-frame movement detection
+        if: inputs.chat_position_replay
+        run: node --test tools/verify-chat-delivery/position-replay.test.cjs
       - name: Check hosted working evidence contract
         if: env.CHAT_WORKING_LIVE_PROOF == '1'
         run: node --test tools/chat-working-live-proof.test.mjs
@@ -473,7 +484,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette'
+        if: inputs.chat_position_replay || env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette'
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -580,6 +591,9 @@ jobs:
         with:
           name: verify-app
           path: zig-out/bin
+      - name: Instrument the independent baseline at the same paint boundary
+        if: inputs.chat_position_replay && matrix.app-revision != ''
+        run: python tools/verify-chat-delivery/install-frame-probe.py app-source
       - name: Build branch executable
         if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1' || env.CHAT_MODEL_PROOF == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
@@ -1044,12 +1058,22 @@ jobs:
           npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
           if ($LASTEXITCODE -ne 0) { throw 'Chrome for Testing install failed' }
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Start complete chat paint recording before launch
+        if: inputs.chat_position_replay
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force evidence/paints | Out-Null
+          "MULTIPROMPT_FRAME_PROBE=$pwd/evidence/paints" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Verify real native browser journey
         if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar' || env.FEATURE == 'live-chat-pane'
         timeout-minutes: ${{ env.FEATURE == 'live-chat-pane' && 60 || 30 }}
         shell: powershell
         run: |
-          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          if ($env:CHAT_POSITION_REPLAY -eq '1') {
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature chat-switch-speed -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          } else {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          }
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |
@@ -1080,6 +1104,17 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Compress every recorded paint without discarding failed evidence
+        if: always() && inputs.chat_position_replay
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          foreach ($file in Get-ChildItem evidence/paints -Filter '*.bmp') {
+            $image = [Drawing.Image]::FromFile($file.FullName)
+            try { $image.Save(($file.FullName -replace '\.bmp$', '.png'), [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+          }
+          Compress-Archive -Path evidence/paints/*.bmp -DestinationPath evidence/paint-bitmaps.zip
+          Remove-Item evidence/paints/*.bmp
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
