@@ -16,7 +16,7 @@ function evidenceName(variant) {
   return `verify-${variant.feature}-${variant['app-revision']}${suffix}`;
 }
 
-function harnessVersion(revision = 'HEAD', workflowRevision = revision, cwd = process.cwd(), workflowFile) {
+function harnessVersion(revision = 'HEAD', cwd = process.cwd(), workflowFile) {
   const git = args => execFileSync('git', args, { cwd, encoding: 'utf8' });
   const catalogs = new Set(['app_state.zig', 'command_palette.zig', 'sidebar.zig', 'shortcuts.zig', 'notify_ports.zig', 'changelog.zig']);
   const files = git(['ls-tree', '-r', revision, '--', '.claude/skills/verify-multiprompt', 'tools', 'assets', 'extension', 'service', 'shared', 'src', 'build.zig', 'build.zig.zon'])
@@ -25,7 +25,7 @@ function harnessVersion(revision = 'HEAD', workflowRevision = revision, cwd = pr
       if (file.startsWith('tools/') && /(?:\.test\.[cm]?js$|\/(?:test_[^/]+|[^/]+[_-]test)\.py$|\.md$)/.test(file)) return false;
       return !/^src\/[^/]+\.zig$/.test(file) || catalogs.has(path.posix.basename(file));
     }).join('\n');
-  const workflow = workflowFile ? fs.readFileSync(workflowFile, 'utf8') : git(['show', `${workflowRevision}:.github/workflows/verify.yml`]);
+  const workflow = fs.readFileSync(workflowFile || path.join(cwd, '.github/workflows/verify.yml'), 'utf8');
   if (!files || !workflow) throw new Error('Cannot identify runtime harness');
   return createHash('sha256').update(`base-cache-v1\n${files}\n${workflow}`).digest('hex');
 }
@@ -96,12 +96,13 @@ function restore(options, directory) {
         let artifacts;
         try {
           artifacts = api(`repos/${repo}/actions/artifacts?name=${encodeURIComponent(name)}&per_page=100`).artifacts;
+          if (!Array.isArray(artifacts)) throw new Error('GitHub did not return an artifact list');
         } catch (error) {
           process.stderr.write(`Base cache lookup missed for ${feature}: ${error.message}\n`);
           break;
         }
         let hit = false;
-        for (const artifact of artifacts.filter(item => item.name === name && !item.expired && item.workflow_run?.id && String(item.workflow_run.id) !== String(options.runId)).sort((a, b) => b.id - a.id)) {
+        for (const artifact of artifacts.filter(item => item && item.name === name && !item.expired && item.workflow_run?.id && String(item.workflow_run.id) !== String(options.runId)).sort((a, b) => b.id - a.id)) {
           const target = path.join(scratch, evidenceName(variant));
           try {
             const id = artifact.workflow_run.id;
@@ -141,7 +142,7 @@ function restore(options, directory) {
 
 function main([command, directory], env) {
   if (command === 'restore') {
-    const harness = env.HARNESS_VERSION || harnessVersion('HEAD', 'HEAD', process.cwd(), env.WORKFLOW_FILE);
+    const harness = env.HARNESS_VERSION || harnessVersion('HEAD', env.HARNESS_ROOT || process.cwd(), env.WORKFLOW_FILE && path.resolve(env.WORKFLOW_FILE));
     const report = restore({ repo: env.REPO, base: env.BASE_SHA, harness, features: JSON.parse(env.FEATURES), runId: env.RUN_ID }, directory);
     const line = `features=${JSON.stringify(report.features)}\nharness_version=${harness}\n`;
     if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, line);

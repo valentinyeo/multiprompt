@@ -1,12 +1,12 @@
 # Reusable baseline evidence
 
-The PR verifier restores baseline evidence before it creates the base job matrix. Only cache misses reach `verify.yml`. Head journeys still run on every PR.
+The PR verifier restores baseline evidence before it creates the base job matrix. Only cache misses reach `verify.yml`. Head journeys still run on every PR. Cache tooling comes from the workflow revision, so older PRs need not contain the tool. The journey scripts and their content hash still come from the PR head.
 
 ## Identity
 
 Each immutable `base-v1-*` artifact identifies one journey, one application commit SHA, one harness content hash, and one DPI/theme variant. Every variant must be available before the verifier reuses a journey.
 
-The content hash covers the verification scripts, fixtures, build configuration, assets, extension, service, and the exact reusable workflow executed by Actions. It also covers non-Zig source helpers and the source catalogs read by the driver: app state, palette, sidebar, shortcuts, notification ports, and changelog. Ordinary application Zig files and tool unit tests do not change this version. Changes to these runtime inputs invalidate stored results without a manual version bump.
+The content hash covers the verification scripts, fixtures, build configuration, assets, extension, service, and the exact reusable workflow executed by Actions. It also covers non-Zig source helpers and the source catalogs read by the driver: app state, palette, sidebar, shortcuts, notification ports, and changelog. Top-level application Zig files outside these catalogs and tool unit tests do not change this version. Changes to these runtime inputs invalidate stored results without a manual version bump.
 
 ## Evidence contract
 

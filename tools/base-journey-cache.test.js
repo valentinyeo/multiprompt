@@ -77,7 +77,7 @@ test('harness versions ignore application-only and test-only edits but change fo
   put('src/app_state.zig', 'catalog');
   put('.github/workflows/verify.yml', 'workflow');
   const tree = () => { git(['add', '.']); return git(['write-tree']); };
-  const version = () => cache.harnessVersion(tree(), tree(), dir);
+  const version = () => cache.harnessVersion(tree(), dir);
   const initial = version();
   put('src/chat_send.zig', 'new app');
   put('tools/example.test.js', 'test');
@@ -87,6 +87,16 @@ test('harness versions ignore application-only and test-only edits but change fo
     put(name, 'changed');
     assert.notEqual(version(), before, name);
   }
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'old PR without cache tools']);
+  const actualWorkflow = path.join(dir, 'actual-workflow.yml');
+  fs.writeFileSync(actualWorkflow, 'new workflow from the controller revision');
+  const restored = spawnSync(process.execPath, [path.join(__dirname, 'base-journey-cache.cjs'), 'restore', path.join(dir, 'restored')], {
+    env: { ...process.env, FEATURES: '[]', BASE_SHA: base, REPO: repo, RUN_ID: '102', HARNESS_VERSION: '', HARNESS_ROOT: dir, WORKFLOW_FILE: actualWorkflow,
+      GITHUB_OUTPUT: path.join(dir, 'outputs'), GITHUB_STEP_SUMMARY: path.join(dir, 'summary') }, encoding: 'utf8',
+  });
+  assert.equal(restored.status, 0, restored.stderr);
+  assert.match(restored.stdout, new RegExp(`harness_version=${cache.harnessVersion('HEAD', dir, actualWorkflow)}`));
+  assert.notEqual(cache.harnessVersion('HEAD', dir, actualWorkflow), cache.harnessVersion('HEAD', dir));
 });
 
 test('two PR runs on one base reuse complete evidence before scheduling; missing variants rerun the whole journey', { skip: process.platform !== 'linux' }, t => {
@@ -100,6 +110,8 @@ test('two PR runs on one base reuse complete evidence before scheduling; missing
 const fs = require('node:fs');
 const endpoint = process.argv[3];
 fs.appendFileSync(process.env.REQUESTS, endpoint + '\\n');
+if (process.env.API_BAD === '1') { console.log('{}'); process.exit(0); }
+if (process.env.DOWNLOAD_BAD === '1' && endpoint.endsWith('/zip')) process.exit(1);
 if (endpoint.endsWith('/zip')) process.stdout.write(fs.readFileSync(process.env.ARCHIVE));
 else if (endpoint.includes('/artifacts?')) {
   const name = new URL('https://example.test/' + endpoint).searchParams.get('name');
@@ -111,7 +123,7 @@ else if (endpoint.includes('/artifacts?')) {
     const out = path.join(f.dir, runId);
     const result = spawnSync(process.execPath, [path.join(__dirname, 'base-journey-cache.cjs'), 'restore', out], {
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, REPO: repo, RUN_ID: runId, BASE_SHA: base, HARNESS_VERSION: harness,
-        FEATURES: '["appearance","title-bar"]', COLD: cold, ARCHIVE: archive, REQUESTS: requests, GITHUB_OUTPUT: path.join(f.dir, `${runId}.output`), ...extra }, encoding: 'utf8',
+        FEATURES: '["appearance","title-bar"]', COLD: cold, ARCHIVE: archive, REQUESTS: requests, GITHUB_OUTPUT: path.join(f.dir, `${runId}.output`), GITHUB_STEP_SUMMARY: path.join(f.dir, `${runId}.summary`), ...extra }, encoding: 'utf8',
     });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(fs.readFileSync(path.join(out, 'reuse.json')));
@@ -124,7 +136,7 @@ else if (endpoint.includes('/artifacts?')) {
   assert.equal(warm.afterJobs, 6);
   assert.ok(fs.existsSync(path.join(f.dir, '103', `verify-appearance-${base}`, 'after.png')));
   assert.ok(!fs.existsSync(path.join(f.dir, '103', `verify-title-bar-${base}-96-light`)));
-  for (const extra of [{ EXPIRED: '1' }, { FOREIGN: '1' }, { HARNESS_VERSION: 'e'.repeat(64) }, { BASE_SHA: 'a'.repeat(40) }]) {
+  for (const extra of [{ EXPIRED: '1' }, { FOREIGN: '1' }, { API_BAD: '1' }, { DOWNLOAD_BAD: '1' }, { RUN_ID: '101' }, { HARNESS_VERSION: 'e'.repeat(64) }, { BASE_SHA: 'a'.repeat(40) }]) {
     assert.deepEqual(run('105', '0', extra).features, ['appearance', 'title-bar']);
   }
   run('103', '1');

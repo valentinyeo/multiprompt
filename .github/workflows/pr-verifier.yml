@@ -183,18 +183,11 @@ jobs:
       contents: read
       actions: read
     outputs:
-      features: ${{ steps.cache.outputs.features }}
-      harness_version: ${{ steps.cache.outputs.harness_version }}
+      features: ${{ steps.pick.outputs.features }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ needs.resolve.outputs.head_sha }}
-          persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
           ref: ${{ github.sha }}
-          path: base-cache-workflow
-          sparse-checkout: .github/workflows
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -208,22 +201,6 @@ jobs:
           FEATURES: ${{ needs.select.outputs.features }}
           REPRO_FEATURES: ${{ needs.select.outputs.repro_features }}
         run: node tools/pr-verifier.cjs failed-head
-      - name: Restore base evidence before scheduling Windows jobs
-        id: cache
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
-          FEATURES: ${{ steps.pick.outputs.features }}
-          WORKFLOW_FILE: base-cache-workflow/.github/workflows/verify.yml
-        run: node tools/base-journey-cache.cjs restore base-reuse
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: pr-verifier-base-reuse
-          path: base-reuse/
-          retention-days: 7
-          if-no-files-found: error
 
   base:
     needs: [resolve, failed-head]
@@ -234,8 +211,6 @@ jobs:
       features: ${{ needs.failed-head.outputs.features }}
       revision: ${{ needs.resolve.outputs.head_sha }}
       app_revision: ${{ needs.resolve.outputs.base_sha }}
-      base_cache: true
-      harness_version: ${{ needs.failed-head.outputs.harness_version }}
 
   verdict:
     name: pstack-verifier report
@@ -271,13 +246,6 @@ jobs:
         with:
           name: pr-verifier-selection
           path: verifier-out
-      - name: Download reused base evidence
-        if: needs.failed-head.result == 'success'
-        continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: pr-verifier-base-reuse
-          path: evidence
       - name: Download the journey evidence
         id: evidence
         continue-on-error: true
