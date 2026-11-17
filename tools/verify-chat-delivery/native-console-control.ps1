@@ -29,7 +29,7 @@ try {
     [NativeConsoleControl]::Close()
     $recorder.Dispose()
 }
-& node "$PSScriptRoot/native-console.cjs" $Evidence
+& node "$PSScriptRoot/native-console.test.cjs" $Evidence
 $result = Get-Content "$Evidence/native-console.json" -Raw | ConvertFrom-Json
 $caught = @($result.flashes | Where-Object { $_.console.hwnd -eq $handles[1] -and $_.console.parent -eq $handles[0] -and $_.phase -eq 'native-child-console-positive-control' })
 if ($LASTEXITCODE -ne 1 -or $result.status -ne 'failed' -or $caught.Count -eq 0) { throw 'Observer missed a real native child-console flash' }

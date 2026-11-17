@@ -63,7 +63,7 @@ try {
         try {
             if ($null -eq $windows) { throw 'Native window observer did not start' }
             $windows.Dispose()
-            & node (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/native-console.cjs') $Evidence
+            & node (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/native-console.test.cjs') $Evidence
             if ($LASTEXITCODE -ne 0) {
                 $native = Get-Content "$Evidence/native-console.json" -Raw | ConvertFrom-Json
                 if ($native.status -eq 'failed') { throw 'Native console appeared over visible Chat View; inspect native-console.json' }
