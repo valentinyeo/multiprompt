@@ -39,8 +39,9 @@
                 Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and @($inbox.shells | Where-Object { $_.sid -eq $sid -and $_.name -ceq $Name }).Count -eq 1 } "published Inbox name $Name"
             }
             function Rename-Sidebar([bool]$Hidden) {
-                Palette $(if ($Hidden) { 'hide sidebar' } else { 'show sidebar' })
-                Press @(0x0D) 'Enter: change sidebar visibility'
+                Invoke-JourneyCommand $(if ($Hidden) { 'Sidebar: hide' } else { 'Sidebar: expand' }) -Confirm {
+                    Press @(0x0D) 'Enter: change sidebar visibility'
+                }
                 Wait-Until { $state = Read-Session; $null -ne $state -and [bool]($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -eq $Hidden -and ($Hidden -or -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)) } 'published sidebar visibility'
                 Rename-WaitChatView
             }
@@ -131,8 +132,9 @@
             Type-Text 'Discard this name'
             Press @(0x1B) 'Esc: cancel rename'
             Rename-WaitSaved $current
-            Palette 'rename session'
-            Press @(0x0D) 'Enter: open the same inline editor'
+            Invoke-JourneyCommand 'Rename' -Confirm {
+                Press @(0x0D) 'Enter: open the same inline editor'
+            }
             [void](Rename-EditPoint $current)
             Type-Text 'Palette name'
             Doctor
