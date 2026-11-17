@@ -18,7 +18,9 @@ Dispatch the GitHub Windows journey:
 gh workflow run verify.yml --ref igsh-1522-live-chat-slash -f feature=chat-slash
 ```
 
-The journey selects an isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
+The journey first opens a saved host-0 tab whose reported folder belongs to the other server account. It types `/verify-owner` and accepts it with Tab. The isolated SSH boundary serves that skill only as the tab's account on its original server. Retain `completion-owner.jsonl`, `slash-owner-catalog.png` and `slash-owner-accepted.png`. On master, the request uses the login account and the skill cannot be accepted.
+
+The journey then selects the same isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
 
 Retain screenshots, raw controls, acknowledgements, resulting mode, executable identity, actions and zero-process cleanup together. This journey is independent of the structured-question card journey.
 
