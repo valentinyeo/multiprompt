@@ -11,6 +11,10 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: large-history-switch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   released-switches:
     runs-on: windows-latest

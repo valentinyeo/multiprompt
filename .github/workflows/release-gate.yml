@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-gate-${{ github.event_name == 'push' && github.sha || github.run_id }}
-  cancel-in-progress: false
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   journey:
