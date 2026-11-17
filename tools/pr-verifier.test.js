@@ -127,6 +127,25 @@ test('the base side is only the head journeys that failed', () => {
   assert.deepEqual(verifier.failedHeadFeatures(jobs, ['appearance', 'chat-view', 'palette-order']), ['appearance']);
 });
 
+test('base journeys run after head failure but respect cancellation', () => {
+  const baseJob = workflow.split('\n  base:\n')[1].split('\n  verdict:\n')[0];
+  const condition = baseJob.match(/^    if: "([^"]+)"$/m)[1];
+  assert.match(condition, /!cancelled\(\)/);
+  assert.match(condition, /needs\.resolve\.result == 'success'/);
+  assert.match(condition, /needs\.failed-head\.result == 'success'/);
+  assert.match(condition, /needs\.failed-head\.outputs\.features != '\[\]'/);
+  assert.match(condition, /needs\.failed-head\.outputs\.features != ''/);
+  const evaluate = new Function('needs', 'cancelled', `return (${condition.replaceAll('needs.failed-head', 'needs.failedHead')});`);
+  const needs = { resolve: { result: 'success' }, head: { result: 'failure' }, failedHead: { result: 'success', outputs: { features: '["settings-panel"]' } } };
+  assert.equal(evaluate(needs, () => false), true);
+  assert.equal(evaluate(needs, () => true), false);
+  for (const features of ['[]', '']) {
+    assert.equal(evaluate({ ...needs, failedHead: { result: 'success', outputs: { features } } }, () => false), false);
+  }
+  assert.equal(evaluate({ ...needs, failedHead: { ...needs.failedHead, result: 'failure' } }, () => false), false);
+  assert.equal(evaluate({ ...needs, resolve: { result: 'failure' } }, () => false), false);
+});
+
 test('the verifier waits until Tests passes for that head and still posts the check on the head', () => {
   assert.equal(verifier.testsGate([]).action, 'wait');
   assert.equal(verifier.testsGate([{ id: 2, status: 'queued', conclusion: '' }]).action, 'wait');

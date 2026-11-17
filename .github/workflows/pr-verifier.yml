@@ -195,7 +195,7 @@ jobs:
 
   base:
     needs: [resolve, failed-head]
-    if: needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''
+    if: "!cancelled() && needs.resolve.result == 'success' && needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''"
     name: base ${{ matrix.feature }}
     strategy:
       fail-fast: false

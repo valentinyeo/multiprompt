@@ -11,6 +11,24 @@ const end = source.indexOf('\nfunction Open-Settings', start);
 assert.ok(start >= 0 && end > start);
 const click = source.slice(start, end);
 
+test('native Settings tab order includes every production control', () => {
+  const panel = fs.readFileSync(path.join(__dirname, '../src/settings_panel.zig'), 'utf8');
+  const words = fs.readFileSync(path.join(__dirname, '../src/ui_words.zon'), 'utf8');
+  const controls = [...panel.match(/pub const Control = enum\(u16\) \{([\s\S]*?)\n\};/)[1].matchAll(/^    (\w+)(?: = \d+)?,/gm)].map(match => match[1]);
+  const labels = new Map([...panel.matchAll(/\.(\w+) => L\(words\.(\w+)\)/g)].map(match => [match[1], match[2]]));
+  const text = new Map([...words.matchAll(/\.(\w+) = "([^"]*)"/g)].map(match => [match[1], match[2]]));
+  const expected = controls.map(control => {
+    const name = text.get(labels.get(control));
+    assert.ok(name, `Missing native label for ${control}`);
+    return name;
+  });
+  const arrays = [...source.matchAll(/foreach \(\$name in @\(([^\n]*)\)\)/g)].map(match => [...match[1].matchAll(/'([^']+)'/g)].map(value => value[1]));
+  assert.deepEqual(arrays[0], expected);
+  assert.deepEqual(arrays[1], [...expected.slice(1), expected[0]]);
+  const recordedCount = Number(source.match(/name = 'settings-native-focus-order'; passed = \$true; tabControls = (\d+)/)[1]);
+  assert.equal(recordedCount, expected.length);
+});
+
 test('settings clicks bring the target into view through bounded native Tab focus', () => {
   assert.match(click, /for \(\$attempt = 0; \$attempt -lt 12 -and -not \$element\.Current\.HasKeyboardFocus; \$attempt\+\+\)/);
   assert.match(click, /Press @\(0x09\)/);
