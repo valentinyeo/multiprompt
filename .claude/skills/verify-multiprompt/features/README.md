@@ -182,3 +182,15 @@ Keep these implementation anchors here, not in the user-facing recipes. Refresh 
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
 
 Part A is [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070): `seed-profile.py`, `seed-profile.ps1` and the `chat-real-size` journey. Part B is [PR 1072](https://github.com/valentinyeo/multiprompt/pull/1072): the runner-owned SSH/tmux `server-chat` journey. These stems are not available on this branch until those prerequisites are integrated; do not add replacement fixtures here.
+
+## Generated source-row journeys
+
+<!-- GENERATED-JOURNEYS:START -->
+- [Cycle sidebar: open / collapsed / hidden](generated-sidebar-cycle.md).
+- [Expand sidebar](generated-sidebar-expand.md).
+- [Theme amoled](generated-theme-amoled.md).
+- [Theme dark](generated-theme-dark.md).
+- [Theme edge grey](generated-theme-edgegray.md).
+- [Theme light](generated-theme-light.md).
+- [Theme mid](generated-theme-mid.md).
+<!-- GENERATED-JOURNEYS:END -->

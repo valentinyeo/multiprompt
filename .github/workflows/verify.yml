@@ -247,7 +247,9 @@ jobs:
           const { available, pr } = discoverFeatures();
           const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
           if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
-          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))])}`);
+          const builds = [...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))];
+          if (!process.env.APP_REVISION && selected.includes('generated-sidebar-cycle')) builds.push('shortcut-break');
+          console.log(`builds=${JSON.stringify(builds)}`);
           console.log(`selected=${JSON.stringify(selected)}`);
           console.log(`matrix=${JSON.stringify(journeyMatrix(selected, process.env.APP_REVISION))}`);
           NODE
@@ -327,13 +329,16 @@ jobs:
       - name: Add the read-only chat measurement probe to the verification build
         if: inputs.tag == '' && matrix.profile == 'chat-still'
         run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
+      - name: Plant a covered shortcut break in the disposable verification build
+        if: inputs.tag == '' && matrix.profile == 'shortcut-break'
+        run: node tools/plant-shortcut-break.mjs .
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
         run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
-          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || matrix.profile == 'shortcut-break' && '-shortcut-break' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -997,6 +1002,8 @@ jobs:
           $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
           if ($mapped.ContainsKey($env:FEATURE)) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          } elseif ($env:FEATURE.StartsWith('generated-')) {
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } else {
             & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
@@ -1112,6 +1119,31 @@ jobs:
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+      - name: Download the planted shortcut break
+        if: success() && env.FEATURE == 'generated-sidebar-cycle' && inputs.app_revision == '' && inputs.tag == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-app-shortcut-break
+          path: shortcut-break-bin
+      - name: Require the covered shortcut journey to catch the planted break
+        if: success() && env.FEATURE == 'generated-sidebar-cycle' && inputs.app_revision == '' && inputs.tag == ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $green = Get-Content evidence/result.json -Raw | ConvertFrom-Json
+          if ($green.status -ne 'passed') { throw 'The unmodified row journey must pass first' }
+          Copy-Item shortcut-break-bin/shortcut-break.json evidence/shortcut-break-mutation.json
+          $exe = "$pwd/shortcut-break-bin/multiprompt.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          if ($hash -eq $env:VERIFY_SHA256) { throw 'The mutation did not change the executable' }
+          & powershell -NoProfile -File .claude/skills/verify-multiprompt/drive.ps1 -Feature generated-sidebar-cycle -Exe $exe -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $hash -Evidence "$pwd/evidence/shortcut-break"
+          $exit = $LASTEXITCODE
+          $red = Get-Content evidence/shortcut-break/result.json -Raw | ConvertFrom-Json
+          $tree = Get-Content evidence/shortcut-break/process-tree.json -Raw | ConvertFrom-Json
+          if ($exit -eq 0 -or $red.status -ne 'failed' -or $red.error -notlike '*generated shortcut:view/ctrl-shift-b: collapsed sidebar saved*') { throw 'The planted shortcut break did not fail its behavioral assertion' }
+          if (-not $red.scratchRemoved -or $tree.activeAfterStop -ne 0) { throw 'Planted shortcut break cleanup failed' }
+          @{ status='passed'; row='shortcut:view/ctrl-shift-b'; clean='passed'; planted='failed'; error=$red.error; sha256=$hash } | ConvertTo-Json | Set-Content -Encoding UTF8 evidence/shortcut-break-proof.json
+          exit 0
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |

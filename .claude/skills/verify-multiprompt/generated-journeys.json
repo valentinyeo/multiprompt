@@ -1,0 +1,66 @@
+[
+  {
+    "feature": "generated-sidebar-cycle",
+    "id": "shortcut:view/ctrl-shift-b",
+    "shape": "sidebar-cycle",
+    "title": "Cycle sidebar: open / collapsed / hidden",
+    "keys": [
+      17,
+      16,
+      66
+    ],
+    "chord": "Ctrl+Shift+B"
+  },
+  {
+    "feature": "generated-sidebar-expand",
+    "id": "palette:SEARCH_HIDESIDEBAR_OFFSET",
+    "shape": "sidebar-expand",
+    "title": "Expand sidebar",
+    "command": "Sidebar: expand"
+  },
+  {
+    "feature": "generated-theme-amoled",
+    "id": "palette:SEARCH_THEME_AMOLED_OFFSET",
+    "shape": "theme-color",
+    "title": "Theme amoled",
+    "query": "amoled",
+    "saved": "amoled",
+    "rgb": 0
+  },
+  {
+    "feature": "generated-theme-dark",
+    "id": "palette:SEARCH_THEME_DARK_OFFSET",
+    "shape": "theme-color",
+    "title": "Theme dark",
+    "query": "dark",
+    "saved": "dark",
+    "rgb": 16
+  },
+  {
+    "feature": "generated-theme-edgegray",
+    "id": "palette:SEARCH_THEME_EDGE_GRAY_OFFSET",
+    "shape": "theme-color",
+    "title": "Theme edge grey",
+    "query": "edge grey",
+    "saved": "edgegray",
+    "rgb": 51
+  },
+  {
+    "feature": "generated-theme-light",
+    "id": "palette:SEARCH_THEME_LIGHT_OFFSET",
+    "shape": "theme-color",
+    "title": "Theme light",
+    "query": "light",
+    "saved": "light",
+    "rgb": 243
+  },
+  {
+    "feature": "generated-theme-mid",
+    "id": "palette:SEARCH_THEME_MID_OFFSET",
+    "shape": "theme-color",
+    "title": "Theme mid",
+    "query": "mid",
+    "saved": "mid",
+    "rgb": 60
+  }
+]

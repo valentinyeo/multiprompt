@@ -54,6 +54,10 @@ jobs:
         run: node tools/check-journey-commands.mjs
       - name: Test source-derived feature journey coverage
         run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
+      - name: Test generated live row recipes
+        run: node --test tools/generate-feature-journeys.test.mjs
+      - name: Reject stale generated journeys
+        run: node tools/generate-feature-journeys.mjs --check
       - name: Check out the base feature map separately
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
