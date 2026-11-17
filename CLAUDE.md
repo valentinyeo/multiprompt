@@ -48,6 +48,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
 | Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
+| Repair PRs name a journey that fails on master and passes on head. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
