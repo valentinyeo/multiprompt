@@ -135,10 +135,6 @@ on:
       app_revision:
         required: false
         type: string
-      chat_position_replay:
-        required: false
-        default: false
-        type: boolean
       browser_stall:
         required: false
         default: false
@@ -286,7 +282,7 @@ jobs:
           "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Install identical read-only paint recorder
-        if: inputs.chat_position_replay
+        if: inputs.feature == 'chat-position-replay'
         run: python tools/verify-chat-delivery/install-frame-probe.py .
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
@@ -400,7 +396,7 @@ jobs:
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_INSTANT_PROOF: ${{ inputs.feature == 'chat-instant' && '1' || '' }}
       CHAT_MODEL_PROOF: ${{ inputs.feature == 'chat-model' && '1' || '' }}
-      CHAT_POSITION_REPLAY: ${{ inputs.chat_position_replay && '1' || '' }}
+      CHAT_POSITION_REPLAY: ${{ inputs.feature == 'chat-position-replay' && '1' || '' }}
       CHAT_WORKING_LIVE_PROOF: ${{ inputs.feature == 'chat-working-live' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
@@ -431,6 +427,10 @@ jobs:
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
+      - name: Select the discoverable long-chat position journey
+        if: inputs.feature == 'chat-position-replay'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV 'FEATURE=chat-switch-speed'
       - name: Select instant chat driver
         if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_DOUBLE_CLICK_PROOF == '1'
         shell: pwsh
@@ -481,7 +481,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || inputs.chat_position_replay
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || inputs.feature == 'chat-position-replay'
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -589,14 +589,14 @@ jobs:
           name: verify-app
           path: zig-out/bin
       - name: Instrument the independent baseline at the same paint boundary
-        if: inputs.chat_position_replay && matrix.app-revision != ''
+        if: inputs.feature == 'chat-position-replay' && matrix.app-revision != ''
         run: python tools/verify-chat-delivery/install-frame-probe.py app-source
       - name: Build branch executable
         if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1' || env.CHAT_MODEL_PROOF == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
       - name: Test frame-by-frame movement detection
-        if: inputs.chat_position_replay
+        if: inputs.feature == 'chat-position-replay'
         run: node --test tools/verify-chat-delivery/position-replay.test.cjs
       - name: Stage the independently built application
         if: matrix.app-revision != ''
@@ -1059,7 +1059,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Chrome for Testing install failed' }
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Start complete chat paint recording before launch
-        if: inputs.chat_position_replay
+        if: inputs.feature == 'chat-position-replay'
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force evidence/paints | Out-Null
@@ -1075,7 +1075,7 @@ jobs:
             & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
       - name: Record the same real-size hosted chat while it stays open
-        if: always() && inputs.chat_position_replay && !cancelled()
+        if: always() && inputs.feature == 'chat-position-replay' && !cancelled()
         shell: powershell
         env:
           CHAT_WORKING_LIVE_PROOF: '1'
@@ -1111,8 +1111,23 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Require both long-chat journeys in the reported result
+        if: always() && inputs.feature == 'chat-position-replay'
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          root = Path('evidence/result.json')
+          native = json.loads(root.read_text(encoding='utf-8-sig'))
+          hosted_path = Path('evidence/hosted/result.json')
+          hosted = json.loads(hosted_path.read_text(encoding='utf-8-sig')) if hosted_path.exists() else dict(status='failed', error='Hosted long-chat evidence is missing')
+          native['positionJourneys'] = dict(switch=native['status'], hosted=hosted['status'])
+          if hosted['status'] != 'passed':
+              native['status'] = 'failed'
+              native['error'] = native.get('error') or hosted.get('error') or 'Hosted long-chat journey failed; inspect hosted evidence'
+          root.write_text(json.dumps(native, indent=2) + '\n', encoding='utf-8')
       - name: Compress every recorded paint without discarding failed evidence
-        if: always() && inputs.chat_position_replay
+        if: always() && inputs.feature == 'chat-position-replay'
         shell: powershell
         run: |
           Add-Type -AssemblyName System.Drawing

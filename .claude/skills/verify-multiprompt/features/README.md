@@ -152,3 +152,5 @@ Keep these implementation anchors here, not in the user-facing recipes. Refresh 
 
 - [Link picker](link-picker.md): Alt+W above chat, AMOLED selection, Escape and Enter.
 - [Live chat model and effort](chat-model.md): real host with a synthetic Claude process.
+
+- [Long-chat position replay](chat-position-replay.md): PR 1070 real-size sessions, every visible paint, held-reader streaming and required native receipts.

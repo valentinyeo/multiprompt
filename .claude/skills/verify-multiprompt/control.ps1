@@ -522,7 +522,7 @@ try {
     }
     [void][VerifyNative]::ShowWindow($script:window, 9)
     if ($env:CHAT_POSITION_REPLAY -eq '1') {
-        [void][VerifyNative]::MoveWindow($script:window, 0, 0, 2560, 1560, $true)
+        [void][VerifyNative]::MoveWindow($script:window, 0, 0, 1920, 1040, $true)
     } else {
         [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
     }

@@ -27,7 +27,7 @@ $frameRate = if ($env:CHAT_POSITION_REPLAY -eq '1') { 30 } else { 8 }
 try {
     if ($env:CHAT_POSITION_REPLAY -eq '1') {
         Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/layout-capture.cs')
-        [LayoutCapture]::Display(2560, 1600)
+        [LayoutCapture]::Display(1920, 1080)
     }
     $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate $frameRate -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
     $start.UseShellExecute = $false
