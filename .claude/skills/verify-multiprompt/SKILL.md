@@ -85,6 +85,10 @@ The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictatio
 
 The [Jump to newest](features/chat-newest.md) journey (`feature=chat-newest`) verifies Shift+G twice and the matching palette action with exact native draft reads. Its named `result.json` checks are independent of the separate full-history restart/performance journey.
 
+## Chat control receipts
+
+The `permission-rows`, `chat-slash` and `chat-view` drivers check their expanded input matrices through `chat-control-coverage.test.cjs`. The evidence modes validate receiving-side raw records, route order, exact counts, drafts and owned screenshots. Run its focused regression suite with `node --test .claude/skills/verify-multiprompt/chat-control-coverage.test.cjs`; the automatic PR comparison also runs changed test files. New `Covers:` lines identify scripted routes, not completed hosted proof. Inspect their Windows artifacts and independent verifier verdict before reporting them as verified. These routes reuse existing stand-ins and add no real SSH or paid-provider claims.
+
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:

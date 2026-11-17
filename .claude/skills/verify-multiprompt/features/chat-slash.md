@@ -1,25 +1,32 @@
 # Live chat commands
 
+Covers: palette:SEARCH_CHAT_MODE_PLAN_OFFSET, palette:SEARCH_CHAT_MODE_MANUAL_OFFSET, palette:SEARCH_CHAT_MODE_EDITS_OFFSET, palette:SEARCH_CHAT_MODE_BYPASS_OFFSET, palette:SEARCH_CHAT_PLUS_MENU_OFFSET
+Covers: shortcut:palette-actions/ctrl-k-chat-view-plus-menu, shortcut:palette-actions/plan-or-permissions-in-live-chat-or-ctrl-k-chat-view-plus-menu
+
 ## Sub-features
 
-/plan and /permissions open the existing mode picker. Plan, Ask and Accept edits apply to the originating live chat. Unsupported terminal commands explain their limits without entering the outbox. /model says coming soon until its dedicated picker is merged.
+- `/plan` and `/permissions` open the permission picker. Plan, Ask, Accept edits and Bypass apply to the originating live chat.
+- The same four modes work through their global Ctrl+K entries and the permission section of Plus Menu.
+- Palette and Plus selections preserve an existing draft. Acknowledged slash choices clear the slash draft. Escape cancels Plus without another request.
+- `/model`, `/resume` and `/rewind` keep the draft editable and explain their limits without entering the outbox.
 
 ## How to get to it (user POV)
 
-Type /plan or /permissions in live chat. Press Enter, then choose a mode. Ctrl+K also lists the modes. /model, /resume and /rewind keep the draft editable and show a plain notice.
+Type `/plan` or `/permissions` in live chat. Press Enter, then choose a mode. Alternatively, open Ctrl+K and select **Chat permission mode: Plan**, **Ask**, **Accept edits**, or **Bypass**. Ctrl+K, **Chat View: Plus Menu**, opens the same permission choices alongside model and effort choices.
 
 ## Driving it with control.ps1
 
-Dispatch the GitHub Windows journey:
+Use the automatic PR verifier's `chat-slash` Windows journey. It invokes `control.ps1 -Feature chat-slash` against the PR head. Do not dispatch a second run while that verifier is active.
 
-```sh
-gh workflow run verify.yml --ref igsh-1522-live-chat-slash -f feature=chat-slash
-```
+1. Select the isolated live chat. Type all five slash commands through the owned composer. Require visible pickers and notices.
+2. Choose Plan and Ask, then Accept edits and Bypass through `/permissions`. Require one successful acknowledgement per choice and an empty composer after each acknowledgement.
+3. Type `Keep this mode draft`. Select each of the four global palette mode entries through Ctrl+K, search, arrows and Enter. Require that exact draft after every acknowledgement.
+4. Open **Chat View: Plus Menu** through Ctrl+K for each mode. From its initial unselected state, press Up twice for Plan, four times for Ask, three times for Accept edits and once for Bypass. Press Enter. Require the same draft and one acknowledgement per choice.
+5. Open Plus again and press Escape. Require the unchanged draft and no thirteenth control.
+6. Require exactly twelve receiving controls and twelve successful acknowledgements for the saved originating SID. The ordered modes are `plan,manual,acceptEdits,bypassPermissions`, repeated for slash, palette and Plus. No slash command may enter the ordinary outbox.
 
-The journey selects an isolated live chat and types all five commands through the real composer. It captures every typed command, each picker and each notice. Choosing Plan, Ask and Accept edits must produce exactly three host controls for that chat, in order. No slash command may enter the ordinary outbox.
-
-Retain screenshots, raw controls, acknowledgements, resulting mode, executable identity, actions and zero-process cleanup together. This journey is independent of the structured-question card journey.
+The driver runs `chat-control-coverage.test.cjs --mode-evidence <evidence>` against the retained raw controls, replies, resulting mode and `mode-inputs.json`. Inspect each `mode-<route>-<mode>-received.png`, picker screenshots, notices, `doctor.json`, actions and zero-process cleanup. Receipt checks establish native routing, not visual polish or real provider execution.
 
 ## Gotchas
 
-Two saved remote tabs and one transcript round are seeded once before launch. The app-supplied reader runs the real host mode handler. Only SSH, host ownership and agent control transport are stand-ins. No shared session, credentials or paid agent is used. This verifies native routing and host controls, not a real agent session.
+Two saved remote tabs and one transcript round are seeded once before launch. The app-supplied reader runs the production host mode handler. SSH, host ownership and agent control transport are stand-ins. No shared session, credentials or paid agent is used. This journey does not claim direct model or effort palette coverage. Real SSH and provider work belongs to the separate server-chat journey.
