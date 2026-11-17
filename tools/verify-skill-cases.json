@@ -26,8 +26,8 @@
     "verdict": "FAIL",
     "seed": {
       "file": "src/shortcuts.zig",
-      "before": "_ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);",
-      "after": "_ = PostMessageW(app_state.g_main_hwnd, 0, 1, 0);"
+      "before": "debugLog(\"hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN\");\n                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);",
+      "after": "debugLog(\"hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN\");\n                    _ = PostMessageW(app_state.g_main_hwnd, 0, 1, 0);"
     },
     "failure": "command palette initialized|palette.*ready|palette.*open"
   }

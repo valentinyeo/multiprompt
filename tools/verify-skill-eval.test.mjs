@@ -43,6 +43,13 @@ for (const scenario of cases) {
   });
 }
 
+test('each planted regression matches the current production source exactly once', () => {
+  for (const scenario of cases.filter(item => item.seed)) {
+    const source = fs.readFileSync(new URL(`../${scenario.seed.file}`, import.meta.url), 'utf8');
+    assert.equal(source.split(scenario.seed.before).length - 1, 1, scenario.id);
+  }
+});
+
 test('self-reported recipe selection without actual reads fails', () => {
   const fixture = proof(cases[0]);
   fixture.transcript = fixture.transcript.filter(event => !event.args.file?.endsWith('/appearance.md'));
