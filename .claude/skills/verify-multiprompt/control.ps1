@@ -10,6 +10,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Run only on a GitHub Windows runner through verify.yml' }
+& node --test "$PSScriptRoot/check-feature-map.test.cjs"
+if ($LASTEXITCODE -ne 0) { throw 'Feature map is incomplete; repair the source-action or recipe links before driving' }
 if ($Feature -eq 'whats-new' -and $env:RELEASE_TAG) { throw 'whats-new requires a branch build matching the source titles' }
 $shapeProof = $env:CHAT_SHAPE_PROOF -eq '1'
 $shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'

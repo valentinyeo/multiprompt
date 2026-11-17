@@ -32,6 +32,9 @@ Verify on: push
 
 ## Gotchas
 
+Live chats remain Chat View and cannot toggle to a shell. Individual tab close clears its pin first; archive and group-close protection are separate. Unpinning is a safe recipe step, not a prerequisite for every individual close.
+
+
 - Ctrl+digits follows displayed sidebar order. Pinning session 3 moves it ahead of sessions 1 and 2 even with manual ordering; unpinning restores creation order.
 - Normal close refuses while a pin exists, so the journey explicitly unpins before its restart. Native session write/load tests cover pinned persistence separately.
 - The native suite covers each refused destructive action and a frozen pre-change session-format fixture. The desktop recipe exercises view toggles, not pinned close or remote tmux archive/end operations.

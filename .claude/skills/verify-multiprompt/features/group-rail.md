@@ -35,6 +35,9 @@ Dispatch `gh workflow run verify.yml --ref <branch> -f feature=group-rail`. The 
 
 ## Gotchas
 
+Current source preserves group-name case and draws Recents literally, not all capitals. Expanded headers are scaled 42 px and unified member rows are scaled 58 px. The native driver still has a 28 px header assumption; treat that as a harness geometry gap, not proof of the current production dimensions.
+
+
 - Release v0.28.946 predates approved capitals and #8A8A8A labels. Run the identical journey against that tag. Require `sidebar-label same-style FAIL`. Old color and mixed case cause this failure. The current build still requires no arrow. It also requires the former button region empty.
 - Before IGSH-932, RECENTS had a leading arrow. The new-tab row also included text. Those builds must fail `sidebar-label no-arrow`. They must also fail `sidebar-former-button empty`. The former `sidebar-newtab plus-only` check rejected that text. Capitals alone do not pass the style check. Unread-only shares the former button region. This empty-region check requires unread-only mode off.
 
