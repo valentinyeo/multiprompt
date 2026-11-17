@@ -11,6 +11,7 @@ cat > /tmp/mp-ci-sshd.conf <<'CONFIG'
 Port 2222
 ListenAddress 127.0.0.1
 HostKey /etc/ssh/ssh_host_ed25519_key
+KexAlgorithms curve25519-sha256
 PidFile /tmp/mp-ci-sshd.pid
 AuthorizedKeysFile .ssh/authorized_keys
 PasswordAuthentication no
