@@ -10,7 +10,7 @@ Open an empty Ctrl+K with a known usage history and check the Most used band, th
 - `job-groups`: every other row sits under one group header, and no header repeats.
 - `rare-recent-stays-out`: a command used twice but stamped as very recent stays out of Most used, so recency alone cannot jump the list.
 - `removed-command`: `chat view per tab` finds no rows.
-- `renamed-commands`: new names such as `copy session diagnostics`, `rename workspace`, `mobile latency mode`, `restore disconnected workspace sessions`, `auto-suspend idle panes`, `use agent or terminal session name` and `insert agent instructions` find their commands, and the old name `copy shell diagnostics` still works.
+- `renamed-commands`: new names such as `copy session diagnostics`, `rename workspace`, `mobile latency mode`, `restore disconnected workspace sessions`, `auto-suspend idle panes` and `insert agent instructions` find their commands, and the old name `copy shell diagnostics` still works.
 
 ## How to get to it (user POV)
 
