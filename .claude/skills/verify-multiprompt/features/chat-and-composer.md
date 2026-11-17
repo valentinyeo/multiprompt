@@ -2,7 +2,7 @@
 
 Read conversations, compose replies, attach files, search, dictate, and switch supported terminal tabs between chat and shell.
 
-Journeys: chat-focus, chat-view, chat-composer-text, chat-real-size
+Journeys: chat-focus, chat-view, chat-composer-text, chat-real-size, chat-still
 
 ## Sub-features
 - `read` displays history, Find matches, selection, copied text, and unread boundaries.
