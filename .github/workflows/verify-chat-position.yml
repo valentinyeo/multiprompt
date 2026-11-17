@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/verify-chat-position.yml
       - .github/workflows/verify.yml
+      - .claude/skills/verify-multiprompt/control-feature-chat-switch-speed.ps1
       - .claude/skills/verify-multiprompt/control.ps1
       - .claude/skills/verify-multiprompt/drive.ps1
       - tools/verify-chat-delivery/*frame-probe*

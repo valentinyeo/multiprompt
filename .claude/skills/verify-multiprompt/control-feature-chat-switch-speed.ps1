@@ -1,3 +1,7 @@
+if ($env:CHAT_POSITION_REPLAY -eq '1') {
+    . (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/position-replay.ps1')
+    return
+}
 
             $shapeResult = $null
             if ($shapeProof) {

@@ -97,7 +97,7 @@ Native compilation, execution, and profiling require Windows CI.
 - The probe measures whether the window thread answers messages, which matches a frozen frame. It does not measure GPU presentation.
 - The journey measures only. The numbers are only meaningful from the GitHub Windows runner, never from a laptop.
 
-## Frame-by-frame position replay
+### Frame-by-frame position replay
 
 `verify-chat-position.yml` automatically compares pinned master `608b7d62` and the PR candidate. Both builds receive the identical test-only `frame-probe.zig` through `install-frame-probe.py`. It adds one observation after a successful transcript BitBlt, without changing layout, scroll, or paint scheduling. The recorder is not included in shipped builds.
 
@@ -106,5 +106,7 @@ The existing Launch/Doctor/Drive/Cleanup driver starts a 30 fps desktop video be
 The journey opens one short and four 400-round sessions, revisits them twelve times with new answers, scrolls into old history, receives and sends while reading, jumps to newest, then sends and receives at the bottom. The stand-in SSH provider writes ordinary source transcripts; native input sends messages. Actual transcript copy must contain both sent messages and both received answers. The driver never writes the app's cache or scroll state.
 
 `position-replay.json` lists every observed block or matching text-pixel-row movement with paint numbers and times. Stable opening, switching, and reading phases reject movement or stale-session content. Explicit scrolling, send actions, and follow-bottom arrivals retain their movements for inspection rather than treating intended scrolling as a bug. Arrival comparisons include the pre-action paint. Missing paints, incomplete phases, missing bitmaps, or missing transcript receipts fail separately from a reproduced jump.
+
+Short chats now start at the top while their opening position is held. Existing messages remain fixed as late history grows through the viewport; holds still clamp after content shrinks. Jump to newest releases that hold and follows the bottom normally.
 
 The original premise was that the first `chat content shown` log was the first visible frame. This replay starts at the first actual nonempty paint, before that readiness filter. Do not accept the PR unless master fails on an observed movement, the candidate passes the same recording, and the independent verifier posts its verdict.

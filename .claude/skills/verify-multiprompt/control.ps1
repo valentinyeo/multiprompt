@@ -687,11 +687,7 @@ try {
             . (Join-Path $PSScriptRoot 'control-feature-command-palette.ps1')
         }
         'chat-switch-speed' {
-            if ($env:CHAT_POSITION_REPLAY -eq '1') {
-                . (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/position-replay.ps1')
-            } else {
-                . (Join-Path $PSScriptRoot 'control-feature-chat-switch-speed.ps1')
-            }
+            . (Join-Path $PSScriptRoot 'control-feature-chat-switch-speed.ps1')
         }
     }
     if ($Feature -in @('title-bar', 'window-controls')) {

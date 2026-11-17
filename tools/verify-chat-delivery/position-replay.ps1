@@ -1,3 +1,4 @@
+Add-Type -AssemblyName System.Windows.Forms
 $case = @{ name='chat-position-replay'; status='failed'; detail='Replay did not complete' }
 $result.checks += $case
 $phases = [Collections.Generic.List[object]]::new()
@@ -78,8 +79,10 @@ try {
         Wait-Until { [VerifyNative]::EditText($composer) -eq '' } 'reader-send composer cleared'
     } 1
     Observe-Replay 'jump-to-newest' 'user-scroll' {
-        Press @(0x23) 'End to newest messages'
+        Invoke-JourneyCommand 'Jump to newest message'
     } 1
+    $latestFrame = @(Get-Content (Join-Path $env:MULTIPROMPT_FRAME_PROBE 'frames.tsv') | Where-Object { $_.StartsWith("frame`t") })[-1] -split "`t"
+    if ($latestFrame[14] -ne '0') { throw 'Newest action must actually reach the bottom before the next send' }
     Observe-Replay 'send-at-bottom' 'send' {
         Press @(0x12, 0x51) 'Focus composer'
         Type-Text 'position replay send at bottom'
@@ -100,7 +103,7 @@ try {
     Press @(0x1B) 'Clear copied selection'
     Snapshot 'action'
     Snapshot 'after'
-    & node (Join-Path $PSScriptRoot 'position-replay.cjs') $env:MULTIPROMPT_FRAME_PROBE (Join-Path $Evidence 'position-phases.json') (Join-Path $Evidence 'position-replay.json')
+    & node (Join-Path $PSScriptRoot 'position-replay.test.cjs') $env:MULTIPROMPT_FRAME_PROBE (Join-Path $Evidence 'position-phases.json') (Join-Path $Evidence 'position-replay.json')
     if ($LASTEXITCODE -ne 0) { throw 'Chat moved after its first painted frame; inspect position-replay.json and paints' }
     $case.status='passed'
     $case.detail='Every successful paint retained through opens, switches, reader arrivals and sends'

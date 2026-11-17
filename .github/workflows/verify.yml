@@ -129,16 +129,16 @@ on:
         type: string
   workflow_call:
     inputs:
-      chat_position_replay:
-        required: false
-        default: false
-        type: boolean
       revision:
         required: false
         type: string
       app_revision:
         required: false
         type: string
+      chat_position_replay:
+        required: false
+        default: false
+        type: boolean
       browser_stall:
         required: false
         default: false
@@ -468,9 +468,6 @@ jobs:
       - name: Check inline working pixel oracle
         continue-on-error: true
         run: node --test tools/chat-working-proof.test.mjs tools/live-working-proof.test.mjs
-      - name: Test frame-by-frame movement detection
-        if: inputs.chat_position_replay
-        run: node --test tools/verify-chat-delivery/position-replay.test.cjs
       - name: Check hosted working evidence contract
         if: env.CHAT_WORKING_LIVE_PROOF == '1'
         run: node --test tools/chat-working-live-proof.test.mjs
@@ -484,7 +481,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install browser toggle recorder
-        if: inputs.chat_position_replay || env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette'
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || inputs.chat_position_replay
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -598,6 +595,9 @@ jobs:
         if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1' || env.CHAT_MODEL_PROOF == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
+      - name: Test frame-by-frame movement detection
+        if: inputs.chat_position_replay
+        run: node --test tools/verify-chat-delivery/position-replay.test.cjs
       - name: Stage the independently built application
         if: matrix.app-revision != ''
         shell: pwsh
