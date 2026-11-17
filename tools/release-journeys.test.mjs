@@ -12,6 +12,12 @@ test('releases have an executable candidate journey gate', () => {
   assert.equal(typeof checkEvidence, 'function', 'Release publication must check candidate journeys before publishing');
 });
 
+test('every Linux video-checking job installs the decoder', () => {
+  for (const workflow of ['test.yml', 'check-red-run.yml', 'release.yml']) {
+    assert.match(fs.readFileSync(`.github/workflows/${workflow}`, 'utf8'), /sudo apt-get install -y ffmpeg/, workflow);
+  }
+});
+
 const sha = 'a'.repeat(40);
 const base = 'b'.repeat(40);
 const run = 'https://github.com/example/multiprompt/actions/runs/123';
