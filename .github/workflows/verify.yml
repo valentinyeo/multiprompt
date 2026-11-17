@@ -129,6 +129,12 @@ on:
         type: string
   workflow_call:
     inputs:
+      revision:
+        required: false
+        type: string
+      app_revision:
+        required: false
+        type: string
       break_it_expect_regression:
         description: Require a product failure after the ordinary repro passes on the pinned past fix
         required: false
@@ -139,12 +145,6 @@ on:
         required: false
         default: false
         type: boolean
-      revision:
-        required: false
-        type: string
-      app_revision:
-        required: false
-        type: string
       browser_stall:
         required: false
         default: false
