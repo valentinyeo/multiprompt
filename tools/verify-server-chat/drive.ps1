@@ -84,7 +84,7 @@ function Server-Snapshot([string]$Name) {
 }
 try {
     & "$PSScriptRoot/start.ps1" -Profile $profile -Evidence $Evidence
-    $repo = (& wsl.exe -d Ubuntu-24.04 -u root -- wslpath -a $env:GITHUB_WORKSPACE).Trim()
+    $repo = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
     $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
     $env:APPDATA = "$profile/roaming"
     $env:LOCALAPPDATA = "$profile/local"
@@ -207,8 +207,14 @@ try {
         $recorder.Dispose()
     }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
-    $linuxEvidence = (& wsl.exe -d Ubuntu-24.04 -u root -- wslpath -a $Evidence).Trim()
-    & wsl.exe -d Ubuntu-24.04 -u root -- bash -c 'cp /tmp/mp-ci-sshd.log "$1/sshd.log"; pkill -u mpverify || true; kill "$(cat /tmp/mp-ci-sshd.pid)"' bash $linuxEvidence
+    try {
+        $linuxEvidence = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $Evidence).Trim()
+        & wsl.exe -d Ubuntu-24.04 -u root --exec bash -c 'cp /tmp/mp-ci-sshd.log "$1/sshd.log"; pkill -u mpverify || true; kill "$(cat /tmp/mp-ci-sshd.pid)"' bash $linuxEvidence
+        if ($LASTEXITCODE -ne 0) { throw 'Linux evidence collection or cleanup failed' }
+    } catch {
+        $result.cleanupError = $_.ToString()
+        $result.status = 'failed'
+    }
     & wsl.exe --terminate Ubuntu-24.04
     Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
     $result.keyRemoved = -not (Test-Path "$settings/ssh-key/multibot_ed25519")

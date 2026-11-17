@@ -1,5 +1,7 @@
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,6 +56,33 @@ class ProviderTest(unittest.TestCase):
             self.assertEqual((manifest['sessions'], manifest['messages'], manifest['longChats']), (64, 19872, 8))
             self.assertEqual((settings / 'session.json').read_text(), selected)
             self.assertEqual(len(list(seed['source_rows'](0, 'busy-fixture'))), 2400)
+
+
+    def test_wsl_path_arguments_survive_the_windows_shell_boundary(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$env:GITHUB_WORKSPACE = 'D:\a path\multiprompt'
+$key = 'D:\key path\id_ed25519'
+$Evidence = 'D:\evidence path'
+function wsl.exe {
+    if ($args -contains '--exec') { $args[-1] }
+    else { $args[-1] -replace '\\', '' }
+}
+$values = @()
+foreach ($name in @('start.ps1', 'drive.ps1')) {
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT ('tools/verify-server-chat/' + $name)), [ref]$tokens, [ref]$errors)
+    $calls = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'wsl.exe' -and @($node.CommandElements | Where-Object { $_.Extent.Text -eq 'wslpath' }).Count -eq 1 }, $true)
+    foreach ($call in $calls) { $values += & ([scriptblock]::Create($call.Extent.Text)) }
+}
+ConvertTo-Json -InputObject $values -Compress
+"""
+        env = dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT))
+        paths = json.loads(subprocess.check_output([shell, '-NoProfile', '-Command', command], env=env, text=True))
+        self.assertEqual(paths, [r'D:\a path\multiprompt', r'D:\key path\id_ed25519.pub', r'D:\a path\multiprompt', r'D:\evidence path'])
 
 
 if __name__ == '__main__':

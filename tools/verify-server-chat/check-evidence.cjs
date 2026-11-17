@@ -14,6 +14,7 @@ assert.ok(!reproduction || busy);
 const ordinary = busy ? ['open', 'send'] : ['open', 'send', 'clear', 'after-clear'];
 for (const name of ordinary) assert.equal(result.cases.find(row => row.name === name)?.passed, true, name);
 assert.equal(result.cleanup.activeAfterStop, 0);
+assert.equal(result.cleanupError, undefined);
 assert.equal(result.keyRemoved, true);
 assert.equal(result.videoExit, 0);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
