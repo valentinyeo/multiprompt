@@ -13,18 +13,19 @@ pub const Member = struct {
     session_identity: []const u8,
 };
 
-pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status };
+pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status, delete };
 
 pub fn requestKind(kind: @import("room_journal.zig").Kind) RequestKind {
     return switch (kind) {
         .create => .create,
         .edit => .edit,
         .post => .post,
+        .delete => .delete,
     };
 }
 
 pub fn isMutation(kind: RequestKind) bool {
-    return kind == .create or kind == .edit or kind == .post;
+    return kind == .create or kind == .edit or kind == .post or kind == .delete;
 }
 pub const Result = struct {
     kind: RequestKind,

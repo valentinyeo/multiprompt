@@ -8,7 +8,7 @@ const max_file = 2 * 1024 * 1024;
 const max_request = 131071;
 const max_evidence = 262144;
 
-pub const Kind = enum { create, edit, post };
+pub const Kind = enum { create, edit, post, delete };
 pub const State = enum { prepared, uncertain, accepted, rejected };
 pub const Scope = struct { account_digest: [64]u8, store_uuid: [36]u8 };
 pub const Binding = struct { alias: []const u8, id: []const u8 };
@@ -125,7 +125,8 @@ fn validAlias(alias: []const u8) bool {
 }
 
 fn validPostRequest(r: Record, obj: std.json.Value) bool {
-    if (obj.object.count() != 7 or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    if ((obj.object.count() != 7 and obj.object.count() != 8) or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    if (obj.object.count() == 8 and !std.mem.eql(u8, text(obj, "target_mode") orelse return false, "explicit")) return false;
     const op = text(obj, "op") orelse return false;
     const command = text(obj, "command_id") orelse return false;
     const host = text(obj, "host_uuid") orelse return false;
@@ -179,6 +180,14 @@ fn validateRequest(r: Record) bool {
     const obj = parsed.value;
     if (obj != .object) return false;
     if (r.kind == .post) return validPostRequest(r, obj);
+    if (r.kind == .delete) {
+        return obj.object.count() == 5 and r.bindings.len == 0 and uuidValid(r.room_id) and r.revision > 0 and
+            std.mem.eql(u8, text(obj, "op") orelse return false, "delete_room") and
+            std.mem.eql(u8, text(obj, "host_uuid") orelse return false, r.store_uuid) and
+            std.mem.eql(u8, text(obj, "command_id") orelse return false, r.command_id) and
+            std.mem.eql(u8, text(obj, "room_id") orelse return false, r.room_id) and
+            (number(obj, "expected_revision") orelse 0) == r.revision;
+    }
     if (obj.object.count() != (if (r.kind == .create) @as(usize, 5) else 7)) return false;
     const op = text(obj, "op") orelse return false;
     const command = text(obj, "command_id") orelse return false;
@@ -222,6 +231,7 @@ fn validateEvidence(r: Record) bool {
         for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op", "invalid_recipients", "invalid_mentions" }) |known| if (std.mem.eql(u8, code, known)) return true;
         return false;
     }
+    if (r.kind == .delete) return obj.object.count() == 1 and std.mem.eql(u8, text(obj, "deleted") orelse return false, r.room_id);
     const event = field(obj, "event") orelse return false;
     const deliveries = field(obj, "deliveries") orelse return false;
     if (obj.object.count() != 2 or event != .object or deliveries != .array) return false;
@@ -437,4 +447,19 @@ test "post journal evidence must match the request" {
     try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .accepted, other_text))));
     try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .accepted, "{\"error\":\"nope\"}"))));
     try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .uncertain, test_receipt))));
+}
+
+
+test "delete journal binds the exact room revision and survives a receipt round trip" {
+    const scope = testScope();
+    const request = "{\"op\":\"delete_room\",\"host_uuid\":\"" ++ test_store ++ "\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3}";
+    const receipt = "{\"deleted\":\"" ++ test_room ++ "\"}";
+    var record = testRecord(&scope, request, .accepted, receipt);
+    record.kind = .delete;
+    try std.testing.expect(try roundTrips(scope, record));
+    record.revision = 4;
+    try std.testing.expect(!(try roundTrips(scope, record)));
+    record.revision = 3;
+    record.room_id = test_event;
+    try std.testing.expect(!(try roundTrips(scope, record)));
 }

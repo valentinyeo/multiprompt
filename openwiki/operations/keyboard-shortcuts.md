@@ -206,7 +206,11 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+N | Create a Room |
 | Ctrl+K -&gt; New room | Create a Room |
 | Ctrl+K -&gt; Room name | Open a Room |
-| Ctrl+K -&gt; Edit room | Edit the selected Room |
+| Ctrl+K -&gt; Room menu | Add or remove sessions and rename the Room |
+| Ctrl+K -&gt; Room recipients | Send to everyone or one Room session |
+| Ctrl+K -&gt; Leave room | Leave the Room without stopping its sessions |
+| Ctrl+K -&gt; Undo leave room | Undo leaving the Room |
+| Ctrl+K -&gt; Delete room | Delete the Room after confirmation |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
 | Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser |

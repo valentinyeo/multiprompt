@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -179,7 +180,7 @@ class RoomStore:
             except BaseException:
                 self.db.execute('ROLLBACK')
                 raise
-        if op not in ('create', 'edit_members', 'edit', 'post_human', 'agent_reply'):
+        if op not in ('create', 'edit_members', 'edit', 'post_human', 'agent_reply', 'delete_room'):
             fail('unknown_op')
         identifier(request.get('command_id'))
         body = encoded(request)
@@ -187,6 +188,10 @@ class RoomStore:
         try:
             previous = self.db.execute('SELECT body, receipt FROM commands WHERE id=?', (request['command_id'],)).fetchone()
             if previous:
+                if previous['body'].startswith('deleted:'):
+                    if previous['body'] != 'deleted:' + hashlib.sha256(body.encode('utf-8')).hexdigest():
+                        fail('command_conflict')
+                    fail('room_not_found')
                 if previous['body'] != body:
                     fail('command_conflict')
                 result = json.loads(previous['receipt'])
@@ -211,6 +216,19 @@ class RoomStore:
             return {'event': event, 'deliveries': []}
         room = self.room(r.get('room_id'))
         room_id = room['id']
+        if op == 'delete_room':
+            fields(r, ('op', 'command_id', 'room_id', 'expected_revision'))
+            if number(r['expected_revision'], 1) != room['revision']:
+                fail('revision_conflict')
+            self.db.execute('DELETE FROM responses WHERE room_id=?', (room_id,))
+            self.db.execute('DELETE FROM reply_progress WHERE delivery_id IN (SELECT id FROM deliveries WHERE room_id=?)', (room_id,))
+            for table in ('deliveries', 'events', 'members'):
+                self.db.execute('DELETE FROM ' + table + ' WHERE room_id=?', (room_id,))
+            self.db.execute('DELETE FROM rooms WHERE id=?', (room_id,))
+            commands = self.db.execute("SELECT id, body FROM commands WHERE json_extract(CASE WHEN json_valid(body) THEN body ELSE '{}' END, '$.room_id')=? OR json_extract(receipt, '$.event.room_id')=?", (room_id, room_id)).fetchall()
+            for command in commands:
+                self.db.execute('UPDATE commands SET body=?, receipt=? WHERE id=?', ('deleted:' + hashlib.sha256(command['body'].encode('utf-8')).hexdigest(), encoded({'deleted': room_id}), command['id']))
+            return {'deleted': room_id}
         if op in ('edit_members', 'edit'):
             fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'name', 'members') if op == 'edit' else ('op', 'command_id', 'room_id', 'expected_revision', 'members'))
             if number(r['expected_revision'], 1) != room['revision']:
@@ -227,7 +245,10 @@ class RoomStore:
                 event = self.event(room_id, 'members_edited', {'revision': revision, 'members': self.members(room_id)})
             return {'event': event, 'deliveries': []}
         if op == 'post_human':
-            fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients'))
+            explicit = 'target_mode' in r
+            fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients', 'target_mode') if explicit else ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients'))
+            if explicit and r['target_mode'] != 'explicit':
+                fail('invalid_fields')
             if number(r['expected_revision'], 1) != room['revision']:
                 fail('revision_conflict')
             message = text(r['text'], 65536)
@@ -237,15 +258,18 @@ class RoomStore:
             if not isinstance(recipients, list) or len(recipients) > 64 or any(not isinstance(a, str) for a in recipients) or len(set(recipients)) != len(recipients):
                 fail('invalid_recipients')
             mentions = []
-            for match in re.finditer(r'(?<![\w@.\\+-])@', message):
+            for match in re.finditer(r'(?<![\w@.\\+-])@', '' if explicit else message):
                 alias = re.match(r'[A-Za-z0-9_-]+', message[match.end():])
                 if not alias:
                     fail('invalid_mentions')
                 mentions.append(alias.group())
             active = {m['alias']: m for m in self.members(room_id)}
-            if any(a not in active for a in mentions) or set(mentions) != set(recipients):
+            if explicit and any(a not in active for a in recipients):
+                fail('invalid_recipients')
+            if not explicit and (any(a not in active for a in mentions) or set(mentions) != set(recipients)):
                 fail('invalid_mentions')
-            targets = [active[a] for a in sorted(set(mentions))] if mentions else list(active.values())
+            chosen = recipients if explicit else mentions
+            targets = [active[a] for a in sorted(set(chosen))] if chosen else list(active.values())
             event = self.event(room_id, 'human', {'text': message, 'revision': room['revision'], 'recipients': [m['id'] for m in targets]})
             deliveries = []
             for member in targets:
@@ -316,6 +340,18 @@ class RoomStore:
                 fail('invalid_fields')
             room = dict(self.room(r['room_id']))
             room['members'] = self.members(room['id'])
+            room['member_states'] = {}
+            room['working_events'] = {}
+            for member in room['members']:
+                delivery = self.db.execute("SELECT d.status, p.turn, p.done, EXISTS(SELECT 1 FROM responses r WHERE r.room_id=d.room_id AND r.member_id=d.member_id AND json_extract(r.body, '$.parent_event_id')=d.event_id) AS replied FROM deliveries d LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.member_id=? ORDER BY d.event_seq DESC LIMIT 1", (room['id'], member['id'])).fetchone()
+                working = self.db.execute("SELECT d.event_id FROM deliveries d JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.member_id=? AND d.status='pending' AND p.turn IS NOT NULL AND p.done=0 AND NOT EXISTS(SELECT 1 FROM responses r WHERE r.room_id=d.room_id AND r.member_id=d.member_id AND json_extract(r.body, '$.parent_event_id')=d.event_id) ORDER BY d.event_seq LIMIT 1", (room['id'], member['id'])).fetchone()
+                if working:
+                    room['working_events'][member['alias']] = working['event_id']
+                room['member_states'][member['alias']] = ('working' if working else
+                    'not_asked' if delivery is None else
+                    'replied' if delivery['replied'] else
+                    'working' if delivery['status'] == 'pending' and delivery['turn'] and not delivery['done'] else
+                    'queued' if delivery['status'] == 'pending' else 'not_asked')
             if metadata:
                 row = self.db.execute("SELECT body FROM events WHERE room_id=? AND json_extract(body, '$.type') IN ('human', 'agent_reply') ORDER BY seq DESC LIMIT 1", (room['id'],)).fetchone()
                 room['preview'] = None

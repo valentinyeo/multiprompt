@@ -133,7 +133,7 @@ class RoomBridge:
             return {'provider': 'claude', 'sid': status['sid'], 'enabled': status['enabled'], 'owner': status.get('owner'), 'alive': status.get('alive')}
         if op in ('agent_reply', 'delivery_work'):
             fail('unsupported_remote_capability')
-        if op not in ('list', 'snapshot', 'events', 'deliveries', 'create', 'edit_members', 'edit', 'post_human'):
+        if op not in ('list', 'snapshot', 'events', 'deliveries', 'create', 'edit_members', 'edit', 'post_human', 'delete_room'):
             fail('unknown_op')
         if op == 'post_human' and not scoped_runtime():
             fail('unsupported_remote_capability')
@@ -162,7 +162,12 @@ class RoomBridge:
                     if member['session_identity'] != 'claude:' + member['provider_sid']:
                         fail('invalid_session')
         result = self.store.execute(command)
-        if op == 'events' and scoped_runtime():
+        if op == 'post_human':
+            try:
+                self.sync_replies(command['room_id'])
+            except RoomError:
+                pass
+        if op in ('events', 'snapshot') and scoped_runtime():
             try:
                 self.sync_replies(command['room_id'])
             except RoomError as error:

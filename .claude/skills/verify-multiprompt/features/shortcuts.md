@@ -109,7 +109,11 @@ Headers are verified in F1. Action rows link to the owning user-operation recipe
 | Palette / Actions | Ctrl+Shift+N | Create a Room | [room](workspaces-rooms.md#room-rooms) |
 | Palette / Actions | Ctrl+K -&gt; New room | Create a Room | [room](workspaces-rooms.md#room-rooms) |
 | Palette / Actions | Ctrl+K -&gt; Room name | Open a Room | [room](workspaces-rooms.md#room-rooms) |
-| Palette / Actions | Ctrl+K -&gt; Edit room | Edit the selected Room | [room](workspaces-rooms.md#room-rooms) |
+| Palette / Actions | Ctrl+K -&gt; Room menu | Add or remove sessions and rename the Room | [Rooms](rooms.md#sub-features) |
+| Palette / Actions | Ctrl+K -&gt; Room recipients | Send to everyone or one Room session | [Rooms](rooms.md#sub-features) |
+| Palette / Actions | Ctrl+K -&gt; Leave room | Leave the Room without stopping its sessions | [Rooms](rooms.md#sub-features) |
+| Palette / Actions | Ctrl+K -&gt; Undo leave room | Undo leaving the Room | [Rooms](rooms.md#sub-features) |
+| Palette / Actions | Ctrl+K -&gt; Delete room | Delete the Room after confirmation | [Rooms](rooms.md#sub-features) |
 | Palette / Actions | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot | [account](account-sync.md#account-account-devices-and-servers) |
 | Palette / Actions | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device | [account](account-sync.md#account-account-devices-and-servers) |
 | Palette / Actions | Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser | [palette](palette.md#palette-find-and-execute-actions) |

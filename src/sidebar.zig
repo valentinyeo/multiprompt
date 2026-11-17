@@ -1650,18 +1650,24 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
 fn appendRoomRows(out: *[MAX_ROWS]Row, count: *u32, y: *i32) void {
     const room = @import("room_frontend.zig");
     if (!room.enabled) return;
-    const rows = room.catalog();
-    if (rows.len == 0) return;
-    if (count.* >= MAX_ROWS) return;
-    out[count.*] = .{ .kind = .room_header, .gidx = 0, .shell_idx = 0, .y = y.* };
-    count.* += 1;
-    y.* += sectionHeaderHeight();
-    for (rows, 0..) |_, index| {
-        if (count.* >= MAX_ROWS) break;
-        out[count.*] = .{ .kind = .room, .gidx = 0, .shell_idx = 0, .room_idx = @intCast(index), .y = y.* };
+    for (room.catalog(), 0..) |item, index| {
+        if (room.isLeft(item.id)) continue;
+        if (count.* >= MAX_ROWS - 1) break;
+        out[count.*] = .{ .kind = .room_header, .gidx = 0, .shell_idx = 0, .room_idx = @intCast(index), .y = y.* };
         count.* += 1;
-        y.* += tabRowH();
+        y.* += sectionHeaderHeight();
+        for (item.members, 0..) |member, member_index| {
+            const shell = room.memberShell(member) orelse continue;
+            if (count.* >= MAX_ROWS - 1) break;
+            out[count.*] = .{ .kind = .tab, .gidx = 0, .shell_idx = shell, .room_idx = @intCast(index), .room_member = true, .member_idx = @intCast(member_index), .y = y.* };
+            count.* += 1;
+            y.* += tabRowH();
+        }
     }
+    if (count.* >= MAX_ROWS) return;
+    out[count.*] = .{ .kind = .room_header, .gidx = 1, .shell_idx = 0, .y = y.* };
+    count.* += 1;
+    y.* += tabRowH();
 }
 
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
@@ -1737,8 +1743,8 @@ pub fn rowTotalHeight(row: Row) i32 {
     return switch (row.kind) {
         .section => sectionHeaderHeight(),
         .header => groupHeaderHeight(),
-        .room_header => sectionHeaderHeight(),
-        .tab, .inbox, .room => tabRowH(),
+        .room_header => if (row.gidx == 1) tabRowH() else sectionHeaderHeight(),
+        .tab, .inbox => tabRowH(),
     };
 }
 
@@ -1982,8 +1988,7 @@ pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
                 .header => HitTarget{ .header = row.gidx },
                 .tab => HitTarget{ .tab = row.shell_idx },
                 .inbox => HitTarget{ .inbox = row.shell_idx },
-                .room_header => .{ .room_header = {} },
-                .room => @import("room_frontend.zig").roomHit(row.room_idx) orelse .{ .none = {} },
+                .room_header => if (row.gidx == 1) .{ .room_header = {} } else @import("room_frontend.zig").roomHit(row.room_idx) orelse .{ .none = {} },
             };
         }
     }
@@ -2227,7 +2232,7 @@ fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry
     smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, switch (marker) { .disconnected => RGB(255, 145, 55), .unread => RGB(137, 180, 248), .favorite => RGB(240, 196, 75) });
 }
 
-fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rect: RECT) void {
+fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rect: RECT, room_activity: ?@import("room_view.zig").Activity) void {
     const shell = &app_state.shells[index];
     const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) RGB(200, 200, 200) else RGB(138, 138, 138);
     var right = column.right - uiScaled(12);
@@ -2264,7 +2269,12 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rec
     const second_line = @import("agent_second_line.zig").forShell(@intCast(index));
     _ = SetTextColor(hdc, if (second_line.question) RGB(137, 180, 248) else hint);
     var preview: [128]u16 = undefined;
-    const len = std.unicode.utf8ToUtf16Le(&preview, second_line.text[0..second_line.len]) catch 0;
+    const len = if (room_activity) |activity| blk: {
+        const label = @import("room_view.zig").activityLabel(activity);
+        @memcpy(preview[0..label.len], label);
+        _ = SetTextColor(hdc, switch (activity) { .working, .queued => RGB(245, 170, 70), .replied => RGB(76, 195, 138), .not_asked => hint });
+        break :blk label.len;
+    } else std.unicode.utf8ToUtf16Le(&preview, second_line.text[0..second_line.len]) catch 0;
     var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
     if (len > 0) {
         _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
@@ -2306,55 +2316,27 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
 fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
     const room = @import("room_frontend.zig");
     if (row.kind == .room_header) {
-        if (!app_state.g_sidebar_collapsed) drawSidebarLabel(hdc, column, y, L("Rooms"), -1);
-        return;
-    }
-    const rows = room.catalog();
-    if (row.room_idx >= rows.len) return;
-    const item = room.requestCatalogRow(rows[row.room_idx].id) orelse return;
-    const selected = room.selectedRoom(item.id);
-    const hover = if (room.roomHit(row.room_idx)) |hit| std.meta.eql(app_state.g_room_hover, @as(?HitTarget, hit)) else false;
-    if (selected or hover) @import("smooth.zig").fillRoundRect(hdc, .{ .left = column.left, .top = y + uiScaled(1), .right = column.right, .bottom = y + tabRowH() - uiScaled(1) }, uiScaled(12), if (selected) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(42, 42, 42));
-    const size = uiScaled(24);
-    const count = @min(item.members.len, if (app_state.g_sidebar_collapsed) @as(usize, 2) else 3);
-    for (item.members[0..count], 0..) |member, index| {
-        const x = column.left + uiScaled(8) + @as(i32, @intCast(index)) * uiScaled(14);
-        const top = y + @divTrunc(tabRowH() - size, 2);
-        @import("bot_avatar.zig").draw(hdc, .{ .left = x, .top = top, .right = x + size, .bottom = top + size }, member.appearance);
-    }
-    if (app_state.g_sidebar_collapsed) {
-        if (count == 0) {
-            var glyph = RECT{ .left = column.left, .top = y, .right = column.right, .bottom = y + tabRowH() };
-            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220));
-            _ = DrawTextW(hdc, L("R"), -1, &glyph, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        if (row.gidx == 1) {
+            if (app_state.g_sidebar_collapsed) {
+                _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
+                _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(200, 200, 200));
+                var rect = RECT{ .left = column.left, .top = y, .right = column.right, .bottom = y + tabRowH() };
+                _ = DrawTextW(hdc, L("+"), -1, &rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+            } else drawSidebarLabel(hdc, column, y + @divTrunc(tabRowH() - sectionHeaderHeight(), 2), L("+ New room"), -1);
+            return;
         }
+        if (app_state.g_sidebar_collapsed) return;
+        const catalog = room.catalog();
+        if (row.room_idx >= catalog.len) return;
+        const item = room.requestCatalogRow(catalog[row.room_idx].id) orelse return;
+        var name: [300:0]u16 = @splat(0);
+        const len = std.unicode.utf8ToUtf16Le(name[0..256], item.name) catch 0;
+        const suffix = L("  Room");
+        @memcpy(name[len..][0..suffix.len], suffix);
+        if (room.selectedRoom(item.id)) @import("smooth.zig").fillRoundRect(hdc, .{ .left = column.left, .top = y, .right = column.right, .bottom = y + sectionHeaderHeight() }, uiScaled(12), selectedSessionBackground());
+        drawSidebarLabel(hdc, column, y, &name, -1);
         return;
     }
-    const left = column.left + uiScaled(60);
-    var name: [256]u16 = undefined;
-    const len = std.unicode.utf8ToUtf16Le(&name, item.name) catch 0;
-    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
-    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
-    var name_rect = RECT{ .left = left, .top = y + uiScaled(6), .right = column.right - uiScaled(8), .bottom = y + uiScaled(30) };
-    if (len > 0) _ = @import("dwrite_text.zig").draw(hdc, &name, @intCast(len), &name_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
-    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138));
-    var preview_rect = RECT{ .left = left, .top = y + uiScaled(31), .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
-    var subtitle: [512]u16 = undefined;
-    var used: usize = 0;
-    if (item.preview.len > 0) {
-        const speaker: []const u16 = if (item.preview_author) |author| author.name else std.mem.span(L("You"));
-        var speaker_len = @min(speaker.len, @min(@as(usize, 48), subtitle.len - 2));
-        if (speaker_len < speaker.len and speaker_len > 0 and speaker[speaker_len - 1] >= 0xd800 and speaker[speaker_len - 1] <= 0xdbff) speaker_len -= 1;
-        @memcpy(subtitle[0..speaker_len], speaker[0..speaker_len]);
-        used = speaker_len;
-        if (used > 0) { subtitle[used] = ':'; subtitle[used + 1] = ' '; used += 2; }
-        var n = @min(item.preview.len, subtitle.len - used);
-        if (n < item.preview.len and n > 0 and item.preview[n - 1] >= 0xd800 and item.preview[n - 1] <= 0xdbff) n -= 1;
-        @memcpy(subtitle[used..][0..n], item.preview[0..n]);
-        used += n;
-    }
-    if (used > 0) _ = @import("dwrite_text.zig").draw(hdc, &subtitle, @intCast(used), &preview_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -2468,7 +2450,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (y + rowTotalHeight(row) <= 0 or y >= client_rc.bottom - sidebarStickyCardSpan()) continue;
             const row_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + rowTotalHeight(row) };
             if (@import("win32.zig").RectVisible(hdc, &row_rc) == 0) continue;
-            if (row.kind == .room_header or row.kind == .room) {
+            if (row.kind == .room_header) {
                 paintRoomRow(hdc, column, y, row);
                 _ = SelectObject(hdc, font_title);
                 continue;
@@ -2571,7 +2553,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (app_state.drag_active and i != app_state.drag_src) {}
 
             if (!app_state.g_sidebar_collapsed) {
-                paintChatSidebarRow(hdc, column, y, @intCast(i), rowAvatarRect(row, column, y));
+                paintChatSidebarRow(hdc, column, y, @intCast(i), rowAvatarRect(row, column, y), if (row.room_member) @import("room_frontend.zig").memberState(row.room_idx, row.member_idx) else null);
             } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
 
@@ -4082,14 +4064,22 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             var pr_hint_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             drawAscii(hdc, folder_buf[0..folder_len], &pr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
                         }
-                    } else if (result_idx == @import("room_frontend.zig").new_room_target or result_idx == @import("room_frontend.zig").edit_room_target or (result_idx >= app_state.SEARCH_ROOM_ROW_OFFSET and result_idx < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) {
+                    } else if (result_idx == @import("room_frontend.zig").new_room_target or result_idx == @import("room_frontend.zig").edit_room_target or (result_idx >= app_state.SEARCH_ROOM_TO_OFFSET and result_idx <= app_state.SEARCH_ROOM_DELETE_OFFSET) or (result_idx >= app_state.SEARCH_ROOM_ROW_OFFSET and result_idx < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var room_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         if (result_idx == @import("room_frontend.zig").new_room_target) {
                             _ = DrawTextW(hdc, L("New room"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         } else if (result_idx == @import("room_frontend.zig").edit_room_target) {
-                            _ = DrawTextW(hdc, L("Edit room"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                            _ = DrawTextW(hdc, L("Room menu"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        } else if (result_idx >= app_state.SEARCH_ROOM_TO_OFFSET and result_idx <= app_state.SEARCH_ROOM_DELETE_OFFSET) {
+                            const label = switch (result_idx) {
+                                app_state.SEARCH_ROOM_TO_OFFSET => L("Room recipients"),
+                                app_state.SEARCH_ROOM_LEAVE_OFFSET => L("Leave room"),
+                                app_state.SEARCH_ROOM_UNDO_LEAVE_OFFSET => L("Undo leave room"),
+                                else => L("Delete room"),
+                            };
+                            _ = DrawTextW(hdc, label, -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         } else if (@import("room_frontend.zig").paletteRoomName(result_idx - app_state.SEARCH_ROOM_ROW_OFFSET)) |name| {
                             var wide: [256]u16 = undefined;
                             const count = std.unicode.utf8ToUtf16Le(&wide, name) catch 0;

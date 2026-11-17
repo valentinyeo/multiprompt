@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 import uuid
 
 ROOT = Path(os.environ['MP_ROOMS_FIXTURE'])
@@ -119,7 +120,13 @@ def ssh():
                 return dict(result=dict(events=[], next_after=query['after']))
             common = dict(sid=query['sid'], room_scope=message['room_scope'], message_id=message['message_id'], turn=message['message_id'])
             events = [dict(seq=1, event=dict(common, kind='turn.started', payload=dict(message_id=message['message_id']))), dict(seq=2, event=dict(common, kind='text.done', item='reply', payload=dict(text=f'Synthetic reply from {query["sid"]}: {message["text"][:160]}'))), dict(seq=3, event=dict(common, kind='turn.ended', payload=dict(status='completed')))]
-            return dict(result=dict(events=events, next_after=3))
+            if message['text'].endswith('ROOMS CONTINUE WHILE AWAY'):
+                clock = ROOT / (message['message_id'] + '.started')
+                if not clock.exists():
+                    clock.write_text(str(time.time()))
+                if time.time() - float(clock.read_text()) < 5:
+                    return dict(result=dict(events=[row for row in events[:1] if row['seq'] > query['after']], next_after=max(1, query['after'])))
+            return dict(result=dict(events=[row for row in events if row['seq'] > query['after']], next_after=3))
         raise ValueError('Unexpected runtime operation ' + op)
 
     bridge.runtime_request = runtime
@@ -127,6 +134,13 @@ def ssh():
 
     def observed_execute(self, request):
         result = execute(self, request)
+        if request.get('op') == 'post_human' and request.get('text') == 'ROOMS CONTINUE WHILE AWAY':
+            time.sleep(2)
+        if request.get('op') == 'snapshot' and request.get('metadata'):
+            target = ROOT / (request['room_id'] + '.metadata.json')
+            temporary = target.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+            temporary.write_text(json.dumps(dict(memberCount=len(result['members']))))
+            temporary.replace(target)
         if request.get('op') == 'events':
             target = ROOT / (request['room_id'] + '.observed.json')
             temporary = target.with_suffix('.' + uuid.uuid4().hex + '.tmp')

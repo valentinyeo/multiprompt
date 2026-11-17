@@ -716,7 +716,11 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT) return @import("bot_look.zig").colors[target - app_state.SEARCH_BOT_COLOR_OFFSET];
     const room = @import("room_frontend.zig");
     if (target == room.new_room_target) return "New room";
-    if (target == room.edit_room_target) return "Edit room";
+    if (target == room.edit_room_target) return "Room menu";
+    if (target == app_state.SEARCH_ROOM_TO_OFFSET) return "Room recipients";
+    if (target == app_state.SEARCH_ROOM_LEAVE_OFFSET) return "Leave room";
+    if (target == app_state.SEARCH_ROOM_UNDO_LEAVE_OFFSET) return "Undo leave room";
+    if (target == app_state.SEARCH_ROOM_DELETE_OFFSET) return "Delete room";
     if (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) return room.paletteRoomName(target - app_state.SEARCH_ROOM_ROW_OFFSET);
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude session";
     if (target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) return "New Claude in terminal";
@@ -1450,6 +1454,7 @@ fn paletteRowIsSession(target: usize) bool {
 }
 
 pub fn roomPaletteAllowed(target: usize) bool {
+    if (target >= app_state.SEARCH_ROOM_TO_OFFSET and target <= app_state.SEARCH_ROOM_DELETE_OFFSET) return true;
     if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return true;
     if (target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS) return true;
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return !app_state.g_search_ws_move_mode and !app_state.g_search_workspace_delete_mode;
@@ -5431,11 +5436,22 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = room.new_room_target;
             app_state.g_search_result_count += 1;
         }
-        if (app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{ "edit room", "room members", "rename room" }, query)) and room.capturePaletteEdit()) {
+        if (app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{ "room menu", "edit room", "room members", "rename room" }, query)) and room.capturePaletteEdit()) {
             app_state.g_search_results[app_state.g_search_result_count] = room.edit_room_target;
             app_state.g_search_result_count += 1;
         }
+        const actions = .{
+            .{ app_state.SEARCH_ROOM_TO_OFFSET, "room recipients", room.canEditSelected() },
+            .{ app_state.SEARCH_ROOM_LEAVE_OFFSET, "leave room", room.canEditSelected() },
+            .{ app_state.SEARCH_ROOM_UNDO_LEAVE_OFFSET, "undo leave room", room.canUndoLeave() },
+            .{ app_state.SEARCH_ROOM_DELETE_OFFSET, "delete room", room.canEditSelected() },
+        };
+        inline for (actions) |action| if (action[2] and app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{action[1]}, query))) {
+            app_state.g_search_results[app_state.g_search_result_count] = action[0];
+            app_state.g_search_result_count += 1;
+        };
         for (room.catalog(), 0..) |row, index| {
+            if (room.isLeft(row.id)) continue;
             if (index >= app_state.MAX_ROOM_PALETTE_ROWS or app_state.g_search_result_count >= app_state.g_search_results.len) break;
             var wide_name: [256]u16 = undefined;
             const len = std.unicode.utf8ToUtf16Le(&wide_name, row.name) catch continue;

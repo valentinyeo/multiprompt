@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const rows = [
+  ['Room recipients', 'SEARCH_ROOM_TO_OFFSET', 'room recipients'],
+  ['Leave room', 'SEARCH_ROOM_LEAVE_OFFSET', 'leave room'],
+  ['Undo leave room', 'SEARCH_ROOM_UNDO_LEAVE_OFFSET', 'undo leave room'],
+  ['Delete room', 'SEARCH_ROOM_DELETE_OFFSET', 'delete room'],
   ['Move to Group', 'SEARCH_GROUPMOVE_MENU_OFFSET', 'move to group'],
   ['Rename', 'SEARCH_TABCTX_RENAME', 'rename session'],
   ['Pin', 'SEARCH_TABCTX_PIN_TOP', 'pin'],

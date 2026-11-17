@@ -97,6 +97,21 @@ class RoutingTest(unittest.TestCase):
     def sent_to(self, alias):
         return [text for sid, _, text in self.runtime.submits if sid == self.sids[alias]]
 
+    def test_dispatch_and_background_status_do_not_require_an_open_conversation(self):
+        self.runtime.answer = False
+        posted = self.post('Continue while the Room is not visible')
+        self.assertEqual(['Continue while the Room is not visible'], self.sent_to('alpha'))
+        self.assertEqual(['Continue while the Room is not visible'], self.sent_to('beta'))
+        members = {member['id']: member for member in self.bridge.store.members(self.room)}
+        for delivery in posted['deliveries']:
+            scope = dict(host_uuid=self.host, room_id=self.room,
+                         parent_event_id=posted['event']['id'], member_id=delivery['member_id'])
+            self.runtime.reply(members[delivery['member_id']]['provider_sid'], delivery['id'], scope, 'Background answer')
+        snapshot = self.bridge.execute(dict(op='snapshot', host_uuid=self.host, room_id=self.room, metadata=True))
+        self.assertEqual({'alpha': 'replied', 'beta': 'replied'}, snapshot['member_states'])
+        self.assertEqual('Background answer', snapshot['preview']['text'])
+        self.assertEqual(2, len(self.runtime.submits))
+
     def test_plain_message_reaches_every_agent_once(self):
         self.post('hello all')
         self.sweep()
@@ -112,15 +127,29 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual([], self.sent_to('alpha'))
         self.assertEqual(['@beta hello'], self.sent_to('beta'))
 
+    def user_messages(self, alias):
+        return [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to(alias)]
+
     def test_each_agent_receives_messages_in_post_order_after_a_runtime_failure(self):
-        first = self.post('one')
-        self.post('two')
-        self.runtime.fail_once.add(first['deliveries'][1]['id'])
-        self.sweep()
-        self.sweep()
-        self.sweep()
-        self.assertEqual(['one', 'two'], self.sent_to('alpha'))
-        self.assertEqual(['one', 'two'], self.sent_to('beta'))
+        original = self.runtime.request
+        failed = []
+
+        def fail_first_submit(query):
+            if query['op'] == 'message_submit' and query['sid'] == self.sids['beta'] and query['text'] == 'one' and not failed:
+                failed.append(query['message_id'])
+                bridge_module.fail('runtime_unavailable')
+            return original(query)
+
+        with mock.patch.object(bridge_module, 'runtime_request', fail_first_submit):
+            first = self.post('one')
+            self.post('two')
+            self.sweep()
+            self.sweep()
+            self.sweep()
+        beta = next(member for member in self.bridge.store.members(self.room) if member['alias'] == 'beta')
+        self.assertEqual([next(delivery['id'] for delivery in first['deliveries'] if delivery['member_id'] == beta['id'])], failed)
+        self.assertEqual(['one', 'two'], self.user_messages('alpha'))
+        self.assertEqual(['one', 'two'], self.user_messages('beta'))
 
     def test_offline_agent_receives_message_when_it_returns(self):
         self.enabled[self.sids['beta']] = False
@@ -133,9 +162,11 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(['hello'], self.sent_to('beta'))
 
     def test_agent_coming_back_mid_sweep_still_gets_messages_in_order(self):
+        beta = self.sids['beta']
+        self.enabled[beta] = False
         self.post('one')
         self.post('two')
-        beta = self.sids['beta']
+        self.assertEqual([], self.sent_to('beta'))
         answers = iter([False, True, True, True, True, True])
         original = self.status
 
@@ -148,7 +179,7 @@ class RoutingTest(unittest.TestCase):
         with mock.patch.object(bridge_module, 'host_status', flipping):
             self.sweep()
             self.sweep()
-        self.assertEqual(['one', 'two'], self.sent_to('beta'))
+        self.assertEqual(['one', 'two'], self.user_messages('beta'))
 
     def test_longest_message_still_reaches_the_agent_with_context(self):
         self.post('first question')

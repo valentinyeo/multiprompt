@@ -203,6 +203,7 @@ try {
         if (@($room.events).Count -ne $seed.largestRoomEvents) { throw 'Leaving or reopening changed the seeded history' }
     }
     Audit-Step 'to-one-and-everyone' {
+        Press @(0x1B) 'Escape: clear any interrupted palette or dialog'
         Open-RoomByName 'Rooms history 01'
         Invoke-JourneyCommand 'Room recipients'
         Press @(0x24) 'Home: everyone'
@@ -229,6 +230,7 @@ try {
         Snapshot 'to-everyone'
     }
     Audit-Step 'leave-and-undo' {
+        Press @(0x1B) 'Escape: clear any interrupted palette or dialog'
         Open-RoomByName 'Rooms history 01'
         $before=@(Read-RoomStore | Where-Object name -eq 'Rooms history 01')[0]
         Invoke-JourneyCommand 'Leave room'
@@ -245,10 +247,12 @@ try {
         Snapshot 'leave-undone'
     }
     Audit-Step 'delete-confirmation' {
+        Press @(0x1B) 'Escape: clear any interrupted palette or dialog'
         Open-RoomByName 'Rooms history 02'
         $target=@(Read-RoomStore | Where-Object name -eq 'Rooms history 02')[0]
+        $sessionIds=@((Read-Inbox).shells | ForEach-Object sid | Sort-Object)
         Invoke-JourneyCommand 'Delete room'
-        Snapshot 'delete-confirmation'
+        Snapshot 'delete-confirmation-open'
         Press @(0x1B) 'Escape: cancel deletion'
         if (@(Read-RoomStore | Where-Object id -eq $target.id).Count -ne 1) { throw 'Cancel deleted the room' }
         Invoke-JourneyCommand 'Delete room'
@@ -256,7 +260,47 @@ try {
         Press @(0x0D) 'Enter: confirm room deletion'
         Wait-Until { @(Read-RoomStore | Where-Object id -eq $target.id).Count -eq 0 } 'only the confirmed room deleted'
         if (@(Read-RoomStore | Where-Object name -eq 'Rooms history 00').Count -ne 1) { throw 'Deletion removed another room' }
+        $remainingIds=@((Read-Inbox).shells | ForEach-Object sid | Sort-Object)
+        if (($sessionIds -join ',') -cne ($remainingIds -join ',')) { throw 'Deleting the Room changed its real session rows' }
         Snapshot 'room-deleted'
+    }
+    Audit-Step 'send-while-away' {
+        Press @(0x1B) 'Escape: clear any interrupted palette or dialog'
+        Open-RoomByName 'Rooms history 03'
+        Wait-Until { (Focused-RoomEdit) -ne [IntPtr]::Zero } 'the seeded Room composer is ready'
+        Type-Text 'ROOMS CONTINUE WHILE AWAY'
+        Press @(0x0D) 'Enter: send while the SSH receipt is deliberately delayed'
+        Press @(0x11,0x10,0x49) 'Ctrl+Shift+I: leave the conversation before its receipt returns'
+        Wait-Until { (Room-Window) -eq [IntPtr]::Zero } 'conversation hidden during delivery'
+        Wait-Until {
+            if ((Room-Window) -ne [IntPtr]::Zero) { throw 'Background delivery reopened the Room' }
+            $room=@(Read-RoomStore | Where-Object name -eq 'Rooms history 03')[0]
+            $sent=@($room.events | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'ROOMS CONTINUE WHILE AWAY' })
+            if ($sent.Count -ne 1) { return $false }
+            @($room.events | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -eq $sent[0].id }).Count -eq 2
+        } 'both replies progress without opening the Room again' 30
+        Snapshot 'background-replies'
+    }
+    Audit-Step 'sidebar-real-session-row' {
+        Press @(0x1B) 'Escape: clear any interrupted palette or dialog'
+        Open-RoomByName 'Rooms history 00'
+        $room=@(Read-RoomStore | Where-Object name -eq 'Rooms history 00')[0]
+        Wait-Until {
+            $path="$fixture/$($room.id).metadata.json"
+            (Test-Path $path) -and (Get-Content $path -Raw | ConvertFrom-Json).memberCount -eq 2
+        } 'first Room member metadata observed on both master and candidate'
+        $state=Read-Session
+        if (-not $state.single_window -or -not $state.hide_pills -or ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -or ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100)) { throw 'Real-row click requires the isolated default expanded sidebar' }
+        $member=@((Read-Inbox).shells | Where-Object name -ceq $room.members[0].display_name)
+        if ($member.Count -ne 1) { throw 'Room member does not identify exactly one real session' }
+        Snapshot 'sidebar-groups'
+        Doctor
+        Assert-Foreground
+        Record 'Click the first real member row below the first Room heading'
+        $scale=[double][VerifyNative]::GetDpiForWindow($script:window)/96.0
+        [VerifyNative]::ClickClient($script:window, [int](150*$scale), [int](131*$scale))
+        Wait-Until { (Room-Window) -eq [IntPtr]::Zero -and (Read-Inbox).active_shell_id -eq $member[0].sid } 'Room member row opens its real session rather than another Room'
+        Snapshot 'sidebar-session-open'
     }
     Snapshot 'after'
     $result.findings=@($result.checks | Where-Object status -ne 'passed')
@@ -294,4 +338,4 @@ finally {
     }
 }
 if ($result.status -ne 'passed') { throw $result.error }
-Write-Output 'Rooms creation, agent selection, send, replies, switching and close/reopen passed. Membership leave/delete and visual design acceptance remain separate.'
+Write-Output 'Rooms creation, recipient selection, send, replies, switching, leave/undo and delete/cancel journeys passed. Review the recorded sidebar and chips for visual acceptance.'

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import sys
 
-ACTIONS = ('create-room', 'add-agents', 'send-message', 'replies-in-order', 'switch-rooms', 'leave-or-close', 'to-one-and-everyone', 'leave-and-undo', 'delete-confirmation')
+ACTIONS = ('create-room', 'add-agents', 'send-message', 'replies-in-order', 'switch-rooms', 'leave-or-close', 'to-one-and-everyone', 'leave-and-undo', 'delete-confirmation', 'send-while-away', 'sidebar-real-session-row')
 
 
 def read(root, name, default=None):
@@ -31,10 +31,10 @@ def findings(root):
         lines.append(f'| {offset} | {action} | {status} | {detail} |')
     if result.get('error'):
         lines.extend(['', 'Journey error: ' + result['error']])
-    lines.extend(['', 'Design gap: leaving the view is distinct from leaving membership. The current service has no leave-membership or delete-room operation.', '', 'Read build.json for the executable revision. These exercised steps do not certify the remaining design A actions.'])
+    lines.extend(['', 'Leave hides the Room in this profile and has undo. Delete removes the confirmed Room and its history; the sessions remain.', '', 'Read build.json for the executable revision. These exercised steps do not certify the remaining design A actions.'])
     (root / 'rooms-findings.md').write_text('\n'.join(lines) + '\n')
     if result.get('status') == 'passed' and [step['name'] for step in steps] != list(ACTIONS):
-        raise ValueError('Completed audit must contain all six Rooms actions in order')
+        raise ValueError('Completed audit must contain all mapped Rooms actions in order')
 
 
 if __name__ == '__main__':

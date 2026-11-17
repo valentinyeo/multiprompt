@@ -9,6 +9,10 @@ extern "user32" fn RemovePropW(w.HANDLE, w.LPCWSTR) callconv(w.WINAPI) w.HANDLE;
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 
 pub const Presence = enum { unknown, offline, online };
+pub const Activity = enum { not_asked, queued, working, replied };
+pub fn activityLabel(activity: Activity) []const u16 {
+    return switch (activity) { .not_asked => L("Not asked yet"), .queued => L("Queued"), .working => L("Working"), .replied => L("Replied") };
+}
 pub const ActionResult = enum { accepted, pending, unsupported, failed };
 pub const Member = struct {
     id: []const u8,
@@ -17,6 +21,9 @@ pub const Member = struct {
     appearance: avatar.Appearance,
     name_color: u32,
     presence: Presence,
+    sid: []const u8 = "",
+    activity: Activity = .not_asked,
+    working_question: []const u8 = "",
 };
 pub const Author = struct {
     name: []const u16,
@@ -28,6 +35,8 @@ pub const Message = struct {
     author: ?Author,
     time: []const u16,
     question_id: []const u8 = "",
+    member_id: []const u8 = "",
+    recipients: []const Member = &.{},
 };
 pub const ViewModel = struct {
     room_id: []const u8,
@@ -36,16 +45,19 @@ pub const ViewModel = struct {
     members: []const Member,
     candidates: []const Member,
     messages: []const Message,
+    loading: bool = false,
 };
-pub const ActionKind = enum { create, edit, submit, restart };
+pub const ActionKind = enum { create, edit, submit, restart, delete };
 pub const ActionToken = struct { generation: u64, serial: u64, kind: ActionKind };
 pub const Callbacks = struct {
     context: *anyopaque,
     create: *const fn (*anyopaque, ActionToken, []const u16, []const []const u8) ActionResult,
     edit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16, []const []const u8) ActionResult,
-    submit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16) ActionResult,
+    submit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16, []const u8) ActionResult,
     restart: *const fn (*anyopaque, ActionToken, []const u8, []const u8) ActionResult,
     draft_changed: ?*const fn (*anyopaque) void = null,
+    leave: ?*const fn (*anyopaque) void = null,
+    delete: ?*const fn (*anyopaque, ActionToken, []const u8, u64) ActionResult = null,
 };
 
 const StoredId = struct {
@@ -108,6 +120,8 @@ pub const View = struct {
     too_small: bool = false,
     result: ?ActionResult = null,
     title_hit: w.RECT = empty_rect,
+    to_hit: w.RECT = empty_rect,
+    recipient: StoredId = .{},
     send_hit: w.RECT = empty_rect,
     restart_hit: w.RECT = empty_rect,
     restart_member: ?[]const u8 = null,
@@ -149,6 +163,8 @@ pub const View = struct {
             self.destroy();
             return false;
         }
+        _ = w.SendMessageW(self.name_edit, 0x00c5, 256, 0);
+        _ = w.SendMessageW(self.name_edit, 0x1501, 1, @bitCast(@intFromPtr(L("Room name"))));
         _ = w.SendMessageW(self.search_edit, 0x00c5, 256, 0);
         _ = w.SendMessageW(self.search_edit, 0x1501, 1, @bitCast(@intFromPtr(L("Search agents"))));
         self.layout();
@@ -186,7 +202,7 @@ pub const View = struct {
     }
 
     pub fn focus(self: *View) void {
-        self.setFocus(if (self.too_small) self.hwnd else if (self.mode == .room) self.composer else self.name_edit);
+        self.setFocus(if (self.too_small or self.model.loading) self.hwnd else if (self.mode == .room) self.composer else self.name_edit);
     }
 
     pub fn ownsFocus(self: *const View) bool {
@@ -255,6 +271,7 @@ pub const View = struct {
         self.presented_revision = 0;
         self.picker = false;
         self.model = empty;
+        self.recipient.len = 0;
         self.suppress_draft_change = true;
         _ = w.SetWindowTextW(self.composer, L(""));
         self.suppress_draft_change = false;
@@ -352,13 +369,13 @@ pub const View = struct {
         }
         const composer_w = @min(self.px(760), @max(self.px(100), width - self.px(32)));
         const x = @divTrunc(width - composer_w, 2);
-        _ = w.MoveWindow(self.composer, x + self.px(16), height - self.px(57), @max(1, composer_w - self.px(64)), self.px(35), 1);
+        _ = w.MoveWindow(self.composer, x + self.px(176), height - self.px(57), @max(1, composer_w - self.px(224)), self.px(35), 1);
         const card_w = @min(self.px(520), @max(1, width - self.px(24)));
         const card_x = @divTrunc(width - card_w, 2);
         const card_top = @max(self.px(8), @divTrunc(height - self.px(520), 2));
         _ = w.MoveWindow(self.name_edit, card_x + self.px(24), card_top + self.px(68), @max(1, card_w - self.px(48)), self.px(32), 1);
         _ = w.MoveWindow(self.search_edit, card_x + self.px(24), card_top + self.px(116), @max(1, card_w - self.px(48)), self.px(32), 1);
-        _ = ShowWindow(self.composer, if (self.mode == .room) w.SW_SHOWNOACTIVATE else w.SW_HIDE);
+        _ = ShowWindow(self.composer, if (self.mode == .room and !self.model.loading) w.SW_SHOWNOACTIVATE else w.SW_HIDE);
         _ = ShowWindow(self.name_edit, if (self.mode == .room) w.SW_HIDE else w.SW_SHOWNOACTIVATE);
         _ = ShowWindow(self.search_edit, if (self.mode == .room) w.SW_HIDE else w.SW_SHOWNOACTIVATE);
         self.invalidate();
@@ -379,6 +396,7 @@ pub const View = struct {
 
     fn clearHits(self: *View) void {
         self.title_hit = empty_rect;
+        self.to_hit = empty_rect;
         self.send_hit = empty_rect;
         self.restart_hit = empty_rect;
         self.restart_member = null;
@@ -426,7 +444,7 @@ pub const View = struct {
         if (self.pending != null or self.too_small or self.mode == .room) return;
         var name: [257]u16 = undefined;
         const size = w.GetWindowTextLengthW(self.name_edit);
-        if (size <= 0 or size >= name.len or self.selected_count == 0) {
+        if (size <= 0 or size >= name.len or (self.mode == .create and self.selected_count == 0)) {
             self.result = .failed;
             self.invalidate();
             return;
@@ -457,6 +475,69 @@ pub const View = struct {
         self.completeAction(action, result);
     }
 
+    pub fn reconcileRecipients(self: *View) void {
+        if (self.recipient.len == 0) return;
+        for (self.model.members) |member| if (std.mem.eql(u8, member.id, self.recipient.slice())) return;
+        self.recipient.len = 0;
+    }
+
+    pub fn chooseRecipient(self: *View) void {
+        if (self.mode != .room or self.model.loading or self.pending != null) return;
+        const menu = w.CreatePopupMenu() orelse return;
+        defer _ = w.DestroyMenu(menu);
+        _ = w.AppendMenuW(menu, if (self.recipient.len == 0) 8 else 0, 1, L("Everyone"));
+        for (self.model.members, 0..) |member, index| {
+            var name: [257:0]u16 = @splat(0);
+            const len = @min(member.name.len, 256);
+            @memcpy(name[0..len], member.name[0..len]);
+            _ = w.AppendMenuW(menu, if (std.mem.eql(u8, self.recipient.slice(), member.id)) 8 else 0, index + 2, &name);
+        }
+        var point = w.POINT{ .x = self.to_hit.left, .y = self.to_hit.top };
+        _ = w.ClientToScreen(self.hwnd, &point);
+        const result = fonts.trackPopupMenu(menu, 0x100, point.x, point.y, 0, self.hwnd, null);
+        const picked: usize = if (result > 0) @intCast(result) else 0;
+        if (picked == 1) self.recipient.len = 0 else if (picked >= 2 and picked <= self.model.members.len + 1) {
+            const member = self.model.members[@as(usize, @intCast(picked)) - 2];
+            @memcpy(self.recipient.bytes[0..member.id.len], member.id);
+            self.recipient.len = member.id.len;
+        }
+        self.setFocus(self.composer);
+        self.invalidate();
+    }
+
+    pub fn openMenu(self: *View) void {
+        if (self.mode != .room or self.model.loading or self.pending != null) return;
+        const menu = w.CreatePopupMenu() orelse return;
+        defer _ = w.DestroyMenu(menu);
+        _ = w.AppendMenuW(menu, 0, 1, L("Add or remove sessions..."));
+        _ = w.AppendMenuW(menu, 0, 2, L("Rename room..."));
+        _ = w.AppendMenuW(menu, 0x800, 0, null);
+        _ = w.AppendMenuW(menu, 0, 3, L("Leave room"));
+        _ = w.AppendMenuW(menu, 0, 4, L("Delete room..."));
+        var point = w.POINT{ .x = self.title_hit.left, .y = self.title_hit.bottom };
+        _ = w.ClientToScreen(self.hwnd, &point);
+        const picked = fonts.trackPopupMenuWithInks(menu, 0x100, point.x, point.y, 0, self.hwnd, null, &.{ null, null, null, null, rgb(0xE5484D) });
+        switch (picked) {
+            1, 2 => self.openEdit(),
+            3 => if (self.callbacks.leave) |callback| { callback(self.callbacks.context); },
+            4 => self.deleteRoom(),
+            else => {},
+        }
+    }
+
+    pub fn deleteRoom(self: *View) void {
+        if (self.mode != .room or self.model.loading or self.pending != null) return;
+        const callback = self.callbacks.delete orelse return;
+        const accepted = @import("dialog.zig").show(@import("app_state.zig").g_main_hwnd, L("Delete this room and its chat history for everyone? The sessions keep running on their own."), L("Delete room?"), &.{
+            .{ .label = L("Cancel"), .result = 2 },
+            .{ .label = L("Delete room"), .result = 6, .destructive = true, .fill = rgb(0xE5484D) },
+        }, 0);
+        if (accepted != 6) { self.focus(); return; }
+        const action = self.token(.delete);
+        self.pending = action;
+        self.completeAction(action, callback(self.callbacks.context, action, self.model.room_id, self.model.revision));
+    }
+
     fn restart(self: *View) void {
         refreshHits(self);
         if (self.pending != null or self.too_small) return;
@@ -477,7 +558,7 @@ pub const View = struct {
         if (bytes == 0 or bytes > 65536) { self.result = .failed; self.invalidate(); return; }
         const action = self.token(.submit);
         self.pending = action;
-        const result = self.callbacks.submit(self.callbacks.context, action, self.model.room_id, self.presented_revision, value);
+        const result = self.callbacks.submit(self.callbacks.context, action, self.model.room_id, self.presented_revision, value, self.recipient.slice());
         self.completeAction(action, result);
     }
 };
@@ -589,11 +670,15 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     _ = w.SelectObject(dc, heading);
     text(dc, view.model.name, .{ .left = view.title_hit.left + view.px(46), .top = view.title_hit.top, .right = view.title_hit.right - view.px(27), .bottom = view.title_hit.bottom }, 0xf2f2f2, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_END_ELLIPSIS);
     var count_buf: [16]u8 = undefined;
-    const count = std.fmt.bufPrint(&count_buf, "· {d}", .{view.model.members.len + 1}) catch "";
+    const count = std.fmt.bufPrint(&count_buf, "· {d}", .{view.model.members.len}) catch "";
     var count_w: [16]u16 = undefined;
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     _ = w.SelectObject(dc, small);
     text(dc, count_w[0..count_len], .{ .left = view.title_hit.right - view.px(26), .top = view.title_hit.top, .right = view.title_hit.right - view.px(4), .bottom = view.title_hit.bottom }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_VCENTER);
+    if (view.model.loading) {
+        text(dc, if (view.result == .unsupported or view.result == .failed) L("Could not load this room. Reopen to retry.") else L("Loading room..."), .{ .left = view.px(20), .top = view.px(90), .right = width - view.px(20), .bottom = view.px(130) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
+        return;
+    }
     view.restart_hit = empty_rect;
     view.restart_member = null;
     for (view.model.members) |member| if (member.presence == .offline) {
@@ -653,7 +738,28 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
         const bubble = w.RECT{ .left = bx, .top = y, .right = bx + bubble_w, .bottom = y + bubble_h };
         smooth.fillRoundRect(dc, bubble, view.px(16), rgb(if (own) 0x2e2e2e else 0x1e1e1e));
         text(dc, message.text, .{ .left = bx + view.px(14), .top = y + view.px(10), .right = bx + bubble_w - view.px(14), .bottom = y + bubble_h - view.px(8) }, 0xf2f2f2, w.DT_WORDBREAK);
-        y += bubble_h + view.px(18);
+        y += bubble_h;
+        if (message.recipients.len > 0) {
+            _ = w.SelectObject(dc, small);
+            const chip_w = @divTrunc(@min(view.px(520), right - left), 3);
+            const chip_left = if (own) right - chip_w * 3 else left + view.px(40);
+            for (message.recipients, 0..) |recipient, index| {
+                const row: i32 = @intCast(index / 3);
+                const col: i32 = @intCast(index % 3);
+                const chip = w.RECT{ .left = chip_left + col * chip_w, .top = y + view.px(6) + row * view.px(26), .right = chip_left + (col + 1) * chip_w - view.px(4), .bottom = y + view.px(28) + row * view.px(26) };
+                smooth.fillRoundRect(dc, chip, view.px(11), rgb(0x1f1f1f));
+                var label: [320]u16 = undefined;
+                const name_len = @min(recipient.name.len, 240);
+                @memcpy(label[0..name_len], recipient.name[0..name_len]);
+                label[name_len] = ' ';
+                const state = activityLabel(recipient.activity);
+                @memcpy(label[name_len + 1 ..][0..state.len], state);
+                text(dc, label[0 .. name_len + 1 + state.len], chip, if (recipient.activity == .replied) 0x4cc38a else if (recipient.activity == .working) 0xf5aa46 else 0x8a8a8a, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_END_ELLIPSIS);
+            }
+            y += @as(i32, @intCast((message.recipients.len + 2) / 3)) * view.px(26) + view.px(4);
+            _ = w.SelectObject(dc, body);
+        }
+        y += view.px(18);
     }
     view.max_scroll = @max(0, y + view.scroll - bottom);
     if (view.scroll > view.max_scroll) {
@@ -666,9 +772,19 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     const composer_x = @divTrunc(width - composer_w, 2);
     const composer = w.RECT{ .left = composer_x, .top = height - view.px(74), .right = composer_x + composer_w, .bottom = height - view.px(20) };
     smooth.fillRoundRect(dc, composer, view.px(27), rgb(0x1e1e1e));
+    view.to_hit = .{ .left = composer.left + view.px(8), .top = composer.top + view.px(10), .right = composer.left + view.px(164), .bottom = composer.bottom - view.px(10) };
     view.send_hit = .{ .left = composer.right - view.px(45), .top = composer.top + view.px(8), .right = composer.right - view.px(8), .bottom = composer.bottom - view.px(8) };
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
+    smooth.fillRoundRect(dc, view.to_hit, view.px(14), rgb(0x2b2b2b));
+    var target: [160]u16 = undefined;
+    const prefix = L("To: ");
+    @memcpy(target[0..prefix.len], prefix);
+    var name: []const u16 = L("Everyone");
+    for (view.model.members) |member| if (std.mem.eql(u8, member.id, view.recipient.slice())) { name = member.name; break; };
+    const len = @min(name.len, target.len - prefix.len);
+    @memcpy(target[prefix.len..][0..len], name[0..len]);
+    text(dc, target[0 .. prefix.len + len], view.to_hit, 0xf2f2f2, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_END_ELLIPSIS);
     if (view.picker) drawPicker(view, dc, composer, body);
     if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Action failed"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
@@ -841,6 +957,7 @@ fn refreshHits(view: *View) void {
     const composer_width = @min(view.px(760), width - view.px(32));
     const x = @divTrunc(width - composer_width, 2);
     const composer = w.RECT{ .left = x, .top = height - view.px(74), .right = x + composer_width, .bottom = height - view.px(20) };
+    view.to_hit = .{ .left = composer.left + view.px(8), .top = composer.top + view.px(10), .right = composer.left + view.px(164), .bottom = composer.bottom - view.px(10) };
     view.send_hit = .{ .left = composer.right - view.px(45), .top = composer.top + view.px(8), .right = composer.right - view.px(8), .bottom = composer.bottom - view.px(8) };
     for (view.model.members) |member| if (member.presence == .offline) {
         view.restart_member = member.id;
@@ -927,7 +1044,7 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
                 _ = w.GetClientRect(hwnd, &box);
                 var hint: [320]u16 = undefined;
                 const prefix = L("Message ");
-                const suffix = L(" · type @ to ask one agent");
+                const suffix = L("");
                 const len = @min(view.model.name.len, hint.len - prefix.len - suffix.len);
                 @memcpy(hint[0..prefix.len], prefix);
                 @memcpy(hint[prefix.len .. prefix.len + len], view.model.name[0..len]);
@@ -1005,6 +1122,8 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
 }
 
 fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+    if (fonts.menuMessage(msg, lp)) |result| return result;
+    if (msg == 0x0120) if (fonts.menuChar(wp)) |result| return result;
     const data = w.GetWindowLongPtrW(hwnd, -21);
     const view: *View = if (data == 0) return w.DefWindowProcW(hwnd, msg, wp, lp) else @ptrFromInt(@as(usize, @bitCast(data)));
     switch (msg) {
@@ -1058,7 +1177,7 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
                     }
                 }
             } else if (wp == 0x0d or wp == 0x20) {
-                if (view.focus_target == 0) view.openEdit() else view.restart();
+                if (view.focus_target == 0) view.openMenu() else view.restart();
             } else if (wp == 0x09) {
                 if (reverse) {
                     if (view.focus_target == 1) view.focus_target = 0 else view.setFocus(view.composer);
@@ -1092,7 +1211,7 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
                 };
                 view.picker = false;
                 view.invalidate();
-            } else if (inside(view.title_hit, x, y)) view.openEdit() else if (inside(view.send_hit, x, y)) view.submit() else if (inside(view.restart_hit, x, y)) {
+            } else if (inside(view.title_hit, x, y)) view.openMenu() else if (inside(view.to_hit, x, y)) view.chooseRecipient() else if (inside(view.send_hit, x, y)) view.submit() else if (inside(view.restart_hit, x, y)) {
                 view.restart();
             }
             return 0;
@@ -1204,7 +1323,7 @@ test "IGSH-1697 synthetic native create and room paint" {
             return self.response;
         }
         fn edit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
-        fn submit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { return .failed; }
+        fn submit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const u8) ActionResult { return .failed; }
         fn restart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
     };
 

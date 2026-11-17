@@ -10,7 +10,7 @@ Journeys: workspaces, workspace-focus
 - `room` creates, opens, and edits a shared multi-agent conversation.
 
 ## How to get to it (user POV)
-- Click the workspace name/card; Ctrl+N or Alt+N creates; Alt+1 opens Starred; Alt+2…9 selects stored workspaces; Alt+Left/Right cycles; Ctrl+Shift+N or Ctrl+K New room creates a Room; search its name or Edit room.
+- Click the workspace name/card; Ctrl+N or Alt+N creates; Alt+1 opens Starred; Alt+2…9 selects stored workspaces; Alt+Left/Right cycles; Ctrl+Shift+N or Ctrl+K New room creates a Room; search its name or Room menu.
 
 ## Driving it with drive.ps1
 Preconditions: single-window mode, fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
@@ -52,7 +52,7 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 
 ### room: Rooms
 
-In a Rooms preview build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
+In a Rooms preview build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Room menu to rename and change members. Reopen and inspect both agents' replies.
 
 Observable proof: The room keeps one ID and the selected members; replies are attributed once to the right agent. Editing preserves earlier history and prevents private per-chat actions from leaking into a room.
 
@@ -61,7 +61,7 @@ UNREACHABLE in the ordinary build: src/room_frontend.zig enables Rooms only with
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
 | `SEARCH_ROOM_ROW_OFFSET` | In a Rooms preview build, search Ctrl+K for the room's name. Follow `room` above. |
-| `room.edit_room_target` | In the Rooms preview build, Ctrl+K, choose **Edit room**. Follow `room` above. |
+| `room.edit_room_target` | In the Rooms preview build, Ctrl+K, choose **Room menu**. Follow `room` above. |
 | `room.new_room_target` | In the Rooms preview build, Ctrl+K, choose **New room**. Follow `room` above. |
 
 ## Gotchas

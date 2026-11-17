@@ -128,13 +128,16 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         except room_bridge.RoomError:
             pass
         status.return_value['enabled'] = True
-        third = bridge.execute(post('Removed recipient must not receive this'))
-        third_id = third['deliveries'][0]['id']
+        removed = []
         def removing_rpc(query):
-            if query.get('op') == 'message_status' and query.get('message_id') == third_id:
+            if query.get('op') == 'message_status' and not removed:
+                removed.append(query['message_id'])
                 bridge.store.execute(dict(op='edit_members', command_id=uid(), room_id=room, expected_revision=1, members=[]))
             return rpc(query)
         with patch.object(room_bridge, 'runtime_request', removing_rpc):
+            third = bridge.execute(post('Removed recipient must not receive this'))
+            third_id = third['deliveries'][0]['id']
+            assert removed == [third_id], 'accepted Room sends must start admission before a view poll'
             bridge.execute(events_request)
         assert not any(q.get('op') == 'message_submit' and q.get('message_id') == third_id for q in calls), 'membership removal raced canonical admission'
         bridge.close()

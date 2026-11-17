@@ -1326,6 +1326,7 @@ comptime {
         _ = @import("room_view.zig");
         _ = @import("room_post.zig");
         _ = @import("room_journal.zig");
+        _ = @import("room_ui_store.zig");
         _ = @import("telemetry_panel.zig");
         _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
@@ -2197,7 +2198,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = InvalidateRect(hwnd, null, 0);
                         return 0;
                     },
-                    .room_header => return 0,
+                    .room_header => { openNewRoom(hwnd); return 0; },
                     .inbox => |ri| {
                         if (@import("room_frontend.zig").isActive()) @import("inbox.zig").jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
                         return 0;
@@ -6208,6 +6209,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (@import("room_frontend.zig").enabled and target == @import("room_frontend.zig").edit_room_target) {
                     _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
                     @import("room_frontend.zig").editPaletteRoom();
+                    return 0;
+                }
+                if (target >= app_state.SEARCH_ROOM_TO_OFFSET and target <= app_state.SEARCH_ROOM_DELETE_OFFSET) {
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    switch (target) {
+                        app_state.SEARCH_ROOM_TO_OFFSET => @import("room_frontend.zig").recipientsSelected(),
+                        app_state.SEARCH_ROOM_LEAVE_OFFSET => @import("room_frontend.zig").leaveSelected(),
+                        app_state.SEARCH_ROOM_UNDO_LEAVE_OFFSET => @import("room_frontend.zig").undoLeave(),
+                        app_state.SEARCH_ROOM_DELETE_OFFSET => @import("room_frontend.zig").deleteSelected(),
+                        else => {},
+                    }
                     return 0;
                 }
                 if (@import("room_frontend.zig").enabled and target == @import("room_frontend.zig").new_room_target) {

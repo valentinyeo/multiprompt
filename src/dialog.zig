@@ -14,6 +14,7 @@ pub const Button = struct {
     label: w.LPCWSTR,
     result: i32,
     destructive: bool = false,
+    fill: ?u32 = null,
 };
 
 const State = struct {
@@ -200,7 +201,7 @@ fn paintFrame(dc: w.HANDLE, state: *State, bounds: w.RECT, color: bool) bool {
         const cell = w.RECT{ .left = x - button_width, .top = state.card.bottom - state.px(64), .right = x, .bottom = state.card.bottom - state.px(24) };
         state.cells[i] = cell;
         const primary = i == state.buttons.len - 1;
-        const fill: u32 = if (button.destructive) (if (light) 0x2a30c6 else 0x828bf2) else if (primary) text else panel;
+        const fill: u32 = button.fill orelse if (button.destructive) (if (light) 0x2a30c6 else 0x828bf2) else if (primary) text else panel;
         smooth.fillRoundRect(dc, cell, state.px(20), if (i == state.selected) hint else outline);
         var face = cell;
         face.left += state.px(1);

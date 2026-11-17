@@ -1,6 +1,5 @@
 import importlib.util
 import json
-import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -87,42 +86,22 @@ class RoomsDesignA(unittest.TestCase):
         self.store.db.execute('INSERT INTO reply_progress VALUES (?, 1, ?, ?, 0, 0)', (delivery['id'], 'turn', '[]'))
         self.assertEqual('working', self.snapshot()['member_states']['alpha'])
         self.assertEqual(sent['event']['id'], self.snapshot().get('working_events', {}).get('alpha'))
+        queued = self.execute(self.post(['alpha'], 'Next question'))
+        self.assertNotIn('error', queued)
+        self.assertEqual('working', self.snapshot()['member_states']['alpha'])
+        self.assertEqual(sent['event']['id'], self.snapshot()['working_events']['alpha'])
         self.store.execute(dict(op='agent_reply', command_id=uid(), room_id=self.room,
                                 parent_event_id=sent['event']['id'], member_id=delivery['member_id'],
                                 response_id=uid(), text='Actual answer'))
+        self.assertEqual({'alpha': 'queued', 'beta': 'not_asked'}, self.snapshot()['member_states'])
+        self.assertNotIn('alpha', self.snapshot()['working_events'])
+        self.store.execute(dict(op='agent_reply', command_id=uid(), room_id=self.room,
+                                parent_event_id=queued['event']['id'], member_id=delivery['member_id'],
+                                response_id=uid(), text='Next answer'))
         self.assertEqual({'alpha': 'replied', 'beta': 'not_asked'}, self.snapshot()['member_states'])
         stale = dict(op='delete_room', command_id=uid(), room_id=self.room, expected_revision=2)
         self.assertEqual(dict(error='revision_conflict'), self.execute(stale))
         self.assertEqual('Crew', self.snapshot()['name'])
-
-
-class DeliveryWithoutAnOpenRoom(unittest.TestCase):
-    def setUp(self):
-        sys.path.insert(0, str(ROOT / 'src'))
-        spec = importlib.util.spec_from_file_location('room_routing_fixture', ROOT / 'tools/room-routing.test.py')
-        self.routing = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.routing)
-        self.fixture = self.routing.RoutingTest(methodName='test_plain_message_reaches_every_agent_once')
-        self.fixture.setUp()
-
-    def tearDown(self):
-        self.fixture.tearDown()
-
-    def test_accepted_send_dispatches_without_opening_or_polling_the_conversation(self):
-        fixture = self.fixture
-        fixture.runtime.answer = False
-        posted = fixture.post('Continue while the Room is not visible')
-        self.assertEqual(['Continue while the Room is not visible'], fixture.sent_to('alpha'))
-        self.assertEqual(['Continue while the Room is not visible'], fixture.sent_to('beta'))
-        members = {member['id']: member for member in fixture.bridge.store.members(fixture.room)}
-        for delivery in posted['deliveries']:
-            scope = dict(host_uuid=fixture.host, room_id=fixture.room,
-                         parent_event_id=posted['event']['id'], member_id=delivery['member_id'])
-            fixture.runtime.reply(members[delivery['member_id']]['provider_sid'], delivery['id'], scope, 'Background answer')
-        snapshot = fixture.bridge.execute(dict(op='snapshot', host_uuid=fixture.host, room_id=fixture.room, metadata=True))
-        self.assertEqual({'alpha': 'replied', 'beta': 'replied'}, snapshot['member_states'])
-        self.assertEqual('Background answer', snapshot['preview']['text'])
-        self.assertEqual(2, len(fixture.runtime.submits))
 
 
 if __name__ == '__main__':

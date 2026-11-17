@@ -772,13 +772,15 @@ pub var groups: [MAX_GROUPS]TabGroup = undefined;
 pub var group_count: u32 = 0;
 pub var next_group_id: u32 = 1;
 
-const RowKind = enum { section, header, tab, inbox, room_header, room };
+const RowKind = enum { section, header, tab, inbox, room_header };
 pub const SidebarTier = enum(u1) { recent = 0, pinned = 1 };
 pub const Row = struct {
     kind: RowKind,
     gidx: u32,
     shell_idx: u32,
     room_idx: u32 = 0,
+    room_member: bool = false,
+    member_idx: u32 = 0,
     section_tier: SidebarTier = .recent,
     y: i32,
     x: i32 = 0,
@@ -1456,6 +1458,10 @@ pub const SEARCH_OPENALL_HOST_BACK_OFFSET: usize = 5003;
 pub const SEARCH_OPENALL_HOST_DE_OFFSET: usize = 5004;
 pub const SEARCH_OPENALL_HOST_UK_OFFSET: usize = 5005;
 pub const SEARCH_OPENALL_HOST_INNE_OFFSET: usize = 5006;
+pub const SEARCH_ROOM_TO_OFFSET: usize = 5111;
+pub const SEARCH_ROOM_LEAVE_OFFSET: usize = 5112;
+pub const SEARCH_ROOM_UNDO_LEAVE_OFFSET: usize = 5113;
+pub const SEARCH_ROOM_DELETE_OFFSET: usize = 5114;
 pub const SEARCH_NEW_CLAUDE_CHAT_OFFSET: usize = 5100;
 pub const SEARCH_NEW_PI_CHAT_OFFSET: usize = 5101;
 pub const SEARCH_NEW_CURSOR_CHAT_OFFSET: usize = 5108;

@@ -23,6 +23,11 @@ pub const Front = union(enum) {
 };
 
 var front: Front = .hidden;
+var loading_name: [257:0]u16 = @splat(0);
+var loading_id: [36]u8 = @splat(0);
+var left_rooms: [128]RoomLocation = undefined;
+var left_count: usize = 0;
+var undo_left: ?RoomLocation = null;
 var retained_selection: ?RoomLocation = null;
 var model = room_view.ViewModel{
     .room_id = "",
@@ -155,8 +160,7 @@ const PendingCommand = struct {
     awaiting_launch: bool = false,
 };
 var pending_command: ?*PendingCommand = null;
-var last_post_room: ?RoomLocation = null;
-var last_post_tick: u64 = 0;
+var reply_watch_started: u64 = 0;
 const CreatedSelection = struct { location: RoomLocation, generation: u64, token_generation: u64 };
 var created_selection: ?CreatedSelection = null;
 const RefreshIntent = struct { location: StoreLocation, attempts: u8 = 0, in_flight: bool = false, dirty: bool = false };
@@ -254,10 +258,15 @@ fn loadUiAccount() bool {
     restore_intent = null;
     restore_front = false;
     restore_pending = false;
+    left_count = 0;
+    undo_left = null;
     if (account_len == 0) return true;
     var entry = (ui_store.load(account[0..account_len]) catch return false) orelse { ui_ready = true; return true; };
     defer entry.deinit();
     const record = entry.record();
+    left_count = record.left.len;
+    undo_left = null;
+    for (record.left, 0..) |location, index| left_rooms[index] = fromStored(location);
     for (record.drafts) |draft| {
         const wide_text = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, draft.text) catch { clearDrafts(); return false; };
         defer std.heap.page_allocator.free(wide_text);
@@ -291,9 +300,11 @@ pub fn flushUi() bool {
         if (entry.location.store.account_len != account_len or !std.mem.eql(u8, entry.location.store.account[0..account_len], account[0..account_len])) return false;
         values[index] = .{ .location = .{ .store_uuid = &entry.location.store.store_uuid, .room_id = &entry.location.room_id }, .text = std.unicode.utf16LeToUtf8Alloc(a, entry.text) catch return false };
     }
+    const left = a.alloc(ui_store.Location, left_count) catch return false;
+    for (left_rooms[0..left_count], 0..) |*location, index| left[index] = .{ .store_uuid = &location.store.store_uuid, .room_id = &location.room_id };
     const selection = retained_selection;
     const selected: ?ui_store.Location = if (selection) |*value| .{ .store_uuid = &value.store.store_uuid, .room_id = &value.room_id } else null;
-    ui_store.save(account[0..account_len], .{ .version = 1, .account = account[0..account_len], .selected = selected, .selected_front = if (restore_pending) restore_front else front == .selected, .drafts = values }) catch return false;
+    ui_store.save(account[0..account_len], .{ .version = 1, .account = account[0..account_len], .selected = selected, .selected_front = if (restore_pending) restore_front else front == .selected, .drafts = values, .left = left }) catch return false;
     ui_dirty = false;
     buffered_location = null;
     if (front == .hidden and desired_layout == null) scope_blocked = false;
@@ -314,6 +325,7 @@ fn freeOwned(value: *OwnedModel) void {
 
 fn clearModels() void {
     stopReplyWatch();
+    model = .{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{} };
     if (created) view.resetScope(&model);
     if (owned_model) |value| freeOwned(value);
     if (building_model) |value| freeOwned(value);
@@ -328,6 +340,45 @@ fn clearModels() void {
     selection_waiting = false;
 }
 
+fn workingQuestion(a: std.mem.Allocator, payload: std.json.Value, alias: []const u8) ?[]const u8 {
+    const events = payload.object.get("working_events") orelse return "";
+    if (events != .object) return null;
+    const value = events.object.get(alias) orelse return "";
+    if (value != .string) return null;
+    var validator = rooms.Controller.init(0);
+    if (!validator.bindHost(value.string)) return null;
+    return a.dupe(u8, value.string) catch null;
+}
+
+fn memberActivity(payload: std.json.Value, alias: []const u8) room_view.Activity {
+    const states = payload.object.get("member_states") orelse return .not_asked;
+    if (states != .object) return .not_asked;
+    const value = states.object.get(alias) orelse return .not_asked;
+    if (value != .string) return .not_asked;
+    return std.meta.stringToEnum(room_view.Activity, value.string) orelse .not_asked;
+}
+
+pub fn isLeft(id: []const u8) bool {
+    const store = catalog_store_uuid orelse return false;
+    for (left_rooms[0..left_count]) |location| if (std.mem.eql(u8, &location.store.store_uuid, &store) and std.mem.eql(u8, &location.room_id, id)) return true;
+    return false;
+}
+
+pub fn memberShell(member: room_view.Member) ?u32 {
+    const shell = eligibleShell(member.sid) orelse return null;
+    for (app_state.shells[0..app_state.shell_count], 0..) |*value, index| if (value == shell) return @intCast(index);
+    return null;
+}
+
+pub fn memberState(room_index: usize, member_index: usize) room_view.Activity {
+    const rows = catalog();
+    if (room_index >= rows.len) return .not_asked;
+    if (isVisible()) if (owned_model) |item| if (std.mem.eql(u8, item.value.room_id, rows[room_index].id) and member_index < rows[room_index].members.len) {
+        for (item.members.items) |member| if (std.mem.eql(u8, member.id, rows[room_index].members[member_index].id)) return member.activity;
+    };
+    return if (member_index < rows[room_index].members.len) rows[room_index].members[member_index].activity else .not_asked;
+}
+
 pub fn catalog() []const CatalogRow {
     if (!enabled or !catalog_complete or request_generation != account_generation) return &.{};
     const route = configuredRoute(route_slot) orelse return &.{};
@@ -338,7 +389,7 @@ pub fn catalog() []const CatalogRow {
 
 pub fn roomHit(index: usize) ?app_state.HitTarget {
     const rows = catalog();
-    if (index >= rows.len) return null;
+    if (index >= rows.len or isLeft(rows[index].id)) return null;
     const store = catalog_store_uuid orelse return null;
     if (rows[index].id.len != 36) return null;
     var id: [36]u8 = undefined;
@@ -361,7 +412,7 @@ pub fn editPaletteRoom() void {
     const hit = palette_edit_hit orelse return;
     const current = roomHit(hit.room.index) orelse return;
     if (!std.meta.eql(hit, current) or !canEditSelected() or !std.mem.eql(u8, &front.selected.room_id, &hit.room.id) or !std.mem.eql(u8, &front.selected.store.store_uuid, &hit.room.store_uuid)) return;
-    editSelected();
+    view.openMenu();
 }
 
 pub fn capturePaletteRoom(index: usize) bool {
@@ -829,7 +880,7 @@ fn applyCatalogPage(payload: std.json.Value) bool {
         for (catalog_rows.items) |existing| if (std.mem.eql(u8, existing.id, id)) return false;
         const id_copy = a.dupe(u8, id) catch return false;
         const name_copy = a.dupe(u8, name) catch return false;
-        catalog_rows.append(a, .{ .id = id_copy, .name = name_copy, .revision = revision, .sequence = message_seq }) catch return false;
+        catalog_rows.append(a, .{ .id = id_copy, .name = name_copy, .revision = revision, .sequence = message_seq, .metadata_state = .queued }) catch return false;
         last = seq;
     }
     if (next != last or (next == catalog_after and next != through)) return false;
@@ -878,6 +929,7 @@ fn startSnapshot(c: *rooms.Controller) bool {
         return true;
     }
     if (!c.snapshot(&location.room_id)) return false;
+    stopReplyWatch();
     read_generation = selection_generation;
     selection_waiting = false;
     _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
@@ -982,6 +1034,7 @@ fn acceptSnapshot(payload: std.json.Value) bool {
     item.value.room_id = a.dupe(u8, id) catch { freeOwned(item); return false; };
     item.value.name = wide(a, name) orelse { freeOwned(item); return false; };
     item.value.revision = revision;
+    item.value.loading = false;
     for (members.array.items, 0..) |member, index| {
         const member_id = textField(member, "id") orelse { freeOwned(item); return false; };
         const member_alias = textField(member, "alias") orelse { freeOwned(item); return false; };
@@ -993,7 +1046,7 @@ fn acceptSnapshot(payload: std.json.Value) bool {
         const historical = authorFrom(a, member) orelse { freeOwned(item); return false; };
         const alias = textField(member, "alias") orelse { freeOwned(item); return false; };
         const alias_wide = wide(a, alias) orelse { freeOwned(item); return false; };
-        item.members.append(a, .{ .id = historical.id, .name = historical.author.name, .alias = alias_wide, .appearance = historical.author.appearance, .name_color = historical.author.name_color, .presence = .unknown }) catch { freeOwned(item); return false; };
+        item.members.append(a, .{ .id = historical.id, .name = historical.author.name, .alias = alias_wide, .appearance = historical.author.appearance, .name_color = historical.author.name_color, .presence = .unknown, .sid = a.dupe(u8, member_sid) catch { freeOwned(item); return false; }, .activity = memberActivity(payload, alias), .working_question = workingQuestion(a, payload, alias) orelse { freeOwned(item); return false; } }) catch { freeOwned(item); return false; };
         item.bindings.append(a, .{ .id = historical.id, .member = .{
             .alias = a.dupe(u8, alias) catch { freeOwned(item); return false; },
             .display_name = a.dupe(u8, textField(member, "display_name").?) catch { freeOwned(item); return false; },
@@ -1047,7 +1100,7 @@ fn acceptCatalogMetadata(payload: std.json.Value, row: *CatalogRow) bool {
             if (std.mem.eql(u8, textField(previous, "id") orelse "", member_id) or std.mem.eql(u8, textField(previous, "alias") orelse "", alias) or (std.mem.eql(u8, textField(previous, "provider") orelse "", provider) and std.mem.eql(u8, textField(previous, "provider_sid") orelse "", sid))) return false;
         }
         const historical = authorFrom(a, member) orelse return false;
-        owned_members[index] = .{ .id = historical.id, .name = historical.author.name, .alias = wide(a, alias) orelse return false, .appearance = historical.author.appearance, .name_color = historical.author.name_color, .presence = .unknown };
+        owned_members[index] = .{ .id = historical.id, .name = historical.author.name, .alias = wide(a, alias) orelse return false, .appearance = historical.author.appearance, .name_color = historical.author.name_color, .presence = .unknown, .sid = a.dupe(u8, sid) catch return false, .activity = memberActivity(payload, alias), .working_question = workingQuestion(a, payload, alias) orelse return false };
     }
     var preview_text: []const u16 = &.{};
     var preview_author: ?room_view.Author = null;
@@ -1130,6 +1183,7 @@ fn acceptEvents(payload: std.json.Value) bool {
             const content = textField(event, "text") orelse return false;
             if (content.len == 0 or content.len > 65536 or item.messages.items.len >= 100000) return false;
             var author: ?room_view.Author = null;
+            var reply_member: []const u8 = "";
             var question_id = id;
             var insertion_index = item.messages.items.len;
             if (std.mem.eql(u8, kind, "human")) {
@@ -1157,6 +1211,7 @@ fn acceptEvents(payload: std.json.Value) bool {
                 check = rooms.Controller.init(0);
                 if (!check.bindHost(response)) return false;
                 const member_id = textField(event, "member_id") orelse return false;
+                reply_member = member_id;
                 check = rooms.Controller.init(0);
                 if (!check.bindHost(member_id)) return false;
                 var authorized = false;
@@ -1177,7 +1232,7 @@ fn acceptEvents(payload: std.json.Value) bool {
                 author = .{ .name = std.unicode.utf8ToUtf16LeStringLiteral("Unknown agent"), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0x9a9a9a };
                 for (item.history.items) |old| if (std.mem.eql(u8, old.id, member_id)) { author = old.author; break; };
             }
-            item.messages.insert(a, insertion_index, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{}, .question_id = a.dupe(u8, question_id) catch return false }) catch return false;
+            item.messages.insert(a, insertion_index, .{ .text = wide(a, content) orelse return false, .author = author, .time = &.{}, .question_id = a.dupe(u8, question_id) catch return false, .member_id = a.dupe(u8, reply_member) catch return false }) catch return false;
         } else return false;
         last = seq;
     }
@@ -1205,10 +1260,35 @@ fn publishModel() bool {
         if (!matched) return false;
     }
     if (active_count != item.bindings.items.len) return false;
+    for (item.messages.items) |*message| {
+        if (message.author != null) continue;
+        for (item.human_events.items) |human| if (std.mem.eql(u8, human.id, message.question_id)) {
+            const recipients = item.arena.allocator().alloc(room_view.Member, human.recipients.len) catch return false;
+            for (human.recipients, 0..) |id, index| {
+                var found = false;
+                for (item.history.items) |historical| if (std.mem.eql(u8, historical.id, id)) {
+                    recipients[index] = .{ .id = historical.id, .alias = wide(item.arena.allocator(), historical.alias) orelse return false, .name = historical.author.name, .appearance = historical.author.appearance, .name_color = historical.author.name_color, .presence = .unknown, .activity = .queued };
+                    found = true;
+                    break;
+                };
+                if (!found) return false;
+                for (item.messages.items) |reply| if (reply.author != null and std.mem.eql(u8, reply.question_id, human.id) and std.mem.eql(u8, reply.member_id, id)) { recipients[index].activity = .replied; break; };
+                if (recipients[index].activity != .replied) for (item.members.items) |member| if (std.mem.eql(u8, member.id, id) and member.activity == .working and std.mem.eql(u8, member.working_question, human.id)) { recipients[index].activity = .working; break; };
+            }
+            message.recipients = recipients;
+            break;
+        };
+    }
     item.value.members = item.members.items;
     item.value.candidates = item.candidates.items;
     item.value.messages = item.messages.items;
+    const was_loading = view.model.loading;
     if (!view.setModel(&item.value)) return false;
+    view.reconcileRecipients();
+    if (was_loading and isVisible() and w.GetForegroundWindow() == app_state.g_main_hwnd) view.focus();
+    var title: [257:0]u16 = @splat(0);
+    @memcpy(title[0..item.value.name.len], item.value.name);
+    _ = w.SetWindowTextW(view.hwnd, &title);
     if (conflict_refresh) |generation| {
         if (generation.selection == selection_generation and generation.view_generation == view.generation and front == .selected and std.mem.eql(u8, &front.selected.room_id, item.value.room_id)) view.refreshEditRevision();
         conflict_refresh = null;
@@ -1228,7 +1308,11 @@ fn publishModel() bool {
                     const id = a.dupe(u8, member.id) catch { ok = false; break; };
                     const name = a.dupe(u16, member.name) catch { ok = false; break; };
                     const alias = a.dupe(u16, member.alias) catch { ok = false; break; };
+                    const sid = a.dupe(u8, member.sid) catch { ok = false; break; };
+                    const working = a.dupe(u8, member.working_question) catch { ok = false; break; };
                     metadata[i] = member;
+                    metadata[i].working_question = working;
+                    metadata[i].sid = sid;
                     metadata[i].id = id;
                     metadata[i].name = name;
                     metadata[i].alias = alias;
@@ -1246,6 +1330,7 @@ fn publishModel() bool {
             break;
         }
     }
+    _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
     if (owned_model) |old| freeOwned(old);
     owned_model = item;
     building_model = null;
@@ -1269,6 +1354,7 @@ fn finishMetadata(c: *rooms.Controller, fresh: bool, payload: ?std.json.Value) v
         }
     }
     if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+    armReplyWatch();
 }
 
 fn freePending(item: *PendingCommand) void {
@@ -1295,11 +1381,17 @@ fn replyPending(item: *const OwnedModel) bool {
 }
 
 fn replyDelay() ?u32 {
-    const posted = last_post_room orelse return null;
-    if (!enabled or !created or !shown or !isVisible() or front != .selected or !sameLocation(front.selected, posted)) return null;
-    const current = owned_model orelse return null;
-    if (!std.mem.eql(u8, current.value.room_id, &posted.room_id) or !replyPending(current)) return null;
-    const age = w.GetTickCount64() -% last_post_tick;
+    if (!enabled or !created or !ui_ready or scope_blocked or account_len == 0 or app_state.g_account_locked) return null;
+    var pending = false;
+    for (catalog()) |row| {
+        if (isLeft(row.id)) continue;
+        for (row.members) |member| if (member.activity == .queued or member.activity == .working) { pending = true; break; };
+    }
+    if (front == .selected) if (owned_model) |current| if (replyPending(current)) { pending = true; };
+    if (!pending) { reply_watch_started = 0; return null; }
+    const now = w.GetTickCount64();
+    if (reply_watch_started == 0) reply_watch_started = now;
+    const age = now -% reply_watch_started;
     if (age < reply_fast_ms) return 2000;
     if (age < reply_window_ms) return 15000;
     return null;
@@ -1397,8 +1489,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     }
     const visible = fresh and commandVisible(item);
     if (state == .accepted and item.kind == .post) {
-        last_post_room = .{ .store = item.location, .room_id = item.room_id };
-        last_post_tick = w.GetTickCount64();
+        reply_watch_started = w.GetTickCount64();
         dropSubmittedDraft(item);
     }
     if (evidence) |bytes| {
@@ -1418,6 +1509,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
             return;
         };
     }
+    if (state == .accepted and item.kind == .delete) finishDeleted(item);
     if (state == .accepted and !enqueueRefresh(item.location)) {
         item.evidence = evidence;
         item.evidence_state = state;
@@ -1589,8 +1681,17 @@ pub fn pollTimer(id: usize) bool {
         if (replyDelay() == null) return true;
         const reader = if (controller) |*value| value else return true;
         if (pending_command != null) { armReplyWatch(); return true; }
-        selection_waiting = true;
-        if (!startSnapshot(reader) and reader.job == null) selection_waiting = false;
+        for (catalog_rows.items) |*row| {
+            if (isLeft(row.id)) continue;
+            for (row.members) |member| if (member.activity == .queued or member.activity == .working) {
+                if (row.metadata_state != .loading) row.metadata_state = .queued;
+                break;
+            };
+        }
+        selection_waiting = front == .selected;
+        if (startSnapshot(reader) or reader.job != null) return true;
+        selection_waiting = false;
+        if (!scheduleMetadata(reader)) armReplyWatch();
         return true;
     }
     if (id != TIMER_ROOM) return false;
@@ -1847,7 +1948,7 @@ pub fn retryCommand(location: StoreLocation) !void {
     const record = entry.record();
     if (record.state != .prepared and record.state != .uncertain) return error.TerminalCommand;
     const item = try std.heap.page_allocator.create(PendingCommand);
-    item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = record.kind, .id = undefined, .revision = record.revision, .request = "", .token = .{ .generation = 0, .serial = 0, .kind = switch (record.kind) { .create => .create, .edit => .edit, .post => .submit } }, .generation = selection_generation, .bindings = &.{} };
+    item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = record.kind, .id = undefined, .revision = record.revision, .request = "", .token = .{ .generation = 0, .serial = 0, .kind = switch (record.kind) { .create => .create, .edit => .edit, .post => .submit, .delete => .delete } }, .generation = selection_generation, .bindings = &.{} };
     var retained = false;
     defer if (!retained) { item.arena.deinit(); std.heap.page_allocator.destroy(item); };
     const a = item.arena.allocator();
@@ -1870,6 +1971,7 @@ pub fn retryCommandEvidence() !void {
     const evidence = item.evidence orelse return error.NotFound;
     try journal.update(item.scope, &item.id, item.evidence_state, evidence);
     if (item.evidence_state == .accepted) {
+        if (item.kind == .delete) finishDeleted(item);
         if (!enqueueRefresh(item.location)) return error.RefreshQueueFull;
         if (commandScope(item.location) != null) if (controller) |*c| {
             if (item.kind != .create and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
@@ -1880,7 +1982,8 @@ pub fn retryCommandEvidence() !void {
 }
 
 fn matchesPending(item: *const PendingCommand, kind: journal.Kind, room_id: []const u8, revision: u64, name: []const u16, ids: []const []const u8) bool {
-    if (kind != item.kind or revision != item.revision or commandScope(item.location) == null or selection_generation != item.generation or (kind == .create and front != .create) or (kind == .edit and (front != .selected or !std.mem.eql(u8, room_id, &item.room_id) or !sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id })))) return false;
+    if (kind != item.kind or revision != item.revision or commandScope(item.location) == null or selection_generation != item.generation or (kind == .create and front != .create) or (kind != .create and (front != .selected or !std.mem.eql(u8, room_id, &item.room_id) or !sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id })))) return false;
+    if (kind == .delete) return name.len == 0 and ids.len == 0;
     var buf: [768]u8 = undefined;
     const len = std.unicode.utf16LeToUtf8(&buf, name) catch return false;
     if (len == 0 or len > 256 or ids.len > 64) return false;
@@ -1934,7 +2037,8 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
     }
     var name_buf: [768]u8 = undefined;
     const name_len = std.unicode.utf16LeToUtf8(&name_buf, name) catch return .failed;
-    if (name_len == 0 or name_len > 256 or std.mem.indexOfScalar(u8, name_buf[0..name_len], 0) != null) return .failed;
+    if (kind != .delete and (name_len == 0 or name_len > 256 or std.mem.indexOfScalar(u8, name_buf[0..name_len], 0) != null)) return .failed;
+    if (kind == .delete and (name_len != 0 or ids.len != 0)) return .failed;
     const item = std.heap.page_allocator.create(PendingCommand) catch return .failed;
     item.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .scope = scope, .location = location, .kind = kind, .id = undefined, .revision = revision, .request = "", .token = token, .generation = selection_generation, .bindings = &.{} };
     var retained = false;
@@ -1955,7 +2059,7 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
         }
     }
     item.bindings = bindings.items;
-    if (kind == .edit) @memcpy(&item.room_id, room_id);
+    if (kind != .create) @memcpy(&item.room_id, room_id);
     var existing = (journal.load(scope) catch return .failed);
     defer if (existing) |*value| value.deinit();
     if (existing) |*value| {
@@ -1965,7 +2069,9 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
             @memcpy(&item.id, record.command_id);
         } else item.id = journal.newCommandId() orelse return .failed;
     } else item.id = journal.newCommandId() orelse return .failed;
-    item.request = if (kind == .create)
+    item.request = if (kind == .delete)
+        std.json.Stringify.valueAlloc(a, .{ .op = "delete_room", .host_uuid = location.store_uuid[0..], .command_id = item.id[0..], .room_id = room_id, .expected_revision = revision }, .{}) catch return .failed
+    else if (kind == .create)
         std.json.Stringify.valueAlloc(a, .{ .op = "create", .host_uuid = location.store_uuid[0..], .command_id = item.id[0..], .name = name_buf[0..name_len], .members = members.items }, .{}) catch return .failed
     else
         std.json.Stringify.valueAlloc(a, .{ .op = "edit", .host_uuid = location.store_uuid[0..], .command_id = item.id[0..], .room_id = room_id, .expected_revision = revision, .name = name_buf[0..name_len], .members = members.items }, .{}) catch return .failed;
@@ -1979,10 +2085,10 @@ fn beginCommand(kind: journal.Kind, token: room_view.ActionToken, room_id: []con
 }
 
 fn postRequest(a: std.mem.Allocator, store_uuid: *const [36]u8, id: *const [36]u8, room_id: []const u8, revision: u64, text: []const u8, recipients: []const []const u8) ![]u8 {
-    return std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .host_uuid = store_uuid[0..], .command_id = id[0..], .room_id = room_id, .expected_revision = revision, .text = text, .recipients = recipients }, .{});
+    return std.json.Stringify.valueAlloc(a, .{ .op = "post_human", .host_uuid = store_uuid[0..], .command_id = id[0..], .room_id = room_id, .expected_revision = revision, .text = text, .recipients = recipients, .target_mode = "explicit" }, .{});
 }
 
-fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, value: []const u16) room_view.ActionResult {
+fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, value: []const u16, recipient: []const u8) room_view.ActionResult {
     if (!enabled or !created or front != .selected or room_id.len != 36 or revision == 0) return .failed;
     const c = if (controller) |*active| active else return .failed;
     if (!c.live_send) return .unsupported;
@@ -1992,10 +2098,13 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     const text_len = std.unicode.utf16LeToUtf8(&text_buf, value) catch return .failed;
     const text = text_buf[0..text_len];
     if (!room_post.validText(text) or current.bindings.items.len > room_post.max_recipients) return .failed;
-    var aliases: [room_post.max_recipients][]const u8 = undefined;
-    for (current.bindings.items, 0..) |binding, index| aliases[index] = binding.member.alias;
+    if (current.bindings.items.len == 0) return .failed;
     var picked: [room_post.max_recipients][]const u8 = undefined;
-    const count = room_post.recipients(text, aliases[0..current.bindings.items.len], &picked) orelse return .failed;
+    var count: usize = 0;
+    if (recipient.len > 0) {
+        for (current.bindings.items) |binding| if (std.mem.eql(u8, binding.id, recipient)) { picked[0] = binding.member.alias; count = 1; break; };
+        if (count == 0) return .failed;
+    }
     if (pending_command) |item| {
         if (item.evidence == null or item.kind != .post) return .failed;
         const bytes = postRequest(std.heap.page_allocator, &item.location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch return .failed;
@@ -2047,9 +2156,77 @@ fn createRoom(_: *anyopaque, token: room_view.ActionToken, name: []const u16, id
 fn editRoom(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64, name: []const u16, ids: []const []const u8) room_view.ActionResult {
     return beginCommand(.edit, token, room_id, revision, name, ids);
 }
-fn submit(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64, text: []const u16) room_view.ActionResult {
-    return beginPost(token, room_id, revision, text);
+fn submit(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64, text: []const u16, recipient: []const u8) room_view.ActionResult {
+    return beginPost(token, room_id, revision, text, recipient);
 }
+pub fn canUndoLeave() bool { return undo_left != null and ui_ready and !scope_blocked; }
+
+pub fn undoLeave() void {
+    const location = undo_left orelse return;
+    if (location.store.account_len != account_len or !std.mem.eql(u8, location.store.account[0..account_len], account[0..account_len])) return;
+    for (left_rooms[0..left_count], 0..) |entry, index| if (sameLocation(entry, location)) {
+        left_count -= 1;
+        left_rooms[index] = left_rooms[left_count];
+        markUiDirty();
+        if (!flushUi()) { left_rooms[left_count] = entry; left_count += 1; return; }
+        undo_left = null;
+        if (app_state.g_inbox_active) @import("inbox.zig").closeInbox(app_state.g_main_hwnd);
+        if (app_state.g_all_sessions_active) @import("archive.zig").closeAllSessions(app_state.g_main_hwnd);
+        select(location);
+        _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    };
+}
+
+fn leaveRoom(_: *anyopaque) void {
+    if (!canEditSelected() or pending_command != null or left_count == left_rooms.len) return;
+    const location = front.selected;
+    if (!saveDraft()) return;
+    left_rooms[left_count] = location;
+    left_count += 1;
+    markUiDirty();
+    if (!flushUi()) { left_count -= 1; return; }
+    undo_left = location;
+    leaveForOtherFront();
+    retained_selection = null;
+    markUiDirty();
+    _ = flushUi();
+    @import("console.zig").showHeaderNoticeAscii("Left room. Ctrl+K: Undo leave room.", 8000, false);
+    _ = w.PostMessageW(app_state.g_main_hwnd, w.WM_APP_TOGGLE_INBOX, 0, 0);
+    _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+pub fn leaveSelected() void { leaveRoom(&context); }
+pub fn recipientsSelected() void { if (canEditSelected()) view.chooseRecipient(); }
+pub fn deleteSelected() void { if (canEditSelected()) view.deleteRoom(); }
+
+fn finishDeleted(item: *const PendingCommand) void {
+    if (commandScope(item.location) == null) return;
+    const location = RoomLocation{ .store = item.location, .room_id = item.room_id };
+    if (retained_selection) |retained| if (sameLocation(retained, location)) { retained_selection = null; };
+    if (restore_intent) |intent| if (sameLocation(intent, location)) { restore_intent = null; restore_pending = false; };
+    if (front == .selected and sameLocation(front.selected, location)) {
+        leaveForOtherFront();
+        retained_selection = null;
+        clearModels();
+        if (!app_state.g_inbox_active) _ = w.PostMessageW(app_state.g_main_hwnd, w.WM_APP_TOGGLE_INBOX, 0, 0);
+    }
+    for (drafts.items, 0..) |draft, index| if (sameLocation(draft.location, location)) {
+        std.heap.page_allocator.free(draft.text);
+        _ = drafts.orderedRemove(index);
+        break;
+    };
+    markUiDirty();
+    _ = flushUi();
+    if (undo_left) |undo| if (sameLocation(undo, location)) { undo_left = null; };
+    @import("console.zig").showHeaderNoticeAscii("Room deleted. Sessions keep running.", 4000, false);
+}
+
+fn deleteRoom(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64) room_view.ActionResult {
+    if (!canEditSelected() or revision == 0) return .failed;
+    return beginCommand(.delete, token, room_id, revision, &.{}, &.{});
+}
+
 fn restart(_: *anyopaque, _: room_view.ActionToken, _: []const u8, _: []const u8) room_view.ActionResult {
     return .unsupported;
 }
@@ -2112,7 +2289,6 @@ pub fn openCreate() void {
     resize(app_state.g_main_hwnd);
     syncVisibility();
     view.openCreate();
-    view.showUnavailable();
     discovery_attempts = 0;
     beginDiscovery(false);
     if (controller) |*c| if (c.job == null and nextStatus(c)) { _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null); };
@@ -2167,12 +2343,22 @@ pub fn select(location: RoomLocation) void {
     retained_selection = location;
     restore_pending = false;
     front = .{ .selected = location };
+    loading_id = location.room_id;
+    var name_len: usize = 0;
+    for (catalog()) |row| if (std.mem.eql(u8, row.id, &location.room_id)) {
+        name_len = std.unicode.utf8ToUtf16Le(loading_name[0..256], row.name) catch 0;
+        break;
+    };
+    if (name_len == 0) { const fallback = std.unicode.utf8ToUtf16LeStringLiteral("Room"); @memcpy(loading_name[0..fallback.len], fallback); name_len = fallback.len; }
+    loading_name[name_len] = 0;
+    model = .{ .room_id = &loading_id, .name = loading_name[0..name_len], .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{}, .loading = true };
+    _ = view.setModel(&model);
+    _ = w.SetWindowTextW(view.hwnd, &loading_name);
     restoreDraft(location);
     markUiDirty();
     @import("workspaces.zig").updateMainWindowTitle();
     resize(app_state.g_main_hwnd);
     syncVisibility();
-    view.showUnavailable();
     view.focus();
     if (!found) return;
     selection_waiting = true;
@@ -2209,6 +2395,7 @@ pub fn leaveForSession() void {
     @import("workspaces.zig").updateMainWindowTitle();
     if (created and shown) view.show(false);
     shown = false;
+    armReplyWatch();
 }
 pub fn leaveForOtherFront() void {
     leaveForSession();
@@ -2220,13 +2407,13 @@ pub fn syncVisibility() void {
     if (visible == shown) return;
     shown = visible;
     view.show(visible);
-    if (visible) armReplyWatch() else stopReplyWatch();
+    armReplyWatch();
 }
 pub fn hideForOverlay() void {
     if (!created or !shown) return;
     view.show(false);
     shown = false;
-    stopReplyWatch();
+    armReplyWatch();
 }
 pub fn restoreAfterOverlay() bool {
     if (!isActive()) return false;
@@ -2239,7 +2426,7 @@ pub fn restoreAfterOverlay() bool {
 pub fn init(parent: w.HANDLE) void {
     if (!enabled or created or !ui_store.bindOwner()) return;
     if (account_len > 0 and !ui_ready and !ui_dirty) _ = loadUiAccount();
-    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged });
+    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged, .leave = leaveRoom, .delete = deleteRoom });
 }
 pub fn resize(parent: w.HANDLE) void {
     if (!enabled or !created) return;
@@ -2263,7 +2450,7 @@ pub fn deinit() void {
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE);
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
     stopReplyWatch();
-    last_post_room = null;
+    reply_watch_started = 0;
     discovery_waiting = false;
     if (controller) |*c| c.shutdown();
     controller = null;

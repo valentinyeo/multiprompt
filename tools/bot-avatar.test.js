@@ -165,45 +165,53 @@ test "tiles wrap and every mouse target remains the painted session" {
 });
 
 
-test('Rooms rows stay absent for an empty catalog and contain only existing rooms', () => {
+test('Rooms groups contain real session rows and keep New room available when empty', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rooms-layout-'));
   try {
     fs.writeFileSync(path.join(dir, 'room_frontend.zig'), `pub var enabled = true;
 pub var room_count: usize = 0;
-const rooms = [_]u8{0, 1};
-pub fn catalog() []const u8 { return rooms[0..room_count]; }
+pub var left = false;
+const Room = struct { id: u8, members: []const u8 };
+const rooms = [_]Room{ .{ .id = 0, .members = &.{ 10, 11 } }, .{ .id = 1, .members = &.{12} } };
+pub fn catalog() []const Room { return rooms[0..room_count]; }
+pub fn isLeft(id: u8) bool { return left and id == 0; }
+pub fn memberShell(member: u8) ?u32 { return member; }
 `);
     fs.writeFileSync(path.join(dir, 'rooms.zig'), `const std = @import("std");
-const MAX_ROWS = 4;
+const MAX_ROWS = 16;
 ${block(read('src/app_state.zig'), 'const RowKind = enum')};
-const Row = struct { kind: RowKind, gidx: u32, shell_idx: u32, room_idx: u32 = 0, y: i32 };
+const Row = struct { kind: RowKind, gidx: u32, shell_idx: u32, room_idx: u32 = 0, room_member: bool = false, member_idx: u32 = 0, y: i32 };
 fn sectionHeaderHeight() i32 { return 24; }
 fn tabRowH() i32 { return 58; }
 ${block(read('src/sidebar.zig'), 'fn appendRoomRows(')}
-test "empty and populated room catalogs determine the visible rows" {
+test "empty catalog still offers New room; groups link the real sessions" {
     const room = @import("room_frontend.zig");
     var rows: [MAX_ROWS]Row = undefined;
     var count: u32 = 0;
     var y: i32 = 20;
     appendRoomRows(&rows, &count, &y);
-    try std.testing.expectEqual(@as(u32, 0), count);
-    try std.testing.expectEqual(@as(i32, 20), y);
-    for (1..3) |n| {
-        room.room_count = n;
-        count = 0;
-        y = 20;
-        appendRoomRows(&rows, &count, &y);
-        try std.testing.expectEqual(@as(u32, @intCast(n + 1)), count);
-        try std.testing.expectEqual(RowKind.room_header, rows[0].kind);
-        for (rows[1..count], 0..) |row, index| {
-            try std.testing.expectEqual(RowKind.room, row.kind);
-            try std.testing.expectEqual(@as(u32, @intCast(index)), row.room_idx);
-            try std.testing.expectEqual(@as(i32, 44) + @as(i32, @intCast(index)) * 58, row.y);
-        }
-    }
-    room.enabled = false;
+    try std.testing.expectEqual(@as(u32, 1), count);
+    try std.testing.expectEqual(@as(u32, 1), rows[0].gidx);
+    room.room_count = 2;
     count = 0;
     y = 20;
+    appendRoomRows(&rows, &count, &y);
+    try std.testing.expectEqual(@as(u32, 6), count);
+    try std.testing.expectEqual(RowKind.room_header, rows[0].kind);
+    try std.testing.expectEqual(RowKind.tab, rows[1].kind);
+    try std.testing.expectEqual(@as(u32, 10), rows[1].shell_idx);
+    try std.testing.expect(rows[1].room_member);
+    try std.testing.expectEqual(@as(u32, 11), rows[2].shell_idx);
+    try std.testing.expectEqual(@as(u32, 12), rows[4].shell_idx);
+    try std.testing.expectEqual(@as(u32, 1), rows[5].gidx);
+    room.left = true;
+    count = 0;
+    y = 20;
+    appendRoomRows(&rows, &count, &y);
+    try std.testing.expectEqual(@as(u32, 3), count);
+    try std.testing.expectEqual(@as(u32, 1), rows[0].room_idx);
+    room.enabled = false;
+    count = 0;
     appendRoomRows(&rows, &count, &y);
     try std.testing.expectEqual(@as(u32, 0), count);
 }

@@ -23,6 +23,7 @@ pub const Record = struct {
     selected: ?Location,
     selected_front: bool,
     drafts: []const Draft,
+    left: []const Location = &.{},
 };
 const Envelope = struct { record: Record, checksum: []const u8 };
 pub const Entry = struct {
@@ -48,6 +49,11 @@ fn validAccount(account: []const u8) bool {
 fn valid(account: []const u8, record: Record) bool {
     if (!validAccount(account) or !std.mem.eql(u8, account, record.account) or record.version != 1 or record.drafts.len > 128 or (record.selected_front and record.selected == null)) return false;
     if (record.selected) |selected| if (!uuidValid(selected.store_uuid) or !uuidValid(selected.room_id)) return false;
+    if (record.left.len > 128) return false;
+    for (record.left, 0..) |location, index| {
+        if (!uuidValid(location.store_uuid) or !uuidValid(location.room_id)) return false;
+        for (record.left[0..index]) |previous| if (sameLocation(previous, location)) return false;
+    }
     var total: usize = 0;
     for (record.drafts, 0..) |draft, index| {
         if (!uuidValid(draft.location.store_uuid) or !uuidValid(draft.location.room_id) or draft.text.len == 0 or draft.text.len > 65536 or !std.unicode.utf8ValidateSlice(draft.text) or std.mem.indexOfScalar(u8, draft.text, 0) != null) return false;
@@ -75,7 +81,10 @@ fn pathFor(account: []const u8, buf: []u8) ![]const u8 {
     return std.fmt.bufPrint(buf, "{s}\\room-ui-{s}.json", .{ dir, &key }) catch error.InvalidPath;
 }
 fn checksum(record: Record) ![64]u8 {
-    const bytes = try std.json.Stringify.valueAlloc(allocator, record, .{});
+    const bytes = if (record.left.len == 0)
+        try std.json.Stringify.valueAlloc(allocator, .{ .version = record.version, .account = record.account, .selected = record.selected, .selected_front = record.selected_front, .drafts = record.drafts }, .{})
+    else
+        try std.json.Stringify.valueAlloc(allocator, record, .{});
     defer allocator.free(bytes);
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
@@ -126,7 +135,10 @@ pub fn save(account: []const u8, record: Record) !void {
     defer _ = w.ReleaseMutex(mutex);
     if (try load(account)) |loaded| { var old = loaded; old.deinit(); }
     const digest = try checksum(record);
-    const bytes = try std.json.Stringify.valueAlloc(allocator, Envelope{ .record = record, .checksum = &digest }, .{});
+    const bytes = if (record.left.len == 0)
+        try std.json.Stringify.valueAlloc(allocator, .{ .record = .{ .version = record.version, .account = record.account, .selected = record.selected, .selected_front = record.selected_front, .drafts = record.drafts }, .checksum = &digest }, .{})
+    else
+        try std.json.Stringify.valueAlloc(allocator, Envelope{ .record = record, .checksum = &digest }, .{});
     defer allocator.free(bytes);
     if (bytes.len > max_file) return error.InvalidRecord;
     var path_buf: [700]u8 = undefined;
@@ -146,4 +158,20 @@ pub fn save(account: []const u8, record: Record) !void {
     const flushed = if (ok) w.FlushFileBuffers(h) != 0 else false;
     const closed = w.CloseHandle(h) != 0;
     if (!ok or !flushed or !closed or w.MoveFileExW(temp_w.ptr, wide.ptr, 1 | 8) == 0) return error.WriteFailed;
+}
+
+
+test "Room leave state retains legacy profile checksums and validates hidden identities" {
+    const record = Record{ .version = 1, .account = "sample", .selected = null, .selected_front = false, .drafts = &.{} };
+    const legacy = try checksum(record);
+    try std.testing.expectEqualStrings("d313381b30cc07e9e4473bfc7731446779c9c06c5de8f7e27ece12d5a49b96a2", &legacy);
+    const location = Location{ .store_uuid = "10000000-0000-4000-8000-000000000001", .room_id = "20000000-0000-4000-8000-000000000002" };
+    var left = record;
+    left.left = &.{location};
+    try std.testing.expect(valid("sample", left));
+    const changed = try checksum(left);
+    try std.testing.expect(!std.mem.eql(u8, &legacy, &changed));
+    left.left = &.{ location, location };
+    try std.testing.expect(!valid("sample", left));
+    try std.testing.expect(!valid("another-account", record));
 }
