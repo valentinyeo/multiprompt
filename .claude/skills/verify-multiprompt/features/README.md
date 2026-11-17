@@ -18,6 +18,10 @@ Start with one feature, then pick a named journey. The nine files follow the ref
 
 Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/command_palette.zig`, and `openwiki/architecture/features.md`. Use `drive.ps1 <feature> <journey>` with the identity/evidence arguments shown in each map. It reuses existing control helpers; no new product journeys are introduced. GitHub `verify.yml -f feature=appearance` and `-f feature=command-palette` now use this entry point and retain video. Other workflow routes remain in the [migration inventory](../inventory.md) for follow-up. Do not claim those routes already produce video or that Rooms passed offline.
 
+## Real server journey
+
+- [Runner-owned server chat](server-chat.md): Windows OpenSSH to an isolated WSL Linux OpenSSH server and real tmux. Opens the chat, sends, sends `/clear`, then sends again; retains desktop video, exact server receipts and runner-only key ACL proof. Paid-provider context erasure remains outside this transport journey.
+
 ## Baseline preconditions
 
 - Only a fresh GitHub `windows-latest` desktop; never launch locally or on a user's computer.
