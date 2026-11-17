@@ -4,19 +4,22 @@ $observation.realSizeChecks = @()
 $manifest = Get-Content "$caseDir/fixture-manifest.json" -Raw | ConvertFrom-Json
 if ($manifest.sessions -ne 64 -or $manifest.messagesPerLongChat -ne 2400 -or $manifest.longChats -ne 8) { throw 'Real-size profile counts differ from the documented fixture' }
 function Copy-RealSize([string]$Stage, [string]$Expected) {
-    $offset = (Read-Shared "$settings/debug.log").Length
-    Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text'
-    $query = 'chat view select all'
-    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
-    [void](Wait-For 'select-all palette row ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
-    Press @(0x0D) 'Enter: select all transcript text'
-    [Windows.Forms.Clipboard]::Clear()
-    Press @(0x11, 0x43) 'Ctrl+C: copy the rendered transcript'
-    $copied = Wait-For 'expected text copied from the native transcript' { $text = [Windows.Forms.Clipboard]::GetText(); if ($text.Contains($Expected)) { $text } } 30
+    $copied = Wait-For 'expected text copied from the native transcript' {
+        $offset = (Read-Shared "$settings/debug.log").Length
+        Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text'
+        $query = 'chat view select all'
+        foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+        [void](Wait-For 'select-all palette row ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
+        Press @(0x0D) 'Enter: select all transcript text'
+        [Windows.Forms.Clipboard]::Clear()
+        Press @(0x11, 0x43) 'Ctrl+C: copy the rendered transcript'
+        $text = [Windows.Forms.Clipboard]::GetText()
+        Press @(0x1B) 'Esc: clear transcript selection'
+        [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+        if ($text.Contains($Expected)) { $text }
+    } 30
     [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
     Shot "real-size-$Stage"
-    Press @(0x1B) 'Esc: clear transcript selection'
-    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     return $copied
 }
 [void](Copy-RealSize 'loaded' 'Synthetic chat 00 answer 1199')

@@ -23,7 +23,8 @@ test('startup failure dispatch fits GitHub limits and selects its driver', () =>
     assert.match(block, /env\.FEATURE == 'chat-startup-failure'/);
   }
   const python = verifyJob.split('- uses: actions/setup-python@')[1].split('\n      - ')[0];
-  assert.match(python, /env\.FEATURE == 'chat-startup-failure'/);
+  assert.match(python, /python-version: '3\.12'/);
+  assert.doesNotMatch(python, /^\s*if:/m);
   const delivery = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/chat-delivery.md'), 'utf8');
   assert.equal((delivery.match(/^## /gm) || []).length, 4);
 });
