@@ -147,7 +147,7 @@ try {
             $state = Server-Snapshot 'fresh-after'
             $hostState = @($state.hosts | Where-Object { $_.sid -ceq 'a1b2c3d4-2567-4000-8000-000000002567' -and $_.alive -and -not $_.freshPhase })
             $state.provider.pid -ne $beforeFresh.provider.pid -and $hostState.Count -eq 1 -and @($state.inputs | Where-Object { $_.text.StartsWith('You are the same chat after a fresh start.') }).Count -eq 1
-        }))
+        })
         $freshText = Copy-Chat 'fresh-copied'
         if (-not $freshText.Contains('Synthetic chat 00 answer 1199.') -or -not $freshText.Contains('Server received: windows send proof')) { throw 'Fresh start lost the readable history' }
         Shot 'fresh-after'
