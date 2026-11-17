@@ -42,11 +42,13 @@ function Room-Window {
     return [IntPtr]::Zero
 }
 function Focused-RoomEdit {
-    $focus = [System.Windows.Automation.AutomationElement]::FocusedElement
-    if ($focus.Current.ProcessId -ne $process.Id -or $focus.Current.ClassName -ine 'Edit') { throw 'Room input is not focused' }
+    $edit = [VerifyNative]::GetFocusedWindow($script:window)
+    [uint32]$owner = 0
+    [void][VerifyNative]::GetWindowThreadProcessId($edit, [ref]$owner)
+    if ($owner -ne $process.Id -or [VerifyNative]::Class($edit) -ine 'Edit') { throw 'Room input is not focused' }
     $room = Room-Window
-    if ($room -eq [IntPtr]::Zero -or [VerifyNative]::GetAncestor([IntPtr]$focus.Current.NativeWindowHandle, 2) -ne $script:window) { throw 'Room input is not owned by this app' }
-    return [IntPtr]$focus.Current.NativeWindowHandle
+    if ($room -eq [IntPtr]::Zero -or [VerifyNative]::GetAncestor($edit, 2) -ne $script:window) { throw 'Room input is not owned by this app' }
+    return $edit
 }
 function Audit-Step([string]$Name, [scriptblock]$Action, [string]$Prerequisite = '') {
     Doctor
@@ -65,12 +67,26 @@ function Audit-Step([string]$Name, [scriptblock]$Action, [string]$Prerequisite =
     return
 }
 function Open-RoomByName([string]$Name) {
+    $logStart = (Read-SharedText "$settings/debug.log").Length
     Press @(0x11,0x4B) 'Ctrl+K: find a room by name'
     Type-Text $Name
-    Wait-Until { (Read-SharedText "$settings/debug.log") -match ('\[palette\] ready chars=' + $Name.Length + ' count=1 ') } 'one exact room palette result'
+    Wait-Until { (Read-SharedText "$settings/debug.log").Substring($logStart) -match ('\[palette\] ready chars=' + $Name.Length + ' count=1 ') } 'one exact room palette result'
     Snapshot ('select-' + $Name.Replace(' ','-'))
     Press @(0x0D) 'Enter: open the named room'
     Wait-Until { (Room-Window) -ne [IntPtr]::Zero } 'visible room view'
+    $manifest = Get-Content "$fixture/manifest.json" -Raw | ConvertFrom-Json
+    $expected = @($manifest.rooms | Where-Object name -eq $Name)[0]
+    Wait-Until {
+        $files = @(Get-ChildItem $settings -Filter 'room-ui-*.json')
+        if ($files.Count -ne 1) { return $false }
+        $saved = Get-Content $files[0].FullName -Raw | ConvertFrom-Json
+        $saved.record.selected.room_id -ceq $expected.id -and $saved.record.selected_front
+    } 'the selected room identity persisted'
+    Wait-Until {
+        $file = "$fixture/$($expected.id).observed.json"
+        if (-not (Test-Path $file)) { return $false }
+        (Get-Content $file -Raw | ConvertFrom-Json).next_after -ge $expected.events
+    } 'all seeded room events delivered through the production bridge' 30
 }
 try {
     foreach ($name in @('APPDATA','LOCALAPPDATA','USERPROFILE','HOME','MULTIPROMPT_NO_LOGIN','ZIGSHELL_DEBUG','IGSH_246','MP_ROOMS_FIXTURE','MP_VERIFY_PYTHON','MP_VERIFY_BOUNDARY','NODE_EXTRA_CA_CERTS')) { $original[$name]=[Environment]::GetEnvironmentVariable($name,'Process') }
@@ -113,7 +129,7 @@ try {
     Wait-Until { $process.Refresh(); $script:window=$process.MainWindowHandle; $script:window -ne [IntPtr]::Zero -and $null -ne (Read-Inbox) } 'owned desktop and published state' 90
     Wait-Until { (Read-SharedText "$settings/debug.log") -match 'account-sync: applied' } 'account layout applied' 90
     [void][VerifyNative]::ShowWindow($script:window,9)
-    [void][VerifyNative]::MoveWindow($script:window,10,10,1200,850,$true)
+    [void][VerifyNative]::MoveWindow($script:window,10,10,1000,650,$true)
     [VerifyNative]::BringToForeground($script:window)
     Doctor
     Snapshot 'before'
@@ -140,6 +156,12 @@ try {
         Press @(0x11,0x0D) 'Ctrl+Enter: create room with the selected agents'
         Wait-Until { $script:createdRoom=@(Read-RoomStore | Where-Object name -eq 'Rooms audit created') | Select-Object -First 1; $null -ne $script:createdRoom } 'created room persisted' 15
         if (@($script:createdRoom.members).Count -ne 2) { throw 'Room was not created with exactly the two selected agents' }
+        Wait-Until {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle((Room-Window))
+            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+            $visible = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen })
+            $visible.Count -eq 1 -and (Focused-RoomEdit) -ne [IntPtr]::Zero
+        } 'the room composer is ready after creation'
     }
     $roomBlocked = if ($null -eq $script:createdRoom) { 'Blocked by room creation or agent selection; no room was persisted' } else { '' }
     Audit-Step 'send-message' {
@@ -185,7 +207,7 @@ try {
     $result.visualReviewRequired=@('visible-reply-order-review.png','long-seeded-room.png','second-seeded-room.png','long-room-return.png')
     & python (Join-Path $PSScriptRoot 'rooms-fixture.py') inspect | Set-Content -Encoding UTF8 "$Evidence/room-store-after.json"
     if ($LASTEXITCODE -ne 0) { throw 'Rooms final store evidence could not be retained' }
-} catch { $result.error=$_.Exception.Message; if ($script:window -ne [IntPtr]::Zero) { try { Snapshot 'failure' } catch {} } }
+} catch { $result.status='failed'; $result.error=$_.Exception.Message; if ($script:window -ne [IntPtr]::Zero) { try { Snapshot 'failure' } catch {} } }
 finally {
     try {
         if ($null -ne $process -and -not $process.HasExited) { [void]$process.CloseMainWindow(); [void]$process.WaitForExit(10000) }

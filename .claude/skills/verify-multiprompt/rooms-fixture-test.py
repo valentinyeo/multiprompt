@@ -49,6 +49,12 @@ class RoomsFixtureTest(unittest.TestCase):
                     return reply['result']
 
                 self.assertTrue(call(dict(op='capabilities', room_messages=1))['live_send'])
+                historical = manifest['rooms'][0]['id']
+                for after in (0, 200, 400, 600, 800, 1000):
+                    call(dict(op='events', host_uuid=host, room_id=historical, after=after, limit=200))
+                self.assertEqual(call(dict(op='snapshot', host_uuid=host, room_id=historical))['seq'], 1201)
+                observed = json.loads((root / (historical + '.observed.json')).read_text())
+                self.assertEqual(observed['next_after'], 1200)
                 created = call(dict(op='create', host_uuid=host, command_id=str(uuid.uuid4()), name='Created through bridge', members=members))
                 room = created['event']['room_id']
                 post = dict(op='post_human', host_uuid=host, command_id=str(uuid.uuid4()), room_id=room, expected_revision=1, text='New user message', recipients=[])

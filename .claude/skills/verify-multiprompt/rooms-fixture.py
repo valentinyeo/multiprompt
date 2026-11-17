@@ -48,7 +48,7 @@ def seed():
     for index in range(12):
         created = store.execute(dict(op='create', command_id=str(uuid.uuid4()), name=f'Rooms history {index:02d}', members=members[:2]))
         room = created['event']['room_id']
-        rooms.append(dict(id=room, name=f'Rooms history {index:02d}'))
+        rooms.append(dict(id=room, name=f'Rooms history {index:02d}', events=1201 if index == 0 else 25))
         active = store.members(room)
         for turn in range(400 if index == 0 else 8):
             body = f'Synthetic room {index:02d} turn {turn:04d}. ' + ('Generated planning detail. ' * (80 if turn % 7 == 0 else 8))
@@ -57,6 +57,7 @@ def seed():
             posted = store.execute(dict(op='post_human', command_id=str(uuid.uuid4()), room_id=room, expected_revision=1, text=body, recipients=[]))
             for member in reversed(active):
                 store.execute(dict(op='agent_reply', command_id=str(uuid.uuid4()), room_id=room, parent_event_id=posted['event']['id'], member_id=member['id'], response_id=str(uuid.uuid4()), text=f'{member["display_name"]} reply to {turn:04d}. ' + body))
+    store.db.execute("INSERT INTO reply_progress SELECT id,3,id,'[]',1,0 FROM deliveries")
     manifest = dict(rooms=rooms, candidateCount=32, events=store.db.execute('SELECT COUNT(*) FROM events').fetchone()[0], largestRoomEvents=1201, synthetic=True, boundary='Production RoomStore and RoomBridge methods; Windows SQLite opener replaces POSIX ownership checks. Synthetic account and SSH/AI runtime. Not real SSH, authentication, paid agents, or POSIX storage-security proof.')
     (ROOT / 'manifest.json').write_text(json.dumps(manifest))
     tabs = [dict(kind='tmux', name=m['display_name'], tmux_session=m['provider_sid'], tmux_host=0, workspace='Work') for m in members]
@@ -122,6 +123,18 @@ def ssh():
         raise ValueError('Unexpected runtime operation ' + op)
 
     bridge.runtime_request = runtime
+    execute = bridge.RoomBridge.execute
+
+    def observed_execute(self, request):
+        result = execute(self, request)
+        if request.get('op') == 'events':
+            target = ROOT / (request['room_id'] + '.observed.json')
+            temporary = target.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+            temporary.write_text(json.dumps(dict(next_after=result['next_after'])))
+            temporary.replace(target)
+        return result
+
+    bridge.RoomBridge.execute = observed_execute
     bridge.serve(str(ROOT))
 
 
