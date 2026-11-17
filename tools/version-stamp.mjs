@@ -307,6 +307,7 @@ function check(baseRev, headRev) {
 
 async function release() {
   const root = git(['rev-parse', '--show-toplevel']).trim();
+<<<<<<< HEAD
   git(['fetch', 'origin', 'master'], root);
   const sha = git(['rev-parse', 'origin/master'], root).trim();
   const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: 45 * 60 * 1000, stdio: ['ignore', 'pipe', 'inherit'] }).trim();
@@ -321,6 +322,97 @@ async function release() {
     const receipt = JSON.parse(fs.readFileSync(path.join(directory, 'release-journeys.json'), 'utf8'));
     if (receipt.status !== 'passed' || receipt.sha !== sha || receipt.run !== run.url || !Array.isArray(receipt.features) || receipt.features.some(feature => !feature.video?.startsWith(`${run.url}/artifacts/`))) {
       throw new Error('Automatic release lacks passing candidate journeys with video');
+=======
+  const deadline = Date.now() + 45 * 60 * 1000;
+  const remaining = () => {
+    const left = deadline - Date.now();
+    if (left <= 0) throw new Error('Release timed out after 45 minutes');
+    return left;
+  };
+  const runGit = (args, cwd = root) => git(args, cwd, remaining());
+  const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+  let pollMs = Number(process.env.VERSION_STAMP_POLL_MS || 60000);
+  const maxPollMs = Number(process.env.VERSION_STAMP_MAX_POLL_MS || 300000);
+  if (!Number.isFinite(pollMs) || pollMs <= 0 || !Number.isFinite(maxPollMs) || maxPollMs < pollMs) throw new Error('VERSION_STAMP_POLL_MS must be positive and VERSION_STAMP_MAX_POLL_MS must be at least VERSION_STAMP_POLL_MS');
+  const wait = async () => {
+    await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, remaining())));
+    pollMs = Math.min(pollMs * 2, maxPollMs);
+    remaining();
+  };
+  while (true) {
+    runGit(['fetch', 'origin', 'master']);
+    const open = JSON.parse(gh(['pr', 'list', '--state', 'open', '--search', 'head:release/', '--json', 'number,url']));
+    if (open.length) {
+      const pr = open[0];
+      console.log(pr.url);
+      let greenNames;
+      let mergeRequested = false;
+      while (true) {
+        const { state, statusCheckRollup } = JSON.parse(gh(['pr', 'view', String(pr.number), '--json', 'state,statusCheckRollup']));
+        if (state === 'MERGED') break;
+        if (state === 'CLOSED') throw new Error(`Release PR closed without merging: ${pr.url}`);
+        const failed = (statusCheckRollup || []).filter(c => ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ERROR'].includes(c.conclusion || c.state));
+        if (failed.length) throw new Error(`Release PR check failed (${failed.map(c => c.name || c.context).join(', ')}): ${pr.url}`);
+        const checks = statusCheckRollup || [];
+        const names = state === 'OPEN' && checks.length && checks.every(c => c.__typename === 'CheckRun' ? c.status === 'COMPLETED' && ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(c.conclusion) : c.__typename === 'StatusContext' && c.state === 'SUCCESS') ? JSON.stringify([...new Set(checks.map(c => c.name || c.context))].sort()) : null;
+        if (names && names === greenNames && !mergeRequested) {
+          gh(['pr', 'merge', String(pr.number), '--squash', '--delete-branch']);
+          mergeRequested = true;
+        }
+        greenNames = names;
+        await wait();
+      }
+      continue;
+    }
+    const base = readTree('origin/master', root, remaining);
+    const stamp = stampTree(base);
+    if (!stamp) {
+      console.log(`NOTHING_TO_STAMP ${base[mainPath].match(versionLine)?.slice(1).join('.')}`);
+      return;
+    }
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'version-stamp-'));
+    const tree = path.join(temp, 'tree');
+    const branch = `release/${stamp.version}`;
+    try {
+      runGit(['worktree', 'add', '--detach', tree, 'origin/master']);
+      for (const file of [mainPath, changelogPath]) fs.writeFileSync(path.join(tree, file), stamp.files[file]);
+      runGit(['rm', '--', ...stamp.removed], tree);
+      runGit(['add', '--', mainPath, changelogPath], tree);
+      const title = `v${stamp.version}: release ${stamp.tickets.join(', ')}`;
+      runGit(['commit', '-m', title], tree);
+      try {
+        runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], tree);
+      } catch (error) {
+        const left = /non-fast-forward|fetch first|already exists|stale info/.test(String(error.stderr)) ? runGit(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]).trim().split(/\s+/)[0] : '';
+        if (!left) throw error;
+        const attempts = JSON.parse(gh(['pr', 'list', '--state', 'all', '--head', branch, '--json', 'number,state,headRefOid']));
+        if (!attempts.length || !attempts.every(attempt => attempt.state === 'CLOSED') || !attempts.some(attempt => attempt.headRefOid === left)) {
+          await wait();
+          continue;
+        }
+        try {
+          runGit(['push', `--force-with-lease=refs/heads/${branch}:${left}`, 'origin', `HEAD:refs/heads/${branch}`], tree);
+        } catch (forceError) {
+          if (!/stale info|rejected|non-fast-forward|fetch first/.test(String(forceError.stderr))) throw forceError;
+          await wait();
+          continue;
+        }
+      }
+      const url = gh(['pr', 'create', '--base', 'master', '--head', branch, '--title', title, '--body', 'Stamped by tools/version-stamp.mjs from changelog.d.']);
+      console.log(url);
+      try {
+        execFileSync('gh', ['pr', 'merge', url, '--squash', '--auto', '--delete-branch'], { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (error) {
+        if (error.stderr) process.stderr.write(error.stderr);
+        if (!/auto.?merge is not allowed|not allowed for this repository|enablePullRequestAutoMerge/i.test(`${error.stderr || ''}\n${error.message}`)) throw error;
+      }
+    } finally {
+      try {
+        if (fs.existsSync(tree)) git(['worktree', 'remove', '--force', tree], root, 60000);
+      } finally {
+        fs.rmSync(temp, { recursive: true, force: true });
+      }
+>>>>>>> origin/master
     }
     console.log(`RELEASE_VERIFIED ${sha} ${run.url}`);
   } finally {

@@ -81,7 +81,8 @@ test('one completed PR check reads only its PR, with one snapshot and no writes'
 });
 
 test('automerge remains disabled without automatic triggers or a shared queue', () => {
-  assert.doesNotMatch(workflow, /schedule:|cron:|concurrency:/);
+  assert.doesNotMatch(workflow, /schedule:|cron:/);
+  assert.match(workflow, /concurrency:[\s\S]*cancel-in-progress: true/);
   assert.match(workflow, /^  workflow_dispatch:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request|workflow_run):/m);
   assert.match(workflow, /^  automerge:\n    if: \$\{\{ false \}\}/m);

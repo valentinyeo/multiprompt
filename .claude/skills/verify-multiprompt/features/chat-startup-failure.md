@@ -1,5 +1,7 @@
 # Chat startup failure
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-startup-failure.ps1
+
 ## Sub-features
 
 Show one plain startup failure after the host stand-in stops, with no provider transcript.

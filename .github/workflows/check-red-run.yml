@@ -29,6 +29,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: check-red-run-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   journey:
     if: inputs.feature != ''
@@ -62,8 +66,6 @@ jobs:
           fi
           echo "ZIG=$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - name: Install video validation tools
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
       - name: Test admission controls
         run: node --test tools/check-red-run.test.mjs
       - name: Require changed tests to fail on merge-base source

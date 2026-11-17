@@ -1,5 +1,7 @@
 # App icon
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-app-icon.ps1, tools/verify-app-icon/drive.ps1
+
 ## Sub-features
 
 The Windows app icon is the approved white robot head on a dark tile. The same icon shows on the taskbar button, in the window's small and large icon slots, and as the icon of the executable file. The 16 pixel frame still reads as a robot: a bright head, a dark visor and two light eyes.

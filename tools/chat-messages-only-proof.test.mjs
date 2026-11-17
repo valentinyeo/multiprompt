@@ -46,7 +46,7 @@ test('messages-only verification drives the real transcript and retains a requir
   const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
   const workflow = read('.github/workflows/verify.yml');
   const driver = read('tools/verify-chat-delivery/drive.ps1');
-  assert.match(workflow, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(workflow, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   const { discoverFeatures } = await import('./verify-features.cjs');
   assert.ok(discoverFeatures().full.includes('chat-messages-only'));
   assert.match(workflow, /tools\/chat-messages-only-proof.test.mjs/);
