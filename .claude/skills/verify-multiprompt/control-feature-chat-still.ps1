@@ -1,4 +1,4 @@
-Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/chat-still/observer.cs')
+Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/chat-still/observer.cs') -ReferencedAssemblies System,System.Core,System.Drawing
 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $case = @{ name = 'chat-still'; status = 'failed'; detail = 'Chat stillness observation did not complete' }
 $result.checks += $case
@@ -17,7 +17,7 @@ try {
     Snapshot 'before'
     $target = (Read-Session).tabs[1]
     $observer = New-Object ChatStillObserver
-    $observer.Start($process.Id, $script:window, $log, (Get-Item $log).Length, [string]$target.shell_id, $remoteState)
+    $observer.Start($process.Id, $script:window, $log, (Get-Item $log).Length, [string]$target.shell_id, $remoteState, $Evidence)
     Press @(0x11, 0x32) 'Ctrl+2: switch to a long chat; observe idle, live streaming and reconciliation without scrolling'
     $observation = $observer.Finish()
     Save-Json $observation 'chat-still.json'

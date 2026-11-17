@@ -45,6 +45,8 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
+      - name: Check the fixed gate and screen-pixel oracle wiring
+        run: node --test tools/chat-still.test.js
       - name: Install the replay compiler
         run: |
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
@@ -80,15 +82,14 @@ jobs:
           ref: bf0c7cd80abdbf7fe47b634978a7d1b4071f71a7
           path: pstack
           persist-credentials: false
-      - name: Register the pinned pstack adapter
-        run: |
-          mkdir -p pstack/pstack/.claude-plugin
-          cp pstack/pstack/plugin.json pstack/pstack/.claude-plugin/plugin.json
       - name: Run pstack no-comments
+        id: comments
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
+          plugin_marketplaces: ${{ github.workspace }}/pstack
+          plugins: pstack@cursor-plugins
           prompt: |
             Follow pstack/pstack/skills/no-comments/SKILL.md in full, including spawning Comment Sicko.
             Scope is the diff origin/master...HEAD, not the checked-out pstack plugin.
@@ -97,6 +98,42 @@ jobs:
             No findings is valid. The author will apply accepted findings before the independent pstack-verifier.
           claude_args: |
             --model sonnet
-            --plugin-dir pstack/pstack
             --max-turns 25
             --allowedTools "Read,Glob,Grep,Task,Agent,Skill,Bash(git diff:*),Bash(git show:*),Bash(git log:*)"
+            --json-schema '{"type":"object","properties":{"deletion_count":{"type":"integer"},"restored_comments":{"type":"integer"},"must_kill":{"type":"array","items":{"type":"string"}},"report":{"type":"string"}},"required":["deletion_count","restored_comments","must_kill","report"]}'
+      - name: Retain the review and prove Comment Sicko ran
+        env:
+          REVIEW: ${{ steps.comments.outputs.structured_output }}
+          EXECUTION: ${{ steps.comments.outputs.execution_file }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, pathlib
+          text = pathlib.Path(os.environ['EXECUTION']).read_text()
+          try:
+              execution = json.loads(text)
+          except json.JSONDecodeError:
+              execution = [json.loads(line) for line in text.splitlines() if line.strip()]
+          calls = []
+          def walk(value):
+              if isinstance(value, dict):
+                  if value.get('type') == 'tool_use' and value.get('name') in ('Agent', 'Task'):
+                      role = value.get('input', {}).get('subagent_type', '')
+                      if role.split(':')[-1] == 'comment-sicko':
+                          calls.append(role)
+                  for child in value.values():
+                      walk(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      walk(child)
+          walk(execution)
+          assert calls, 'pstack no-comments did not spawn Comment Sicko'
+          review = json.loads(os.environ['REVIEW'])
+          review['agents'] = calls
+          pathlib.Path('comment-review.json').write_text(json.dumps(review, indent=2))
+          print(json.dumps(review, indent=2))
+          PYTHON
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-still-comment-review
+          path: comment-review.json
+          if-no-files-found: error

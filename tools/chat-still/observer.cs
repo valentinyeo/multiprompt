@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Security.Cryptography;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -24,7 +27,7 @@ public sealed class ChatStillObserver {
     Thread thread;
     string error, key, latest;
     int[] baseline;
-    double first = -1, streaming = -1;
+    double first = -1, firstPixel = -1, streaming = -1;
     long streamStartedUtc;
     long position;
     string carry = "";
@@ -32,6 +35,12 @@ public sealed class ChatStillObserver {
     int dirty, width, layout, paints, height;
     readonly HashSet<int> heights = new HashSet<int>();
     volatile bool stop;
+    string evidence;
+    Bitmap pixelImage, firstPixels;
+    Graphics pixelGraphics;
+    byte[] pixelBaseline, pixelCurrent;
+    int[] pixelRect;
+    int pixelFrames;
     public static int[] ParseRect(string value) { return Array.ConvertAll(value.Split(','), Int32.Parse); }
     public static bool Same(int[] a, int[] b) {
         if (a == null || b == null || a.Length != 4 || b.Length != 4) return false;
@@ -41,6 +50,44 @@ public sealed class ChatStillObserver {
     public static void AssertFrame(int[] baseline, int[] current, int dirty, int width, int layout) {
         if (dirty != 0 || width != layout) throw new InvalidOperationException("Half-laid-out transcript painted");
         if (!Same(baseline, current)) throw new InvalidOperationException("Newest visible message moved after its first frame");
+    }
+    public static void AssertPixels(byte[] baseline, byte[] current) {
+        if (baseline.Length != current.Length) throw new InvalidOperationException("Newest message pixel area changed");
+        for (int i = 0; i < baseline.Length; i++)
+            if (baseline[i] != current[i]) throw new InvalidOperationException("Newest message pixels changed after the first frame");
+    }
+    void CapturePixels(int[] screen, Rect client, Point origin, Dictionary<string, object> sample) {
+        var clip = new int[] { Math.Max(screen[0], origin.X), Math.Max(screen[1], origin.Y), Math.Min(screen[2], origin.X + client.Right), Math.Min(screen[3], origin.Y + client.Bottom) };
+        if (clip[2] <= clip[0] || clip[3] <= clip[1]) throw new InvalidOperationException("Newest message has no on-screen pixel area");
+        if (pixelImage == null) {
+            pixelRect = clip;
+            pixelImage = new Bitmap(clip[2] - clip[0], clip[3] - clip[1], PixelFormat.Format32bppRgb);
+            pixelGraphics = Graphics.FromImage(pixelImage);
+            pixelCurrent = new byte[pixelImage.Width * pixelImage.Height * 4];
+        }
+        if (!Same(pixelRect, clip)) throw new InvalidOperationException("Newest message on-screen pixel crop moved");
+        pixelGraphics.CopyFromScreen(clip[0], clip[1], 0, 0, pixelImage.Size, CopyPixelOperation.SourceCopy);
+        var data = pixelImage.LockBits(new Rectangle(0, 0, pixelImage.Width, pixelImage.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppRgb);
+        try { Marshal.Copy(data.Scan0, pixelCurrent, 0, pixelCurrent.Length); }
+        finally { pixelImage.UnlockBits(data); }
+        for (int alpha = 3; alpha < pixelCurrent.Length; alpha += 4) pixelCurrent[alpha] = 0;
+        sample["pixel_rect"] = clip;
+        using (var digest = SHA256.Create()) sample["pixels_sha256"] = BitConverter.ToString(digest.ComputeHash(pixelCurrent)).Replace("-", "").ToLowerInvariant();
+        pixelFrames++;
+        if (pixelBaseline == null) {
+            firstPixel = clock.Elapsed.TotalMilliseconds;
+            firstPixels = (Bitmap)pixelImage.Clone();
+            bool detail = false;
+            for (int i = 4; i < pixelCurrent.Length; i += 4)
+                if (pixelCurrent[i] != pixelCurrent[0] || pixelCurrent[i + 1] != pixelCurrent[1] || pixelCurrent[i + 2] != pixelCurrent[2]) { detail = true; break; }
+            if (!detail) throw new InvalidOperationException("Newest message first-frame pixels have no visible detail");
+            pixelBaseline = (byte[])pixelCurrent.Clone();
+        }
+        try { AssertPixels(pixelBaseline, pixelCurrent); }
+        catch {
+            pixelImage.Save(Path.Combine(evidence, "chat-still-changed-message.png"), ImageFormat.Png);
+            throw;
+        }
     }
     IntPtr Transcript(int pid, IntPtr owner) {
         uint actual;
@@ -66,13 +113,15 @@ public sealed class ChatStillObserver {
         var origin = new Point();
         if (!ClientToScreen(view, ref origin)) throw new InvalidOperationException("Transcript screen origin unavailable");
         var screen = new int[] { rect[0] + origin.X, rect[1] + origin.Y, rect[2] + origin.X, rect[3] + origin.Y };
-        samples.Add(new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } });
+        var sample = new Dictionary<string, object> { { "ms", clock.Elapsed.TotalMilliseconds }, { "utc_ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "height", height }, { "kind", kind }, { "phase", streaming < 0 ? "idle" : "streaming" }, { "message", key }, { "rect", screen }, { "dirty", dirty }, { "width", width }, { "layout", layout } };
+        samples.Add(sample);
         if (baseline == null) baseline = screen;
         AssertFrame(baseline, screen, dirty, width, layout);
         Rect client;
         if (!GetClientRect(view, out client)) throw new InvalidOperationException("Transcript client rectangle unavailable");
         AssertFrame(baseline, screen, dirty, client.Right - client.Left, layout);
         if (rect[3] <= 0 || rect[1] >= client.Bottom) throw new InvalidOperationException("Newest initially visible message is no longer on screen");
+        if (kind == "display-frame") CapturePixels(screen, client, origin, sample);
     }
     void Read(string log, string shell, IntPtr view) {
         using (var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
@@ -111,18 +160,19 @@ public sealed class ChatStillObserver {
             }
         }
     }
-    public void Start(int pid, IntPtr owner, string log, long offset, string shell, string state) {
+    public void Start(int pid, IntPtr owner, string log, long offset, string shell, string state, string output) {
         if (thread != null) throw new InvalidOperationException("Observer already started");
+        evidence = output;
         thread = new Thread(delegate() {
             try {
                 IntPtr view = Transcript(pid, owner);
                 position = offset;
                 clock.Start();
                 while (!stop && clock.Elapsed.TotalMilliseconds < 30000 && (streaming < 0 || clock.Elapsed.TotalMilliseconds - streaming < 4200 || building)) {
-                    if (DwmFlush() != 0) throw new InvalidOperationException("DWM frame sampling unavailable");
                     Read(log, shell, view);
+                    if (DwmFlush() != 0) throw new InvalidOperationException("DWM frame sampling unavailable");
                     Sample(view, "display-frame");
-                    if (first >= 0 && streaming < 0 && clock.Elapsed.TotalMilliseconds - first >= 2100 && File.Exists(Path.Combine(state, "still-subscribed"))) {
+                    if (firstPixel >= 0 && streaming < 0 && clock.Elapsed.TotalMilliseconds - firstPixel >= 2100 && File.Exists(Path.Combine(state, "still-subscribed"))) {
                         streaming = clock.Elapsed.TotalMilliseconds;
                         streamStartedUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                         File.WriteAllText(Path.Combine(state, "still-stream-start"), "start");
@@ -137,12 +187,21 @@ public sealed class ChatStillObserver {
                 }
                 if (building) throw new InvalidOperationException("Incomplete paint geometry at observation end");
             } catch (Exception failure) { error = failure.Message; }
+            finally {
+                try {
+                    if (firstPixels != null) firstPixels.Save(Path.Combine(evidence, "chat-still-first-message.png"), ImageFormat.Png);
+                    if (pixelImage != null) pixelImage.Save(Path.Combine(evidence, "chat-still-last-message.png"), ImageFormat.Png);
+                } catch (Exception failure) { error = (error == null ? "" : error + "; ") + failure.Message; }
+                if (pixelGraphics != null) pixelGraphics.Dispose();
+                if (pixelImage != null) pixelImage.Dispose();
+                if (firstPixels != null) firstPixels.Dispose();
+            }
         });
         thread.IsBackground = true;
         thread.Start();
     }
     public Dictionary<string, object> Finish() {
         if (thread == null || !thread.Join(35000)) { stop = true; throw new InvalidOperationException("Observer did not finish"); }
-        return new Dictionary<string, object> { { "status", error == null ? "passed" : "failed" }, { "error", error }, { "message", key }, { "baseline", baseline }, { "samples", samples }, { "streaming_paints", paints }, { "distinct_streaming_heights", heights.Count }, { "elapsed_ms", clock.Elapsed.TotalMilliseconds }, { "idle_ms", first < 0 || streaming < 0 ? 0 : streaming - first }, { "streaming_ms", streaming < 0 ? 0 : clock.Elapsed.TotalMilliseconds - streaming }, { "stream_started_utc_ms", streamStartedUtc } };
+        return new Dictionary<string, object> { { "status", error == null ? "passed" : "failed" }, { "error", error }, { "message", key }, { "baseline", baseline }, { "samples", samples }, { "pixel_frames", pixelFrames }, { "streaming_paints", paints }, { "distinct_streaming_heights", heights.Count }, { "elapsed_ms", clock.Elapsed.TotalMilliseconds }, { "idle_ms", firstPixel < 0 || streaming < 0 ? 0 : streaming - firstPixel }, { "streaming_ms", streaming < 0 ? 0 : clock.Elapsed.TotalMilliseconds - streaming }, { "stream_started_utc_ms", streamStartedUtc } };
     }
 }
