@@ -79,7 +79,6 @@ test "owner catalog routing" {
     app_state.shells[0].claude_cwd_len = cwd.len;
     const index = chatAcCatalog(.slash).?;
     const slot = &app_state.g_chat_ac_slots[index];
-    try std.testing.expectEqual(@as(u8, 2), slot.host);
     slot.pending = 7;
     const req = ChatAcRequest{ .slot = index, .id = 7, .host = slot.host, .agent = slot.agent, .mode = slot.mode, .session = slot.session, .cwd = slot.cwd };
     chatAcFetchThread(req);
@@ -94,15 +93,22 @@ test "owner catalog routing" {
     slot.pending = 0;
     app_state.shells[0].tmux_host = 1;
     try std.testing.expectEqual(@as(u8, 1), app_state.g_chat_ac_slots[chatAcCatalog(.slash).?].host);
-    app_state.g_chat_ac_slots = .{.{}, .{}};
-    app_state.shells[0].tmux_host = 0;
+    var own_req = req;
+    own_req.host = 1;
+    chatAcFetchThread(own_req);
+    try std.testing.expectEqual(@as(u8, 1), received_host);
+    own_req.host = 0;
+    own_req.cwd = @splat(0);
+    const other = "/home/inne-other/projects/sample";
+    @memcpy(own_req.cwd[0..other.len], other);
+    chatAcFetchThread(own_req);
+    try std.testing.expectEqual(@as(u8, 0), received_host);
+    own_req.host = 2;
+    own_req.cwd = @splat(0);
     const configured = "~/projects/sample";
-    @memcpy(app_state.shells[0].claude_cwd[0..configured.len], configured);
-    app_state.shells[0].claude_cwd_len = configured.len;
-    known_cwd = cwd;
-    const resolved = &app_state.g_chat_ac_slots[chatAcCatalog(.slash).?];
-    try std.testing.expectEqual(@as(u8, 2), resolved.host);
-    try std.testing.expectEqualStrings(cwd, std.mem.sliceTo(&resolved.cwd, 0));
+    @memcpy(own_req.cwd[0..configured.len], configured);
+    chatAcFetchThread(own_req);
+    try std.testing.expectEqual(@as(u8, 2), received_host);
 }
 `;
     fs.writeFileSync(path.join(dir, 'owner.zig'), program);
