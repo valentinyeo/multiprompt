@@ -46,7 +46,7 @@ const rows = [
   ['Chat View: Restart every idle live chat', 'Restart every idle chat'],
   ['Chat View: Restart this chat on the newest version', 'Restart this chat on the newest version'],
   ['Chat View: Resync chat', 'Resync chat'],
-  ['Chat View: Scroll to newest message', 'Scroll to newest message'],
+  ['Chat View: Scroll to newest message', 'Jump to newest message'],
   ['Chat View: Send Queued Messages Now', 'Send queued messages now'],
   ['Chat View: Stop the agent', 'Stop agent'],
   ['Chat View: Toggle Dictation', 'Dictate'],

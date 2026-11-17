@@ -242,7 +242,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K / right-click tab → Give each face its own name / Bot color | Remote faces, colors and pictures sync. |
 | Ctrl+K -&gt; Workspace color | Choose a workspace default color or Auto. Manual bot colors stay unchanged. |
 | Ctrl+F in Chat View | Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
-| End / Ctrl+K "Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
+| Shift+G twice / End / Ctrl+K "Jump to newest message" | Chat View: jump to the newest message; capital GG works only from an empty message box with two Shift+G presses within 600 ms and leaves the box empty; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |
 | Alt+C | Switch terminal tabs between the shell and the chat view; off for live chats, which have no terminal; also the Ctrl+K row and the tab menu for terminal tabs |
 | Ctrl+K -&gt; Switch to chat view / Switch to shell | Show a terminal tab as the chat view or the shell; hidden for live chats; same as Alt+C and the right-click tab menu |
