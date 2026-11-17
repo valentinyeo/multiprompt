@@ -129,6 +129,16 @@ test('the measurement probe belongs only to the verification build', () => {
   assert.doesNotMatch(read('tools/chat-still/paint.zig'), /app_state\.\w+\s*(?:=(?!=)|[+\-*\/]=)/, 'the probe must not mutate product state');
   const workflow = read('.github/workflows/verify.yml');
   assert.match(workflow, /matrix\.profile == 'chat-still'\n        run: python \$\{\{ inputs\.app_revision && 'probe-source\/' \|\| '' \}\}tools\/chat-still\/instrument\.py \./);
-  assert.match(workflow, /matrix\.profile == 'chat-still' && inputs\.app_revision != ''[\s\S]*?ref: \$\{\{ inputs\.revision \|\| github\.sha \}\}\n          path: probe-source/);
+  const checkout = workflow.match(/if: ([^\n]+)\n        with:\n          ref: \$\{\{ inputs\.revision \|\| github\.sha \}\}\n          path: probe-source/);
+  assert.ok(checkout, 'comparison instrumentation comes from the head harness revision');
+  for (const profile of ['normal', 'chat-still', 'chat-position-replay']) {
+    for (const revision of ['', 'base-sha']) {
+      for (const tag of ['', 'v1.0.0']) {
+        const context = { matrix: { profile }, inputs: { app_revision: revision, tag } };
+        const enabled = require('node:vm').runInNewContext(checkout[1], context);
+        assert.equal(enabled, profile !== 'normal' && revision !== '' && tag === '', `${profile}/${revision}/${tag}`);
+      }
+    }
+  }
   assert.match(workflow, /evidence\/chat-still-instrumentation\.json/);
 });
