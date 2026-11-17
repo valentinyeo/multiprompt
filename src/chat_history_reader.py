@@ -4624,7 +4624,7 @@ def host_set_mode(provider, sid, session, mode):
 def host_interrupt(provider, sid, session):
     if not host_control_request(session, dict(subtype="interrupt", cancel_queued=True)):
         return dict(status="error", reason="stdin_write_failed")
-    session["interrupted"] = True
+    session["interrupted"] = session["turn"] is not None
     inflight = session.get("inflight")
     host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
     return dict(status="ok")
@@ -4800,6 +4800,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         return host_refuse("no_chat")
     if provider != "claude" and not session.get("ready"):
         return dict(status="busy", reason="agent_starting")
+    if provider == "claude" and (session["turn"] is not None or session["sends"] or session["parked"]):
+        return dict(status="busy", reason="chat_busy")
     if provider == "hax" and (session["turn"] is not None or session["sends"]):
         return dict(status="busy", reason="hax_run_active")
     if provider == "codex" and not isinstance(session.get("native_turn"), str) and "turn" in session["rpc"].values():
@@ -6843,7 +6845,7 @@ def message_worker(tmux, provider, sid):
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
                         held = pending is not None and pending[0] in host_held(provider, sid)
-                        if pending != head or held:
+                        if pending != head or held or host_turn_busy(provider, sid):
                             head = pending
                             stalled_at = time.monotonic()
                         message_poll(tmux, provider, sid)
@@ -8124,7 +8126,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 129
+RUNTIME_GENERATION = 130
 
 if __name__ == '__main__':
     import base64 as _base64
