@@ -27,7 +27,8 @@ test('blocked maintenance is an honest outcome but incomplete coverage cannot be
 });
 
 test('corrections stay inside the verification skill', () => {
-  assert.doesNotThrow(() => validateChanges([feature, '.claude/skills/verify-multiprompt/drive.ps1']));
+  assert.doesNotThrow(() => validateChanges([feature, '.claude/skills/verify-multiprompt/SKILL.md']));
+  assert.throws(() => validateChanges(['.claude/skills/verify-multiprompt/drive.ps1']), /master-only evidence cannot prove them/);
   for (const file of ['src/main.zig', '.github/workflows/test.yml', '.claude/skills/verify-multiprompt/../../../src/main.zig', 'CLAUDE.md']) assert.throws(() => validateChanges([feature, file]), /only change its own verification skill/);
 });
 

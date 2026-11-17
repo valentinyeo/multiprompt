@@ -22,6 +22,7 @@ export function validateAudit(audit, features, repo) {
 
 export function validateChanges(files) {
   if (files.some(file => !file.startsWith(skillDirectory) || file.slice(skillDirectory.length).split('/').includes('..'))) throw new Error('Maintenance may only change its own verification skill');
+  if (files.some(file => !file.endsWith('.md'))) throw new Error('Executable corrections need a live run of the changed driver; master-only evidence cannot prove them');
 }
 
 export function main(env = process.env) {
