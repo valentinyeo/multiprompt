@@ -5,9 +5,7 @@ $result.checks += $case
 try {
     Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 5 } 'five long-chat sessions restored'
     Wait-Until { (Get-Content $log -Raw) -match '\[chat-still\] row message=' } 'initial native chat geometry'
-    Focus-Palette 'tab order' 6217
-    Press @(0x28) 'Down: Tab Order Manual'
-    Press @(0x0D) 'Enter: keep the long-chat switch target in manual order'
+    Invoke-JourneyCommand 'Tab order: auto'
     Wait-Until {
         $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
         if (-not (Test-Path $path)) { return $false }
