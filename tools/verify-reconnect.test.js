@@ -63,16 +63,17 @@ for (const section of ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Main
 assert.match(skill, /never runs on the Linux server/);
 assert.match(skill, /\.github\/workflows\/verify-reconnect\.yml/);
 assert.match(skill, /tools\/verify-reconnect\//);
-const baseline = ['browser-pane-stuck.md', 'appearance.md', 'command-palette.md', 'inbox.md', 'session-open.md', 'favorites-groups.md', 'sessions.md', 'workspaces.md'];
+const baseline = ['browser-pane-stuck.md', 'appearance.md', 'command-palette.md', 'inbox.md', 'session-open.md', 'favorites-groups.md', 'sessions.md', 'workspaces.md', 'settings-appearance.md'];
 const reconnect = ['ended-remote-session.md', 'saved-remote-workspace.md', 'ssh-tab-reconnect.md'];
 const features = fs.readdirSync(path.join(root, '.claude/skills/verify-multiprompt/features')).filter(f => f.endsWith('.md') && f !== 'README.md');
 for (const file of [...baseline, ...reconnect]) assert.ok(features.includes(file), `required feature: ${file}`);
 const index = read('.claude/skills/verify-multiprompt/features/README.md');
 for (const file of features) {
   assert.ok(index.includes(`](${file})`), file);
-  assert.deepEqual(read(`.claude/skills/verify-multiprompt/features/${file}`).match(/^## .+$/gm), [
+  const map = read(`.claude/skills/verify-multiprompt/features/${file}`);
+  assert.deepEqual(map.match(/^## .+$/gm), [
     '## Sub-features', '## How to get to it (user POV)',
-    reconnect.includes(file) ? '## Driving it with the Windows reconnect harness' : '## Driving it with control.ps1',
+    reconnect.includes(file) ? '## Driving it with the Windows reconnect harness' : /^Journeys: /m.test(map) ? '## Driving it with drive.ps1' : '## Driving it with control.ps1',
     '## Gotchas',
   ]);
 }

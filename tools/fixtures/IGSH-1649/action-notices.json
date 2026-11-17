@@ -87,7 +87,7 @@
     "chatMessageMenu: showHeaderNoticeAscii(\"Could not copy text; try again\",2500,true)",
     "chatMessageMenu: showHeaderNoticeAscii(\"Could not copy text; try again\",2500,true)",
     "chatMessageMenu: showHeaderNoticeAscii(\"Could not copy text; try again\",2500,true)",
-    "chatReactToMessage: if(!@import(\"chat_send.zig\").sendChatMessage(line))showHeaderNoticeAscii(\"Could not send the reaction; try again\",3500,true)",
+    "chatReactToMessage: showHeaderNoticeAscii(\"Could not send the reaction; try again\",3500,true)",
     "chatReplyLatestAgent: showHeaderNoticeAscii(\"No agent message to reply to\",1800,false)",
     "chatReplyResolve: showHeaderNoticeAscii(\"Original message is not available\",2500,false)",
     "chatSendStartFiles: showHeaderNoticeAscii(\"Could not start sending files\",3000,true)",

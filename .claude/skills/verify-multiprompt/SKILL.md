@@ -11,6 +11,12 @@ Read [features/README.md](features/README.md), then the selected feature file be
 
 Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
 
+## Reusable driver
+
+Read the nine-feature index in [features/README.md](features/README.md). The Windows entry point is `./.claude/skills/verify-multiprompt/drive.ps1 settings-appearance appearance -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/settings-appearance-appearance"`. It invokes the existing Launch/Doctor/Drive/Cleanup control in a child PowerShell and records the actual desktop with FFmpeg. Use a fresh evidence folder outside the disposable profile. The mapped palette equivalent is `drive.ps1 palette command-palette` with the same arguments.
+
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=appearance` or `-f feature=command-palette` to acquire the executable and recorder and invoke the new driver automatically. Inspect `journey.mp4`, `journey.json`, screenshots, Doctor, saved side effects, and zero-process cleanup in artifact `verify-<journey>`. The recorder stops only its owned process. Evidence remains in `evidence/` after profile cleanup and is uploaded even on failure. Existing workflow routes and migration decisions are in [inventory.md](inventory.md). Two existing journeys are promoted here; the remaining legacy routes retain their documented coverage limits. Never treat source review as live coverage.
+
 ## Feature control ownership
 
 - `control.ps1` keeps options, setup, dispatch and cleanup.
@@ -76,6 +82,8 @@ The [Chat View everywhere](features/chat-view-everywhere.md) journey switches al
 The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session, proves immediate composer typing through bounded WM_GETTEXT with UI Automation focus identity, and recovers typing with Alt+Q and Alt+M while Find is open and without a browser pane. The native Edit may appear as a UIA Pane with no text patterns; validate its Edit class and owned root before reading standard WM_GETTEXTLENGTH/WM_GETTEXT messages.
 
 The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictation`, branch build only) drives Ctrl+D, Enter, repeated Ctrl+D and a real mic click. Recorded PCM and offline provider-response replay traverse the production worker/parser/draft delivery; exact native composer text must appear within 1000 ms, while listening-time typing and active/idle microphone pixels are checked independently. This does not verify acoustic recognition or microphone hardware.
+
+The [Jump to newest](features/chat-newest.md) journey (`feature=chat-newest`) verifies Shift+G twice and the matching palette action with exact native draft reads. Its named `result.json` checks are independent of the separate full-history restart/performance journey.
 
 ## PR verifier
 

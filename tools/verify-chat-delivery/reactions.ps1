@@ -28,6 +28,10 @@ $point = Wait-For 'two painted same-prefix replies' {
     $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --locate 2> "$caseDir/oracle-locate-stderr.log"
     if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
 }
+if ($env:CHAT_DOUBLE_CLICK_PROOF -eq '1') {
+    . "$PSScriptRoot/double-click.ps1"
+    return
+}
 $menuStart = (Read-Shared "$settings/debug.log").Length
 Doctor
 $actions.Add(@{case=$plan.name; input='real right-click first same-prefix reply'; x=$point.x; y=$point.y})

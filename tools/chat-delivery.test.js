@@ -1778,7 +1778,7 @@ test "IGSH-975 popup snapshot sends the clicked reply after live blocks change" 
     g_chat_block_count = 1;
     const draft = std.unicode.utf8ToUtf16LeStringLiteral("draft stays here");
     composer_text = draft;
-    chatReactToMessage(reference, snapshot, .like);
+    try std.testing.expect(chatReactToMessage(reference, snapshot, .like));
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
     const sent = chat_reaction.parse(g_chat_outbox.items[0].text).?;
     try std.testing.expectEqual(reference, sent.reference);
