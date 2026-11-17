@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: manage-snippets-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   snippets:
     uses: ./.github/workflows/verify.yml
