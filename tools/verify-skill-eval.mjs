@@ -136,6 +136,7 @@ function codex(config, request) {
     '-c', 'features.shell_tool=false', '-c', 'model_reasoning_effort="medium"',
     '-c', `mcp_servers.workspace.command=${toml(process.execPath)}`,
     '-c', `mcp_servers.workspace.args=${JSON.stringify([script, 'serve', path.join(config.out, 'workspace.json')])}`,
+    '-c', 'mcp_servers.workspace.env_vars=["GITHUB_ACTIONS","RUNNER_OS","RUNNER_TEMP"]',
     '-c', 'mcp_servers.workspace.tool_timeout_sec=660',
     '-c', 'mcp_servers.workspace.default_tools_approval_mode="approve"',
     '--output-schema', schemaFile, '--output-last-message', path.join(config.out, 'answer.txt'), '-'], {
