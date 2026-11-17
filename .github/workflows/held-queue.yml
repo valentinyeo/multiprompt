@@ -25,6 +25,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: held-queue-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cancel:
     runs-on: ubuntu-latest
