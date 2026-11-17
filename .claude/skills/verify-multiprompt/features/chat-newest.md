@@ -1,5 +1,7 @@
 # Jump to the newest chat message
 
+Covers: palette:SEARCH_CHAT_NEWEST_OFFSET, shortcut:palette-actions/shift-g-twice-end-ctrl-k-jump-to-newest-message
+
 ## Sub-features
 
 - Shift+G twice within 600 ms, starting in an empty composer, jumps from older messages to the newest message and leaves the box empty.

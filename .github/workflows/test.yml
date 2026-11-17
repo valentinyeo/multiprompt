@@ -48,6 +48,12 @@ jobs:
         run: node --test tools/check-journey-commands.test.mjs
       - name: Reject raw desktop journey commands
         run: node tools/check-journey-commands.mjs
+      - name: Test source-derived feature journey coverage
+        run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
+      - name: Keep every new feature mapped to a live journey
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: node tools/check-feature-coverage.mjs --base "$BASE"
       - name: Test the timer ratchet
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes

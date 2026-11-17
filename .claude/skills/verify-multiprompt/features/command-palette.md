@@ -1,5 +1,7 @@
 # Command palette
 
+Covers: palette:SEARCH_UI_BIGGER_OFFSET, palette:SEARCH_UI_RESET_OFFSET
+
 Find real actions in Ctrl+K, execute an app-size change and reset it while checking the saved setting.
 
 ## Sub-features
