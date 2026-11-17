@@ -1,7 +1,5 @@
 # Rooms
 
-Journeys: rooms
-
 This is a verification-first audit for SOFT-2581. It records broken and confusing actions for the wireframe and rebuild. A completed audit does not mean Rooms works.
 
 ## Sub-features
@@ -37,7 +35,7 @@ The account fixture reuses `service/journey/server.mjs`, the real account Worker
 
 `rooms-fixture-test.py` exercises create, retry, send, ordered replies, and no duplicate replies through the embedded real bridge. The workflow runs it before desktop launch. These focused fixture tests do not replace the native journey.
 
-## Evidence and interpretation
+### Evidence and interpretation
 
 Artifact `verify-rooms-<app-sha>` contains `build.json` with both harness and master executable revision, `journey.mp4`, `journey.json`, `video.json`, and normal Doctor and cleanup evidence. `rooms-steps.json` records all six actions with start and end UTC timestamps, status, error, and screenshot. `rooms-steps.json` is written after each action, so a later failure does not erase earlier observations.
 
