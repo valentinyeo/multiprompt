@@ -24,14 +24,15 @@ export function checkFrames(frames, pushedMs, sendMs, replyPushedMs, queuedMs) {
     JSON.stringify(shape(frame)) !== JSON.stringify(shape(other)))), 'Queued dots did not animate in place');
 }
 
-function verify(root) {
-  const dir = path.join(root, 'working-live');
+function verifyCase(root, name) {
+  const steady = name === 'steady-live';
+  const dir = path.join(root, name);
   const json = name => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8').replace(/^\uFEFF/, ''));
   const observation = json('observation.json');
   assert.equal(observation.error, null, observation.error || 'driver failed');
   const reply = 'The hosted stand-in reply is visible.';
   assert.ok(observation.copied.includes(reply), 'Live reply missing from copied rendered transcript');
-  assert.ok(observation.copied.includes('Known history message 0.') && observation.copied.includes('Known history message 49.'), 'Seeded server history missing from the rendered transcript');
+  if (steady) assert.ok(observation.copied.includes('Known history message 0.') && observation.copied.includes('Known history message 49.'), 'Seeded server history missing from the rendered transcript');
   const rows = fs.readFileSync(path.join(dir, 'stand-in', 'working-host.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.ok(rows.some(row => row.stage === 'subscribed' && row.provider === 'claude'), 'Missing production subscription');
   const queued = rows.find(row => row.stage === 'before-dispatch');
@@ -69,34 +70,41 @@ function verify(root) {
     }
     frame.replyPixels = count;
   }
-  checkFrames(frames, push.ms, observation.sendMs, replyPush.ms, observation.queuedMs);
-  const trace = fs.readFileSync(path.join(dir, 'debug.log'), 'utf8');
-  const windows = observation.paintWindows;
-  assert.ok(windows, 'Missing idle and streaming paint windows');
-  const idle = positionProof.steadyPosition(trace, windows.idleStart, windows.idleEnd);
-  const streaming = positionProof.steadyPosition(trace, windows.readingStart, windows.readingEnd);
-  fs.writeFileSync(path.join(dir, 'steady-position.json'), JSON.stringify({ idle, streaming }, null, 2) + '\n');
-  assert.equal(idle.status, 'passed', 'Idle chat moved');
-  assert.equal(idle.layouts, 0, 'Idle chat repeatedly laid out unchanged history');
-  assert.ok(idle.paints <= 1, `Idle chat repainted ${idle.paints} times without input`);
-  assert.equal(streaming.status, 'passed', 'Streaming reply moved the message being read');
-  const reading = frames.filter(frame => frame.phase === 'reading');
-  assert.ok(reading.length >= 20, 'Missing multi-second reader screenshots');
-  assert.ok(rows.filter(row => row.stage === 'reading-stream-delta' && row.ms >= reading[0].startWallMs && row.ms <= reading.at(-1).startWallMs).length >= 6, 'Reply did not actually stream during the reading observation');
-  const referenceImage = reading[0].image;
-  let bodyPixels = 0;
-  for (let y = 80; y < referenceImage.height - 110; y++) for (let x = 16; x < referenceImage.width - 24; x++) {
-    const offset = (y * referenceImage.width + x) * 4;
-    if ([0, 1, 2].some(c => Math.abs(referenceImage.pixels[offset + c] - referenceImage.pixels[c]) > 60)) bodyPixels++;
-    for (const frame of reading.slice(1)) {
-      assert.ok([0, 1, 2].every(c => frame.image.pixels[offset + c] === referenceImage.pixels[offset + c]), `Reading surface flickered in ${frame.name}`);
+  if (!steady) checkFrames(frames, push.ms, observation.sendMs, replyPush.ms, observation.queuedMs);
+  if (steady) {
+    const trace = fs.readFileSync(path.join(dir, 'debug.log'), 'utf8');
+    const windows = observation.paintWindows;
+    assert.ok(windows, 'Missing idle and streaming paint windows');
+    const idle = positionProof.steadyPosition(trace, windows.idleStart, windows.idleEnd);
+    const streaming = positionProof.steadyPosition(trace, windows.readingStart, windows.readingEnd);
+    fs.writeFileSync(path.join(dir, 'steady-position.json'), JSON.stringify({ idle, streaming }, null, 2) + '\n');
+    assert.equal(idle.status, 'passed', 'Idle chat moved');
+    assert.equal(idle.layouts, 0, 'Idle chat repeatedly laid out unchanged history');
+    assert.ok(idle.paints <= 1, `Idle chat repainted ${idle.paints} times without input`);
+    assert.equal(streaming.status, 'passed', 'Streaming reply moved the message being read');
+    const reading = frames.filter(frame => frame.phase === 'reading');
+    assert.ok(reading.length >= 20, 'Missing multi-second reader screenshots');
+    assert.ok(rows.filter(row => row.stage === 'reading-stream-delta' && row.ms >= reading[0].startWallMs && row.ms <= reading.at(-1).startWallMs).length >= 6, 'Reply did not actually stream during the reading observation');
+    const referenceImage = reading[0].image;
+    let bodyPixels = 0;
+    for (let y = 80; y < referenceImage.height - 110; y++) for (let x = 16; x < referenceImage.width - 24; x++) {
+      const offset = (y * referenceImage.width + x) * 4;
+      if ([0, 1, 2].some(c => Math.abs(referenceImage.pixels[offset + c] - referenceImage.pixels[c]) > 60)) bodyPixels++;
+      for (const frame of reading.slice(1)) {
+        assert.ok([0, 1, 2].every(c => frame.image.pixels[offset + c] === referenceImage.pixels[offset + c]), `Reading surface flickered in ${frame.name}`);
+      }
     }
+    assert.ok(bodyPixels > 200, 'Steady screenshots must show real message content, not a blank surface');
   }
-  assert.ok(bodyPixels > 200, 'Steady screenshots must show real message content, not a blank surface');
   const cleanup = JSON.parse(fs.readFileSync(path.join(root, 'cleanup.json'), 'utf8').replace(/^\uFEFF/, ''));
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
   assert.equal(cleanup.evidence_preserved, true);
+}
+
+function verify(root) {
+  verifyCase(root, 'working-live');
+  verifyCase(root, 'steady-live');
   return {feature:'chat-working-live', status:'passed', boundary:'Simulated provider and SSH; production composer, message store dispatch, event pages and Windows painter.'};
 }
 
