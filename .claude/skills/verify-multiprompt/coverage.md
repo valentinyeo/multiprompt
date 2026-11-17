@@ -1,5 +1,15 @@
 # Recent changes coverage, 2026-10-16 to 2026-10-23
 
+## Complete feature map
+
+Start with [long chats](features/long-session-chat.md), [real server chats](features/server-chats.md), [/clear](features/chat-clear.md), [Stop](features/chat-stop.md) and [sending](features/chat-message-sending.md). The [feature index](features/README.md) links the full source-action map. [Shortcuts](features/shortcuts.md) maps every SHORTCUT_ROWS entry; the owning files map palette IDs/dynamic families and the [architecture crosswalk](features/sidebar-sessions.md#architecture-feature-crosswalk) maps the design document.
+
+A source-complete map is not a live pass. Each operation names its existing focused journeys and the exact prerequisites for any unreachable full path. Existing ticket rows below retain their historical coverage; do not relabel them covered because a recipe was added. Part A (`w-2567a`, SOFT-2567) supplies real-size seed data; Part B (`w-2567b`, SOFT-2567) supplies real SSH/tmux. Neither is duplicated here. Authenticated accounts, provider CLIs, audio, Computer and missing native input/assertion paths remain separately explicit.
+
+Per-run source-reader notes, screenshots reviewed and triage stay in scratch notes or the ticket, not this historical table.
+
+## Historical ticket coverage
+
 One row per user-facing ticket, combining its changes in this period. CI, test, benchmark, documentation and release-only rows are skipped. Coverage describes existing actions and assertions, not a live pass; the second table records supplied GitHub results separately. `partial` includes supplemental native checks, never a claim of real agent delivery. All proposed journeys run on isolated GitHub runners, not locally.
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |

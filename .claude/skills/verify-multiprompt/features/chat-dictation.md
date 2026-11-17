@@ -44,6 +44,9 @@ Artifact: `verify-chat-dictation`. Inspect `before.png`, `action.png`, `after.pn
 
 ## Gotchas
 
+The recording control is an expanded pill with a stop square, elapsed timer and waveform, not merely an accented microphone. The current journey checks animation, Escape discard and restart. Live preview can update text during recording, while the offline fixture disables it. Enter while recording is stop-only; stop-and-send is a separate explicit path.
+
+
 The existing `chat_dictation_engine_toggle` unit-test seam replaces the engine and cannot prove the real app's transcription/delivery path. The added `MULTIPROMPT_DICTATION_FIXTURE` boundary in `src/voice.zig` is enabled only with `GITHUB_ACTIONS=true`, `RUNNER_OS=Windows` and `MULTIPROMPT_NO_LOGIN=1`. Only this journey sets it; the harness clears inherited values for other ordinary journeys and restores the environment during cleanup.
 
 The checked-in, checksum-pinned CMUSphinx recording is 16 kHz mono signed 16-bit PCM saying “go forward ten meters.” See `tools/fixtures/IGSH-812/README.md`, source revision and bundled license. Capture reads those actual bytes and stays listening until the real user stop changes the production recording flag. The provider boundary requires byte-for-byte matching audio before replaying a hand-authored provider-format response. It feeds the real `parseDeepgramTranscript`, UTF-8 conversion, worker completion message, stable draft-owner routing and native Edit update. Missing/mismatched fixtures fail closed; there is no fallback to live STT, API key, local server, network dependency or secret. This proves app transcription-response handling and delivery, **not acoustic recognition quality, microphone hardware or Deepgram availability**.
