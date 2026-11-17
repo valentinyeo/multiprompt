@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 const gateFile = new URL('./release-journeys.mjs', import.meta.url);
-const { releaseMaps, releasePlan, checkEvidence, evidenceNotes } = fs.existsSync(gateFile) ? await import(gateFile.href) : {};
+const { releaseMaps, releasePlan, collectPlan, checkEvidence, evidenceNotes } = fs.existsSync(gateFile) ? await import(gateFile.href) : {};
 
 test('releases have an executable candidate journey gate', () => {
   assert.equal(typeof checkEvidence, 'function', 'Release publication must check candidate journeys before publishing');
@@ -75,6 +75,59 @@ test('unmapped product changes fail closed with the complete missing file list',
     assert.match(error.message, /extension\/new.js/);
     return true;
   });
+});
+
+test('Git-derived plans distinguish Zig test edits from runtime edits', { skip: process.platform === 'win32' }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-plan-git-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const previous = process.cwd();
+  const previousPath = process.env.PATH;
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' }).trim();
+  git('init', '-b', 'master');
+  git('config', 'user.name', 'Release Plan Test');
+  git('config', 'user.email', 'release-plan@example.invalid');
+  git('config', 'commit.gpgsign', 'false');
+  const maps = path.join(dir, '.claude/skills/verify-multiprompt/features');
+  fs.mkdirSync(maps, { recursive: true });
+  fs.writeFileSync(path.join(maps, 'chat-focus.md'), '# Chat\nVerify on: push, pull_request\nRelease paths: src/chat*\n## Driving it with control.ps1\n');
+  fs.mkdirSync(path.join(dir, 'src'));
+  const source = path.join(dir, 'src/chat.zig');
+  fs.writeFileSync(source, 'pub const value = 1;\ntest "fixture" { _ = 1; }\n');
+  git('add', '.');
+  git('commit', '-m', 'previous release');
+  const base = git('rev-parse', 'HEAD');
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nconsole.log('[[]]');\n`, { mode: 0o755 });
+  try {
+    process.chdir(dir);
+    process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+    fs.writeFileSync(source, 'pub const value = 1;\ntest "fixture" { _ = 2; }\n');
+    git('add', 'src');
+    git('commit', '-m', 'change only an existing test');
+    const first = git('rev-parse', 'HEAD');
+    const testOnly = collectPlan(base, first, 'example/multiprompt');
+    assert.deepEqual(testOnly.features, []);
+    assert.deepEqual(testOnly.changes[0].testOnlyFiles, ['src/chat.zig']);
+    assert.deepEqual(testOnly.changes[0].files, ['src/chat.zig']);
+    fs.writeFileSync(source, 'pub const value = 2;\ntest "fixture" { _ = 2; }\n');
+    git('add', 'src');
+    git('commit', '-m', 'change product behavior');
+    const product = collectPlan(first, git('rev-parse', 'HEAD'), 'example/multiprompt');
+    assert.deepEqual(product.features.map(feature => feature.feature), ['chat-focus']);
+    assert.deepEqual(product.changes[0].testOnlyFiles, []);
+  } finally {
+    process.chdir(previous);
+    process.env.PATH = previousPath;
+  }
+});
+
+test('in-source test edits retain attribution without selecting a changed product feature', () => {
+  const changed = { ...change(['src/chat_render.zig']), testOnlyFiles: ['src/chat_render.zig'] };
+  const plan = releasePlan(base, sha, [changed], maps);
+  assert.deepEqual(plan.features, []);
+  assert.deepEqual(plan.changes[0].files, ['src/chat_render.zig']);
+  assert.deepEqual(plan.changes[0].prs, changed.prs);
 });
 
 test('pipeline-only changes need no unrelated desktop journey', () => {

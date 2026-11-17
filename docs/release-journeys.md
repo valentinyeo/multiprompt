@@ -6,6 +6,8 @@ A release cannot publish until each changed feature has a passing, recorded jour
 
 `release-journeys.mjs plan` starts at the latest published release tag, not the newest reserved tag. It walks every first-parent commit through the candidate. Each commit retains its merged PR links and changed files. Reverts and direct commits remain in the plan.
 
+Zig changes that only edit top-level tests or comments do not change a product feature. The plan uses the same runtime-token comparison as the changelog gate, keeps those paths in its attribution and marks them `testOnlyFiles`. New, deleted and runtime-modified files still need mapping.
+
 Feature maps own `Release paths`, a comma-separated list of repository paths with optional `*` wildcards. A changed recipe also selects itself. All matching maps are required. A product file without a map fails preparation with its filename. This intentionally blocks a release until its missing mapping or journey exists.
 
 Each selected map names its permitted `Journeys`. The release runs these through the existing verification workflow without the PR picker's three-journey limit. One passing journey per changed map is required. This is journey coverage, not proof of every sub-feature listed in a map.

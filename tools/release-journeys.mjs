@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { discoverFeatures } from './verify-features.cjs';
+import { runtimeZigTokens } from './version-stamp.mjs';
 
 const mapDirectory = '.claude/skills/verify-multiprompt/features';
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -35,6 +36,7 @@ export function releasePlan(base, sha, changes, maps) {
   const mappedChanges = changes.map(change => {
     const features = new Set();
     for (const file of change.files) {
+      if (change.testOnlyFiles?.includes(file)) continue;
       const owners = maps.filter(map => map.map === file || map.paths.some(pattern => matches(file, pattern)));
       if (!owners.length && productPath(file)) unmapped.add(file);
       for (const map of owners) {
@@ -58,7 +60,10 @@ export function collectPlan(base, sha, repo) {
       .filter(pr => pr.merged_at && pr.merge_commit_sha === commit && pr.base.ref === 'master')
       .map(pr => ({ number: pr.number, url: pr.html_url }));
     const files = git(['diff', '--no-renames', '--name-only', '-z', `${commit}^1`, commit]).split('\0').filter(Boolean);
-    return { commit, prs, files };
+    const modified = git(['diff', '--no-renames', '--diff-filter=M', '--name-only', '-z', `${commit}^1`, commit]).split('\0').filter(Boolean);
+    const testOnlyFiles = modified.filter(file => file.startsWith('src/') && file.endsWith('.zig') &&
+      runtimeZigTokens(git(['show', `${commit}^1:${file}`])) === runtimeZigTokens(git(['show', `${commit}:${file}`])));
+    return { commit, prs, files, testOnlyFiles };
   });
   return releasePlan(base, sha, changes, releaseMaps());
 }

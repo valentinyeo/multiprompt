@@ -69,7 +69,7 @@ export function fragmentLines(file, text) {
   return lines;
 }
 
-function runtimeZigTokens(source) {
+export function runtimeZigTokens(source) {
   const tokens = tokenize(source, 'zig').tokens;
   const result = [];
   let depth = 0;
