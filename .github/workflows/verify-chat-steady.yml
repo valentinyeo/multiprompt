@@ -1,0 +1,23 @@
+name: Verify steady chat
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-chat-steady.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  before:
+    uses: ./.github/workflows/verify.yml
+    with:
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
+      app_revision: 596e3261e9e77ce193ab7addbfd3001892242331
+      feature: chat-working-live
+  after:
+    uses: ./.github/workflows/verify.yml
+    with:
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
+      feature: chat-working-live

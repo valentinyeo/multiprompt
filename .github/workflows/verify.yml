@@ -9,11 +9,6 @@ on:
         required: true
         default: appearance
         type: string
-      app_revision:
-        description: Optional application commit for comparison with this branch's unchanged verification driver
-        required: false
-        default: ''
-        type: string
       dictation_stall:
         description: Deliberately stall dictation capture or the browser-pane-stuck driver to prove timeout evidence
         required: false

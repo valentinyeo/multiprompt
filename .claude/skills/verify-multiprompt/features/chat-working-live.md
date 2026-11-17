@@ -21,6 +21,8 @@ The remote shell and provider are stand-ins. The provider stand-in runs producti
 
 Recorded hosted proof: https://github.com/valentinyeo/multiprompt/actions/runs/42368960296 passed on `f6fefa003`. Downloaded `verify-chat-delivery/result.json` reports `passed`; both cleanup records report zero remaining owned processes and removed scratch directories. This is the simulated-provider boundary above, not a real provider acceptance claim.
 
+The `Verify steady chat` workflow runs this same driver against the instrumented pre-idle-fix app at `596e3261` and the candidate. Its baseline artifact is `verify-chat-delivery-596e3261e9e77ce193ab7addbfd3001892242331`; the candidate artifact is `verify-chat-delivery`. The baseline must fail the idle layout or paint assertion, not setup. The driver creates empty isolated host directories before concurrent readers start, then uses production archive and event APIs to fill them.
+
 ## Gotchas
 
 This is not proof of a real provider, real SSH, provider startup or the normal external message-worker process. Timing includes the actual hosted runner and stand-in transport, not production network or provider latency. A passing portable checker test is not a hosted desktop result. Require the Windows artifact and inspect the screenshots; no pass is claimed until that run succeeds.
