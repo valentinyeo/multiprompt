@@ -1,5 +1,7 @@
 # Long-chat position replay
 
+Source files: src/chat*, src/main.zig, build.zig, build.zig.zon, src/console.zig, src/focus.zig, src/window_layout.zig, tools/verify-chat-delivery/*, .claude/skills/verify-multiprompt/control-feature-chat-switch-speed.ps1, .claude/skills/verify-multiprompt/control.ps1, .claude/skills/verify-multiprompt/drive.ps1, .claude/skills/verify-multiprompt/seed-profile.*
+
 ## Sub-features
 
 - PR 1070's synthetic 64-session profile, eight workspaces and 2,400-message histories with images, tables and code.

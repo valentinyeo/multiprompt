@@ -56,8 +56,8 @@ test('received messages use one below-message panel with real request IDs', () =
 
 test('pull requests run reaction proof instead of the appearance shortcut', () => {
   const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
-  const matrix = workflow.match(/^        feature: (.+)$/m)[1];
-  assert.match(matrix, /!inputs\.chat_reactions_proof &&[^]*?github\.event_name == 'pull_request'/);
+  assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  assert.match(workflow, /process.env.FEATURE && process.env.FEATURE !== 'all' \? \[process.env.FEATURE\]/);
   const entry = fs.readFileSync('.github/workflows/chat-style.yml', 'utf8');
   assert.match(entry, /feature: chat-delivery/);
   assert.match(entry, /chat_reactions_proof: true/);
