@@ -113,6 +113,9 @@ test('the independent judge accepts only the known runner bots without relaxing 
   const judge = workflow.split('id: judge')[1].split('- name: Require both')[0];
   assert.match(judge, /allowed_bots: software-factory-runners,hypertask-runners\s/);
   assert.doesNotMatch(judge, /restrict_untrusted_prs:\s*["']?false/);
+  assert.ok(Number(judge.match(/--max-turns (\d+)/)?.[1]) >= cases.length * 2 * 3 + 2, 'Review budget must cover six responses, their screenshots and structured output');
+  assert.match(workflow, /EXECUTION_FILE: \$\{\{ steps\.judge\.outputs\.execution_file \}\}/);
+  assert.match(workflow, /cp -- "\$EXECUTION_FILE" report\/judge-execution\.json/);
 });
 
 test('an existing but unread screenshot cannot support a passing answer', () => {
