@@ -120,7 +120,9 @@ function Doctor([bool]$Chat = $false) {
         Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
         throw 'Doctor: visible UI Automation identity or fixed title missing'
     }
-    $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $session = Wait-For 'saved session is readable' {
+        try { Read-Shared "$settings/session.json" | ConvertFrom-Json } catch [IO.IOException] { $null }
+    } 5
     $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $expectedShells } else { 1 }
     if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
         ($expectedShells -eq 2 -and $env:CHAT_LIVE_DELIVERY_PROOF -ne '1' -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }

@@ -461,7 +461,7 @@ jobs:
         run: node --test tools/chat-working-proof.test.mjs tools/live-working-proof.test.mjs
       - name: Check hosted working evidence contract
         if: env.CHAT_WORKING_LIVE_PROOF == '1'
-        run: node --test tools/chat-working-live-proof.test.mjs
+        run: node --test --test-name-pattern='SOFT-2555 Doctor|hosted working evidence' tools/chat-working-live-proof.test.mjs tools/verify-chat-delivery.test.js
       - name: Check handed recall evidence contract
         if: env.CHAT_RECALL_PROOF == '1'
         run: node --test tools/chat-recall-proof.test.js
