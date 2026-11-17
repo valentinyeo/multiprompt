@@ -333,6 +333,7 @@ try {
             $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
         }
         $remoteDocument = [ordered]@{ name = $(if ($Feature -eq 'chat-still') { 'chat-still' } else { 'chat-switch-speed' }); fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = (Join-Path $scratch 'profile'); procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
+        if ($Feature -eq 'chat-slash') { $remoteDocument.cwds = @{'live-slash'='/home/inne/projects/sample'} }
         [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
         $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
         $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
@@ -370,6 +371,7 @@ try {
             $remoteTabs[1].cv = $true
             $remoteTabs[1].csid = $remoteSids['live-slash']
             $remoteTabs[1].claude_session = $true
+            $remoteTabs[1].ccwd = '/home/inne/projects/sample'
         }
         if ($Feature -eq 'chat-still') { foreach ($tab in $remoteTabs) { $tab.cv = $true }; $env:MULTIPROMPT_CHAT_STILL_PROOF = '1' }
         $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = ($Feature -eq 'chat-still'); tabs = $remoteTabs } -Depth 6

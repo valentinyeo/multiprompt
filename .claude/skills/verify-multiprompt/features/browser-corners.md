@@ -1,5 +1,7 @@
 # Browser corners
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-corners.ps1
+
 ## Sub-features
 
 Four native corner masks remain above Chrome and the straight edge strips after activation, session switches, minimize/restore and resize.

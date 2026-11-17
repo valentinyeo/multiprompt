@@ -1,5 +1,7 @@
 # Double-click thumbs up
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-double-click.ps1
+
 ## Sub-features
 
 - Double-click an assistant bubble to show one thumbs-up badge.
