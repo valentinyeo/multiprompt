@@ -674,7 +674,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
   assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
-    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: \[journeys, build-app\]\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: \[journeys, build-app\]\r?\n    if: [^\r\n]*&& inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
   assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
@@ -1509,12 +1509,13 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.match(chat, /foreach \(\$mode in @\('typed', 'suggestion'\)\)/);
   assert.match(chat, /Invoke-JourneyCommand 'new cmd shell' -Confirm {[\s\S]*?Type-Text \('"' \+ \$localAgent/);
   assert.match(chat, /\$inbox = Read-Inbox[\s\S]*?\$_.sid -eq \$localState.tabs\[\$localTab\].shell_id[\s\S]*?\$_.ag -eq 1/);
-  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+|\$agentDetectionSeconds)\s*\n/);
+  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+|\$\w+)\s*\n/);
+  const waitArgument = detectionWait?.[1];
+  const detectionSeconds = waitArgument?.startsWith('$') ? chat.match(new RegExp(`\\${waitArgument}\\s*=\\s*(\\d+)`))?.[1] : waitArgument;
   const normalNamePoll = read('src/power.zig').match(/\.normal\s*=>\s*setCoalescableTimerInterval\(hwnd, TIMER_NAME_POLL, ([\d_]+)\)/);
-  assert.ok(detectionWait, 'local Claude detection wait must specify -Seconds');
+  assert.ok(detectionSeconds, 'local Claude detection wait must specify a numeric -Seconds budget');
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
-  const detectionSeconds = detectionWait[1].startsWith('$') ? Number(chat.match(/\$agentDetectionSeconds\s*=\s*(\d+)/)?.[1]) : Number(detectionWait[1]);
-  assert.ok(detectionSeconds > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
+  assert.ok(Number(detectionSeconds) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
   const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
@@ -2270,7 +2271,7 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
-  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ matrix\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
+  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ (?:inputs|matrix)\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
   assert.ok(proofOnly.includes('chat-model') && proofOnly.includes('chat-working-live'));
   assert.deepEqual(features.available.filter(feature => !proofOnly.includes(feature)), registered.filter(feature => !proofOnly.includes(feature)));
   assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);
