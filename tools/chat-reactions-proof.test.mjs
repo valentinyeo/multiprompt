@@ -40,7 +40,8 @@ with tempfile.TemporaryDirectory() as directory:
                 db.commit()
         if row:
             (first if row[0] == 1 else second).set()
-    scope = dict(record=lambda name, **row: records.append(row))
+        return dict(message=dict(id=row[0]) if row else None)
+    scope = dict(record=lambda name, **row: records.append(row) if name == 'reaction-worker.jsonl' else None)
     exec(compile(ast.Module(body=[worker], type_ignores=[]), '<reaction-worker>', 'exec'), scope)
     namespace = dict(message_poll=poll, message_store_request=dispatch, message_store_db=connect)
     scope['install_reaction_worker'](namespace)
@@ -276,4 +277,25 @@ test('reaction proof measures the painted transcript, excluding the floating com
   f.fill(20, 245, 250, 280, 0x444444);
   assert.throws(() => assertBadge(inspect(f.image, area)));
   assertBadge(inspect(f.image, { ...area, bottom: 235 }));
+});
+
+test('double-click proof rejects a retained badge, a second send, a changed draft and missing cleanup', () => {
+  assert.equal(typeof proof.assertDoubleClick, 'function');
+  const f = fixture();
+  const added = inspect(f.image, area);
+  f.fill(28, 120, 68, 142, 0x444444);
+  const empty = inspect(f.image, area);
+  const frames = { before: empty, added, removed: empty, delivered: empty };
+  const content = `👍 to: ${('Same first words ' + 'for this example '.repeat(8)).trim().slice(0, 80)} [mp:6d8e353d25c5fe23]\n[mp:7536833c3252b72c]`;
+  const events = [{ type: 'queue-operation', operation: 'enqueue', content }, { type: 'attachment', attachment: { prompt: content } }];
+  const observation = { error: null, 'double-click-added': { queueCount: 1, composerText: 'draft stays here' }, 'double-click-removed': { queueCount: 1, composerText: 'draft stays here' }, doubleClickDelivered: true };
+  const cleanup = { remaining_owned_processes: 0, scratch_removed: true };
+  proof.assertDoubleClick(frames, events, observation, cleanup);
+  assert.throws(() => proof.assertDoubleClick({ ...frames, removed: added }, events, observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick({ ...frames, added: empty }, events, observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick({ ...frames, delivered: added }, events, observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, [...events, events[0]], observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, [events[0], { type: 'attachment', attachment: { prompt: content.replace('7536833c3252b72c', '0000000000000001') } }], observation, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, events, { ...observation, 'double-click-removed': { queueCount: 1, composerText: '' } }, cleanup));
+  assert.throws(() => proof.assertDoubleClick(frames, events, observation, { ...cleanup, remaining_owned_processes: 1 }));
 });
