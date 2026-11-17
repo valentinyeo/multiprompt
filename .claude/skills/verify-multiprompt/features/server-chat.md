@@ -1,5 +1,7 @@
 # Runner-owned server chat
 
+Source files: tools/verify-server-chat/*, src/ssh*, src/tmux*, src/chat*, src/console.zig, src/session.zig, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control.ps1
+
 Verify on: push, pull_request
 
 ## Sub-features
@@ -30,4 +32,5 @@ Require `result.json` status `passed`, all four named cases passed, zero app pro
 - Initial saved-tab and provider configuration are seeded before launch. User actions after launch use SendInput, not UI setters or forged transport responses. Server snapshots are read-only SQLite reads over real SSH.
 - Never use a shared VPS, production key, real account, or user computer. WSL and its test user belong to this disposable GitHub runner.
 - WSL1 shares loopback with Windows. WSL2 would require separate reachability configuration; do not silently switch it.
+- Startup writes complete native stdout and stderr to `server-start.stdout.log` and `server-start.stderr.log`. Stderr alone is not failure; the native process exit code decides. Cleanup runs `stop.sh` as a file, not a nested shell command, and retains the production host logs in `linux-host/` before shutting WSL down.
 - A green source test is not Windows proof. The run and video are required.
