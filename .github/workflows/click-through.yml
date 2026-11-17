@@ -10,13 +10,13 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      run: ${{ steps.diff.outputs.run }}
+      features: ${{ steps.diff.outputs.features }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -28,61 +28,38 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "$EVENT" != pull_request ]; then
-            echo 'run=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed=$(git diff --name-only "$BASE...$HEAD" -- src build.zig build.zig.zon .claude/skills/verify-multiprompt tools .github/required-checks.txt .github/workflows/click-through.yml .github/workflows/verify.yml)
-          if [ -n "$changed" ]; then
-            echo 'run=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'run=false' >> "$GITHUB_OUTPUT"
-          fi
-  chat-browser-shortcut:
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const { execFileSync } = require('node:child_process');
+          const { touchedJourneys } = require('./tools/touched-journeys.cjs');
+          const journeys = ['chat-browser-shortcut', 'chat-browser-autoload', 'chat-model', 'chat-not-sent-remove'];
+          const files = process.env.EVENT === 'pull_request' ? execFileSync('git', ['diff', '--name-only', '-z', `${process.env.BASE}...${process.env.HEAD}`], { encoding: 'utf8' }).split('\0').filter(Boolean) : [];
+          const mapped = new Set(touchedJourneys(files).features);
+          console.log(`features=${JSON.stringify(process.env.EVENT === 'pull_request' ? journeys.filter(feature => mapped.has(feature)) : journeys)}`);
+          NODE
+  journeys:
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    if: needs.changes.outputs.features != '[]'
     uses: ./.github/workflows/verify.yml
     with:
-      feature: chat-browser-shortcut
-  chat-browser-autoload:
-    needs: changes
-    if: needs.changes.outputs.run == 'true'
-    uses: ./.github/workflows/verify.yml
-    with:
-      feature: chat-browser-autoload
-  chat-model:
-    needs: changes
-    if: needs.changes.outputs.run == 'true'
-    uses: ./.github/workflows/verify.yml
-    with:
-      feature: chat-model
-  chat-not-sent-remove:
-    needs: changes
-    if: needs.changes.outputs.run == 'true'
-    uses: ./.github/workflows/verify.yml
-    with:
-      feature: chat-not-sent-remove
+      features: ${{ needs.changes.outputs.features }}
+      revision: ${{ github.event.pull_request.head.sha || github.sha }}
   click-through:
     name: click-through
-    needs: [changes, chat-browser-shortcut, chat-browser-autoload, chat-model, chat-not-sent-remove]
+    needs: [changes, journeys]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Require every click-through journey
+      - name: Require every touched click-through journey
         env:
           CHANGES: ${{ needs.changes.result }}
-          RUN: ${{ needs.changes.outputs.run }}
-          SHORTCUT: ${{ needs.chat-browser-shortcut.result }}
-          AUTOLOAD: ${{ needs.chat-browser-autoload.result }}
-          MODEL: ${{ needs.chat-model.result }}
-          REMOVE: ${{ needs.chat-not-sent-remove.result }}
+          FEATURES: ${{ needs.changes.outputs.features }}
+          JOURNEYS: ${{ needs.journeys.result }}
         run: |
           [ "$CHANGES" = success ] || exit 1
-          if [ "$RUN" = false ]; then
-            echo 'No desktop files changed; journeys skipped.'
-            exit 0
+          if [ "$FEATURES" = '[]' ]; then
+            [ "$JOURNEYS" = skipped ] || exit 1
+            echo 'No click-through feature changed; journeys skipped.'
+          else
+            [ "$JOURNEYS" = success ] || exit 1
           fi
-          for result in "$SHORTCUT" "$AUTOLOAD" "$MODEL" "$REMOVE"; do
-            [ "$result" = success ] || exit 1
-          done
