@@ -1,0 +1,1 @@
+Rooms feature: wireframe it, then test it properly before it ships

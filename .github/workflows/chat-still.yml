@@ -89,6 +89,7 @@ jobs:
         id: comments
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
+          allowed_bots: "software-factory-runners[bot]"
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           plugin_marketplaces: ${{ github.workspace }}/pstack
