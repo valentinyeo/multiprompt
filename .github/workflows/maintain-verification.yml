@@ -9,7 +9,7 @@ permissions:
 
 concurrency:
   group: weekly-verification-maintenance
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   maintain:

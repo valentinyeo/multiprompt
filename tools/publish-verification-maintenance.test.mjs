@@ -47,6 +47,6 @@ test('weekly maintenance uses the verifier Claude action, OAuth secret and Sonne
   assert.ok(!weekly.includes('workflow_dispatch:'));
   assert.ok(!weekly.includes('self-hosted'));
   assert.match(weekly, /skills\/maintain-verification-skill\/SKILL\.md/);
-  assert.match(weekly, /cancel-in-progress: false/);
+  assert.match(weekly, /cancel-in-progress: true/);
   assert.match(weekly, /publish-verification-maintenance\.mjs/);
 });
