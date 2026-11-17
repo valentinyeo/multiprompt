@@ -26,7 +26,8 @@ if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].Id
 $repo = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
 $public = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a "$key.pub").Trim()
 $startArguments = "-d Ubuntu-24.04 -u root --exec bash `"$repo/tools/verify-server-chat/start.sh`" `"$repo`" `"$public`""
-$linuxStart = Start-Process -FilePath (Get-Command wsl.exe).Source -ArgumentList $startArguments -RedirectStandardOutput "$Evidence/server-start.stdout.log" -RedirectStandardError "$Evidence/server-start.stderr.log" -NoNewWindow -Wait -PassThru
+$linuxStart = Start-Process -FilePath (Get-Command wsl.exe).Source -ArgumentList $startArguments -RedirectStandardOutput "$Evidence/server-start.stdout.log" -RedirectStandardError "$Evidence/server-start.stderr.log" -NoNewWindow -PassThru
+$linuxStart.WaitForExit()
 Get-Content "$Evidence/server-start.stdout.log", "$Evidence/server-start.stderr.log" | ForEach-Object { Write-Host $_ }
 if ($linuxStart.ExitCode -ne 0) { throw "Runner-owned Linux server exited $($linuxStart.ExitCode); see server-start.stderr.log" }
 $config = @"

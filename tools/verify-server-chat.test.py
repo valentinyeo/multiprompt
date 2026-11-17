@@ -65,7 +65,8 @@ ConvertTo-Json -InputObject $values -Compress
         command = r"""
 $ErrorActionPreference = 'Stop'
 $Evidence = $env:VERIFY_TEST_EVIDENCE
-$startArguments = "-c `"import sys; print('seed stdout'); print('traceback line 1\ntraceback line 2', file=sys.stderr); sys.exit($env:VERIFY_TEST_EXIT)`""
+$background = if ($env:VERIFY_TEST_EXIT -eq '0') { "import subprocess; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL);" } else { '' }
+$startArguments = "-c `"import sys; $background print('seed stdout'); print('traceback line 1\ntraceback line 2', file=sys.stderr); sys.exit($env:VERIFY_TEST_EXIT)`""
 function Get-Command { @{ Source = $env:VERIFY_TEST_PYTHON } }
 $tokens = $null
 $errors = $null
@@ -73,13 +74,16 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env
 $launch = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$linuxStart' }, $true)
 $check = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.StartsWith('if ($linuxStart.ExitCode') }, $true)
 if ($null -eq $launch -or $null -eq $check) { throw 'Startup must capture the native process and check its exit code' }
-. ([scriptblock]::Create($launch.Extent.Text))
-. ([scriptblock]::Create($check.Extent.Text))
+$source = Get-Content (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/start.ps1') -Raw
+. ([scriptblock]::Create($source.Substring($launch.Extent.StartOffset, $check.Extent.EndOffset - $launch.Extent.StartOffset)))
 """
         for exit_code in (0, 1):
             with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory(prefix='server chat launch ') as evidence:
                 env = dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_PYTHON=sys.executable, VERIFY_TEST_EXIT=str(exit_code), VERIFY_TEST_EVIDENCE=evidence)
-                result = subprocess.run([shell, '-NoProfile', '-Command', command], env=env, text=True, capture_output=True)
+                try:
+                    result = subprocess.run([shell, '-NoProfile', '-Command', command], env=env, text=True, capture_output=True, timeout=6)
+                except subprocess.TimeoutExpired:
+                    self.fail('Startup waited for the background server instead of only its launcher')
                 self.assertEqual(result.returncode == 0, exit_code == 0, result.stderr)
                 self.assertEqual((Path(evidence) / 'server-start.stdout.log').read_text().strip(), 'seed stdout')
                 self.assertEqual((Path(evidence) / 'server-start.stderr.log').read_text().splitlines(), ['traceback line 1', 'traceback line 2'])
