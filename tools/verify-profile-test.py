@@ -29,10 +29,14 @@ class ProfileFixtureTest(unittest.TestCase):
             self.fixture.write_json(settings / 'session.json', dict(active_tab=1, tabs=[dict(name='Keep this journey')]))
             self.fixture.write_json(settings / 'windows.json', dict(windows=[dict(id='journey', name='Keep this workspace', restore=True)]))
             before = (settings / 'session.json').read_bytes()
+            metadata = home / '.claude/sessions/4300.json'
+            self.fixture.write_json(metadata, dict(sessionId='keep-the-existing-agent', pid=4300))
+            before_metadata = metadata.read_bytes()
             first = self.fixture.seed(root, home)
             second = self.fixture.seed(root, home)
             self.assertEqual(first, second)
             self.assertEqual((settings / 'session.json').read_bytes(), before)
+            self.assertEqual(metadata.read_bytes(), before_metadata)
             self.assertEqual(first['sessions'], 64)
             self.assertEqual(first['messages'], 19872)
             self.assertEqual(first['messagesPerLongChat'], 2400)
@@ -42,6 +46,7 @@ class ProfileFixtureTest(unittest.TestCase):
             self.assertEqual({tab['kind'] for document in saved for tab in document['tabs']}, {'cmd', 'tmux'})
             identities = [tab['csid'] for document in saved for tab in document['tabs']]
             self.assertEqual(len(set(identities)), 64)
+            self.assertTrue(all(tab['tmux_session'].startswith('fixture-agent-') for document in saved for tab in document['tabs']))
             source = home / first['files'][0]['path']
             rows = [json.loads(line) for line in source.read_text().splitlines()]
             self.assertEqual(len(rows), 2400)

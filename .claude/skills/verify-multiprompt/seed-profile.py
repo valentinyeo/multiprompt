@@ -67,7 +67,7 @@ def seed(root, home, activate=False, ssh=None, settings=None):
         for slot in range(SESSIONS_PER_WORKSPACE):
             index = workspace * SESSIONS_PER_WORKSPACE + slot
             sid = f'a1b2c3d4-2567-4000-8000-{index:012d}'
-            name = 'verify-agent' if index == 0 else f'fixture-agent-{index:02d}'
+            name = f'fixture-agent-{index:02d}'
             cwd = f'C:/verify/work{index}'
             transcript = home / '.claude' / 'projects' / f'C--verify-work{index}' / f'{sid}.jsonl'
             transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +84,8 @@ def seed(root, home, activate=False, ssh=None, settings=None):
                 names.append(name)
                 panes[name] = 4300 + index
                 sids[name] = sid
-                write_json(home / '.claude' / 'sessions' / f'{4300 + index}.json', dict(sessionId=sid, cwd=cwd, pid=4300 + index))
+                if activate:
+                    write_json(home / '.claude' / 'sessions' / f'{4300 + index}.json', dict(sessionId=sid, cwd=cwd, pid=4300 + index))
         document = dict(active_tab=0, single_window=True, chat_active=True, tabs=tabs)
         write_json(settings / f'session-{wid}.json', document)
         if not any(entry['id'] == wid for entry in registry['windows']):
