@@ -69,6 +69,12 @@ test('routing checks reject the removed dependency, missing history, classifier 
   }
 });
 
+test('Windows group 3 has a bounded twenty-minute build and test budget', () => {
+  const job = workflow.split('\n  test:\n')[1].split(/\n  [\w-]+:\n/)[0];
+  const budget = job.match(/timeout-minutes: \$\{\{ (.+) \}\}/)[1];
+  assert.deepEqual([1, 2, 3, 4, 5].map(group => vm.runInNewContext(budget, { matrix: { group } })), [15, 10, 20, 10, 10]);
+});
+
 test('Tests starts on every pull request and every master push so drift cannot hide', () => {
   const events = workflow.split('\non:\n')[1]?.split('\npermissions:')[0];
   assert.ok(events, 'workflow events are declared');
