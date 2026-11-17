@@ -24,4 +24,7 @@ Prove responsive signed-out launch during background checking, cold-launch stage
 
 ## Gotchas
 
+User entry points are the sidebar Update ready card and Ctrl+K Restart to update; the latter is absent in dev builds. Dismissal and overflowing release notes are separate controls. The fixture restart uses posted mouse messages, not proof of a physical user click on every update surface.
+
+
 `safe-updates.json` records each successful scenario and cleanup; `sign-in-ready.png` shows the responsive signed-out app; `build.json` pins the branch executable and commit. Any missing assertion fails the job. All fixture processes are stopped before evidence is uploaded.
