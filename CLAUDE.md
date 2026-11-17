@@ -13,7 +13,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - Drain existing PRs first. Do not open new PRs.
 - Commit small units directly to `master`. Include a one-line undo. Add it to each commit.
 - Never build or test on shared servers. This includes lightweight tests. Use GitHub-hosted public CI only.
-- Each `master` push starts a release. CI builds x64 and arm64. The built x64 app must launch. Its main window must appear within five minutes. Gitleaks blocks publication on failure. CI signs and publishes the assets.
+- Each master push publishes a release automatically. CI builds x64 and arm64. The built x64 app must launch. Its main window must appear within five minutes. Gitleaks blocks publication on failure. CI signs and publishes the assets.
 - Other checks run nightly or manually. They report only. Automatic revert is disabled. The built release must launch. If it fails, revert the change immediately. Revert it manually.
 - Add `changelog.d/<TICKET>-<slug>.md` fragments (see `changelog.d/README.md`). Commit as `<TICKET>: Brief description`. CI stamps versions. Never hand-edit app versions.
 - Release updates reach users via the in-app updater. Never compile on the laptop.
