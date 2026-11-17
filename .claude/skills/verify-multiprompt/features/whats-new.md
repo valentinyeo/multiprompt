@@ -1,5 +1,7 @@
 # What's new
 
+Source files: src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-whats-new.ps1, src/changelog.zig
+
 ## Sub-features
 
 Production release titles and ticket IDs in the native changelog, including historical releases.

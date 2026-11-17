@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: read
+concurrency:
+  group: idle-poll-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   idle-poll-proof:
     runs-on: windows-latest

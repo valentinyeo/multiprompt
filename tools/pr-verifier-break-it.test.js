@@ -80,3 +80,24 @@ test('chat journeys require streaming, busy-send and reconnect variations too', 
   assert.equal(typeof verifier.breakItVariations, 'function');
   assert.deepEqual(verifier.breakItVariations('chat-delivery'), ['resize', 'maximize', 'fast-switch', 'long-chat', 'stream-scroll', 'busy-send', 'reconnect']);
 });
+
+test('batched builds replay only the named repair and isolate the historical experiment', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { runInNewContext } = require('node:vm');
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const parent = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
+  assert.match(workflow, /      - name: Try to bring the repaired bug back\n/);
+  const condition = workflow.split('      - name: Try to bring the repaired bug back\n')[1].split('\n')[0].trim().slice(4);
+  for (const feature of ['appearance', 'chat-still', 'chat-working-live']) {
+    const actual = runInNewContext(condition, {
+      success: () => true, fromJSON: JSON.parse, contains: (items, item) => items.includes(item),
+      inputs: { break_it_features: '["chat-working-live"]' }, matrix: { feature },
+    });
+    assert.equal(actual, feature === 'chat-working-live');
+  }
+  const head = parent.split('  head:\n')[1].split('  history:\n')[0];
+  assert.match(head, /break_it_features: \$\{\{ needs\.select\.outputs\.break_it_features \}\}/);
+  assert.doesNotMatch(head, /matrix\./);
+  assert.match(parent, /break_it_features: '\["chat-working-live"\]'/);
+});

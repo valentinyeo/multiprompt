@@ -1,5 +1,7 @@
 # Own browser profile per workspace
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1, tools/agent-notifications/owner_browser_live.py
+
 Verify on: push
 
 ## Sub-features

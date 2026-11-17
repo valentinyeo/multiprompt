@@ -1,5 +1,7 @@
 # Status card
 
+Source files: src/inbox*, src/notification*, src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-status-card.ps1, tools/capture-usage-pace.py
+
 Verify on: push
 
 Verify all three compact status pages. The AI page is a grey floating pill; click it to expand the approved usage card.

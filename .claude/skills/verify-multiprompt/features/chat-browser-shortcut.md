@@ -1,5 +1,7 @@
 # Chat tab browser shortcut
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-browser-shortcut.ps1
+
 Alt+A opens the browser pane from a tab that is in Chat View. The pane shows a real browser window, never the "Browser not open" placeholder.
 
 ## Sub-features

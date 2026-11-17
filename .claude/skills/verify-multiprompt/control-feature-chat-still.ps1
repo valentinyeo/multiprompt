@@ -4,7 +4,7 @@ $case = @{ name = 'chat-still'; status = 'failed'; detail = 'Chat stillness obse
 $result.checks += $case
 try {
     Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 5 } 'five long-chat sessions restored'
-    Wait-Until { (Get-Content $log -Raw) -match '\[chat-still\] row message=' } 'initial native chat geometry'
+    Wait-Until { ((Get-Content $log -Raw) -join '') -match '\[chat-still\] row message=' } 'initial native chat geometry'
     Invoke-JourneyCommand 'Tab order: auto'
     Wait-Until {
         $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'

@@ -26,7 +26,15 @@ function discoverFeatures(directory = path.join(__dirname, '../.claude/skills/ve
   return result;
 }
 
-module.exports = { discoverFeatures };
+function journeyMatrix(features, appRevision = '') {
+  return features.flatMap(feature => {
+    const dpis = ['title-bar', 'window-controls'].includes(feature) ? [96, 120, 144] : feature === 'bot-photo' ? [96, 144] : [96];
+    const themes = feature === 'title-bar' ? ['light', 'dark'] : ['light'];
+    return dpis.flatMap(dpi => themes.map(theme => ({ feature, 'app-revision': appRevision, 'caption-dpi': dpi, 'caption-browser-theme': theme })));
+  });
+}
+
+module.exports = { discoverFeatures, journeyMatrix };
 
 if (require.main === module) {
   const features = discoverFeatures();
@@ -36,7 +44,7 @@ if (require.main === module) {
     if (!features.available.includes(selected)) throw new Error(`Unsupported desktop journey: ${selected}`);
     console.log(JSON.stringify([selected]));
   } else {
-    for (const name of ['full', 'pr']) {
+    for (const name of ['full', 'pr', 'available']) {
       const line = `${name}=${JSON.stringify(features[name])}\n`;
       if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, line);
       process.stdout.write(line);
