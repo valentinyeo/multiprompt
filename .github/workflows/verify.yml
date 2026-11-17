@@ -329,7 +329,7 @@ jobs:
         run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
-        run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
+        run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ contains(fromJSON(needs.journeys.outputs.selected), 'rooms') && '-Drooms-preview=true' || '' }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
@@ -516,7 +516,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette'
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'rooms'
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -981,6 +981,19 @@ jobs:
           if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Runner-note negative cleanup failed' }
           Write-Host 'RELEASED_RUNNER_NOTE_NEGATIVE_CONTROL_REJECTED'
           $global:LASTEXITCODE = 0
+      - name: Prepare Rooms account and SSH boundaries
+        if: env.FEATURE == 'rooms'
+        shell: pwsh
+        run: |
+          Push-Location service
+          try {
+            npm ci --no-audit --no-fund --prefer-offline
+            if ($LASTEXITCODE -ne 0) { throw 'Rooms account dependencies failed' }
+            npx wrangler deploy --dry-run --outdir .build
+            if ($LASTEXITCODE -ne 0) { throw 'Rooms account Worker fixture failed' }
+          } finally { Pop-Location }
+          zig cc tools/verify-chat-delivery/launcher.c -o verify-bin/rooms-ssh.exe -municode -mconsole
+          if ($LASTEXITCODE -ne 0) { throw 'Rooms SSH boundary build failed' }
       - name: Launch Doctor Drive Evidence Cleanup
         id: desktop-driver
         timeout-minutes: ${{ env.FEATURE == 'browser-pane-stuck' && 8 || inputs.long_chat_proof && 40 || env.FEATURE == 'chat-dictation' && 5 || 30 }}
@@ -994,7 +1007,7 @@ jobs:
             Start-Sleep -Seconds 900
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
-          $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
+          $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette'; rooms = 'rooms' }
           if ($mapped.ContainsKey($env:FEATURE)) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } else {

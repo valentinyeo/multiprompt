@@ -89,6 +89,10 @@ The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictatio
 
 The [Jump to newest](features/chat-newest.md) journey (`feature=chat-newest`) verifies Shift+G twice and the matching palette action with exact native draft reads. Its named `result.json` checks are independent of the separate full-history restart/performance journey.
 
+## Rooms regression
+
+Read [Rooms](features/rooms.md). The **Rooms regression** PR workflow compares master and candidate using the same keyboard journey and generated account/agent data. The candidate fails on any failed or blocked exercised step. Inspect its video and timestamped findings; closing the view does not prove membership leave or deletion.
+
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:
