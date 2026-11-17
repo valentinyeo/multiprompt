@@ -237,6 +237,24 @@ test "IGSH-1928 real OpenSSH isolates proven keys while preserving unproven fall
     try tmp.dir.writeFile(io, .{ .sub_path = "user.conf", .data = "Host remote-1\n  HostName old.example.invalid\n  IdentityFile legacy-host-key\n" ++
         "Host *\n  IdentityFile legacy-wildcard-key\n  IdentityAgent legacy-agent\n" });
     try tmp.dir.writeFile(io, .{ .sub_path = "system.conf", .data = "Host *\n  IdentityFile legacy-system-key\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "app.conf", .data = "" });
+    if (@import("builtin").os.tag == .windows) {
+        const identity = try std.process.run(a, io, .{ .argv = &.{ "whoami.exe", "/user", "/fo", "csv", "/nh" } });
+        defer a.free(identity.stdout);
+        defer a.free(identity.stderr);
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, identity.term);
+        const start = std.mem.indexOf(u8, identity.stdout, "S-1-") orelse return error.RunnerSidMissing;
+        const sid_end = std.mem.indexOfScalar(u8, identity.stdout[start..], '"') orelse return error.RunnerSidMissing;
+        const permission = try std.fmt.allocPrint(a, "*{s}:F", .{identity.stdout[start..][0..sid_end]});
+        defer a.free(permission);
+        for ([_][]const u8{ user_config, system_config, app_config }) |config| {
+            const acl = try std.process.run(a, io, .{ .argv = &.{ "icacls.exe", config, "/inheritance:r", "/grant:r", permission } });
+            defer a.free(acl.stdout);
+            defer a.free(acl.stderr);
+            if (acl.term != .exited or acl.term.exited != 0) std.debug.print("SSH fixture permissions: {s}", .{acl.stderr});
+            try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, acl.term);
+        }
+    }
     var table: Table = @splat(.{});
     table[0].hostname.set("example.invalid");
     table[0].user.set("deploy");
