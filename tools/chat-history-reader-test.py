@@ -6,6 +6,7 @@ import io
 import os
 import selectors
 import shutil
+import signal
 import sqlite3
 from pathlib import Path
 import subprocess
@@ -26,6 +27,57 @@ BoardFeedbackTest = FEEDBACK_TESTS.BoardFeedbackTest
 SPEC = importlib.util.spec_from_file_location('reader', ROOT / 'src/chat_history_reader.py')
 reader = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reader)
+
+
+@unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+class TmuxCleanupTest(unittest.TestCase):
+    def test_interrupted_reader_test_stops_only_its_own_server(self):
+        wrapper = """
+import runpy, signal, subprocess, sys
+run = subprocess.run
+mode = sys.argv[2]
+def traced(command, *args, **kwargs):
+    result = run(command, *args, **kwargs)
+    if 'new-session' in command:
+        print('STARTED ' + command[command.index('-L') + 1], flush=True)
+        if mode == 'assertion':
+            raise AssertionError('injected failure after server creation')
+        signal.pause()
+    return result
+subprocess.run = traced
+sys.argv = [sys.argv[1], 'HistoryReaderTest.test_watch_appends_do_not_recapture_screen', '-v']
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+        tmux = shutil.which('tmux')
+        neighbor = 'cleanup-neighbor-' + uuid.uuid4().hex
+        self.addCleanup(lambda: subprocess.run([tmux, '-L', neighbor, 'kill-server'], capture_output=True))
+        subprocess.run([tmux, '-L', neighbor, '-f', '/dev/null', 'new-session', '-d', '-s', 'neighbor', 'cat'], check=True)
+        for mode in ('SIGTERM', 'SIGINT', 'assertion'):
+            with self.subTest(mode=mode):
+                child = subprocess.Popen([sys.executable, '-u', '-c', wrapper, __file__, mode],
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                socket = None
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(child.stdout, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(timeout=10), 'reader test did not start tmux')
+                    line = child.stdout.readline().strip()
+                    self.assertTrue(line.startswith('STARTED '), line)
+                    socket = line.split(' ', 1)[1]
+                    if mode != 'assertion':
+                        child.send_signal(getattr(signal, mode))
+                    stdout, stderr = child.communicate(timeout=10)
+                    self.assertNotEqual(child.returncode, 0, stderr)
+                    live = subprocess.run([tmux, '-L', socket, 'list-sessions'], capture_output=True, text=True)
+                    self.assertNotEqual(live.returncode, 0, mode + ' left server ' + socket + ': ' + live.stdout)
+                    self.assertEqual(subprocess.run([tmux, '-L', neighbor, 'has-session', '-t', '=neighbor'],
+                                                    capture_output=True).returncode, 0, 'unrelated server stopped')
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.communicate(timeout=5)
+                    if socket is not None:
+                        subprocess.run([tmux, '-L', socket, 'kill-server'], capture_output=True)
 
 
 class HistoryReaderTest(unittest.TestCase):
