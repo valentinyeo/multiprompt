@@ -89,6 +89,10 @@ The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictatio
 
 The [Jump to newest](features/chat-newest.md) journey (`feature=chat-newest`) verifies Shift+G twice and the matching palette action with exact native draft reads. Its named `result.json` checks are independent of the separate full-history restart/performance journey.
 
+## Rooms verification-first audit
+
+Read [Rooms](features/rooms.md). The automatic **Rooms master audit** runs the PR's recorded Windows journey against the event's exact master executable revision. Do not dispatch extra runs for SOFT-2581. The shared driver records video and per-action timestamps. Download the artifact, inspect the video and screenshots, and put every failed, blocked, or confusing action in the PR body with its video offset. An audit pass means evidence was collected, not that Rooms passed. Product code stays unchanged until the wireframe is reviewed.
+
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:

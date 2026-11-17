@@ -21,6 +21,7 @@ Start with one feature, then pick a named journey. The area files keep the refer
 - [Command palette](palette.md).
 - [Browser pane](browser-pane.md).
 - [Workspaces and rooms](workspaces-rooms.md).
+- [Rooms audit](rooms.md).
 - [Shortcuts](shortcuts.md).
 - [Settings and appearance](settings-appearance.md).
 - [Notifications and Inbox](notifications-inbox.md).

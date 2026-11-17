@@ -1,0 +1,23 @@
+name: Rooms master audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rooms-verification.yml'
+      - '.claude/skills/verify-multiprompt/rooms*'
+      - '.claude/skills/verify-multiprompt/features/rooms.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rooms-master-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  master:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: rooms
+      revision: ${{ github.event.pull_request.head.sha }}
+      app_revision: ${{ github.event.pull_request.base.sha }}

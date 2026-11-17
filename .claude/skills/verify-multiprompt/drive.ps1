@@ -28,6 +28,7 @@ try {
     $start.UseShellExecute = $false
     $start.RedirectStandardInput = $true
     $start.CreateNoWindow = $true
+    @{ startedAt=[DateTime]::UtcNow.ToString('o'); clock='Recorder launch UTC; video offsets approximate within recorder startup latency' } | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/recording-start.json"
     $video = [Diagnostics.Process]::Start($start)
     & powershell -NoProfile -File "$PSScriptRoot/control.ps1" -Feature $Journey -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
     if ($LASTEXITCODE -ne 0) { throw "Journey exited $LASTEXITCODE; inspect result.json" }
@@ -54,6 +55,10 @@ try {
         finally { $video.Dispose() }
     }
     $record | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/journey.json"
+    if ($Journey -eq 'rooms') {
+        & python "$PSScriptRoot/rooms-findings.py" $Evidence
+        if ($LASTEXITCODE -ne 0) { throw 'Rooms findings could not be generated' }
+    }
 }
 if ($record.status -ne 'passed') { throw $record.error }
 Write-Output "VERIFIED $Feature/$Journey; evidence retained at $Evidence"
