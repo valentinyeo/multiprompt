@@ -81,3 +81,10 @@ test('query failures and missing head state cannot produce a successful Tests re
     assert.equal(f.requests().length, 1);
   }
 });
+
+
+test('the Tests waiter can read GraphQL check suites with its scoped workflow token', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
+  const waiter = workflow.split('  tests:\n')[1].split('  resolve:\n')[0];
+  assert.match(waiter, /permissions:[\s\S]*checks: read/);
+});
