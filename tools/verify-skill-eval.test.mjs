@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { grade, judgePassed, parseAnswer, plant, prompt, workspace } from './verify-skill-eval.mjs';
+const moduleUrl = new URL('./verify-skill-eval.mjs', import.meta.url);
+assert.ok(fs.existsSync(moduleUrl), 'The verification skill needs its executable exercise runner');
+const { grade, judgePassed, parseAnswer, plant, prompt, workspace } = await import(moduleUrl.href);
 
 const cases = JSON.parse(fs.readFileSync(new URL('./verify-skill-cases.json', import.meta.url)));
 const skill = '.claude/skills/verify-multiprompt';
@@ -65,6 +67,14 @@ test('reading the recipe after execution does not count', () => {
   assert.equal(check(cases[0], fixture).passed, false);
 });
 
+test('reading the skill or index only after execution does not count', () => {
+  for (const late of [0, 1]) {
+    const fixture = proof(cases[0]);
+    fixture.transcript.push(fixture.transcript.splice(late, 1)[0]);
+    assert.equal(check(cases[0], fixture).passed, false);
+  }
+});
+
 test('wrong journey and fabricated citations fail even with the expected verdict', () => {
   const fixture = proof(cases[0]);
   fixture.journey.feature = 'inbox';
@@ -72,6 +82,14 @@ test('wrong journey and fabricated citations fail even with the expected verdict
   const result = check(cases[0], fixture);
   assert.equal(result.checks.ran_correct_journey, false);
   assert.equal(result.checks.file_backed_evidence, false);
+});
+
+test('recipe citations can explain observations but cannot replace product evidence', () => {
+  const fixture = proof(cases[0]);
+  fixture.answer.evidence.push({ file: `${skill}/features/appearance.md`, observation: 'The recipe requires a saved Light choice.' });
+  assert.equal(check(cases[0], fixture).passed, true);
+  fixture.answer.evidence.shift();
+  assert.equal(check(cases[0], fixture).passed, false);
 });
 
 test('infrastructure, absent cleanup and unrelated errors cannot detect planted bugs', () => {

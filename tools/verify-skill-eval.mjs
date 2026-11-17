@@ -56,7 +56,7 @@ export function workspace(config) {
       const exe = path.join(config.root, 'desktop/multiprompt.exe');
       if (hash(exe) !== build.sha256) throw new Error('Downloaded executable hash mismatch');
       save(path.join(evidenceRoot, 'build.json'), { version: build.version, sha256: build.sha256, revision: build.revision });
-      const run = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(config.root, skill, 'control.ps1'), '-Feature', args.feature, '-Exe', exe, '-ExpectedVersion', build.version, '-ExpectedHash', build.sha256, '-Evidence', evidenceRoot], { cwd: config.root, encoding: 'utf8', timeout: 600000, maxBuffer: 16 * 1024 * 1024 });
+      const run = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(config.root, skill, 'control.ps1'), '-Feature', args.feature, '-Exe', exe, '-ExpectedVersion', build.version, '-ExpectedHash', build.sha256, '-Evidence', evidenceRoot], { cwd: config.root, encoding: 'utf8', timeout: 600000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PSModulePath: path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/Modules') } });
       fs.writeFileSync(path.join(config.out, 'desktop.log'), (run.stdout || '') + (run.stderr || ''));
       save(path.join(config.out, 'execution.json'), { exitCode: run.status, error: run.error?.message || null });
       answer = { files: evidenceFiles(), exitCode: run.status };
@@ -96,7 +96,7 @@ async function deepseek(config, request) {
   for (let turn = 0; turn < 35; turn++) {
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}` },
-      body: JSON.stringify({ model: 'deepseek-flash', messages, tools: tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })), temperature: 0, max_tokens: 4000, thinking: { type: 'disabled' } }),
+      body: JSON.stringify({ model: 'deepseek-flash', messages, tools: tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })), response_format: { type: 'json_object' }, temperature: 0, max_tokens: 4000, thinking: { type: 'disabled' } }),
       signal: AbortSignal.timeout(180000),
     });
     if (!response.ok) throw new Error(`DeepSeek HTTP ${response.status}`);
@@ -132,7 +132,7 @@ function codex(config, request) {
   const schemaFile = path.join(home, 'answer.json');
   save(schemaFile, schema);
   const toml = value => JSON.stringify(value);
-  const command = spawnSync(process.execPath, [path.join(process.env.CLIENTS, 'node_modules/@openai/codex/bin/codex.js'), 'exec', '--model', 'gpt-5.4', '--sandbox', 'read-only', '--skip-git-repo-check', '--json', '-C', config.workspace,
+  const command = spawnSync(process.execPath, [path.join(process.env.CLIENTS, 'node_modules/@openai/codex/bin/codex.js'), 'exec', '--model', 'gpt-6.1-sol', '--sandbox', 'read-only', '--skip-git-repo-check', '--json', '-C', config.workspace,
     '-c', 'features.shell_tool=false', '-c', 'model_reasoning_effort="medium"',
     '-c', `mcp_servers.workspace.command=${toml(process.execPath)}`,
     '-c', `mcp_servers.workspace.args=${JSON.stringify([script, 'serve', path.join(config.out, 'workspace.json')])}`,
@@ -165,7 +165,7 @@ async function agent(root, id, family, out) {
     save(path.join(config.out, 'answer.json'), result);
   } catch (error) { save(path.join(config.out, 'error.json'), { error: error.message }); }
   fs.rmSync(path.join(config.out, 'workspace.json'));
-  save(path.join(config.out, 'identity.json'), { case: id, family, model: family === 'deepseek' ? 'deepseek-flash' : 'gpt-5.4', revision: process.env.GITHUB_SHA });
+  save(path.join(config.out, 'identity.json'), { case: id, family, model: family === 'deepseek' ? 'deepseek-flash' : 'gpt-6.1-sol', revision: process.env.GITHUB_SHA });
 }
 
 export function grade(scenario, transcript, journey, answer, evidence) {
@@ -177,11 +177,11 @@ export function grade(scenario, transcript, journey, answer, evidence) {
   const doctor = evidence['evidence/doctor.json'];
   const tree = evidence['evidence/process-tree.json'];
   const checks = {
-    read_skill_and_recipe: read(`${skill}/SKILL.md`) && read(`${skill}/features/README.md`) && recipeIndex >= 0 && recipeIndex < runIndex,
+    read_skill_and_recipe: [`${skill}/SKILL.md`, `${skill}/features/README.md`].every(file => transcript.slice(0, runIndex).some(event => event.name === 'read_file' && event.ok && event.args.file === file)) && recipeIndex >= 0 && recipeIndex < runIndex,
     ran_correct_journey: journey?.feature === scenario.feature && result?.feature === scenario.feature,
     real_build_and_cleanup: Boolean(doctor?.pid && doctor?.hwnd && evidence['evidence/build.json']?.sha256 === doctor?.sha256 && result?.sha256 === doctor?.sha256 && result?.scratchRemoved && tree?.activeAfterStop === 0 && result?.failureKind !== 'infrastructure'),
     correct_verdict: answer?.verdict === scenario.verdict && (scenario.verdict === 'PASS' ? result?.status === 'passed' : result?.status === 'failed' && new RegExp(scenario.failure, 'i').test(result.error || '')),
-    file_backed_evidence: Boolean(answer?.evidence?.length && read('evidence/result.json') && answer.evidence.every(item => read(item.file) && Object.hasOwn(evidence, item.file) && item.observation?.trim())),
+    file_backed_evidence: Boolean(answer?.evidence?.some(item => item.file === 'evidence/result.json') && read('evidence/result.json') && answer.evidence.every(item => read(item.file) && (Object.hasOwn(evidence, item.file) || item.file.startsWith(`${skill}/`)) && item.observation?.trim())),
   };
   return { checks, passed: Object.values(checks).every(Boolean) };
 }

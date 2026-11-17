@@ -16,7 +16,7 @@ The Windows build matrix compiles the current revision three times. Maple is unc
 
 ## Blinding and execution
 
-DeepSeek Flash and Codex GPT-5.4 receive the same request per case. Each has a fresh `multiprompt` workspace containing only the unmodified skill and feature maps. Neither receives the hidden answers, source patches, model comparisons or case identifiers. Models choose from the entire feature index, not a shortened list containing only the expected recipes.
+DeepSeek Flash and Codex GPT-6.1 Sol receive the same request per case. Each has a fresh `multiprompt` workspace containing only the unmodified skill and feature maps. Neither receives the hidden answers, source patches, model comparisons or case identifiers. Models choose from the entire feature index, not a shortened list containing only the expected recipes.
 
 Both clients use the same workspace tools. The host records successful file reads separately from the model's transcript. `run_journey` launches the original `control.ps1` on a hosted Windows desktop, with the downloaded executable's checked hash and version. It accepts one feature choice and performs real keyboard input and owned cleanup. A wrong choice is not redirected to the expected journey. Evidence is produced by execution, not fabricated or replayed.
 
