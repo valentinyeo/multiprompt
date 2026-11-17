@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 
@@ -24,7 +24,7 @@ const transport = control.slice(control.indexOf('function Invoke-Zsb('), control
 function evaluateWorkflowExpression(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();
-    const lexer = /\s*('(?:[^']|'')*'|needs\.journeys\.outputs\.(?:pr|full)|(?:github|inputs)\.[a-z_]+|format|fromJSON|startsWith|==|!=|!|&&|\|\||[(),])/gy;
+    const lexer = /\s*('(?:[^']|'')*'|needs\.journeys\.outputs\.(?:pr|full|selected)|(?:github|inputs)\.[a-z_]+|format|fromJSON|startsWith|contains|==|!=|!|&&|\|\||[(),])/gy;
     const tokens = [];
     while (lexer.lastIndex < source.length) {
       const token = lexer.exec(source);
@@ -53,6 +53,14 @@ function evaluateWorkflowExpression(template, context) {
         expect(')');
         return () => value().toLowerCase().startsWith(prefix().toLowerCase());
       }
+      if (token === 'contains') {
+        expect('(');
+        const values = or();
+        expect(',');
+        const value = or();
+        expect(')');
+        return () => values().includes(value());
+      }
       if (token === 'fromJSON') {
         expect('(');
         const value = or();
@@ -72,7 +80,7 @@ function evaluateWorkflowExpression(template, context) {
       }
       assert.ok(token, 'missing concurrency operand');
       if (token.startsWith("'")) return () => token.slice(1, -1).replace(/''/g, "'");
-      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+|needs\.journeys\.outputs\.(pr|full))$/);
+      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+|needs\.journeys\.outputs\.(pr|full|selected))$/);
       return () => token.split('.').reduce((value, key) => value?.[key], context) ?? '';
     }
     function equality() {
@@ -123,14 +131,14 @@ test('IGSH-1113 the pull-request gate cannot be filtered out for any PR', () => 
   const gate = read('.github/workflows/click-through.yml');
   assert.match(gate, /^  pull_request:\r?\n  workflow_dispatch:/m);
   assert.doesNotMatch(gate, /^    (?:branches(?:-ignore)?|paths|paths-ignore|types):|^      - ['"]?!/m);
-  assert.match(gate, /git diff --name-only[^\n]*-- src build\.zig/);
+  assert.match(gate, /touchedJourneys/);
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
 test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   assert.match(workflow, /^  workflow_call:/m);
   assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m, 'only click-through and release dispatch the desktop matrix');
-  assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
+  assert.match(read('.github/workflows/release.yml'), /journeys:[\s\S]*?feature: all/);
 });
 
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
@@ -138,7 +146,7 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
   assert.ok(concurrency, 'workflow concurrency block exists');
   const group = concurrency[1].match(/^  group: (.+?)\r?$/m);
   assert.ok(group, 'workflow concurrency group exists');
-  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}\r?$/m, 'a running master verify finishes; only the pending run is replaced');
+  assert.match(concurrency[1], /^  cancel-in-progress: true\r?$/m, 'superseded work is cancelled');
   assert.doesNotMatch(concurrency[1], /refs\/heads\/master/, 'a master push never cancels the master verify already running');
   assert.match(workflow, /^    strategy:\n      fail-fast: false\n      max-parallel: 6\n      matrix:\n/m, 'full journey matrix leaves Windows slots for release and PR checks');
   const context = (event, feature, tag = '', attempt = '1') => ({
@@ -155,7 +163,7 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
       current.inputs = inputs;
       const gate = event === 'push' && inputs ? `-gate-${current.github.sha}` : '';
       const feature = inputs ? `-feature-${inputs.feature}` : '';
-      assert.equal(evaluateWorkflowExpression(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}${feature}`);
+      assert.equal(evaluateWorkflowExpression(group[1], current), `verify-desktop-${current.github.workflow}-${current.github.ref}${gate}${feature}`);
     }
     const first = evaluateWorkflowExpression(group[1], context(event));
     const rerun = evaluateWorkflowExpression(group[1], context(event, undefined, '', '2'));
@@ -169,17 +177,19 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
 
 test('IGSH-1028 reusable PR journeys select their requested feature and cannot cancel each other', () => {
   const group = workflow.match(/^  group: (.+)$/m)[1];
-  const matrix = workflow.match(/^        feature: (.+)$/m)[1];
-  const discovered = featureMatrix(workflow);
-  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature }, needs: { journeys: { outputs: { pr: JSON.stringify(discovered.pr), full: JSON.stringify(discovered.full) } } } });
+  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature } });
   assert.notEqual(evaluateWorkflowExpression(group, context('pane-layout')), evaluateWorkflowExpression(group, context('browser-pane-stuck')));
-  for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.equal(evaluateWorkflowExpression(matrix, context(feature)), feature);
-  assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), discovered.pr.join(','));
-  assert.equal(evaluateWorkflowExpression(matrix, context('all')), discovered.pr.join(','));
-  const dictation = context(undefined);
-  dictation.github.event_name = 'push';
-  dictation.github.ref = 'refs/heads/ceo/IGSH-1072';
-  assert.equal(evaluateWorkflowExpression(matrix, dictation), 'chat-dictation');
+  featureMatrix(workflow);
+  const script = workflow.split('      - id: matrix\n')[1].split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^          /gm, '');
+  const run = (feature, features = '', event = 'pull_request') => {
+    const output = require('node:child_process').execFileSync(process.execPath, ['-'], { cwd: root, input: script, encoding: 'utf8', env: { ...process.env, FEATURE: feature, FEATURES: features, EVENT: event, APP_REVISION: '' } });
+    return Object.fromEntries(output.trim().split('\n').map(line => [line.slice(0, line.indexOf('=')), JSON.parse(line.slice(line.indexOf('=') + 1))]));
+  };
+  for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.deepEqual(run(feature).selected, [feature]);
+  assert.deepEqual(run('').selected, featureMatrix(workflow).pr);
+  assert.deepEqual(run('all').selected, featureMatrix(workflow).available);
+  assert.deepEqual(run('', '["chat-newest","title-bar"]').selected, ['chat-newest', 'title-bar']);
+  assert.equal(run('', '["title-bar"]').matrix.length, 6);
 });
 
 function allowsSessionOpen(text) {
@@ -212,7 +222,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
-  assert.match(read('.github/workflows/click-through.yml'), /git diff --name-only[^\n]*tools/);
+  assert.match(read('.github/workflows/click-through.yml'), /touchedJourneys/);
   assert.throws(() => allowsSessionOpen(workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
 });
 
@@ -1507,11 +1517,12 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.match(chat, /foreach \(\$mode in @\('typed', 'suggestion'\)\)/);
   assert.match(chat, /Invoke-JourneyCommand 'new cmd shell' -Confirm {[\s\S]*?Type-Text \('"' \+ \$localAgent/);
   assert.match(chat, /\$inbox = Read-Inbox[\s\S]*?\$_.sid -eq \$localState.tabs\[\$localTab\].shell_id[\s\S]*?\$_.ag -eq 1/);
-  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+)\s*\n/);
+  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+|\$agentDetectionSeconds)\s*\n/);
   const normalNamePoll = read('src/power.zig').match(/\.normal\s*=>\s*setCoalescableTimerInterval\(hwnd, TIMER_NAME_POLL, ([\d_]+)\)/);
   assert.ok(detectionWait, 'local Claude detection wait must specify -Seconds');
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
-  assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
+  const detectionSeconds = detectionWait[1].startsWith('$') ? Number(chat.match(/\$agentDetectionSeconds\s*=\s*(\d+)/)?.[1]) : Number(detectionWait[1]);
+  assert.ok(detectionSeconds > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
   const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
@@ -2255,19 +2266,29 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
   assert.throws(() => assert.match(control.replace("'chat-send-latency'", ''), /ValidateSet\([^\n)]*'chat-send-latency'/));
 });
 
+test('SOFT-2581 shared builds enable Rooms for single and batched journey selection', () => {
+  const build = workflow.split('      - name: Build the Windows app once for this push\n')[1].split('      - uses:')[0];
+  const command = build.match(/        run: (.+)/)[1];
+  for (const selected of [['rooms'], ['appearance', 'rooms'], ['appearance']]) {
+    const context = { inputs: {}, needs: { journeys: { outputs: { selected: JSON.stringify(selected) } } } };
+    const roomsOption = command.match(/\$\{\{ [^}]*'-Drooms-preview=true'[^}]*\}\}/)?.[0] || '';
+    assert.equal(evaluateWorkflowExpression(roomsOption, context).includes('-Drooms-preview=true'), selected.includes('rooms'));
+  }
+});
+
 test('IGSH-1108 workflow consumes feature-owned matrices without changing required journey names', () => {
   const features = featureMatrix(workflow);
   assert.match(workflow, /  journeys:\n    if: inputs.feature != 'chat-sync-audit'/);
   assert.match(workflow, /  verify:\n    needs: \[journeys, build-app\]/);
   assert.match(workflow, /pr: \$\{\{ steps.features.outputs.pr \}\}/);
-  assert.match(workflow, /full: \$\{\{ steps.features.outputs.full \}\}/);
+  assert.match(workflow, /full: \$\{\{ steps.features.outputs.available \}\}/);
   assert.match(workflow, /- id: features\n        run: node tools\/verify-features.cjs/);
-  assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\(needs.journeys.outputs.pr\)/);
-  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /process.env.EVENT === 'pull_request'/);
+  assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
-  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ inputs\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
+  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ matrix\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
   assert.ok(proofOnly.includes('chat-model') && proofOnly.includes('chat-working-live'));
   assert.deepEqual(features.available.filter(feature => !proofOnly.includes(feature)), registered.filter(feature => !proofOnly.includes(feature)));
   assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);
@@ -2316,7 +2337,7 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
     const split = line.indexOf('=');
     return [line.slice(0, split), JSON.parse(line.slice(split + 1))];
   }));
-  assert.deepEqual(outputs, { full: features.full, pr: features.pr });
+  assert.deepEqual(outputs, { full: features.full, pr: features.pr, available: features.available });
   assert.deepEqual(JSON.parse(cli('browser-switch-speed').stdout), ['browser-switch-speed']);
   for (const feature of ['unknown', '../appearance', 'ssh-tab-reconnect', 'README', 'chat-sync-audit']) {
     const result = cli(feature);
@@ -2332,8 +2353,8 @@ test('IGSH-1033 shared tracked quarantine protects rollback and release executio
   assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \|\| inputs.app_revision != '' \}\}/);
   assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
-  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
-  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  assert.match(workflow, /full: \$\{\{ steps.features.outputs.available \}\}/);
   for (const entry of Object.values(policy.quarantined)) {
     assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
     assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);

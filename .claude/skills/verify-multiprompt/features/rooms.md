@@ -1,5 +1,7 @@
 # Rooms
 
+Source files: src/room*, src/roster*, src/main.zig, src/command_palette.zig, src/shortcuts.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/rooms*
+
 This is a verification-first audit for SOFT-2581. It records broken and confusing actions for the wireframe and rebuild. A completed audit does not mean Rooms works.
 
 ## Sub-features

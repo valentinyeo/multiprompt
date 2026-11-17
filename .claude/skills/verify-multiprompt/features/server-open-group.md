@@ -1,5 +1,7 @@
 # Server runner group
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-server-open-group.ps1, tools/mp-layout.mjs
+
 Import one account shell tab into a named group, then import that same tab again.
 
 ## Sub-features

@@ -99,7 +99,7 @@ test('manual and nightly reaction proof uses the shared journey', () => {
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   assert.match(verify, /workflow_call:\n    inputs:\n(?:      [\s\S]*?)      chat_reactions_proof:/);
-  assert.match(verify, /workflow_call:\n    inputs:\n      revision:\n        required: false\n        type: string/);
+  assert.match(verify, /workflow_call:\n    inputs:\n[\s\S]*?      revision:\n        required: false\n        type: string/);
   verifyManualNightly(verify);
   const expression = verify.match(/CHAT_REACTIONS_PROOF: \$\{\{ (.+) \}\}/)?.[1];
   assert.ok(expression, 'reaction proof routing exists');
@@ -116,19 +116,19 @@ test('manual and nightly verification execute native appearance', async () => {
   const { discoverFeatures } = await import('./verify-features.cjs');
   const features = discoverFeatures();
   assert.ok(features.full.includes('appearance'));
-  const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)?.[1];
-  assert.ok(expression);
-  const matrix = (event, feature, source = expression) => JSON.parse(JSON.stringify(vm.runInNewContext(source, {
-    inputs: { feature }, github: { event_name: event, ref: 'refs/heads/master' },
-    needs: { journeys: { outputs: { full: JSON.stringify(features.full), pr: JSON.stringify(features.pr) } } },
-    fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value), startsWith: (value, prefix) => value.startsWith(prefix),
-  })));
-  assert.deepEqual(matrix('schedule', ''), ['appearance']);
+  assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  const script = verify.split('      - id: matrix\n')[1].split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^          /gm, '');
+  const { execFileSync } = await import('node:child_process');
+  const matrix = (event, feature, source = script) => {
+    const output = execFileSync(process.execPath, ['-'], { cwd: new URL('..', import.meta.url), input: source, encoding: 'utf8', env: { ...process.env, EVENT: event, FEATURE: feature, FEATURES: '', APP_REVISION: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    return JSON.parse(output.split('\n').find(line => line.startsWith('selected=')).slice(9));
+  };
+  assert.deepEqual(matrix('schedule', ''), features.available);
   assert.deepEqual(matrix('workflow_dispatch', 'appearance'), ['appearance']);
   assert.ok(matrix('workflow_dispatch', 'all').includes('appearance'));
-  const oldFallback = expression.replace("inputs.feature || 'appearance'", 'inputs.feature');
-  assert.notEqual(oldFallback, expression);
-  assert.notDeepEqual(matrix('schedule', '', oldFallback), ['appearance']);
+  const broken = script.replace(': available;', ': [];');
+  assert.notEqual(broken, script);
+  assert.throws(() => matrix('schedule', '', broken));
   assert.match(verify, /runs-on: windows-latest/);
   assert.match(verify, /FEATURE: \$\{\{ matrix.feature \}\}/);
   const driver = verify.split('      - name: Launch Doctor Drive Evidence Cleanup\n')[1]?.split(/\n      - /)[0];

@@ -129,6 +129,10 @@ on:
         type: string
   workflow_call:
     inputs:
+      features:
+        description: JSON array of mapped journeys sharing one application build
+        required: false
+        type: string
       revision:
         required: false
         type: string
@@ -176,7 +180,7 @@ on:
         default: false
         type: boolean
       feature:
-        required: true
+        required: false
         type: string
       tag:
         required: false
@@ -204,17 +208,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}${{ inputs.app_revision && format('-base-{0}', inputs.app_revision) || '' }}${{ inputs.revision && format('-rev-{0}', inputs.revision) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: verify-desktop-${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}${{ inputs.features && format('-features-{0}', inputs.app_revision || 'head') || '' }}${{ inputs.app_revision && format('-base-{0}', inputs.app_revision) || '' }}${{ inputs.revision && format('-rev-{0}', inputs.revision) || '' }}
+  cancel-in-progress: true
 
 jobs:
   journeys:
     if: inputs.feature != 'chat-sync-audit'
     runs-on: ubuntu-latest
     outputs:
-      full: ${{ steps.features.outputs.full }}
+      full: ${{ steps.features.outputs.available }}
       quarantined: ${{ steps.policy.outputs.quarantined }}
       pr: ${{ steps.features.outputs.pr }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      selected: ${{ steps.matrix.outputs.selected }}
+      builds: ${{ steps.matrix.outputs.builds }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -228,6 +235,22 @@ jobs:
         run: node --test tools/verify-multiprompt.test.js
       - id: features
         run: node tools/verify-features.cjs
+      - id: matrix
+        env:
+          FEATURES: ${{ inputs.features }}
+          FEATURE: ${{ inputs.feature }}
+          APP_REVISION: ${{ inputs.app_revision }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const { discoverFeatures, journeyMatrix } = require('./tools/verify-features.cjs');
+          const { available, pr } = discoverFeatures();
+          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
+          if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
+          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))])}`);
+          console.log(`selected=${JSON.stringify(selected)}`);
+          console.log(`matrix=${JSON.stringify(journeyMatrix(selected, process.env.APP_REVISION))}`);
+          NODE
       - id: policy
         run: |
           node - <<'NODE' >> "$GITHUB_OUTPUT"
@@ -235,6 +258,10 @@ jobs:
           console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
           NODE
   build-app:
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(needs.journeys.outputs.builds) }}
     outputs:
       version: ${{ steps.identity.outputs.version }}
     needs: journeys
@@ -248,12 +275,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: inputs.tag == ''
         with:
-          ref: ${{ inputs.revision || github.sha }}
+          ref: ${{ inputs.app_revision || inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Restore Zig toolchain
         if: inputs.tag == ''
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
@@ -270,6 +297,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Cache Zig compilation
+        if: inputs.tag == ''
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ~/AppData/Local/zig
+          key: ${{ runner.os }}-verify-zig-0.16.0-${{ matrix.profile }}-${{ inputs.app_revision || inputs.revision || github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-verify-zig-0.16.0-
       - name: Identify the shared executable revision
         id: identity
         if: inputs.tag == ''
@@ -281,23 +318,22 @@ jobs:
           "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: inputs.tag == '' && matrix.profile == 'chat-still' && inputs.app_revision != ''
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          path: probe-source
+          persist-credentials: false
       - name: Add the read-only chat measurement probe to the verification build
-        if: inputs.tag == '' && inputs.feature == 'chat-still'
-        run: python tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
+        if: inputs.tag == '' && matrix.profile == 'chat-still'
+        run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
-        run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ inputs.feature == 'rooms' && '-Drooms-preview=true' || '' }}
+        run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ contains(fromJSON(needs.journeys.outputs.selected), 'rooms') && '-Drooms-preview=true' || '' }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: inputs.tag == '' && inputs.feature != 'chat-still'
+        if: inputs.tag == ''
         with:
-          name: verify-app${{ inputs.app_revision && '-compare' || '' }}
-          path: zig-out/bin/
-          retention-days: 1
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: inputs.tag == '' && inputs.feature == 'chat-still'
-        with:
-          name: verify-app-chat-still${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -383,17 +419,14 @@ jobs:
     needs: [journeys, build-app]
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
-    name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
+    name: ${{ matrix.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || matrix.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
     continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) || inputs.app_revision != '' }}
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ inputs.feature && inputs.feature != 'all' && fromJSON(format('["{0}"]', inputs.feature)) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature || 'appearance')) }}
-        app-revision: ${{ inputs.app_revision && fromJSON(format('["{0}"]', inputs.app_revision)) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
-        caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || inputs.feature == 'bot-photo' && fromJSON('[96,144]') || fromJSON('[96]') }}
-        caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
+        include: ${{ fromJSON(needs.journeys.outputs.matrix) }}
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
@@ -401,9 +434,9 @@ jobs:
       CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_RECALL_PROOF: ${{ inputs.chat_recall_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
-      CHAT_INSTANT_PROOF: ${{ inputs.feature == 'chat-instant' && '1' || '' }}
-      CHAT_MODEL_PROOF: ${{ inputs.feature == 'chat-model' && '1' || '' }}
-      CHAT_WORKING_LIVE_PROOF: ${{ inputs.feature == 'chat-working-live' && '1' || '' }}
+      CHAT_INSTANT_PROOF: ${{ matrix.feature == 'chat-instant' && '1' || '' }}
+      CHAT_MODEL_PROOF: ${{ matrix.feature == 'chat-model' && '1' || '' }}
+      CHAT_WORKING_LIVE_PROOF: ${{ matrix.feature == 'chat-working-live' && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
@@ -420,7 +453,7 @@ jobs:
       CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
       CHAT_HAX_PROOF: ${{ inputs.hax_sessions_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
-      CHAT_STARTUP_FAILURE_PROOF: ${{ inputs.feature == 'chat-startup-failure' && '1' || '' }}
+      CHAT_STARTUP_FAILURE_PROOF: ${{ matrix.feature == 'chat-startup-failure' && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
@@ -543,14 +576,21 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-chat-delivery/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
           }
+      - name: Cache Zig toolchain
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: env.RELEASE_TAG == '' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'permission-rows' || env.USAGE_PACE_PROOF == '1'
         shell: pwsh
         run: |
-          $zip = "$env:RUNNER_TEMP/zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          if (-not (Test-Path "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe")) {
+            $zip = "$env:RUNNER_TEMP/zig.zip"
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+            if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+            Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          }
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Test maximized startup decision
         if: env.FEATURE == 'appearance' && env.RELEASE_TAG == ''
@@ -585,20 +625,17 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Download the shared Windows app build
-        if: env.RELEASE_TAG == '' && matrix.app-revision == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1' && env.CHAT_MODEL_PROOF != '1'
+        if: env.RELEASE_TAG == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}
+          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin
-      - name: Add the same measurement probe to the independent chat application
-        if: env.FEATURE == 'chat-still' && matrix.app-revision != ''
-        run: python tools/chat-still/instrument.py app-source app-source/zig-out/bin/chat-still-instrumentation.json
       - name: Build branch executable
-        if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1' || env.CHAT_MODEL_PROOF == '1')
-        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} ${{ env.FEATURE == 'rooms' && '-Drooms-preview=true' || '' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
+        if: env.RELEASE_TAG == '' && (env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')
+        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
       - name: Stage the independently built application
-        if: matrix.app-revision != ''
+        if: matrix.app-revision != '' && (env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force zig-out/bin | Out-Null
@@ -1124,12 +1161,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ matrix.feature }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls' || inputs.feature == 'bot-photo') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
+          name: verify-${{ matrix.feature }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls' || matrix.feature == 'bot-photo') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
   tmux-identity-semantics:
-    if: inputs.feature == 'tmux-binding'
-    needs: verify
+    if: contains(fromJSON(needs.journeys.outputs.selected), 'tmux-binding')
+    needs: [journeys, verify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
