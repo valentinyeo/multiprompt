@@ -16,10 +16,12 @@ function Wait-Control([scriptblock]$Check) {
 $stage = 'create'
 try {
     [NativeConsoleControl]::Create()
+    $handles = [NativeConsoleControl]::Handles()
+    @{pid=$PID; hwnd=$handles[0]; consolePid=$handles[2]} | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/doctor.json"
     $stage = 'adopt-owned-console'
     Wait-Control { [NativeConsoleControl]::Attach() }
     $handles = [NativeConsoleControl]::Handles()
-    @{pid=$PID; hwnd=$handles[0]; console=$handles[1]} | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/doctor.json"
+    @{pid=$PID; hwnd=$handles[0]; console=$handles[1]; consolePid=$handles[2]} | ConvertTo-Json | Set-Content -Encoding UTF8 "$Evidence/doctor.json"
     $stage = 'observe-chat'
     Wait-Control { (Get-Content "$Evidence/windows/windows.tsv" -Raw) -match 'window\tshow\t[^\r\n]+\tZigShellChatTranscript\t' }
     $stage = 'observe-flash'
@@ -39,6 +41,6 @@ try {
 }
 & node "$PSScriptRoot/native-console.test.cjs" $Evidence
 $result = Get-Content "$Evidence/native-console.json" -Raw | ConvertFrom-Json
-$caught = @($result.flashes | Where-Object { $_.console.hwnd -eq $handles[1] -and $_.console.parent -eq $handles[0] -and $_.phase -eq 'native-child-console-positive-control' })
+$caught = @($result.flashes | Where-Object { $_.console.hwnd -eq $handles[1] -and $_.console.pid -eq $handles[2] -and $_.console.parent -eq $handles[0] -and $_.phase -eq 'native-child-console-positive-control' })
 if ($LASTEXITCODE -ne 1 -or $result.status -ne 'failed' -or $caught.Count -eq 0) { throw 'Observer missed a real native child-console flash' }
 Write-Output 'Native console hook positive control passed'

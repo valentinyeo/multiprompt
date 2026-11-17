@@ -147,7 +147,8 @@ print(json.dumps(actual))
 
 test('the hosted replay completes the actual mixed steady and real-size provider protocol', () => {
   const { spawnSync } = require('node:child_process');
-  const script = `import ast, hashlib, importlib.util, json, re, sys, tempfile, threading, time
+  const script = `import ast, hashlib, importlib.util, json, os, re, sys, tempfile, threading, time, uuid
+from datetime import datetime
 from pathlib import Path
 root = Path(sys.argv[1])
 spec = importlib.util.spec_from_file_location('working', root / 'working-host.py')
@@ -161,22 +162,26 @@ stages = []
 namespace = {key: lambda *a, **k: None for key in ('host_dispatch_switch', 'host_owned', 'host_deliver', 'start_message_worker', 'serve_request', 'host_event')}
 reader = ast.parse((root.parents[1] / 'src/chat_history_reader.py').read_text(encoding='utf-8'))
 reader = ast.parse(ast.literal_eval(reader.body[0].value))
-accept = next(node for node in reader.body if isinstance(node, ast.FunctionDef) and node.name == 'host_accept')
-rows = []
-dependencies = dict(hashlib=hashlib, HOST_ADAPTERS={'claude': dict(provenance='test')}, host_written=lambda state: {}, host_history_append=lambda provider, sid, session, row: rows.append(row), host_apply=lambda *args: True, host_log=lambda *args: None, host_state_write=lambda *args: None)
-exec(compile(ast.Module(body=[accept], type_ignores=[]), '<production-host-accept>', 'exec'), dependencies)
-namespace['host_accept'] = dependencies['host_accept']
+names = ('host_read', 'host_write', 'host_state_write', 'host_written', 'host_session_state', 'host_history_append', 'host_accept')
+functions = [next(node for node in reader.body if isinstance(node, ast.FunctionDef) and node.name == name) for name in names]
 def record(file, **data):
     stages.append(data['stage'])
     if data['stage'] == 'real-size-complete': complete.set()
 original_sleep = time.sleep
 with tempfile.TemporaryDirectory() as directory:
     state = Path(directory)
+    paths = dict(history=state / 'host-history.jsonl', state=state / 'host-state.json')
+    dependencies = dict(hashlib=hashlib, json=json, os=os, uuid=uuid, datetime=datetime, HOST_ADAPTERS={'claude': dict(provenance='test')}, host_paths=lambda *args: paths, host_apply=lambda *args: True, host_log=lambda *args: None)
+    exec(compile(ast.Module(body=functions, type_ignores=[]), '<production-host-archive>', 'exec'), dependencies)
+    namespace.update({name: dependencies[name] for name in names})
+    dependencies['host_write'](paths['state'], dict(display_history=True, marker='retained'))
     for gate in gates: (state / gate).touch()
     working.time.sleep = lambda seconds: original_sleep(min(seconds, 0.001))
     working.install(namespace, state, record, steady=True, real_size=True)
     namespace['host_deliver']('claude', working.SID, 'id', 'attempt1', 1, 'reader send')
-    assert rows == [dict(role='user', text='reader send', id='id')], rows
+    rows = [json.loads(line)['row'] for line in paths['history'].read_text(encoding='utf-8').splitlines()] if paths['history'].exists() else []
+    assert [{key: row[key] for key in ('role', 'text', 'id')} for row in rows] == [dict(role='user', text='reader send', id='id')], rows
+    assert dependencies['host_read'](paths['state'])['marker'] == 'retained'
     assert complete.wait(2), dict(gates=gates, stages=stages)
     assert stages.count('streaming-delta') == 7
     assert stages.count('reading-stream-delta') == 8

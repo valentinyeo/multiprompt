@@ -90,7 +90,7 @@ def install(namespace, root, record, steady=False, real_size=False):
         if not matches(provider, sid):
             return previous_deliver(provider, sid, token, attempt, epoch, text)
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
-        session = {'turn': 'standin-turn', 'state': {},
+        session = {'turn': 'standin-turn', 'state': namespace['host_session_state'](provider, sid),
                    'sends': [dict(id=token, attempt=attempt, text=text, accepted=False)]}
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))

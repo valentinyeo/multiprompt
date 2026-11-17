@@ -27,7 +27,7 @@ public static class NativeConsoleControl {
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr data);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetModuleHandle(string module);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcess(string app, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInfo process);
     [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process, uint code);
@@ -37,12 +37,14 @@ public static class NativeConsoleControl {
     static readonly WindowProc proc = DefWindowProc;
     static readonly string title = "native-console-control-" + Guid.NewGuid().ToString("N");
     static IntPtr main, console, process;
+    static uint processId;
     public static void Create() {
         string exe = Environment.GetEnvironmentVariable("ComSpec");
         var startup = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfo)), Title = title, Flags = 1, Show = 0 };
         ProcessInfo child;
         if (!CreateProcess(exe, new StringBuilder("\"" + exe + "\" /d /q /k title " + title), IntPtr.Zero, IntPtr.Zero, false, 0x10, IntPtr.Zero, null, ref startup, out child)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         process = child.Process;
+        processId = child.Pid;
         CloseHandle(child.Thread);
         foreach (string name in new[] { "ZigShell", "ZigShellChatTranscript" }) {
             var cls = new WindowClass { Proc = proc, Name = name, Instance = GetModuleHandle(null) };
@@ -57,10 +59,10 @@ public static class NativeConsoleControl {
     public static bool Attach() {
         EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
             var name = new StringBuilder(256);
-            var text = new StringBuilder(256);
+            uint owner;
+            GetWindowThreadProcessId(hwnd, out owner);
             GetClassName(hwnd, name, name.Capacity);
-            GetWindowText(hwnd, text, text.Capacity);
-            if (name.ToString() == "ConsoleWindowClass" && text.ToString() == title) { console = hwnd; return false; }
+            if (name.ToString() == "ConsoleWindowClass" && owner == processId) { console = hwnd; return false; }
             return true;
         }, IntPtr.Zero);
         if (console == IntPtr.Zero) return false;
@@ -70,7 +72,7 @@ public static class NativeConsoleControl {
         if (GetParent(console) != main || !MoveWindow(console, 0, 0, 800, 600, false)) throw new Exception("Positive control console adoption failed");
         return true;
     }
-    public static long[] Handles() { return new[] { main.ToInt64(), console.ToInt64() }; }
+    public static long[] Handles() { return new[] { main.ToInt64(), console.ToInt64(), (long)processId }; }
     public static void Flash() {
         if (!SetWindowPos(console, IntPtr.Zero, 0, 0, 0, 0, 0x13)) throw new Exception("Positive control console Z-order failed");
         ShowWindow(console, 4);
