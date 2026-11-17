@@ -12,7 +12,7 @@ Set-Acl -LiteralPath $keyDir -AclObject $acl
 $key = Join-Path $keyDir 'multibot_ed25519'
 $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
 $env:SERVER_CHAT_KEY = $key
-python -c 'import os,subprocess; subprocess.run([os.environ["SystemRoot"]+"/System32/OpenSSH/ssh-keygen.exe","-q","-t","ed25519","-N","","-f",os.environ["SERVER_CHAT_KEY"]],check=True)'
+python -c "import os,subprocess; subprocess.run([os.environ['SystemRoot']+'/System32/OpenSSH/ssh-keygen.exe','-q','-t','ed25519','-N','','-f',os.environ['SERVER_CHAT_KEY']],check=True)"
 if ($LASTEXITCODE -ne 0) { throw 'Per-run SSH key generation failed' }
 $fileAcl = [Security.AccessControl.FileSecurity]::new()
 $fileAcl.SetOwner($user)
