@@ -1,6 +1,7 @@
 # Runner-owned server chat
 
 Verify on: push, pull_request
+Source files: src/chat*, src/tmux*, src/message*, src/command_palette.zig, src/main.zig, build.zig, build.zig.zon, tools/verify-server-chat/*, .claude/skills/verify-multiprompt/seed-profile.py
 
 ## Sub-features
 

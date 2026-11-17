@@ -16,6 +16,10 @@ class ProviderTest(unittest.TestCase):
         self.assertIn('server-chat', available, 'Windows verification must offer the real SSH server journey')
         self.assertIn('server-chat-fresh-start', available, 'Windows verification must offer the ended-owner replacement journey')
 
+    def test_server_fixture_selects_its_three_journeys(self):
+        selected = json.loads(subprocess.check_output(['node', '-e', 'console.log(JSON.stringify(require("./tools/touched-journeys.cjs").touchedJourneys(["tools/verify-server-chat/snapshot.py"])))'], cwd=ROOT, text=True))
+        self.assertEqual(selected, dict(features=['server-chat', 'server-chat-busy', 'server-chat-fresh-start'], unmapped=[]))
+
     def test_round_trip_and_clear_reach_the_provider_once(self):
         with tempfile.TemporaryDirectory() as home:
             program = ROOT / 'tools/verify-server-chat/provider.py'
