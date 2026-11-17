@@ -1,0 +1,74 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { featureDirectory } from './check-feature-coverage.mjs';
+
+const skillDirectory = '.claude/skills/verify-multiprompt/';
+const branchPrefix = 'automation/verification-maintenance-';
+
+export function validateAudit(audit, features, repo) {
+  if (!audit || !['clean', 'changed', 'blocked'].includes(audit.outcome) || !audit.summary?.trim()) throw new Error('Maintenance needs a clean, changed or blocked outcome and summary');
+  if (audit.outcome === 'blocked') return;
+  if (!Array.isArray(audit.coverage)) throw new Error('Maintenance needs source and live coverage for every feature');
+  const remaining = new Set(features);
+  for (const entry of audit.coverage) {
+    if (!remaining.delete(entry.feature)) throw new Error(`Unknown or duplicate feature: ${entry.feature}`);
+    const prefix = `https://github.com/${repo}/actions/runs/`;
+    if (!entry.run_url?.startsWith(prefix) || !/^\d+$/.test(entry.run_url.slice(prefix.length)) || !entry.source?.includes('src/') || !entry.artifact?.trim() || !entry.evidence?.trim()) throw new Error(`Missing source or live evidence: ${entry.feature}`);
+  }
+  if (remaining.size) throw new Error(`Incomplete live pass: ${[...remaining].join(', ')}`);
+}
+
+export function validateChanges(files) {
+  if (files.some(file => !file.startsWith(skillDirectory) || file.slice(skillDirectory.length).split('/').includes('..'))) throw new Error('Maintenance may only change its own verification skill');
+  if (files.some(file => !file.endsWith('.md'))) throw new Error('Executable corrections need a live run of the changed driver; master-only evidence cannot prove them');
+}
+
+export function main(env = process.env) {
+  const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+  const gh = args => run('gh', args);
+  const git = args => run('git', args);
+  const audit = JSON.parse(env.AUDIT);
+  const features = fs.readdirSync(featureDirectory).filter(file => file.endsWith('.md') && file !== 'README.md').map(file => `${featureDirectory}/${file}`);
+  validateAudit(audit, features, env.REPO);
+  fs.writeFileSync(path.join(env.RUNNER_TEMP, 'verification-maintenance.json'), JSON.stringify(audit, null, 2) + '\n');
+  fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${audit.outcome}: ${audit.summary}\n`);
+  if (audit.outcome === 'blocked') throw new Error('Maintenance blocked; no PR was opened');
+  const head = git(['rev-parse', 'HEAD']);
+  const checked = new Set();
+  for (const entry of audit.coverage) {
+    const id = entry.run_url.split('/').at(-1);
+    if (!checked.has(id)) {
+      const result = JSON.parse(gh(['api', `repos/${env.REPO}/actions/runs/${id}`]));
+      if (result.conclusion !== 'success' || result.head_sha !== head || !result.path?.startsWith('.github/workflows/')) throw new Error(`Live run must pass at the audited revision: ${entry.run_url}`);
+      checked.add(id);
+    }
+    const artifacts = JSON.parse(gh(['api', `repos/${env.REPO}/actions/runs/${id}/artifacts?per_page=100`]));
+    if (!artifacts.artifacts.some(artifact => artifact.name === entry.artifact && !artifact.expired)) throw new Error(`Missing live artifact: ${entry.artifact}`);
+  }
+  const changed = git(['diff', '--name-only', 'HEAD', '-z']).split('\0').filter(Boolean);
+  const untracked = git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(file => file && file !== '.pstack-maintenance/');
+  validateChanges([...changed, ...untracked]);
+  if (audit.outcome === 'clean') {
+    if (changed.length || untracked.length) throw new Error('Clean maintenance must not leave corrections');
+    return;
+  }
+  if (!changed.length && !untracked.length) throw new Error('Changed maintenance needs proven corrections');
+  const pending = JSON.parse(gh(['pr', 'list', '--repo', env.REPO, '--state', 'open', '--limit', '100', '--json', 'headRefName']));
+  if (pending.some(pr => pr.headRefName.startsWith(branchPrefix))) throw new Error('A maintenance PR is already open');
+  const branch = `${branchPrefix}${env.GITHUB_RUN_ID}`;
+  git(['switch', '-c', branch]);
+  git(['add', '--', skillDirectory]);
+  git(['-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com', 'commit', '-m', 'SOFT-2567: Correct the verification skill after the weekly live pass']);
+  gh(['auth', 'setup-git']);
+  git(['push', 'origin', `HEAD:refs/heads/${branch}`]);
+  const body = path.join(env.RUNNER_TEMP, 'verification-maintenance-pr.md');
+  fs.writeFileSync(body, `## Why\n\nKeep Multiprompt's feature map accurate through source and live verification.\n\n${audit.summary}\n\n## Proof\n\n${audit.coverage.map(entry => `- ${entry.feature}: ${entry.source}; ${entry.run_url}; ${entry.artifact}; ${entry.evidence}`).join('\n')}\n\nGenerated by the weekly pstack maintain-verification-skill pass. Do not merge without the pstack-verifier verdict.\n`);
+  gh(['pr', 'create', '--repo', env.REPO, '--base', 'master', '--head', branch, '--title', 'SOFT-2567: Correct the verification skill after the weekly live pass', '--body-file', body]);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { main(); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+}

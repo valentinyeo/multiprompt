@@ -33,7 +33,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       revision: ${{ github.event.pull_request.head.sha }}
-      app_revision: 2452e248a2fe8ff78be0b342273b7677dd7c3f52
+      app_revision: 8bbd8d81a0c58bbd40fa44f9e5c91c3d61d39cb7
       feature: chat-position-replay
   candidate:
     uses: ./.github/workflows/verify.yml
@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-chat-position-replay-2452e248a2fe8ff78be0b342273b7677dd7c3f52
+          name: verify-chat-position-replay-8bbd8d81a0c58bbd40fa44f9e5c91c3d61d39cb7
           path: baseline
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
