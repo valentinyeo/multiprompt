@@ -34,6 +34,7 @@ Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/comman
 
 ## Real server journey
 
+- [Server tab after a fresh start](server-chat-fresh-start.md): real palette context reset, an ended old owner and a live replacement in the same tmux pane. The existing tab must follow and deliver to the replacement.
 - [Busy server chat and Stop](server-chat-busy.md): real SSH, a long seeded chat, ten-minute pending-message observation and a native Stop click. Both reported failures must reproduce on master before any application fix.
 - [Runner-owned server chat](server-chat.md): Windows OpenSSH to an isolated WSL Linux OpenSSH server and real tmux. Opens the chat, sends, sends `/clear`, then sends again; retains desktop video, exact server receipts and runner-only key ACL proof. Paid-provider context erasure remains outside this transport journey.
 

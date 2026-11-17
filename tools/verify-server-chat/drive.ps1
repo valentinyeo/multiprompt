@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [switch]$Busy
+    [switch]$Busy,
+    [switch]$FreshStart
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -14,7 +15,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 $profile = Join-Path $env:RUNNER_TEMP ('server-chat-' + [guid]::NewGuid().ToString('N'))
 $settings = Join-Path $profile 'roaming/ZigShell'
 $actions = [Collections.Generic.List[object]]::new()
-$result = @{ feature = $(if ($Busy) { 'server-chat-busy' } else { 'server-chat' }); status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
+$result = @{ feature = $(if ($Busy) { 'server-chat-busy' } elseif ($FreshStart) { 'server-chat-fresh-start' } else { 'server-chat' }); status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
 $job = $null
 $recorder = $null
 $writer = $null
@@ -65,6 +66,14 @@ function Copy-Chat([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
     Press @(0x1B) 'Escape: return to composer'
     return $text
+}
+function Fresh-Chat {
+    $offset = (Log-Text).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    [void](Wait-For 'palette ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    Type-Text 'chat view fresh start'
+    [void](Wait-For 'fresh start command' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=21 count=\d+ target=6498(?:\s|$)' })
+    Press @(0x0D) 'Enter: fresh start of this chat'
 }
 function Send-Line([string]$Text) {
     $composer = Wait-For 'owned composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
@@ -121,7 +130,7 @@ try {
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
     $scenarios = @(@{ name = 'send'; text = 'windows send proof' })
-    if (-not $Busy) { $scenarios += @(@{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' }) }
+    if (-not $Busy -and -not $FreshStart) { $scenarios += @(@{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' }) }
     foreach ($case in $scenarios) {
         Send-Line $case.text
         [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
@@ -130,6 +139,51 @@ try {
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
+    if ($FreshStart) {
+        $beforeFresh = Server-Snapshot 'fresh-before'
+        Copy-Item "$settings/session.json" "$Evidence/fresh-tab-before.json"
+        Fresh-Chat
+        [void](Wait-For 'fresh context resumed in the same public chat' {
+            $state = Server-Snapshot 'fresh-after'
+            $hostState = @($state.hosts | Where-Object { $_.sid -ceq 'a1b2c3d4-2567-4000-8000-000000002567' -and $_.alive -and -not $_.freshPhase })
+            $state.provider.pid -ne $beforeFresh.provider.pid -and $hostState.Count -eq 1 -and @($state.inputs | Where-Object { $_.text.StartsWith('You are the same chat after a fresh start.') }).Count -eq 1
+        }))
+        $freshText = Copy-Chat 'fresh-copied'
+        if (-not $freshText.Contains('Synthetic chat 00 answer 1199.') -or -not $freshText.Contains('Server received: windows send proof')) { throw 'Fresh start lost the readable history' }
+        Shot 'fresh-after'
+        $result.cases += @{ name = 'fresh-start-rotates'; passed = $true; detail = 'Actual palette Fresh start rotated the native provider process and retained the public tab history' }
+        $actions.Add(@{ input = 'replace ended host through production CLI in the same tmux pane'; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
+        $raw = & $ssh -F "$settings/ssh-key/config" remote-1 "python3 $repo/tools/verify-server-chat/replace-chat.py $repo"
+        if ($LASTEXITCODE -ne 0) { throw 'Replacement chat lifecycle setup failed' }
+        $replacement = ($raw -join "`n") | ConvertFrom-Json
+        Save $replacement "$Evidence/replacement.json"
+        [void](Server-Snapshot 'replacement-before')
+        Fresh-Chat
+        Shot 'replacement-fresh-start'
+        $visible = $false
+        try {
+            [void](Wait-For 'same tab follows the fresh replacement' { (Copy-Chat 'replacement-copied').Contains('Server received: fresh replacement seed') } 30)
+            $visible = $true
+        } catch { $result.replacementViewError = $_.Exception.Message }
+        Send-Line 'after fresh replacement'
+        $received = $false
+        try {
+            [void](Wait-For 'same tab delivers to the replacement' {
+                $state = Server-Snapshot 'replacement-after'
+                $native = @($state.hosts | Where-Object { $_.sid -ceq $replacement.new -and $_.alive })
+                $native.Count -eq 1 -and @($state.inputs | Where-Object { $_.text -ceq 'after fresh replacement' -and $_.sid -ceq $native[0].native_session -and $_.pid -eq $state.provider.pid }).Count -eq 1
+            } 30)
+            [void](Wait-For 'replacement reply is painted' { (Copy-Chat 'replacement-reply-copied').Contains('Server received: after fresh replacement') } 30)
+            $received = $true
+        } catch { $result.replacementSendError = $_.Exception.Message }
+        [void](Server-Snapshot 'replacement-after')
+        Copy-Item "$settings/session.json" "$Evidence/fresh-tab-after.json"
+        if (Test-Path "$settings/chat-outbox.json") { Copy-Item "$settings/chat-outbox.json" "$Evidence/replacement-outbox.json" }
+        Shot 'replacement-after'
+        $result.cases += @{ name = 'replacement-follows'; passed = $visible; detail = 'The unchanged saved tab displays the new live chat in the same tmux pane after its previous host ended' }
+        $result.cases += @{ name = 'replacement-send'; passed = $received; detail = 'One native composer send reaches the replacement provider and paints its reply' }
+        if (-not $visible -or -not $received) { throw 'Tab still points at the old chat after a fresh replacement; inspect the native saved tab, host states, receipts and video' }
+    }
     if ($Busy) {
         Send-Line 'busy server turn'
         [void](Wait-For 'provider is still inside the busy turn' { (Server-Snapshot 'busy-start').provider.busy })

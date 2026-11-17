@@ -483,14 +483,14 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install runner-owned Linux server
-        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy')
+        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start')
         uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
           wsl-version: '1'
           additional-packages: openssh-server tmux python3
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy')
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start')
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -662,11 +662,11 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy') || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
+        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start') || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
         with:
           python-version: '3.12'
       - name: Check the deterministic provider boundary
-        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy')
+        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start')
         run: python tools/verify-server-chat.test.py
       - name: Prepare usage pace SSH boundary
         if: env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1'
@@ -986,7 +986,7 @@ jobs:
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
       - name: Check real server chat evidence
-        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy')
+        if: (env.FEATURE == 'server-chat' || env.FEATURE == 'server-chat-busy' || env.FEATURE == 'server-chat-fresh-start')
         run: node tools/verify-server-chat/check-evidence.cjs evidence
       - name: Save paired session views
         if: success() && steps.desktop-driver.outcome == 'success' && env.CHAT_HAX_PROOF == '1'
