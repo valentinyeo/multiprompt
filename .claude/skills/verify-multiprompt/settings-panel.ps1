@@ -326,8 +326,9 @@ try {
     Wait-Until { -not [VerifyNative]::IsWindowVisible($script:settingsWindow) } 'clicking the dimmed content dismisses Settings'
     Wait-ChatFocus 'Edit' 'settings-outside-focus-restored'
     $result.checks += @{ name = 'settings-outside-dismissal'; passed = $true }
-    Palette 'settings'
-    Press @(0x0D) 'Enter: open Settings from the command palette'
+    Invoke-JourneyCommand 'Settings' -Confirm {
+        Press @(0x0D) 'Enter: open Settings from the command palette'
+    }
     Wait-Until { (Settings-Window) -ne [IntPtr]::Zero } 'Settings opened through its palette entry'
     $script:settingsWindow = Settings-Window
     Snapshot 'settings-palette'

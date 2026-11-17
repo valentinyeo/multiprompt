@@ -1,9 +1,8 @@
 
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'The fresh offline CMD has no signed-in agent or received conversation; the separate native painter proof uses a synthetic envelope without seeding app state' }
-            Palette 'interface'
-            Press @(0x28) 'Down: UI Size: Decrease'
-            Press @(0x28) 'Down: UI Size: Reset'
-            Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            Invoke-JourneyCommand 'UI Size: Reset' -Confirm {
+                Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 } 'saved initial tab before Chat View'
             $baseline = Read-Session
             if ($baseline.PSObject.Properties['ui_scale'] -and $baseline.ui_scale -ne 100) { throw 'Chat View baseline UI size is not 100' }
@@ -61,8 +60,9 @@
                 try {
                     foreach ($mode in @('typed', 'suggestion')) {
                         $beforeLocal = Read-Session
-                        Palette 'new cmd'
-                        Press @(0x0D) 'Enter: create local console for direct-route check'
+                        Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                            Press @(0x0D) 'Enter: create local console for direct-route check'
+                        }
                         Wait-Until {
                             $state = Read-Session
                             @($state.tabs).Count -eq @($beforeLocal.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
@@ -147,7 +147,7 @@
                             Snapshot 'running-claude-shell'
                             foreach ($chat in @($true, $false)) {
                                 $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
-                                Focus-Palette 'switch to terminal' 6305
+                                Invoke-JourneyCommand 'Switch to shell' -SelectOnly
                                 Snapshot $(if ($chat) { 'running-claude-palette-chat' } else { 'running-claude-palette-shell' })
                                 Press @(0x0D) "Enter: $label for the current tab"
                                 & $checkJourney $(if ($chat) { 'palette-chat' } else { 'palette-shell' }) $chat
@@ -378,8 +378,9 @@
             $insideCard = { param($rect, $card) $rect[0] -ge $card[0] -and $rect[1] -ge $card[1] -and $rect[2] -le $card[2] -and $rect[3] -le $card[3] }
             try {
                 $beforeStop = Read-Session
-                Palette 'new cmd'
-                Press @(0x0D) 'Enter: create local console for the in-box Stop check'
+                Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                    Press @(0x0D) 'Enter: create local console for the in-box Stop check'
+                }
                 Wait-Until {
                     $state = Read-Session
                     @($state.tabs).Count -eq @($beforeStop.tabs).Count + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'

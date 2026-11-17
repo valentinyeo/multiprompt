@@ -9,10 +9,9 @@
             $result.checks += $faceCheck
             $result.checks += $edgeCheck
             $result.checks += $painterCheck
-            Palette 'interface'
-            Press @(0x28) 'Down: UI Size: Decrease'
-            Press @(0x28) 'Down: UI Size: Reset'
-            Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            Invoke-JourneyCommand 'UI Size: Reset' -Confirm {
+                Press @(0x0D) 'Enter: persist default UI size before Chat View'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 } 'saved initial tab before Chat View'
             $baseline = Read-Session
             if ($baseline.PSObject.Properties['ui_scale'] -and $baseline.ui_scale -ne 100) { throw 'Chat code font baseline UI size is not 100' }

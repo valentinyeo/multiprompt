@@ -80,7 +80,7 @@ test('IGSH-1507 global Ctrl+K exposes sign-in for the active own-profile tab', (
 test('IGSH-1507 hosted sign-in proof checks the actual Chrome owner with two same-profile panes', () => {
   const control = read('.claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1');
   assert.match(control, /Two distinct managed panes must share the same controlled Chrome process and profile/);
-  assert.match(control, /Focus-Palette 'sign in to google' 7191/);
+  assert.match(control, /Invoke-JourneyCommand 'Sign in to Google in this profile' -Confirm {/);
   assert.match(control, /Get-PaneUserDataDir \$handle/);
   assert.match(control, /\$script:signinWindow\.browser\.commandLine -match/);
   assert.match(control, /Sign-in window is owned by a controlled Chrome process/);

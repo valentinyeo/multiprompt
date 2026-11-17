@@ -56,11 +56,13 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
 }
 
 if ((Read-Session).workspace_count -ne 1) { throw 'Identity round-trip requires one initial workspace' }
-Focus-Palette 'single window' 6207
-Press @(0x0D) 'Enter: leave single-window mode with one workspace'
+Invoke-JourneyCommand 'Single-Window Mode' -Confirm {
+    Press @(0x0D) 'Enter: leave single-window mode with one workspace'
+}
 Wait-Until { $state = Read-Session; $null -ne $state -and -not ($state.PSObject.Properties['single_window'] -and $state.single_window) } 'standalone mode saved'
-Focus-Palette 'single window' 6207
-Press @(0x0D) 'Enter: return to single-window mode'
+Invoke-JourneyCommand 'Single-Window Mode' -Confirm {
+    Press @(0x0D) 'Enter: return to single-window mode'
+}
 Wait-Until {
     $state = Read-Session
     $null -ne $state -and $state.PSObject.Properties['single_window'] -and $state.single_window -and $state.workspace_count -eq 1 -and $state.workspaces[0].wid -ceq 'default'
@@ -137,8 +139,9 @@ Wait-Until { (Get-WorkspaceCard) -eq [IntPtr]::Zero -and (Read-Session).workspac
 $result.checks += @{ name = 'workspace-card-create'; workspacesBefore = $count; workspacesAfter = (Read-Session).workspace_count }
 
 function Rename-DeleteFixture([string]$Name) {
-    Focus-Palette 'rename workspace' 7000
-    Press @(0x0D) 'Enter: rename the current synthetic workspace'
+    Invoke-JourneyCommand 'Rename workspace' -Confirm {
+        Press @(0x0D) 'Enter: rename the current synthetic workspace'
+    }
     Wait-Until { [VerifyNative]::Class([VerifyNative]::GetFocusedWindow($script:window)) -eq 'Edit' } 'workspace rename input focused'
     Press @(0x11, 0x41) 'Ctrl+A: select the whole workspace rename text'
     Type-Text $Name
@@ -155,8 +158,9 @@ function Begin-WorkspaceDelete([string]$Name) {
         if ($rows[$index].name -ceq $Name) { $target = 6400 + $index }
     }
     if ($target -lt 6400) { throw 'Synthetic delete target missing from registry' }
-    Focus-Palette 'delete workspace' 6201
-    Press @(0x0D) 'Enter: open Delete workspace'
+    Invoke-JourneyCommand 'Delete workspace' -Confirm {
+        Press @(0x0D) 'Enter: open Delete workspace'
+    }
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
     $start = ((Get-Content $log -Raw) -join '').Length
     Type-Text $Name
@@ -250,8 +254,9 @@ $archiveName = [string](@($archiveRegistry.windows | Where-Object { $_.id -ceq $
 $archiveTabs = @($archiveBefore.tabs | Where-Object { (Get-SavedTabWorkspace $_) -eq $created })
 if ($archiveId.Length -eq 0 -or $archiveName.Length -eq 0 -or $archiveTabs.Count -eq 0) { throw 'Archive fixture needs a named workspace and a real session' }
 $archiveCount = $archiveBefore.workspace_count
-Focus-Palette 'archive workspace' 6205
-Press @(0x0D) 'Enter: choose workspace to archive'
+Invoke-JourneyCommand 'Archive workspace' -Confirm {
+    Press @(0x0D) 'Enter: choose workspace to archive'
+}
 $archivePickStart = (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Length
 Type-Text $archiveName
 Wait-Until { (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Substring($archivePickStart) -match ('\[palette\] ready chars=' + $archiveName.Length + ' count=2 target=65[0-9]+(?:\r?\n|$)') } 'one archive workspace matches by name'
@@ -274,8 +279,9 @@ $look = [VerifyNative]::MenuLook($card)
 $registry = Get-Content (Join-Path $scratch 'roaming/ZigShell/windows.json') -Raw | ConvertFrom-Json
 if ($look.height -ne (19 + (@($registry.windows | Where-Object { -not ($_.PSObject.Properties['archived'] -and $_.archived) }).Count + 2) * 28)) { throw 'Archived workspace still occupies a card row' }
 Press @(0x1B) 'Escape: close workspace card'
-Focus-Palette 'open workspace' 6200
-Press @(0x0D) 'Enter: open workspace list'
+Invoke-JourneyCommand 'Open workspace' -Confirm {
+    Press @(0x0D) 'Enter: open workspace list'
+}
 $archiveLogStart = (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Length
 Type-Text $archiveName
 Wait-Until {
@@ -295,8 +301,9 @@ Wait-Until {
 Snapshot 'archive-open-list-hidden'
 Press @(0x1B) 'Escape: leave workspace list'
 Press @(0x1B) 'Escape: close palette'
-Focus-Palette 'archived workspaces' 6387
-Press @(0x0D) 'Enter: list archived workspaces'
+Invoke-JourneyCommand 'Archived workspaces' -Confirm {
+    Press @(0x0D) 'Enter: list archived workspaces'
+}
 $archivePickStart = (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Length
 Type-Text $archiveName
 Wait-Until { (Read-SharedText (Join-Path $scratch 'roaming/ZigShell/debug.log')).Substring($archivePickStart) -match ('\[palette\] ready chars=' + $archiveName.Length + ' count=2 target=65[0-9]+(?:\r?\n|$)') } 'archived workspace available to restore'

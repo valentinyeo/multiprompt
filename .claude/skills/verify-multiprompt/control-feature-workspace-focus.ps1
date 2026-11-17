@@ -8,8 +8,9 @@
             $initialTab = $initial.active_tab
             Wait-WorkspaceSurface 0 $initialTab $false
             if ($initial.hide_pills) {
-                Focus-Palette 'workspace switcher' 6213
-                Press @(0x0D) 'Enter: show workspace switcher'
+                Invoke-JourneyCommand 'Show Workspace Switcher' -Confirm {
+                    Press @(0x0D) 'Enter: show workspace switcher'
+                }
             }
             Wait-Until {
                 $state = Read-Session
@@ -17,8 +18,9 @@
             } 'workspace switcher shown and saved'
             Wait-WorkspaceSurface 0 $initialTab $false
             Snapshot 'pills-ready'
-            Focus-Palette 'chat view off everywhere' 6347
-            Press @(0x0D) 'Enter: reset Chat View to shell for the test session'
+            Invoke-JourneyCommand 'Chat View off everywhere' -Confirm {
+                Press @(0x0D) 'Enter: reset Chat View to shell for the test session'
+            }
             Wait-Until {
                 $state = Read-Session
                 $null -ne $state -and -not $state.PSObject.Properties['chat_view_mode'] -and -not $state.tabs[$initialTab].PSObject.Properties['chat_view_lock'] -and
