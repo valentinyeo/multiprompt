@@ -63,6 +63,34 @@ export function assertBadge(frame, users = 1) {
   assert.ok(pill.ink > 8, 'badge glyph must actually be painted');
 }
 
+export function assertNoBadge(frame) {
+  assert.equal(frame.agent.length, 2, 'both original replies remain');
+  assert.equal(frame.user.length, 1, 'no ordinary reaction bubble');
+  assert.equal(frame.dim.length, 0, 'no queued reaction bubble');
+  assert.equal(frame.pill.length, 0, 'no reaction badge remains');
+}
+
+export function assertDoubleClick({ before, added, removed, delivered }, events, observation, cleanup) {
+  assertNoBadge(before);
+  assertBadge(added);
+  assertNoBadge(removed);
+  assertNoBadge(delivered);
+  assert.equal(observation.error, null);
+  for (const stage of ['double-click-added', 'double-click-removed']) {
+    assert.equal(observation[stage].queueCount, 1, 'removing a badge must not enqueue another reaction');
+    assert.equal(observation[stage].composerText, 'draft stays here');
+  }
+  assert.equal(observation.doubleClickDelivered, true);
+  const expected = `👍 to: ${('Same first words ' + 'for this example '.repeat(8)).trim().slice(0, 80)} [mp:6d8e353d25c5fe23]`;
+  const sends = events.filter(e => e.type === 'queue-operation' && e.operation === 'enqueue');
+  assert.equal(sends.length, 1, 'exactly one reaction transport submission');
+  assert.match(sends[0].content, /\n\[mp:[0-9a-f]{16}\]$/);
+  assert.equal(sends[0].content.replace(/\n\[mp:[0-9a-f]{16}\]$/, ''), expected);
+  assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === sends[0].content).length, 1);
+  assert.equal(cleanup.remaining_owned_processes, 0);
+  assert.equal(cleanup.scratch_removed, true);
+}
+
 export function assertFollowup(frame, area) {
   const question = frame.user.at(-1);
   assert.ok(question, 'ordinary follow-up question is visible');
@@ -108,7 +136,24 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify(assertFollowup(inspect(readBmp(path.join(root, 'reactions-followup.bmp')), area), area)));
   } else if (process.argv[3] === '--frame') {
     const name = process.argv[4];
-    assertBadge(inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), json('reactions/area.json')), name === 'fallback' ? 2 : 1);
+    const frame = inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), json('reactions/area.json'));
+    if (['double-click-removed', 'double-click-delivered'].includes(name)) assertNoBadge(frame);
+    else assertBadge(frame, name === 'fallback' ? 2 : 1);
+  } else if (process.argv[3] === '--double-click') {
+    try {
+      const observation = json('reactions/observation.json');
+      assert.equal(observation.error, null);
+      const area = json('reactions/area.json');
+      const stages = { before: 'before', added: 'double-click-added', removed: 'double-click-removed', delivered: 'double-click-delivered' };
+      const frames = Object.fromEntries(Object.entries(stages).map(([key, stage]) => [key, inspect(readBmp(path.join(root, `reactions-${stage}.bmp`)), area)]));
+      const events = fs.readFileSync(path.join(root, 'reactions/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(JSON.parse);
+      assertDoubleClick(frames, events, observation, json('cleanup.json'));
+      fs.writeFileSync(path.join(root, 'double-click-proof.json'), JSON.stringify(frames, null, 2));
+      fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-double-click', status: 'passed', transportCount: 1, checks: ['double-click-add', 'double-click-remove-without-send', 'removed-after-delivery', 'draft-preserved'], cleanup: 'zero owned processes; scratch removed' }, null, 2));
+    } catch (error) {
+      fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-double-click', status: 'failed', error: error.message }, null, 2));
+      throw error;
+    }
   } else {
     try {
       const observation = json('reactions/observation.json');

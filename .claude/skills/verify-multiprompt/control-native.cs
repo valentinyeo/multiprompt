@@ -292,6 +292,7 @@ public static class VerifyNative {
     public static void ResetHangProbe() { lock (probeLock) { probeWindowStarted = System.Diagnostics.Stopwatch.GetTimestamp(); probeMax = 0; } }
     public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
     public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
+    [DllImport("kernel32.dll")] public static extern ulong GetTickCount64();
     public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
         Input[] inputs = new Input[4];
         for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;
@@ -305,7 +306,7 @@ public static class VerifyNative {
         double shown = -1;
         long position = offset;
         string carry = "";
-        while (timer.ElapsedMilliseconds < settleMs) {
+        while (timer.ElapsedMilliseconds < settleMs || (shown >= 0 && timer.Elapsed.TotalMilliseconds < shown + 1000)) {
             if (shown < 0) {
                 using (var stream = new System.IO.FileStream(log, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete)) {
                     if (stream.Length > position) {
@@ -321,7 +322,7 @@ public static class VerifyNative {
             }
             Thread.Sleep(1);
         }
-        return new double[] { shown, HangProbeMax() };
+        return new double[] { shown, HangProbeMax(), timer.Elapsed.TotalMilliseconds - shown };
     }
     public static IntPtr DockedPaneWindow(IntPtr owner) {
         Rect frame;

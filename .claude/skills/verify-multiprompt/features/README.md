@@ -2,6 +2,22 @@
 
 Read the matching feature before dispatching. [Recent changes coverage](../coverage.md) lists ticket gaps and this pass's run results. Each file uses four sections: sub-features, user entry points, driving recipe and gotchas. Baseline file stems are `verify.yml`'s `feature` input; the SSH maps below use the separate reconnect workflow.
 
+## User-facing features
+
+Start with one feature, then pick a named journey. The nine files follow the reference's four-section contract. They describe entry points, not full live coverage.
+
+- [Sidebar sessions](sidebar-sessions.md).
+- [Chat view and composer](chat-and-composer.md).
+- [Command palette](palette.md).
+- [Browser pane](browser-pane.md).
+- [Workspaces and rooms](workspaces-rooms.md).
+- [Shortcuts](shortcuts.md).
+- [Settings and appearance](settings-appearance.md).
+- [Notifications and Inbox](notifications-inbox.md).
+- [Relaunch and update](relaunch-update.md).
+
+Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/command_palette.zig`, and `openwiki/architecture/features.md`. Use `drive.ps1 <feature> <journey>` with the identity/evidence arguments shown in each map. It reuses existing control helpers; no new product journeys are introduced. GitHub `verify.yml -f feature=appearance` and `-f feature=command-palette` now use this entry point and retain video. Other workflow routes remain in the [migration inventory](../inventory.md) for follow-up. Do not claim those routes already produce video or that Rooms passed offline.
+
 ## Baseline preconditions
 
 - Only a fresh GitHub `windows-latest` desktop; never launch locally or on a user's computer.
@@ -35,7 +51,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 
-## Features
+## Legacy journey recipes
 
 - [A chat stays still](chat-still.md): exact newest-visible message rectangle on every native paint and DWM frame, idle and during streaming.
 
@@ -52,6 +68,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Hosted live working dots](chat-working-live.md): composer send, event subscription and timestamped native pixels with a provider stand-in.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
+- [Jump to newest](chat-newest.md): Shift+G twice, exact draft preservation and the renamed palette action, with direct verifier checks.
 - [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 
 - [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
@@ -103,6 +120,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Remove a stuck Not sent message](chat-not-sent-remove.md): Up then Delete removes a Not sent message from an old session.
 - [Browser typing](browser-typing.md): real page and address typing, plus one controlled lost Alt release.
 - [Chat startup failure](chat-startup-failure.md): show one failure without a provider transcript.
+- [Double-click thumbs up](chat-double-click.md): real mouse add/remove, painted badge, unchanged draft and exactly one transport submission.
 - [Chat delivery](chat-delivery.md): real-keyboard composer delivery through the production tmux host channel to a console-backed remote-shell stand-in, with busy, grey-suggestion and steer cases; not real Claude or a real server. This verify.yml journey explicitly seeds isolated saved tabs like verify-reconnect.
 - [Chat View everywhere](chat-view-everywhere.md): one-time bulk actions on every tab, independent pinned/unpinned toggles, removed command queries and restart persistence through real input.
 - [Chat focus](chat-focus.md): restart typing and Alt+Q/Alt+M recovery from Find and transcript interaction without a browser pane.

@@ -39,7 +39,7 @@ Each passive event is checked through both callers. History may add a divider; m
 
 ## Read failures
 
-Current master drops the existing anchor when a divider first appears. Replays also expose that preserving the first visible row can move a later visible message after a row-height change, and that padding compensation can move messages when the transcript HWND stays fixed. These are findings. PR 1062 owns the product fix; do not edit product behavior, omit event classes or relax the property to make this check green.
+Master's SOFT-2557 fix in `5ce536b4` preserves the existing anchor when a divider first appears. The checker reads that changed `held_y` guard directly, and the divider obligation now passes. Six findings remain for row-height changes, padding compensation and reconciliation across both callers. The latest Z3 mutation checks reject all ten scratch breaks; fresh native replay remains a hosted check. The last fully confirmed sync commit above is unchanged until that replay completes. Do not edit product behavior, omit event classes or relax the property to make this check green.
 
 A counterexample lists old/new row tops, content height, viewport, divider, padding and the newest message's before/after Y. Tell it as opening the chat, receiving that update, and painting the changed Y. For a model error, show the mismatching production operation or impossible geometry and repair the mapping; keep the invariant. For a real bug, link the failing coordinates and native replay to the product ticket. Do not confuse replaying a synthetic measurement boundary with proving a production UI path.
 
