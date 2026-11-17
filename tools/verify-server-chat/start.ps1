@@ -23,9 +23,9 @@ $actual = Get-Acl -LiteralPath $key
 $rules = @($actual.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
 if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IdentityReference.Value -ne $user.Value) { throw 'SSH private key is not restricted to the runner user' }
 @{ owner = $user.Value; protected = $actual.AreAccessRulesProtected; rules = @($rules | ForEach-Object { @{ sid = $_.IdentityReference.Value; rights = [string]$_.FileSystemRights } }) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 "$Evidence/key-acl.json"
-$repo = (& wsl.exe -d Ubuntu-24.04 -u root -- wslpath -a $env:GITHUB_WORKSPACE).Trim()
-$public = (& wsl.exe -d Ubuntu-24.04 -u root -- wslpath -a "$key.pub").Trim()
-& wsl.exe -d Ubuntu-24.04 -u root -- bash "$repo/tools/verify-server-chat/start.sh" $repo $public 2>&1 | Tee-Object "$Evidence/server-start.log"
+$repo = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
+$public = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a "$key.pub").Trim()
+& wsl.exe -d Ubuntu-24.04 -u root --exec bash "$repo/tools/verify-server-chat/start.sh" $repo $public 2>&1 | Tee-Object "$Evidence/server-start.log"
 if ($LASTEXITCODE -ne 0) { throw 'Runner-owned Linux server failed to start' }
 $config = @"
 Host remote-1
