@@ -281,13 +281,16 @@ jobs:
           "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Add the read-only chat measurement probe to the verification build
+        if: inputs.tag == '' && inputs.feature == 'chat-still'
+        run: python tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
         run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
-          name: verify-app${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ inputs.feature == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -575,8 +578,11 @@ jobs:
         if: env.RELEASE_TAG == '' && matrix.app-revision == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1' && env.CHAT_MODEL_PROOF != '1'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app
+          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}
           path: zig-out/bin
+      - name: Add the same measurement probe to the independent chat application
+        if: env.FEATURE == 'chat-still' && matrix.app-revision != ''
+        run: python tools/chat-still/instrument.py app-source app-source/zig-out/bin/chat-still-instrumentation.json
       - name: Build branch executable
         if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1' || env.CHAT_MODEL_PROOF == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
@@ -618,6 +624,11 @@ jobs:
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
+            if ($env:FEATURE -eq 'chat-still') {
+              $probe = Get-Content zig-out/bin/chat-still-instrumentation.json -Raw | ConvertFrom-Json
+              if ($probe.probe_sha256 -ne (Get-FileHash tools/chat-still/paint.zig -Algorithm SHA256).Hash.ToLower()) { throw 'Chat measurement probe does not match this harness' }
+              Copy-Item zig-out/bin/chat-still-instrumentation.json evidence/chat-still-instrumentation.json
+            }
             if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION

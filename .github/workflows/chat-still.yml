@@ -46,7 +46,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Check the fixed gate and screen-pixel oracle wiring
-        run: node --test tools/chat-still.test.js
+        run: |
+          node --test tools/chat-still.test.js
+          python3 tools/chat-still/instrument_test.py -v
       - name: Install the replay compiler
         run: |
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"

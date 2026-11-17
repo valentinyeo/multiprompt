@@ -28,3 +28,13 @@ test('stillness checks real pixels on display frames, not only paint logs', () =
   assert.equal((driver.match(/\.Start\(/g) || []).length, 1, 'one continuous first-frame baseline must cover idle and streaming');
   assert.match(read('tools/chat-still/observer.test.ps1'), /AssertPixels\(\$pixels, \$changed\)/);
 });
+
+
+test('the measurement probe belongs only to the verification build', () => {
+  assert.doesNotMatch(read('src/chat_render.zig'), /fn chatStillFrame\(/);
+  assert.doesNotMatch(read('tools/chat-still/paint.zig'), /app_state\.\w+\s*(?:=(?!=)|[+\-*\/]=)/, 'the probe must not mutate product state');
+  const workflow = read('.github/workflows/verify.yml');
+  assert.match(workflow, /inputs\.feature == 'chat-still'[\s\S]*?python tools\/chat-still\/instrument\.py \./);
+  assert.match(workflow, /python tools\/chat-still\/instrument\.py app-source/);
+  assert.match(workflow, /evidence\/chat-still-instrumentation\.json/);
+});
