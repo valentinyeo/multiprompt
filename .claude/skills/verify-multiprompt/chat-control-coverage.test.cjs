@@ -69,7 +69,9 @@ function modeEvidence(dir) {
     screenshot(dir, row.screenshot);
   }
   assert.equal(json(dir, 'slash-mode.json').mode, 'bypassPermissions');
+  assert.deepEqual(json(dir, 'mode-cancel.json'), { visible: false, draft: 'Keep this mode draft', controls: 12 });
   screenshot(dir, 'mode-plus-cancel.png');
+  screenshot(dir, 'mode-plus-cancelled.png');
 }
 
 function stopEvidence(dir) {
@@ -113,6 +115,8 @@ if (process.argv[2]) {
     assert.match(text, /Wait-SlashMode \$choice.mode 'Keep this mode draft' 'palette'/);
     assert.match(text, /Wait-SlashMode \$choice.mode 'Keep this mode draft' 'plus'/);
     assert.match(text, /--mode-evidence \$Evidence/);
+    assert.match(text, /-not \[VerifyNative\]::IsWindowVisible\(\$plusWindow\)/);
+    assert.match(text, /Snapshot 'mode-plus-cancelled'/);
   });
   test('Stop journey requires exact receiving bytes for Escape, button and palette', () => {
     const text = driver('control-feature-chat-view.ps1');
@@ -193,8 +197,13 @@ if (process.argv[2]) {
     write('seed-session.json', { tabs: [{ tmux_session: 'live-slash', csid: 'origin' }] });
     write('slash-mode.json', { mode: 'bypassPermissions' });
     image('mode-plus-cancel.png');
+    image('mode-plus-cancelled.png');
+    write('mode-cancel.json', { visible: false, draft: 'Keep this mode draft', controls: 12 });
     save();
     modeEvidence(dir);
+    write('mode-cancel.json', { visible: true, draft: 'Keep this mode draft', controls: 12 });
+    assert.throws(() => modeEvidence(dir), assert.AssertionError);
+    write('mode-cancel.json', { visible: false, draft: 'Keep this mode draft', controls: 12 });
     controls[4].sid = 'neighbor'; save();
     assert.throws(() => modeEvidence(dir), assert.AssertionError);
     controls[4].sid = 'origin'; replies[8].reply.status = 'refused'; save();

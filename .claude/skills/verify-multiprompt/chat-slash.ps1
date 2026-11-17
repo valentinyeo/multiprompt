@@ -118,11 +118,16 @@ foreach ($choice in @(@{mode='plan'; up=2}, @{mode='manual'; up=4}, @{mode='acce
     Snapshot ('mode-plus-' + $choice.mode + '-applied')
 }
 Invoke-JourneyCommand 'Chat View: Plus Menu'
+$plusWindow = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptPlusMenu', $null)
+if ($plusWindow -eq [IntPtr]::Zero -or -not [VerifyNative]::IsWindowVisible($plusWindow)) { throw 'Plus is not visibly open before cancellation' }
 Snapshot 'mode-plus-cancel'
 Press @(0x1B) 'Escape: dismiss Plus without changing permission or draft'
+Wait-Until { -not [VerifyNative]::IsWindowVisible($plusWindow) } 'Escape hides the owned Plus menu'
 Wait-ChatFocus 'Edit' 'mode-plus-cancelled'
 if ([VerifyNative]::EditText($script:slashComposer) -cne 'Keep this mode draft') { throw 'Cancelling Plus changed the unsent draft' }
+Snapshot 'mode-plus-cancelled'
 $controls = @(Get-Content (Join-Path $remoteState 'slash-control.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+Save-Json @{ visible=[VerifyNative]::IsWindowVisible($plusWindow); draft=[VerifyNative]::EditText($script:slashComposer); controls=$controls.Count } 'mode-cancel.json'
 if ($controls.Count -ne 12 -or ($controls.request.mode -join ',') -cne 'plan,manual,acceptEdits,bypassPermissions,plan,manual,acceptEdits,bypassPermissions,plan,manual,acceptEdits,bypassPermissions') { throw 'Mode choices did not reach the host exactly once and in order' }
 foreach ($control in $controls) {
     if ($control.sid -cne $remoteSids['live-slash'] -or $control.request.subtype -cne 'set_permission_mode') { throw 'Mode control targeted another chat or operation' }
