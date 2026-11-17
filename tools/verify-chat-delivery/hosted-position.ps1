@@ -59,6 +59,9 @@ try {
         [void](Wait-For 'production message dispatch accepted the send' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "accepted"' } 30)
     }
     Shot 'action'
+    Observe-HostedPosition 'resume-reading-after-send' 'user-scroll' { [void](Scroll-Transcript 12000) }
+    $frame = @((Read-Shared "$env:MULTIPROMPT_FRAME_PROBE/frames.tsv") -split "`n" | Where-Object { $_.StartsWith("frame`t") })[-1] -split "`t"
+    if ($frame[14] -ne '1') { throw 'Streaming requires the reader to be above the newest messages after sending' }
     Observe-HostedPosition 'stream-while-reading' 'stable' {
         [IO.File]::WriteAllText("$state/working-reply", '')
         [void](Wait-For 'first production text.delta' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "text.delta"' } 30)
