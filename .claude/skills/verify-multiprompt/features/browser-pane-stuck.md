@@ -40,6 +40,9 @@ Preconditions:
 
 ## Gotchas
 
+Immediate toggle pairs currently use a fixed 50 ms spacing. They do not sweep the entire documented 50–250 ms range; other intervals remain unexercised.
+
+
 - Foreground immediately after Enter can precede Edge's asynchronous activation. Do not treat that transient observation as launch completion or rely on docking to return foreground to the main window. Every input still requires the unchanged foreground safety guard.
 - No extension is not a failed launch: a successfully docked pane must work indefinitely without a bound window ID.
 - Undocked timeout/retry, immediate opening close, stale replies, URL retention, and cancellation overflow are covered by production-state unit tests. This desktop journey does not claim to force an undocked launch failure; its opening-only palette close queues input ahead of adoption timers rather than racing docking.

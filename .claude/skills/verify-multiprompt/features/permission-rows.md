@@ -16,4 +16,7 @@ The branch run captures pending and each picked row, reads actual console key re
 
 ## Gotchas
 
+The fixture uses denial digit 4, but console permission digits are parsed dynamically and live approvals use protocol decisions. Alt+Y/O/D and palette Allow/Always allow/Deny are alternate inputs not all exercised by this focused driver.
+
+
 Inspect the pending and picked screenshots against the approved design, including the tick, fading, answer echo, and surrounding chat. These are not automatically certified by the receipt or rectangle checks. This synthetic local console does not exercise the live approval.request provider protocol, a real Claude process, or a remote server. The ordinary question-card journey is `chat-options`; working dots are `chat-working`. Run them separately for surrounding behavior. Retain the build identity, screenshots, key/event receipts and cleanup evidence; no coverage is claimed until hosted execution and independent visual review.
