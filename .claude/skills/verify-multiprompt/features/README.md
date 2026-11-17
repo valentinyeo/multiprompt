@@ -77,6 +77,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Legacy journey recipes
 
+- [A chat stays still](chat-still.md): exact newest-visible message rectangle on every native paint and DWM frame, idle and during streaming.
+
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
 - [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.
 
