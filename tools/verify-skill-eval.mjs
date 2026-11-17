@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const script = fileURLToPath(import.meta.url);
 const skill = '.claude/skills/verify-multiprompt';
 const cases = JSON.parse(fs.readFileSync(new URL('./verify-skill-cases.json', import.meta.url)));
-export const prompt = request => `Help me check this Multiprompt desktop build. Read ${skill}/SKILL.md and use the workspace tools to follow the appropriate feature recipe. The run_journey tool performs the hosted Windows keyboard journey for the feature you choose. Do not dispatch another workflow. Return one JSON object with verdict (PASS, FAIL or BLOCKED) and evidence (an array of {file, observation}). Cite files you actually read.\n\n${request}`;
+export const prompt = request => `Help me check this Multiprompt desktop build. Read ${skill}/SKILL.md and use the workspace tools to follow the appropriate feature recipe. The run_journey tool performs the hosted Windows keyboard journey for the feature you choose. Do not dispatch another workflow. Return one JSON object with verdict (PASS, FAIL or BLOCKED) and evidence (an array of {file, observation}). Cite only files returned by read_file; listing a filename is not reading it. If your client cannot view images, cite the JSON observations and saved state you read, disclose that limitation alongside those observations, and do not cite PNG files as evidence.\n\n${request}`;
 const json = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const save = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value, null, 2)); };
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -136,6 +136,7 @@ function codex(config, request) {
     '-c', 'features.shell_tool=false', '-c', 'model_reasoning_effort="medium"',
     '-c', `mcp_servers.workspace.command=${toml(process.execPath)}`,
     '-c', `mcp_servers.workspace.args=${JSON.stringify([script, 'serve', path.join(config.out, 'workspace.json')])}`,
+    '-c', 'mcp_servers.workspace.env_vars=["GITHUB_ACTIONS","RUNNER_OS","RUNNER_TEMP"]',
     '-c', 'mcp_servers.workspace.tool_timeout_sec=660',
     '-c', 'mcp_servers.workspace.env_vars=["GITHUB_ACTIONS","RUNNER_OS","RUNNER_TEMP"]',
     '-c', 'mcp_servers.workspace.default_tools_approval_mode="approve"',
