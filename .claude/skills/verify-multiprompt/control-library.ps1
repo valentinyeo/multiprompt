@@ -399,6 +399,7 @@ function WindowShot([string]$Name) {
 }
 
 function Snapshot([string]$Name) {
+    trap { if (-not $result.error) { $result.failureKind = 'infrastructure' }; throw }
     Write-Host "Evidence: snapshot $Name, focused UI Automation element"
     $foreground = [VerifyNative]::GetForegroundWindow()
     $focus = @{ foreground = $foreground.ToInt64(); capturedAt = [DateTime]::UtcNow.ToString('o') }
@@ -466,6 +467,7 @@ function Press([int[]]$Keys, [string]$Label) {
     Record $Label
     Assert-Foreground
     [VerifyNative]::Chord($Keys)
+    if (-not (Test-Path (Join-Path $Evidence 'action.png'))) { Snapshot 'action' }
 }
 
 function Type-Text([string]$Text) {
