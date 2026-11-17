@@ -96,13 +96,16 @@ jobs:
             Follow pstack/pstack/skills/no-comments/SKILL.md in full, including spawning Comment Sicko.
             Scope is the diff origin/master...HEAD, not the checked-out pstack plugin.
             This is a report-only check. Do not edit application code or commit.
+            Run Comment Sicko in the foreground with run_in_background=false and wait for its final report.
+            Inspect that report before returning structured output. A launched or unfinished agent is not a completed review.
+            Set completed_review=true only after completing that inspection.
             Report deletion candidates, MUST KILL flags, suppressions, and constraint keeps with evidence.
             No findings is valid. The author will apply accepted findings before the independent pstack-verifier.
           claude_args: |
             --model sonnet
             --max-turns 25
             --allowedTools "Read,Glob,Grep,Task,Agent,Skill,Bash(git diff:*),Bash(git show:*),Bash(git log:*)"
-            --json-schema '{"type":"object","properties":{"deletion_count":{"type":"integer"},"restored_comments":{"type":"integer"},"must_kill":{"type":"array","items":{"type":"string"}},"report":{"type":"string"}},"required":["deletion_count","restored_comments","must_kill","report"]}'
+            --json-schema '{"type":"object","properties":{"completed_review":{"type":"boolean"},"deletion_count":{"type":"integer"},"restored_comments":{"type":"integer"},"must_kill":{"type":"array","items":{"type":"string"}},"report":{"type":"string"}},"required":["completed_review","deletion_count","restored_comments","must_kill","report"]}'
       - name: Retain the review and prove Comment Sicko ran
         env:
           REVIEW: ${{ steps.comments.outputs.structured_output }}
@@ -116,7 +119,7 @@ jobs:
               if isinstance(value, dict):
                   if value.get('type') == 'tool_use' and value.get('name') in ('Agent', 'Task'):
                       role = value.get('input', {}).get('subagent_type', '')
-                      if role.split(':')[-1] == 'comment-sicko':
+                      if role.split(':')[-1] == 'comment-sicko' and not value.get('input', {}).get('run_in_background', False):
                           calls[value['id']] = role
                   if value.get('type') == 'tool_result' and not value.get('is_error', False):
                       completed.add(value.get('tool_use_id'))
@@ -127,8 +130,9 @@ jobs:
                       walk(child)
           walk(execution)
           agents = [role for call, role in calls.items() if call in completed]
-          assert agents, 'pstack no-comments did not successfully spawn Comment Sicko'
+          assert agents, 'pstack no-comments did not complete a foreground Comment Sicko review'
           review = json.loads(os.environ['REVIEW'])
+          assert review.get('completed_review') is True, 'Comment Sicko report was not inspected'
           review['agents'] = agents
           pathlib.Path('comment-review.json').write_text(json.dumps(review, indent=2))
           print(json.dumps(review, indent=2))
