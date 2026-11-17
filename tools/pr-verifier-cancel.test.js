@@ -47,7 +47,7 @@ test('superseded runs stop queued report jobs while the independent cancellation
   assert.match(recovery, /github.event.workflow_run.conclusion != 'success'/);
 });
 
-test('the cancellation observer dispatches the latest PR once, never an obsolete head or a measurement run', { skip: process.platform === 'win32' }, () => {
+for (const failure of ['', 'marker', 'dispatch']) test(`the cancellation observer reserves one latest-head attempt before dispatch, even when ${failure || 'nothing'} fails`, { skip: process.platform === 'win32' }, () => {
   const os = require('node:os');
   const { spawnSync } = require('node:child_process');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-cancel-'));
@@ -69,21 +69,27 @@ if (args.includes('graphql')) {
   const recoveries = fs.existsSync(process.env.MARKER) ? [{ databaseId: 2, name: 'pstack-verifier recovery', status: 'COMPLETED', conclusion: 'NEUTRAL' }] : [];
   console.log(JSON.stringify({ data: { repository: { pullRequest: { number: pr.number, state: 'OPEN', isDraft: false, title: '', body: '', headRefOid: pr.head.sha, baseRefName: 'master', headRepository: { nameWithOwner: 'owner/repo' }, comments: { nodes: [] }, commits: { nodes: [{ commit: { checkSuites: { nodes: [{ status: 'COMPLETED', conclusion: 'SUCCESS', recoveries: { nodes: recoveries } }] } } }] } } } } }));
 } else if (route.includes('/pulls/')) console.log(process.env.PULL);
-else if (args.includes('name=pstack-verifier recovery')) fs.writeFileSync(process.env.MARKER, 'queued');
+else if (args.includes('name=pstack-verifier recovery')) {
+  if (process.env.FAILURE === 'marker') process.exit(1);
+  fs.writeFileSync(process.env.MARKER, 'reserved');
+} else if (route.endsWith('/dispatches') && process.env.FAILURE === 'dispatch') process.exit(1);
 else if (route.endsWith('/check-runs?filter=all&per_page=100') && fs.existsSync(process.env.MARKER)) console.log(JSON.stringify({ name: 'pstack-verifier recovery', head_sha: '${head}' }));
 else if (route.endsWith('/runs?per_page=100')) console.log('[]');
 `, { mode: 0o755 });
     const env = { ...process.env, PATH: `${directory}${path.delimiter}${process.env.PATH}`, REQUESTS: requests, MARKER: marker,
-      GITHUB_EVENT_PATH: event, REPO: 'owner/repo', PULL: JSON.stringify({ ...pr, head: { sha: head, repo: { full_name: 'owner/repo' } } }) };
+      GITHUB_EVENT_PATH: event, REPO: 'owner/repo', FAILURE: failure, PULL: JSON.stringify({ ...pr, head: { sha: head, repo: { full_name: 'owner/repo' } } }) };
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'recover'], { env, encoding: 'utf8' });
-      assert.equal(result.status, 0, result.stderr);
+      const failed = failure === 'marker' || (failure === 'dispatch' && attempt === 0);
+      assert.equal(result.status, failed ? 1 : 0, result.stderr);
     }
     const calls = fs.readFileSync(requests, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const queued = calls.filter(args => args.some(arg => arg.endsWith('/dispatches')));
-    assert.equal(queued.length, 1);
-    assert.ok(queued[0].includes('ref=master'));
-    assert.ok(queued[0].includes('inputs[pr]=1076'));
+    assert.equal(queued.length, failure === 'marker' ? 0 : 1);
+    for (const args of queued) {
+      assert.ok(args.includes('ref=master'));
+      assert.ok(args.includes('inputs[pr]=1076'));
+    }
     assert.ok(calls.some(args => args.includes(`head_sha=${head}`) && args.includes('name=pstack-verifier recovery')));
     assert.equal(calls.some(args => args.includes('conclusion=success')), false);
   } finally {

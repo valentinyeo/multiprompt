@@ -362,8 +362,8 @@ function recover(env) {
   if (run.conclusion === 'cancelled') {
     const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '.workflow_runs']));
     if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
+      gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
       gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
-      gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier re-queued', '-f', 'output[summary]=One automatic recovery was queued for this head. A successful independent verdict is still required.']);
     }
   }
   if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
