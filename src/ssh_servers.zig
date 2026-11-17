@@ -228,6 +228,23 @@ test "IGSH-1928 real OpenSSH isolates proven keys while preserving unproven fall
     defer tmp.cleanup();
     const base = try tmp.dir.realPathFileAlloc(io, ".", a);
     defer a.free(base);
+    if (@import("builtin").os.tag == .windows) {
+        try tmp.dir.writeFile(io, .{ .sub_path = "private.ps1", .data =
+            \\param([string]$Path)
+            \\$ErrorActionPreference = 'Stop'
+            \\$acl = Get-Acl -LiteralPath $Path
+            \\$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            \\$acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;$sid)")
+            \\Set-Acl -LiteralPath $Path -AclObject $acl
+        });
+        const script = try std.fmt.allocPrint(a, "{s}/private.ps1", .{base});
+        defer a.free(script);
+        const secured = try std.process.run(a, io, .{ .argv = &.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-File", script, base } });
+        defer a.free(secured.stdout);
+        defer a.free(secured.stderr);
+        if (secured.term != .exited or secured.term.exited != 0) std.debug.print("{s}", .{secured.stderr});
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, secured.term);
+    }
     const user_config = try std.fmt.allocPrint(a, "{s}/user.conf", .{base});
     defer a.free(user_config);
     const system_config = try std.fmt.allocPrint(a, "{s}/system.conf", .{base});
