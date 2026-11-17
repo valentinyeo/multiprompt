@@ -64,7 +64,11 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.REQUESTS, JSON.stringify(args) + '\n');
 const route = args.find(arg => arg.startsWith('repos/')) || '';
-if (route.includes('/pulls/')) console.log(process.env.PULL);
+if (args.includes('graphql')) {
+  const pr = JSON.parse(process.env.PULL);
+  const recoveries = fs.existsSync(process.env.MARKER) ? [{ databaseId: 2, name: 'pstack-verifier recovery', status: 'COMPLETED', conclusion: 'NEUTRAL' }] : [];
+  console.log(JSON.stringify({ data: { repository: { pullRequest: { number: pr.number, state: 'OPEN', isDraft: false, title: '', body: '', headRefOid: pr.head.sha, baseRefName: 'master', headRepository: { nameWithOwner: 'owner/repo' }, comments: { nodes: [] }, commits: { nodes: [{ commit: { checkSuites: { nodes: [{ status: 'COMPLETED', conclusion: 'SUCCESS', recoveries: { nodes: recoveries } }] } } }] } } } } }));
+} else if (route.includes('/pulls/')) console.log(process.env.PULL);
 else if (args.includes('name=pstack-verifier recovery')) fs.writeFileSync(process.env.MARKER, 'queued');
 else if (route.endsWith('/check-runs?filter=all&per_page=100') && fs.existsSync(process.env.MARKER)) console.log(JSON.stringify({ name: 'pstack-verifier recovery', head_sha: '${head}' }));
 else if (route.endsWith('/runs?per_page=100')) console.log('[]');

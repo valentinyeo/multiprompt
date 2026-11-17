@@ -314,17 +314,43 @@ function cancelledRunNeedsRetry(run, pr, checks, runs) {
     (candidate.head_sha === head || candidate.event === 'workflow_dispatch') && !['completed', 'cancelled'].includes(candidate.status));
 }
 
+function githubState(env, { number, headSha }) {
+  const [owner, name] = env.REPO.split('/');
+  const suites = `checkSuites(last:100) { nodes { status conclusion workflowRun { databaseId workflow { name } }
+    ${number ? `verdicts:checkRuns(last:20,filterBy:{checkName:"pstack-verifier",checkType:ALL}) { nodes { databaseId name status conclusion completedAt summary } }
+    recoveries:checkRuns(last:1,filterBy:{checkName:"pstack-verifier recovery",checkType:ALL}) { nodes { databaseId name status conclusion completedAt summary } }` : ''}
+  } }`;
+  const selection = number
+    ? `pullRequest(number:$number) { number state isDraft title body headRefOid baseRefName headRepository { nameWithOwner }
+        comments(last:100) { nodes { body author { __typename login } } } commits(last:1) { nodes { commit { ${suites} } } } }`
+    : `object(oid:$head) { ...on Commit { ${suites} } }`;
+  const query = `query($owner:String!,$name:String!,${number ? '$number:Int!' : '$head:GitObjectID!'}) { repository(owner:$owner,name:$name) { ${selection} } }`;
+  const response = JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, number ? '-F' : '-f', number ? `number=${number}` : `head=${headSha}`]));
+  if (response.errors?.length) throw new Error('GitHub state query failed');
+  const repository = response.data?.repository;
+  const pull = repository?.pullRequest;
+  const commit = number ? pull?.commits.nodes.at(-1)?.commit : repository?.object;
+  if (!commit) throw new Error('GitHub did not return the requested head state');
+  const sha = number ? pull.headRefOid : headSha;
+  const checks = [], tests = [];
+  for (const suite of commit.checkSuites.nodes) {
+    if (suite.workflowRun?.workflow.name === 'Tests') tests.push({ id: suite.workflowRun.databaseId, status: suite.status.toLowerCase(), conclusion: suite.conclusion?.toLowerCase() || '' });
+    for (const check of [...(suite.verdicts?.nodes || []), ...(suite.recoveries?.nodes || [])]) checks.push({ id: check.databaseId, name: check.name, head_sha: sha, status: check.status.toLowerCase(), conclusion: check.conclusion?.toLowerCase() || '', completed_at: check.completedAt, output: { summary: check.summary || '' } });
+  }
+  return { checks, tests, comments: pull?.comments.nodes.map(comment => ({ body: comment.body, user: { login: comment.author?.__typename === 'Bot' ? `${comment.author.login}[bot]` : comment.author?.login || '' } })) || [],
+    pr: pull && { number: pull.number, state: pull.state.toLowerCase(), draft: pull.isDraft, title: pull.title, body: pull.body,
+      head: { sha, repo: { full_name: pull.headRepository?.nameWithOwner } }, base: { ref: pull.baseRefName } } };
+}
+
 function recover(env) {
   const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
   const run = event.workflow_run;
   if (!run || run.head_repository?.full_name !== env.REPO || !['pull_request', 'workflow_dispatch'].includes(run.event)) return;
   const number = run.pull_requests?.[0]?.number || run.display_title?.match(/^verify PR (\d+)$/)?.[1];
   if (!number) return;
-  const pr = JSON.parse(gh(['api', `repos/${env.REPO}/pulls/${number}`]));
+  const { pr, checks, comments, tests } = githubState(env, { number });
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
   const headSha = pr.head.sha;
-  const checks = gh(['api', '--paginate', `repos/${env.REPO}/commits/${headSha}/check-runs?filter=all&per_page=100`, '--jq', '.check_runs[]'])
-    .split('\n').filter(Boolean).map(line => JSON.parse(line));
   if (run.conclusion === 'cancelled') {
     const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '.workflow_runs']));
     if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
@@ -334,12 +360,10 @@ function recover(env) {
   }
   if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
-  const comments = gh(['api', '--paginate', `repos/${env.REPO}/issues/${number}/comments?per_page=100`, '--jq', '.[] | {body,user:{login:.user.login}}'])
-    .split('\n').filter(Boolean).map(line => JSON.parse(line));
   let { result, body } = recoveryReport(run, headSha, comments);
   if (checkConclusion(result) === 'success') {
     let gate;
-    try { gate = testsGate(testsRuns(env, headSha)); }
+    try { gate = testsGate(tests); }
     catch { gate = { reason: 'Tests could not be confirmed' }; }
     if (gate.action !== 'pass') {
       ({ result, body } = recoveryReport(run, headSha, []));
@@ -589,9 +613,7 @@ async function pickDeepseek(env, outDir) {
 }
 
 function testsRuns(env, headSha) {
-  const raw = gh(['api', `repos/${env.REPO}/actions/workflows/test.yml/runs?head_sha=${headSha}&per_page=20`, '--jq', '[.workflow_runs[] | {id, status, conclusion}]']);
-  const parsed = JSON.parse(raw || '[]');
-  return Array.isArray(parsed) ? parsed : [];
+  return githubState(env, { headSha }).tests;
 }
 
 async function waitForTests(env) {
@@ -603,7 +625,9 @@ async function waitForTests(env) {
   }
   if (!/^[0-9a-f]{40}$/.test(head)) throw new Error('Pull request head was not found');
   const deadline = Date.now() + Number(env.WAIT_MS || 75 * 60 * 1000);
-  const poll = Number(env.POLL_MS || 30000);
+  let poll = Number(env.POLL_MS || 60000);
+  const maxPoll = Number(env.MAX_POLL_MS || 300000);
+  if (!Number.isFinite(poll) || poll <= 0 || !Number.isFinite(maxPoll) || maxPoll < poll) throw new Error('POLL_MS must be positive and MAX_POLL_MS must be at least POLL_MS');
   for (;;) {
     const decision = testsGate(testsRuns(env, head));
     process.stdout.write(`${decision.reason}\n`);
@@ -615,6 +639,7 @@ async function waitForTests(env) {
     }
     if (Date.now() + poll > deadline) throw new Error('Tests did not pass before the wait ended');
     await new Promise(resolveWait => setTimeout(resolveWait, poll));
+    poll = Math.min(poll * 2, maxPoll);
   }
 }
 
@@ -720,7 +745,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

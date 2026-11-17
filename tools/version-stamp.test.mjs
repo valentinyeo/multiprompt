@@ -269,7 +269,7 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
   const bin = path.join(r.dir, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';\nimport { execFileSync } from 'node:child_process';\nconst args = process.argv.slice(2);\nfs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');\nconst stateFile = process.env.GH_STATE;\nlet state = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, 'utf8') : '';\nconst git = args => execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, ...args]);\nif (args[1] === 'list' && process.env.GH_RACE === '1' && fs.readFileSync(process.env.GH_LOG, 'utf8').split('\\n').filter(line => line.includes('\"list\"')).length > 1 && !state) { state = 'OPEN'; fs.writeFileSync(stateFile, state); }\nif (args[1] === 'list') console.log(JSON.stringify(state === 'OPEN' ? [{ number: 1, url: 'https://example.invalid/pr/1' }] : []));\nelse if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.log('https://example.invalid/pr/1'); }\nelse if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }\nelse if (args[1] !== 'merge') process.exit(1);\n`, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: path.join(r.dir, 'src'), encoding: 'utf8', timeout: 60000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote, VERSION_STAMP_POLL_MS: '50', GH_RACE: race ? '1' : '0', GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: path.join(r.dir, 'src'), encoding: 'utf8', timeout: 60000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote, VERSION_STAMP_POLL_MS: '50', VERSION_STAMP_MAX_POLL_MS: '50', GH_RACE: race ? '1' : '0', GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /https:\/\/example\.invalid\/pr\/1[\s\S]*NOTHING_TO_STAMP 0\.28\.736/);
@@ -293,7 +293,7 @@ for (const outcome of ['green', 'red', 'pending']) test({ green: 'release merges
   const bin = path.join(r.dir, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';\nimport { execFileSync } from 'node:child_process';\nconst args = process.argv.slice(2);\nconst log = event => fs.appendFileSync(process.env.GH_LOG, JSON.stringify(event) + '\\n');\nlog({ args });\nconst stateFile = process.env.GH_STATE;\nconst state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { created: false, merged: false, views: 0 };\nconst outcome = process.env.GH_OUTCOME;\nif (args[1] === 'create') { state.created = true; console.log('https://example.invalid/pr/1'); }\nelse if (args[1] === 'list') console.log(JSON.stringify(state.created && !state.merged ? [{ number: 1, url: 'https://example.invalid/pr/1' }] : []));\nelse if (args[1] === 'merge' && args.includes('--auto')) { console.error('GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'); process.exit(1); }\nelse if (args[1] === 'merge') { execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state.merged = true; }\nelse if (args[1] === 'view') { state.views++; const green = outcome === 'green' && state.views >= 4; const checks = outcome === 'red' ? [{ __typename: 'CheckRun', name: 'windows-release', status: 'COMPLETED', conclusion: 'FAILURE' }] : green ? [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }, { __typename: 'CheckRun', name: 'optional', status: 'COMPLETED', conclusion: 'SKIPPED' }, { __typename: 'CheckRun', name: 'neutral', status: 'COMPLETED', conclusion: 'NEUTRAL' }, { __typename: 'StatusContext', context: 'external', state: 'SUCCESS' }] : outcome === 'green' && state.views === 2 ? [] : outcome === 'green' && state.views === 3 ? [{ __typename: 'StatusContext', context: 'external', state: 'EXPECTED' }] : [{ __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null }, { __typename: 'CheckRun', name: 'optional', status: 'QUEUED', conclusion: null }]; const view = { state: state.merged ? 'MERGED' : outcome === 'pending' && state.views >= 5 ? 'CLOSED' : 'OPEN', statusCheckRollup: state.views % 2 ? checks.reverse() : checks }; log({ view }); console.log(JSON.stringify(view)); }\nelse process.exit(2);\nfs.writeFileSync(stateFile, JSON.stringify(state));\n`, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_OUTCOME: outcome, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', VERSION_STAMP_MAX_POLL_MS: '50', TEST_REMOTE: remote, GH_OUTCOME: outcome, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   assert.equal(result.error, undefined);
   assert.equal(result.status, outcome === 'green' ? 0 : 1, result.stderr);
   assert.match(result.stderr, /Auto merge is not allowed for this repository/);
@@ -492,7 +492,7 @@ else if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.lo
 else if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }
 else if (args[1] !== 'merge') process.exit(1);
 `, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', VERSION_STAMP_MAX_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   if (result.error?.code === 'ETIMEDOUT') {
     try { process.kill(-result.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
@@ -787,4 +787,19 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
   const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
   assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
+});
+
+
+test('release status polling backs off from one minute to five without changing merge gates', async () => {
+  const source = fs.readFileSync(tool, 'utf8');
+  const start = source.indexOf('  let pollMs =');
+  assert.ok(start >= 0);
+  const wait = source.slice(start, source.indexOf('  while (true) {', start));
+  const delays = [];
+  const { runInNewContext } = await import('node:vm');
+  await runInNewContext(`(async () => { ${wait} for (let i = 0; i < 5; i++) await wait(); })()`, {
+    process: { env: {} }, remaining: () => 600000,
+    setTimeout: (fn, delay) => { delays.push(delay); fn(); },
+  });
+  assert.deepEqual(delays, [60000, 120000, 240000, 300000, 300000]);
 });
