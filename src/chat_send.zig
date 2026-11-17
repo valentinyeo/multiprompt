@@ -2727,7 +2727,8 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
-    const route = chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
+    const terminal = shell.kind == .tmux and shell.ai_agent == 0 and identity.tmux[0] != 0 and !std.mem.startsWith(u8, std.mem.sliceTo(&identity.tmux, 0), "live-");
+    const route = if (terminal) ChatSendRoute.terminal_send else chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
         chatLogSendPath(shell_index, entry, route, "enter");
