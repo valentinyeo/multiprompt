@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 
 const read = file => {
   const full = path.join(__dirname, '..', file);
@@ -77,14 +78,13 @@ test('formal findings inherit only from byte-identical modeled source', { skip: 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'zig'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
   for (const variant of ['changed', 'drift']) {
-    const source = path.join(dir, variant, 'src');
-    fs.mkdirSync(source, { recursive: true });
-    fs.writeFileSync(path.join(source, 'chat_session.zig'), read('src/chat_session.zig').replace(
-      'if (old_content_h <= viewport_h) null else if (anchor_top)',
-      variant === 'changed' ? 'if (old_content_h >= 0) null else if (anchor_top)' : 'if (old_content_h <= viewport_h) null else if (anchor_top)'));
-    fs.writeFileSync(path.join(source, 'chat_history.zig'), read('src/chat_history.zig').replace(
-      'pub fn scrollAnchor(', variant === 'drift' ? 'pub fn renamedScrollAnchor(' : 'pub fn scrollAnchor('));
+    copyZig(['src/chat_session.zig', 'src/chat_history.zig'], path.join(dir, variant), root);
   }
+  const session = path.join(dir, 'changed/src/chat_session.zig');
+  fs.writeFileSync(session, fs.readFileSync(session, 'utf8').replace(
+    'if (old_content_h <= viewport_h) null else if (anchor_top)', 'if (old_content_h >= 0) null else if (anchor_top)'));
+  const history = path.join(dir, 'drift/src/chat_history.zig');
+  fs.writeFileSync(history, fs.readFileSync(history, 'utf8').replace('pub fn scrollAnchor(', 'pub fn renamedScrollAnchor('));
   for (const [name, args, expected] of [
     ['raw findings remain failures', [], 1],
     ['unchanged source is inherited', ['--inherit-from', 'HEAD'], 0],
