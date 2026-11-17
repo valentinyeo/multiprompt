@@ -206,7 +206,7 @@ test('a missing or invalid verdict is BLOCKED and evidence stops at eight lines'
 
 test('the workflow starts on same-repository pull requests and on a dispatched pull request number', () => {
   const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
-  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review\]/);
+  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review, edited, labeled, unlabeled\]/);
   assert.match(events, /workflow_dispatch:\n    inputs:\n      pr:\n        description: .+\n        required: true/);
   assert.doesNotMatch(events, /pull_request_target|workflow_run|schedule|push:/);
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository && !github\.event\.pull_request\.draft/);
@@ -541,12 +541,22 @@ test('chat changes cannot omit the stillness journey or exceed the journey limit
   const maps = [...available, 'chat-still'];
   const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
   for (const file of ['src/chat_render.zig', 'src/chat_session.zig', 'src/chat_history_reader.py', 'src/main.zig', 'src/browser_pane.zig', 'src/window_layout.zig', 'tools/chat-still/observer.cs', 'tools/verify-chat-delivery/boundary.py', '.claude/skills/verify-multiprompt/control-feature-chat-still.ps1']) {
-    assert.deepEqual(verifier.validateSelection(raw, maps, [file]).features, ['chat-still', 'appearance', 'command-palette']);
+    assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: file }] }).features, ['chat-still', 'appearance', 'command-palette']);
   }
-  assert.deepEqual(verifier.validateSelection(raw, maps, ['docs/readme.md']).features, raw.features);
-  assert.throws(() => verifier.validateSelection(raw, available, ['src/chat_render.zig']), /require the chat-still journey/);
+  assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: 'docs/readme.md' }] }).features, raw.features);
+  assert.throws(() => verifier.validateSelection(raw, available, { files: [{ path: 'src/chat_render.zig' }] }), /require the chat-still journey/);
 });
 
+
+test('repair repro and mandatory chat stillness both survive a full picker selection', () => {
+  const result = verifier.validateSelection(
+    { features: ['appearance', 'palette-order', 'chat-view'], compare_base: false },
+    [...available, 'chat-still'],
+    { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
+  );
+  assert.deepEqual(result.features, ['command-palette', 'chat-still', 'appearance']);
+  assert.equal(result.compareBase, true);
+});
 
 test('inspecting known failed tests can never turn an independent PASS into a green gate', () => {
   const summary = { head: { 'chat-still': [{ status: 'passed' }] }, base: {} };

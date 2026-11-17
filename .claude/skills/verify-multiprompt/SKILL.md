@@ -97,6 +97,20 @@ timeout 3000 gh run watch <id> --interval 300
 
 DeepSeek picks up to three journeys from `features/` that exercise the change, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
 
+### Reproduce before fixing
+
+A PR marked as a repair must name exactly one runnable journey in its description:
+
+```text
+Repro journey: `chat-delivery`
+```
+
+The gate treats titles containing `bug`, `bug fix`, `fix`, `fixes`, or `fixed`, including conventional `fix(scope):` titles, as repairs. Labels `bug`, `bug-fix`, `bugfix`, `bug fix`, `defect`, and `regression` also mark repairs.
+
+For these PRs, the named journey takes priority over the picker and runs against both head and the current master commit captured when verification starts. Both runs use the PR's journey harness. The journey must fail on master for a product assertion and pass on head. A master pass, missing result, infrastructure failure, unknown journey, or an omitted declaration makes `pstack-verifier` FAIL even if the judge says PASS. An unrelated failing journey and inherited failures on both revisions do not prove a repair. Keep the failure screenshots and result files in the uploaded artifacts.
+
+Other PRs retain the existing failed-head baseline comparison. Title, description, and label changes also rerun the gate, and resolution resets the required status to pending, so adding a repair label cannot reuse an earlier green verdict. `node --test tools/pr-verifier-repro.test.js` checks rejection without a failing-master repro and acceptance with matching before-and-after evidence. See [the rule and evidence contract](../../../openwiki/operations/reproduce-before-fixing.md).
+
 ## Doctor
 
 For ordinary desktop journeys, `control.ps1` runs `Doctor` after launch, before each input, and after the journey. Doctor is read-only and cheap: the original Process object must be alive, its path and SHA256 must match the selected executable, its HWND must belong to that PID and class `ZigShell`, its title must be `Multi Bot` or carry the expected legacy version, UI Automation must see that window, and its published Inbox state must contain a usable initial shell. It writes only evidence (`doctor.json`), never app state; it does not build, seed, authenticate, invoke actions or repair preconditions.
