@@ -11,7 +11,7 @@ const foreground = "if ([VerifyNative]::GetForegroundWindow() -ne $browser) { th
 const space = "if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 opening a pane sent Space to browser chrome' }";
 
 function assertsOpenPaneHopSync(driver) {
-  const palette = driver.indexOf("Palette 'open browser'");
+  const palette = driver.indexOf("Invoke-JourneyCommand 'Open Browser Pane' -SelectOnly");
   const offset = driver.indexOf("$hopStart = (Read-SharedText $hopLog).Length", palette);
   const press = driver.indexOf("Press @(0x0D) 'IGSH-724: opening an existing pane focuses its page'", palette);
   const wait = driver.indexOf("-match 'pane_hop result bh_fg=true' } 'IGSH-998 app finished the open-pane hop to its browser'", palette);

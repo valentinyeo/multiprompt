@@ -255,18 +255,18 @@ try {
     Save-Json $pixels 'settings-panel-pixels.json'
     $result.checks += @{ name = 'settings-centred-painted-panel'; passed = $true; pixels = $pixels }
 
-    foreach ($name in @('Close Settings', 'Theme', 'Small', 'Normal', 'Large', 'Terminal details', 'Dictation key', 'Screencast2 upload key', 'Release notes')) {
+    foreach ($name in @('Close Settings', 'Theme', 'Small', 'Normal', 'Large', 'Terminal details', 'Dictation key', 'Screencast2 upload key', 'Servers', 'Release notes')) {
         $null = Settings-Control $name
     }
     $result.checks += @{ name = 'settings-accessible-controls'; passed = $true; keyRows = 2; ownerPid = $process.Id }
-    foreach ($name in @('Theme', 'Small', 'Normal', 'Large', 'Terminal details', 'Dictation key', 'Screencast2 upload key', 'Release notes', 'Close Settings')) {
+    foreach ($name in @('Theme', 'Small', 'Normal', 'Large', 'Terminal details', 'Dictation key', 'Screencast2 upload key', 'Servers', 'Release notes', 'Close Settings')) {
         Press @(0x09) ('Tab: focus ' + $name)
         Wait-Until { (Settings-Control $name).Current.HasKeyboardFocus } ('native tab focus: ' + $name)
     }
     Press @(0x10, 0x09) 'Shift+Tab: previous Settings control'
     Wait-Until { (Settings-Control 'Release notes').Current.HasKeyboardFocus } 'native reverse tab focus'
     Press @(0x09) 'Tab: return to round close control'
-    $result.checks += @{ name = 'settings-native-focus-order'; passed = $true; tabControls = 9; reverseTab = $true }
+    $result.checks += @{ name = 'settings-native-focus-order'; passed = $true; tabControls = 10; reverseTab = $true }
 
     if ((Get-ItemPropertyValue -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY) -cne 'settings-dictation-before-zzzzzzzzzz' -or
         (Get-Content -LiteralPath $uploadConfig -Raw) -notmatch 'upload_secret = "settings-upload-before"') { throw 'Opening Settings changed existing keys' }
@@ -326,8 +326,9 @@ try {
     Wait-Until { -not [VerifyNative]::IsWindowVisible($script:settingsWindow) } 'clicking the dimmed content dismisses Settings'
     Wait-ChatFocus 'Edit' 'settings-outside-focus-restored'
     $result.checks += @{ name = 'settings-outside-dismissal'; passed = $true }
-    Palette 'settings'
-    Press @(0x0D) 'Enter: open Settings from the command palette'
+    Invoke-JourneyCommand 'Settings' -Confirm {
+        Press @(0x0D) 'Enter: open Settings from the command palette'
+    }
     Wait-Until { (Settings-Window) -ne [IntPtr]::Zero } 'Settings opened through its palette entry'
     $script:settingsWindow = Settings-Window
     Snapshot 'settings-palette'

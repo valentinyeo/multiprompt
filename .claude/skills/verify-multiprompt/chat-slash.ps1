@@ -75,7 +75,7 @@ foreach ($command in @('/model', '/resume', '/rewind')) {
 Press @(0x11, 0x41) 'Ctrl+A: clear the unsupported command'
 Press @(0x08) 'Backspace: clear without sending'
 $offset = (Read-SharedText $script:slashLog).Length
-Palette 'accept edits'
+Invoke-JourneyCommand 'Chat permission mode: Accept edits' -SelectOnly
 Wait-SlashPalette 12002 $offset
 Snapshot 'slash-permissions-palette'
 Press @(0x0D) 'Enter: choose Accept edits from Ctrl+K'

@@ -17,8 +17,9 @@ function Save-SkillPill([string]$Name, [string]$Theme, [IntPtr]$Control, [bool]$
 foreach ($theme in @('dark', 'light')) {
     Select-Theme $theme ('skill-theme-' + $theme)
     $beforeTabs = @((Read-Session).tabs).Count
-    Palette 'new cmd'
-    Press @(0x0D) 'Enter: new isolated shell for skill colors'
+    Invoke-JourneyCommand 'new cmd shell' -Confirm {
+        Press @(0x0D) 'Enter: new isolated shell for skill colors'
+    }
     Wait-Until {
         $state = Read-Session
         @($state.tabs).Count -eq $beforeTabs + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'

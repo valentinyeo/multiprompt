@@ -1,3 +1,6 @@
+$script:journeyCommands = $null
+$script:journeyCommandSequence = 0
+
 function ConvertTo-PlainValue($Value, [int]$Level = 0) {
     if ($null -eq $Value) { return $null }
     if ($Value -is [string]) { return [string]$Value }
@@ -213,8 +216,9 @@ function Focus-BrowserPaneOwner([string]$Step, [long]$ConnectionId) {
 }
 
 function Open-BrowserPane([string]$Step, [long]$PreviousId = 0) {
-    Palette 'open browser'
-    Press @(0x0D) 'Enter: Open Browser Pane'
+    Invoke-JourneyCommand 'Open Browser Pane' -Confirm {
+        Press @(0x0D) 'Enter: Open Browser Pane'
+    }
     $pane = Assert-BrowserPane 'open' $Step $PreviousId
     Focus-BrowserPaneOwner $Step $pane.browser_connection_id
     return $pane
@@ -535,24 +539,66 @@ function Retry-PaletteOpen([string]$Log, [int]$Start) {
     }
 }
 
-function Focus-Palette([string]$Query, [string]$Target) {
+function Invoke-JourneyCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [switch]$Session,
+        [switch]$SelectOnly,
+        [scriptblock]$Confirm = { Press @(0x0D) 'Enter: run named journey command' }
+    )
+    if ($Session) {
+        $tabs = @((Read-Session).tabs)
+        $matching = @(for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].name -ceq $Name) { $i } })
+        if ($matching.Count -ne 1) { throw "Journey session name must be unique: $Name" }
+        $query = $Name
+        $target = $matching[0]
+    } else {
+        if (-not $script:journeyCommands) {
+            $catalog = & node (Join-Path $PSScriptRoot '../../../tools/journey-commands.mjs')
+            if ($LASTEXITCODE -ne 0) { throw 'Journey command catalog failed' }
+            $script:journeyCommands = $catalog | ConvertFrom-Json
+        }
+        $entry = $script:journeyCommands.PSObject.Properties[$Name.ToLowerInvariant()]
+        if ($null -eq $entry) { throw "Unknown journey command name: $Name" }
+        $query = $entry.Value.query
+        $target = $entry.Value.target
+    }
     if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { Activate-OwnedFrame }
+    $script:journeyCommandSequence++
+    $shot = 'journey-command-{0:D3}' -f $script:journeyCommandSequence
+    WindowShot ($shot + '-before')
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $start = ((Get-Content $log -Raw) -join '').Length
+    $start = (Read-SharedText $log).Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Retry-PaletteOpen $log $start
     Wait-Until {
-        $trace = ((Get-Content $log -Raw) -join '').Substring($start)
+        $trace = (Read-SharedText $log).Substring($start)
         if ($trace -notmatch '\[palette\] ready chars=0 count=\d+ target=\d+') { return $false }
         Doctor
         Assert-Foreground
         [void][VerifyNative]::SetForegroundWindow($script:window)
         $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and [VerifyNative]::GetForegroundWindow() -eq $script:window -and [VerifyNative]::GetFocusedWindow($script:window) -eq $script:window
     } 'command palette initialized and owned frame focused' 20
-    Type-Text $Query
+    Type-Text $query
+    $rowsPattern = '\[palette\] rows chars=' + $query.Length + ' count=\d+ ids=([^\r\n]+)'
     Wait-Until {
-        ((Get-Content $log -Raw) -join '').Substring($start) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)')
-    } "palette query consumed and expected command $Target selected"
+        $rows = [regex]::Matches((Read-SharedText $log).Substring($start), $rowsPattern)
+        $rows.Count -gt 0 -and @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ') -contains [string]$target
+    } "palette contains named command $Name"
+    $rows = [regex]::Matches((Read-SharedText $log).Substring($start), $rowsPattern)
+    $ids = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ')
+    $index = [Array]::IndexOf($ids, [string]$target)
+    Press @(0x24) 'Home: first matching command'
+    for ($i = 0; $i -lt $index; $i++) { Press @(0x28) 'Down: named command row' }
+    WindowShot ($shot + '-selected')
+    $before = if ($SelectOnly) { '-before' } else { '-selected' }
+    $beforeHash = (Get-FileHash (Join-Path $Evidence ($shot + $before + '.png')) -Algorithm SHA256).Hash
+    if (-not $SelectOnly) { & $Confirm }
+    Wait-Until {
+        WindowShot ($shot + '-after')
+        (Get-FileHash (Join-Path $Evidence ($shot + '-after.png')) -Algorithm SHA256).Hash -ne $beforeHash
+    } "named command $Name changed the visible screen"
+    Record ("Journey command $Name target=$target selectOnly=$SelectOnly screen=$shot-after.png")
 }
 
 function Wait-WorkspaceSurface([int]$Workspace, [int]$Tab, [bool]$Chat, [int]$Composer = 0) {
@@ -612,16 +658,6 @@ function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedU
     $result.checks += @{ name = "browser-own-profile screenshot $Step"; windowId = $windowId; url = $expectedUrl; profile = $(if ($Profile -eq '') { 'shared' } else { $Profile }) }
 }
 
-function Palette([string]$Query, [string]$Target = '') {
-    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $offset = if ($Target) { (Read-SharedText $log).Length } else { 0 }
-    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
-    Wait-Foreground
-    Type-Text $Query
-    if ($Target) {
-        Wait-Until { $trace = Read-SharedText $log; $trace.Length -ge $offset -and $trace.Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)') } "palette $Query selects $Target"
-    }
-}
 
 function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace', [switch]$AllowPlainOk) {
     Doctor
@@ -867,14 +903,16 @@ function Assert-WorkspaceBrowser([string]$Step, [string]$ExpectedRoot = '', [int
 }
 
 function Open-WorkspaceBrowser([string]$Step) {
-    Palette 'open browser'
-    Press @(0x0D) ('Enter: Open Browser Pane for ' + $Step)
+    Invoke-JourneyCommand 'Open Browser Pane' -Confirm {
+        Press @(0x0D) ('Enter: Open Browser Pane for ' + $Step)
+    }
     return Assert-WorkspaceBrowser $Step
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot, [string]$SavedTheme = $Theme) {
-    Focus-Palette 'themes' 4000
-    Press @(0x0D) 'Enter: Themes...'
+    Invoke-JourneyCommand 'Themes' -Confirm {
+        Press @(0x0D) 'Enter: Themes...'
+    }
     Type-Text $Theme
     Snapshot $ActionShot
     Press @(0x0D) ('Enter: choose ' + $Theme)

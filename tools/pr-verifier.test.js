@@ -149,6 +149,34 @@ test('the verifier waits until Tests passes for that head and still posts the ch
   assert.match(workflow, /repos\/\$REPO\/check-runs/);
 });
 
+for (const verdict of ['PASS', 'PASS+NOTES', 'FAIL', 'BLOCKED']) {
+  nodeTest(`the ${verdict} verdict publishes a required commit status independent of its check suite`, { skip: process.platform !== 'linux' }, () => {
+    const step = workflow.match(/      - name: Record the verdict on the pull request head\n([^]*?)(?=      - uses:)/)?.[1];
+    assert.ok(step, 'The head verdict publication step exists');
+    assert.match(workflow.slice(workflow.indexOf('\n  verdict:')), /      statuses: write/);
+    const script = step.split('        run: |\n')[1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-status-'));
+    try {
+      const requests = path.join(dir, 'requests.jsonl');
+      fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env node
+require('node:fs').appendFileSync(process.env.GH_REQUESTS, JSON.stringify(process.argv.slice(2)) + '\\n');
+`, { mode: 0o755 });
+      const passed = verdict === 'PASS' || verdict === 'PASS+NOTES';
+      const result = require('node:child_process').spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: {
+        ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GH_REQUESTS: requests,
+        REPO: 'owner/repo', HEAD_SHA: head, RESULT: verdict, CONCLUSION: passed ? 'success' : 'failure', RUN_URL: 'https://example.test/run/1',
+      } });
+      assert.equal(result.status, 0, result.stderr);
+      const calls = fs.readFileSync(requests, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const status = calls.find(args => args.includes(`repos/owner/repo/statuses/${head}`));
+      assert.ok(status, 'The verdict publishes a status directly on the PR head');
+      for (const field of ['POST', 'context=pstack-verifier', `state=${passed ? 'success' : 'failure'}`, 'target_url=https://example.test/run/1', `description=pstack-verifier: ${verdict}`]) assert.ok(status.includes(field), field);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
 test('a clean head and a red base is PASS with the before and after rows', () => {
   const dir = evidenceDir({ 'verify-appearance': { status: 'passed' }, [`verify-appearance-${base}`]: { status: 'failed' } });
   const summary = verifier.summarize(dir, ['appearance'], base);
