@@ -108,6 +108,20 @@ test('infrastructure, absent cleanup and unrelated errors cannot detect planted 
   }
 });
 
+test('the independent judge accepts only the known runner bots without relaxing PR trust', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/verify-skill-eval.yml', import.meta.url), 'utf8');
+  const judge = workflow.split('id: judge')[1].split('- name: Require both')[0];
+  assert.match(judge, /allowed_bots: software-factory-runners,hypertask-runners\s/);
+  assert.doesNotMatch(judge, /restrict_untrusted_prs:\s*["']?false/);
+});
+
+test('an existing but unread screenshot cannot support a passing answer', () => {
+  const fixture = proof(cases[0]);
+  fixture.evidence['evidence/after.png'] = { image: 'after.png' };
+  fixture.answer.evidence.push({ file: 'evidence/after.png', observation: 'The file exists, but I could not inspect it.' });
+  assert.equal(check(cases[0], fixture).checks.file_backed_evidence, false);
+});
+
 test('candidate prompts and visible filenames do not disclose the exercise', () => {
   const forbidden = /\b(eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena)\b/i;
   for (const scenario of cases) assert.doesNotMatch(prompt(scenario.prompt), forbidden);
