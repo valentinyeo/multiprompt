@@ -2219,7 +2219,6 @@ fn finishDeleted(item: *const PendingCommand) void {
     markUiDirty();
     _ = flushUi();
     if (undo_left) |undo| if (sameLocation(undo, location)) { undo_left = null; };
-    @import("console.zig").showHeaderNoticeAscii("Room deleted. Sessions keep running.", 4000, false);
 }
 
 fn deleteRoom(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64) room_view.ActionResult {

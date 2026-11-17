@@ -2,6 +2,8 @@
 
 Source files: src/main.zig, src/sidebar.zig, src/command_palette.zig, src/shortcuts.zig, src/app_state.zig, src/dialog.zig, src/room*, .claude/skills/verify-multiprompt/rooms*
 
+Covers: palette:SEARCH_ROOM_DELETE_OFFSET, palette:SEARCH_ROOM_LEAVE_OFFSET, palette:SEARCH_ROOM_TO_OFFSET, palette:SEARCH_ROOM_UNDO_LEAVE_OFFSET, shortcut:palette-actions/ctrl-k-delete-room, shortcut:palette-actions/ctrl-k-leave-room, shortcut:palette-actions/ctrl-k-room-menu, shortcut:palette-actions/ctrl-k-room-recipients, shortcut:palette-actions/ctrl-k-undo-leave-room
+
 SOFT-2581 uses approved [variant A](https://multibot-rooms-proto.pages.dev/). Each Room is a sidebar group containing real session rows, followed by New room. Existing session rows, composer chips, themed menus, and confirmation overlays provide the controls.
 
 ## Sub-features
@@ -37,6 +39,10 @@ The independent `send-while-away` step sends to a seeded Room, switches to Inbox
 ### recipients
 
 Open the seeded Room, choose **Room recipients**, then Home, Down, Enter to target its first session. Send ordinary text and require one delivery. Choose recipients again, Home then Enter for Everyone, and require two deliveries even when the message contains an at sign.
+
+### room menu
+
+Open a seeded Room and choose Ctrl+K **Room menu**. Select **Rename room...**, change the name, and save. Open the menu again, select **Add or remove sessions...**, change one selected session, and save. Require the same Room ID and preserved earlier messages, with only the intended name and membership changed. Capture the themed menu and resulting sidebar heading. This recipe remains unexercised by the eleven-step automatic journey.
 
 ### leave and undo
 

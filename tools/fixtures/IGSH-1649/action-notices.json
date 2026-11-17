@@ -270,6 +270,9 @@
   "rename.zig": [
     "commitRename: showHeaderNoticeAscii(\"Other is the permanent catch-all\",3500,true)"
   ],
+  "room_frontend.zig": [
+    "leaveRoom: @import(\"console.zig\").showHeaderNoticeAscii(\"Left room. Ctrl+K: Undo leave room.\",8000,false)"
+  ],
   "sidebar.zig": [
     "hideActiveTabUntilAttention: showHeaderNoticeAscii(\"Moved to Waiting until next blue dot\",2500,false)",
     "hideActiveTabUntilAttention: showHeaderNoticeAscii(\"Moved to Waiting until next blue dot\",2500,false)",

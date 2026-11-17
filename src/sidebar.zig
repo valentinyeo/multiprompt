@@ -2331,7 +2331,7 @@ fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
         const item = room.requestCatalogRow(catalog[row.room_idx].id) orelse return;
         var name: [300:0]u16 = @splat(0);
         const len = std.unicode.utf8ToUtf16Le(name[0..256], item.name) catch 0;
-        const suffix = L("  Room");
+        const suffix = std.mem.span(L("  Room"));
         @memcpy(name[len..][0..suffix.len], suffix);
         if (room.selectedRoom(item.id)) @import("smooth.zig").fillRoundRect(hdc, .{ .left = column.left, .top = y, .right = column.right, .bottom = y + sectionHeaderHeight() }, uiScaled(12), selectedSessionBackground());
         drawSidebarLabel(hdc, column, y, &name, -1);
