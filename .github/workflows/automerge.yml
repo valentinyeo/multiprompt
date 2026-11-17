@@ -10,6 +10,10 @@ permissions:
   checks: read
   statuses: read
 
+concurrency:
+  group: automerge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   automerge:
     if: ${{ false }}
