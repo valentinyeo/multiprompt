@@ -169,6 +169,7 @@ try {
             if ($stopEffective) { break }
             Start-Sleep -Milliseconds 200
         } while ($stopClock.Elapsed.TotalSeconds -lt 10)
+        $stopClock.Stop()
         Shot 'busy-after-stop'
         $received = $false
         if ($stopEffective) {
@@ -177,7 +178,10 @@ try {
                     $snapshot = Server-Snapshot 'busy-follow-up'
                     @($snapshot.inputs | Where-Object { $_.text -ceq 'follow-up during busy turn' }).Count -eq 1
                 } 30)
-                $received = (Copy-Chat 'busy-follow-up-copied').Contains('Server received: follow-up during busy turn')
+                [void](Wait-For 'follow-up reply painted in the real transcript' {
+                    (Copy-Chat 'busy-follow-up-copied').Contains('Server received: follow-up during busy turn')
+                } 30)
+                $received = $true
             } catch { $result.followUpError = $_.Exception.Message }
         }
         $result.reproduction = @{ notSent = $notSent; stopIneffective = -not $stopEffective; matchesReport = $notSent -and -not $stopEffective; waitedMilliseconds = $busyClock.ElapsedMilliseconds; stopMilliseconds = $stopClock.ElapsedMilliseconds; providerPid = $beforeStop.provider.pid }
