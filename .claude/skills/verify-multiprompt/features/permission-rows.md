@@ -26,4 +26,6 @@ The driver runs `chat-control-coverage.test.cjs --permission-evidence <evidence>
 
 ## Gotchas
 
+The fixture uses denial digit 4, but console permission digits are parsed dynamically and live approvals use protocol decisions.
+
 Inspect the tick, fading, answer echo and surrounding chat in the screenshots. Receipt and rectangle checks do not certify these visuals. This local console replaces Claude and does not exercise the live `approval.request` provider protocol or a remote server. Tab-context permission entries are separate actions and are not claimed here. The ordinary question-card journey is `chat-options`; working dots are `chat-working`.

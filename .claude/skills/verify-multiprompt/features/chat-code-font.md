@@ -26,6 +26,9 @@ IGSH-678: every code piece in Chat View draws in the bundled Nordwand Mono SemiB
 
 ## Gotchas
 
+Tool rows are hidden by the current messages-only presentation. A synthetic painter diff scene is not a visible live file-edit preview. The live code-size driver currently compares a two-pixel difference, not a DPI-independent two-point difference; non-96-DPI proof remains a harness gap.
+
+
 - A release built before IGSH-678 draws 13 px code at default size and has no `[chatcode]` line, so it fails `IGSH-678 code cell size` after launch and Chat View opened. That is the expected red, not a launch failure.
 - The fenced block is formatted from real console text, not a seeded transcript or app setter. Tool/diff blocks are hidden in Chat View. The separate branch painter image still exercises their low-level drawing routine directly, not visible transcript rows.
 - Fenced code lines that fit already drew through DirectWrite before IGSH-678; only rows wider than their space (diff previews ending in `...`) fell back to GDI. The live crop therefore records edges, while the painter compares DirectWrite against GDI.

@@ -8,11 +8,13 @@ Covers: shortcut:palette-actions/ctrl-k-chat-view-plus-menu, shortcut:palette-ac
 - `/plan` and `/permissions` open the permission picker. Plan, Ask, Accept edits and Bypass apply to the originating live chat.
 - The same four modes work through their global Ctrl+K entries and the permission section of Plus Menu.
 - Palette and Plus selections preserve an existing draft. Acknowledged slash choices clear the slash draft. Escape cancels Plus without another request.
-- `/model`, `/resume` and `/rewind` keep the draft editable and explain their limits without entering the outbox.
+- In non-Pi chats, `/model`, `/resume` and `/rewind` keep the draft editable and explain their limits without entering the outbox. Pi `/model` opens its provider model picker.
 
 ## How to get to it (user POV)
 
 Type `/plan` or `/permissions` in live chat. Press Enter, then choose a mode. Alternatively, open Ctrl+K and select **Chat permission mode: Plan**, **Ask**, **Accept edits**, or **Bypass**. Ctrl+K, **Chat View: Plus Menu**, opens the same permission choices alongside model and effort choices.
+
+Pi `/login` opens provider authentication. This journey does not cover every Pi/provider path.
 
 ## Driving it with control.ps1
 

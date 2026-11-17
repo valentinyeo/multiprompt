@@ -16,7 +16,7 @@ Confirm the main window starts maximized, then choose a global color theme throu
 - Press Ctrl+K, type `themes`, press Enter on `Themes...`.
 - Ctrl+Shift+K is the palette alternative when a browser surface owns Ctrl+K; this baseline uses Ctrl+K from the main app.
 - Inside Themes, type a theme name and use Up/Down and Enter. Esc returns to the workspace.
-- There is no dedicated direct theme shortcut or native menu selector.
+- Settings also has a native theme selector through Ctrl+,; that alternative is not exercised by this palette journey. There is no dedicated direct theme shortcut.
 
 ## Driving it with control.ps1
 
