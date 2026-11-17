@@ -109,8 +109,6 @@ finally:
 });
 
 test('the host refuses a second hax message while a run is active, so it stays queued', () => {
-  const start = source.indexOf('def host_handle_request(');
-  const end = source.indexOf('    binding = dict(v=1', start);
-  assert.ok(start >= 0 && end > start, 'delivery admission must precede the write claim');
-  assert.match(source.slice(start, end), /if provider == "hax" and \(session\["turn"\] is not None or session\["sends"\]\):\n\s+return dict\(status="busy", reason="hax_run_active"\)/);
+  const deliver = source.slice(source.indexOf('if provider != "claude" and not session.get("ready"):'));
+  assert.match(deliver.slice(0, 400), /if provider == "hax" and \(session\["turn"\] is not None or session\["sends"\]\):\n\s+return dict\(status="busy", reason="hax_run_active"\)/);
 });

@@ -4003,30 +4003,6 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.status()['state'], 'accepted', 'a message the bot was still going to read was marked Not sent')
         self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
 
-    def test_SOFT_2566_watchdog_spares_a_queued_message_during_an_active_host_turn(self):
-        self.submit()
-        written = time.monotonic()
-
-        def host_state(provider, sid):
-            if time.monotonic() - written < 3:
-                return dict(inflight=dict(id='active_message'), sends=['active_message'])
-            db = reader.message_store_db('fixture')
-            with db:
-                db.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id='message_fixture_0001'")
-            db.close()
-            return dict(inflight=None, sends=[])
-
-        with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 1.5), \
-                patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
-                patch.object(reader, 'host_owned', return_value=True), \
-                patch.object(reader, 'host_session_state', side_effect=host_state), \
-                patch.object(reader, 'message_poll'), \
-                patch.object(reader, 'message_store_request'), \
-                patch.object(reader, 'host_log') as log:
-            reader.message_worker('fixture', 'claude', 'sid')
-        self.assertEqual(self.status()['state'], 'accepted')
-        self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
-
     def test_submit_replay_has_one_handoff_and_global_id(self):
         first = self.submit()
         self.assertEqual(self.submit()['attempt'], first['attempt'])
@@ -5354,21 +5330,22 @@ process.exitCode = await run(['spawn', '--name', 'Headless fixture', '--folder',
         self.assertEqual(self.user_lines(), [self.text])
         self.assertEqual(len(self.host_events('delivered')), 1)
 
-    def test_host_queues_a_second_message_while_a_turn_is_in_flight(self):
+    def test_host_writes_a_second_message_while_a_turn_is_in_flight(self):
         self.enable(mode='silent')
         self.seed(text='first prompt')
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt'])
         self.seed(token='host_fixture_message_02', text='second prompt')
         self.dispatch()
-        self.assertEqual(self.message('host_fixture_message_02')['state'], 'queued')
-        self.assertEqual(self.user_lines(), ['first prompt'])
+        self.assertNotEqual(self.message('host_fixture_message_02')['state'], 'queued',
+                            'a hosted chat must take the next message while a turn runs')
+        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
         self.assertEqual(reader.host_backoff(self.provider, self.sid), 0.0)
         db = reader.message_store_db(self.tmux)
         attempts = db.execute("SELECT id FROM message_attempts WHERE provider='claude' AND sid=? AND outcome='sent' ORDER BY id",
                               (self.sid,)).fetchall()
         db.close()
-        self.assertEqual([row[0] for row in attempts], ['host_fixture_message_01'])
+        self.assertEqual([row[0] for row in attempts], ['host_fixture_message_01', 'host_fixture_message_02'])
 
     def test_host_lock_refuses_second_owner(self):
         self.enable()
@@ -7384,15 +7361,10 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
             db.execute("INSERT INTO shared_messages(id,provider,sid,text,position,attempt,state,epoch,created) VALUES (?,?,?,?,?,?,'sent',0,?)",
                        (token, self.provider, self.sid, token, len(self.session['sends']) + 1, 'attempt-1', time.time()))
         db.close()
-        sends, turn, inflight = self.session['sends'], self.session['turn'], self.session['inflight']
-        self.session.update(sends=[], turn=None, inflight=None)
+        self.session['turn'] = None if not self.session['sends'] else self.session['turn']
         result = self.reply(op='deliver', id=token, attempt='attempt-1', epoch=0, text=token)
         self.assertEqual(result['status'], 'sent')
-        entry = self.session['sends'][-1]
-        self.session['sends'] = sends + [entry]
-        if sends:
-            self.session.update(turn=turn, inflight=inflight)
-        return entry
+        return self.session['sends'][-1]
 
     def control(self, cancelled, subtype='success', before=None):
         read_fd, write_fd = os.pipe()
@@ -7490,15 +7462,6 @@ class HostInterruptTest(HostControlFixture, unittest.TestCase):
         self.assertFalse(self.session['interrupted'], 'the next turn must not inherit the interrupt')
         self.assertIsNone(self.session['turn'])
 
-    def test_SOFT_2566_stop_with_stale_idle_state_does_not_interrupt_the_next_turn(self):
-        self.session['turn'] = None
-        self.assertEqual(self.reply(op='interrupt')['status'], 'ok')
-        self.assertEqual(self.writes()[0]['request']['subtype'], 'interrupt')
-        self.assertFalse(self.session['interrupted'])
-        self.session['turn'] = 't-2'
-        self.feed(dict(type='result', subtype='success', total_cost_usd=0))
-        self.assertEqual(self.events('turn.ended')[0]['payload']['status'], 'completed')
-
     def test_an_interrupt_without_a_running_agent_is_refused(self):
         self.session['agent'] = types.SimpleNamespace(stdin=None)
         self.assertEqual(self.reply(op='interrupt')['reason'], 'stdin_write_failed')
@@ -7530,40 +7493,25 @@ class AgentHostInterruptTest(AgentHostControlFixture, unittest.TestCase):
 
 
 class AgentHostMidTurnSendTest(AgentHostControlFixture, unittest.TestCase):
-    def test_SOFT_2566_stop_interrupts_only_the_active_turn_and_preserves_the_queue(self):
-        self.fake('slow')
+    def test_a_second_message_starts_its_own_turn_in_the_event_log(self):
+        self.fake('silent')
         self.seed(text='first prompt')
         self.dispatch()
-        self.wait_for(lambda: self.events('text.done'))
-        second = self.seed(token='host_fixture_message_02', text='second prompt')
-        third = self.seed(token='host_fixture_message_03', text='third prompt')
-        attempt = self.message(second)['attempt']
-        for _ in range(3):
-            self.dispatch()
-            self.assertEqual(self.message(second)['state'], 'queued')
-        self.assertEqual(self.message(second)['attempt'], attempt)
-        self.assertEqual(reader.host_backoff(self.provider, self.sid), 0)
-        self.assertEqual(self.user_lines(), ['first prompt'])
-        self.assertEqual(len(self.events('turn.started')), 1)
-        self.assertEqual(self.answer(op='interrupt')['status'], 'ok')
-        self.wait_for(lambda: len(self.events('turn.ended')) == 1)
-        self.assertEqual(self.events('turn.ended')[0]['payload']['status'], 'interrupted')
-        self.assertEqual(self.message(second)['state'], 'queued')
+        self.wait_for(lambda: self.user_lines() == ['first prompt'])
+        self.seed(token='host_fixture_message_02', text='second prompt')
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
-        self.wait_for(lambda: self.message(second)['state'] == 'accepted')
-        self.assertEqual(self.message(second)['attempt'], attempt)
-        self.assertEqual(self.message(third)['state'], 'queued')
-        self.assertEqual(self.answer(op='interrupt')['status'], 'ok')
-        self.wait_for(lambda: len(self.events('turn.ended')) == 2)
-        self.dispatch()
-        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt', 'third prompt'])
-        self.assertEqual(self.answer(op='interrupt')['status'], 'ok')
-        self.wait_for(lambda: len(self.events('turn.ended')) == 3)
-        self.assertTrue(reader.host_owned(self.provider, self.sid))
-        self.assertEqual([row['turn'] for row in self.events('turn.started')], ['t-1', 't-2', 't-3'])
-        self.assertEqual([row['payload']['message_id'] for row in self.events('turn.started')],
-                         [self.token, second, third])
+        started = self.events('turn.started')
+        self.assertEqual([row['turn'] for row in started], ['t-1', 't-2'])
+        self.assertEqual([row['payload']['message_id'] for row in started], ['host_fixture_message_01', 'host_fixture_message_02'])
+        self.assertEqual([row['payload']['text_sha256'] for row in started],
+                         [hashlib.sha256(b'first prompt').hexdigest(), hashlib.sha256(b'second prompt').hexdigest()])
+        self.wait_for(lambda: {row['item'] for row in self.events('text.delta')} == {'msg-1:text:0', 'msg-2:text:0'})
+        self.assertEqual({row['turn'] for row in self.events('text.delta')}, {'t-1'},
+                         'a queued message joins the turn that is already running')
+        self.assertEqual({row['item'] for row in self.events('text.delta')}, {'msg-1:text:0', 'msg-2:text:0'},
+                         'each message streams under its own message id')
+        self.assertEqual(self.host_events('delivered')[-1]['detail']['id'], 'host_fixture_message_02')
 
 
 

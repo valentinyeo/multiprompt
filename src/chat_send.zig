@@ -4662,7 +4662,7 @@ fn chatLiveInterrupt(shell_index: u32) bool {
     if (shell_index >= app_state.shell_count) return false;
     const live = @import("chat_live.zig");
     const shell_id = app_state.shells[shell_index].shell_id;
-    if (!live.running(shell_id) and !live.settingsKnown(shell_id)) return false;
+    if (!live.running(shell_id)) return false;
     const key = chatFileIdentityForShell(shell_index);
     const line = live.interruptLine(std.heap.page_allocator, shell_id, key.provider(), std.mem.sliceTo(&key.sid, 0)) catch return false;
     if (!chatLiveReply(line)) return false;

@@ -154,13 +154,8 @@ python3 <reader> host handover <provider> <sid>
   without a live agent in a pane.
 - Not owned, switched off, or not Claude: the existing connector path runs unchanged and still
   needs the live agent in its pane.
-- A Claude chat that is mid-turn answers `busy` before claiming or writing the next prompt.
-  The next message stays `queued` and is retried about once a second, with the same attempt and
-  no growing backoff, until the turn ends. An active host turn does not consume the delivery
-  worker's stalled-progress budget.
-- Stop sends the host's `interrupt` control request even when the desktop has model settings but
-  no running-turn event. Waiting prompts remain in the durable store, outside Claude's input
-  queue, so interrupting the current turn does not discard them.
+- A chat that is mid-turn answers `busy`: the next message stays `queued` and is retried about once
+  a second, with no growing backoff, until the turn ends.
 - Host unavailable or timed out: the row returns to `queued` (same attempt, so a later
   retry is a `duplicate`, not a second send) and the per-chat backoff grows 250 ms, 500 ms,
   1 s, 2 s, 4 s, 8 s, 16 s, 30 s. Success clears it.

@@ -62,9 +62,15 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       feature: chat-not-sent-remove
+  server-chat-busy:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: server-chat-busy
   click-through:
     name: click-through
-    needs: [changes, chat-browser-shortcut, chat-browser-autoload, chat-model, chat-not-sent-remove]
+    needs: [changes, chat-browser-shortcut, chat-browser-autoload, chat-model, chat-not-sent-remove, server-chat-busy]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -77,12 +83,13 @@ jobs:
           AUTOLOAD: ${{ needs.chat-browser-autoload.result }}
           MODEL: ${{ needs.chat-model.result }}
           REMOVE: ${{ needs.chat-not-sent-remove.result }}
+          BUSY: ${{ needs.server-chat-busy.result }}
         run: |
           [ "$CHANGES" = success ] || exit 1
           if [ "$RUN" = false ]; then
             echo 'No desktop files changed; journeys skipped.'
             exit 0
           fi
-          for result in "$SHORTCUT" "$AUTOLOAD" "$MODEL" "$REMOVE"; do
+          for result in "$SHORTCUT" "$AUTOLOAD" "$MODEL" "$REMOVE" "$BUSY"; do
             [ "$result" = success ] || exit 1
           done
