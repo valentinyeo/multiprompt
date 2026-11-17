@@ -59,7 +59,7 @@ test('non-fix PRs keep the existing optional baseline behaviour', () => {
 
 test('the declared repro takes priority over the picker and forces a master comparison', () => {
   const selected = verifier.validateSelection({ features: ['sessions', 'chat-view', 'title-bar'], compare_base: false }, ['appearance', 'sessions', 'chat-view', 'title-bar'], fix);
-  assert.deepEqual(selected.features, ['appearance', 'sessions', 'chat-view']);
+  assert.deepEqual(selected.features, ['appearance', 'sessions', 'chat-view', 'title-bar']);
   assert.equal(selected.compareBase, true);
   assert.equal(selected.reproJourney, 'appearance');
 });

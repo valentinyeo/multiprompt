@@ -39,18 +39,23 @@ function validateSelection(raw, available, pr = {}) {
   const allowed = new Set(selectable(available));
   const requirement = reproRequirement(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
+  const required = [];
   const changedPaths = (pr.files || []).map(file => file.path);
   if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
     if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
-    requested.unshift('chat-still');
+    required.push('chat-still');
   }
-  if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
+  if (requirement.bugFix && requirement.reproJourney) required.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
-  for (const name of requested) {
+  let picked = 0;
+  for (const name of [...required, ...requested]) {
     if (features.includes(name) || dropped.includes(name)) continue;
-    if (allowed.has(name) && features.length < MAX_FEATURES) features.push(name);
-    else dropped.push(name);
+    const mandatory = required.includes(name);
+    if (allowed.has(name) && (mandatory || picked < MAX_FEATURES)) {
+      features.push(name);
+      if (!mandatory) picked++;
+    } else dropped.push(name);
   }
   return {
     features,

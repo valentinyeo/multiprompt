@@ -537,11 +537,11 @@ test('job timeouts and cancellations block even when product result files passed
 });
 
 
-test('chat changes cannot omit the stillness journey or exceed the journey limit', () => {
+test('mandatory stillness preserves the three optional journey slots', () => {
   const maps = [...available, 'chat-still'];
   const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
   for (const file of ['src/chat_render.zig', 'src/chat_session.zig', 'src/chat_history_reader.py', 'src/main.zig', 'src/browser_pane.zig', 'src/window_layout.zig', 'tools/chat-still/observer.cs', 'tools/verify-chat-delivery/boundary.py', '.claude/skills/verify-multiprompt/control-feature-chat-still.ps1']) {
-    assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: file }] }).features, ['chat-still', 'appearance', 'command-palette']);
+    assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: file }] }).features, ['chat-still', 'appearance', 'command-palette', 'palette-order']);
   }
   assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: 'docs/readme.md' }] }).features, raw.features);
   assert.throws(() => verifier.validateSelection(raw, available, { files: [{ path: 'src/chat_render.zig' }] }), /require the chat-still journey/);
@@ -554,8 +554,20 @@ test('repair repro and mandatory chat stillness both survive a full picker selec
     [...available, 'chat-still'],
     { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
   );
-  assert.deepEqual(result.features, ['command-palette', 'chat-still', 'appearance']);
+  assert.deepEqual(result.features, ['command-palette', 'chat-still', 'appearance', 'palette-order', 'chat-view']);
   assert.equal(result.compareBase, true);
+});
+
+test('mandatory stillness cannot displace Stop proof from the chat-control matrix', () => {
+  const maps = [...available, 'chat-still', 'permission-rows', 'chat-slash'];
+  const pr = { files: [{ path: '.claude/skills/verify-multiprompt/control-feature-chat-view.ps1' }] };
+  const requested = ['permission-rows', 'chat-slash', 'chat-view'];
+  const result = verifier.validateSelection({ features: requested, compare_base: false }, maps, pr);
+  assert.deepEqual(result.features, ['chat-still', ...requested]);
+  assert.deepEqual(result.dropped, []);
+  const overflow = verifier.validateSelection({ features: ['chat-still', ...requested, 'appearance'] }, maps, pr);
+  assert.deepEqual(overflow.features, ['chat-still', ...requested]);
+  assert.deepEqual(overflow.dropped, ['appearance']);
 });
 
 test('inspecting known failed tests can never turn an independent PASS into a green gate', () => {
