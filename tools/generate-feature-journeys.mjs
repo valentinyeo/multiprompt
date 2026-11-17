@@ -69,7 +69,7 @@ export function outputs(read) {
   const control = `${skill}/control.ps1`;
   files.set(control, read(control).replace(/ValidateSet\(([^\n)]+)\)/, (_, names) => {
     const existing = [...names.matchAll(/'([^']+)'/g)].map(match => match[1]).filter(name => !name.startsWith('generated-'));
-    return `ValidateSet(${[...existing, ...rows.map(row => row.feature)].map(name => `'${name}'`).join(', ')})`;
+    return `ValidateSet(${[...rows.map(row => row.feature), ...existing].map(name => `'${name}'`).join(', ')})`;
   }));
   return { files, rows, gaps };
 }
