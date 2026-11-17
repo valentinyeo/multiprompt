@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 
 const root = process.argv[2];
 const text = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, '');
@@ -29,7 +29,20 @@ assert.equal(locks.integrity, 'ok');
 assert.equal(locks.writes, 2);
 assert.match(text('ssh-preflight.txt'), /Linux[\s\S]*tmux[\s\S]*Python/);
 assert.match(text('sshd.log'), /Accepted publickey for mpverify/);
-const video = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path.join(root, 'journey.mp4')], { encoding: 'utf8' }));
+const nativeLogs = fs.readdirSync(root).filter(name => name.endsWith('.exit-code.txt'));
+for (const name of ['ssh-keygen', 'driver-repo-path', 'start-repo-path', 'public-key-path', 'server-start', 'ssh-keyscan', 'ssh-preflight', 'evidence-path', 'server-stop', 'wsl-terminate']) {
+  assert.ok(nativeLogs.includes(`${name}.exit-code.txt`), `Missing native command evidence: ${name}`);
+}
+for (const name of nativeLogs) {
+  assert.equal(text(name).trim(), '0', `Native command failed: ${name}`);
+  assert.ok(fs.existsSync(path.join(root, name.replace('.exit-code.txt', '.stderr.log'))));
+}
+const probe = spawnSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path.join(root, 'journey.mp4')], { encoding: 'utf8' });
+fs.writeFileSync(path.join(root, 'ffprobe.stdout.log'), probe.stdout ?? '');
+fs.writeFileSync(path.join(root, 'ffprobe.stderr.log'), probe.stderr ?? String(probe.error ?? ''));
+fs.writeFileSync(path.join(root, 'ffprobe.exit-code.txt'), String(probe.status));
+assert.equal(probe.status, 0, `Video probe failed; see ${path.join(root, 'ffprobe.stderr.log')}`);
+const video = JSON.parse(probe.stdout);
 assert.ok(video.streams.some(stream => stream.codec_type === 'video' && Number(stream.nb_frames) > 0));
 assert.ok(Number(video.format.duration) > 1);
 assert.equal(json('doctor.json').sha256.toLowerCase(), json('build.json').sha256.toLowerCase());

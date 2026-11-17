@@ -41,16 +41,16 @@ class ProviderTest(unittest.TestCase):
 $env:GITHUB_WORKSPACE = 'D:\a path\multiprompt'
 $key = 'D:\key path\id_ed25519'
 $Evidence = 'D:\evidence path'
-function wsl.exe {
-    if ($args -contains '--exec') { $args[-1] }
-    else { $args[-1] -replace '\\', '' }
+function Invoke-ServerNative($FilePath, $Arguments, $Evidence, $Name) {
+    if ($Arguments -contains '--exec') { $Arguments[-1] }
+    else { $Arguments[-1] -replace '\\', '' }
 }
 $values = @()
 foreach ($name in @('start.ps1', 'drive.ps1')) {
     $tokens = $null
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT ('tools/verify-server-chat/' + $name)), [ref]$tokens, [ref]$errors)
-    $calls = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'wsl.exe' -and @($node.CommandElements | Where-Object { $_.Extent.Text -eq 'wslpath' }).Count -eq 1 }, $true)
+    $calls = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Invoke-ServerNative' -and $node.Extent.Text -match 'wslpath' }, $true)
     foreach ($call in $calls) { $values += & ([scriptblock]::Create($call.Extent.Text)) }
 }
 ConvertTo-Json -InputObject $values -Compress
@@ -100,35 +100,59 @@ ConvertTo-Json -InputObject $values -Compress
                             execute(str(seed))
                         reader['host_send'].assert_not_called()
 
-    def test_startup_preserves_full_stderr_and_uses_the_process_exit_code(self):
+    def test_native_commands_preserve_stderr_and_check_exit_codes(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
         if shell is None:
             self.skipTest('PowerShell is installed by the Windows verification runner')
         command = r"""
 $ErrorActionPreference = 'Stop'
-$Evidence = $env:VERIFY_TEST_EVIDENCE
-$background = if ($env:VERIFY_TEST_EXIT -eq '0') { "import subprocess; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL);" } else { '' }
-$startArguments = "-c `"import sys; $background print('seed stdout'); print('traceback line 1\ntraceback line 2', file=sys.stderr); sys.exit($env:VERIFY_TEST_EXIT)`""
-function Get-Command { @{ Source = $env:VERIFY_TEST_PYTHON } }
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/start.ps1'), [ref]$tokens, [ref]$errors)
-$launch = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$linuxStart' }, $true)
-$check = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.StartsWith('if ($linuxStart.ExitCode') }, $true)
-if ($null -eq $launch -or $null -eq $check) { throw 'Startup must capture the native process and check its exit code' }
-$source = Get-Content (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/start.ps1') -Raw
-. ([scriptblock]::Create($source.Substring($launch.Extent.StartOffset, $check.Extent.EndOffset - $launch.Extent.StartOffset)))
+$PSNativeCommandUseErrorActionPreference = $true
+. (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/native.ps1')
+$output = Invoke-ServerNative -FilePath $env:VERIFY_TEST_PYTHON -Arguments @($env:VERIFY_TEST_PROGRAM, 'a path', '', 'embedded"quote', 'trailing\', $env:VERIFY_TEST_EXIT) -Evidence $env:VERIFY_TEST_EVIDENCE -Name 'native'
+if ($ErrorActionPreference -ne 'Stop') { throw 'Native execution changed PowerShell error policy' }
+$output
 """
-        for exit_code in (0, 1):
+        for exit_code in (0, 7):
             with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory(prefix='server chat launch ') as evidence:
-                env = dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_PYTHON=sys.executable, VERIFY_TEST_EXIT=str(exit_code), VERIFY_TEST_EVIDENCE=evidence)
+                program = Path(evidence) / 'native child.py'
+                program.write_text("import json,subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(8)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(json.dumps(sys.argv[1:-1])); print('# 127.0.0.1:2222 SSH-2.0-OpenSSH',file=sys.stderr); print('traceback line 2',file=sys.stderr); sys.exit(int(sys.argv[-1]))")
+                env = dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_PYTHON=sys.executable, VERIFY_TEST_PROGRAM=str(program), VERIFY_TEST_EXIT=str(exit_code), VERIFY_TEST_EVIDENCE=evidence)
                 try:
                     result = subprocess.run([shell, '-NoProfile', '-Command', command], env=env, text=True, capture_output=True, timeout=6)
                 except subprocess.TimeoutExpired:
-                    self.fail('Startup waited for the background server instead of only its launcher')
+                    self.fail('Native execution waited for a background descendant instead of only its launcher')
                 self.assertEqual(result.returncode == 0, exit_code == 0, result.stderr)
-                self.assertEqual((Path(evidence) / 'server-start.stdout.log').read_text().strip(), 'seed stdout')
-                self.assertEqual((Path(evidence) / 'server-start.stderr.log').read_text().splitlines(), ['traceback line 1', 'traceback line 2'])
+                self.assertEqual(json.loads((Path(evidence) / 'native.stdout.log').read_text()), ['a path', '', 'embedded"quote', 'trailing\\'])
+                self.assertEqual((Path(evidence) / 'native.stderr.log').read_text().splitlines(), ['# 127.0.0.1:2222 SSH-2.0-OpenSSH', 'traceback line 2'])
+                self.assertEqual((Path(evidence) / 'native.exit-code.txt').read_text().strip(), str(exit_code))
+                if exit_code:
+                    self.assertIn('exited 7', result.stderr)
+                else:
+                    self.assertEqual(json.loads(result.stdout), ['a path', '', 'embedded"quote', 'trailing\\'])
+
+    def test_native_commands_cannot_bypass_the_shared_boundary(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+foreach ($path in Get-ChildItem (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/*.ps1')) {
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($path.FullName, [ref]$tokens, [ref]$errors)
+    if ($errors.Count) { throw ($errors | Out-String) }
+    $blocks = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.ParameterAst] -and $node.StaticType -eq [scriptblock] }, $true) | ForEach-Object { $_.Name.Extent.Text })
+    foreach ($call in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        $name = $call.GetCommandName()
+        $scriptCall = $call.CommandElements[0].Extent.Text -match '\.ps1["'']?$'
+        if (($call.InvocationOperator -eq 'Ampersand' -and -not $scriptCall -and $call.CommandElements[0].Extent.Text -notin $blocks) -or $name -match '(?i)(\.exe$|^python[0-9]*$|^ssh|^ffmpeg|^ffprobe|^wsl$)' -or ($name -eq 'Start-Process' -and $path.Name -ne 'native.ps1')) {
+            throw "$($path.Name):$($call.Extent.StartLineNumber): Use Invoke-ServerNative for native commands so exit codes decide success and stderr reaches evidence"
+        }
+    }
+}
+"""
+        result = subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT)), text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

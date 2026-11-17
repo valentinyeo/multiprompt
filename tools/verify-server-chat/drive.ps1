@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory)][string]$Evidence
 )
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/native.ps1"
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Use a GitHub Windows runner' }
 $Exe = (Resolve-Path $Exe).Path
@@ -76,14 +77,13 @@ function Send-Line([string]$Text) {
     [void](Wait-For 'composer cleared' { [ChatDeliveryDesktop]::Text($composer) -ceq '' })
 }
 function Server-Snapshot([string]$Name) {
-    $raw = & $ssh -F "$settings/ssh-key/config" remote-1 "python3 $repo/tools/verify-server-chat/snapshot.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Real SSH evidence read failed' }
+    $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/tools/verify-server-chat/snapshot.py") -Evidence $Evidence -Name ($Name + '-' + [guid]::NewGuid().ToString('N'))
     $snapshot = ($raw -join "`n") | ConvertFrom-Json
     Save $snapshot "$Evidence/$Name.json"
     return $snapshot
 }
 try {
-    $repo = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
+    $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'driver-repo-path').Trim()
     & "$PSScriptRoot/start.ps1" -Profile $profile -Evidence $Evidence
     $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
     $env:APPDATA = "$profile/roaming"
@@ -143,14 +143,18 @@ try {
     }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
     try {
-        $linuxEvidence = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $Evidence).Trim()
-        & wsl.exe -d Ubuntu-24.04 -u root --exec bash "$repo/tools/verify-server-chat/stop.sh" $linuxEvidence
-        if ($LASTEXITCODE -ne 0) { throw 'Linux evidence collection or cleanup failed' }
+        $linuxEvidence = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $Evidence) -Evidence $Evidence -Name 'evidence-path').Trim()
+        [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/stop.sh", $linuxEvidence) -Evidence $Evidence -Name 'server-stop')
     } catch {
         $result.cleanupError = $_.ToString()
         $result.status = 'failed'
     }
-    & wsl.exe --terminate Ubuntu-24.04
+    try {
+        [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $Evidence -Name 'wsl-terminate')
+    } catch {
+        $result.cleanupError = ($result['cleanupError'], $_.ToString() -join "`n")
+        $result.status = 'failed'
+    }
     Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
     $result.keyRemoved = -not (Test-Path "$settings/ssh-key/multibot_ed25519")
     if (-not $result.keyRemoved) { $result.status = 'failed'; $result.error = 'Private key cleanup failed' }
@@ -158,4 +162,4 @@ try {
     Save $result "$Evidence/result.json"
     Stop-Transcript
 }
-if ($result.status -ne 'passed') { throw $result.error }
+if ($result.status -ne 'passed') { throw ($result['error'], $result['cleanupError'] -join "`n") }
