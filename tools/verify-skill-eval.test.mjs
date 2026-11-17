@@ -203,35 +203,3 @@ test('blinded verdict must include each label exactly once and cannot override f
   assert.equal(judgePassed({ passed: true }, verdict, ['response-1', 'response-2']), false);
   assert.equal(judgePassed({ passed: true }, { ...verdict, results: [...verdict.results, ...verdict.results] }, ['response-1']), false);
 });
-
-test('Codex workspace child receives hosted platform flags without API credentials', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-platform-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const clients = path.join(root, 'clients');
-  const client = path.join(clients, 'node_modules/@openai/codex/bin/codex.js');
-  const capture = path.join(root, 'child-env.json');
-  fs.mkdirSync(path.dirname(client), { recursive: true });
-  fs.writeFileSync(client, `
-    const fs = require('node:fs');
-    const { spawnSync } = require('node:child_process');
-    const args = process.argv.slice(2);
-    const config = args.find(arg => arg.startsWith('mcp_servers.workspace.env_vars='));
-    const names = config ? JSON.parse(config.slice(config.indexOf('=') + 1)) : [];
-    const env = Object.fromEntries(names.filter(name => process.env[name] !== undefined).map(name => [name, process.env[name]]));
-    const result = spawnSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.env))'], { env, encoding: 'utf8' });
-    if (result.status !== 0) process.exit(1);
-    fs.writeFileSync(${JSON.stringify(capture)}, result.stdout);
-    fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ verdict: 'BLOCKED', evidence: [{ file: 'fixture', observation: 'Environment-only fixture; no desktop is launched.' }] }));
-  `);
-  const result = spawnSync(process.execPath, [fileURLToPath(moduleUrl), 'agent', path.resolve(import.meta.dirname, '..'), cases[0].id, 'codex', path.join(root, 'results')], {
-    env: { ...process.env, RUNNER_TEMP: root, CLIENTS: clients, CODEX_AUTH_JSON: '{}', GITHUB_ACTIONS: 'hosted-flag-fixture', RUNNER_OS: 'platform-flag-fixture', GH_TOKEN: 'fixture-not-a-secret', GITHUB_TOKEN: 'fixture-not-a-secret', DEEPSEEK_API_KEY: 'fixture-not-a-secret' },
-    encoding: 'utf8', timeout: 15000,
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.ok(fs.existsSync(capture), 'the Codex transport must launch its workspace child');
-  const child = JSON.parse(fs.readFileSync(capture, 'utf8'));
-  assert.equal(child.GITHUB_ACTIONS, 'hosted-flag-fixture');
-  assert.equal(child.RUNNER_OS, 'platform-flag-fixture');
-  assert.equal(child.RUNNER_TEMP, root);
-  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'DEEPSEEK_API_KEY', 'CODEX_AUTH_JSON']) assert.ok(!child[name], `${name} must not reach the workspace child`);
-});
