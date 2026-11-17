@@ -1,0 +1,71 @@
+name: Isolated tmux cleanup
+on:
+  pull_request:
+    paths:
+      - tools/chat-history-reader-test.py
+      - tools/verify-tmux-cleanup.py
+      - .github/workflows/tmux-cleanup.yml
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Prove the regression fails before the fix
+        run: |
+          git show 2828bff76:tools/chat-history-reader-test.py > tools/chat-history-reader-test.py
+          status=0
+          python3 tools/chat-history-reader-test.py TmuxCleanupTest -v > red.log 2>&1 || status=$?
+          cat red.log
+          git checkout -- tools/chat-history-reader-test.py
+          test "$status" -ne 0
+          grep -q 'FAILED (failures=3)' red.log
+      - run: python3 tools/chat-history-reader-test.py TmuxCleanupTest -v
+  deepseek:
+    needs: regression
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Independent runtime verification
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERIFIER_OUTPUT: ${{ runner.temp }}/tmux-verifier
+        run: python3 tools/verify-tmux-cleanup.py
+      - name: Post verifier verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -f "$RUNNER_TEMP/tmux-verifier/verdict.md" ]; then
+            gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/tmux-verifier/verdict.md"
+          else
+            echo 'DeepSeek produced no verdict.' >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: tmux-verifier-evidence
+          path: ${{ runner.temp }}/tmux-verifier
