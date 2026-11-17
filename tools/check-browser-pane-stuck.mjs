@@ -75,7 +75,7 @@ for (const step of ['initial-open', 'shortcut-close', 'reopen-after-shortcut', '
 for (const observation of ['GetProp(hwnd, "ZigShellPaneOwner")', 'IsWindowVisible(hwnd)', 'GetWindowRect(hwnd, out pane)', 'AddSeconds(21)', 'Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id']) {
   assert.ok(driver.includes(observation), `connected journey observes ${observation}`);
 }
-for (const input of ['Press @(0x12, 0x41)', "Palette 'close all browser panes'", 'Press @(0x12, 0x10, 0x41)', 'Press @(0x12, 0x10, 0x42)']) {
+for (const input of ['Press @(0x12, 0x41)', "Invoke-JourneyCommand 'Close all browser panes' -Confirm {", 'Press @(0x12, 0x10, 0x41)', 'Press @(0x12, 0x10, 0x42)']) {
   assert.ok(driver.includes(input), `real input: ${input}`);
 }
 function foregroundInputContract(source) {
@@ -173,8 +173,8 @@ function browserForegroundContract(source) {
     assert.ok(next > offset, `missing or misordered foreground handoff: ${step}`);
     offset = next;
   }
-  assert.match(source, /function Open-BrowserPane\([^\n]*\) \{\s*Palette 'open browser'\s*Press @\(0x0D\) 'Enter: Open Browser Pane'\s*\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s*Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s*return \$pane\s*\}/);
-  assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
+  assert.match(source, /function Open-BrowserPane\([^\n]*\) \{\s*Invoke-JourneyCommand 'Open Browser Pane' -Confirm {\s*Press @\(0x0D\) 'Enter: Open Browser Pane'\s*\}\s*\$pane = Assert-BrowserPane 'open' \$Step \$PreviousId\s*Focus-BrowserPaneOwner \$Step \$pane.browser_connection_id\s*return \$pane\s*\}/);
+  assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Invoke-JourneyCommand 'Close all browser panes' -Confirm {/);
   foregroundInputContract(source);
   for (const name of ['Press', 'Type-Text']) {
     const precondition = 'Wait-Foreground';

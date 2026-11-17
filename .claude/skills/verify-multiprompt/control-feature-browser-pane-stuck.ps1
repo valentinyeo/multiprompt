@@ -5,8 +5,9 @@
             Wait-Until { @((Read-Session).tabs | Where-Object { $_.cv -eq $true }).Count -eq 1 } 'Chat View saved for the initial session'
             $first = Open-BrowserPane 'initial-open'
             Snapshot 'action'
-            Palette 'new cmd'
-            Press @(0x0D) 'Enter: create terminal target for Chat View handoff'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Press @(0x0D) 'Enter: create terminal target for Chat View handoff'
+            }
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD selected'
             if ((Read-Session).tabs[1].PSObject.Properties['cv'] -and (Read-Session).tabs[1].cv) {
                 Press @(0x12, 0x43) 'Alt+C: keep target in terminal view'
@@ -43,8 +44,9 @@
             Press @(0x12, 0x41) 'Alt+A: close browser pane'
             $closed = Assert-BrowserPane 'closed' 'shortcut-close'
             $second = Open-BrowserPane 'reopen-after-shortcut' $first.browser_connection_id
-            Palette 'close all browser panes'
-            Press @(0x0D) 'Enter: Close All Browser Panes'
+            Invoke-JourneyCommand 'Close all browser panes' -Confirm {
+                Press @(0x0D) 'Enter: Close All Browser Panes'
+            }
             $closed = Assert-BrowserPane 'closed' 'palette-close-all'
             if (@((Read-Inbox).shells | Where-Object { $_.browser_state -ne 'closed' }).Count -ne 0) { throw 'Close All left a browser pane open' }
             Doctor
@@ -60,8 +62,9 @@
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
             Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id
-            Palette 'close all browser panes'
-            Press @(0x0D) 'Enter: Close All Browser Panes'
+            Invoke-JourneyCommand 'Close all browser panes' -Confirm {
+                Press @(0x0D) 'Enter: Close All Browser Panes'
+            }
             $closed = Assert-BrowserPane 'closed' 'final-close'
             Snapshot 'after'
 
@@ -110,8 +113,9 @@
                 $slowPane = Assert-BrowserPane 'open' 'slow-open'
                 Focus-BrowserPaneOwner 'slow-open' $slowPane.browser_connection_id
                 $slowUrl = "http://127.0.0.1:$port/slow"
-                Palette 'browser url'
-                Press @(0x0D) 'Enter: choose browser URL'
+                Invoke-JourneyCommand 'Browser: Open URL...' -Confirm {
+                    Press @(0x0D) 'Enter: choose browser URL'
+                }
                 Type-Text $slowUrl
                 Press @(0x0D) 'Enter: retain slow URL through app navigation'
                 Wait-Until { (Read-Session).tabs[0].burl -eq $slowUrl } 'slow URL saved through the real app UI'

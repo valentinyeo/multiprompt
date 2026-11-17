@@ -42,6 +42,10 @@ jobs:
           BASE: ${{ github.event.before || '' }}
           HEAD: ${{ github.sha }}
         run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
+      - name: Test stable desktop journey command names
+        run: node --test tools/check-journey-commands.test.mjs
+      - name: Reject raw desktop journey commands
+        run: node tools/check-journey-commands.mjs
       - name: Test the timer ratchet
         run: node --test tools/check-timer-ratchet.test.mjs
       - name: Block new timer and sleep quick fixes

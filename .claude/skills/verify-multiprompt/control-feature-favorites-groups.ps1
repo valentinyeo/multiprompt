@@ -17,8 +17,9 @@
                     Wait-Until { $state = Read-Session; $null -ne $state -and $state.starred_view -eq ($view -eq 'starred') -and $state.tabs[$state.active_tab].shell_id -eq $markerSid } 'robot marker workspace and session selected'
                     foreach ($placement in @('row', 'pinned')) {
                         if ($placement -eq 'pinned') {
-                            Focus-Palette 'pin to top' '(7113|6293)'
-                            Press @(0x0D) 'Enter: pin robot'
+                            Invoke-JourneyCommand 'Pin' -Confirm {
+                                Press @(0x0D) 'Enter: pin robot'
+                            }
                             Wait-Until { $state = Read-Session; if ($view -eq 'starred') { $state.tabs[$tabIndex].starred_pinned_top -eq $true } else { $state.tabs[$tabIndex].pinned_top -eq $true } } 'robot pinned in current workspace'
                         }
                         Wait-Until { $item = @((Read-Inbox).shells | Where-Object { $_.sid -eq $markerSid }); $item.Count -eq 1 -and -not $item[0].att } 'favorite robot initially read'
@@ -34,8 +35,9 @@
                         Press @(0x1B) 'Escape: return to robot'
                         Wait-Until { (Read-Inbox).inbox_active -eq $false } 'Inbox closed after robot unread reset'
                         if ($placement -eq 'pinned') {
-                            Focus-Palette 'unpin from top' '(7113|6293)'
-                            Press @(0x0D) 'Enter: restore robot row'
+                            Invoke-JourneyCommand 'Unpin' -Confirm {
+                                Press @(0x0D) 'Enter: restore robot row'
+                            }
                             Wait-Until { $state = Read-Session; $field = if ($view -eq 'starred') { 'starred_pinned_top' } else { 'pinned_top' }; -not $state.tabs[$tabIndex].PSObject.Properties[$field] -or -not $state.tabs[$tabIndex].$field } 'robot unpinned in current workspace'
                         }
                     }
@@ -43,8 +45,9 @@
             }
             $result.checks += @{ name = 'IGSH-1534-robot-dots'; themes = @('light', 'amoled', 'edgegray'); views = @('home', 'starred'); placements = @('row', 'pinned'); states = @('read', 'unread') }
             Press @(0x12, 0x32) 'Alt+2: return home for grouping'
-            Palette 'move to group'
-            Press @(0x0D) 'Enter: Move to Group submenu in home workspace'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu in home workspace'
+            }
             Type-Text 'new group'
             Snapshot 'action'
             Press @(0x0D) 'Enter: New home group'
@@ -59,8 +62,9 @@
             $homeGroupIds = @($homeState.groups | ForEach-Object { $_.id })
             Press @(0x1B) 'Escape: finish home group inline rename without changing its name'
             Press @(0x12, 0x31) 'Alt+1: Starred workspace'
-            Palette 'move to group'
-            Press @(0x0D) 'Enter: Move to Group submenu in Starred workspace'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu in Starred workspace'
+            }
             Type-Text 'new group'
             Press @(0x0D) 'Enter: New Favorites group'
             Wait-Until {
@@ -75,8 +79,9 @@
             Press @(0x1B) 'Escape: finish Favorites group inline rename without changing its name'
             Snapshot 'starred-grouped'
             Snapshot 'starred-pins-before'
-            Focus-Palette 'pin to top' '(7113|6293)'
-            Press @(0x0D) 'Enter: pin this session in Starred only'
+            Invoke-JourneyCommand 'Pin' -Confirm {
+                Press @(0x0D) 'Enter: pin this session in Starred only'
+            }
             Wait-Until { $state = Read-Session; $state.tabs[$tabIndex].starred_pinned_top -eq $true -and (-not $state.tabs[$tabIndex].PSObject.Properties['pinned_top'] -or -not $state.tabs[$tabIndex].pinned_top) } 'Starred pin saved independently from home pin'
             Save-Json (Read-Session) 'starred-pins-after.json'
             Snapshot 'starred-pins-after'
@@ -90,13 +95,15 @@
             Snapshot 'after'
             $result.checks += @{ name = 'favorites-groups-independent'; group_id = $homeGroupId; starred_group_id = $favoritesGroupId; tab = $tabIndex }
             $tabsBefore = @((Read-Session).tabs).Count
-            Palette 'new cmd'
-            Press @(0x0D) 'Enter: New CMD shell so the Inbox keeps one unmuted session'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Press @(0x0D) 'Enter: New CMD shell so the Inbox keeps one unmuted session'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $tabsBefore + 1 -and $state.active_tab -ne $tabIndex } 'second unmuted CMD tab saved and active'
             Press @(0x12, 0x31) 'Alt+1: Favorites with the starred session'
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and $state.starred_view -and $state.active_tab -eq $tabIndex } 'starred session selected in Favorites'
-            Palette 'mute tab'
-            Press @(0x0D) 'Enter: Mute Tab on the starred session'
+            Invoke-JourneyCommand 'Mute Tab' -Confirm {
+                Press @(0x0D) 'Enter: Mute Tab on the starred session'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.tabs[$tabIndex].PSObject.Properties['muted'] -and $state.tabs[$tabIndex].muted -eq $true } 'muted true saved on the starred session'
             Press @(0x12, 0x32) 'Alt+2: leave Favorites before reopening it'
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['starred_view'] -and -not $state.starred_view } 'home workspace before reopening Favorites'
@@ -167,8 +174,9 @@
                 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].starred_pinned_top -eq $true -and (-not $state.tabs[$state.active_tab].PSObject.Properties['pinned_top'] -or -not $state.tabs[$state.active_tab].pinned_top) } 'Starred pin survives two app restarts without pinning home'
                 Save-Json (Read-Session) 'starred-pins-restarted.json'
                 Snapshot 'starred-pins-restarted'
-                Focus-Palette 'unpin from top' '(7113|6293)'
-                Press @(0x0D) 'Enter: unpin from Starred back into its group'
+                Invoke-JourneyCommand 'Unpin' -Confirm {
+                    Press @(0x0D) 'Enter: unpin from Starred back into its group'
+                }
                 Wait-Until { $state = Read-Session; (-not $state.tabs[$state.active_tab].PSObject.Properties['starred_pinned_top'] -or -not $state.tabs[$state.active_tab].starred_pinned_top) -and (-not $state.tabs[$state.active_tab].PSObject.Properties['pinned_top'] -or -not $state.tabs[$state.active_tab].pinned_top) -and $state.tabs[$state.active_tab].starred_group_id -eq $favoritesGroupId } 'Unpin returns session to its unchanged Starred group'
                 Save-Json (Read-Session) 'starred-pins-unpinned.json'
                 Snapshot 'starred-pins-unpinned'

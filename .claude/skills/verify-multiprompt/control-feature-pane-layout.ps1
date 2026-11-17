@@ -7,8 +7,9 @@
             $initial = Read-Session
             if ($initial.tabs[0].PSObject.Properties['cv'] -and $initial.tabs[0].cv) { throw 'pane-layout requires the console, not Chat View' }
             $script:browserShellId = (Read-Inbox).shells[0].sid
-            Focus-Palette 'move to group' 6301
-            Press @(0x0D) 'Enter: Move to Group submenu'
+            Invoke-JourneyCommand 'Move to Group' -Confirm {
+                Press @(0x0D) 'Enter: Move to Group submenu'
+            }
             Type-Text 'new group'
             Press @(0x0D) 'Enter: New group containing CMD'
             Wait-Until {
@@ -16,8 +17,9 @@
                 $null -ne $state -and $state.PSObject.Properties['groups'] -and @($state.groups).Count -eq 1 -and $state.tabs[0].group_id -eq $state.groups[0].id
             } 'CMD membership in the user-created gray group'
             Press @(0x1B) 'Esc: leave inline group rename using the saved default name'
-            Palette 'new cmd'
-            Press @(0x0D) 'Enter: create ungrouped foreground console'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Press @(0x0D) 'Enter: create ungrouped foreground console'
+            }
             Wait-Until {
                 $state = Read-Session
                 @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 -and $state.tabs[1].kind -eq 'cmd' -and
