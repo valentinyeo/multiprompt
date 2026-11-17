@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: read
+concurrency:
+  group: chat-table-bench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bench:
     runs-on: windows-latest
