@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: auto-revert-master
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   auto-revert:

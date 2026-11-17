@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: workspace-identity-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: true
 
 jobs:
   workspace:
