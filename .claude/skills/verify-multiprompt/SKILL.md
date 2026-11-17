@@ -11,6 +11,12 @@ Read [features/README.md](features/README.md), then the selected feature file be
 
 Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
 
+## Reusable driver
+
+Read the nine-feature index in [features/README.md](features/README.md). The Windows entry point is `./.claude/skills/verify-multiprompt/drive.ps1 settings-appearance appearance -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/settings-appearance-appearance"`. It invokes the existing Launch/Doctor/Drive/Cleanup control in a child PowerShell and records the actual desktop with FFmpeg. Use a fresh evidence folder outside the disposable profile. The mapped palette equivalent is `drive.ps1 palette command-palette` with the same arguments.
+
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=appearance` or `-f feature=command-palette` to acquire the executable and recorder and invoke the new driver automatically. Inspect `journey.mp4`, `journey.json`, screenshots, Doctor, saved side effects, and zero-process cleanup in artifact `verify-<journey>`. The recorder stops only its owned process. Evidence remains in `evidence/` after profile cleanup and is uploaded even on failure. Existing workflow routes and migration decisions are in [inventory.md](inventory.md). Two existing journeys are promoted here; the remaining legacy routes retain their documented coverage limits. Never treat source review as live coverage.
+
 ## Feature control ownership
 
 - `control.ps1` keeps options, setup, dispatch and cleanup.
