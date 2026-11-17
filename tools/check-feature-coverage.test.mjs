@@ -4,10 +4,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { coverage, compare, inventory, liveRecipe, featureDirectory, snapshot } from './check-feature-coverage.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const tool = path.join(root, 'tools/check-feature-coverage.mjs');
+
+test('the coverage CLI runs and reports numeric source coverage', () => {
+  const result = spawnSync(process.execPath, [tool, '--base', root, '--json'], { cwd: root, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
+  assert.equal(result.status, 0, 'The source coverage CLI must run successfully before its coverage can be trusted');
+  const report = JSON.parse(result.stdout);
+  assert.equal(typeof report.percent, 'number');
+  assert.ok(report.total > 300);
+});
+
+if (fs.existsSync(tool)) {
+const { coverage, compare, inventory, liveRecipe, featureDirectory, snapshot } = await import('./check-feature-coverage.mjs');
 const row = (a, b, header = false) => `    .{ .a = "${a}", .b = "${b}", .header = ${header} },`;
 const shortcuts = rows => `pub const SHORTCUT_ROWS = [_]ShortcutRow{\n${rows.join('\n')}\n};\n`;
 const palette = `pub fn updateSearchResults() void {\n    app_state.g_search_results[0] = SEARCH_OLD_OFFSET;\n}\n`;
@@ -135,3 +145,4 @@ test('the real checkout inventory is nonempty and baseline mode reports every cu
   assert.equal(report.invalid.length, 0, report.invalid.join('\n'));
   assert.equal(report.covered + report.gaps.length, report.total);
 });
+}

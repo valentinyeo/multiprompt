@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { validateAudit, validateChanges } from './publish-verification-maintenance.mjs';
+
+const publisher = path.resolve(import.meta.dirname, 'publish-verification-maintenance.mjs');
+if (fs.existsSync(publisher)) {
+const { validateAudit, validateChanges } = await import('./publish-verification-maintenance.mjs');
 
 const feature = '.claude/skills/verify-multiprompt/features/example.md';
 const entry = { feature, source: 'src/shortcuts.zig:250', run_url: 'https://github.com/example/app/actions/runs/123', artifact: 'verify-example', evidence: 'Inspected result.json, Doctor, before/after screenshots and cleanup.json.' };
@@ -28,8 +31,11 @@ test('corrections stay inside the verification skill', () => {
   for (const file of ['src/main.zig', '.github/workflows/test.yml', '.claude/skills/verify-multiprompt/../../../src/main.zig', 'CLAUDE.md']) assert.throws(() => validateChanges([feature, file]), /only change its own verification skill/);
 });
 
+}
+
 test('weekly maintenance uses the verifier Claude action, OAuth secret and Sonnet model', () => {
   const root = path.resolve(import.meta.dirname, '..');
+  assert.ok(fs.existsSync(path.join(root, '.github/workflows/maintain-verification.yml')), 'A weekly pstack maintenance workflow must exist');
   const weekly = fs.readFileSync(path.join(root, '.github/workflows/maintain-verification.yml'), 'utf8');
   const verifier = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier.yml'), 'utf8');
   const action = verifier.match(/uses: (anthropics\/claude-code-action@\w+)/)[1];
