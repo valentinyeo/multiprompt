@@ -10,6 +10,10 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: browser-toggle-normal-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   browser-toggle-normal:
     runs-on: windows-latest

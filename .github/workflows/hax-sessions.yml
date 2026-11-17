@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hax-sessions-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   runners:
     if: github.event_name != 'pull_request' || github.head_ref != 'ceo/IGSH-1043'
