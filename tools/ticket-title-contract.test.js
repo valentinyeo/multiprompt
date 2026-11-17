@@ -22,10 +22,13 @@ test('generation shares ticket titles with both historical and current release n
 test('checked-in visible history has authoritative titles and release notes preserve them', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   assert.ok(fs.existsSync('tools/ticket-titles.mjs'), 'ticket title module exists');
-  assert.ok(fs.existsSync('tools/ticket-titles.json'), 'release title catalog exists');
-  const { ticketLine, ticketRecord } = await import('./ticket-titles.mjs');
-  const titles = JSON.parse(fs.readFileSync('tools/fixtures/IGSH-1681/ticket-titles.json', 'utf8'));
-  assert.deepEqual(JSON.parse(fs.readFileSync('tools/ticket-titles.json', 'utf8')), titles);
+  assert.ok(fs.existsSync('tools/ticket-titles'), 'release title catalog folder exists');
+  const titleModule = await import('./ticket-titles.mjs');
+  assert.equal(typeof titleModule.loadTicketTitles, 'function', 'one loader reads the title catalog');
+  const { ticketLine, ticketRecord, loadTicketTitles } = titleModule;
+  const titles = loadTicketTitles();
+  const frozen = JSON.parse(fs.readFileSync('tools/fixtures/IGSH-1681/ticket-titles.json', 'utf8'));
+  for (const [id, title] of Object.entries(frozen)) assert.equal(titles[id], title, `${id} keeps its published title`);
   const source = fs.readFileSync('src/changelog.zig', 'utf8');
   const rows = [...source.matchAll(/\.text = ("(?:\\.|[^"\\])*"), \.ticket = "([^"]+)"/g)];
   assert.ok(rows.length > 0);
