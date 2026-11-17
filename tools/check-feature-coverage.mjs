@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const featureDirectory = '.claude/skills/verify-multiprompt/features';
@@ -102,12 +101,7 @@ export function compare(current, base) {
   return current.gaps.filter(entry => !allowed.has(entry.id));
 }
 
-export function snapshot(root, revision) {
-  if (revision) {
-    execFileSync('git', ['rev-parse', '--verify', `${revision}^{commit}`], { cwd: root, stdio: 'pipe' });
-    const files = execFileSync('git', ['ls-tree', '-r', '--name-only', revision, '--', featureDirectory], { cwd: root, encoding: 'utf8' }).trim().split('\n');
-    return coverage(file => execFileSync('git', ['show', `${revision}:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }), files);
-  }
+export function snapshot(root) {
   const files = fs.readdirSync(path.join(root, featureDirectory)).map(file => `${featureDirectory}/${file}`);
   return coverage(file => fs.readFileSync(path.join(root, file), 'utf8'), files);
 }
@@ -115,9 +109,9 @@ export function snapshot(root, revision) {
 export function main(args, root = process.cwd()) {
   const json = args.includes('--json');
   args = args.filter(arg => arg !== '--json');
-  if (args.length && (args.length !== 2 || args[0] !== '--base')) throw new Error('Usage: node tools/check-feature-coverage.mjs [--base <commit>] [--json]');
+  if (args.length && (args.length !== 2 || args[0] !== '--base')) throw new Error('Usage: node tools/check-feature-coverage.mjs [--base <checkout-directory>] [--json]');
   const current = snapshot(root);
-  const regressions = args.length ? compare(current, snapshot(root, args[1])) : current.gaps;
+  const regressions = args.length ? compare(current, snapshot(path.resolve(root, args[1]))) : current.gaps;
   const percent = Number((100 * current.covered / current.total).toFixed(2));
   const report = { ...current, percent, newGaps: regressions };
   if (json) console.log(JSON.stringify(report, null, 2));

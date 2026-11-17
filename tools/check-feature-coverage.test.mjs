@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { coverage, compare, inventory, liveRecipe, featureDirectory, snapshot } from './check-feature-coverage.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -79,22 +79,21 @@ test('CLI reports numeric coverage, the full gap list and a nonzero strict resul
     fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     fs.writeFileSync(path.join(directory, file), text);
   }
-  const git = args => execFileSync('git', args, { cwd: directory, stdio: 'pipe' });
-  git(['init']);
-  git(['add', '.']);
-  git(['-c', 'user.name=Coverage fixture', '-c', 'user.email=coverage@example.invalid', 'commit', '-m', 'Initial fixture']);
+  const base = `${directory}-base`;
+  fs.cpSync(directory, base, { recursive: true });
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const run = args => spawnSync(process.execPath, [tool, ...args], { cwd: directory, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
   assert.equal(run([]).status, 1);
   assert.match(run([]).stdout, /33.33% \(1\/3\)/);
   assert.match(run([]).stdout, /shortcut:tabs\/alt-s/);
   assert.match(run([]).stdout, /architecture:existing-behavior/);
-  assert.equal(run(['--base', 'HEAD']).status, 0);
-  const current = JSON.parse(run(['--base', 'HEAD', '--json']).stdout);
+  assert.equal(run(['--base', base]).status, 0);
+  const current = JSON.parse(run(['--base', base, '--json']).stdout);
   assert.equal(current.percent, 33.33);
   assert.equal(current.gaps.length, 2);
   assert.equal(current.newGaps.length, 0);
   fs.writeFileSync(path.join(directory, 'src/command_palette.zig'), palette.replace('SEARCH_OLD_OFFSET;', 'SEARCH_NEW_OFFSET;'));
-  assert.equal(run(['--base', 'HEAD']).status, 1);
+  assert.equal(run(['--base', base]).status, 1);
   assert.equal(run(['--base', 'missing-commit']).status, 1);
 });
 
@@ -118,13 +117,12 @@ test('SOFT-2276 real Pi login addition is rejected without a map entry', t => {
     fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     fs.writeFileSync(path.join(directory, file), text);
   }
-  const git = args => execFileSync('git', args, { cwd: directory, stdio: 'pipe' });
-  git(['init']);
-  git(['add', '.']);
-  git(['-c', 'user.name=Coverage fixture', '-c', 'user.email=coverage@example.invalid', 'commit', '-m', 'Before the Pi login addition']);
+  const base = `${directory}-base`;
+  fs.cpSync(directory, base, { recursive: true });
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   fs.writeFileSync(path.join(directory, 'src/shortcuts.zig'), fixture.after.shortcuts);
   fs.writeFileSync(path.join(directory, 'src/command_palette.zig'), fixture.after.palette);
-  const result = spawnSync(process.execPath, [tool, '--base', 'HEAD'], { cwd: directory, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
+  const result = spawnSync(process.execPath, [tool, '--base', base], { cwd: directory, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /3 new gaps/);
   assert.match(result.stderr, /SEARCH_PI_LOGIN_OFFSET/);
