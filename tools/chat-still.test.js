@@ -128,7 +128,7 @@ test('the measurement probe belongs only to the verification build', () => {
   assert.doesNotMatch(read('src/chat_render.zig'), /fn chatStillFrame\(/);
   assert.doesNotMatch(read('tools/chat-still/paint.zig'), /app_state\.\w+\s*(?:=(?!=)|[+\-*\/]=)/, 'the probe must not mutate product state');
   const workflow = read('.github/workflows/verify.yml');
-  assert.match(workflow, /inputs\.feature == 'chat-still'[\s\S]*?python tools\/chat-still\/instrument\.py \./);
-  assert.match(workflow, /python tools\/chat-still\/instrument\.py app-source/);
+  assert.match(workflow, /matrix\.profile == 'chat-still'\n        run: python \$\{\{ inputs\.app_revision && 'probe-source\/' \|\| '' \}\}tools\/chat-still\/instrument\.py \./);
+  assert.match(workflow, /matrix\.profile == 'chat-still' && inputs\.app_revision != ''[\s\S]*?ref: \$\{\{ inputs\.revision \|\| github\.sha \}\}\n          path: probe-source/);
   assert.match(workflow, /evidence\/chat-still-instrumentation\.json/);
 });

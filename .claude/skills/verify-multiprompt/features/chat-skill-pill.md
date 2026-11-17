@@ -1,5 +1,7 @@
 # Skill pills
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-skill-pill.ps1
+
 ## Sub-features
 
 Known complete skill names and slash commands use one accent foreground and a soft rounded background with a slight lower edge. Arguments stay normal. Both the composer and user messages use the same exact catalog-name rule; unknown names and paths stay plain. Native caret positions, wrapping, selection, undo and sent text remain unchanged.

@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 const root = path.resolve(__dirname, '..');

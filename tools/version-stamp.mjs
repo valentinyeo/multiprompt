@@ -315,9 +315,12 @@ async function release() {
   };
   const runGit = (args, cwd = root) => git(args, cwd, remaining());
   const gh = args => execFileSync('gh', args, { cwd: root, encoding: 'utf8', timeout: remaining(), stdio: ['ignore', 'pipe', 'inherit'] }).trim();
-  const pollMs = Number(process.env.VERSION_STAMP_POLL_MS || 20000);
+  let pollMs = Number(process.env.VERSION_STAMP_POLL_MS || 60000);
+  const maxPollMs = Number(process.env.VERSION_STAMP_MAX_POLL_MS || 300000);
+  if (!Number.isFinite(pollMs) || pollMs <= 0 || !Number.isFinite(maxPollMs) || maxPollMs < pollMs) throw new Error('VERSION_STAMP_POLL_MS must be positive and VERSION_STAMP_MAX_POLL_MS must be at least VERSION_STAMP_POLL_MS');
   const wait = async () => {
     await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, remaining())));
+    pollMs = Math.min(pollMs * 2, maxPollMs);
     remaining();
   };
   while (true) {

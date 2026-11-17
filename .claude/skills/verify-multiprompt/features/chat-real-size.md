@@ -1,5 +1,6 @@
 # Real-size chat
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, src/main.zig, build.zig, build.zig.zon, tools/chat-history-reader.py, tools/verify-chat-delivery/*, .claude/skills/verify-multiprompt/seed-profile.py, .claude/skills/verify-multiprompt/seed-profile.ps1, .claude/skills/verify-multiprompt/drive.ps1
 Verify on: push, pull_request
 
 ## Sub-features
@@ -14,7 +15,7 @@ Open a saved server chat, read its history, type a message, and watch its reply 
 
 ## Driving it with control.ps1
 
-`click-through.yml` requires this journey on desktop PR changes and calls `verify.yml`. Do not dispatch an additional run while its automatic run is pending.
+`click-through.yml` requires this journey when chat or fixture sources change and calls the shared `verify.yml` batch. Do not dispatch an additional run while its automatic run is pending.
 
 The workflow calls `drive.ps1 chat-and-composer chat-real-size` with the executable identity and evidence arguments from the shared skill. It records `journey.mp4` and delegates to the existing console-backed SSH and provider boundary.
 

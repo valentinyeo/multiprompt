@@ -1,5 +1,7 @@
 # Chat options
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-options.ps1
+
 ## Sub-features
 
 Only a pending structured question creates answer cards. Claude Code supplies AskUserQuestion; Codex supplies request_user_input. Ordinary numbered and bulleted replies stay text. Cards preserve the question, header, option label and description. Single choices send the corresponding provider selection. Multiple choices remain selectable until Submit. Other focuses the existing composer for a typed answer. Finished tool calls remove the cards.

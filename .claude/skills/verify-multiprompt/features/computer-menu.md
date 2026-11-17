@@ -1,5 +1,7 @@
 # Computer in the chat menu
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-computer-menu.ps1
+
 ## Sub-features
 
 - Chat headers have no standalone Computer button.

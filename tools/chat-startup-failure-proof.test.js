@@ -12,7 +12,7 @@ test('startup failure dispatch fits GitHub limits and selects its driver', () =>
   const inputs = [...dispatch.matchAll(/^      ([a-z_]+):$/gm)].map(match => match[1]);
   assert.ok(inputs.length <= 25, `workflow_dispatch has ${inputs.length} inputs`);
   assert.ok(!inputs.includes('startup_failure_proof'));
-  assert.match(workflow, /CHAT_STARTUP_FAILURE_PROOF: \$\{\{ inputs\.feature == 'chat-startup-failure'/);
+  assert.match(workflow, /CHAT_STARTUP_FAILURE_PROOF: \$\{\{ matrix\.feature == 'chat-startup-failure'/);
   assert.ok(discoverFeatures().available.includes('chat-startup-failure'));
   const control = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
   assert.match(control, /ValidateSet\([^\n]*'chat-startup-failure'/);
@@ -31,7 +31,7 @@ test('startup failure dispatch fits GitHub limits and selects its driver', () =>
 
 test('startup failure proof rejects duplicates, transcripts and missing events', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
-  assert.match(workflow, /CHAT_STARTUP_FAILURE_PROOF: \$\{\{ inputs\.feature == 'chat-startup-failure'/);
+  assert.match(workflow, /CHAT_STARTUP_FAILURE_PROOF: \$\{\{ matrix\.feature == 'chat-startup-failure'/);
   const { verify, MESSAGE, SID } = require('./chat-startup-failure-proof.cjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-proof-'));
   const put = (name, value) => {

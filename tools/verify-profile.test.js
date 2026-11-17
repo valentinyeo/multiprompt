@@ -34,10 +34,16 @@ test('the seeded streaming journey runs automatically and retains video', () => 
   assert.ok(features.pr.includes('chat-real-size'));
   assert.ok(features.full.includes('chat-real-size'));
   const automatic = read('.github/workflows/click-through.yml');
-  assert.match(automatic, /  chat-real-size:\n    needs: changes\n    if: needs\.changes\.outputs\.run == 'true'\n    uses: \.\/\.github\/workflows\/verify\.yml\n    with:\n      feature: chat-real-size/);
-  assert.match(automatic, /needs: \[changes,[^\n]*, chat-real-size\]/);
-  assert.match(automatic, /REAL_SIZE: \$\{\{ needs\.chat-real-size\.result \}\}/);
-  assert.match(automatic, /for result in [^\n]*"\$REAL_SIZE"; do/);
+  assert.match(automatic, /const journeys = \[[^\n]*'chat-real-size'\]/);
+  assert.match(automatic, /features: \$\{\{ needs\.changes\.outputs\.features \}\}/);
+  assert.match(automatic, /needs: \[changes, journeys\]/);
+  assert.match(automatic, /\[ "\$JOURNEYS" = success \] \|\| exit 1/);
+  const { touchedJourneys } = require('./touched-journeys.cjs');
+  for (const file of ['src/chat_history.zig', skill + 'seed-profile.py', skill + 'seed-profile.ps1', 'tools/verify-chat-delivery/real-size.ps1']) {
+    const mapped = touchedJourneys([file]);
+    assert.deepEqual(mapped.unmapped, [], file);
+    assert.ok(mapped.features.includes('chat-real-size'), file);
+  }
   const workflow = read('.github/workflows/verify.yml');
   assert.match(workflow, /'chat-real-size' = 'chat-and-composer'/);
   assert.match(workflow, /Install browser toggle recorder\n\s+if: [^\n]*env\.FEATURE == 'chat-real-size'/);

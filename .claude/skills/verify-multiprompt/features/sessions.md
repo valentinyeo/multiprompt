@@ -1,5 +1,7 @@
 # Sessions
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-sessions.ps1
+
 Open a real local console tab, give it a recognizable name and execute a command in that console.
 
 ## Sub-features

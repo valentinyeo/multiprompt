@@ -24,8 +24,8 @@ concurrency:
 
 jobs:
   tests:
-    needs: resolve
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    needs: [resolve, select, head, failed-head, base]
+    if: always() && !cancelled() && ( github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 80
     outputs:
@@ -33,6 +33,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      checks: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -81,8 +82,8 @@ jobs:
         run: node tools/pr-verifier.cjs resolve
 
   select:
-    needs: [resolve, tests]
-    if: always() && !cancelled() && needs.resolve.outputs.eligible == 'true' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL'))
+    needs: resolve
+    if: always() && !cancelled() && needs.resolve.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -112,6 +113,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.resolve.outputs.number }}
           FEATURES_DIR: .claude/skills/verify-multiprompt/features
+          BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
         run: node verifier-tools/tools/pr-verifier.cjs prepare verifier-out
       - name: Pick the journeys with DeepSeek
         id: deepseek-pick
@@ -166,19 +168,15 @@ jobs:
   head:
     needs: [resolve, select]
     if: always() && !cancelled() && needs.select.result == 'success' && needs.select.outputs.features != '[]'
-    name: head ${{ matrix.feature }}
-    strategy:
-      fail-fast: false
-      matrix:
-        feature: ${{ fromJSON(needs.select.outputs.features) }}
+    name: head
     uses: ./.github/workflows/verify.yml
     with:
-      feature: ${{ matrix.feature }}
+      features: ${{ needs.select.outputs.features }}
       revision: ${{ needs.resolve.outputs.head_sha }}
 
   failed-head:
     needs: [resolve, select, head]
-    if: always() && needs.resolve.result == 'success' && needs.select.result == 'success' && needs.head.result != 'cancelled'
+    if: always() && !cancelled() && needs.resolve.result == 'success' && needs.select.result == 'success' && needs.head.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -207,14 +205,10 @@ jobs:
   base:
     needs: [resolve, failed-head]
     if: always() && !cancelled() && needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''
-    name: base ${{ matrix.feature }}
-    strategy:
-      fail-fast: false
-      matrix:
-        feature: ${{ fromJSON(needs.failed-head.outputs.features) }}
+    name: base
     uses: ./.github/workflows/verify.yml
     with:
-      feature: ${{ matrix.feature }}
+      features: ${{ needs.failed-head.outputs.features }}
       revision: ${{ needs.resolve.outputs.head_sha }}
       app_revision: ${{ needs.resolve.outputs.base_sha }}
 
@@ -224,7 +218,7 @@ jobs:
       group: pstack-verdict-${{ format('verify PR {0}', inputs.pr || github.event.pull_request.number) }}
       cancel-in-progress: false
     needs: [tests, resolve, select, head, failed-head, base]
-    if: always() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
+    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

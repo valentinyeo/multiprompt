@@ -1,5 +1,7 @@
 # Permission rows
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-permission-rows.ps1
+
 ## Sub-features
 
 A pending permission has three rows. The chosen row stays marked; the others fade. The answer appears in chat. Three clicks and composer shortcuts 1, 2 and 3 must each send one provider choice.
