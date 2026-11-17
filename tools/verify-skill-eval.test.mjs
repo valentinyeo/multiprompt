@@ -40,12 +40,15 @@ for (const scenario of cases) {
     plant(root, scenario);
     assert.equal(fs.readFileSync(file, 'utf8'), scenario.seed.after);
     assert.throws(() => plant(root, scenario), /exactly once/);
+    fs.writeFileSync(file, scenario.seed.before.replaceAll('\n', '\r\n'));
+    plant(root, scenario);
+    assert.equal(fs.readFileSync(file, 'utf8'), scenario.seed.after.replaceAll('\n', '\r\n'));
   });
 }
 
 test('each planted regression matches the current production source exactly once', () => {
   for (const scenario of cases.filter(item => item.seed)) {
-    const source = fs.readFileSync(new URL(`../${scenario.seed.file}`, import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL(`../${scenario.seed.file}`, import.meta.url), 'utf8').replaceAll('\r\n', '\n');
     assert.equal(source.split(scenario.seed.before).length - 1, 1, scenario.id);
   }
 });

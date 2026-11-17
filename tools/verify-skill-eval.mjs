@@ -19,8 +19,11 @@ export function plant(root, scenario) {
   if (!scenario.seed) return;
   const file = path.join(root, scenario.seed.file);
   const text = fs.readFileSync(file, 'utf8');
-  if (text.split(scenario.seed.before).length !== 2) throw new Error(`Seed no longer matches exactly once: ${scenario.seed.file}`);
-  fs.writeFileSync(file, text.replace(scenario.seed.before, scenario.seed.after));
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const before = scenario.seed.before.replaceAll('\n', newline);
+  const after = scenario.seed.after.replaceAll('\n', newline);
+  if (text.split(before).length !== 2) throw new Error(`Seed no longer matches exactly once: ${scenario.seed.file}`);
+  fs.writeFileSync(file, text.replace(before, after));
 }
 
 export const tools = [
