@@ -578,6 +578,8 @@ fn sameSkillText(left: []const u16, right: []const u16) bool {
 
 fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (p.text.len == 0) return newBlockMatches(block, p.prefix);
+    if (norm.len > 0 and std.mem.indexOfScalar(u16, block, norm[0]) == null and
+        std.mem.indexOfScalar(u16, block, '[') == null) return false;
     if (sameText(block, p.text)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
@@ -1214,6 +1216,28 @@ test "IGSH-991 text search preserves first matches and UTF16 alignment" {
     try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("xyzabc"), &w("abd")));
     try std.testing.expectEqual(@as(?usize, 5), indexOfText(std.unicode.utf8ToUtf16LeStringLiteral("left 😀 right"), std.unicode.utf8ToUtf16LeStringLiteral("😀")));
     try std.testing.expectEqual(@as(?usize, null), indexOfText(&.{ 0x00aa, 0xbb00, 0x00cc }, &.{ 0xaa00, 0x00bb }));
+}
+
+test "SOFT-2567 candidate rejection preserves normalized and special message echoes" {
+    const cases = [_]struct { text: []const u16, block: []const u16, confirmed: bool = false, matches: bool = true }{
+        .{ .text = &w("Review the final build"), .block = &w("Different lower case message"), .matches = false },
+        .{ .text = &w("Review the final build"), .block = &w("  Review\n the final\tbuild  ") },
+        .{ .text = &w("Review the final build"), .block = &w("<pasted_content>Review the final build</pasted_content>") },
+        .{ .text = &w("Review the final build"), .block = &w("Context before Review the final build") },
+        .{ .text = &w("Review the final build"), .block = &w("Review the final...") },
+        .{ .text = &w("Review the final build"), .block = &w("[Pasted text #1 +4 lines]") },
+        .{ .text = &w("/plan Review the final build"), .block = &w("Review /plan the final build"), .confirmed = true },
+        .{ .text = std.unicode.utf8ToUtf16LeStringLiteral("😀 review the build"), .block = std.unicode.utf8ToUtf16LeStringLiteral("Earlier context 😀 review the build") },
+        .{ .text = &w("Review the final build"), .block = &w("Review some other build"), .matches = false },
+    };
+    for (cases) |case| {
+        var full: [128]u16 = undefined;
+        const norm = normalize(case.text, &full);
+        var pending = [_]Pending{.{ .text = case.text, .prefix = norm[0..@min(norm.len, 40)], .confirmed = case.confirmed, .anchor = .{ .counted = true } }};
+        var chosen: [1]?usize = undefined;
+        assign(&pending, &.{.{ .text = case.block }}, false, &.{}, &chosen);
+        try std.testing.expectEqual(case.matches, chosen[0] != null);
+    }
 }
 
 test "IGSH-1102 distinct accepted messages in one millisecond all confirm" {
