@@ -17,6 +17,28 @@ Read the nine-feature index in [features/README.md](features/README.md). The Win
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=appearance` or `-f feature=command-palette` to acquire the executable and recorder and invoke the new driver automatically. Inspect `journey.mp4`, `journey.json`, screenshots, Doctor, saved side effects, and zero-process cleanup in artifact `verify-<journey>`. The recorder stops only its owned process. Evidence remains in `evidence/` after profile cleanup and is uploaded even on failure. Existing workflow routes and migration decisions are in [inventory.md](inventory.md). Two existing journeys are promoted here; the remaining legacy routes retain their documented coverage limits. Never treat source review as live coverage.
 
+## Default real-size profile
+
+Every desktop profile owner calls `seed-profile.ps1` before its first app launch. The wrapper runs the deterministic `seed-profile.py` generator. Python 3.12 is installed for every Windows journey, not only remote-chat journeys.
+
+The seed contains 64 saved sessions in eight non-restoring workspaces, 19,872 source messages, and eight long chats of 2,400 messages each. It includes Markdown tables, fenced Python, and embedded synthetic PNG images. IDs, timestamps, text, image bytes, and transcript hashes are fixed. No captured user profile, account, hostname, or private conversation is used.
+
+The generator preserves the journey's selected tabs and existing workspace entries. It adds saved workspaces rather than launching 64 consoles or replacing feature-specific preconditions. This supplies realistic saved-session discovery and source-history state; it does not claim that every journey opens every long chat. `chat-real-size` opens a long server conversation through production history storage, sends with real keys, and observes partial and completed replies through eight production live events.
+
+`drive.ps1` requires the seed manifest for its mapped routes. `verify.yml` runs `chat-real-size` automatically in its PR matrix and retains `journey.mp4`. Use that existing automatic run; do not dispatch another run while waiting for it.
+
+For another hosted reproduction, create the same data before launching the app:
+
+```powershell
+python .claude/skills/verify-multiprompt/seed-profile.py --root "$env:RUNNER_TEMP/repro" --home "$env:RUNNER_TEMP/repro/home" --evidence "$pwd/evidence"
+```
+
+The default preserves `session.json`. Add `--activate --ssh "$pwd/verify-bin/ssh.exe"` only in a new profile to select eight long synthetic server tabs. It also writes `state/state.json` for the existing SSH boundary. Set the reproduction's private APPDATA, LOCALAPPDATA, HOME, USERPROFILE, MP_VERIFY_STATE, MP_VERIFY_PYTHON, and MP_VERIFY_BOUNDARY as the existing chat-delivery driver does. This needs the workflow-built SSH/tmux launchers, not a real server. `--activate` refuses an existing selected-session file.
+
+For a driver that already owns its saved tabs and provider boundary, import `seed-profile.py` and reuse `messages(index)` or `source_rows(index, session_id)` instead. The hosted `working-host.py` boundary uses the same message factory for its production archive. Seed only before launch or through that external provider boundary; never replace app caches or layout state during a journey.
+
+`fixture-manifest.json` records counts, relative transcript paths, and SHA256 hashes. It is retained outside the profile before cleanup. Delegated multi-case chat journeys retain one manifest per case. Run `python tools/verify-profile-test.py -v` for repeatability, state preservation, image bytes, and production-reader checks. These checks do not replace the Windows video proof.
+
 ## Feature control ownership
 
 - `control.ps1` keeps options, setup, dispatch and cleanup.
@@ -71,7 +93,7 @@ The tag must be `v<major>.<minor>.<patch>`. The workflow downloads the real x64 
 
 The `sessions` journey seeds two saved remote tabs once, with the third server active, and replaces only SSH with a repository-listing and console-backed transport stand-in. Real Ctrl+T and palette input must preserve the selected server, folder and view, including after Cancel. See [sessions](features/sessions.md) for this boundary; it does not verify real remote agents.
 
-The `session-restore` journey uses `--single-window` with restoration enabled and retains its private data between launches in the same job. For ordinary desktop journeys, the Windows helper starts exactly that executable with `--single-window --no-window-restore`, a unique empty directory under RUNNER_TEMP, and private APPDATA, LOCALAPPDATA, USERPROFILE and HOME. It creates no session fixtures or settings. A ready instance has its own visible `ZigShell` main window, the expected version, and a published initial CMD session. Startup is bounded to 60 seconds; missing readiness fails, rather than driving a login screen or an unrelated window.
+The `session-restore` journey uses `--single-window` with restoration enabled and retains its private data between launches in the same job. For ordinary desktop journeys, the Windows helper starts exactly that executable with `--single-window --no-window-restore`, a unique directory under RUNNER_TEMP, and private APPDATA, LOCALAPPDATA, USERPROFILE and HOME. The default real-size seed adds saved workspace snapshots and synthetic provider sources before launch; feature-specific selected tabs and settings are preserved. A ready instance has its own visible `ZigShell` main window, the expected version, and a published initial CMD session. Startup is bounded to 60 seconds; missing readiness fails, rather than driving a login screen or an unrelated window.
 
 `IGSH_246=0` keeps the selected branch/release executable fixed during verification; update download and rollback behavior is tested separately on GitHub Windows.
 
@@ -183,7 +205,7 @@ For example:
 gh run download <id> -n verify-appearance -D /tmp/verify-multiprompt-<id>
 ```
 
-Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `result.json` and `data/roaming/ZigShell/theme-mode.txt`. Record the run URL, exact feature/sub-features, revision and what changed. Report unexercised entry points and unmet prerequisites explicitly. Only a selected journey is covered; the map is not a claim that all features or releases have passed. Ordinary desktop journeys use no synthetic accounts, transcripts, remote servers or mocked UI. Reconnect seeds saved tabs and replaces SSH; the branch Chat View painter uses a synthetic message; safe updates uses signed fixture releases; emulation serves a synthetic page to real Chrome; chat delivery replaces the remote-shell boundary with a stand-in. None proves live agent or account behavior.
+Inspect `/tmp/verify-multiprompt-<id>/before.png`, `action.png`, `after.png`, `result.json` and `data/roaming/ZigShell/theme-mode.txt`. Record the run URL, exact feature/sub-features, revision and what changed. Report unexercised entry points and unmet prerequisites explicitly. Only a selected journey is covered; the map is not a claim that all features or releases have passed. Desktop journeys use synthetic source histories and saved sessions from the default seed, with real native UI. No real account or remote server is implied. Reconnect seeds saved tabs and replaces SSH; the branch Chat View painter uses a synthetic message; safe updates uses signed fixture releases; emulation serves a synthetic page to real Chrome; chat delivery replaces the remote-shell boundary with a stand-in. None proves live agent or account behavior.
 
 ## Cleanup
 

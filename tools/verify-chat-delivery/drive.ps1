@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-newest')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-newest', 'chat-real-size')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -62,7 +62,8 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
-if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
+if ($Feature -eq 'chat-real-size') { $plans = @(@{name='working-live'; mode='busy'; text='Show the real-size streamed reply'}) }
+elseif ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
@@ -583,6 +584,7 @@ foreach ($plan in $plans) {
         }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
+        if ($Feature -eq 'chat-real-size') { $seed.realSize = $true }
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
@@ -643,7 +645,7 @@ foreach ($plan in $plans) {
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isModel -or $isRecall) { $savedSession.tabs[0].csid = $sid }
-        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1' -or $Feature -eq 'chat-real-size') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
@@ -675,6 +677,7 @@ foreach ($plan in $plans) {
             if ($isSwitch) { $saved.single_window = $true }
             Save $saved "$settings/session.json"
         }
+        & "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $profile -HomePath $env:HOME -Evidence $caseDir
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
         if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable embedded version mismatch' }
         $job = [VerifyJob]::new()
@@ -690,7 +693,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+        if ($Feature -eq 'chat-real-size') {
+            . "$PSScriptRoot/real-size.ps1"
+        } elseif ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
             . "$PSScriptRoot/working-live.ps1"
         } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
@@ -1554,6 +1559,13 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($Feature -eq 'chat-real-size') {
+    $observed = Get-Content "$Evidence/working-live/observation.json" -Raw | ConvertFrom-Json
+    $clean = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+    if ($observed.error -or -not $observed.realSizePassed -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed) { throw "Real-size journey failed: $($observed.error)" }
+    Save @{feature=$Feature; status='passed'; checks=$observed.realSizeChecks} "$Evidence/result.json"
+    exit 0
+}
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-working-live-proof.mjs" $Evidence
     exit $LASTEXITCODE

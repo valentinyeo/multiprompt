@@ -139,6 +139,7 @@ try {
     $env:LOCALAPPDATA = Join-Path $Root 'local'
     $env:USERPROFILE = Join-Path $Root 'profile'
     $env:HOME = $env:USERPROFILE
+    & "$PSScriptRoot/../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $Root -HomePath $env:HOME -Evidence $Evidence
     $env:IGSH_246 = '1'
     $env:MULTIPROMPT_NO_LOGIN = ''
     Copy-Item -LiteralPath $Verifier -Destination "$Root/verifier.exe" -Force
@@ -216,6 +217,7 @@ try {
             $cardEvent = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $cardEventName)
             $cardProcess = $null
             $env:APPDATA = Join-Path $Root 'card-roaming'
+            & "$PSScriptRoot/../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $Root -HomePath $env:HOME -Evidence (Join-Path $Evidence 'card-profile')
             New-Item -ItemType Directory -Force (Join-Path $env:APPDATA 'ZigShell') | Out-Null
             $log = Join-Path $env:APPDATA 'ZigShell/debug.log'
             Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue

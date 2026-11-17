@@ -2,7 +2,7 @@
 
 Read conversations, compose replies, attach files, search, dictate, and switch supported terminal tabs between chat and shell.
 
-Journeys: chat-focus, chat-view, chat-composer-text
+Journeys: chat-focus, chat-view, chat-composer-text, chat-real-size
 
 ## Sub-features
 - `read` displays history, Find matches, selection, copied text, and unread boundaries.
@@ -16,6 +16,8 @@ Journeys: chat-focus, chat-view, chat-composer-text
 Preconditions: fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
 - Migration pending for this feature. Run `gh workflow run verify.yml --ref <branch> -f feature=chat-focus`. [Chat focus](chat-focus.md), [Chat View](chat-view.md), and [composer text](chat-composer-text.md) provide exact key sequences and native text reads.
 - Require typed draft equality, visible transcript/composer screenshots, saved conversation state, and the named journey result. Only the selected journey is covered. Download `verify-chat-focus` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
+
+- `drive.ps1 chat-and-composer chat-real-size` opens a 2,400-message synthetic server chat, sends through the production message store, copies partial and completed streamed replies, and retains video. See [real-size chat](chat-real-size.md).
 
 ## Gotchas
 - Live chats have no shell toggle. Sending, attachments, provider login, and real delivery need their own live prerequisites; focus proof does not cover them.

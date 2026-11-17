@@ -393,6 +393,7 @@ try {
     Check 'embedded-version' ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;"))
     $tabs = @(@{kind='cmd'; name='Photo Alpha'; manual=$true; workspace=0}, @{kind='cmd'; name='Photo Beta'; manual=$true; workspace=0})
     Save @{active_tab=0; single_window=$true; active_workspace=0; workspace_count=1; workspaces=@(@{name='Home'; wid='home'}); tabs=$tabs} (Join-Path $settings 'session.json')
+    & "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $profile -HomePath $env:HOME -Evidence $Evidence
     $wide = Join-Path $profile 'wide.png'; $tall = Join-Path $profile 'tall.jpg'; $bad = Join-Path $profile 'bad.png'; $oversized = Join-Path $profile 'oversized.png'; $truncated = Join-Path $profile 'truncated.jpg'
     New-Fixture $wide 480 240 $false
     New-Fixture $tall 240 480 $true

@@ -1,4 +1,6 @@
 import hashlib
+import importlib.util
+from pathlib import Path
 import json
 import os
 import threading
@@ -9,7 +11,7 @@ SID = 'a1b2c3d4-1668-4000-8000-000000001668'
 REPLY = 'The hosted stand-in reply is visible.'
 
 
-def install(namespace, root, record, steady=False):
+def install(namespace, root, record, steady=False, real_size=False):
     previous_switch = namespace['host_dispatch_switch']
     previous_owned = namespace['host_owned']
     previous_deliver = namespace['host_deliver']
@@ -27,11 +29,18 @@ def install(namespace, root, record, steady=False):
         except FileExistsError:
             return
         os.close(fd)
-        if steady:
+        if steady or real_size:
             session = {'turn': 'standin-seed-turn', 'state': {'display_history': True}}
-            for index in range(50):
-                namespace['host_history_append']('claude', SID, session,
-                    dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10))
+            if real_size:
+                generator = Path(__file__).resolve().parents[2] / '.claude/skills/verify-multiprompt/seed-profile.py'
+                spec = importlib.util.spec_from_file_location('profile_fixture', generator)
+                fixture = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(fixture)
+                rows = fixture.messages(0)
+            else:
+                rows = (dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10) for index in range(50))
+            for row in rows:
+                namespace['host_history_append']('claude', SID, session, row)
             namespace['host_state_write']('claude', SID, session['state'])
             namespace['host_write'](namespace['host_paths']('claude', SID)['config'], dict(enabled=True, tmux='verify-agent'))
             namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended')
@@ -102,6 +111,12 @@ def install(namespace, root, record, steady=False):
             namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
                                     dict(text=REPLY, done=False), 'standin-reply')
             record('working-host.jsonl', stage='text.delta', sid=sid, text=REPLY)
+            if real_size:
+                deadline = time.monotonic() + 60
+                while not (root / 'real-size-continue').exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if not (root / 'real-size-continue').exists():
+                    return
             text = REPLY
             for index in range(1, 8):
                 time.sleep(0.4)
@@ -120,6 +135,11 @@ def install(namespace, root, record, steady=False):
                                                 dict(text=text, done=False), 'standin-reply')
                         record('working-host.jsonl', stage='reading-stream-delta', sid=sid, segment=index)
                         time.sleep(0.4)
+            if real_size:
+                namespace['host_event'](provider, sid, 'verify-agent', session, 'text.done',
+                                        dict(text=text, done=True), 'standin-reply')
+                namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.ended')
+                record('working-host.jsonl', stage='real-size-complete', sid=sid, text=text)
             if session.get('db') is not None:
                 session['db'].close()
 

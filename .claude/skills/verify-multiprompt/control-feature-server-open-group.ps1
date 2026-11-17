@@ -131,6 +131,7 @@ try {
     $env:LOCALAPPDATA = Join-Path $workRoot 'local'
     [Environment]::SetEnvironmentVariable('USERPROFILE', $workRoot, 'Process')
     $env:HOME = $workRoot
+    & "$PSScriptRoot/seed-profile.ps1" -Root $workRoot -HomePath $env:HOME -Evidence $Evidence
     $env:ZIGSHELL_DEBUG = '1'
     Remove-Item Env:\MULTIPROMPT_NO_LOGIN -ErrorAction SilentlyContinue
     $appProcess = Start-Process -FilePath $Exe -ArgumentList @('--single-window', '--name', 'server-group', '--no-window-restore') -PassThru -RedirectStandardOutput (Join-Path $workRoot 'desktop.log') -RedirectStandardError (Join-Path $workRoot 'desktop.err.log')

@@ -122,6 +122,7 @@ try {
     $env:USERPROFILE = Join-Path $scratch 'profile'
     $env:HOME = $env:USERPROFILE
     foreach ($dir in @($env:APPDATA, $env:LOCALAPPDATA, $env:USERPROFILE)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+    & "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $scratch -HomePath $env:HOME -Evidence $Evidence
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $process = Start-Process -FilePath $Exe -PassThru
     $windows = @()

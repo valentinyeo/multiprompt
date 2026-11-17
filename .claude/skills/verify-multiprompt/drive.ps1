@@ -21,7 +21,7 @@ if ($text -match '(?m)^Journeys: (.+)\r?$') {
 $Evidence = [IO.Path]::GetFullPath($Evidence)
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 if (Test-Path "$Evidence/journey.json") { throw 'Use a fresh evidence folder for each journey' }
-$record = [ordered]@{ feature=$Feature; journey=$Journey; revision=(git rev-parse HEAD).Trim(); status='failed'; error=$null }
+$record = [ordered]@{ feature=$Feature; journey=$Journey; revision=(git rev-parse HEAD).Trim(); seed='real-size-v1'; status='failed'; error=$null }
 $video = $null
 try {
     $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate 8 -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
@@ -33,9 +33,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Journey exited $LASTEXITCODE; inspect result.json" }
     $result = Get-Content "$Evidence/result.json" -Raw | ConvertFrom-Json
     if ($result.status -ne 'passed') { throw 'Journey did not pass' }
-    $tree = Get-Content "$Evidence/process-tree.json" -Raw | ConvertFrom-Json
-    if (-not $result.scratchRemoved -or $tree.activeAfterStop -ne 0) { throw 'Owned cleanup failed' }
-    foreach ($name in @('before.png', 'action.png', 'after.png', 'actions.json', 'doctor.json', 'data')) {
+    if ($Journey -eq 'chat-real-size') {
+        $cleanup = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+        if (-not $cleanup.scratch_removed -or $cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.evidence_preserved) { throw 'Owned cleanup failed' }
+        $manifestPath = "$Evidence/working-live/fixture-manifest.json"
+    } else {
+        $tree = Get-Content "$Evidence/process-tree.json" -Raw | ConvertFrom-Json
+        if (-not $result.scratchRemoved -or $tree.activeAfterStop -ne 0) { throw 'Owned cleanup failed' }
+        if (-not (Test-Path "$Evidence/data")) { throw 'Saved profile evidence missing' }
+        $manifestPath = "$Evidence/fixture-manifest.json"
+    }
+    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.version -ne 1 -or $manifest.sessions -ne 64 -or $manifest.longChats -ne 8 -or $manifest.messagesPerLongChat -ne 2400) { throw 'Real-size seed evidence missing or incomplete' }
+    foreach ($name in @('before.png', 'action.png', 'after.png', 'actions.json', 'doctor.json')) {
         if (-not (Test-Path "$Evidence/$name")) { throw "Evidence missing after cleanup: $name" }
     }
     $record.status = 'passed'

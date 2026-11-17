@@ -22,9 +22,9 @@ Names come from `src/shortcuts.zig` `SHORTCUT_ROWS`, palette rows in `src/comman
 
 - Only a fresh GitHub `windows-latest` desktop; never launch locally or on a user's computer.
 - A real branch build or checksum-verified release executable with matching embedded version.
-- Empty isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME, one single-window instance and an initialized CMD tab. The harness must see the owned `ZigShell` HWND through UI Automation.
+- Isolated APPDATA, LOCALAPPDATA, USERPROFILE and HOME with the default 64-session synthetic seed, one single-window instance and an initialized CMD tab. The harness must see the owned `ZigShell` HWND through UI Automation.
 - Documented `MULTIPROMPT_NO_LOGIN=1` offline mode. Account login, device approval, sync, real AI agents, SSH/tmux and browser integration are not verified by this baseline.
-- Read-only Doctor passes before input. Never seed session JSON, set app settings directly or reuse a shared desktop.
+- Read-only Doctor passes before input. Only the documented pre-launch fixture may seed saved sessions. Never alter live session JSON, set app settings directly, or reuse a shared desktop.
 
 ## Driving conventions
 
@@ -52,6 +52,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 
 ## Legacy journey recipes
+
+- [Real-size chat](chat-real-size.md): default 64-session profile, a 2,400-message server conversation, real send, partial/final live replies, and retained video.
 
 - [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
 - [Bot photos](bot-photo.md): a bot face keeps a chosen local image or resets, drawn as a centred circle through real native file dialogs.

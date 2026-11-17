@@ -213,6 +213,7 @@ try {
         @{kind='tmux'; name='Beta'; manual=$true; tmux_host=0; tmux_session=$names[1]; csid=$ids[1]; workspace=0; cv=$false; pid=0}
     )} (Join-Path $settings 'session.json')
     [IO.File]::WriteAllText((Join-Path $settings 'ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+    & "$PSScriptRoot/../../.claude/skills/verify-multiprompt/seed-profile.ps1" -Root $profile -HomePath $env:HOME -Evidence $Evidence
     Start-App
     Shot 'before'
     Press @(0x11,0x57)
