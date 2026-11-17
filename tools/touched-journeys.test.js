@@ -40,7 +40,7 @@ test('unknown application files run every available journey instead of losing co
 
 test('documentation and CI-only changes do not launch unrelated desktop journeys', t => {
   const directory = maps(t);
-  assert.deepEqual(touchedJourneys(['README.md', '.github/workflows/test.yml', 'tools/pr-verifier.cjs', '.claude/skills/verify-multiprompt/features/appearance.md'], directory), { features: [], unmapped: [] });
+  assert.deepEqual(touchedJourneys(['README.md', '.github/workflows/test.yml', 'tools/pr-verifier.cjs', '.claude/skills/verify-multiprompt/features/appearance.md', 'src/chat.test.js', 'tools/chat-dictation.test.js', 'tools/chat-history-reader-test.py'], directory), { features: [], unmapped: [] });
 });
 
 test('every runnable feature has source-file ownership in its map', () => {

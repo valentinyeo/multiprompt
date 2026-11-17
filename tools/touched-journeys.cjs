@@ -12,6 +12,7 @@ function touchedJourneys(files, directory = path.join(__dirname, '../.claude/ski
     return { feature, sources };
   });
   for (const file of files) {
+    if (/(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file)) continue;
     const matches = maps.filter(map => map.sources.some(source => {
       const pattern = source.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
       return new RegExp(`^${pattern}$`).test(file);

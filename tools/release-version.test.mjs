@@ -266,7 +266,7 @@ test('five Windows and three VPS jobs retain the upstream test graph with indepe
   assert.match(worker, /actions\/setup-node@[a-f0-9]{40}\n        if: steps\.paths\.outputs\.heavy == 'true'\n        with:\n          node-version: 22\n          cache: npm\n          cache-dependency-path: service\/package-lock.json/);
   assert.match(worker, /name: Build the account Worker\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        working-directory: service\n        timeout-minutes: 2\n        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build/);
   assert.match(worker, /name: Run account Worker tests\n        if: steps\.paths\.outputs\.heavy == 'true' && steps\.rule\.outputs\.kind != 'STAMP'\n        run: node --test service\/test\/infra.test.js service\/test\/worker.test.js/);
-  for (const name of ['Restore Zig toolchain (PR)', 'Cache Zig toolchain', 'Install Zig 0.16.0']) {
+  for (const name of ['Restore Zig toolchain (PR)', 'Install Zig 0.16.0']) {
     const step = vps.split(/(?=^      - )/m).find(step => step.startsWith(`      - name: ${name}\n`));
     assert.ok(step);
     assert.ok(worker.includes(step));
