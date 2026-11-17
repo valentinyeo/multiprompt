@@ -206,7 +206,7 @@ test('a missing or invalid verdict is BLOCKED and evidence stops at eight lines'
 
 test('the workflow starts on same-repository pull requests and on a dispatched pull request number', () => {
   const events = workflow.split('\non:\n')[1].split('\npermissions:')[0];
-  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review\]/);
+  assert.match(events, /pull_request:\n    types: \[opened, synchronize, ready_for_review, edited, labeled, unlabeled\]/);
   assert.match(events, /workflow_dispatch:\n    inputs:\n      pr:\n        description: .+\n        required: true/);
   assert.doesNotMatch(events, /pull_request_target|workflow_run|schedule|push:/);
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository && !github\.event\.pull_request\.draft/);

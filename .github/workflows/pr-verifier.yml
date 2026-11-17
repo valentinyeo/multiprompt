@@ -3,7 +3,7 @@ run-name: verify PR ${{ inputs.pr || github.event.pull_request.number }}
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
+    types: [opened, synchronize, ready_for_review, edited, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       pr:
@@ -86,6 +86,7 @@ jobs:
     outputs:
       features: ${{ steps.choose.outputs.features }}
       base_features: ${{ steps.choose.outputs.base_features }}
+      repro_features: ${{ steps.choose.outputs.repro_features }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -188,12 +189,13 @@ jobs:
         with:
           node-version: 22
       - id: pick
-        name: List head journeys that failed
+        name: List failed head journeys and the required repro
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           FEATURES: ${{ needs.select.outputs.features }}
+          REPRO_FEATURES: ${{ needs.select.outputs.repro_features }}
         run: node tools/pr-verifier.cjs failed-head
 
   base:
@@ -298,6 +300,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           JOB_RESULTS: ${{ toJSON(needs) }}
+          PR_NUMBER: ${{ needs.resolve.outputs.number || inputs.pr || github.event.pull_request.number }}
           JUDGE_RESULT: ${{ needs.resolve.outputs.engine == 'deepseek' && steps.deepseek.outcome || steps.claude.outcome }}
           VERDICT: ${{ steps.claude.outputs.structured_output || steps.deepseek.outputs.structured_output }}
           ENGINE: ${{ needs.resolve.outputs.engine }}
