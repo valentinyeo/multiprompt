@@ -225,3 +225,5 @@ One application build per revision is shared within each run. Signed update fixt
 All workflows cancel superseded work. Keep reusable workflow groups separate from their callers. Run the full runnable set nightly on master and before release publication. Keep all Tests shards, update scenarios, speed comparisons, and five-minute idle observations.
 
 Measure real automatic runs, including queue time and cancellations. Put run links, sample counts, elapsed times, and conclusions in the PR body. Do not report a failed or cancelled run as a speedup. Push once per fix and never dispatch additional measurements.
+
+Cancelled verifier runs recover the latest open PR head automatically, at most once per head. Recovery skips drafts, existing active runs, and successful verdicts. It never retries product failures or dispatches measurement runs. Cancelling a superseded run stops its queued report jobs; the separate completion observer keeps cancellation BLOCKED until a fresh independent verdict passes.

@@ -21,7 +21,7 @@ concurrency:
 jobs:
   tests:
     needs: [resolve, select, head, failed-head, base]
-    if: always() && ( github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
+    if: always() && !cancelled() && ( github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 80
     outputs:
@@ -170,7 +170,7 @@ jobs:
 
   failed-head:
     needs: [resolve, select, head]
-    if: always() && needs.resolve.result == 'success' && needs.select.result == 'success' && needs.head.result != 'cancelled'
+    if: always() && !cancelled() && needs.resolve.result == 'success' && needs.select.result == 'success' && needs.head.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -212,7 +212,7 @@ jobs:
       group: pstack-verdict-${{ format('verify PR {0}', inputs.pr || github.event.pull_request.number) }}
       cancel-in-progress: false
     needs: [tests, resolve, select, head, failed-head, base]
-    if: always() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
+    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

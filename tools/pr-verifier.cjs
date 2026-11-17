@@ -305,17 +305,34 @@ function recoveryReport(run, headSha, comments) {
   return { result: 'BLOCKED', body: `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n` };
 }
 
+function cancelledRunNeedsRetry(run, pr, checks, runs) {
+  if (run.conclusion !== 'cancelled' || pr.state !== 'open' || pr.draft) return false;
+  const head = pr.head.sha;
+  if (checks.some(check => check.head_sha === head &&
+    (check.name === 'pstack-verifier recovery' || (check.name === 'pstack-verifier' && check.conclusion === 'success')))) return false;
+  return !runs.some(candidate => Number(candidate.id) !== Number(run.id) && candidate.display_title === `verify PR ${pr.number}` &&
+    (candidate.head_sha === head || candidate.event === 'workflow_dispatch') && !['completed', 'cancelled'].includes(candidate.status));
+}
+
 function recover(env) {
-  const run = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).workflow_run;
+  const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
+  const run = event.workflow_run;
   if (!run || run.head_repository?.full_name !== env.REPO || !['pull_request', 'workflow_dispatch'].includes(run.event)) return;
   const number = run.pull_requests?.[0]?.number || run.display_title?.match(/^verify PR (\d+)$/)?.[1];
   if (!number) return;
   const pr = JSON.parse(gh(['api', `repos/${env.REPO}/pulls/${number}`]));
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
-  const headSha = run.pull_requests?.[0]?.head?.sha || pr.head.sha;
-  if (headSha !== pr.head.sha) return;
+  const headSha = pr.head.sha;
   const checks = gh(['api', '--paginate', `repos/${env.REPO}/commits/${headSha}/check-runs?filter=all&per_page=100`, '--jq', '.check_runs[]'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
+  if (run.conclusion === 'cancelled') {
+    const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '.workflow_runs']));
+    if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
+      gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
+      gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier re-queued', '-f', 'output[summary]=One automatic recovery was queued for this head. A successful independent verdict is still required.']);
+    }
+  }
+  if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
   const comments = gh(['api', '--paginate', `repos/${env.REPO}/issues/${number}/comments?per_page=100`, '--jq', '.[] | {body,user:{login:.user.login}}'])
     .split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -703,7 +720,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {
