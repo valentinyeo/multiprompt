@@ -221,7 +221,9 @@ test('publication requires candidate journey gate even when its matrix fails or 
   assert.match(jobs.release, /cat release-journeys.json.md >> release-body.txt/);
   assert.match(jobs.release, /sha256sum .*release-journeys.json/);
   const verify = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
-  assert.match(verify, /inputs.features && fromJSON\(inputs.features\)/);
+  assert.match(verify, /FEATURES: \$\{\{ inputs.features \}\}/);
+  assert.match(verify, /process.env.FEATURES \? JSON.parse\(process.env.FEATURES\)/);
+  assert.match(verify, /include: \$\{\{ fromJSON\(needs.journeys.outputs.matrix\) \}\}/);
   assert.match(verify, /Copy-Item candidate-bin\/multiprompt-x64.exe verify-bin\/multiprompt.exe/);
   assert.match(verify, /candidate = \[bool\]\$env:CANDIDATE_ARTIFACT/);
 });

@@ -161,13 +161,8 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
-<<<<<<< HEAD
   assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation, journey-gate\]/);
-  assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: false$/m);
-=======
-  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation, journeys\]/);
   assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: true$/m);
->>>>>>> origin/master
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /"tools\/version-stamp.test.mjs", "tools\/release-version.test.mjs"/);
@@ -217,13 +212,8 @@ test('release builds both architectures independently of the report-only Tests w
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.build, /needs: prepare/);
-<<<<<<< HEAD
   assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks, resource-observation, journey-gate\]/);
   assert.doesNotMatch(jobs.release.split('    steps:')[0], /update-test|test-result/);
-=======
-  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks, resource-observation, journeys\]/);
-  assert.doesNotMatch(jobs.release, /update-test|test-result/);
->>>>>>> origin/master
   const tests = readWorkflow('test.yml');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
