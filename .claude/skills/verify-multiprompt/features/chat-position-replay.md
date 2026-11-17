@@ -2,10 +2,11 @@
 
 ## Sub-features
 
-- PR 1070's synthetic 64-session profile, eight workspaces and 2,400-message long histories with images, tables and code.
-- Opening and revisiting five real-size long chats through native session shortcuts.
-- Every visible successful paint saved with global chat/message bounds, identities, scroll and exact pixels, including unfinished layouts.
-- A long hosted chat left open through idle refreshes, reading old history, a real composer send, eight production text deltas and completion below the reader.
+- PR 1070's synthetic 64-session profile, eight workspaces and 2,400-message histories with images, tables and code.
+- Opening and revisiting five long chats through native session shortcuts.
+- Every successful visible chat paint, including unfinished layouts, saved with exact pixels, message identities, bounds and scroll.
+- Native console SHOW/HIDE, foreground, parent, location and Z-order events recorded before launch through owned cleanup.
+- A hosted long chat left open through idle refreshes, reading old history, a real send, streaming and completion below the reader.
 - Native copied transcript receipts and zero surviving owned processes.
 
 ## How to get to it (user POV)
@@ -14,14 +15,20 @@ Open a long saved session, switch away and return. Scroll into older messages, l
 
 ## Driving it with control.ps1
 
-Select `feature=chat-position-replay` in the existing reusable Windows workflow. This is a verification alias, not a new app feature. The workflow enables the identical paint probe and normalizes to the existing chat-switch driver, then runs the production-host delivery driver in a separate owned profile. The original switch-speed benchmark is unchanged.
+Select `feature=chat-position-replay` in the existing reusable Windows workflow. This verification alias enables the paint probe and runs the existing switch driver, then the production-host delivery driver. The original switch-speed benchmark is unchanged.
 
-No manual dispatch is needed for PR 1067. Its automatic baseline/candidate workflow already runs these same scripts. The independent verifier can select this map by name to run the same journey itself. Artifacts use `verify-chat-position-replay`; application-compare artifacts append the baseline SHA.
+PR 1067 runs the same scripts automatically against master and head. The independent verifier can select this map itself. No extra dispatch or rerun is needed. Artifacts use `verify-chat-position-replay`; application-compare artifacts append the baseline SHA.
 
-Done when both long-chat journeys pass, copied text includes the seed's final answer and the real sent/completed reply, all stable phases have no block or text-row movement, every recorded paint has its image, and both owned profiles clean up. `result.json.positionJourneys` must report both switch and hosted success. Explicit user scrolls retain their movement records.
+Before either journey, a separate process proves the observer catches a real native console reparented over a test chat window. Its expected failure is saved under `observer-control`. It cannot satisfy the app's failing-master requirement.
 
-Before a product fix, master must fail on an actual painted movement in a stable long-chat phase under the same scripts. A missing screenshot, unsupported display mode, setup error, or short-chat jump does not establish that reproduction. Do not substitute the regular 400-round speed journey or the 50-paragraph working-dots journey.
+Done when both app journeys pass, copied text includes the seed's final answer and the sent/completed reply, and all stable phases preserve message positions. Every recorded paint must have its image. Both `native-console.json` files must pass with complete hook coverage and owned Chat View visibility intervals. `result.json.positionJourneys` must report switch and hosted success. Explicit scrolling and send-triggered scrolling retain their movement records without counting as spontaneous jumps. Console flashes fail regardless of the action's scroll policy.
+
+Before a product fix, master must expose a native console over visible long-chat Chat View under these same scripts. Inspect its event timestamps, console screenshots and desktop video. A fixture timeout, missing evidence or short-chat jump cannot establish this reproduction.
 
 ## Gotchas
 
-The hosted runner supports 1920x1080; it rejected the owner's 2560x1600 mode before launch. The video starts before launch at the supported size. Exact per-paint bitmaps, not sampled video alone, establish positions. Recording overhead is not a latency benchmark. SSH/provider I/O is synthetic; the app's archive, subscription, layout, input and scroll paths are real. No production fix is claimed until the required long-chat master failure and candidate pass exist.
+The runner supports 1920x1080, not the owner's 2560x1600 mode. Video starts before app launch. Paint bitmaps establish chat positions but cannot detect another window covering chat between paints.
+
+The window observer includes child consoles reparented into the app. It retains original SHOW timestamps even when the console is already hidden at callback time. It records bounds, parent, owner, foreground and sibling Z-order. An intersecting console SHOW during an owned visible Chat View interval fails even when no chat paint occurs. Current hidden state or current Z-order cannot erase that historical SHOW. A missing hook, unobserved chat or incomplete journey interval is infrastructure failure, never a product reproduction.
+
+Recording overhead is not a latency benchmark. SSH/provider I/O is synthetic. The app's archive, subscription, layout, input and scroll paths are real. No product fix is claimed until failing-master and passing-head evidence exists.

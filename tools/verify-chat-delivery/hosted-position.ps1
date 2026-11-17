@@ -52,7 +52,7 @@ try {
     $frame = @((Read-Shared "$env:MULTIPROMPT_FRAME_PROBE/frames.tsv") -split "`n" | Where-Object { $_.StartsWith("frame`t") })[-1] -split "`t"
     if ($frame[14] -ne '1') { throw 'The long-chat reader did not actually leave the bottom' }
     Observe-HostedPosition 'idle-long-reading' 'stable' {} 15
-    Observe-HostedPosition 'send-while-reading' 'stable' {
+    Observe-HostedPosition 'send-while-reading' 'send' {
         [IO.File]::WriteAllText("$state/working-initial-start", '')
         Type-Composer $plan.text
         Press @(0x0D) 'Send while keeping the long-chat reader position' $true
@@ -63,6 +63,7 @@ try {
         [IO.File]::WriteAllText("$state/working-reply", '')
         [void](Wait-For 'first production text.delta' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "text.delta"' } 30)
         [IO.File]::WriteAllText("$state/real-size-continue", '')
+        [IO.File]::WriteAllText("$state/working-steady-stream", '')
         [void](Wait-For 'eight production deltas and the final reply' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "real-size-complete"' } 30)
     }
     Observe-HostedPosition 'idle-after-stream' 'stable' {} 12

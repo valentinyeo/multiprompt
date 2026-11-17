@@ -145,6 +145,40 @@ print(json.dumps(actual))
 });
 
 
+test('the hosted replay completes the actual mixed steady and real-size provider protocol', () => {
+  const { spawnSync } = require('node:child_process');
+  const script = `import importlib.util, json, re, sys, tempfile, threading, time
+from pathlib import Path
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('working', root / 'working-host.py')
+working = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(working)
+source = (root / 'hosted-position.ps1').read_text()
+stream = source.split("Observe-HostedPosition 'stream-while-reading'", 1)[1].split("Observe-HostedPosition 'idle-after-stream'", 1)[0]
+gates = re.findall(r'WriteAllText\\("\\$state/([^"/]+)"', stream)
+complete = threading.Event()
+stages = []
+namespace = {key: lambda *a, **k: None for key in ('host_dispatch_switch', 'host_owned', 'host_deliver', 'start_message_worker', 'serve_request', 'host_accept', 'host_event')}
+def record(file, **data):
+    stages.append(data['stage'])
+    if data['stage'] == 'real-size-complete': complete.set()
+original_sleep = time.sleep
+with tempfile.TemporaryDirectory() as directory:
+    state = Path(directory)
+    for gate in gates: (state / gate).touch()
+    working.time.sleep = lambda seconds: original_sleep(min(seconds, 0.001))
+    working.install(namespace, state, record, steady=True, real_size=True)
+    namespace['host_deliver']('claude', working.SID, 'id', 1, 1, 'reader send')
+    assert complete.wait(2), dict(gates=gates, stages=stages)
+    assert stages.count('streaming-delta') == 7
+    assert stages.count('reading-stream-delta') == 8
+print(json.dumps(dict(gates=gates, completed=True)))
+`;
+  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script, __dirname], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).completed, true);
+});
+
 function bitmap(width, height, textY) {
   const image = Buffer.alloc(54 + width * height * 4, 255);
   image.write('BM');

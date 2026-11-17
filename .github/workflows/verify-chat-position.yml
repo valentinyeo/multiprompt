@@ -11,12 +11,15 @@ on:
       - tools/verify-chat-delivery/*frame-probe*
       - tools/verify-chat-delivery/position-replay*
       - tools/verify-chat-delivery/hosted-position.ps1
+      - tools/verify-chat-delivery/native-console*
       - tools/verify-chat-delivery/seed-position-profile.py
       - .claude/skills/verify-multiprompt/seed-profile.*
       - tools/verify-chat-delivery/working-host.py
       - tools/verify-chat-delivery/boundary.py
       - tools/verify-chat-delivery/drive.ps1
       - src/chat*.zig
+      - src/console.zig
+      - src/focus.zig
 
 permissions:
   contents: read
@@ -30,7 +33,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       revision: ${{ github.event.pull_request.head.sha }}
-      app_revision: 608b7d62944fd39b79cbbaa2c83bc6e3251f590c
+      app_revision: ee394be0c178378919a6d4d3499329f5d3636691
       feature: chat-position-replay
   candidate:
     uses: ./.github/workflows/verify.yml
@@ -45,7 +48,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-chat-position-replay-608b7d62944fd39b79cbbaa2c83bc6e3251f590c
+          name: verify-chat-position-replay-ee394be0c178378919a6d4d3499329f5d3636691
           path: baseline
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -67,10 +70,18 @@ jobs:
           paths = ['position-replay.json', 'hosted/steady-live/position-replay.json']
           before = [load('baseline', file) for file in paths]
           after = [load('candidate', file) for file in paths]
-          moved = [(p['name'], p['moves']) for run in before for p in run['observations'] if p['policy'] == 'stable' and p['moves']]
-          assert moved, 'Master must reproduce a painted jump in a long chat; setup failures or short-chat jumps do not count'
+          window_paths = ['native-console.json', 'hosted/native-console.json']
+          windows_before = [load('baseline', file) for file in window_paths]
+          windows_after = [load('candidate', file) for file in window_paths]
+          for root in ('baseline', 'candidate'):
+              control = load(root, 'observer-control/native-console.json')
+              assert control['status'] == 'failed' and control['flashes'], 'The hook must catch the real native child-console positive control'
+          assert all(run['status'] != 'incomplete' for run in windows_before), windows_before
+          flashes = [flash for run in windows_before for flash in run['flashes']]
+          assert flashes, 'Master must expose a native console over visible long-chat Chat View; fixture timeouts or short-chat jumps do not count'
+          assert all(run['status'] == 'passed' for run in windows_after), windows_after
           assert all(run['status'] == 'passed' for run in after), after
           assert load('candidate', 'result.json')['status'] == 'passed'
           assert load('candidate', 'hosted/result.json')['status'] == 'passed'
-          print(json.dumps(dict(master_moved_phases=[name for name, moves in moved], candidate='passed', before_frames=[run['frameCount'] for run in before], after_frames=[run['frameCount'] for run in after])))
+          print(json.dumps(dict(master_console_flashes=flashes, candidate='passed', before_frames=[run['frameCount'] for run in before], after_frames=[run['frameCount'] for run in after])))
           PY

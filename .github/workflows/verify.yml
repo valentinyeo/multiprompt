@@ -1058,6 +1058,14 @@ jobs:
           npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
           if ($LASTEXITCODE -ne 0) { throw 'Chrome for Testing install failed' }
           "VERIFY_BROWSER_MODULE=$env:RUNNER_TEMP/browser-verify" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Prove the native window observer catches a real child-console flash
+        if: inputs.feature == 'chat-position-replay'
+        shell: powershell
+        run: |
+          & node --test tools/verify-chat-delivery/native-console.test.cjs tools/verify-chat-delivery/position-replay.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Position recorder contracts failed' }
+          & powershell -NoProfile -File tools/verify-chat-delivery/native-console-control.ps1 -Evidence "$pwd/evidence/observer-control"
+          if ($LASTEXITCODE -ne 0) { throw 'Native console hook positive control failed' }
       - name: Start complete chat paint recording before launch
         if: inputs.feature == 'chat-position-replay'
         shell: powershell
