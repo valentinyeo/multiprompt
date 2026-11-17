@@ -372,7 +372,7 @@ def fake_seed_many(rounds):
     for index, name in enumerate(value["sessions"]):
         pid = value["panes"][name]
         sid = value["sids"][name]
-        cwd = f"C:/verify/work{index}"
+        cwd = value.get("cwds", {}).get(name, f"C:/verify/work{index}")
         transcript = home / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", cwd) / f"{sid}.jsonl"
         meta = home / ".claude" / "sessions" / f"{pid}.json"
         process = Path(value["procRoot"]) / str(pid)
@@ -1001,6 +1001,13 @@ def completion(remote):
     helper.CACHE.parent.mkdir(parents=True, exist_ok=True)
 
     def reply(line):
+        if state().get("slashProof"):
+            target = next((arg for arg in ARGS if arg in ("remote-1", "remote-2", "remote-3")), "unknown")
+            record("completion-owner.jsonl", target=target, request=line.strip())
+            fields = line.rstrip("\n").split("\t")
+            if target != "remote-3":
+                return f"@mp\t{fields[0]}\t{fields[1]}\terror\t-\t0\n@@MP_END@@\n"
+            return f"@mp\t{fields[0]}\t{fields[1]}\tok\t/home/inne/projects/sample\t1\nS\tverify-owner\t\tOwner account skill\n@@MP_END@@\n"
         helper.CACHE.write_text(json.dumps({"key": helper.cache_key(), "at": time.time(), "commands": []}), encoding="utf-8")
         response = helper.request(line)
         rows = [row.split("\t")[1] for row in response.splitlines()[1:-1]]
