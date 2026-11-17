@@ -1,5 +1,7 @@
 # Browser pane stuck opening
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1
+
 Verify on: push
 
 Verify browser-pane close/reopen behavior and that a docked pane works without the extension.

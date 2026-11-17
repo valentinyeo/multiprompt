@@ -34,8 +34,8 @@ for (const [file, names] of [
 }
 
 function matrixContract(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.pr\)/);
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
+  assert.match(source, /full: \$\{\{ steps.features.outputs.available \}\}/);
   const features = discoverFeatures();
   assert.ok(features.pr.includes('appearance'), 'PR smoke includes appearance');
   assert.ok(features.full.includes('browser-pane-stuck'), 'master matrix includes browser recovery');
@@ -46,7 +46,7 @@ function matrixContract(source) {
   assert.doesNotMatch(source, /^\s+paths(?:-ignore)?:/m);
 }
 matrixContract(workflow);
-assert.throws(() => matrixContract(workflow.replace('fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.missing)')));
+assert.throws(() => matrixContract(workflow.replace('fromJSON(needs.journeys.outputs.matrix)', 'fromJSON(needs.journeys.outputs.missing)')));
 
 const featureFiles = fs.readdirSync(path.join(root, directory, 'features')).filter(name => name.endsWith('.md') && name !== 'README.md');
 const index = read(`${directory}/features/README.md`);
@@ -54,7 +54,13 @@ const desktopFeatures = featureFiles.filter(file => {
   const text = read(`${directory}/features/${file}`);
   const desktop = text.includes('## Driving it with control.ps1');
   const reconnect = text.includes('## Driving it with the Windows reconnect harness');
-  assert.notEqual(desktop, reconnect, `${file} names exactly one desktop or reconnect driver`);
+  const aggregate = text.includes('## Driving it with drive.ps1');
+  assert.equal(Number(desktop) + Number(reconnect) + Number(aggregate), 1, `${file} names exactly one driver`);
+  if (aggregate) {
+    const journeys = text.match(/^Journeys: (.+)$/m);
+    assert.ok(journeys, `${file} names its runnable journeys`);
+    for (const journey of journeys[1].split(', ')) assert.ok(discoverFeatures().available.includes(journey), `${file}/${journey}`);
+  }
   return desktop && !text.includes('The workflow selects');
 });
 const allowed = driver.match(/ValidateSet\(([^)]*)\)/)?.[1].match(/'([^']+)'/g).map(value => value.slice(1, -1));
@@ -102,7 +108,7 @@ function foregroundInputContract(source) {
   assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-(?:Until|Foreground)|\b(?:while|do|until)\b/);
   assert.match(wait, /^function Wait-Foreground \{\s+try \{ Assert-Foreground; return \} catch \{\}\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
   assert.doesNotMatch(wait, /Wait-Until|while\s*\(/);
-  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
+  assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+if \(-not \(Test-Path \(Join-Path \$Evidence 'action.png'\)\)\) \{ Snapshot 'action' \}\s+\}\s*$/);
   assert.match(press, /Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)/);
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);

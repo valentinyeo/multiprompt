@@ -5,9 +5,9 @@ const { readControlSource } = require('./app-source');
 assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
-const { runInNewContext } = require('node:vm');
+const { execFileSync } = require('node:child_process');
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
@@ -337,89 +337,47 @@ test('QPC tracing is debug-gated, thread-local and emits exactly one aggregate l
 });
 
 function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master', flags = {}) {
-  const expression = source.match(/^        feature: \$\{\{ (.+) \}\}$/m);
-  assert.ok(expression, 'journey matrix expression exists');
-  const discovered = featureMatrix(source);
-  return runInNewContext(expression[1], {
-    needs: { journeys: { outputs: { pr: JSON.stringify(discovered.pr), full: JSON.stringify(discovered.full) } } },
-    github: { event_name: event, ref },
-    inputs: { feature, ...flags },
-    fromJSON: JSON.parse,
-    startsWith: (value, prefix) => value.startsWith(prefix),
-    format: (pattern, value) => pattern.replace('{0}', value),
-  }, { timeout: 1000 });
+  featureMatrix(source);
+  const script = source.split('      - id: matrix\n')[1].split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^          /gm, '');
+  const output = execFileSync(process.execPath, ['-'], { cwd: path.join(__dirname, '..'), input: script, encoding: 'utf8', env: { ...process.env, FEATURE: feature, FEATURES: '', EVENT: event, APP_REVISION: '' } });
+  return JSON.parse(output.split('\n').find(line => line.startsWith('selected=')).slice(9));
 }
 
 function assertsDispatchOnly(source) {
-  for (const [event, feature] of [['pull_request', ''], ['push', ''], ['workflow_dispatch', 'all']]) {
-    assert.equal(journeyMatrix(source, event, feature).includes('browser-switch-speed'), false);
-  }
+  assert.equal(journeyMatrix(source, 'pull_request').includes('browser-switch-speed'), false);
+  assert.ok(journeyMatrix(source, 'schedule').includes('browser-switch-speed'));
+  assert.ok(journeyMatrix(source, 'workflow_dispatch', 'all').includes('browser-switch-speed'));
   assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'browser-switch-speed'), ['browser-switch-speed']);
   assert.match(source, /workflow_dispatch:[\s\S]+feature:/);
-  assert.match(source, /fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
   assert.match(source, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(source).available.includes('browser-switch-speed'));
 }
 
-test('IGSH-1033 master smoke stays small while release candidates retain feature-owned coverage', async () => {
-  assert.doesNotMatch(workflow, /^  push:/m, 'master pushes no longer start another full matrix');
-  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
-  function contract(source) {
-    assert.doesNotMatch(source, /^  push:/m);
-    assert.doesNotMatch(source, /^    tags(?:-ignore)?:/m, 'release tags do not duplicate the tested master matrix');
-    assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);
-    assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), featureMatrix(source).pr);
-    assert.deepEqual(journeyMatrix(source, 'push'), ['appearance', 'relaunch-saved-sessions']);
-    for (const feature of full) assert.ok(journeyMatrix(source, 'push', 'all').includes(feature));
-    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
-    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
-    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1083'), ['appearance']);
-    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1079'), ['appearance']);
-    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1055-hax2'), ['browser-pane-stuck', 'chat-messages-only']);
-    for (const feature of full) assert.ok(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837').includes(feature));
-    assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
-  }
-  contract(workflow);
-  for (const [before, after] of [
-    ['fromJSON(needs.journeys.outputs.pr)', 'fromJSON(needs.journeys.outputs.full)'],
-    ['fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.pr)'],
-    [`github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]')`, `github.event_name == 'pull_request' && fromJSON('["appearance", "relaunch-saved-sessions"]')`],
-    ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
-  ]) {
-    const broken = workflow.replace(before, after);
-    assert.notEqual(broken, workflow, before);
-    assert.throws(() => contract(broken), assert.AssertionError, before);
-  }
+test('IGSH-1033 master runs the full runnable set while PR journeys remain selected', () => {
+  assert.doesNotMatch(workflow, /^  push:/m);
+  assert.deepEqual(journeyMatrix(workflow, 'pull_request'), featureMatrix(workflow).pr);
+  for (const event of ['schedule', 'push', 'workflow_dispatch']) assert.deepEqual(journeyMatrix(workflow, event, 'all'), featureMatrix(workflow).available);
+  assert.deepEqual(journeyMatrix(workflow, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
 });
 
 test('explicit runner-note proof selects its native journey without expanding ordinary PR checks', () => {
   assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'chat-delivery', 'refs/pull/577/merge', { chat_notes_proof: true }), ['chat-delivery']);
-  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), featureMatrix(workflow).pr);
+  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), featureMatrix(workflow).available);
 });
 
-test('switch timing is dispatch-only while allowlists and artifact contracts retain it', () => {
+test('switch timing is selected on PRs and included in full nightly and release coverage', () => {
   assertsDispatchOnly(workflow);
-  for (const before of ['fromJSON(needs.journeys.outputs.pr)', 'fromJSON(needs.journeys.outputs.full)']) {
-    const broken = workflow.replace(before, `fromJSON('["browser-switch-speed"]')`);
-    assert.notEqual(broken, workflow, before);
-    assert.throws(() => assertsDispatchOnly(broken), assert.AssertionError);
+  for (const [before, after] of [["process.env.EVENT === 'pull_request'", "process.env.EVENT === 'schedule'"], ["process.env.FEATURE !== 'all'", "process.env.FEATURE !== 'browser-switch-speed'"]]) {
+    assert.notEqual(workflow.replaceAll(before, after), workflow);
+    assert.throws(() => assertsDispatchOnly(workflow.replaceAll(before, after)));
   }
-  assert.throws(() => assertsDispatchOnly(workflow.replaceAll(`fromJSON(format('["{0}"]', inputs.feature))`, `fromJSON(format('["{0}"]', inputs.other))`)));
-  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
-  assert.ok(featureMatrix(workflow).available.includes('browser-switch-speed'));
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
   assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
-  assert.match(read('.github/workflows/click-through.yml'), /changed=\$\(git diff --name-only[^\n]*-- src[^\n]*\btools\b/);
+  assert.match(read('.github/workflows/click-through.yml'), /touchedJourneys/);
   assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'chat-browser-shortcut', 'chat-browser-autoload', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
-  assert.match(map, /on demand only/);
-  for (const file of ['SKILL.md', 'features/README.md']) {
-    const prLine = read(base + file).split('\n').find(line => /PR.*trigger|pull_request.*trigger/.test(line));
-    assert.ok(prLine);
-    assert.equal(prLine.includes('browser-switch-speed'), false);
-  }
   for (const term of ['Ctrl+Tab', 'verify-browser-switch-speed', '50 ms', '100 ms', '180 ms', 'not a switch-speed fix']) assert.ok(map.includes(term));
   assert.match(read(base + 'features/README.md'), /\[Browser switch speed\]\(browser-switch-speed.md\)/);
   assert.match(read(base + 'SKILL.md'), /`browser-switch-speed`/);

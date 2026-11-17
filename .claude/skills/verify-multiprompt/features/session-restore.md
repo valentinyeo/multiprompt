@@ -1,5 +1,7 @@
 # Session restore
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-restore.ps1
+
 Verify on: push
 
 Reopen the workspace and local CMD session that was selected, after an updater restart, a normal close or a killed process, including whether it was open in Starred or its home workspace.
