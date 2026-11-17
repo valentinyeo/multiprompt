@@ -1507,11 +1507,13 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.match(chat, /foreach \(\$mode in @\('typed', 'suggestion'\)\)/);
   assert.match(chat, /Invoke-JourneyCommand 'new cmd shell' -Confirm {[\s\S]*?Type-Text \('"' \+ \$localAgent/);
   assert.match(chat, /\$inbox = Read-Inbox[\s\S]*?\$_.sid -eq \$localState.tabs\[\$localTab\].shell_id[\s\S]*?\$_.ag -eq 1/);
-  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+)\s*\n/);
+  const detectionWait = chat.match(/\} 'local claude\.exe detected as Claude for the direct input route' -Seconds (\d+|\$\w+)\s*\n/);
+  const waitArgument = detectionWait?.[1];
+  const detectionSeconds = waitArgument?.startsWith('$') ? chat.match(new RegExp(`\\${waitArgument}\\s*=\\s*(\\d+)`))?.[1] : waitArgument;
   const normalNamePoll = read('src/power.zig').match(/\.normal\s*=>\s*setCoalescableTimerInterval\(hwnd, TIMER_NAME_POLL, ([\d_]+)\)/);
-  assert.ok(detectionWait, 'local Claude detection wait must specify -Seconds');
+  assert.ok(detectionSeconds, 'local Claude detection wait must specify a numeric -Seconds budget');
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
-  assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
+  assert.ok(Number(detectionSeconds) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
   const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
