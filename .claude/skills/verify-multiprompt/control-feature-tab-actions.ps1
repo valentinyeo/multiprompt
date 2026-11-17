@@ -20,7 +20,8 @@ function Get-ActionPoint([long]$Id) {
     $index = -1
     for ($i = 0; $i -lt $tabs.Count; $i++) { if ($tabs[$i].chat_id -eq $Id) { $index = $i } }
     if ($index -lt 0) { throw 'Sidebar target no longer exists' }
-    $pattern = '\[photo-proof\] (?:expanded|pinned) target=' + $index + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)'
+    $placement = if (Get-ActionValue $tabs[$index] 'pinned_top') { 'pinned' } else { 'expanded' }
+    $pattern = '\[photo-proof\] ' + $placement + ' target=' + $index + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)'
     Wait-Until { [regex]::Matches((Read-SharedText $script:tabLog), $pattern).Count -gt 0 } 'real sidebar avatar geometry for the target'
     $rects = [regex]::Matches((Read-SharedText $script:tabLog), $pattern)
     $rect = $rects[$rects.Count - 1]

@@ -150,6 +150,25 @@ else if (process.argv[2] === '--evidence') {
     assert.match(text, /Substring\(\$script:tabPaletteOffset\)/);
     for (const name of ['copy-', 'rename-', 'unread-', 'face', 'color', 'group-new', 'workspace-existing', 'archive-context', 'delete-keyboard']) assert.ok(text.includes(name), name);
   });
+  test('context geometry follows current placement after pin and unpin', t => {
+    const text = fs.readFileSync(path.join(__dirname, 'control-feature-tab-actions.ps1'), 'utf8');
+    const helper = text.slice(text.indexOf('function Get-ActionValue('), text.indexOf('function Open-ActionPalette('));
+    const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      $ErrorActionPreference = 'Stop'
+      $script:pinned = $false
+      function Read-Session { return @{ tabs = @([pscustomobject]@{ chat_id = 101 }, [pscustomobject]@{ chat_id = 202; pinned_top = $script:pinned }) } }
+      function Read-SharedText { return $script:log }
+      function Wait-Until($Condition, $Label) { if (-not (& $Condition)) { throw $Label } }
+      ${helper}
+      $script:log = "[photo-proof] expanded target=1 rect=20,229,56,265\n[photo-proof] pinned target=1 rect=122,68,178,124"
+      if (((Get-ActionPoint 202) -join ',') -ne '38,247') { throw 'Unpinned target reused its old pinned rectangle' }
+      $script:pinned = $true
+      $script:log += "\n[photo-proof] expanded target=1 rect=20,113,56,149"
+      if (((Get-ActionPoint 202) -join ',') -ne '150,96') { throw 'Pinned target reused its old expanded rectangle' }
+    `], { encoding: 'utf8' });
+    if (run.error?.code === 'ENOENT') return t.skip('PowerShell is required to execute the driver geometry helper');
+    assert.equal(run.status, 0, run.stderr);
+  });
   test('wrong inactive targets, clipboard identity and collateral edits fail with positive controls', () => {
     const before = { active_tab: 0, active_workspace: 0, tabs: [{ chat_id: 101, name: 'Control' }, { chat_id: 202, name: 'Target' }] };
     const after = structuredClone(before);
