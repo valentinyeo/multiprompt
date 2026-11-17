@@ -108,6 +108,22 @@ test('formal findings inherit only from byte-identical modeled source', { skip: 
   }
 });
 
+test('local Claude detection waits cover the production polling and coalescing interval', () => {
+  const power = read('src/power.zig');
+  const intervals = [...power.matchAll(/TIMER_NAME_POLL, ([\d_]+)\)/g)].map(match => Number(match[1].replaceAll('_', '')));
+  assert.ok(intervals.length > 0);
+  const divisor = Number(power.match(/interval_ms \/ (\d+)/)[1]);
+  const latestPoll = Math.max(...intervals.map(ms => ms + Math.max(32, Math.floor(ms / divisor))));
+  const journey = read('.claude/skills/verify-multiprompt/control-feature-chat-view.ps1');
+  const configured = Number(journey.match(/\$agentDetectionSeconds\s*=\s*(\d+)/)?.[1]);
+  const waits = [...journey.matchAll(/\}\s+'[^']*claude\.exe detected as Claude[^']*'\s+-Seconds (\d+|\$agentDetectionSeconds)/g)];
+  assert.equal(waits.length, 2);
+  for (const [, value] of waits) {
+    const seconds = value.startsWith('$') ? configured : Number(value);
+    assert.ok(seconds * 1000 > latestPoll, `${seconds}s cannot cover the ${latestPoll}ms production poll window`);
+  }
+});
+
 test('the measurement probe belongs only to the verification build', () => {
   assert.doesNotMatch(read('src/chat_render.zig'), /fn chatStillFrame\(/);
   assert.doesNotMatch(read('tools/chat-still/paint.zig'), /app_state\.\w+\s*(?:=(?!=)|[+\-*\/]=)/, 'the probe must not mutate product state');
