@@ -164,6 +164,7 @@ jobs:
         id: judge
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:
+          allowed_bots: software-factory-runners,hypertask-runners
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           prompt: |
@@ -174,9 +175,14 @@ jobs:
             Return PASS only if every response meets all criteria. Give each response one reason citing its observations or the missing proof. Return structured output only.
           claude_args: |
             --model sonnet
-            --max-turns 12
+            --max-turns 32
             --allowedTools Read
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","FAIL"]},"results":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"},"passed":{"type":"boolean"},"reason":{"type":"string"}},"required":["label","passed","reason"]}}},"required":["verdict","results"]}'
+      - name: Retain independent judge execution
+        if: always() && steps.judge.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.judge.outputs.execution_file }}
+        run: cp -- "$EXECUTION_FILE" report/judge-execution.json
       - name: Require both the observed checks and independent verdict
         env:
           VERDICT: ${{ steps.judge.outputs.structured_output }}
