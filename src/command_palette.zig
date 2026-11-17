@@ -4467,6 +4467,20 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
+    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        for ([_]struct { target: usize, label: []const u8 }{
+            .{ .target = SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
+            .{ .target = SEARCH_CHAT_MODE_MANUAL_OFFSET, .label = "chat permission mode: ask" },
+            .{ .target = SEARCH_CHAT_MODE_EDITS_OFFSET, .label = "chat permission mode: accept edits" },
+            .{ .target = SEARCH_CHAT_MODE_BYPASS_OFFSET, .label = "chat permission mode: bypass" },
+        }) |row| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!labelsMatchQuery(&.{ row.label, "permissions" }, query)) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = row.target;
+            app_state.g_search_result_count += 1;
+        }
+    }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "chat view insert command or skill", "browse commands", "browse skills", "ctrl slash", "autocomplete" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
