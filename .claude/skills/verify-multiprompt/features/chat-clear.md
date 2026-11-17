@@ -10,7 +10,9 @@ Journeys: chat-slash
 
 In a server chat, type /clear into the message box and press Enter. Do not substitute Reset this chat or Fresh start.
 
-## Driving recipe and observable proof
+## Driving it with drive.ps1
+
+Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
 1. Start with a healthy Part B real server chat containing a known exchange and an unsent marker.
 2. Invoke /clear through the composer, wait for the host result, then send a new unique message. Use Escape to dismiss a completion popup before sending /clear as literal text.

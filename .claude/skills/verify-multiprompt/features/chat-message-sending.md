@@ -10,7 +10,9 @@ Journeys: chat-delivery, chat-send-latency, chat-not-sent-remove
 
 Select a chat and type. Enter or Ctrl+Enter sends unless a command suggestion is open. The Send button sends the draft. With an empty composer, Up selects the newest message, which may be waiting; Enter opens its actions. Delete can discard unsent messages directly from the empty composer. Ctrl+K offers Send Queued Messages Now, conditional Discard Unsent Messages and searched Edit Queued Messages. Retry remains a message action; its old palette handler alone does not create a row.
 
-## Driving recipe and observable proof
+## Driving it with drive.ps1
+
+Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
 1. Use Part A data and a healthy Part B host. Send distinct idle messages using each entry point and one multiline message.
 2. While a reply is running, send three numbered messages. Require their receiving-host order, exactly one copy of each, and retained conversation identity.

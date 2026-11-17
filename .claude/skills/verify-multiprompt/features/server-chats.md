@@ -10,7 +10,9 @@ Journeys: chat-delivery, chat-model, chat-slash
 
 Ctrl+T, Alt+T and the sidebar plus use the default workspace launch. Use Ctrl+K New Claude session, New Codex chat, New Pi chat or New Cursor chat for explicit provider selection; choose the server and folder when requested. Pi /login and its Log in row have separate authentication prerequisites. New Claude in terminal is a distinct terminal action, not live-chat proof.
 
-## Driving recipe and observable proof
+## Driving it with drive.ps1
+
+Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
 1. Use Part B (`w-2567b`, SOFT-2567) runner-owned real SSH/tmux host and Part A real-size profile. Do not create another server fixture.
 2. Open each available provider chat on that server. Send a prompt requesting one unique marker, require one matching logical reply turn, leave and reopen the chat.

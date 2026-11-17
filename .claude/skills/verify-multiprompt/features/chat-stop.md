@@ -10,7 +10,9 @@ Journeys: chat-view
 
 Open a working chat with an empty message box. Click Stop inside the box, press Escape, or select Ctrl+K Chat View: Stop the agent. The tab context menu and chat More menu offer the same action. Focus the composer and dismiss autocomplete or transcript selection before using Escape. Typed text replaces Stop with Send; use Escape or the palette for the draft-preservation case.
 
-## Driving recipe and observable proof
+## Driving it with drive.ps1
+
+Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
 1. On a healthy Part B host, send a request that stays busy long enough to stop. Capture the working state.
 2. Click the square Stop button with real mouse input. Require the host's current turn to end and the working dots to disappear.

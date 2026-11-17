@@ -11,7 +11,9 @@ Journeys: chat-full-history, chat-switch-speed, chat-newest
 
 Select a long chat in the sidebar. Use Page Up, Home, Find, selection and Copy; use End or two Shift+G presses in an empty box to return to newest.
 
-## Driving recipe and observable proof
+## Driving it with drive.ps1
+
+Preconditions: a healthy hosted Windows instance, matching executable/hash/version and the exact Part A/B or provider prerequisites below. The named Journeys are supporting existing routes; they do not exercise the complete path unless explicitly stated.
 
 1. Use Part A (`w-2567a`, SOFT-2567) real-size seeded state. Do not build a second fixture generator here.
 2. Open a long chat, scroll up, type an unsent marker, switch sessions and workspaces, and return.
