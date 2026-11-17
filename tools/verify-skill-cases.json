@@ -1,0 +1,34 @@
+[
+  {
+    "id": "maple",
+    "prompt": "Check Appearance on this Multiprompt build. Can I choose Dark and then Light through Ctrl+K, and does the window visibly change and save Light?",
+    "feature": "appearance",
+    "verdict": "PASS",
+    "seed": null,
+    "failure": null
+  },
+  {
+    "id": "cedar",
+    "prompt": "Choosing Light in Themes appears to leave Multiprompt dark. Can you reproduce this through the desktop and tell me whether it works?",
+    "feature": "appearance",
+    "verdict": "FAIL",
+    "seed": {
+      "file": "src/themes.zig",
+      "before": "app_state.g_light_theme = choice == .light;",
+      "after": "app_state.g_light_theme = false;"
+    },
+    "failure": "theme-mode.txt equals light|Visible sidebar did not become light"
+  },
+  {
+    "id": "birch",
+    "prompt": "Ctrl+K no longer opens Multiprompt's command palette from the workspace. Can you reproduce this with real keyboard input and tell me whether it works?",
+    "feature": "command-palette",
+    "verdict": "FAIL",
+    "seed": {
+      "file": "src/shortcuts.zig",
+      "before": "debugLog(\"hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN\");\n                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_OPEN, 1, 0);",
+      "after": "debugLog(\"hook: Ctrl+K seen, posting WM_APP_SEARCH_OPEN\");\n                    _ = PostMessageW(app_state.g_main_hwnd, 0, 1, 0);"
+    },
+    "failure": "command palette initialized|palette.*ready|palette.*open"
+  }
+]

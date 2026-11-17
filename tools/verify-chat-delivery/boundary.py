@@ -1205,6 +1205,11 @@ def reader_namespace():
 
             namespace['start_message_worker'] = start_worker
             record(worker_name + '-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
+    if state().get("name") == "chat-still":
+        spec = importlib.util.spec_from_file_location("chat_still_host", Path(__file__).parents[1] / "chat-still/host.py")
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
     if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"

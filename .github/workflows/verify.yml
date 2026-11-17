@@ -281,13 +281,23 @@ jobs:
           "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "version=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Add the read-only chat measurement probe to the verification build
+        if: inputs.tag == '' && inputs.feature == 'chat-still'
+        run: python tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
         run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: inputs.tag == ''
+        if: inputs.tag == '' && inputs.feature != 'chat-still'
         with:
           name: verify-app${{ inputs.app_revision && '-compare' || '' }}
+          path: zig-out/bin/
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.tag == '' && inputs.feature == 'chat-still'
+        with:
+          name: verify-app-chat-still${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -578,8 +588,11 @@ jobs:
         if: env.RELEASE_TAG == '' && matrix.app-revision == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1' && env.CHAT_MODEL_PROOF != '1'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app
+          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}
           path: zig-out/bin
+      - name: Add the same measurement probe to the independent chat application
+        if: env.FEATURE == 'chat-still' && matrix.app-revision != ''
+        run: python tools/chat-still/instrument.py app-source app-source/zig-out/bin/chat-still-instrumentation.json
       - name: Build branch executable
         if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1' || env.CHAT_MODEL_PROOF == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
@@ -621,6 +634,11 @@ jobs:
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
+            if ($env:FEATURE -eq 'chat-still') {
+              $probe = Get-Content zig-out/bin/chat-still-instrumentation.json -Raw | ConvertFrom-Json
+              if ($probe.probe_sha256 -ne (Get-FileHash tools/chat-still/paint.zig -Algorithm SHA256).Hash.ToLower()) { throw 'Chat measurement probe does not match this harness' }
+              Copy-Item zig-out/bin/chat-still-instrumentation.json evidence/chat-still-instrumentation.json
+            }
             if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION
@@ -637,7 +655,7 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
+        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'live-chat-pane'
         with:
           python-version: '3.12'
       - name: Prepare usage pace SSH boundary
@@ -651,6 +669,13 @@ jobs:
           } else {
             Copy-Item tools/fixtures/IGSH-997/sample.json verify-bin/usage-pace-source.json
           }
+      - name: Prove the per-frame stillness oracle rejects broken frames
+        if: env.FEATURE == 'chat-still'
+        shell: powershell
+        run: |
+          python tools/chat-still/host_test.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Live streaming boundary contracts failed' }
+          . tools/chat-still/observer.test.ps1
       - name: Check measured chat shape contracts
         if: env.FEATURE == 'chat-switch-speed'
         run: |
@@ -664,7 +689,7 @@ jobs:
         if: env.FEATURE == 'chat-newest'
         run: node --test tools/chat-newest-proof.test.mjs
       - name: Compile chat delivery remote-shell boundary
-        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash'
+        if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash'
         shell: pwsh
         run: |
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
