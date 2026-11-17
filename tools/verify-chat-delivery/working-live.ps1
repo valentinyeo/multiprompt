@@ -15,7 +15,7 @@ function Get-WorkingTurnPush([string]$turn) {
 }
 $observation.paintWindows = @{}
 [void](Wait-For 'completed server history seeded through the production archive' { (Read-Shared "$state/working-host.jsonl") -match '"stage": "idle-history-ready"' } 30)
-[void](Wait-For 'known server history painted' { (Read-Shared "$settings/debug.log") -match '\[switch\] chat content shown shell=\d+ blocks=[1-9]' } 30)
+[void](Wait-For 'known server history painted' { (Read-Shared "$settings/debug.log") -match '\[switch\] chat content shown shell=\d+ blocks=(?:[5-9]\d|\d{3,})(?:\s|$)' } 30)
 $idleReady = [ChatDeliveryDesktop]::GetTickCount64() + 1500
 [void](Wait-For 'server history settled before idle observation' { [ChatDeliveryDesktop]::GetTickCount64() -ge $idleReady } 5)
 $observation.paintWindows.idleStart = [ChatDeliveryDesktop]::GetTickCount64()
