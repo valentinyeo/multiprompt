@@ -151,7 +151,9 @@ else if (process.argv[2] === '--evidence') {
     for (const name of ['copy-', 'rename-', 'unread-', 'face', 'color', 'group-new', 'workspace-existing', 'archive-context', 'delete-keyboard']) assert.ok(text.includes(name), name);
   });
   test('context geometry follows current placement after pin and unpin', t => {
-    const text = fs.readFileSync(path.join(__dirname, 'control-feature-tab-actions.ps1'), 'utf8');
+    const file = path.join(__dirname, 'control-feature-tab-actions.ps1');
+    assert.ok(fs.existsSync(file), 'executable native tab journey exists');
+    const text = fs.readFileSync(file, 'utf8');
     const helper = text.slice(text.indexOf('function Get-ActionValue('), text.indexOf('function Open-ActionPalette('));
     const run = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
       $ErrorActionPreference = 'Stop'
