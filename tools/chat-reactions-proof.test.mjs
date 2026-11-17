@@ -40,7 +40,8 @@ with tempfile.TemporaryDirectory() as directory:
                 db.commit()
         if row:
             (first if row[0] == 1 else second).set()
-    scope = dict(record=lambda name, **row: records.append(row))
+        return dict(message=dict(id=row[0]) if row else None)
+    scope = dict(record=lambda name, **row: records.append(row) if name == 'reaction-worker.jsonl' else None)
     exec(compile(ast.Module(body=[worker], type_ignores=[]), '<reaction-worker>', 'exec'), scope)
     namespace = dict(message_poll=poll, message_store_request=dispatch, message_store_db=connect)
     scope['install_reaction_worker'](namespace)
