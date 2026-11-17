@@ -5,7 +5,11 @@ function Invoke-ServerNative {
         [Parameter(Mandatory)][string]$Evidence,
         [Parameter(Mandatory)][string]$Name
     )
-    $commandLine = ($Arguments | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' }) -join ' '
+    $commandLine = ($Arguments | ForEach-Object {
+        if ($_ -ne '' -and $_ -notmatch '[\s"]') { $_ }
+        else { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' }
+    }) -join ' '
+    [IO.File]::WriteAllText((Join-Path $Evidence "$Name.command-line.txt"), $commandLine)
     $stdout = Join-Path $Evidence "$Name.stdout.log"
     $stderr = Join-Path $Evidence "$Name.stderr.log"
     $process = Start-Process -FilePath (Get-Command $FilePath).Source -ArgumentList $commandLine -RedirectStandardOutput $stdout -RedirectStandardError $stderr -NoNewWindow -PassThru

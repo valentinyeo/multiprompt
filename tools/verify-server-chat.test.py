@@ -130,6 +130,30 @@ $output
                 else:
                     self.assertEqual(json.loads(result.stdout), ['a path', '', 'embedded"quote', 'trailing\\'])
 
+    def test_wsl_switches_remain_unquoted_on_the_native_command_line(self):
+        shell = shutil.which('pwsh') or shutil.which('powershell')
+        if shell is None:
+            self.skipTest('PowerShell is installed by the Windows verification runner')
+        command = r"""
+$ErrorActionPreference = 'Stop'
+. (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/verify-server-chat/native.ps1')
+function Get-Command { @{ Source = 'wsl.exe' } }
+function Start-Process($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, [switch]$NoNewWindow, [switch]$PassThru) {
+    [IO.File]::WriteAllText($RedirectStandardOutput, '')
+    [IO.File]::WriteAllText($RedirectStandardError, '')
+    $process = [pscustomobject]@{ Handle = 1; ExitCode = 0 }
+    $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {}
+    $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value {}
+    return $process
+}
+[void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', 'D:\a path\multiprompt') -Evidence $env:VERIFY_TEST_EVIDENCE -Name 'path')
+[void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $env:VERIFY_TEST_EVIDENCE -Name 'terminate')
+"""
+        with tempfile.TemporaryDirectory() as evidence:
+            subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT), VERIFY_TEST_EVIDENCE=evidence), check=True, text=True, capture_output=True)
+            self.assertEqual((Path(evidence) / 'path.command-line.txt').read_text(), '-d Ubuntu-24.04 -u root --exec wslpath -a "D:\\a path\\multiprompt"')
+            self.assertEqual((Path(evidence) / 'terminate.command-line.txt').read_text(), '--terminate Ubuntu-24.04')
+
     def test_native_commands_cannot_bypass_the_shared_boundary(self):
         shell = shutil.which('pwsh') or shutil.which('powershell')
         if shell is None:
