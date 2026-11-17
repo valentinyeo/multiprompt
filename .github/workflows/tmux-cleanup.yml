@@ -56,8 +56,8 @@ jobs:
           from pathlib import Path
           import subprocess
           import urllib.request
-          
-          
+
+
           def main():
               key = os.environ['DEEPSEEK_API_KEY']
               output = Path(os.environ['VERIFIER_OUTPUT'])
@@ -118,8 +118,8 @@ jobs:
                   print(report)
                   return 0 if verdict['verdict'] in {'PASS', 'PASS+NOTES'} else 1
               raise RuntimeError('Verifier exhausted sixteen turns')
-          
-          
+
+
           if __name__ == '__main__':
               raise SystemExit(main())
           PY
