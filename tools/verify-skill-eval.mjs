@@ -137,6 +137,7 @@ function codex(config, request) {
     '-c', `mcp_servers.workspace.command=${toml(process.execPath)}`,
     '-c', `mcp_servers.workspace.args=${JSON.stringify([script, 'serve', path.join(config.out, 'workspace.json')])}`,
     '-c', 'mcp_servers.workspace.tool_timeout_sec=660',
+    '-c', 'mcp_servers.workspace.default_tools_approval_mode="approve"',
     '--output-schema', schemaFile, '--output-last-message', path.join(config.out, 'answer.txt'), '-'], {
     input: request, encoding: 'utf8', timeout: 1200000, maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, CODEX_HOME: home, DEEPSEEK_API_KEY: '', CODEX_AUTH_JSON: '', HYPERTASK_AGENT_TOKEN: '', GH_TOKEN: '', GITHUB_TOKEN: '' },
