@@ -153,13 +153,13 @@ root = Path(sys.argv[1])
 spec = importlib.util.spec_from_file_location('working', root / 'working-host.py')
 working = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(working)
-source = (root / 'hosted-position.ps1').read_text()
+source = (root / 'hosted-position.ps1').read_text(encoding='utf-8')
 stream = source.split("Observe-HostedPosition 'stream-while-reading'", 1)[1].split("Observe-HostedPosition 'idle-after-stream'", 1)[0]
 gates = re.findall(r'WriteAllText\\("\\$state/([^"/]+)"', stream)
 complete = threading.Event()
 stages = []
 namespace = {key: lambda *a, **k: None for key in ('host_dispatch_switch', 'host_owned', 'host_deliver', 'start_message_worker', 'serve_request', 'host_event')}
-reader = ast.parse((root.parents[1] / 'src/chat_history_reader.py').read_text())
+reader = ast.parse((root.parents[1] / 'src/chat_history_reader.py').read_text(encoding='utf-8'))
 reader = ast.parse(ast.literal_eval(reader.body[0].value))
 accept = next(node for node in reader.body if isinstance(node, ast.FunctionDef) and node.name == 'host_accept')
 rows = []
@@ -182,7 +182,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert stages.count('reading-stream-delta') == 8
 print(json.dumps(dict(gates=gates, completed=True)))
 `;
-  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script, __dirname], { encoding: 'utf8', timeout: 10000 });
+  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script, __dirname], { encoding: 'utf8', timeout: 10000, env: { ...process.env, PYTHONWARNDEFAULTENCODING: '1', PYTHONWARNINGS: 'error::EncodingWarning' } });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(result.stdout).completed, true);
 });
