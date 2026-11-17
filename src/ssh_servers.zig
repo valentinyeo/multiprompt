@@ -228,6 +228,19 @@ test "IGSH-1928 real OpenSSH isolates proven keys while preserving unproven fall
     defer tmp.cleanup();
     const base = try tmp.dir.realPathFileAlloc(io, ".", a);
     defer a.free(base);
+    if (@import("builtin").os.tag == .windows) {
+        const permissions = try std.process.run(a, io, .{ .argv = &.{
+            "powershell.exe",
+            "-NoProfile",
+            "-Command",
+            "& { param($target) $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; icacls $target /inheritance:r /grant:r ('*' + $sid + ':(OI)(CI)F'); exit $LASTEXITCODE }",
+            base,
+        } });
+        defer a.free(permissions.stdout);
+        defer a.free(permissions.stderr);
+        if (permissions.term != .exited or permissions.term.exited != 0) std.debug.print("{s}{s}", .{ permissions.stdout, permissions.stderr });
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, permissions.term);
+    }
     const user_config = try std.fmt.allocPrint(a, "{s}/user.conf", .{base});
     defer a.free(user_config);
     const system_config = try std.fmt.allocPrint(a, "{s}/system.conf", .{base});
