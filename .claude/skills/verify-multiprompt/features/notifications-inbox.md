@@ -3,6 +3,7 @@
 Triage unread or working sessions across workspaces, mark them read, archive them, and return to the chosen chat.
 
 Journeys: inbox, remind-me
+Release paths: src/inbox*.zig, src/notification*.zig, src/alert*.zig, src/attention*.zig, src/remind*.zig, src/main.zig, build.zig
 
 ## Sub-features
 - `attention` shows unread and working sessions across workspaces.

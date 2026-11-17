@@ -3,6 +3,7 @@
 Change settings, theme, text size, and interface scale while keeping the current sessions usable.
 
 Journeys: appearance, settings-panel
+Release paths: src/settings*.zig, src/appearance*.zig, src/themes.zig, src/font*.zig, src/window*.zig, src/main.zig, build.zig
 
 ## Sub-features
 - `settings` opens and dismisses the settings panel.
