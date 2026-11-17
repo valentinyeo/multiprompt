@@ -473,7 +473,7 @@ function latestArtifacts(artifacts, selection, baseSha) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && (!match[1] || (selection.compareBase && match[1] === baseSha) || match[1] === selection.breakItHistory);
+      return match && (!match[1] || match[1] === baseSha || match[1] === selection.breakItHistory);
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||
@@ -503,6 +503,10 @@ function download(env, selectionFile, evidenceDir, baseSha) {
       fs.rmSync(target, { recursive: true, force: true });
       fs.renameSync(content, target);
     } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+  }
+  if (!selection.compareBase && wanted.some(artifact => selection.features.some(feature => artifact.name.match(featureDirPattern(feature))?.[1] === baseSha))) {
+    selection.compareBase = true;
+    fs.writeFileSync(selectionFile, JSON.stringify(selection, null, 2));
   }
   process.stdout.write(`downloaded ${wanted.length} evidence artifacts\n`);
 }

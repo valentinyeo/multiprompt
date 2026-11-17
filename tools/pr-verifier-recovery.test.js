@@ -42,8 +42,8 @@ test('retry collection selects one newest artifact ID per journey and revision',
   assert.deepEqual(selected.map(item => item.id).sort(), [...artifacts.expectedIds].sort());
   assert.equal(new Set(selected.map(item => item.name)).size, selected.length);
   assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection, artifacts.baseSha), selected);
-  const headOnly = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
-  assert.deepEqual(headOnly.map(item => item.name).sort(), ['verify-chat-focus', 'verify-command-palette']);
+  const fallbackComparison = verifier.latestArtifacts(artifacts.artifacts, { ...artifacts.selection, compareBase: false }, artifacts.baseSha);
+  assert.deepEqual(fallbackComparison, selected, 'a picker forecast cannot discard a completed comparison against the captured base');
 });
 
 test('retry collection downloads exact IDs and replaces evidence without duplicate extraction', { skip: process.platform !== 'linux' }, () => {
@@ -67,7 +67,7 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
 }
 `, { mode: 0o755 });
     const selection = path.join(dir, 'selection.json');
-    fs.writeFileSync(selection, JSON.stringify(artifacts.selection));
+    fs.writeFileSync(selection, JSON.stringify({ ...artifacts.selection, compareBase: false }));
     const evidence = path.join(dir, 'evidence');
     const requests = path.join(dir, 'requests.jsonl');
     const env = {
@@ -82,6 +82,7 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'download', selection, evidence, artifacts.baseSha], { env, encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr);
+      assert.equal(JSON.parse(fs.readFileSync(selection, 'utf8')).compareBase, true, 'published evidence must describe the comparison that actually ran');
       for (const name of ['verify-chat-focus', `verify-chat-focus-${artifacts.baseSha}`, 'verify-command-palette', `verify-command-palette-${artifacts.baseSha}`]) {
         const proof = path.join(evidence, name, 'action.focus.json');
         assert.ok(fs.existsSync(proof), `${name} retained its evidence`);
