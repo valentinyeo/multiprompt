@@ -3,6 +3,10 @@ name: check-red-run
 on:
   workflow_dispatch:
     inputs:
+      feature:
+        description: Optional desktop journey to bisect using head harness and base app
+        required: false
+        type: string
       base:
         description: Base revision
         default: master^
@@ -26,7 +30,16 @@ permissions:
   contents: read
 
 jobs:
+  journey:
+    if: inputs.feature != ''
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: ${{ inputs.feature }}
+      revision: ${{ inputs.head }}
+      app_revision: ${{ inputs.base }}
+
   check-red-run:
+    if: inputs.feature == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
