@@ -1,4 +1,5 @@
 
+            $agentDetectionSeconds = 75
             $result.agentBoundary = @{ liveDeliveryVerified = $false; reason = 'The fresh offline CMD has no signed-in agent or received conversation; the separate native painter proof uses a synthetic envelope without seeding app state' }
             Invoke-JourneyCommand 'UI Size: Reset' -Confirm {
                 Press @(0x0D) 'Enter: persist default UI size before Chat View'
@@ -85,10 +86,12 @@
                         $ready = $script:localReady
                         if ($ready.chars[0] -ne 0x276F -or $ready.chars[1] -ne 32) { throw 'Stand-in did not render the Claude prompt glyph and separator' }
                         if ($mode -eq 'suggestion' -and (($ready.attributes[2] -band 0x4000) -eq 0 -or ($ready.attributes[3] -band 0xF) -ne 8)) { throw 'Real console did not retain the suggestion cursor and gray foreground' }
+                        $agentDetection = [Diagnostics.Stopwatch]::StartNew()
                         Wait-Until {
                             $inbox = Read-Inbox
                             @($inbox.shells | Where-Object { $_.sid -eq $localState.tabs[$localTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
-                        } 'local claude.exe detected as Claude for the direct input route' -Seconds 45
+                        } 'local claude.exe detected as Claude for the direct input route' -Seconds $agentDetectionSeconds
+                        Save-Json @{ mode = $mode; budgetSeconds = $agentDetectionSeconds; elapsedMilliseconds = $agentDetection.ElapsedMilliseconds } "local-route-$mode-detection.json"
                         if ($mode -eq 'typed') {
                             $journeyState = Read-Session
                             $journeyId = [int]$journeyState.tabs[$localTab].shell_id
@@ -407,10 +410,12 @@
                     $script:stopReady.chars.Count -eq 32
                 } 'working stand-in rendered its status line and empty prompt'
                 if ($script:stopReady.chars[0] -ne 0x276F -or $script:stopReady.chars[1] -ne 32) { throw 'Working stand-in did not render the Claude prompt glyph and separator' }
+                $agentDetection = [Diagnostics.Stopwatch]::StartNew()
                 Wait-Until {
                     $inbox = Read-Inbox
                     @($inbox.shells | Where-Object { $_.sid -eq $stopState.tabs[$stopTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
-                } 'working claude.exe detected as Claude' -Seconds 45
+                } 'working claude.exe detected as Claude' -Seconds $agentDetectionSeconds
+                Save-Json @{ budgetSeconds = $agentDetectionSeconds; elapsedMilliseconds = $agentDetection.ElapsedMilliseconds } 'working-agent-detection.json'
                 Press @(0x12, 0x43) 'Alt+C: open working agent Chat View'
                 Wait-Until {
                     $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
