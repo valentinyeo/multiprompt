@@ -82,6 +82,9 @@ function describeRun(directory, name) {
     failureKind: String(result.failureKind ?? ''),
     version: String(result.version ?? ''),
     checks: Array.isArray(result.checks) ? result.checks.length : 0,
+    caseFailures: Array.isArray(result.cases) ? [...new Set(result.cases
+      .filter(item => item.passed === false)
+      .map(item => JSON.stringify([item.name, item.detail])))].sort() : [],
     screenshots: files.filter(file => /\.png$/i.test(file)),
     files: files.slice(0, 60),
   };
@@ -130,8 +133,10 @@ function journeyRows(summary, compareBase, features = Object.keys(summary.head))
     const baseRuns = summary.base[feature] || [];
     const base = baseRuns.length ? worst(baseRuns) : (head === 'passed' || !compareBase ? 'not run' : 'missing');
     const failures = headRuns.filter(run => runOutcome(run) === 'failed');
-    const inherited = head === 'failed' && base === 'failed' && failures.every(run => run.error && baseRuns.some(other =>
-      runOutcome(other) === 'failed' && other.error === run.error &&
+    const inherited = head === 'failed' && base === 'failed' && failures.every(run => baseRuns.some(other =>
+      runOutcome(other) === 'failed' &&
+      (run.error ? other.error === run.error : !other.error && run.caseFailures?.length > 0 &&
+        JSON.stringify(other.caseFailures) === JSON.stringify(run.caseFailures)) &&
       other.artifact.replace(/-[0-9a-f]{40}(?=-|$)/, '') === run.artifact));
     const requiredRuns = [...headRuns, ...(head === 'failed' && compareBase ? baseRuns : [])];
     const blocked = requiredRuns.some(run => runOutcome(run) === 'blocked' || infrastructureError(run.cleanup) || run.screenshots?.length === 0);

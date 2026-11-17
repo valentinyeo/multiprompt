@@ -65,7 +65,7 @@ test('fixture launches the embedded production host and adapts Windows pipes onl
   const agent = source('tools/verify-chat-delivery/model-agent.py');
   assert.match(boundary, /namespace\["host_start"\]\("claude", sid, namespace\["READER_SOURCE"\]\)/);
   assert.match(boundary, /model-agent\.py/);
-  assert.match(adapter, /os\.environ\.get\("CHAT_MODEL_PROOF"\) == "1"/);
+  assert.match(adapter, /if os\.name == "nt" and os\.environ\.get\("MP_VERIFY_STATE"\):/);
   assert.match(adapter, /PeekNamedPipe/);
   assert.match(adapter, /msvcrt\.get_osfhandle/);
   assert.match(adapter, /select\.select/);
