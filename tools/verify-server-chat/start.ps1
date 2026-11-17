@@ -25,8 +25,10 @@ if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].Id
 @{ owner = $user.Value; protected = $actual.AreAccessRulesProtected; rules = @($rules | ForEach-Object { @{ sid = $_.IdentityReference.Value; rights = [string]$_.FileSystemRights } }) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 "$Evidence/key-acl.json"
 $repo = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
 $public = (& wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a "$key.pub").Trim()
-& wsl.exe -d Ubuntu-24.04 -u root --exec bash "$repo/tools/verify-server-chat/start.sh" $repo $public 2>&1 | Tee-Object "$Evidence/server-start.log"
-if ($LASTEXITCODE -ne 0) { throw 'Runner-owned Linux server failed to start' }
+$startArguments = "-d Ubuntu-24.04 -u root --exec bash `"$repo/tools/verify-server-chat/start.sh`" `"$repo`" `"$public`""
+$linuxStart = Start-Process -FilePath (Get-Command wsl.exe).Source -ArgumentList $startArguments -RedirectStandardOutput "$Evidence/server-start.stdout.log" -RedirectStandardError "$Evidence/server-start.stderr.log" -NoNewWindow -Wait -PassThru
+Get-Content "$Evidence/server-start.stdout.log", "$Evidence/server-start.stderr.log" | ForEach-Object { Write-Host $_ }
+if ($linuxStart.ExitCode -ne 0) { throw "Runner-owned Linux server exited $($linuxStart.ExitCode); see server-start.stderr.log" }
 $config = @"
 Host remote-1
   HostName 127.0.0.1
