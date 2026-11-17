@@ -336,9 +336,16 @@ jobs:
         if: inputs.tag == ''
         run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: inputs.tag == ''
+        if: inputs.tag == '' && matrix.profile != 'shortcut-break'
         with:
-          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || matrix.profile == 'shortcut-break' && '-shortcut-break' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          path: zig-out/bin/
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.tag == '' && matrix.profile == 'shortcut-break'
+        with:
+          name: shortcut-break-app
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -1123,7 +1130,7 @@ jobs:
         if: success() && env.FEATURE == 'generated-sidebar-cycle' && inputs.app_revision == '' && inputs.tag == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app-shortcut-break
+          name: shortcut-break-app
           path: shortcut-break-bin
       - name: Require the covered shortcut journey to catch the planted break
         if: success() && env.FEATURE == 'generated-sidebar-cycle' && inputs.app_revision == '' && inputs.tag == ''

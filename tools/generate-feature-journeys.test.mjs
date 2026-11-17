@@ -100,4 +100,12 @@ test('hosted desktop routing runs generated rows and rejects a mutation failing 
   assert.match(driver, /Sidebar-Dominant/);
   assert.match(driver, /GetWindowRect/);
   assert.match(driver, /Wait-WorkspaceSurface/);
+  const { spawnSync } = await import('node:child_process');
+  const matrix = workflow.split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^ {10}/gm, '');
+  for (const [revision, expected] of [['', ['normal', 'shortcut-break']], ['base-sha', ['normal']]]) {
+    const run = spawnSync(process.execPath, ['-e', matrix], { cwd: root, encoding: 'utf8', env: { ...process.env, FEATURES: '["generated-sidebar-cycle"]', APP_REVISION: revision } });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout.match(/^builds=(.+)$/m)[1]), expected);
+  }
+  assert.equal((workflow.match(/name: shortcut-break-app/g) || []).length, 2);
 });

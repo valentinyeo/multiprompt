@@ -100,7 +100,7 @@ test('every runnable feature has source-file ownership in its map', () => {
     assert.match(text, /^Source files: .+$/m, name);
     assert.ok(touchedJourneys(['src/main.zig'], directory).features.includes(name), name);
   }
-  assert.deepEqual(touchedJourneys(['src/themes.zig']).features, ['appearance', 'chat-code-font', 'chat-composer-text', 'settings-panel', 'status-card']);
+  assert.deepEqual(touchedJourneys(['src/themes.zig']).features, ['appearance', 'chat-code-font', 'chat-composer-text', 'generated-theme-amoled', 'generated-theme-dark', 'generated-theme-edgegray', 'generated-theme-light', 'generated-theme-mid', 'settings-panel', 'status-card']);
 });
 
 test('the full set retains every DPI and browser-theme variant without multiplying unrelated journeys', () => {
