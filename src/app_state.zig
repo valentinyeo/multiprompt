@@ -772,7 +772,7 @@ pub var groups: [MAX_GROUPS]TabGroup = undefined;
 pub var group_count: u32 = 0;
 pub var next_group_id: u32 = 1;
 
-const RowKind = enum { section, header, tab, inbox, room_header, room, room_new };
+const RowKind = enum { section, header, tab, inbox, room_header, room };
 pub const SidebarTier = enum(u1) { recent = 0, pinned = 1 };
 pub const Row = struct {
     kind: RowKind,
@@ -797,7 +797,6 @@ pub const HitTarget = union(enum) {
     inbox: u32,
     room_header: void,
     room: struct { index: u32, generation: u64, id: [36]u8, store_uuid: [36]u8 },
-    room_new: void,
 };
 
 pub const ClosedShell = struct {
@@ -1301,6 +1300,8 @@ pub var g_chat_layout_font_pt: i32 = 0;
 pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
 pub var g_chat_scroll_y: i32 = 0;
+pub var g_chat_paint_count: u64 = 0;
+pub var g_chat_layout_count: u64 = 0;
 pub var g_chat_scrolled_up = false;
 pub var g_chat_read_visit_shell_id: u32 = 0;
 pub var g_chat_read_visit_marker: u64 = 0;

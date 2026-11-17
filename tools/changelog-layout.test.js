@@ -124,8 +124,9 @@ test('existing command palette speed journey measures real input through changed
   assert.doesNotMatch(method, /::Chord|DwmFlush|Thread.Sleep\(250\)/);
   const journey = control.slice(control.indexOf("        'command-palette' {"), control.indexOf("        'chat-switch-speed' {"));
   for (const key of ['0x0D', '0x22', '0x1B']) assert.ok(journey.includes(`MeasureChangelogKey($script:window, ${key})`));
-  assert.match(journey, /Focus-Palette 'changelog' 6241/);
+  assert.match(journey, /Invoke-JourneyCommand 'Changelog' -SelectOnly/);
   assert.match(journey, /\$sample -lt 5/);
   assert.match(journey, /Save-Json \$changelogSpeed 'changelog-speed.json'/);
-  assert.match(journey, /Maximum -ge 100/);
+  assert.match(journey, /Maximum -ge \$limit/);
+  assert.match(journey, /open_ms = 200/);
 });

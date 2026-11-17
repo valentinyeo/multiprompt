@@ -50,9 +50,9 @@ pub fn build(b: *std.Build) void {
             .optimize = stable_optimize,
         }),
     });
-    const rooms_preview = b.option(bool, "rooms-preview", "Compile the experimental desktop Rooms integration") orelse false;
+    const rooms_preview_flag = b.option(bool, "rooms-preview", "Compile the desktop Rooms integration");
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
-    if (release and rooms_preview) @panic("Rooms preview cannot be included in a release");
+    const rooms_preview = rooms_preview_flag orelse release;
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
         if ((std.base64.standard.Decoder.calcSizeForSlice(encoded) catch 0) != 32) @panic("Invalid release signing public key: expected base64 raw 32-byte key");
@@ -314,7 +314,7 @@ pub fn build(b: *std.Build) void {
     const chat_send_integration = b.addSystemCommand(&.{ "python3", "tools/chat-tmux-send-test.py", "--integration" });
     vps_test_step.dependOn(&chat_send_integration.step);
     const outbox_test_step = b.step("test-chat-outbox", "Run native outbox delivery and restart tests");
-    const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-resync.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js", "tools/chat-instant.test.js", "tools/host-first-message.test.js", "tools/chat-message-replay.test.js", "tools/chat-waiting-message.test.js" });
+    const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-resync.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js", "tools/chat-instant.test.js", "tools/host-first-message.test.js", "tools/chat-message-replay.test.js", "tools/chat-waiting-message.test.js", "tools/soft-2418-working-dots.test.js" });
     chat_send_routing.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     vps_test_step.dependOn(&chat_send_routing.step);
     outbox_test_step.dependOn(&chat_send_routing.step);
@@ -898,7 +898,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&windows_shortcut_passthrough_tests.step);
     const inbox_reduction_search_tests = b.addSystemCommand(&.{ "node", "--test", "tools/inbox-reduction-search.test.js" });
     test_step.dependOn(&inbox_reduction_search_tests.step);
-    const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js" });
+    const dictation_paste_tests = b.addSystemCommand(&.{ "node", "--test", "tools/dictation-paste.test.js", "tools/dictation-audit.test.js", "tools/dictation-respect-edits.test.js" });
     test_step.dependOn(&dictation_paste_tests.step);
     const deepgram_key_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/deepgram_key.zig"),

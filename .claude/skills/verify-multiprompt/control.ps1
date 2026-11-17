@@ -291,6 +291,15 @@ try {
         Save-Json $seed 'seed-session.json'
         $result.repoPickerBoundary = 'Two synthetic tmux tabs in Other, host 0 then active host 2, and an Example terminal with seeded reported cwd; distinct per-host SSH listings, switchable discovery failure and console-backed tmux; no real SSH, tmux server or agent verified.'
     }
+    if ($Feature -eq 'command-palette') {
+        $env:MP_VERIFY_STATE = Join-Path $scratch 'repo-picker-state'
+        $env:MP_VERIFY_REPOS = '/tmp/multiprompt-harness-folder'
+        New-Item -ItemType Directory -Force $env:MP_VERIFY_STATE, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $ssh = Join-Path $scratch 'ssh.exe'
+        & zig cc -target x86_64-windows-gnu -O2 (Join-Path $PSScriptRoot '../../../tools/verify-repo-picker/ssh.c') -o $ssh
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ssh)) { throw 'Command palette SSH boundary compilation failed' }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh)
+    }
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
         New-Item -ItemType Directory -Force $bindingState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -744,6 +753,7 @@ try {
         }
     } catch {
         $result.status = 'failed'
+        if (-not $result.error) { $result.failureKind = 'infrastructure' }
         $result.cleanup = $_.Exception.Message
     }
     if ($null -ne $warmup) { $warmup.Dispose() }

@@ -725,6 +725,16 @@ pub fn running(shell_id: u32) bool {
     return false;
 }
 
+pub fn ownsTurn(shell_id: u32, message_id: []const u8) bool {
+    if (message_id.len == 0) return false;
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return std.mem.eql(u8, live.sent_id[0..live.sent_id_len], message_id);
+    }
+    return false;
+}
+
 pub fn replyPresent(shell_id: u32) bool {
     mutex.lock();
     defer mutex.unlock();
@@ -775,8 +785,9 @@ pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_ma
             out.text_len += 1;
         }
         if (out.text_len < text.len) {
-            const converted = std.unicode.utf8ToUtf16Le(text[out.text_len..], item.text.items) catch 0;
-            out.text_len += converted;
+            const body = out.text_len;
+            const converted = std.unicode.utf8ToUtf16Le(text[body..], item.text.items) catch 0;
+            out.text_len = body + @import("chat_mention.zig").revealChatNames(text[body..], converted);
         }
         if (out.text_len <= start) continue;
         blocks[out.blocks] = .{
@@ -1747,4 +1758,18 @@ test "pending setting requests block until replies failure or disconnect" {
     try std.testing.expectEqual(@as(u32, 2), pending.clear());
     try std.testing.expect(!pending.pending());
     try std.testing.expectEqual(@as(u32, 0), pending.clear());
+}
+
+test "SOFT-2418 a live turn is owned only by the message that started it" {
+    const sid = "11111111-2222-3333-4444-555555555555";
+    _ = begin(2418, 0, sid);
+    defer release(2418);
+    try std.testing.expect(!ownsTurn(2418, "m1"));
+    try std.testing.expect(applyPage(2418, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t\",\"payload\":{\"message_id\":\"m1\"}}}]}}"));
+    try std.testing.expect(running(2418));
+    try std.testing.expect(ownsTurn(2418, "m1"));
+    try std.testing.expect(!ownsTurn(2418, "m2"));
+    try std.testing.expect(applyPage(2418, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t\",\"payload\":{\"status\":\"completed\"}}}]}}"));
+    try std.testing.expect(!running(2418));
+    try std.testing.expect(ownsTurn(2418, "m1"));
 }

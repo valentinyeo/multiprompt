@@ -223,7 +223,8 @@ fn parseArchiveJson(allocator: std.mem.Allocator, json: []const u8, parsed: *std
         e.ai_agent = if (agent >= 1 and agent <= 3) @intCast(agent) else 1;
         e.claude_sid_len = json_reader.copyString(obj, "csid", &e.claude_sid);
         e.claude_cwd_len = json_reader.copyString(obj, "ccwd", &e.claude_cwd);
-        if (json_reader.uint(obj, "host") == 1) e.tmux_host = 1;
+        const host = json_reader.uint(obj, "host");
+        e.tmux_host = if (host <= TMUX_HOST_INNE) @intCast(host) else 0;
         if (e.tmux_session_len > 0) parsed.append(allocator, e) catch return false;
     }
     return true;
@@ -280,6 +281,24 @@ fn serializeArchiveJson(entries: []const ArchivedEntry, out: []u8) ?usize {
     }
     out[pos] = ']';
     return pos + 1;
+}
+
+test "SOFT-1974 an archived chat keeps the server it ran on" {
+    const allocator = std.testing.allocator;
+    var entries: std.ArrayList(ArchivedEntry) = .empty;
+    defer entries.deinit(allocator);
+    const json = "[{\"name\":\"First\",\"tmux_session\":\"on-first\",\"host\":0},{\"name\":\"Second\",\"tmux_session\":\"on-second\",\"host\":1},{\"name\":\"Third\",\"tmux_session\":\"on-third\",\"host\":2},{\"name\":\"Odd\",\"tmux_session\":\"on-odd\",\"host\":9}]";
+    try std.testing.expect(parseArchiveJson(allocator, json, &entries));
+    try std.testing.expectEqual(@as(u8, 0), entries.items[0].tmux_host);
+    try std.testing.expectEqual(TMUX_HOST_UK, entries.items[1].tmux_host);
+    try std.testing.expectEqual(TMUX_HOST_INNE, entries.items[2].tmux_host);
+    try std.testing.expectEqual(@as(u8, 0), entries.items[3].tmux_host);
+    var out: [4098]u8 = undefined;
+    const len = serializeArchiveJson(entries.items, &out) orelse return error.TestUnexpectedResult;
+    var restored: std.ArrayList(ArchivedEntry) = .empty;
+    defer restored.deinit(allocator);
+    try std.testing.expect(parseArchiveJson(allocator, out[0..len], &restored));
+    for (entries.items, restored.items) |before, after| try std.testing.expectEqual(before.tmux_host, after.tmux_host);
 }
 
 test "archive JSON grows beyond the former entry and file-size limits" {

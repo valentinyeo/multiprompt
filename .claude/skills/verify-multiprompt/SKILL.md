@@ -11,12 +11,21 @@ Read [features/README.md](features/README.md), then the selected feature file be
 
 Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
 
+## Reusable driver
+
+Read the nine-feature index in [features/README.md](features/README.md). The Windows entry point is `./.claude/skills/verify-multiprompt/drive.ps1 settings-appearance appearance -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/settings-appearance-appearance"`. It invokes the existing Launch/Doctor/Drive/Cleanup control in a child PowerShell and records the actual desktop with FFmpeg. Use a fresh evidence folder outside the disposable profile. The mapped palette equivalent is `drive.ps1 palette command-palette` with the same arguments.
+
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=appearance` or `-f feature=command-palette` to acquire the executable and recorder and invoke the new driver automatically. Inspect `journey.mp4`, `journey.json`, screenshots, Doctor, saved side effects, and zero-process cleanup in artifact `verify-<journey>`. The recorder stops only its owned process. Evidence remains in `evidence/` after profile cleanup and is uploaded even on failure. Existing workflow routes and migration decisions are in [inventory.md](inventory.md). Two existing journeys are promoted here; the remaining legacy routes retain their documented coverage limits. Never treat source review as live coverage.
+
 ## Feature control ownership
 
 - `control.ps1` keeps options, setup, dispatch and cleanup.
 - `control-feature-<name>.ps1` owns each extracted feature body.
 - Existing dedicated scripts keep their names.
 - `control-library.ps1` holds shared PowerShell helpers.
+- Run palette actions with `Invoke-JourneyCommand 'new cmd shell'`. Names come from the current palette or shortcut rows in `tools/journey-commands.mjs`. The helper reads routing numbers from source, selects the matching row, presses Enter, and requires changed screen pixels. Existing journey assertions still check the command's result.
+- Use `-Confirm { Snapshot 'action'; Press @(0x0D) 'Enter: New CMD shell' }` to retain a pre-action capture. Use `-SelectOnly` only to inspect a row or measure Enter separately. Use `Invoke-JourneyCommand 'Restore middle' -Session` for a uniquely named saved session.
+- `node --test tools/check-journey-commands.test.mjs` proves that old-style calls fail. `node tools/check-journey-commands.mjs` rejects raw `Palette`/`Focus-Palette` calls and names missing from the catalog.
 - `control-native.cs` holds unchanged native types.
 - Same-directory dot sourcing preserves scope and paths.
 - Source readers use `readControlSource` from `tools/app-source.js`.
@@ -73,6 +82,18 @@ The [Chat View everywhere](features/chat-view-everywhere.md) journey switches al
 The [Chat focus](features/chat-focus.md) journey restarts an offline CMD session, proves immediate composer typing through bounded WM_GETTEXT with UI Automation focus identity, and recovers typing with Alt+Q and Alt+M while Find is open and without a browser pane. The native Edit may appear as a UIA Pane with no text patterns; validate its Edit class and owned root before reading standard WM_GETTEXTLENGTH/WM_GETTEXT messages.
 
 The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictation`, branch build only) drives Ctrl+D, Enter, repeated Ctrl+D and a real mic click. Recorded PCM and offline provider-response replay traverse the production worker/parser/draft delivery; exact native composer text must appear within 1000 ms, while listening-time typing and active/idle microphone pixels are checked independently. This does not verify acoustic recognition or microphone hardware.
+
+## PR verifier
+
+Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:
+
+```sh
+gh workflow run pr-verifier.yml --ref master -f pr=<number>
+gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
+timeout 3000 gh run watch <id> --interval 300
+```
+
+DeepSeek picks up to three journeys from `features/` that exercise the change, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
 
 ## Doctor
 

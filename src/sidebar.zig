@@ -1650,19 +1650,15 @@ fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
 fn appendRoomRows(out: *[MAX_ROWS]Row, count: *u32, y: *i32) void {
     const room = @import("room_frontend.zig");
     if (!room.enabled) return;
+    const rows = room.catalog();
+    if (rows.len == 0) return;
     if (count.* >= MAX_ROWS) return;
     out[count.*] = .{ .kind = .room_header, .gidx = 0, .shell_idx = 0, .y = y.* };
     count.* += 1;
     y.* += sectionHeaderHeight();
-    const rows = room.catalog();
     for (rows, 0..) |_, index| {
-        if (count.* + 1 >= MAX_ROWS) break;
+        if (count.* >= MAX_ROWS) break;
         out[count.*] = .{ .kind = .room, .gidx = 0, .shell_idx = 0, .room_idx = @intCast(index), .y = y.* };
-        count.* += 1;
-        y.* += tabRowH();
-    }
-    if (count.* < MAX_ROWS) {
-        out[count.*] = .{ .kind = .room_new, .gidx = 0, .shell_idx = 0, .y = y.* };
         count.* += 1;
         y.* += tabRowH();
     }
@@ -1742,7 +1738,7 @@ pub fn rowTotalHeight(row: Row) i32 {
         .section => sectionHeaderHeight(),
         .header => groupHeaderHeight(),
         .room_header => sectionHeaderHeight(),
-        .tab, .inbox, .room, .room_new => tabRowH(),
+        .tab, .inbox, .room => tabRowH(),
     };
 }
 
@@ -1987,7 +1983,6 @@ pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
                 .tab => HitTarget{ .tab = row.shell_idx },
                 .inbox => HitTarget{ .inbox = row.shell_idx },
                 .room_header => .{ .room_header = {} },
-                .room_new => .{ .room_new = {} },
                 .room => @import("room_frontend.zig").roomHit(row.room_idx) orelse .{ .none = {} },
             };
         }
@@ -2314,13 +2309,6 @@ fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
         if (!app_state.g_sidebar_collapsed) drawSidebarLabel(hdc, column, y, L("Rooms"), -1);
         return;
     }
-    if (row.kind == .room_new) {
-        if (app_state.g_room_hover != null and app_state.g_room_hover.? == .room_new) @import("smooth.zig").fillRoundRect(hdc, .{ .left = column.left, .top = y, .right = column.right, .bottom = y + tabRowH() }, uiScaled(12), if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(42, 42, 42));
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(80, 80, 80) else RGB(180, 180, 180));
-        var rect = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
-        _ = DrawTextW(hdc, if (app_state.g_sidebar_collapsed) L("+") else L("+  New room"), -1, &rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (app_state.g_sidebar_collapsed) @as(u32, DT_CENTER) else 0));
-        return;
-    }
     const rows = room.catalog();
     if (row.room_idx >= rows.len) return;
     const item = room.requestCatalogRow(rows[row.room_idx].id) orelse return;
@@ -2480,7 +2468,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (y + rowTotalHeight(row) <= 0 or y >= client_rc.bottom - sidebarStickyCardSpan()) continue;
             const row_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + rowTotalHeight(row) };
             if (@import("win32.zig").RectVisible(hdc, &row_rc) == 0) continue;
-            if (row.kind == .room_header or row.kind == .room or row.kind == .room_new) {
+            if (row.kind == .room_header or row.kind == .room) {
                 paintRoomRow(hdc, column, y, row);
                 _ = SelectObject(hdc, font_title);
                 continue;
@@ -3075,6 +3063,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
                         var rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        if (result_idx == SEARCH_TABCTX_END_TMUX) {
+                            _ = SelectObject(hdc, palette_hint_font);
+                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
+                            var hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        }
                     } else if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4886,8 +4880,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             L("Command Prompt"),
                             L("Server 1 tmux session"),
                             L("Server 2 tmux session"),
-                            L("Server 1 shell"),
-                            L("Server 2 shell"),
+                            L("Open shell on VPS 1"),
+                            L("Open shell on VPS 2"),
                             L("PowerShell"),
                             L("Bash"),
                             L("Git Bash"),

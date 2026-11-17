@@ -5,32 +5,31 @@ const test = require('node:test');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
-test('Ctrl+Shift+W starts an app-wide quit without ending a session', () => {
+test('Ctrl+Shift+W deletes the current session and does not quit the app', () => {
   const shortcuts = read('src/shortcuts.zig');
-  const route = shortcuts.match(/\.quit =>([^\n]+)/);
+  const route = shortcuts.match(/\.delete_session =>([^\n]+)/);
   assert.ok(route);
-  assert.match(route[1], /PostMessageW\(app_state\.g_main_hwnd, WM_APP_QUIT_ALL, 1, 0\)/);
-  assert.doesNotMatch(route[1], /WM_APP_CLOSE_SESSION|WM_APP_CLOSE,/);
+  assert.match(route[1], /PostMessageW\(app_state\.g_main_hwnd, WM_APP_CLOSE_SESSION, 0, 0\)/);
+  assert.doesNotMatch(route[1], /WM_APP_QUIT_ALL/);
   const main = read('src/main.zig');
-  const quit = main.slice(main.indexOf('        WM_APP_QUIT_ALL => {'), main.indexOf('        WM_APP_RESTART => {'));
-  assert.match(quit, /if \(wp == 1\) \{\s+quitAllZigShellWindows\(hwnd\);\s+return 0;/);
-  assert.match(quit, /requestAppClose\(hwnd, \.quit_all\)/);
-  const console = read('src/console.zig');
-  const all = console.slice(console.indexOf('pub fn quitAllZigShellWindows('), console.indexOf('pub fn cleanupStaleWindows('));
-  assert.match(all, /rememberOpenWorkspaceForQuit\(\)/);
-  assert.match(all, /PostMessageW\(target, WM_APP_QUIT_ALL, 0, 0\)/);
-  assert.doesNotMatch(all, /endTmuxSession|killRemoteTmuxSession|closeShell/);
+  const close = main.slice(main.indexOf('        WM_APP_CLOSE_SESSION => {'), main.indexOf('        WM_APP_MORE_MENU_ACTION => {'));
+  assert.match(close, /endActiveTmuxSession\(\)/);
+  assert.match(close, /closeNonTmuxTabAt\(app_state\.active_shell\)/);
+  const quit = main.slice(main.indexOf('if (target == SEARCH_QUIT_OFFSET)'), main.indexOf('if (target == SEARCH_UPDATE_OFFSET)'));
+  assert.match(quit, /quitAllZigShellWindows\(hwnd\)/);
 });
 
-test('Ctrl+W is left for the browser pane and only Ctrl+Shift+W quits', () => {
+test('Ctrl+W is left for the browser pane and only Ctrl+Shift+W deletes the session', () => {
   const shortcuts = read('src/shortcuts.zig');
-  const fn = shortcuts.slice(shortcuts.indexOf('pub fn sessionCloseShortcut('), shortcuts.indexOf('test "IGSH-1965'));
+  const fn = shortcuts.slice(shortcuts.indexOf('pub fn sessionCloseShortcut('), shortcuts.indexOf('test "SOFT-2355'));
   assert.match(fn, /!shift/);
-  assert.doesNotMatch(shortcuts, /\.delete =>/);
-  assert.match(shortcuts, /\.a = "Ctrl\+Shift\+W", \.b = "Quit the app/);
+  assert.match(fn, /return \.delete_session/);
+  assert.doesNotMatch(fn, /return \.quit/);
+  assert.match(shortcuts, /\.a = "Ctrl\+Shift\+W", \.b = "Delete the current session/);
   assert.doesNotMatch(shortcuts, /\.a = "Ctrl\+W",/);
   const drive = read('tools/verify-session-actions/drive.ps1');
   assert.match(drive, /Check 'ctrl-w-does-not-quit'/);
+  assert.doesNotMatch(drive, /Ctrl\+Shift\+W quits/);
 });
 
 test('Alt+X no longer has an archive binding or shortcut row', () => {

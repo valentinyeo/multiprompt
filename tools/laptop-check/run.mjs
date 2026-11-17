@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parseTicketId, ticketIds } from '../ticket-id.js';
+
 const repo = 'valentinyeo/multiprompt';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const requiredChecks = ['install', 'start', 'chats', 'computer-view', 'sync', 'memory', 'crashes'];
@@ -23,7 +25,7 @@ function shippedTickets(subjects) {
   const tickets = new Set();
   for (const subject of subjects) {
     const line = String(subject ?? '').split('\n')[0];
-    for (const match of line.matchAll(/(?:^|[^A-Za-z0-9-])(IGSH-\d+)/g)) tickets.add(match[1]);
+    for (const id of ticketIds(line)) if (parseTicketId(id).prefix === 'IGSH') tickets.add(id);
   }
   return [...tickets].sort((left, right) => Number(left.slice(5)) - Number(right.slice(5)));
 }
@@ -96,7 +98,7 @@ function selfTest() {
   const clean = version => ({ version, checks: requiredChecks.map(name => ({ name, ok: true, detail: '' })) });
   check('release tag', releaseVersion(' v0.28.900 ') === '0.28.900');
   check('rejects loose tags', ['0.28.900', 'latest', 'v0.28', 'v0.28.900-rc1', ''].every(tag => throws(() => releaseVersion(tag))));
-  check('shipped tickets', JSON.stringify(shippedTickets(['IGSH-1901: x', 'Merge IGSH-1894', 'no ticket', 'IGSH-1901: again'])) === JSON.stringify(['IGSH-1894', 'IGSH-1901']));
+  check('shipped tickets', JSON.stringify(shippedTickets(['SOFT-1901: x', 'Merge IGSH-1894', 'no ticket', 'IGSH-1901: again'])) === JSON.stringify(['IGSH-1894', 'IGSH-1901']));
   check('subject only', JSON.stringify(shippedTickets(['IGSH-7: body\nIGSH-8: also here'])) === JSON.stringify(['IGSH-7']));
   check('machine list', connectedMachines('\u2713 laptop1\n\u2717 laptop2\n').has('laptop1') && !connectedMachines('\u2713 laptop1\n\u2717 laptop2\n').has('laptop2'));
   check('result block', readResult('noise\nLAPTOP_CHECK_JSON_BEGIN\n{"checks":[{"name":"start","ok":true}]}\nLAPTOP_CHECK_JSON_END\n').checks[0].name === 'start');

@@ -167,6 +167,18 @@ test "IGSH-1640 host upgrade captures admission before persistence and never ref
     try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 1), admission_captures);
 }
+test "SOFT-2548 existing terminals send while an unidentified live chat stays queued" {
+    reset(); shells[0].ai_agent = 0; test_key.tmux[0] = 0;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 0), starts + pastes + local_pastes + enters);
+    test_key.tmux[0..9].* = "live-test".*;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 0), starts + pastes + local_pastes + enters);
+    test_key.tmux[0..9].* = "term-test".*;
+    try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 1), starts);
+    try std.testing.expectEqual(@as(usize, 0), pastes + local_pastes + enters);
+}
 test "VPS tmux routing ignores console visibility lock and busy status" {
     reset();
     try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
@@ -193,7 +205,7 @@ test "a local shell keeps the console paste while a hosted tab never types into 
     reset(); test_key.tmux[0] = 0;
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
-    reset(); shells[0].ai_agent = 0;
+    reset(); shells[0].ai_agent = 0; test_key.tmux[0..9].* = "live-test".*;
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
 }
@@ -282,7 +294,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 9 tests passed/);
+  assert.match(result.stderr, /All 10 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);

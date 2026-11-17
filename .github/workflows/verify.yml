@@ -132,6 +132,9 @@ on:
       revision:
         required: false
         type: string
+      app_revision:
+        required: false
+        type: string
       browser_stall:
         required: false
         default: false
@@ -201,7 +204,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}${{ inputs.app_revision && format('-base-{0}', inputs.app_revision) || '' }}${{ inputs.revision && format('-rev-{0}', inputs.revision) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -284,7 +287,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
-          name: verify-app
+          name: verify-app${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -323,7 +326,7 @@ jobs:
           fi
   chat-sync-audit:
     needs: chat-sync-audit-changes
-    if: inputs.feature == 'chat-sync-audit' || (github.event_name == 'pull_request' && needs.chat-sync-audit-changes.outputs.changed == 'true')
+    if: inputs.feature == 'chat-sync-audit' || (github.event_name == 'pull_request' && needs.chat-sync-audit-changes.outputs.changed == 'true' && inputs.app_revision == '')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -372,13 +375,13 @@ jobs:
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
-    continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) }}
+    continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) || inputs.app_revision != '' }}
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix:
         feature: ${{ inputs.feature && inputs.feature != 'all' && fromJSON(format('["{0}"]', inputs.feature)) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature || 'appearance')) }}
-        app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
+        app-revision: ${{ inputs.app_revision && fromJSON(format('["{0}"]', inputs.app_revision)) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || inputs.feature == 'bot-photo' && fromJSON('[96,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -469,7 +472,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck'
+        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette'
         shell: pwsh
         run: |
           choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
@@ -500,6 +503,8 @@ jobs:
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/control.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
           New-Item -ItemType Directory -Force evidence | Out-Null
           & tools/split-feature-controls.ps1 -Path "$pwd/.claude/skills/verify-multiprompt/control.ps1" -Output "$pwd/evidence/control-ast.json"
@@ -923,7 +928,12 @@ jobs:
             Start-Sleep -Seconds 900
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
-          & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
+          if ($mapped.ContainsKey($env:FEATURE)) {
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          } else {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
             & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/footer-full"
@@ -1070,7 +1080,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ env.FEATURE }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls' || inputs.feature == 'bot-photo') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
+          name: verify-${{ matrix.feature }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls' || inputs.feature == 'bot-photo') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
   tmux-identity-semantics:

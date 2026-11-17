@@ -53,7 +53,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Ctrl+K: Quick switcher — search/switch tabs + spawn new shells by name. Also exposes **"Open sessions in this folder"** (search "folder"/"sessions"/"repo"): when a VPS/tmux tab is focused, bulk-attaches every *other* tmux session on the **same host** whose cwd is under the focused session's folder (prefix match on `#{session_path}`). Requires the VPS list source to emit the path — the inline fallback already sends `-F '#{session_name}|#{session_activity}|#{session_path}'`; for `~/.local/bin/tmux-list.sh` append `|#{session_path}` to its `-F` format (4th field after ram; client parser detects path by leading `/`, ram by all-digits, so it tolerates 2–4 fields). Until a host emits the path, the entry just won't match there.
 - Alt+T: New workspace tmux tab in its configured or inferred remote folder. It starts Claude: with no workspace-scoped `commands.json` default the program is `claude`, which runs the app-owned host with a minted session id instead of typing into the pane ([agent host](../architecture/agent-host.md)). A workspace-scoped `alt_t` still wins and starts that program after shell startup, so `codex` or `pi` keep the typed terminal start. The plus at the end of the sidebar list and Ctrl+T outside browser focus use the same path.
 - Ctrl+T: New workspace tmux tab outside browser focus, same as Alt+T and the plus at the end of the sidebar list, so it also starts Claude by default. When choosing a folder, search includes project folders without Git, empty ones too, and covers up to 1024 folders on each server; the list shows the first 256 matches, so type part of a name to reach the rest. In a focused docked browser, Ctrl+T and Ctrl+K go to the browser; Ctrl+Shift+K opens the multiprompt palette.
-- Ctrl+Shift+1: New CMD tab
+- Ctrl+Shift+1: New CMD tab. Ctrl+K also finds Command Prompt, PowerShell, Bash and Git Bash.
 - Ctrl+Shift+2: New TMUX tab
 - Ctrl+Shift+3: New VPS Remote host 1 tab
 - Ctrl+Shift+4: New VPS Remote host 2 tab
@@ -92,7 +92,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - Win+Shift+Left/Right: Move the window to the adjacent monitor, preserving maximized state (v0.28.235 — natively these targeted the conhost child and did nothing)
 - Ctrl+K → "Sort Workspaces": drag rows by their ≡ handle (or Ctrl+Up/Down) to reorder the workspace pills; Enter switches to a pill; order persists (registry + session + inbox)
 - Ctrl+N: New ZigShell window (single-window mode: new in-process workspace)
-- Ctrl+Shift+W: Quit the app (IGSH-1965). Ctrl+W is left for the browser pane, where it closes the tab.
+- Ctrl+Shift+W: Delete the current session. Ctrl+W is left for the browser pane, where it closes the tab. Close the app from Ctrl+K.
 - F1: Open the in-app keyboard-shortcuts overview overlay (Esc/F1/click to close; ↑↓ or j/k to scroll). Also a Ctrl+K entry ("Keyboard Shortcuts"). **When adding/removing a shortcut, update `SHORTCUT_ROWS` in `src/shortcuts.zig` and run `node tools/shortcuts-doc.mjs` to regenerate the Full list.**
 - F2: Rename the visible session name. With the sidebar open, edit its tab. With the sidebar collapsed or hidden, edit the top title. In Inbox, edit the selected row.
 - Enter saves, Esc cancels, and leaving the name saves.
@@ -117,8 +117,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
-| Ctrl+Shift+W | Quit the app; keep server agents and saved chats |
-| Ctrl+K -&gt; Delete | Delete the active chat; stop its agent and keep its history |
+| Ctrl+Shift+W | Delete the current session; stop its agent and keep its history |
+| Ctrl+K -&gt; Delete chat | Delete the current session; stop its agent and keep its history |
+| Ctrl+K -&gt; Quit Multi Bot | Quit the app; keep server agents and saved chats |
 | Ctrl+K -&gt; Copy chat ID | Copy the chosen chat identity |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |
 | Alt+U | Mark active session unread / restore blue dot |
