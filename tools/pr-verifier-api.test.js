@@ -27,7 +27,7 @@ const responses = JSON.parse(fs.readFileSync(process.env.RESPONSES, 'utf8'));
 console.log(JSON.stringify(responses.shift()));
 fs.writeFileSync(process.env.RESPONSES, JSON.stringify(responses));
 `, { mode: 0o755 });
-  return { dir, env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, REQUESTS: path.join(dir, 'requests'), RESPONSES: path.join(dir, 'responses'), REPO: 'owner/repo', HEAD_SHA: head },
+  return { dir, env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, REQUESTS: path.join(dir, 'requests'), RESPONSES: path.join(dir, 'responses'), GITHUB_OUTPUT: path.join(dir, 'output'), REPO: 'owner/repo', HEAD_SHA: head },
     requests: () => fs.readFileSync(path.join(dir, 'requests'), 'utf8').trim().split('\n').map(line => JSON.parse(line)) };
 }
 
@@ -67,7 +67,7 @@ test('Tests waiting backs off from one minute to five minutes instead of polling
   const result = spawnSync(process.execPath, ['-e', script], { env: f.env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(fs.readFileSync(delays, 'utf8').trim().split('\n').map(Number), [60000, 120000, 240000, 300000, 300000]);
-  assert.match(result.stdout, /result=PASS/);
+  assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /result=PASS/);
   assert.equal(f.requests().length, 6);
 });
 
@@ -77,7 +77,7 @@ test('query failures and missing head state cannot produce a successful Tests re
     const result = spawnSync(process.execPath, [modulePath, 'wait-for-tests'], { env: f.env, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
     assert.doesNotMatch(result.stdout, /result=PASS/);
-    assert.match(result.stdout, /result=BLOCKED/);
+    assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /result=BLOCKED/);
     assert.equal(f.requests().length, 1);
   }
 });
