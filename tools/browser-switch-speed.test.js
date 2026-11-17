@@ -408,7 +408,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('browser-switch-speed'));
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
-  assert.match(workflow, /name: verify-\$\{\{ env\.CHAT_CLEAR_PROOF == '1' && 'chat-server-clear' \|\| env\.FEATURE \}\}/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(read('.github/workflows/click-through.yml'), /changed=\$\(git diff --name-only[^\n]*-- src[^\n]*\btools\b/);
   assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'chat-browser-shortcut', 'chat-browser-autoload', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'/);
