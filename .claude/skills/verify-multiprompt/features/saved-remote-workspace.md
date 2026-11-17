@@ -14,4 +14,7 @@ The driver seeds the real APPDATA/ZigShell/session.json with two kind=tmux recor
 
 ## Gotchas
 
+The live transports here are running synthetic SSH/tmux stand-in processes, not authenticated server connections. The driver forces Ctrl+1 before focus verification, so it does not independently prove initial active-tab selection. Both tabs use host 0; cross-host restoration remains unexercised.
+
+
 The production restore path directly calls spawnShellWithSession for saved remote tabs; it no longer queues their initial spawn. A successful spawn is not yet a healthy attachment. Do not infer readiness from a window existing. Isolated APPDATA/LOCALAPPDATA and MULTIPROMPT_NO_LOGIN avoid real workspace/account state. This fixture covers remote restore only, not local console recovery or multi-workspace restoration.
