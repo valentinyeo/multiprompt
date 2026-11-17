@@ -170,5 +170,6 @@ test('Codex workspace child receives hosted platform flags without API credentia
   const child = JSON.parse(fs.readFileSync(capture, 'utf8'));
   assert.equal(child.GITHUB_ACTIONS, 'hosted-flag-fixture');
   assert.equal(child.RUNNER_OS, 'platform-flag-fixture');
+  assert.equal(child.RUNNER_TEMP, root);
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'DEEPSEEK_API_KEY', 'CODEX_AUTH_JSON']) assert.ok(!child[name], `${name} must not reach the workspace child`);
 });
