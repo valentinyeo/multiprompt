@@ -9,7 +9,7 @@ import uuid
 args = sys.argv[1:]
 sid = args[args.index('--resume') + 1] if '--resume' in args else args[args.index('--session-id') + 1]
 root = Path.home()
-folder = root / '.claude/projects' / str(Path.cwd()).replace('/', '-')
+folder = root / '.claude/projects' / str(Path.cwd()).replace('\\', '-').replace('/', '-').replace(':', '-')
 folder.mkdir(parents=True, exist_ok=True)
 transcript = folder / (sid + '.jsonl')
 metadata = root / '.claude/sessions'

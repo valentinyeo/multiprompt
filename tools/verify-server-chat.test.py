@@ -9,9 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProviderTest(unittest.TestCase):
-    def test_round_trip_and_clear_reach_the_provider_once(self):
+    def setUp(self):
         available = json.loads(subprocess.check_output(['node', '-e', 'console.log(JSON.stringify(require("./tools/verify-features.cjs").discoverFeatures().available))'], cwd=ROOT, text=True))
         self.assertIn('server-chat', available, 'Windows verification must offer the real SSH server journey')
+
+    def test_round_trip_and_clear_reach_the_provider_once(self):
         with tempfile.TemporaryDirectory() as home:
             program = ROOT / 'tools/verify-server-chat/provider.py'
             script = 'import os,runpy,sys; sys.argv=sys.argv[1:]; home=sys.argv.pop(1); os.environ.update(HOME=home,USERPROFILE=home); runpy.run_path(sys.argv[0],run_name="__main__")'
