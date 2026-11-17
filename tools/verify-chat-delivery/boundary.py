@@ -188,8 +188,12 @@ def fake_queue_event(operation, content=None, **extra):
 
 def fake_submit(claude, text):
     if state().get("name") in ("skill-echo", "plain-echo"):
-        record("echo-input.jsonl", original=text, sent=state()["echoText"])
-        text = state()["echoText"]
+        original = state()["echoOriginal"]
+        if text != original and not text.startswith(original + "\n[mp:"):
+            raise ValueError("Echo source received unexpected text")
+        sent = state()["echoText"] + text[len(original):]
+        record("echo-input.jsonl", original=text, sent=sent)
+        text = sent
     if claude["mode"] == "busy":
         claude["queue"].append(text)
         fake_queue_event("enqueue", text)
@@ -887,8 +891,11 @@ def tmux_buffer(argv, input):
     directory.mkdir(exist_ok=True)
     path = directory / name
     operation = argv[0]
+    text = None
     if operation == "load-buffer":
-        path.write_bytes(input.read())
+        payload = input.read()
+        path.write_bytes(payload)
+        text = payload.decode("utf-8")
     elif operation == "paste-buffer":
         if not path.exists():
             return 1
@@ -901,7 +908,7 @@ def tmux_buffer(argv, input):
         path.unlink()
     else:
         return 1
-    record("tmux-buffers.jsonl", argv=argv)
+    record("tmux-buffers.jsonl", argv=argv, text=text)
     return 0
 
 
@@ -909,6 +916,10 @@ def tmux(argv, input, output):
     fake = state().get("fake")
     if fake and argv[:1] in (["load-buffer"], ["paste-buffer"], ["delete-buffer"]):
         return tmux_buffer(argv, input)
+    if fake and len(argv) == 5 and argv[:3] == ["display-message", "-p", "-t"] and argv[3] in ["=" + name + ":" for name in session_names()] and argv[4] == "#{window_height}":
+        record("invocations.jsonl", kind="dimensions", argv=argv, height=24)
+        output.write("24\n")
+        return 0
     if argv[:1] == ["capture-pane"]:
         shown = capture_screen("-e" in argv)
         record("capture.jsonl", argv=argv, screen=shown)
@@ -1059,7 +1070,9 @@ def install_reaction_worker(namespace):
                 while True:
                     wake.clear()
                     namespace['message_poll'](query['tmux'], *key)
-                    namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    dispatched = namespace['message_store_request'](dict(query, op='message_dispatch'))
+                    if dispatched.get('message') is not None:
+                        record('message-dispatch.jsonl', result=dispatched)
                     with closing(namespace['message_store_db'](query['tmux'])) as db:
                         pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
                     with lock:
@@ -1153,13 +1166,13 @@ def reader_namespace():
                     return child
 
             namespace["subprocess"] = WorkerDiagnostics()
-        if state().get("name") == "reactions":
+        if state().get("name") in ("reactions", "queue-draft-sync", "send-stays-gone", "skill-echo", "plain-echo"):
             install_reaction_tmux(namespace)
             install_reaction_worker(namespace)
         if state().get("name") in ("instant-chat", "startup-failure", "working-live"):
             namespace["start_message_worker"] = lambda *args, **kwargs: None
             record("instant-boundary.jsonl", notification="poll fallback", dispatch="thread stand-in" if state().get("name") == "working-live" else "store arrival only")
-        if state().get("name") in ("accepted-message", "recall-handed", "skill-echo", "plain-echo"):
+        if state().get("name") in ("accepted-message", "recall-handed"):
             import threading
 
             worker_name = 'recall' if state().get('name') == 'recall-handed' else 'accepted'
@@ -1191,13 +1204,13 @@ def reader_namespace():
 
             namespace['start_message_worker'] = start_worker
             record(worker_name + '-boundary.jsonl', notification='poll fallback', worker='in-process production dispatch and connector polling')
-    if state().get("name") == "working-live":
+    if state().get("name") in ("working-live", "steady-live"):
         fixture_path = Path(__file__).with_name("working-host.py")
         assert fixture_path.is_file(), "Hosted working provider fixture is missing"
         spec = importlib.util.spec_from_file_location("working_host", fixture_path)
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
-        fixture.install(namespace, ROOT, record)
+        fixture.install(namespace, ROOT, record, steady=state().get("name") == "steady-live")
         original_push = namespace["events_push"]
 
         def working_push(subscriptions):
@@ -1614,6 +1627,10 @@ def watch_reader():
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
+        return 0
+    if len(ARGS) == 2 and ARGS[0] == "-G" and ARGS[1] in ("remote-1", "remote-2", "remote-3"):
+        record("invocations.jsonl", kind="config", argv=ARGS)
+        print("hostname " + ARGS[1] + "\nuser verify\nport 22")
         return 0
     if (ROOT / "connection-held").exists():
         record("connection-waits.jsonl", operation="connect held")

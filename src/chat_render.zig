@@ -2461,6 +2461,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 }
 
 pub fn chatRelayout(client_width: i32) void {
+    app_state.g_chat_layout_count +%= 1;
     g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
@@ -4273,11 +4274,39 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
     return chatViewOwnsInput() and chat_code.copyKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
 }
 
-pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) void {
-    if (@import("chat_composer.zig").chatAcAgent() != .claude) return;
+pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) bool {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
     var out: [256]u16 = undefined;
-    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return;
-    if (!@import("chat_send.zig").sendChatMessage(line)) showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
+    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return false;
+    if (!@import("chat_send.zig").sendChatMessage(line)) {
+        showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
+        return false;
+    }
+    return true;
+}
+
+fn likeShown(reference: u64) bool {
+    if (reference == 0) return false;
+    if (g_reaction_view.wishedLike(reference)) |wanted| return wanted;
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
+        if (block.reaction_reference == reference and (g_reaction_view.mask(index) & chat_reaction.Emoji.like.bit()) != 0) return true;
+    }
+    return false;
+}
+
+pub fn chatToggleReaction(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) void {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return;
+    const show = emoji != .like or !likeShown(reference);
+    if (emoji == .like) g_reaction_view.wishLike(reference, show);
+    if (!show) {
+        chatImageReady();
+        return;
+    }
+    if (!chatReactToMessage(reference, quote, emoji)) {
+        if (emoji == .like) g_reaction_view.wishLike(reference, !show);
+        return;
+    }
+    if (emoji == .like) chatImageReady();
 }
 
 pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
@@ -4288,10 +4317,38 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
             const block = app_state.g_chat_blocks[i];
             const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
             const display = chatBlockDisplayRange(buf, block);
-            chatReactToMessage(block.reaction_reference, buf[display.start..][0..display.len], emoji);
+            const quote = buf[display.start..][0..display.len];
+            if (emoji == .like) chatToggleReaction(block.reaction_reference, quote, emoji) else _ = chatReactToMessage(block.reaction_reference, quote, emoji);
             return;
         }
     }
+}
+
+fn chatDoubleClickThumbs(hwnd: HANDLE, x: i32, y: i32) bool {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return false;
+    const index = chatTranscriptBlockAtPoint(y) orelse return false;
+    if (index >= app_state.g_chat_block_count) return false;
+    const block = app_state.g_chat_blocks[index];
+    if ((block.role != .prose and block.role != .code) or block.reaction_reference == 0) return false;
+    const rc = chatMessageRect(index);
+    const content_y = y + app_state.g_chat_scroll_y;
+    if (x < rc.left or x >= rc.right or content_y < rc.top or content_y >= rc.bottom) return false;
+    const quote = chatMessageTextAlloc(std.heap.page_allocator, index, true) catch return false;
+    defer std.heap.page_allocator.free(quote);
+    if (quote.len == 0) return false;
+    _ = KillTimer(hwnd, selection_offer_timer);
+    _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+    app_state.g_chat_sel_dragging = false;
+    selection_completion_pending = false;
+    chatSelectionClear();
+    app_state.g_chat_sel_click_count = 2;
+    app_state.g_chat_sel_last_click = GetTickCount64();
+    app_state.g_chat_sel_last_x = x;
+    app_state.g_chat_sel_last_y = y;
+    _ = ReleaseCapture();
+    chatToggleReaction(block.reaction_reference, quote, .like);
+    _ = InvalidateRect(hwnd, null, 0);
+    return true;
 }
 
 fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
@@ -5758,8 +5815,11 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_ind
         }
     }
     switch (cmd) {
-        8, 9, 10 => if (reply_text) |quote| {
-            chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
+        8 => if (reply_text) |quote| {
+            chatToggleReaction(reaction_reference, quote, .like);
+        },
+        9, 10 => if (reply_text) |quote| {
+            _ = chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
         },
         11 => if (request_id) |id| chatCopyTextToClipboard(id),
         7 => if (link_text) |text| chatCopyTextToClipboard(text),
@@ -6050,6 +6110,20 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
     }
 }
 
+pub fn chatLogPosition() void {
+    if (!verboseLoggingEnabled() or !app_state.g_chat_active or app_state.g_chat_layout_dirty or app_state.active_shell >= app_state.shell_count) return;
+    const tick = GetTickCount64();
+    const edge = app_state.g_chat_scroll_y + app_state.g_chat_top_pad;
+    const anchor = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], edge) orelse return;
+    for (anchor.index..app_state.g_chat_block_count) |first| {
+        const block = app_state.g_chat_blocks[first];
+        if (block.role == .tool or g_reaction_view.hides(first)) continue;
+        var log: [384]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] position ms={d} shell={d} first={d} message={d} offset={d} y={d} scroll={d} height={d} pad={d} opening={d} paints={d} layouts={d} tick={d}", .{ tick -| app_state.g_chat_switch_started, app_state.g_chat_cache_shell_id, first, block.message_id, block.source_offset, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y, app_state.g_chat_scroll_y, app_state.g_chat_content_h, app_state.g_chat_top_pad, app_state.g_chat_switch_started, app_state.g_chat_paint_count, app_state.g_chat_layout_count, tick }) catch "");
+        return;
+    }
+}
+
 var transcript_paint_dc: HANDLE = null;
 var transcript_paint_bitmap: HANDLE = null;
 var transcript_paint_old_bitmap: HANDLE = null;
@@ -6125,6 +6199,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 _ = EndPaint(hwnd, &ps);
                 if (painted) chatSwitchDidPaint();
                 if (painted) chatSwitchContentPainted();
+                if (painted) {
+                    app_state.g_chat_paint_count +%= 1;
+                    chatLogPosition();
+                }
                 if (painted) chatBenchPaint();
                 if (painted) @import("launch_cache.zig").painted(true);
             }
@@ -6369,6 +6447,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 openClickedLink(app_state.g_chat_capture[link.start..link.end]);
                 return 0;
             }
+            if (chatDoubleClickThumbs(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             const toggle = @import("dblclick_toggle.zig");
             if (toggle.ISSUE_355_DOUBLE_CLICK_TOGGLE and toggle.chatTargetBlank(
                 app_state.g_chat_layout_rects[0..app_state.g_chat_block_count],
@@ -7928,6 +8007,8 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         _ = live.begin(shell_id, 0, sid);
         var entry = app_state.ChatOutboxEntry{ .id = 1668, .state = .queued };
         entry.text = try std.heap.page_allocator.dupe(u16, std.unicode.utf8ToUtf16LeStringLiteral("Please reply."));
+        const landed_wire = "m-1668";
+        @memcpy(entry.message_wire_id[0..landed_wire.len], landed_wire);
         const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &entry.key);
         entry.key_len = @intCast(key.len);
         app_state.g_chat_outbox.append(std.heap.page_allocator, entry) catch |err| {
@@ -7940,8 +8021,10 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         app_state.g_chat_outbox.items[0].state = .delivered;
         app_state.g_chat_outbox.items[0].channel_sent = true;
         layout.chatWorkingIndicatorSync();
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect != null);
         try liveWorkingProofFrame(dc, case.files[1], bytes, info.header, started, case.name, "accepted-before-event");
-        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{}}}]}}";
+        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{\"message_id\":\"m-1668\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, begin));
         session.chatFileOnReady();
         try liveWorkingProofFrame(dc, case.files[2], bytes, info.header, started, case.name, "turn-started");

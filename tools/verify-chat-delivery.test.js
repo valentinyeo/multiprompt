@@ -6,7 +6,7 @@ assert.equal(typeof readControlSource, 'function', 'Control readers must follow 
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, nativeText, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 
 function featureMatrix(source) {
@@ -367,6 +367,34 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
   assert.match(source, /text = "\\r\\n".join\(lines\) \+ "\\r\\n"/);
 });
 
+test('native correlation IDs are removed only when the exact text and production dispatch identity match', () => {
+  assert.equal(typeof nativeText, 'function', 'native dispatch receipts are checked');
+  const message = { id: 'desktop-proof', attempt: 'test-attempt', epoch: 0, text: 'typed message' };
+  const dispatches = [{ result: { message } }];
+  const payload = 'typed message\n[mp:fd2993712c1ba84d]';
+  assert.equal(nativeText(payload, dispatches), message.text);
+  assert.equal(nativeText(payload, []), payload);
+  assert.equal(nativeText(payload, [{ result: { message: { ...message, epoch: 1 } } }]), payload);
+  assert.equal(nativeText(payload.replace('typed', 'changed'), dispatches), payload.replace('typed', 'changed'));
+  assert.equal(nativeText(payload.replace('fd2993712c1ba84d', '0000000000000000'), dispatches), payload.replace('fd2993712c1ba84d', '0000000000000000'));
+  assert.notEqual(nativeText(payload + '\n[mp:fd2993712c1ba84d]', dispatches), message.text);
+  assert.notEqual(nativeText(payload + '\n' + payload, dispatches), message.text);
+  assert.equal(nativeText('ordinary [mp:fd2993712c1ba84d] user text', dispatches), 'ordinary [mp:fd2993712c1ba84d] user text');
+});
+
+test('persistent reader evidence requires the supplied bootstrap and a real shared serve channel', () => {
+  assert.equal(typeof persistentReader, 'function', 'shared channel provenance is checked');
+  const bootstrap = ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'];
+  const supplied = { kind: 'reader', argv: bootstrap };
+  const channel = { kind: 'reader', argv: ['--serve'], channel: 2 };
+  assert.equal(persistentReader([{ kind: 'reader', argv: [...bootstrap, '--serve'] }]), true);
+  assert.equal(persistentReader([supplied, channel]), true);
+  assert.equal(persistentReader([supplied]), false);
+  assert.equal(persistentReader([channel]), false);
+  assert.equal(persistentReader([supplied, { ...channel, channel: 0 }]), false);
+  assert.equal(persistentReader([supplied, { ...channel, argv: ['--watch'] }]), false);
+});
+
 test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux writes without fabricating text', () => {
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
@@ -411,6 +439,7 @@ test('background host probes are explicitly declined and unknown remote commands
   }
   probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
   const unknown = [
+    ['-G', 'unexpected-host'],
     ['-T', 'remote-1', 'uname -a'],
     ['-T', 'remote-1', relayCommand + '; unexpected-operation'],
     ['-T', 'remote-2', ladder + '.unknown'],
@@ -447,6 +476,13 @@ with tempfile.TemporaryDirectory() as directory:
         assert row["case"] == "busy-send" and row["ms"] > 0 and row["pid"] > 0, row
     assert len(rows("declined.jsonl")) == len(fixtures["probes"])
     assert not rows("unsupported.jsonl")
+    for host in ("remote-1", "remote-2", "remote-3"):
+        namespace["ARGS"] = ["-G", host]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert namespace["ssh"]() == 0
+        assert output.getvalue() == "hostname " + host + "\nuser verify\nport 22\n"
+        assert rows("invocations.jsonl")[-1]["argv"] == ["-G", host]
     for argv in fixtures["unknown"]:
         namespace["ARGS"] = argv
         assert namespace["declined_remote"](argv) is None, argv
@@ -459,7 +495,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert row["operation"] == "remote command" and row["hasPython"] is False, row
     assert len(rows("unsupported.jsonl")) == len(fixtures["unknown"])
     assert len(rows("declined.jsonl")) == len(fixtures["probes"])
-    assert not rows("invocations.jsonl") and not rows("capture.jsonl")
+    assert len(rows("invocations.jsonl")) == 3
+    assert all(row["kind"] == "config" for row in rows("invocations.jsonl"))
+    assert not rows("capture.jsonl")
     assert (root / "agent-buffer.jsonl").read_text(encoding="utf-8") == "existing delivery evidence\n"
 print("probe classification passed")
 `;
@@ -578,7 +616,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /actions\/setup-python@[a-f0-9]{40}/);
   assert.match(workflow, /gh release download \$env:RELEASE_TAG/);
   assert.match(workflow, /Release checksum mismatch/);
-  assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /verify-chat-delivery\/drive.ps1[\s\S]*errors.Count/);
   assert.ok(read('.github/workflows/click-through.yml').includes('-- src'));
 });
@@ -747,10 +785,13 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     const text = name === 'skill-echo' ? 'make it simpler /pstack:poteto-mode confirm that' : 'plain message confirms once';
     const sentText = name === 'skill-echo' ? '/pstack:poteto-mode make it simpler confirm that' : text;
     put(`${name}/observation.json`, { error: null, text, sentText, composerText: '' });
-    log(`${name}/stand-in/echo-input.jsonl`, [{ original: text, sent: sentText }]);
+    const message = { id: 'desktop-echo', attempt: 'echo-attempt', epoch: 0, text };
+    const token = require('node:crypto').createHash('sha256').update(`${message.id}\n${message.attempt}\n${message.epoch}`).digest('hex').slice(0, 16);
+    log(`${name}/stand-in/message-dispatch.jsonl`, [{ result: { message } }]);
+    log(`${name}/stand-in/echo-input.jsonl`, [{ original: `${text}\n[mp:${token}]`, sent: `${sentText}\n[mp:${token}]` }]);
     log(`${name}/transcript.jsonl`, [
-      { type: 'queue-operation', operation: 'enqueue', content: sentText },
-      { type: 'attachment', attachment: { type: 'queued_command', prompt: sentText } },
+      { type: 'queue-operation', operation: 'enqueue', content: `${sentText}\n[mp:${token}]` },
+      { type: 'attachment', attachment: { type: 'queued_command', prompt: `${sentText}\n[mp:${token}]` } },
     ]);
     put(`${name}/outbox-final.json`, { queues: [] });
     files.set(path.join(base, name, 'copied.txt'), sentText);
@@ -786,6 +827,8 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     () => put('skill-echo/outbox-final.json', { queues: [{ messages: [{ t: 'make it simpler /pstack:poteto-mode confirm that' }] }] }),
     () => log('skill-echo/stand-in/echo-input.jsonl', []),
     () => log('skill-echo/transcript.jsonl', []),
+    () => log('skill-echo/stand-in/message-dispatch.jsonl', []),
+    () => log('skill-echo/stand-in/echo-input.jsonl', [{ original: 'make it simpler /pstack:poteto-mode confirm that\n[mp:0000000000000000]', sent: '/pstack:poteto-mode make it simpler confirm that' }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('asking', 'answering') }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace(saved.suggestion, '') }]),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('\u001b[2m', '\u001b[2K') }]),
@@ -1464,4 +1507,37 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
   assert.match(retention, /WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$historyView, 30000\)/);
   assert.match(history, /incomplete copied messages/);
   assert.match(retention, /retained copy missing or reordered/);
+});
+
+
+test('SOFT-2384 the simulated source reorders the skill without losing its native delivery marker', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-echo-boundary-'));
+  try {
+    const original = 'make it simpler /pstack:poteto-mode confirm that';
+    const sent = '/pstack:poteto-mode make it simpler confirm that';
+    const marker = '\n[mp:0123456789abcdef]';
+    const transcript = path.join(dir, 'home/.claude/projects/C--verify-work/echo-session.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'skill-echo', mode: 'busy', suggestion: 'Try the next step', fake: true,
+      sid: 'echo-session', cwd: 'C:/verify/work', panePid: 4242, transcript,
+      meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+      echoOriginal: original, echoText: sent,
+    }));
+    const run = (mode, ...args) => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], {
+      env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8', timeout: 10000,
+    });
+    run('shell', 'init');
+    run('tmux', 'send-keys', '-t', '=verify-agent:', '-l', '--', original + marker);
+    run('tmux', 'send-keys', '-t', '=verify-agent:', 'Enter');
+    assert.deepEqual(JSON.parse(run('shell', 'show')).queue, [sent + marker]);
+    run('shell', 'idle');
+    const events = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(events.filter(row => row.type === 'queue-operation' && row.operation === 'enqueue' && row.content === sent + marker).length, 1);
+    assert.equal(events.filter(row => row.type === 'attachment' && row.attachment?.prompt === sent + marker).length, 1);
+    const input = JSON.parse(fs.readFileSync(path.join(dir, 'echo-input.jsonl'), 'utf8'));
+    assert.equal(input.original, original + marker);
+    assert.equal(input.sent, sent + marker);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

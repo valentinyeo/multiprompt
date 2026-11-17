@@ -3,7 +3,9 @@ Type-Composer $plan.text
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer text differs from the message' }
 Shot "$($plan.name)-action"
 Press @(0x0D) 'Enter: send the message' $true
-[void](Wait-For 'source queued the sent text' { @((Fake-State).queue) -ccontains $observation.sentText })
+[void](Wait-For 'source queued the sent text' {
+    @((Fake-State).queue | Where-Object { $_ -ceq $observation.sentText -or $_.StartsWith($observation.sentText + "`n[mp:") }).Count -eq 1
+})
 Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-queued.json"
 Shot "$($plan.name)-queued"
 Shell-Input 'idle'

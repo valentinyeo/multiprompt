@@ -65,8 +65,8 @@ test('IGSH-820 commands expose pin protection and bulk views without removed row
 
 function journeyContract(source, restartSource = restart) {
   const steps = [
-    "Focus-Palette 'tab order' 6217", "'manual tab order saved before creating sessions'",
-    "Focus-Palette 'new cmd' 2000", "Focus-Palette 'pin to top' '(7113|6293)'",
+    "Invoke-JourneyCommand 'Tab order: auto' -Confirm {", "'manual tab order saved before creating sessions'",
+    "Invoke-JourneyCommand 'new cmd shell' -SelectOnly", "Invoke-JourneyCommand 'Pin' -Confirm {",
     "Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'",
     "Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'",
     '$toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)',
@@ -75,22 +75,22 @@ function journeyContract(source, restartSource = restart) {
     "Press @(0x12, 0x43) 'Alt+C: pinned session can return to shell'",
     '$toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)',
     "Wait-ChatViews @($false, $false, $false) 2 'pinned-toggle-shell'",
-    "Focus-Palette 'chat view on everywhere' 6346", "Wait-ChatViews @($true, $true, $true) 2 'on-everywhere'",
+    "Invoke-JourneyCommand 'Chat View on everywhere' -Confirm {", "Wait-ChatViews @($true, $true, $true) 2 'on-everywhere'",
     "Press @(0x11, 0x32)",
     "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'",
     "Press @(0x12, 0x43) 'Alt+C: session 1 back to shell'",
     "Wait-ChatViews @($false, $true, $true) 0 'session-1-toggled'",
     "Press @(0x11, 0x33)", "Wait-ChatViews @($false, $true, $true) 1 'session-2-chat'",
     "Press @(0x11, 0x32)", "Wait-ChatViews @($false, $true, $true) 0 'toggle-sticks'",
-    "Focus-Palette 'chat view off everywhere' 6347", "Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'",
+    "Invoke-JourneyCommand 'Chat View off everywhere' -Confirm {", "Wait-ChatViews @($false, $false, $false) 0 'off-everywhere'",
     "Press @(0x11, 0x31)", "Wait-ChatViews @($false, $false, $false) 2 'pinned-after-off'",
-    "Focus-Palette 'unpin from top' '(7113|6293)'",
+    "Invoke-JourneyCommand 'Unpin' -Confirm {",
     "Wait-ChatViews @($false, $false, $false) 2 'unpinned-before-restart' $false", 'Restart-ChatView 3',
     "Wait-ChatViews @($false, $false, $false) 0 'restart-session-1' $false",
     "Wait-ChatViews @($false, $false, $false) 1 'restart-session-2' $false",
     "Wait-ChatViews @($false, $false, $false) 2 'restart-session-3' $false",
     "foreach ($query in @('chat view per tab', 'lock session', 'always chat view for this session', 'always shell view for this session', 'clear always view for this session'))",
-    "Focus-Palette 'chat view on everywhere' 6346", "'Esc: close known positive palette query'", 'Type-Text $query',
+    "Invoke-JourneyCommand 'Chat View on everywhere' -SelectOnly", "'Esc: close known positive palette query'", 'Type-Text $query',
     '$query.Length + " count=0 target=0', "Wait-ChatViews @($false, $false, $false) 2 'after' $false",
   ];
   let from = 0;
@@ -111,7 +111,7 @@ function journeyContract(source, restartSource = restart) {
 test('IGSH-820 Windows journey checks pinned toggles, all views and removed commands', () => {
   journeyContract(journey);
   assert.doesNotMatch(journey, /pinnedCloseRefused|Ctrl\+W/);
-  for (const step of ["Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'", '$query.Length + " count=0 target=0', "Focus-Palette 'unpin from top' '(7113|6293)'"]) assert.throws(() => journeyContract(journey.replace(step, '')));
+  for (const step of ["Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'", '$query.Length + " count=0 target=0', "Invoke-JourneyCommand 'Unpin' -Confirm {"]) assert.throws(() => journeyContract(journey.replace(step, '')));
   assert.throws(() => journeyContract(journey.replaceAll('AddMilliseconds(1600)', 'AddMilliseconds(100)')));
   assert.throws(() => journeyContract(journey.replace("@($false, $false, $false) 2 'pinned-toggle-shell'", "@($false, $false, $false) 0 'pinned-toggle-shell'")));
   assert.throws(() => journeyContract(journey, restart.replace('$stopped.ActiveProcesses -ne 0', '$false')));

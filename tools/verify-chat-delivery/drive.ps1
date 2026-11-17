@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-newest')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -42,7 +42,7 @@ $plans = @(
     @{name='plain-echo'; mode='busy'; text='plain message confirms once'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
-if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
+if ($Feature -in @('chat-full-history', 'chat-newest')) { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
@@ -64,7 +64,7 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
-if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
@@ -182,7 +182,18 @@ function Shell-Input([string]$Kind, [string]$Value = '') {
 function Fake-State {
     $text = & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell show
     if ($LASTEXITCODE -ne 0) { throw 'Fake shell state read failed' }
-    ($text -join "`n") | ConvertFrom-Json
+    $view = ($text -join "`n") | ConvertFrom-Json
+    foreach ($line in ((Read-Shared "$state/message-dispatch.jsonl") -split "`n" | Where-Object { $_.Trim() })) {
+        $message = ($line | ConvertFrom-Json).result.message
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $hash.ComputeHash([Text.Encoding]::UTF8.GetBytes("$($message.id)`n$($message.attempt)`n$($message.epoch)")) }
+        finally { $hash.Dispose() }
+        $token = ([BitConverter]::ToString($digest) -replace '-', '').Substring(0, 16).ToLowerInvariant()
+        $payload = $message.text + "`n[mp:$token]"
+        $view.queue = @($view.queue | ForEach-Object { $_.Replace($payload, $message.text) })
+        $view.box = $view.box.Replace($payload, $message.text)
+    }
+    $view
 }
 function Queue-View {
     $views = [regex]::Matches((Read-Shared "$settings/debug.log"), 'CHAT_QUEUE items=(\[[^\r\n]*\])')
@@ -565,16 +576,20 @@ foreach ($plan in $plans) {
         $env:USERPROFILE = "$profile/home"
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
-        if ($isModel -or $isRecall) {
+        if ($isModel -or $isRecall -or $plan.name -in @('working-live', 'steady-live')) {
             $socketTemp = Join-Path ([IO.Path]::GetPathRoot($profile)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
             New-Item -ItemType Directory $socketTemp | Out-Null
             $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
+        }
+        if ($plan.name -in @('working-live', 'steady-live')) {
+            New-Item -ItemType Directory -Force "$profile/home/.local/state/multiprompt/agent-host", "$socketTemp/mp-agent-host-0" | Out-Null
         }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
         if ($isEcho) {
+            $seed.echoOriginal = $plan.text
             $seed.echoText = if ($plan.name -eq 'skill-echo') { '/pstack:poteto-mode make it simpler confirm that' } else { $plan.text }
             $observation.sentText = $seed.echoText
         }
@@ -811,6 +826,70 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$caseDir/copied.txt", $observation.copied)
             Press @(0x1B) 'Esc: clear selection'
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } elseif ($Feature -eq 'chat-newest') {
+            Bind-Transcript
+            [void](Wait-For 'loaded conversation has a native scrollbar' {
+                (Read-Shared "$settings/debug.log") -match '\[chat\] scroll ui thumb=-?\d+,[1-9]\d* button=0'
+            })
+            $ggScrollStart = Scroll-Transcript 1200
+            [void](Wait-For 'older messages visible before gg' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '1'
+            })
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Type-Composer 'draftGG'
+            [void](Wait-For 'gg preserves an existing draft' { [ChatDeliveryDesktop]::Text($composer) -ceq 'draftGG' })
+            $existingDraft = [ChatDeliveryDesktop]::Text($composer)
+            Shot 'chat-newest-draft'
+            Clear-Composer
+            Type-Composer 'gg'
+            [void](Wait-For 'lowercase gg remains ordinary text' { [ChatDeliveryDesktop]::Text($composer) -ceq 'gg' })
+            $plainDraft = [ChatDeliveryDesktop]::Text($composer)
+            Clear-Composer
+            Type-Composer 'G'
+            $slowStart = [DateTime]::UtcNow
+            [void](Wait-For 'ordinary g typing exceeds the shortcut interval' { ([DateTime]::UtcNow - $slowStart).TotalMilliseconds -gt 650 })
+            Type-Composer 'G'
+            [void](Wait-For 'slow GG remains ordinary text' { [ChatDeliveryDesktop]::Text($composer) -ceq 'GG' })
+            $slowDraft = [ChatDeliveryDesktop]::Text($composer)
+            $beforeGg = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+            if ($beforeGg.Count -eq 0 -or $beforeGg[$beforeGg.Count - 1].Groups[3].Value -ne '1') { throw 'Ordinary gg typing unexpectedly jumped to newest' }
+            Clear-Composer
+            Shot 'chat-newest-before'
+            $ggStart = (Read-Shared "$settings/debug.log").Length
+            Type-Composer 'GG'
+            if (-not (Step 'GG jumps to newest and leaves an empty composer' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0' -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
+            })) {
+                Doctor $true
+                throw 'SOFT-2489 Shift+G twice did not jump to newest or left text in the composer'
+            }
+            $jumpDraft = [ChatDeliveryDesktop]::Text($composer)
+            Shot 'chat-newest-after'
+            $paletteScrollStart = Scroll-Transcript 1200
+            [void](Wait-For 'older messages visible before palette jump' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($paletteScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '1'
+            })
+            Press @(0x11, 0x4B) 'Ctrl+K: jump to newest message'
+            [void](Wait-For 'owned palette ready for newest query' { (Read-Shared "$settings/debug.log").Substring($paletteScrollStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            $query = 'jump to newest message'
+            $actions.Add(@{case=$plan.name; input='type palette query'; text=$query})
+            foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            [void](Wait-For 'Jump to newest message is the selected palette row' {
+                (Read-Shared "$settings/debug.log").Substring($paletteScrollStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6465(?:\s|$)')
+            })
+            Shot 'chat-newest-palette'
+            $paletteJumpStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x0D) 'Enter: jump to newest message'
+            [void](Wait-For 'palette command returns to newest' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($paletteJumpStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0'
+            })
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Doctor $true
+            Save @{scrollStart=$ggScrollStart; jumpDraft=$jumpDraft; paletteJumpStart=$paletteJumpStart; existingDraft=$existingDraft; plainDraft=$plainDraft; slowDraft=$slowDraft; finalDraft=[ChatDeliveryDesktop]::Text($composer); logStart=$ggStart; paletteLogStart=$paletteScrollStart; scrolledBefore=$true} "$caseDir/newest.json"
         } elseif ($isHistory -and $env:CHAT_RETENTION_PROOF -eq '1') {
             Assert-Retention
         } elseif ($isHistory) {
@@ -826,7 +905,6 @@ foreach ($plan in $plans) {
             $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
@@ -834,6 +912,7 @@ foreach ($plan in $plans) {
             }
             Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
             . "$PSScriptRoot/../verify-chat-reply.ps1"
@@ -1445,7 +1524,7 @@ foreach ($plan in $plans) {
         try {
             if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$caseDir/debug.log"; Get-Content "$caseDir/debug.log" | Add-Content "$Evidence/debug.log" }
             if (Test-Path $state) { Copy-Item $state "$caseDir/stand-in" -Recurse -Force }
-            if (($isModel -or $isRecall) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
+            if (($isModel -or $isRecall -or $plan.name -in @('working-live', 'steady-live')) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
             foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl')) {
                 $source = "$caseDir/stand-in/$file"
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
@@ -1526,7 +1605,11 @@ if ($env:CHAT_HAX_PROOF -eq '1') {
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {
-    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    if ($env:CHAT_DOUBLE_CLICK_PROOF -eq '1') {
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --double-click
+    } else {
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    }
     exit $LASTEXITCODE
 }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
@@ -1570,6 +1653,8 @@ if ($env:CHAT_SKILLS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
 } elseif ($env:CHAT_RETENTION_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-history-retention-proof.mjs" $Evidence
+} elseif ($Feature -eq 'chat-newest') {
+    & node "$PSScriptRoot/../chat-newest-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {

@@ -20,9 +20,10 @@
             Snapshot 'before'
             $buildsBefore = @([regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=1 columns=2 .*source=box')).Count
             $tabsBefore = @((Read-Session).tabs).Count
-            Palette 'new cmd'
-            Snapshot 'action'
-            Press @(0x0D) 'Enter: create another real CMD tab'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Snapshot 'action'
+                Press @(0x0D) 'Enter: create another real CMD tab'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $tabsBefore + 1 -and (Read-Session).active_tab -ne $tableTab } 'new CMD tab active and saved'
             Snapshot 'away'
             $awayLogLength = ((Get-Content $log -Raw) -join '').Length
@@ -78,8 +79,9 @@ Border 0x2514 0x2534 0x2518
             $wide = [regex]::Matches(((Get-Content $log -Raw) -join ''), 'CHAT_TABLE rows=4 columns=4 header_bold=1 content_w=(\d+) view_w=(\d+) source=box')
             $wideLine = $wide[$wide.Count - 1]
             Snapshot 'wide-in-chat'
-            Palette 'expand table' '6495'
-            Press @(0x0D) 'Enter: Chat View: Expand table'
+            Invoke-JourneyCommand 'Chat View: Expand table' -Confirm {
+                Press @(0x0D) 'Enter: Chat View: Expand table'
+            }
             Wait-Until { ((Get-Content $log -Raw) -join '') -match 'CHAT_TABLE_EXPAND open card_w=\d+ content_w=\d+ view_w=\d+' } 'expanded table overlay opened'
             Wait-Until { [VerifyNative]::Class([VerifyNative]::GetForegroundWindow()) -ceq 'MultiPromptTableOverlay' } 'expanded table overlay owns the foreground'
             $overlay = [VerifyNative]::GetForegroundWindow()

@@ -23,4 +23,6 @@ The journey creates a real skill definition under the isolated profile before la
 
 ## Gotchas
 
+Sent-history measurements stop at the owned composer's top edge. The transcript HWND extends behind the composer, so its full bounds also contain placeholder text and microphone pixels. Draft measurements still use the native Edit bounds.
+
 The fixture skill is discovered through the production local skill scanner. Delivery uses the actual local CMD console, not a remote AI provider; the journey proves the visible message treatment, not execution of a skill by an external agent. It does not alter the app's files after launch. Existing composer tests cover native scale, DPI, editing and text rendering.

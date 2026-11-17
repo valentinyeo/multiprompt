@@ -23,8 +23,9 @@ export function evaluate(directory) {
   const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'skill-pill.json'), 'utf8').replace(/^\uFEFF/, ''));
   const checks = manifest.captures.map(capture => {
     const image = readBmp(path.join(directory, `${capture.name}.bmp`));
-    const actual = measure(image, capture.rect, capture.theme === 'dark' ? [110, 175, 245] : [30, 90, 170]);
-    return { ...capture, ...actual, passed: capture.expected ? actual.pill : actual.ink === 0 && actual.fill === 0 };
+    const rect = capture.composerTop === undefined ? capture.rect : { ...capture.rect, bottom: Math.min(capture.rect.bottom, capture.composerTop) };
+    const actual = measure(image, rect, capture.theme === 'dark' ? [110, 175, 245] : [30, 90, 170]);
+    return { ...capture, rect, ...actual, passed: capture.expected ? actual.pill : actual.ink === 0 && actual.fill === 0 };
   });
   const required = ['dark', 'light'].flatMap(theme => ['unknown-draft', 'plain-draft', 'plain-sent', 'skill-draft', 'skill-sent'].map(stage => `${theme}-${stage}`));
   const passed = required.length === checks.length && required.every(name => checks.some(check => check.name === name)) && checks.every(check => check.passed);

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 
 const names = ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover'];
 const queueName = 'queue-draft-sync';
@@ -46,10 +47,15 @@ function evaluateEchoCase({ root, json, lines, png }, name) {
   assert.equal(observation.error, null, observation.error || 'driver error');
   assert.equal(observation.composerText, '', 'composer cleared after send');
   const input = lines(`${name}/stand-in/echo-input.jsonl`);
-  assert.deepEqual(input.map(row => [row.original, row.sent]), [[observation.text, observation.sentText]], 'one real composer message reached the source');
+  const dispatches = lines(`${name}/stand-in/message-dispatch.jsonl`);
+  assert.ok(dispatches.length > 0, 'production dispatcher received the composer message');
+  assert.ok(dispatches.every(row => row.result.message.text === observation.text), 'dispatch receipts match the original text');
+  const moved = dispatches.map(row => ({ result: { message: { ...row.result.message, text: observation.sentText } } }));
+  assert.deepEqual(input.map(row => [nativeText(row.original, dispatches), nativeText(row.sent, moved)]), [[observation.text, observation.sentText]], 'one real composer message reached the source with its delivery marker intact');
+  assert.equal(input[0].sent, observation.sentText + input[0].original.slice(observation.text.length), 'source preserves the delivery marker while moving the skill');
   const events = lines(`${name}/transcript.jsonl`);
-  assert.equal(events.filter(row => row.type === 'queue-operation' && row.operation === 'enqueue' && row.content === observation.sentText).length, 1);
-  assert.equal(events.filter(row => row.type === 'attachment' && row.attachment?.prompt === observation.sentText).length, 1);
+  assert.equal(events.filter(row => row.type === 'queue-operation' && row.operation === 'enqueue' && nativeText(row.content, moved) === observation.sentText).length, 1);
+  assert.equal(events.filter(row => row.type === 'attachment' && nativeText(row.attachment?.prompt, moved) === observation.sentText).length, 1);
   const outbox = json(`${name}/outbox-final.json`);
   assert.ok(outbox.queues.flatMap(queue => queue.messages).every(message => message.t !== observation.text), 'no leftover pending copy');
   const copied = fs.readFileSync(path.join(root, name, 'copied.txt'), 'utf8');
@@ -71,6 +77,26 @@ function evaluateEchoCase({ root, json, lines, png }, name) {
   assert.equal(cleanup.evidence_preserved, true);
   for (const stage of ['action', 'queued', 'after', 'final']) png(`${name}-${stage}.png`);
   return { original: observation.text, sent: observation.sentText, copies: 1, pending: 0 };
+}
+
+function persistentReader(invocations) {
+  const bootstrap = 'python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))';
+  return invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === `${bootstrap} --serve`)
+    || (invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === bootstrap)
+      && invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === '--serve' && Number.isSafeInteger(row.channel) && row.channel > 0));
+}
+
+function nativeText(text, dispatches) {
+  for (const row of dispatches) {
+    const message = row.result.message;
+    assert.equal(typeof message.id, 'string');
+    assert.equal(typeof message.attempt, 'string');
+    assert.equal(typeof message.text, 'string');
+    assert.ok(Number.isSafeInteger(message.epoch) && message.epoch >= 0);
+    const token = createHash('sha256').update(`${message.id}\n${message.attempt}\n${message.epoch}`).digest('hex').slice(0, 16);
+    text = text.replaceAll(`${message.text}\n[mp:${token}]`, () => message.text);
+  }
+  return text;
 }
 
 function evaluateDelivery(observation, events) {
@@ -138,7 +164,8 @@ function evaluateSendCase(context) {
   assert.ok(failed.length === 0, `journey steps failed: ${failed.join(', ')}`);
   const entered = json('actions.json').filter(action => action.case === name && action.input === 'Enter: send composer');
   assert.equal(entered.length, sendTexts.length, 'one real Enter per message');
-  const enqueued = lines(`${name}/transcript.jsonl`).filter(row => row.type === 'queue-operation' && row.operation === 'enqueue').map(row => row.content);
+  const dispatches = lines(`${name}/stand-in/message-dispatch.jsonl`);
+  const enqueued = lines(`${name}/transcript.jsonl`).filter(row => row.type === 'queue-operation' && row.operation === 'enqueue').map(row => nativeText(row.content, dispatches));
   const outbox = (json(`${name}/outbox-final.json`).queues || []).flatMap(queue => queue.messages || []);
   const pending = outbox.filter(message => message.s === 0 || message.s === 1 || message.s === 2).map(message => message.t);
   const joined = [...enqueued, ...pending].filter(text => typeof text === 'string' && sendTexts.filter(sent => text.includes(sent)).length > 1);
@@ -173,14 +200,16 @@ function evaluateQueueCase(context) {
   assert.equal(state.fake, true);
   assert.equal(state.mode, 'busy');
   assert.equal(state.suggestion, t.suggestion);
+  const dispatches = lines(`${stand}/message-dispatch.jsonl`);
+  const text = value => nativeText(value, dispatches);
   const transcript = lines(`${name}/transcript.jsonl`);
-  const operations = transcript.filter(row => row.type === 'queue-operation');
+  const operations = transcript.filter(row => row.type === 'queue-operation').map(row => ({ ...row, content: row.content === undefined ? undefined : text(row.content) }));
   assert.deepEqual(operations.filter(row => row.operation === 'enqueue').map(row => row.content), [t.a, t.b, t.a2, t.b], 'enqueue events in order');
   assert.deepEqual(operations.filter(row => row.operation === 'popAll').map(row => row.content), [`${t.a}\n${t.b}`]);
   assert.deepEqual(operations.filter(row => row.operation === 'remove').map(row => [row.content, row.reason]), [[t.a2, 'absorbed_mid_turn']]);
   assert.equal(operations.filter(row => row.operation === 'dequeue').length, 1);
-  assert.deepEqual(transcript.filter(row => row.type === 'attachment' && row.attachment.type === 'queued_command').map(row => row.attachment.prompt), [t.a2, t.b], 'Claude took both in order');
-  const frames = lines(`${stand}/frames.jsonl`);
+  assert.deepEqual(transcript.filter(row => row.type === 'attachment' && row.attachment.type === 'queued_command').map(row => text(row.attachment.prompt)), [t.a2, t.b], 'Claude took both in order');
+  const frames = lines(`${stand}/frames.jsonl`).map(frame => ({ ...frame, queue: frame.queue.map(text), box: text(frame.box) }));
   assert.ok(frames.length > 0 && frames.every(frame => frame.case === name));
   const frameIndex = (from, test) => {
     const index = frames.findIndex((frame, position) => position >= from && test(frame));
@@ -204,8 +233,11 @@ function evaluateQueueCase(context) {
   assert.ok(frames.length - 1 > draftIndex, 'the draft reached the shell box through the app before the agent message');
   const keys = lines(`${stand}/agent-buffer.jsonl`);
   assert.ok(keys.length > 0 && keys.every(row => row.case === name));
-  assert.ok(keys.some(row => row.argv.includes('-l') && row.argv.at(-1) === t.b), 'Chat View sent its queued message through the tmux channel');
+  const buffers = lines(`${stand}/tmux-buffers.jsonl`);
+  assert.ok(keys.some(row => row.argv.includes('-l') && text(row.argv.at(-1)) === t.b)
+    || buffers.some(row => row.argv[0] === 'paste-buffer' && typeof row.text === 'string' && text(row.text) === t.b), 'Chat View sent its queued message through the tmux channel');
   assert.ok(keys.every(row => !row.argv.some(value => value.includes(t.suggestion))), 'the grey suggestion was never treated as text');
+  assert.ok(buffers.every(row => row.case === name && (row.text == null || !row.text.includes(t.suggestion))), 'buffer transfers never contain the grey suggestion');
   const views = queueViews(fs.readFileSync(path.join(root, name, 'debug.log'), 'utf8'));
   const one = firstView(views, 0, [['queued', t.a]]);
   const two = firstView(views, one, [['queued', t.a], ['queued', t.b]]);
@@ -221,7 +253,7 @@ function evaluateQueueCase(context) {
   assert.ok(captures.length > 0 && captures.every(row => row.case === name), 'production reader inspected fake tmux input box');
   const invocations = lines(`${stand}/invocations.jsonl`);
   assert.ok(invocations.some(row => row.kind === 'attach' && row.session === 'verify-agent'));
-  assert.ok(invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === "python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline())) --serve"), 'app-supplied persistent reader bootstrap');
+  assert.ok(persistentReader(invocations), 'app-supplied persistent reader bootstrap');
   assert.equal(lines(`${stand}/unsupported.jsonl`).length, 0, 'no silently unsupported boundary operations');
   const doctor = json(`${name}/doctor.json`);
   const build = json('build.json');
@@ -293,7 +325,7 @@ function evaluateEvidence(root) {
       } else assert.ok(captures.every(row => row.screen === ready.screen && row.case === name));
       const invocations = lines(`${name}/stand-in/invocations.jsonl`);
       assert.ok(invocations.some(row => row.kind === 'attach' && row.session === 'verify-agent'));
-      assert.ok(invocations.some(row => row.kind === 'reader' && row.argv.join(' ') === "python3 -u -c import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline())) --serve"), 'app-supplied persistent reader bootstrap');
+      assert.ok(persistentReader(invocations), 'app-supplied persistent reader bootstrap');
       assert.equal(lines(`${name}/stand-in/unsupported.jsonl`).length, 0, 'no silently unsupported boundary operations');
       const doctor = json(`${name}/doctor.json`);
       const build = json('build.json');
@@ -356,4 +388,4 @@ if (require.main === module) {
   process.exitCode = result.status === 'passed' ? 0 : 1;
 }
 
-module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEchoCase, evaluateEvidence };
+module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, nativeText, evaluateDelivery, evaluateEchoCase, evaluateEvidence };
