@@ -232,7 +232,7 @@ function git(args, cwd, timeout) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout });
 }
 
-function readTree(rev, cwd, remaining, sourcePaths = []) {
+export function readTree(rev, cwd, remaining, sourcePaths = []) {
   const read = args => git(args, cwd, remaining?.());
   const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/', ...sourcePaths]).split('\0').filter(Boolean);
   return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));

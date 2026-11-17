@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { discoverFeatures } from './verify-features.cjs';
-import { runtimeZigTokens } from './version-stamp.mjs';
+import { readTree, runtimeZigTokens } from './version-stamp.mjs';
 
 const mapDirectory = '.claude/skills/verify-multiprompt/features';
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -56,13 +56,16 @@ export function collectPlan(base, sha, repo) {
   const commits = git(['rev-list', '--first-parent', '--reverse', `${base}..${sha}`]).split('\n').filter(Boolean);
   if (!commits.length) throw new Error('No commits since the last published release');
   const changes = commits.map(commit => {
+    const parent = git(['rev-parse', `${commit}^1`]);
     const prs = api(`repos/${repo}/commits/${commit}/pulls?per_page=100`).flat()
       .filter(pr => pr.merged_at && pr.merge_commit_sha === commit && pr.base.ref === 'master')
       .map(pr => ({ number: pr.number, url: pr.html_url }));
-    const files = git(['diff', '--no-renames', '--name-only', '-z', `${commit}^1`, commit]).split('\0').filter(Boolean);
-    const modified = git(['diff', '--no-renames', '--diff-filter=M', '--name-only', '-z', `${commit}^1`, commit]).split('\0').filter(Boolean);
-    const testOnlyFiles = modified.filter(file => file.startsWith('src/') && file.endsWith('.zig') &&
-      runtimeZigTokens(git(['show', `${commit}^1:${file}`])) === runtimeZigTokens(git(['show', `${commit}:${file}`])));
+    const files = git(['diff', '--no-renames', '--name-only', '-z', parent, commit]).split('\0').filter(Boolean);
+    const modified = git(['diff', '--no-renames', '--diff-filter=M', '--name-only', '-z', parent, commit]).split('\0').filter(Boolean);
+    const zigFiles = modified.filter(file => file.startsWith('src/') && file.endsWith('.zig'));
+    const before = zigFiles.length ? readTree(parent, undefined, undefined, zigFiles) : {};
+    const after = zigFiles.length ? readTree(commit, undefined, undefined, zigFiles) : {};
+    const testOnlyFiles = zigFiles.filter(file => runtimeZigTokens(before[file]) === runtimeZigTokens(after[file]));
     return { commit, prs, files, testOnlyFiles };
   });
   return releasePlan(base, sha, changes, releaseMaps());
