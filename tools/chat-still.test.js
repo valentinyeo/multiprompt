@@ -5,7 +5,11 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
-const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+const read = file => {
+  const full = path.join(__dirname, '..', file);
+  assert.ok(fs.existsSync(full), `The stillness gate requires ${file}`);
+  return fs.readFileSync(full, 'utf8');
+};
 
 test('chat source changes always run the stillness journey without an AI picker', () => {
   const workflow = read('.github/workflows/chat-still.yml');
