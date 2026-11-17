@@ -38,6 +38,44 @@ function verify(root) {
   assert.ok(doctor.pid > 0 && doctor.hwnd > 0 && doctor.chat);
   assert.match(doctor.sha256, /^[a-f0-9]{64}$/i);
   const actions = JSON.parse(fs.readFileSync(path.join(root, 'actions.json'), 'utf8').replace(/^\uFEFF/, ''));
+  assert.equal(json('saved-settings.json').model, 'fable');
+  assert.ok(!json('config-initial.json').model);
+  assert.ok(!json('config-initial.json').effort);
+  const initial = lines('argv-initial.jsonl');
+  assert.ok(initial.length > 0);
+  for (const row of initial) {
+    assert.equal(row.saved_model, 'fable');
+    assert.deepEqual(row.aliases, {});
+    const args = row.argv;
+    assert.equal(args.filter(arg => arg === '--model').length, 1);
+    assert.equal(args[args.indexOf('--model') + 1], 'opus');
+    assert.equal(args[args.indexOf('--effort') + 1], 'medium');
+  }
+  const defaults = json('plus-default.json');
+  assert.deepEqual(defaults.failures, []);
+  for (const item of ['model_opus', 'effort_medium']) {
+    assert.ok(defaults.expected_active.includes(item));
+    assert.ok(defaults.rows.some(row => row.item === item && row.accent >= 10));
+  }
+  for (const row of defaults.rows) {
+    assert.equal(row.mark, 0, row.item);
+    if (/^(model_|effort_)/.test(row.item) && !['model_opus', 'effort_medium'].includes(row.item)) assert.ok(row.accent < 10, row.item);
+  }
+  for (const [name, text, amber] of [['fable', 'Fable 5.2 · medium', true], ['opus', 'Opus 5.5 · medium', false]]) {
+    const header = json(`header-${name}.json`);
+    assert.equal(header.text, text);
+    assert.equal(header.amber, amber);
+    assert.ok(header.ink >= 10);
+    assert.ok(header.rect[1] >= header.titleBottom - 1 && header.rect[3] > header.titleBottom);
+    assert.equal(header.hand, true);
+    const cursor = json(`header-${name}-cursor.json`);
+    assert.equal(cursor.flags, 1);
+    assert.ok(cursor.expectedHand > 0);
+    assert.equal(cursor.actual, cursor.expectedHand);
+    assert.equal(header.pickerOpened, true);
+    assert.ok(actions.some(action => action.input === 'click header model' && action.text === text));
+  }
+  assert.ok(actions.some(action => action.input === 'Enter: send with the default model'));
   for (const [name, item, effort] of [['haiku', 'model_haiku', 'default'], ['low', 'effort_low', 'low'], ['medium', 'effort_medium', 'medium'], ['high', 'effort_high', 'high']]) {
     assert.ok(actions.some(action => action.input === 'choose plus menu row' && action.text === item));
     const config = json(`config-${name}.json`);
@@ -52,15 +90,15 @@ function verify(root) {
       const args = row.argv;
       const model = args.indexOf('--model');
       const level = args.indexOf('--effort');
-      return model >= 0 && args[model + 1] === 'haiku' && (effort === 'default' ? level < 0 : level >= 0 && args[level + 1] === effort);
+      return model >= 0 && args[model + 1] === 'haiku' && (level >= 0 && args[level + 1] === (effort === 'default' ? 'medium' : effort));
     }));
   }
-  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-plus-${choice}`, `model-after-${choice}`])]) {
+  for (const name of ['model-before', 'model-after', 'model-plus-menu-active', 'model-default-menu', 'model-header-fable', 'model-header-fable-picker', 'model-header-opus', 'model-header-opus-picker', ...['haiku', 'low', 'medium', 'high'].flatMap(choice => [`model-plus-${choice}`, `model-after-${choice}`])]) {
     const png = fs.readFileSync(path.join(root, `${name}.png`));
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(png.length > 1000);
   }
-  return { model: 'haiku', efforts: ['low', 'medium', 'high'], historyRetained: true, draftRetained: true };
+  return { defaultModel: 'opus', defaultEffort: 'medium', savedModel: 'fable', aliasesCleared: true, headers: ['Fable 5.2 · medium', 'Opus 5.5 · medium'], headerClickOpensPicker: true, handCursor: true, defaultMenu: ['model_opus', 'effort_medium'], model: 'haiku', efforts: ['low', 'medium', 'high'], historyRetained: true, draftRetained: true };
 }
 
 module.exports = { verify };
@@ -68,7 +106,7 @@ if (require.main === module) {
   const root = process.argv[2];
   try {
     const proof = verify(root);
-    fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-model', status: 'passed', agentBoundary: 'Production embedded reader and host; fixture SSH, Windows compatibility and synthetic Claude process; no model call', cases: [{ name: 'model-settings', passed: true, detail: proof }] }, null, 2));
+    fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-model', status: 'passed', checks: ['Opus and medium launch despite saved Fable and aliases', 'Running transcript model below the chat name', 'Amber Fable and grey Opus header pixels', 'Header hand cursor and click open the plus picker', 'Opus and medium menu defaults'], cleanup: JSON.parse(fs.readFileSync(path.join(root, 'cleanup.json'), 'utf8').replace(/^\uFEFF/, '')), agentBoundary: 'Production embedded reader and host; fixture SSH, Windows compatibility and synthetic Claude process; no model call', cases: [{ name: 'model-settings', passed: true, detail: proof }] }, null, 2));
     console.log(JSON.stringify(proof));
   } catch (error) {
     console.error(error);
