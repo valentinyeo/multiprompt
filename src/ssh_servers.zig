@@ -239,7 +239,7 @@ test "IGSH-1928 real OpenSSH isolates proven keys while preserving unproven fall
         });
         const script = try std.fmt.allocPrint(a, "{s}/private.ps1", .{base});
         defer a.free(script);
-        const secured = try std.process.run(a, io, .{ .argv = &.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-File", script, base } });
+        const secured = try std.process.run(a, io, .{ .argv = &.{ "pwsh.exe", "-NoProfile", "-NonInteractive", "-File", script, base } });
         defer a.free(secured.stdout);
         defer a.free(secured.stderr);
         if (secured.term != .exited or secured.term.exited != 0) std.debug.print("{s}", .{secured.stderr});
