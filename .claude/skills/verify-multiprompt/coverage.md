@@ -14,6 +14,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
+| SOFT-2567 batch 3 | Native tab identity, appearance, organization and local closure have executable input paths. | tab-actions | 32 declared recipes; hosted proof pending | Forty ordered actions, app-written before/after state, exact clipboard identities, native process exits, nine control-console markers and restart persistence. Real local CMD processes, no seeded profile or provider stand-ins. |
 | SOFT-2559 | Opening a chat never moves its messages. | chat-still, verify-chat-still | verification added; inherited overlay reproduced on head and master | Independent DeepSeek review confirmed the same pixel failure on both builds; do not call the product fixed. |
 | SOFT-2489 | Press Shift+G twice in an empty chat box to reach the newest message. | chat-newest | focused journey added, hosted proof pending | Real keyboard jump and palette execution, exact native draft reads, ordinary lowercase/slow/draft typing and owned cleanup appear directly in result.json. Existing history/performance journeys are unchanged. |
 | IGSH-1729 | Pasted dictation keys normalize and rejected keys stay unsaved. | settings-panel | journey extended, not run | Run hosted branch and published baseline; baseline must fail wrapped-key normalization. Inspect inline errors, cancellation and screenshots. Loopback replaces only key-check HTTP. |

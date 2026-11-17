@@ -113,6 +113,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Workspaces](workspaces.md): create an in-process workspace, switch away and return without losing it.
 - [Servers](servers.md): add a disposable server in the real app, paste its one setup line, test the own-key sign-in, then remove it and require the key to be refused. Manual-only release journey.
 - [Session open](session-open.md): discover workspaces/groups and create a named background tmux tab through the real agent bridge; prove repeat no-op and unchanged selection, and require failed SSH status with its logged exit code; successful remote attachment remains outside verification.
+- [Native tab actions](tab-actions.md): identity, appearance, grouping, workspace moves and local closure through actual menus, with saved-state and process receipts.
 - [Session tabs](session-tabs.md): `zsb session-rename`, `session-rebind`, `session-move` and `session-close` repair four background tabs without changing the active tab or foreground window, and the saved layout survives a restart exactly.
 - [Workspace focus](workspace-focus.md): restore Chat View typing and shell input after keyboard workspace switches.
 - [Inbox without shortcut legend](inbox-no-footer.md): manual paired release/branch pixel proof across Inbox states and themes.

@@ -89,6 +89,10 @@ The [Chat dictation](features/chat-dictation.md) journey (`feature=chat-dictatio
 
 The [Jump to newest](features/chat-newest.md) journey (`feature=chat-newest`) verifies Shift+G twice and the matching palette action with exact native draft reads. Its named `result.json` checks are independent of the separate full-history restart/performance journey.
 
+## Native tab action receipts
+
+The `tab-actions` journey creates real local CMD tabs through input and exercises forty context, global-palette and keyboard steps. It reads current painted sidebar geometry, matches source-derived routing IDs and requires production palette confirmations, app-written saved state, clipboard identity and actual CMD process exits. `tab-actions.test.cjs --catalog` supplies the current routing numbers; `--evidence <directory>` validates retained receipts and screenshots. Run the focused checker suite with `node --test .claude/skills/verify-multiprompt/tab-actions.test.cjs`. See [Native tab actions](features/tab-actions.md). No remote/provider or account synchronization claim follows from local processes.
+
 ## PR verifier
 
 Every pull request from this repository gets an independent verdict from `.github/workflows/pr-verifier.yml`. It runs on GitHub's hosted runners only. To verify an open pull request by hand:
