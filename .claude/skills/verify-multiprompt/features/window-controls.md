@@ -1,5 +1,7 @@
 # Window controls
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-window-controls.ps1
+
 ## Sub-features
 
 The app draws three grey minimize, maximize/restore and close buttons at the top right. There is no native Windows title bar or replacement full-width header. The session separator reaches the top edge. Native resize edges, a thin draggable top strip, double-click maximize and Windows snapping remain available.

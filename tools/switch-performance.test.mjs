@@ -102,8 +102,10 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   for (const build of [baseline, candidate]) {
     assert.ok(build.includes('ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache'), 'Each speed build must reuse the restored local Zig cache');
     assert.ok(build.includes('ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache'), 'Each speed build must cache its global Zig tree');
-    assert.match(build, /uses: actions\/cache\/restore@[0-9a-f]{40}/, 'Pull requests must restore the speed Zig cache');
-    assert.match(build, /uses: actions\/cache@[0-9a-f]{40}/, 'Master pushes must save the speed Zig cache');
+    const caches = build.split(/(?=^      - )/m).filter(step => step.includes('.zig-cache') && /uses: actions\/cache/.test(step));
+    assert.equal(caches.length, 1, 'One incremental speed cache serves every event');
+    assert.match(caches[0], /uses: actions\/cache@[0-9a-f]{40}/);
+    assert.match(caches[0], /key: [^\n]*github.sha/);
     assert.ok(build.includes('-zig-0.16.0-speed-'), 'The speed cache must use its own key prefix');
   }
 });

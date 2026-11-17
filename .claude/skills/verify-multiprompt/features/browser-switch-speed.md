@@ -1,5 +1,7 @@
 # Browser session switch speed
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-switch-speed.ps1
+
 ## Sub-features
 
 - Real Ctrl+Tab latency in console view and Chat View, each with browser panes off, warm, and freshly frozen.

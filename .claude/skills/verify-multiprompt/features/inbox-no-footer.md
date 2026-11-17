@@ -1,5 +1,7 @@
 # Inbox without shortcut legend
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox-no-footer.ps1
+
 ## Sub-features
 
 - The bottom Inbox legend is absent in normal, search, no-match and unread-only states.

@@ -6,7 +6,7 @@ const { followDecision } = require('./release-follow.cjs');
 
 const workflowDir = path.join(__dirname, '..', '.github', 'workflows');
 const group = 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
-const cancel = "cancel-in-progress: ${{ github.event_name == 'pull_request' }}";
+const cancel = "cancel-in-progress: true";
 
 function read(name) {
   return fs.readFileSync(path.join(workflowDir, name), 'utf8');
@@ -59,12 +59,12 @@ test('every pull_request workflow cancels only a superseded pull request run', (
   }
 });
 
-test('the release workflow does not cancel an in-progress publication', () => {
-  for (const name of ['release.yml', 'auto-release.yml']) {
-    assert.doesNotMatch(read(name), /cancel-in-progress:\s*(?:true|\$\{\{\s*true\s*\}\})/);
+test('every workflow cancels superseded work with an explicit group', () => {
+  for (const name of fs.readdirSync(workflowDir).filter(name => /\.ya?ml$/.test(name))) {
+    const concurrency = topConcurrency(read(name));
+    assert.match(concurrency, /^  group: .+$/m, name);
+    assert.match(concurrency, /^  cancel-in-progress: true$/m, name);
   }
-  assert.match(topConcurrency(read('release.yml')), /cancel-in-progress:\s*false/);
-  assert.match(topConcurrency(read('auto-release.yml')), /cancel-in-progress:\s*false/);
   assert.doesNotMatch(onBlock(read('release.yml')), /pull_request/);
   assert.doesNotMatch(onBlock(read('auto-release.yml')), /pull_request/);
 });
@@ -84,8 +84,8 @@ test('a newer master commit still gets a release when this run is not the tip', 
   }
 });
 
-test('a release-called secret scan never shares a concurrency group with another release', () => {
+test('a release-called secret scan has its own cancellation group', () => {
   const text = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '.github', 'workflows', 'gitleaks.yml'), 'utf8');
   const group = text.match(/^concurrency:\n  group: (.+)$/m)[1];
-  require('node:assert').match(group, /inputs\.release_scan && github\.run_id/);
+  require('node:assert').match(group, /inputs\.release_scan && 'release'/);
 });

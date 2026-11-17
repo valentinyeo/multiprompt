@@ -1,5 +1,7 @@
 # Browser typing
 
+Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-browser-typing.ps1
+
 ## Sub-features
 
 - The Multiprompt address Edit receives ordinary characters after repeated page and address focus changes.

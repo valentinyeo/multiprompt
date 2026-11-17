@@ -25,8 +25,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: account-journey-${{ (inputs.pictures || inputs.pictures_isolated) && 'pictures' || github.run_id }}
-  cancel-in-progress: false
+  group: account-journey-${{ (inputs.pictures || inputs.pictures_isolated) && 'pictures' || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   desktop:
