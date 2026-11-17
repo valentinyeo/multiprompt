@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { discoverFeatures } = require('./verify-features.cjs');
+const { touchedJourneys } = require('./touched-journeys.cjs');
 
 const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
@@ -39,28 +40,26 @@ function validateSelection(raw, available, pr = {}) {
   const allowed = new Set(selectable(available));
   const requirement = reproRequirement(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
-  const required = [];
+  const requiredFeatures = [];
   const changedPaths = (pr.files || []).map(file => file.path);
   if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
     if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
-    required.push('chat-still');
+    requested.unshift('chat-still');
+    requiredFeatures.push('chat-still');
   }
-  if (requirement.bugFix && requirement.reproJourney) required.unshift(requirement.reproJourney);
+  if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
-  let picked = 0;
-  for (const name of [...required, ...requested]) {
+  for (const name of requested) {
     if (features.includes(name) || dropped.includes(name)) continue;
-    const mandatory = required.includes(name);
-    if (allowed.has(name) && (mandatory || picked < MAX_FEATURES)) {
-      features.push(name);
-      if (!mandatory) picked++;
-    } else dropped.push(name);
+    if (allowed.has(name) && features.length < MAX_FEATURES) features.push(name);
+    else dropped.push(name);
   }
   return {
     features,
     dropped,
     ...requirement,
+    requiredFeatures,
     compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
@@ -186,8 +185,7 @@ function failedHeadFeatures(jobs, features) {
   const list = Array.isArray(jobs) ? jobs : [];
   const failed = [];
   for (const feature of names) {
-    const prefix = `head ${feature} /`;
-    const mine = list.filter(job => job && (job.name === `head ${feature}` || String(job.name || '').startsWith(prefix)));
+    const mine = list.filter(job => job && (job.name === `head / verify (${feature})` || String(job.name || '').startsWith(`head / verify (${feature}, `)));
     const finished = mine.filter(job => job.conclusion && job.conclusion !== 'skipped');
     if (finished.some(job => job.conclusion !== 'success')) failed.push(feature);
   }
@@ -315,24 +313,65 @@ function recoveryReport(run, headSha, comments) {
   return { result: 'BLOCKED', body: `pstack-verifier: BLOCKED @ ${headSha}\n\nVerifier run ${run.conclusion} before recording a verdict. Infrastructure, cancellation or runner queue prevented verification.\n\nRun: ${run.html_url}\n${MARKER}\n` };
 }
 
+function cancelledRunNeedsRetry(run, pr, checks, runs) {
+  if (run.conclusion !== 'cancelled' || pr.state !== 'open' || pr.draft) return false;
+  const head = pr.head.sha;
+  if (checks.some(check => check.head_sha === head &&
+    (check.name === 'pstack-verifier recovery' || (check.name === 'pstack-verifier' && check.conclusion === 'success')))) return false;
+  return !runs.some(candidate => Number(candidate.id) !== Number(run.id) && candidate.display_title === `verify PR ${pr.number}` &&
+    (candidate.head_sha === head || candidate.event === 'workflow_dispatch') && !['completed', 'cancelled'].includes(candidate.status));
+}
+
+function githubState(env, { number, headSha }) {
+  const [owner, name] = env.REPO.split('/');
+  const suites = `checkSuites(last:100) { nodes { status conclusion workflowRun { databaseId workflow { name } }
+    ${number ? `verdicts:checkRuns(last:20,filterBy:{checkName:"pstack-verifier",checkType:ALL}) { nodes { databaseId name status conclusion completedAt summary } }
+    recoveries:checkRuns(last:1,filterBy:{checkName:"pstack-verifier recovery",checkType:ALL}) { nodes { databaseId name status conclusion completedAt summary } }` : ''}
+  } }`;
+  const selection = number
+    ? `pullRequest(number:$number) { number state isDraft title body headRefOid baseRefName headRepository { nameWithOwner }
+        comments(last:100) { nodes { body author { __typename login } } } commits(last:1) { nodes { commit { ${suites} } } } }`
+    : `object(oid:$head) { ...on Commit { ${suites} } }`;
+  const query = `query($owner:String!,$name:String!,${number ? '$number:Int!' : '$head:GitObjectID!'}) { repository(owner:$owner,name:$name) { ${selection} } }`;
+  const response = JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, number ? '-F' : '-f', number ? `number=${number}` : `head=${headSha}`]));
+  if (response.errors?.length) throw new Error('GitHub state query failed');
+  const repository = response.data?.repository;
+  const pull = repository?.pullRequest;
+  const commit = number ? pull?.commits.nodes.at(-1)?.commit : repository?.object;
+  if (!commit) throw new Error('GitHub did not return the requested head state');
+  const sha = number ? pull.headRefOid : headSha;
+  const checks = [], tests = [];
+  for (const suite of commit.checkSuites.nodes) {
+    if (suite.workflowRun?.workflow.name === 'Tests') tests.push({ id: suite.workflowRun.databaseId, status: suite.status.toLowerCase(), conclusion: suite.conclusion?.toLowerCase() || '' });
+    for (const check of [...(suite.verdicts?.nodes || []), ...(suite.recoveries?.nodes || [])]) checks.push({ id: check.databaseId, name: check.name, head_sha: sha, status: check.status.toLowerCase(), conclusion: check.conclusion?.toLowerCase() || '', completed_at: check.completedAt, output: { summary: check.summary || '' } });
+  }
+  return { checks, tests, comments: pull?.comments.nodes.map(comment => ({ body: comment.body, user: { login: comment.author?.__typename === 'Bot' ? `${comment.author.login}[bot]` : comment.author?.login || '' } })) || [],
+    pr: pull && { number: pull.number, state: pull.state.toLowerCase(), draft: pull.isDraft, title: pull.title, body: pull.body,
+      head: { sha, repo: { full_name: pull.headRepository?.nameWithOwner } }, base: { ref: pull.baseRefName } } };
+}
+
 function recover(env) {
-  const run = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).workflow_run;
+  const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
+  const run = event.workflow_run;
   if (!run || run.head_repository?.full_name !== env.REPO || !['pull_request', 'workflow_dispatch'].includes(run.event)) return;
   const number = run.pull_requests?.[0]?.number || run.display_title?.match(/^verify PR (\d+)$/)?.[1];
   if (!number) return;
-  const pr = JSON.parse(gh(['api', `repos/${env.REPO}/pulls/${number}`]));
+  const { pr, checks, comments, tests } = githubState(env, { number });
   if (pr.state !== 'open' || pr.head.repo?.full_name !== env.REPO) return;
-  const headSha = run.pull_requests?.[0]?.head?.sha || pr.head.sha;
-  if (headSha !== pr.head.sha) return;
-  const checks = gh(['api', '--paginate', `repos/${env.REPO}/commits/${headSha}/check-runs?filter=all&per_page=100`, '--jq', '.check_runs[]'])
-    .split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const headSha = pr.head.sha;
+  if (run.conclusion === 'cancelled') {
+    const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/runs?per_page=100`, '--jq', '.workflow_runs']));
+    if (cancelledRunNeedsRetry(run, pr, checks, runs)) {
+      gh(['api', `repos/${env.REPO}/check-runs`, '-X', 'POST', '-f', 'name=pstack-verifier recovery', '-f', `head_sha=${headSha}`, '-f', `external_id=${headSha}`, '-f', 'status=completed', '-f', 'conclusion=neutral', '-f', 'output[title]=Cancelled verifier recovery reserved', '-f', 'output[summary]=The one automatic recovery attempt is reserved for this head. A successful independent verdict is still required.']);
+      gh(['api', `repos/${env.REPO}/actions/workflows/pr-verifier.yml/dispatches`, '-X', 'POST', '-f', `ref=${event.repository.default_branch}`, '-f', `inputs[pr]=${pr.number}`]);
+    }
+  }
+  if (run.pull_requests?.[0]?.head?.sha && run.pull_requests[0].head.sha !== headSha) return;
   if (!recoveryNeeded(run, headSha, checks)) return;
-  const comments = gh(['api', '--paginate', `repos/${env.REPO}/issues/${number}/comments?per_page=100`, '--jq', '.[] | {body,user:{login:.user.login}}'])
-    .split('\n').filter(Boolean).map(line => JSON.parse(line));
   let { result, body } = recoveryReport(run, headSha, comments);
   if (checkConclusion(result) === 'success') {
     let gate;
-    try { gate = testsGate(testsRuns(env, headSha)); }
+    try { gate = testsGate(testsRuns(env, headSha, tests)); }
     catch { gate = { reason: 'Tests could not be confirmed' }; }
     if (gate.action !== 'pass') {
       ({ result, body } = recoveryReport(run, headSha, []));
@@ -400,8 +439,10 @@ function prepare(env, outDir) {
   ].join('\n');
   fs.writeFileSync(path.join(outDir, 'pr.md'), context);
   fs.writeFileSync(path.join(outDir, 'pr.json'), JSON.stringify(pr));
-  const available = availableFeatures(env);
-  fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(selectable(available), null, 2));
+  const files = execFileSync('git', ['diff', '--name-only', '-z', `${env.BASE_SHA}...HEAD`], { encoding: 'utf8' }).split('\0').filter(Boolean);
+  const mapped = touchedJourneys(files, env.FEATURES_DIR);
+  fs.writeFileSync(path.join(outDir, 'mapped.json'), JSON.stringify(mapped, null, 2));
+  fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(mapped.features, null, 2));
 }
 
 function latestArtifacts(artifacts, selection, baseSha) {
@@ -579,10 +620,11 @@ async function pickDeepseek(env, outDir) {
   setOutputs({ structured_output: structured });
 }
 
-function testsRuns(env, headSha) {
-  const raw = gh(['api', `repos/${env.REPO}/actions/workflows/test.yml/runs?head_sha=${headSha}&per_page=20`, '--jq', '[.workflow_runs[] | {id, status, conclusion}]']);
-  const parsed = JSON.parse(raw || '[]');
-  return Array.isArray(parsed) ? parsed : [];
+function testsRuns(env, headSha, suites) {
+  const snapshot = suites || githubState(env, { headSha }).tests;
+  if (testsGate(snapshot).action === 'wait') return snapshot;
+  const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/test.yml/runs?head_sha=${headSha}&per_page=20`, '--jq', '[.workflow_runs[] | {id, status, conclusion}]']));
+  return runs;
 }
 
 async function waitForTests(env) {
@@ -594,7 +636,9 @@ async function waitForTests(env) {
   }
   if (!/^[0-9a-f]{40}$/.test(head)) throw new Error('Pull request head was not found');
   const deadline = Date.now() + Number(env.WAIT_MS || 75 * 60 * 1000);
-  const poll = Number(env.POLL_MS || 30000);
+  let poll = Number(env.POLL_MS || 60000);
+  const maxPoll = Number(env.MAX_POLL_MS || 300000);
+  if (!Number.isFinite(poll) || poll <= 0 || !Number.isFinite(maxPoll) || maxPoll < poll) throw new Error('POLL_MS must be positive and MAX_POLL_MS must be at least POLL_MS');
   for (;;) {
     const decision = testsGate(testsRuns(env, head));
     process.stdout.write(`${decision.reason}\n`);
@@ -606,6 +650,7 @@ async function waitForTests(env) {
     }
     if (Date.now() + poll > deadline) throw new Error('Tests did not pass before the wait ended');
     await new Promise(resolveWait => setTimeout(resolveWait, poll));
+    poll = Math.min(poll * 2, maxPoll);
   }
 }
 
@@ -627,7 +672,14 @@ async function main(argv, env) {
   if (command === 'select') {
     const outDir = rest[0];
     const pr = JSON.parse(fs.readFileSync(path.join(outDir, 'pr.json'), 'utf8'));
-    const selection = validateSelection(env.SELECTION, availableFeatures(env), pr);
+    const available = availableFeatures(env);
+    const selection = validateSelection(env.SELECTION, available, pr);
+    const mapped = JSON.parse(fs.readFileSync(path.join(outDir, 'mapped.json'), 'utf8'));
+    const repro = selection.bugFix && available.includes(selection.reproJourney) ? [selection.reproJourney] : [];
+    selection.features = [...new Set([...mapped.features, ...repro, ...selection.requiredFeatures])].sort();
+    selection.dropped = [];
+    selection.compareBase = selection.features.length > 0 && (selection.bugFix || JSON.parse(env.SELECTION).compare_base !== false);
+    selection.unmapped = mapped.unmapped;
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);
@@ -704,7 +756,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|failed-head|prepare|select|download|summarize|pick-deepseek|judge-deepseek|finalize');
 }
 
-module.exports = { MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
+module.exports = { waitForTests, githubState, cancelledRunNeedsRetry, MARKER, DEEPSEEK_MODEL, pickEngine, judgeMessages, pickerMessages, deepseekRequestBody, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, selectable, featureDirPattern, testsGate, failedHeadFeatures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

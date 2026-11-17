@@ -97,6 +97,7 @@ test('Manual native workflow proof restores the same Zig caches as PR checks', (
   const nativeJob = read('.github/workflows/test.yml').split('  test-update-source:')[0];
   for (const name of ['Restore Zig toolchain (PR)', 'Restore Zig (PR)']) {
     const condition = nativeJob.split(`- name: ${name}\n`)[1]?.split('\n')[0];
-    assert.ok(condition?.includes("github.event_name == 'workflow_dispatch'"), name);
+    assert.ok(condition?.includes("steps.paths.outputs.heavy == 'true'"), name);
+    assert.equal(condition.includes('github.event_name'), false, name);
   }
 });

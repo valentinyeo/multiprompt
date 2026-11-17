@@ -1,5 +1,7 @@
 # Inbox bottom space
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox-space.ps1
+
 ## Sub-features
 
 - Existing rows use all space above the existing footer.

@@ -103,7 +103,7 @@ gh run list --workflow pr-verifier.yml --limit 5 --json databaseId,headSha,url
 timeout 3000 gh run watch <id> --interval 300
 ```
 
-DeepSeek picks up to three optional journeys from `features/` that exercise the change. Required stillness and repair-reproduction journeys run in addition and never displace the picker's direct feature checks. For the selected journeys, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
+DeepSeek picks up to three journeys from `features/` that exercise the change, `verify.yml` runs them on the pull request head and on the merge base with the same harness, and a second pass reads the evidence against the Done-when lines. The picker and the judge call `https://api.deepseek.com` with model `deepseek-flash` (DeepSeek-V4.1-Flash, never Pro). Claude runs both passes only when a commit carries a DeepSeek Co-Authored-By trailer, so the judge is never the author's model family. Grok-authored and Claude-authored pull requests stay on DeepSeek. The check is named `pstack-verifier` and the result is one comment whose first line is `pstack-verifier: PASS|PASS+NOTES|FAIL @ <head sha>`. A failed head journey forces `FAIL`. A change no journey covers is capped at `PASS+NOTES`, with a generated journey map in the `pr-verifier-selection` artifact as the reviewer's checklist. The generated map is not run, because every journey needs a PowerShell driver in `control.ps1`. The decision logic lives in `tools/pr-verifier.cjs`.
 
 ### Reproduce before fixing
 
@@ -217,6 +217,24 @@ Use `/maintain-verification-skill` when menus, keyboard routing, persistence or 
 
 - [Skill pills](features/chat-skill-pill.md): native draft and sent-history colors on dark and light themes.
 - [Chat options](features/chat-options.md): clickable answer cards for lettered or numbered options and terminal pick lists.
+
+## Part S. Verification speed
+
+PRs select journeys from each feature map's `Source files:` line. Run every match. An unknown application source selects all runnable journeys; never cap the result to save time. Documentation and CI-only edits use the required Tests and independent verifier without unrelated UI journeys.
+
+Selection and desktop journeys overlap Tests. A verdict still requires Tests to pass for the exact PR head. The independent judge, PASS, PASS+NOTES, FAIL, BLOCKED, inherited-failure handling, and cleanup requirements do not change.
+
+One application build per revision is shared within each run. Signed update fixtures, source instrumentation, and symbolized builds retain separate binaries because their build inputs differ. Zig toolchains and compilation are cached. Never accept a cached binary without the embedded version, revision, and hash checks.
+
+All workflows cancel superseded work. Keep reusable workflow groups separate from their callers. Run the full runnable set nightly on master and before release publication. Keep all Tests shards, update scenarios, speed comparisons, and five-minute idle observations.
+
+Measure real automatic runs, including queue time and cancellations. Put run links, sample counts, elapsed times, and conclusions in the PR body. Do not report a failed or cancelled run as a speedup. Push once per fix and never dispatch additional measurements.
+
+Cancelled verifier runs recover the latest open PR head automatically, at most once per head. Recovery skips drafts, existing active runs, and successful verdicts. It never retries product failures or dispatches measurement runs. Cancelling a superseded run stops its queued report jobs; the separate completion observer keeps cancellation BLOCKED until a fresh independent verdict passes.
+
+Verifier recovery reads PR metadata, head checks, comments and Tests status in one GraphQL snapshot. Tests and release-status polling start at one minute and back off to five minutes. Missing head state, API errors, and non-green Tests remain fail-closed; snapshots never substitute an older successful head or attempt.
+
+A terminal check-suite result is confirmed once against the actual Tests workflow run. Custom verifier checks can attach to another workflow's suite, so the suite's conclusion alone cannot prove that Tests passed or failed.
 
 ## Chat stillness
 

@@ -2,6 +2,7 @@
 
 Covers: palette:SEARCH_CHAT_ALLOW_OFFSET, palette:SEARCH_CHAT_ALWAYS_OFFSET, palette:SEARCH_CHAT_DENY_OFFSET
 Covers: shortcut:palette-actions/1-or-alt-y-in-chat-view-ctrl-k-chat-view-allow, shortcut:palette-actions/2-or-alt-o-in-chat-view-ctrl-k-chat-view-always-allow, shortcut:palette-actions/3-or-alt-d-in-chat-view-ctrl-k-chat-view-deny
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-permission-rows.ps1
 
 ## Sub-features
 

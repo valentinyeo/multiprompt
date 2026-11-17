@@ -2,6 +2,7 @@
 
 Covers: palette:SEARCH_CHAT_MODE_PLAN_OFFSET, palette:SEARCH_CHAT_MODE_MANUAL_OFFSET, palette:SEARCH_CHAT_MODE_EDITS_OFFSET, palette:SEARCH_CHAT_MODE_BYPASS_OFFSET, palette:SEARCH_CHAT_PLUS_MENU_OFFSET
 Covers: shortcut:palette-actions/ctrl-k-chat-view-plus-menu, shortcut:palette-actions/plan-or-permissions-in-live-chat-or-ctrl-k-chat-view-plus-menu
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-slash.ps1
 
 ## Sub-features
 
@@ -26,6 +27,8 @@ Use the automatic PR verifier's `chat-slash` Windows journey. It invokes `contro
 4. Open **Chat View: Plus Menu** through Ctrl+K for each mode. From its initial unselected state, press Up twice for Plan, four times for Ask, three times for Accept edits and once for Bypass. Press Enter. Require the same draft and one acknowledgement per choice.
 5. Open Plus again and press Escape. Require the unchanged draft and no thirteenth control.
 6. Require exactly twelve receiving controls and twelve successful acknowledgements for the saved originating SID. The ordered modes are `plan,manual,acceptEdits,bypassPermissions`, repeated for slash, palette and Plus. No slash command may enter the ordinary outbox.
+
+The journey first opens a saved host-0 tab whose reported folder belongs to the other server account. It types `/verify-owner` and accepts it with Tab. The isolated SSH boundary serves that skill only as the tab's account on its original server. Retain `completion-owner.jsonl`, `slash-owner-catalog.png` and `slash-owner-accepted.png`. On master, the request uses the login account and the skill cannot be accepted.
 
 The driver runs `chat-control-coverage.test.cjs --mode-evidence <evidence>` against the retained raw controls, replies, resulting mode and `mode-inputs.json`. Inspect each `mode-<route>-<mode>-received.png`, picker screenshots, notices, `doctor.json`, actions and zero-process cleanup. Receipt checks establish native routing, not visual polish or real provider execution.
 

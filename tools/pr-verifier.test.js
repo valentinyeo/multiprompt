@@ -118,12 +118,11 @@ test('a passed head does not need a base run', () => {
 
 test('the base side is only the head journeys that failed', () => {
   const jobs = [
-    { name: 'head appearance / build-app', conclusion: 'success' },
-    { name: 'head appearance / verify (appearance)', conclusion: 'failure' },
-    { name: 'head chat-view / verify (chat-view)', conclusion: 'success' },
-    { name: 'head chat-view / build-app', conclusion: 'success' },
-    { name: 'base appearance / verify (appearance)', conclusion: 'failure' },
-    { name: 'head palette-order / reopen-board-contract', conclusion: 'skipped' },
+    { name: 'head / build-app', conclusion: 'success' },
+    { name: 'head / verify (appearance)', conclusion: 'failure' },
+    { name: 'head / verify (chat-view)', conclusion: 'success' },
+    { name: 'base / verify (appearance)', conclusion: 'failure' },
+    { name: 'head / verify (palette-order)', conclusion: 'skipped' },
   ];
   assert.deepEqual(verifier.failedHeadFeatures(jobs, ['appearance', 'chat-view', 'palette-order']), ['appearance']);
 });
@@ -134,7 +133,9 @@ test('the verifier waits until Tests passes for that head and still posts the ch
   assert.equal(verifier.testsGate([{ id: 2, status: 'completed', conclusion: 'failure' }, { id: 1, status: 'completed', conclusion: 'success' }]).action, 'fail');
   assert.equal(verifier.testsGate([{ id: 1, status: 'completed', conclusion: 'failure' }, { id: 2, status: 'completed', conclusion: 'success' }]).action, 'pass');
   assert.match(workflow, /node tools\/pr-verifier\.cjs wait-for-tests/);
-  assert.match(workflow, /needs: \[resolve, tests\]/);
+  assert.match(workflow, /select:\n    needs: resolve/);
+  assert.match(workflow, /tests:\n    needs: \[resolve, select, head, failed-head, base\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head, failed-head, base\]/);
   assert.match(workflow, /needs\.failed-head\.outputs\.features/);
   assert.match(workflow, /head_sha="\$HEAD_SHA"/);
   assert.match(workflow, /repos\/\$REPO\/check-runs/);
@@ -244,9 +245,10 @@ test('the verifier reuses verify.yml for head and for the merge base build', () 
   assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
   assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      app_revision: \$\{\{ needs\.resolve\.outputs\.base_sha \}\}/);
   assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
-  assert.match(verify, /app-revision: \$\{\{ inputs\.app_revision && fromJSON\(format\('\["\{0\}"\]', inputs\.app_revision\)\)/);
+  assert.match(verify, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
+  assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
   assert.match(verify, /continue-on-error: .*inputs\.app_revision != ''/);
-  assert.match(verify, /name: verify-app\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
+  assert.match(verify, /name: verify-app\$\{\{ matrix\.profile == 'chat-still' && '-chat-still' \|\| '' \}\}\$\{\{ inputs\.app_revision && '-compare' \|\| '' \}\}/);
 });
 
 test('the verdict job fails the check on FAIL and posts one comment', () => {
@@ -537,11 +539,11 @@ test('job timeouts and cancellations block even when product result files passed
 });
 
 
-test('mandatory stillness preserves the three optional journey slots', () => {
+test('chat changes cannot omit the stillness journey or exceed the journey limit', () => {
   const maps = [...available, 'chat-still'];
   const raw = { features: ['appearance', 'command-palette', 'palette-order'], compare_base: false };
   for (const file of ['src/chat_render.zig', 'src/chat_session.zig', 'src/chat_history_reader.py', 'src/main.zig', 'src/browser_pane.zig', 'src/window_layout.zig', 'tools/chat-still/observer.cs', 'tools/verify-chat-delivery/boundary.py', '.claude/skills/verify-multiprompt/control-feature-chat-still.ps1']) {
-    assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: file }] }).features, ['chat-still', 'appearance', 'command-palette', 'palette-order']);
+    assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: file }] }).features, ['chat-still', 'appearance', 'command-palette']);
   }
   assert.deepEqual(verifier.validateSelection(raw, maps, { files: [{ path: 'docs/readme.md' }] }).features, raw.features);
   assert.throws(() => verifier.validateSelection(raw, available, { files: [{ path: 'src/chat_render.zig' }] }), /require the chat-still journey/);
@@ -554,20 +556,8 @@ test('repair repro and mandatory chat stillness both survive a full picker selec
     [...available, 'chat-still'],
     { title: 'Fix chat selection', body: 'Repro journey: command-palette', files: [{ path: 'src/chat_render.zig' }] },
   );
-  assert.deepEqual(result.features, ['command-palette', 'chat-still', 'appearance', 'palette-order', 'chat-view']);
+  assert.deepEqual(result.features, ['command-palette', 'chat-still', 'appearance']);
   assert.equal(result.compareBase, true);
-});
-
-test('mandatory stillness cannot displace Stop proof from the chat-control matrix', () => {
-  const maps = [...available, 'chat-still', 'permission-rows', 'chat-slash'];
-  const pr = { files: [{ path: '.claude/skills/verify-multiprompt/control-feature-chat-view.ps1' }] };
-  const requested = ['permission-rows', 'chat-slash', 'chat-view'];
-  const result = verifier.validateSelection({ features: requested, compare_base: false }, maps, pr);
-  assert.deepEqual(result.features, ['chat-still', ...requested]);
-  assert.deepEqual(result.dropped, []);
-  const overflow = verifier.validateSelection({ features: ['chat-still', ...requested, 'appearance'] }, maps, pr);
-  assert.deepEqual(overflow.features, ['chat-still', ...requested]);
-  assert.deepEqual(overflow.dropped, ['appearance']);
 });
 
 test('inspecting known failed tests can never turn an independent PASS into a green gate', () => {

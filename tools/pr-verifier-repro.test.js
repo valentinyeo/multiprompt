@@ -59,7 +59,7 @@ test('non-fix PRs keep the existing optional baseline behaviour', () => {
 
 test('the declared repro takes priority over the picker and forces a master comparison', () => {
   const selected = verifier.validateSelection({ features: ['sessions', 'chat-view', 'title-bar'], compare_base: false }, ['appearance', 'sessions', 'chat-view', 'title-bar'], fix);
-  assert.deepEqual(selected.features, ['appearance', 'sessions', 'chat-view', 'title-bar']);
+  assert.deepEqual(selected.features, ['appearance', 'sessions', 'chat-view']);
   assert.equal(selected.compareBase, true);
   assert.equal(selected.reproJourney, 'appearance');
 });
@@ -75,13 +75,13 @@ test('the CLI carries real PR metadata into selection, schedules a passing repro
 const args = process.argv.slice(2);
 require('node:fs').appendFileSync(process.env.GH_REQUESTS, JSON.stringify(args) + '\\n');
 if (args[0] === 'pr') console.log(process.env.PR_FIXTURE);
-else if (args.some(arg => arg.endsWith('/jobs'))) console.log(JSON.stringify({ name: 'head appearance / verify (appearance)', conclusion: 'success' }));
+else if (args.some(arg => arg.endsWith('/jobs'))) console.log(JSON.stringify({ name: 'head / verify (appearance)', conclusion: 'success' }));
 else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40));
 `, { mode: 0o755 });
     const output = path.join(dir, 'outputs');
     const requests = path.join(dir, 'requests.jsonl');
     const env = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, GITHUB_OUTPUT: output, GH_REQUESTS: requests,
-      REPO: 'owner/repo', PR_NUMBER: '1', PR_FIXTURE: JSON.stringify({ ...fix, number: 1, state: 'OPEN', headRefOid: 'a'.repeat(40), baseRefName: 'release', commits: [] }) };
+      REPO: 'owner/repo', PR_NUMBER: '1', BASE_SHA: 'HEAD', PR_FIXTURE: JSON.stringify({ ...fix, number: 1, state: 'OPEN', headRefOid: 'a'.repeat(40), baseRefName: 'release', commits: [] }) };
     const run = (args, extra = {}) => {
       fs.writeFileSync(output, '');
       const result = spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), ...args], { env: { ...env, ...extra }, encoding: 'utf8' });
@@ -93,6 +93,7 @@ else console.log(args[1].includes('/commits/') ? 'b'.repeat(40) : 'c'.repeat(40)
     assert.ok(calls.some(args => args.includes('repos/owner/repo/commits/master')), 'repair baselines must be master even for a retargeted PR');
     assert.ok(calls.some(args => args.includes(`repos/owner/repo/statuses/${'a'.repeat(40)}`) && args.includes('state=pending') && args.includes('context=pstack-verifier')), 'a metadata rerun must invalidate a previous green status on the same head');
     run(['prepare', dir]);
+    assert.equal(fs.existsSync(path.join(dir, 'mapped.json')), true, 'Preparation retains the touched-source selection alongside the required repro');
     const selected = run(['select', dir], { SELECTION: JSON.stringify({ features: [], compare_base: false }) });
     assert.match(selected, /repro_features=\["appearance"\]/);
     assert.match(selected, /features=\["appearance"\]/);

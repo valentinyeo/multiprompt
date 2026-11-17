@@ -10,7 +10,7 @@ const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, 
 const os = require('node:os');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 const root = path.resolve(__dirname, '..');
@@ -618,7 +618,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /Release checksum mismatch/);
   assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /verify-chat-delivery\/drive.ps1[\s\S]*errors.Count/);
-  assert.ok(read('.github/workflows/click-through.yml').includes('-- src'));
+  assert.ok(read('.github/workflows/click-through.yml').includes('touchedJourneys'));
 });
 
 test('delivery maps state both the accepted boundary and uncovered local console gap', () => {
