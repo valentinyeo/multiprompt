@@ -20,7 +20,7 @@ permissions:
 
 concurrency:
   group: release-publication
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   gitleaks:
@@ -117,6 +117,13 @@ jobs:
             src/changelog.zig
             release-notes.json
           if-no-files-found: error
+
+  journeys:
+    needs: prepare
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: all
+      revision: ${{ needs.prepare.outputs.sha }}
 
   build:
     needs: prepare
@@ -282,7 +289,7 @@ jobs:
           if-no-files-found: warn
 
   release:
-    needs: [prepare, build, launch, gitleaks, resource-observation]
+    needs: [prepare, build, launch, gitleaks, resource-observation, journeys]
     permissions:
       contents: write
     runs-on: ubuntu-latest

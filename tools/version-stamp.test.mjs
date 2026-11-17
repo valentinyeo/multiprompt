@@ -162,84 +162,35 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
 });
 
-test('PR, manual and nightly runs restore Zig caches while master pushes can save them', () => {
+test('PR, manual and nightly runs reuse Zig caches without duplicate restore/save steps', () => {
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-    const speedJobs = ['speed-baseline', 'speed-candidate'].map(name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0]).filter(Boolean);
-    const idleJob = workflow.split('\n  idle-budget:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
-    if (file === 'test.yml') assert.ok(idleJob, 'test.yml runs the idle budget job');
-    if (idleJob) {
-      const idleCaches = idleJob.split(/(?=^      - )/m).filter(step => /uses: actions\/cache/.test(step));
-      assert.equal(idleCaches.length, 1);
-      assert.match(idleCaches[0], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
-      assert.match(idleJob, /if: github\.event_name == 'pull_request'\n/);
-    }
-    const caches = workflow.split(/(?=^      - )/m).filter(step => !speedJobs.some(job => job.includes(step)) && !idleJob?.includes(step)).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
-    const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
-    const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
-    const canSave = /^  push:\n/m.test(workflow);
+    const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     for (const cache of caches) {
-      const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
-      const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
-      assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      if (!canSave) {
-        assert.match(cache, /uses: actions\/cache\/restore@/, `${file} must never save a cache outside a master push`);
-        continue;
-      }
-      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
-      if (cache.includes('uses: actions/cache/restore@')) {
-        const condition = cache.match(new RegExp(`if: ${pathGuard}${guard}\\(([^\\n]+)\\)\\n`));
-        assert.ok(condition, 'restore condition must enumerate allowed events');
-        const events = condition[1].split(' || ').sort();
-        const expected = ["github.event_name == 'pull_request'", "github.event_name == 'workflow_dispatch'", "github.event_name == 'schedule'"];
-        if (windows?.includes(cache)) expected.push("(github.event_name == 'push' && github.ref != 'refs/heads/master')");
-        assert.deepEqual(events, expected.sort());
-      } else {
-        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
-      }
+      assert.match(cache, /uses: actions\/cache(?:\/(?:restore|save))?@[a-f0-9]{40}\n/);
+      assert.match(cache, /path:/);
+      assert.match(cache, /key:/);
+      if (cache.includes('.zig-cache') && cache.includes('uses: actions/cache@')) assert.match(cache, /github.sha|inputs.revision|inputs.app_revision/);
     }
-    if (file === 'test.yml') {
-      assert.equal(caches.length, 16);
-      for (let i = 0; i < caches.length; i += 2) {
-        assert.ok(caches[i].includes('uses: actions/cache/restore@'));
-        assert.ok(caches[i + 1].includes('uses: actions/cache@'));
-        assert.equal(caches[i].split('        with:\n')[1], caches[i + 1].split('        with:\n')[1]);
-      }
-      const gated = "steps\\.paths\\.outputs\\.heavy == 'true' && steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
-      for (const [name, cap, prefix, run, gate] of [
-        ['test', 1600, 'shards-v7-group-', 'Run tests', gated],
-        ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests', gated],
-        ['speed-baseline', 1600, '-zig-0\\.16\\.0-speed-', 'Build baseline', ''],
-        ['speed-candidate', 1600, '-zig-0\\.16\\.0-speed-', 'Build candidate', ''],
-      ]) {
-        const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
-        const steps = job.split(/(?=^      - )/m);
-        const trim = steps.filter(step => step.includes('name: Bound Zig cache before save'));
-        assert.equal(trim.length, 1);
-        assert.match(trim[0], new RegExp(`if: ${gate}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\\n`));
-        assert.match(trim[0], /shell: bash\n/);
-        assert.equal((trim[0].match(/du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/g) || []).length, 1);
-        assert.ok(trim[0].includes('du -sh "$ZIG_GLOBAL_CACHE_DIR"\n'));
-        assert.ok(trim[0].includes('if [ -d .zig-cache ]; then du -sh .zig-cache; fi\n'));
-        assert.ok(trim[0].includes(`python3 tools/trim-zig-cache.py --cap-mib ${cap}\n`));
-        assert.ok(job.indexOf(`name: ${run}\n`) < job.indexOf('name: Bound Zig cache before save\n'));
-        const buildCaches = steps.filter(step => /name: (?:Restore Zig \(PR\)|Cache Zig)\n/.test(step));
-        assert.equal(buildCaches.length, 2);
-        for (const cache of buildCaches) {
-          assert.equal((cache.match(new RegExp(prefix, 'g')) || []).length, 2);
-          assert.match(cache, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
-          assert.match(cache, /path: \|\n            \.zig-cache\n            \$\{\{ env\.ZIG_GLOBAL_CACHE_DIR \}\}/);
-        }
-      }
-      const speedCaches = speedJobs.flatMap(job => job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/restore)?@/.test(step)));
-      assert.equal(speedCaches.length, 4);
-      for (let i = 0; i < speedCaches.length; i += 2) {
-        assert.match(speedCaches[i], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
-        assert.match(speedCaches[i], /if: \(?github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'schedule'\)?\n/);
-        assert.match(speedCaches[i + 1], /uses: actions\/cache@[a-f0-9]{40}\n/);
-        assert.match(speedCaches[i + 1], /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
-        assert.equal(speedCaches[i].split('        with:\n')[1], speedCaches[i + 1].split('        with:\n')[1]);
-      }
+    if (file !== 'test.yml') continue;
+    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate', 'idle-budget']) {
+      const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+      const caches = job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache@/.test(step));
+      assert.equal(caches.length, 2, name);
+      const compile = caches.find(step => step.includes('.zig-cache'));
+      const toolchain = caches.find(step => step.includes('-toolchain-'));
+      assert.ok(compile && toolchain, name);
+      assert.match(compile, /github.sha/);
+      assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
+      assert.match(compile, /restore-keys:/);
+      assert.match(toolchain, /zig-toolchain-0.16.0/);
+      if (name === 'idle-budget') assert.match(job, /if: github\.event_name == 'pull_request'\n/);
+      if (name === 'build-windows' || name === 'idle-budget') continue;
+      const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
+      assert.ok(trim, name);
+      assert.match(trim, /python3 tools\/trim-zig-cache.py --cap-mib 1600/);
+      assert.doesNotMatch(trim, /github.event_name == 'push'/);
+      assert.match(trim, /du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/);
     }
   }
 });
@@ -318,7 +269,7 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
   const bin = path.join(r.dir, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';\nimport { execFileSync } from 'node:child_process';\nconst args = process.argv.slice(2);\nfs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');\nconst stateFile = process.env.GH_STATE;\nlet state = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, 'utf8') : '';\nconst git = args => execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, ...args]);\nif (args[1] === 'list' && process.env.GH_RACE === '1' && fs.readFileSync(process.env.GH_LOG, 'utf8').split('\\n').filter(line => line.includes('\"list\"')).length > 1 && !state) { state = 'OPEN'; fs.writeFileSync(stateFile, state); }\nif (args[1] === 'list') console.log(JSON.stringify(state === 'OPEN' ? [{ number: 1, url: 'https://example.invalid/pr/1' }] : []));\nelse if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.log('https://example.invalid/pr/1'); }\nelse if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }\nelse if (args[1] !== 'merge') process.exit(1);\n`, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: path.join(r.dir, 'src'), encoding: 'utf8', timeout: 60000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote, VERSION_STAMP_POLL_MS: '50', GH_RACE: race ? '1' : '0', GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: path.join(r.dir, 'src'), encoding: 'utf8', timeout: 60000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote, VERSION_STAMP_POLL_MS: '50', VERSION_STAMP_MAX_POLL_MS: '50', GH_RACE: race ? '1' : '0', GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /https:\/\/example\.invalid\/pr\/1[\s\S]*NOTHING_TO_STAMP 0\.28\.736/);
@@ -342,7 +293,7 @@ for (const outcome of ['green', 'red', 'pending']) test({ green: 'release merges
   const bin = path.join(r.dir, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';\nimport { execFileSync } from 'node:child_process';\nconst args = process.argv.slice(2);\nconst log = event => fs.appendFileSync(process.env.GH_LOG, JSON.stringify(event) + '\\n');\nlog({ args });\nconst stateFile = process.env.GH_STATE;\nconst state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : { created: false, merged: false, views: 0 };\nconst outcome = process.env.GH_OUTCOME;\nif (args[1] === 'create') { state.created = true; console.log('https://example.invalid/pr/1'); }\nelse if (args[1] === 'list') console.log(JSON.stringify(state.created && !state.merged ? [{ number: 1, url: 'https://example.invalid/pr/1' }] : []));\nelse if (args[1] === 'merge' && args.includes('--auto')) { console.error('GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)'); process.exit(1); }\nelse if (args[1] === 'merge') { execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state.merged = true; }\nelse if (args[1] === 'view') { state.views++; const green = outcome === 'green' && state.views >= 4; const checks = outcome === 'red' ? [{ __typename: 'CheckRun', name: 'windows-release', status: 'COMPLETED', conclusion: 'FAILURE' }] : green ? [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }, { __typename: 'CheckRun', name: 'optional', status: 'COMPLETED', conclusion: 'SKIPPED' }, { __typename: 'CheckRun', name: 'neutral', status: 'COMPLETED', conclusion: 'NEUTRAL' }, { __typename: 'StatusContext', context: 'external', state: 'SUCCESS' }] : outcome === 'green' && state.views === 2 ? [] : outcome === 'green' && state.views === 3 ? [{ __typename: 'StatusContext', context: 'external', state: 'EXPECTED' }] : [{ __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null }, { __typename: 'CheckRun', name: 'optional', status: 'QUEUED', conclusion: null }]; const view = { state: state.merged ? 'MERGED' : outcome === 'pending' && state.views >= 5 ? 'CLOSED' : 'OPEN', statusCheckRollup: state.views % 2 ? checks.reverse() : checks }; log({ view }); console.log(JSON.stringify(view)); }\nelse process.exit(2);\nfs.writeFileSync(stateFile, JSON.stringify(state));\n`, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_OUTCOME: outcome, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: 10000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', VERSION_STAMP_MAX_POLL_MS: '50', TEST_REMOTE: remote, GH_OUTCOME: outcome, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   assert.equal(result.error, undefined);
   assert.equal(result.status, outcome === 'green' ? 0 : 1, result.stderr);
   assert.match(result.stderr, /Auto merge is not allowed for this repository/);
@@ -541,7 +492,7 @@ else if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.lo
 else if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }
 else if (args[1] !== 'merge') process.exit(1);
 `, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', VERSION_STAMP_MAX_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   if (result.error?.code === 'ETIMEDOUT') {
     try { process.kill(-result.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
@@ -836,4 +787,19 @@ test('tests after: a CI-board ticket cannot carry a product line', async t => {
   assert.deepEqual(releaseNotes(source, 'v0.29.2').releases[0], release('0.29.2', 'HYCI-101'));
   const forged = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.1100", .items = &.{\n        .{ .text = "Typing feels faster.", .ticket = "HYCI-101" },\n    } },\n};\n';
   assert.throws(() => releaseNotes(forged, 'v0.28.1100'), /invalid ticket title/);
+});
+
+
+test('release status polling backs off from one minute to five without changing merge gates', async () => {
+  const source = fs.readFileSync(tool, 'utf8');
+  const start = source.indexOf('  let pollMs =');
+  assert.ok(start >= 0);
+  const wait = source.slice(start, source.indexOf('  while (true) {', start));
+  const delays = [];
+  const { runInNewContext } = await import('node:vm');
+  await runInNewContext(`(async () => { ${wait} for (let i = 0; i < 5; i++) await wait(); })()`, {
+    process: { env: {} }, remaining: () => 600000,
+    setTimeout: (fn, delay) => { delays.push(delay); fn(); },
+  });
+  assert.deepEqual(delays, [60000, 120000, 240000, 300000, 300000]);
 });

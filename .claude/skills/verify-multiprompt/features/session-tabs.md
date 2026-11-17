@@ -1,5 +1,7 @@
 # Session tabs
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-tabs.ps1
+
 Repair terminal tabs from an agent's real `zsb` TCP entry point: rename, rebind to another remote tmux session, move to another group or workspace, and close, all in the background.
 
 ## Sub-features

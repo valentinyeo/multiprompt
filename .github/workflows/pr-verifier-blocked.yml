@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: pr-verifier-recovery-${{ github.event.workflow_run.display_title || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   blocked:
     concurrency:
@@ -18,7 +22,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
+      actions: write
       checks: write
       pull-requests: write
     steps:

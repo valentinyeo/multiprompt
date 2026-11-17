@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 const { readChangelogEntry } = require('./changelog-entry');
@@ -453,7 +453,7 @@ test('pane-lock journey is mapped, indexed, allowed and included in the pull-req
   assert.ok(featureMatrix(workflow).available.includes('browser-pane-locked'));
   assert.ok(workflow.includes('tools/check-browser-pane-locked.test.js'));
   assert.match(workflow, /RELEASE_TAG: \$\{\{ inputs\.tag \|\| '' \}\}/);
-  assert.match(workflow, /name: Build branch executable\s+if: env\.RELEASE_TAG == '' && \(matrix\.app-revision != '' \|\| env\.FEATURE == 'safe-updates' \|\| env\.CHAT_SHAPE_PROOF == '1' \|\| env\.CHAT_SWITCH_PROFILE == '1' \|\| env\.CHAT_MODEL_PROOF == '1'\)\s+run: zig build/);
+  assert.match(workflow, /name: Build branch executable\s+if: env\.RELEASE_TAG == '' && \(env\.FEATURE == 'safe-updates' \|\| env\.CHAT_SHAPE_PROOF == '1' \|\| env\.CHAT_SWITCH_PROFILE == '1'\)\s+run: zig build/);
   assert.match(workflow, /} else \{\s*Copy-Item zig-out\/bin\/multiprompt\.exe verify-bin\/multiprompt\.exe/);
   assert.ok(read(`${directory}/features/README.md`).includes('](browser-pane-locked.md)'));
   assert.ok(read(`${directory}/SKILL.md`).includes('`browser-pane-locked`'));

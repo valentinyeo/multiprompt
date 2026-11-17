@@ -1,5 +1,7 @@
 # Composer buttons
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-composer-buttons.ps1
+
 ## Sub-features
 
 - Round attach, microphone and Send or Stop controls share one bottom line while the draft grows.

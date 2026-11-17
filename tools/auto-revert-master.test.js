@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 const { decide } = require('./auto-revert-master.js');
@@ -580,23 +580,17 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.match(events, /^  workflow_dispatch:/m);
   assert.match(events, /^  schedule:/m);
   assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run|repository_dispatch):/m);
-  const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)[1];
-  const targeted = vm.runInNewContext(expression, {
-    needs: { journeys: { outputs: { pr: JSON.stringify(matrices[0]), full: JSON.stringify(matrices[1]) } } },
-    github: { event_name: 'push', ref: 'refs/heads/ceo/IGSH-1055-hax2' }, inputs: {},
-    fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value),
-    startsWith: (value, prefix) => value.startsWith(prefix),
-  });
-  assert.deepEqual(JSON.parse(JSON.stringify(targeted)), ['browser-pane-stuck', 'chat-messages-only']);
+  assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  assert.match(verify, /process.env.FEATURES \? JSON.parse\(process.env.FEATURES\)/);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
-  assert.doesNotMatch(release, /\n  journeys:/);
+  assert.match(release, /\n  journeys:[\s\S]*?feature: all/);
   assert.match(release, /\n  launch:\n    needs: \[prepare, build\]/);
-  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation\]/);
+  assert.match(release, /\n  release:\n    needs: \[prepare, build, launch, gitleaks, resource-observation, journeys\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    needs: \[journeys, build-app\]\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    needs: \[journeys, build-app\]\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ matrix\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| matrix\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
