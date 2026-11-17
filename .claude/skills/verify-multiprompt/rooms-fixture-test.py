@@ -15,6 +15,9 @@ SOURCE = HERE.parents[2] / 'src'
 
 class RoomsFixtureTest(unittest.TestCase):
     def test_seed_and_real_bridge_create_send_and_reply_without_duplicates(self):
+        discovered = subprocess.run(['node', str(SOURCE.parent / 'tools/verify-features.cjs'), 'rooms'], capture_output=True, text=True)
+        self.assertEqual(discovered.returncode, 0, 'The desktop workflow must accept the Rooms journey before a rebuild: ' + discovered.stderr)
+        self.assertEqual(json.loads(discovered.stdout), ['rooms'])
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / 'fixture'
             env = dict(os.environ, MP_ROOMS_FIXTURE=str(root))
