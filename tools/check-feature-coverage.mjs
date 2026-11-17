@@ -46,16 +46,18 @@ export function inventory(read) {
 
   const wiki = read(sourceFiles[2]);
   let featureSection = false;
+  let futureSection = false;
   let found = 0;
   for (const line of wiki.split('\n')) {
     const heading = /^## (.+)/.exec(line);
     if (heading) {
       featureSection = heading[1] === 'Features';
+      futureSection = heading[1] === 'Future Features';
       if (!['What Is This', 'Why', 'Core Design', 'Features', 'Future Features'].includes(heading[1])) {
         add(`architecture:${slug(heading[1])}`, sourceFiles[2], heading[1]);
         found++;
       }
-    } else if (featureSection && line.trim()) {
+    } else if (!futureSection && (featureSection || /^[-*] /.test(line)) && line.trim()) {
       const bold = /^- \*\*(.+?)\*\*/.exec(line);
       const label = bold?.[1] || line.replace(/^[-*] /, '').split(/[.!]\s|\s(?:has|sit)\b/)[0];
       add(`architecture:${slug(label)}`, sourceFiles[2], label);

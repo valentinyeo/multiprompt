@@ -36,10 +36,10 @@ const measure = data => coverage(file => data[file], Object.keys(data));
 test('enumerates shortcut actions, palette literals, tables, row families and all shipped wiki features', () => {
   const data = files({
     'src/command_palette.zig': palette + `const ROWS = [_]Row{\n    .{ .target = SEARCH_NEW_OFFSET + 5, .label = "PowerShell" },\n    .{ .id = app_state.SEARCH_TABLE_ROW, .label = "New" },\n};\nfn appendRows() void {\n    app_state.g_search_results[0] = SEARCH_DYNAMIC_OFFSET + i;\n    app_state.g_search_results[1] = room.new_room_target;\n}\n`,
-    'openwiki/architecture/features.md': '## Features\n- **One**: useful.\n- Plain feature.\n\nFavorites has groups.\n\n## Future Features\n- Future only.\n\n## Unread boundary\nThe current behavior.\n',
+    'openwiki/architecture/features.md': '## Core Design\n### Architecture\n- **Drag to reorder**: move tabs.\n\n## Features\n- **One**: useful.\n- Plain feature.\n\nFavorites has groups.\n\n## Future Features\n- Future only.\n\n## Unread boundary\nThe current behavior.\n',
   });
   const ids = inventory(file => data[file]).map(entry => entry.id);
-  for (const id of ['shortcut:tabs/alt-s', 'palette:SEARCH_OLD_OFFSET', 'palette:SEARCH_NEW_OFFSET+5', 'palette:SEARCH_TABLE_ROW', 'palette:SEARCH_DYNAMIC_OFFSET', 'palette:new_room_target', 'architecture:one', 'architecture:plain-feature', 'architecture:favorites', 'architecture:unread-boundary']) assert.ok(ids.includes(id), id);
+  for (const id of ['shortcut:tabs/alt-s', 'palette:SEARCH_OLD_OFFSET', 'palette:SEARCH_NEW_OFFSET+5', 'palette:SEARCH_TABLE_ROW', 'palette:SEARCH_DYNAMIC_OFFSET', 'palette:new_room_target', 'architecture:drag-to-reorder', 'architecture:one', 'architecture:plain-feature', 'architecture:favorites', 'architecture:unread-boundary']) assert.ok(ids.includes(id), id);
   assert.ok(!ids.some(id => /future|shortcut:tabs\/$/.test(id)));
 });
 
