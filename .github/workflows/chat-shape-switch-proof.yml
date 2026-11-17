@@ -6,6 +6,10 @@ on:
 
 permissions:
   contents: read
+concurrency:
+  group: chat-shape-switch-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   baseline:
     uses: ./.github/workflows/verify.yml
