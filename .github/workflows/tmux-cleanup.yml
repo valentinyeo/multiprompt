@@ -17,7 +17,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - run: sudo apt-get update && sudo apt-get install -y tmux
-      - name: Prove the regression fails before the fix
+      - name: Prove the original regression fails before the fix
+        if: github.head_ref == 'fix/soft-2576-tmux-cleanup'
         run: |
           git show 2828bff76:tools/chat-history-reader-test.py > tools/chat-history-reader-test.py
           status=0
