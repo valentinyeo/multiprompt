@@ -166,6 +166,7 @@ var g_chat_bubble_pos: [1001]chat_style.BubblePos = undefined;
 var g_chat_capture: [1]u16 = .{'x'};
 var g_chat_last_len: usize = 1;
 var g_chat_layout_dirty = true;
+var g_chat_layout_count: u64 = 0;
 var g_chat_find_layout_open = false;
 var g_chat_find_id: u32 = 0;
 var g_chat_last_hash: u64 = 0;
@@ -301,6 +302,19 @@ test "working dots visibility" {
 });
 test('production layout measures only changed suffixes and caches unchanged geometry', () => {
   const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+test('SOFT-2557 layout counters include passes that reuse unchanged geometry', () => {
+  const result = run(layout + body(source, 'chatRelayout') + `
+  test "each actual layout pass increments its diagnostic counter" {
+      for (&blocks) |*b| b.* = .{ .start = 0, .len = 1, .role = .prose };
+      chatRelayout(400);
+      try std.testing.expectEqual(@as(u64, 1), g_chat_layout_count);
+      const before = measured;
+      chatRelayout(400);
+      try std.testing.expectEqual(before, measured);
+      try std.testing.expectEqual(@as(u64, 2), g_chat_layout_count);
+  }`);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 test('IGSH-1754 layout keeps the last batch boundary', () => {

@@ -37,8 +37,9 @@
             Save-Json (Read-Session) 'workspace-owner-new-session.json'
             Snapshot 'workspace-owner-new-chat'
             $result.checks += @{ name = 'workspace-reported-owner'; workspace = 'Example'; host = 0; cwd = '/home/owner/projects/sample'; boundary = 'Seeded provider-reported cwd and SSH stand-in; no real provider or server' }
-            Palette 'hide from sidebar'
-            Press @(0x0D) 'Enter: hide Example workspace chat'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide Example workspace chat'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq 3 } 'Example workspace chat hidden'
             Press @(0x12, 0x32) 'Alt+2: return to Other workspace'
             Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_session -ceq 'second' } 'Other workspace and second server restored'
@@ -72,15 +73,17 @@
                     $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
                     $tab.cwd -eq $case.cwd -and $hostId -eq $case.host -and $tab.cv -eq $true
                 } 'selected remote folder and host saved'
-                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('tmux new-session') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
+                Wait-Until { @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { $text = Get-Content -LiteralPath $_.FullName -Raw; $text.Contains($case.alias) -and $text.Contains($case.cwd) -and $text.Contains('--tmux ') -and $text.Contains('host enable claude') -and $text.Contains('host start claude') -and $text.Contains('--cwd ' + $case.cwd) }).Count -gt 0 } 'SSH command starts Claude on selected host and path'
                 Save-Json (Read-Session) ('ctrl-t-' + $case.proof + '-session.json')
                 Snapshot ('ctrl-t-' + $case.proof + '-chat')
                 $result.checks += @{ name = ('cross-host-' + $case.proof); host = $case.host; cwd = $case.cwd; alias = $case.alias }
-                Palette 'hide from sidebar'
-                Press @(0x0D) 'Enter: hide cross-host chat'
+                Invoke-JourneyCommand 'Archive chat' -Confirm {
+                    Press @(0x0D) 'Enter: hide cross-host chat'
+                }
                 Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'cross-host chat closed'
-                Palette 'Second'
-                Press @(0x0D) 'Enter: return to host 2'
+                Invoke-JourneyCommand 'Second' -Session -Confirm {
+                    Press @(0x0D) 'Enter: return to host 2'
+                }
                 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before next choice'
             }
             $offlineFile = Join-Path $env:MP_VERIFY_STATE 'offline-1'
@@ -90,12 +93,12 @@
             Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] offline host=1') } 'production publishes host 1 offline'
             Type-Text 'remote-2 cedar'
             Snapshot 'ctrl-t-offline-picker'
-            $launches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('tmux new-session') }).Count
+            $launches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('host start claude') }).Count
             $logBefore = (Get-Content -LiteralPath $repoLog -Raw).Length
             Press @(0x0D) 'Enter: reject offline folder'
             Wait-Until { $log = Get-Content -LiteralPath $repoLog -Raw; $log.Length -gt $logBefore -and $log.Substring($logBefore).Contains('[repo] selection rejected') } 'offline selection rejected'
             if (@((Read-Session).tabs).Count -ne $beforeClaude) { throw 'Offline selection saved a tab' }
-            $afterLaunches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('tmux new-session') }).Count
+            $afterLaunches = @(Get-ChildItem -LiteralPath $env:MP_VERIFY_STATE -Filter 'invocation-*.txt' | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('host start claude') }).Count
             if ($afterLaunches -ne $launches) { throw 'Offline selection launched SSH' }
             Press @(0x11, 0x54) 'Ctrl+T: use host 0 while host 1 is offline'
             Type-Text 'atlas'
@@ -108,11 +111,13 @@
                 $hostId = if ($tab.PSObject.Properties['tmux_host']) { [int]$tab.tmux_host } else { 0 }
                 $hostId -eq 0 -and $tab.cwd -eq '/work/primary/atlas' -and $tab.cv -eq $true
             } 'other host stays usable'
-            Palette 'hide from sidebar'
-            Press @(0x0D) 'Enter: hide available host chat'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide available host chat'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'available host chat closed'
-            Palette 'Second'
-            Press @(0x0D) 'Enter: return to host 2'
+            Invoke-JourneyCommand 'Second' -Session -Confirm {
+                Press @(0x0D) 'Enter: return to host 2'
+            }
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active after offline check'
             Remove-Item -LiteralPath $offlineFile
             $result.checks += @{ name = 'offline-enter-rejected'; tabs = $beforeClaude; launches = $launches }
@@ -134,11 +139,13 @@
             } 'Ctrl+T notes-only chat saved'
             Snapshot 'ctrl-t-notes-only-chat'
             $result.checks += @{ name = 'ctrl-t-notes-only-chat'; cwd = '/work/projects/notes-only'; cv = $true; host = 2 }
-            Palette 'hide from sidebar'
-            Press @(0x0D) 'Enter: hide notes-only chat'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide notes-only chat'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'notes-only chat closed'
-            Palette 'Second'
-            Press @(0x0D) 'Enter: return to the seeded third-server session'
+            Invoke-JourneyCommand 'Second' -Session -Confirm {
+                Press @(0x0D) 'Enter: return to the seeded third-server session'
+            }
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal choice'
 
             foreach ($query in @('soft', 'factory soft')) {
@@ -156,16 +163,19 @@
                 Save-Json (Read-Session) ($searchProof + '-session.json')
                 Snapshot ($searchProof + '-chat')
                 $result.checks += @{ name = $searchProof; query = $query; cwd = '/work/projects/software-factory'; cv = $true; host = 2 }
-                Palette 'hide from sidebar'
-                Press @(0x0D) 'Enter: hide software-factory chat'
+                Invoke-JourneyCommand 'Archive chat' -Confirm {
+                    Press @(0x0D) 'Enter: hide software-factory chat'
+                }
                 Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'software-factory chat closed'
-                Palette 'Second'
-                Press @(0x0D) 'Enter: return to the seeded third-server session'
+                Invoke-JourneyCommand 'Second' -Session -Confirm {
+                    Press @(0x0D) 'Enter: return to the seeded third-server session'
+                }
                 Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active after search proof'
             }
 
-            Palette 'new terminal'
-            Press @(0x0D) 'Enter: New terminal'
+            Invoke-JourneyCommand 'New terminal' -Confirm {
+                Press @(0x0D) 'Enter: New terminal'
+            }
             Snapshot 'terminal-picker-cancel'
             Press @(0x1B) 'Esc: cancel repository picker'
             Press @(0x1B) 'Esc: close palette'
@@ -183,15 +193,18 @@
             } 'Ctrl+T zz-last-folder chat after cancel saved'
             Snapshot 'ctrl-t-zz-last-folder-chat'
             $result.checks += @{ name = 'cancel-then-ctrl-t-zz-last-folder'; cwd = '/work/projects/zz-last-folder'; cv = $true; host = 2 }
-            Palette 'hide from sidebar'
-            Press @(0x0D) 'Enter: hide zz-last-folder chat'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide zz-last-folder chat'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'zz-last-folder chat closed'
-            Palette 'Second'
-            Press @(0x0D) 'Enter: return to the seeded third-server session'
+            Invoke-JourneyCommand 'Second' -Session -Confirm {
+                Press @(0x0D) 'Enter: return to the seeded third-server session'
+            }
             Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].tmux_host -eq 2 } 'host 2 active before terminal session'
 
-            Palette 'new terminal'
-            Press @(0x0D) 'Enter: New terminal'
+            Invoke-JourneyCommand 'New terminal' -Confirm {
+                Press @(0x0D) 'Enter: New terminal'
+            }
             Type-Text 'beta'
             Snapshot 'terminal-beta-picker'
             Press @(0x0D) 'Enter: select beta terminal'
@@ -203,16 +216,19 @@
             } 'beta terminal saved'
             Snapshot 'terminal-beta'
             $result.checks += @{ name = 'terminal-beta'; cwd = '/work/projects/beta'; cv = $false; host = 2 }
-            Palette 'hide from sidebar'
-            Press @(0x0D) 'Enter: hide beta terminal'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide beta terminal'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeClaude } 'beta terminal closed'
 
-            Palette 'Second'
-            Press @(0x0D) 'Enter: return to Other on the third server'
+            Invoke-JourneyCommand 'Second' -Session -Confirm {
+                Press @(0x0D) 'Enter: return to Other on the third server'
+            }
             Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'Other active before saving its folder'
             $commandsFile = Join-Path $scratch 'roaming/ZigShell/commands.json'
-            Palette 'set workspace folder'
-            Press @(0x0D) 'Enter: set a saved folder for Other'
+            Invoke-JourneyCommand 'Set workspace folder...' -Confirm {
+                Press @(0x0D) 'Enter: set a saved folder for Other'
+            }
             Type-Text 'notes-only'
             Press @(0x0D) 'Enter: save notes-only as the Other default'
             Wait-Until {
@@ -220,8 +236,9 @@
                 @($commands.commands | Where-Object { $_.PSObject.Properties['workspace'] -and $_.workspace -eq 'Other' -and $_.cwd -eq '/work/projects/notes-only' -and $_.default }).Count -gt 0
             } 'Other saved default persisted through the palette'
             foreach ($repo in @('beta', 'zz-last-folder')) {
-                Palette 'Second'
-                Press @(0x0D) 'Enter: select Other before its next new session'
+                Invoke-JourneyCommand 'Second' -Session -Confirm {
+                    Press @(0x0D) 'Enter: select Other before its next new session'
+                }
                 Wait-Until { $state = Read-Session; $state.active_workspace -eq 0 -and $state.tabs[$state.active_tab].tmux_host -eq 2 } 'Other active for repeated picker proof'
                 $beforeOther = @((Read-Session).tabs).Count
                 Press @(0x11, 0x54) 'Ctrl+T: Other must ask despite its saved default'
@@ -237,8 +254,9 @@
                 Save-Json (Read-Session) ('other-saved-default-' + $repo + '-session.json')
                 Snapshot ('other-saved-default-' + $repo + '-chat')
                 $result.checks += @{ name = 'other-saved-default-picker'; repo = $repo; ignoredDefault = '/work/projects/notes-only'; host = 2 }
-                Palette 'hide from sidebar'
-                Press @(0x0D) 'Enter: hide the Other proof chat'
+                Invoke-JourneyCommand 'Archive chat' -Confirm {
+                    Press @(0x0D) 'Enter: hide the Other proof chat'
+                }
                 Wait-Until { @((Read-Session).tabs).Count -eq $beforeOther } 'Other proof chat closed'
             }
             $workspaceCount = @((Read-Session).workspaces).Count
@@ -250,8 +268,9 @@
             if ([string]::IsNullOrWhiteSpace($namedWorkspace)) { $namedWorkspace = 'Workspace ' + ($namedSlot + 1) }
             if ($namedWorkspace -eq 'Other') { throw 'Comparison workspace must not be Other' }
             $namedPickerLogStart = (Get-Content -LiteralPath $repoLog -Raw).Length
-            Palette 'set workspace folder'
-            Press @(0x0D) 'Enter: set the named workspace folder'
+            Invoke-JourneyCommand 'Set workspace folder...' -Confirm {
+                Press @(0x0D) 'Enter: set the named workspace folder'
+            }
             Type-Text 'notes-only'
             Wait-Until {
                 $text = Get-Content -LiteralPath $repoLog -Raw
@@ -274,14 +293,16 @@
             Save-Json (Read-Session) 'named-workspace-saved-default-session.json'
             Snapshot 'named-workspace-saved-default-chat'
             $result.checks += @{ name = 'named-workspace-skips-picker'; workspace = $namedWorkspace; cwd = '/work/projects/notes-only'; cv = $true }
-            Palette 'hide from sidebar'
-            Press @(0x0D) 'Enter: hide the named workspace proof chat'
+            Invoke-JourneyCommand 'Archive chat' -Confirm {
+                Press @(0x0D) 'Enter: hide the named workspace proof chat'
+            }
             Wait-Until { @((Read-Session).tabs).Count -eq $beforeNamed } 'named workspace proof chat closed'
 
             $before = @( (Read-Session).tabs ).Count
-            Palette 'new cmd'
-            Snapshot 'action'
-            Press @(0x0D) 'Enter: New CMD shell'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Snapshot 'action'
+                Press @(0x0D) 'Enter: New CMD shell'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $before + 1 } 'new CMD tab saved'
             Press @(0x71) 'F2: rename active tab'
             Press @(0x11, 0x41) 'Ctrl+A: replace tab name'

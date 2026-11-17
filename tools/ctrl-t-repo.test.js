@@ -30,16 +30,16 @@ test('sessions installs the SSH boundary before launch', () => {
 });
 
 test('Ctrl+T picks a notes-only folder directly and checks the saved chat', () => {
-  const journey = sessions.slice(0, sessions.indexOf("Palette 'new terminal'"));
+  const journey = sessions.slice(0, sessions.indexOf("Invoke-JourneyCommand 'New terminal' -Confirm {"));
   assert.match(journey, /\$state\.active_tab -eq 1[\s\S]*\$state\.tabs\[1\]\.tmux_host -eq 2[\s\S]*sessions-initial\.json[\s\S]*Ctrl\+T: new Claude chat[\s\S]*listing-\$_-\*\.txt[\s\S]*Type-Text 'notes-only'[\s\S]*Enter: select notes-only[\s\S]*\$tab\.cwd -eq '\/work\/projects\/notes-only' -and \$tab\.cv -eq \$true -and \$tab\.tmux_host -eq 2/);
   const pickerStart = journey.indexOf('Ctrl+T: select an available server after offline rejection');
-  const pickerEnd = journey.indexOf("Palette 'hide from sidebar'", pickerStart);
+  const pickerEnd = journey.indexOf("Invoke-JourneyCommand 'Archive chat' -Confirm {", pickerStart);
   assert.ok(pickerStart >= 0 && pickerEnd > pickerStart, 'notes-only picker boundaries must exist');
   assert.doesNotMatch(journey.slice(pickerStart, pickerEnd), /\bPalette\s+'|commands\.json|settings|catch|fallback/i);
-  assert.match(journey.slice(pickerEnd), /^Palette 'hide from sidebar'\s*\n\s*Press @\(0x0D\) 'Enter: hide notes-only chat'/);
+  assert.match(journey.slice(pickerEnd), /^Invoke-JourneyCommand 'Archive chat' -Confirm {\s*\n\s*Press @\(0x0D\) 'Enter: hide notes-only chat'/);
   assert.match(journey.slice(0, pickerStart), /workspace-carrier-cache\.json[\s\S]*Ctrl\+T: new chat in Example workspace[\s\S]*host enable claude\.\*--cwd \/home\/owner\/projects\/sample[\s\S]*workspace-hosted-launch\.txt/);
 
-  assert.match(journey, /notes-only chat closed'[\s\S]*Palette 'Second'[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
+  assert.match(journey, /notes-only chat closed'[\s\S]*Invoke-JourneyCommand 'Second' -Session -Confirm {[\s\S]*Enter: return to the seeded third-server session[\s\S]*\$state\.tabs\[\$state\.active_tab\]\.tmux_host -eq 2/);
 });
 
 test('initial picker captures the combined all-server search', () => {
@@ -47,7 +47,7 @@ test('initial picker captures the combined all-server search', () => {
 });
 
 test('cross-host and offline journeys require the selected host and rejection', () => {
-  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('tmux new-session'\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
+  assert.match(sessions, /listing-\$_-\*\.txt[\s\S]*remote-2 cedar[\s\S]*host = 1[\s\S]*host = 0[\s\S]*\$hostId -eq \$case\.host[\s\S]*\$text\.Contains\(\$case\.alias\)[\s\S]*\$text\.Contains\(\$case\.cwd\)[\s\S]*\$text\.Contains\('--tmux '\)[\s\S]*\$text\.Contains\('host enable claude'\)[\s\S]*\$text\.Contains\('host start claude'\)[\s\S]*\$text\.Contains\('--cwd ' \+ \$case\.cwd\)/);
   const normalizeHost = /\$hostId = if \(\$tab\.PSObject\.Properties\['tmux_host'\]\) \{ \[int\]\$tab\.tmux_host \} else \{ 0 \}/.source;
   assert.match(sessions, new RegExp(`Where-Object \\{ \\$tab = \\$_; ${normalizeHost}; \\$hostId -eq 1 \\}\\)\\.Count -ne 0`));
   assert.match(sessions, new RegExp(`${normalizeHost}\\s+\\$tab\\.cwd -eq \\$case\\.cwd -and \\$hostId -eq \\$case\\.host -and \\$tab\\.cv -eq \\$true`));
@@ -57,7 +57,7 @@ test('cross-host and offline journeys require the selected host and rejection', 
 
 test('cross-host and available-host cleanup hides tabs and restores host 2', () => {
   for (const kind of ['cross-host', 'available host']) {
-    assert.match(sessions, new RegExp(`Palette 'hide from sidebar'\\s+Press @\\(0x0D\\) 'Enter: hide ${kind} chat'\\s+Wait-Until \\{ @\\(\\(Read-Session\\)\\.tabs\\)\\.Count -eq \\$beforeClaude \\} '${kind} chat closed'\\s+Palette 'Second'\\s+Press @\\(0x0D\\) 'Enter: return to host 2'\\s+Wait-Until \\{ \\$state = Read-Session; \\$state\\.tabs\\[\\$state\\.active_tab\\]\\.tmux_host -eq 2 \\}`));
+    assert.match(sessions, new RegExp(`Invoke-JourneyCommand 'Archive chat' -Confirm {\\s+Press @\\(0x0D\\) 'Enter: hide ${kind} chat'\\s+\\}\\s+Wait-Until \\{ @\\(\\(Read-Session\\)\\.tabs\\)\\.Count -eq \\$beforeClaude \\} '${kind} chat closed'\\s+Invoke-JourneyCommand 'Second' -Session -Confirm {\\s+Press @\\(0x0D\\) 'Enter: return to host 2'\\s+\\}\\s+Wait-Until \\{ \\$state = Read-Session; \\$state\\.tabs\\[\\$state\\.active_tab\\]\\.tmux_host -eq 2 \\}`));
   }
   assert.doesNotMatch(sessions, /Press\s+@\(0x11,\s*0x57\)/i);
 });

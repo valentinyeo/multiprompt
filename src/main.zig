@@ -2197,11 +2197,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = InvalidateRect(hwnd, null, 0);
                         return 0;
                     },
-                    .room_new => {
-                        @import("room_frontend.zig").openCreate();
-                        _ = InvalidateRect(hwnd, null, 0);
-                        return 0;
-                    },
                     .room_header => return 0,
                     .inbox => |ri| {
                         if (@import("room_frontend.zig").isActive()) @import("inbox.zig").jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
@@ -2460,7 +2455,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {
                 const hit = hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll);
-                break :blk if (hit == .room or hit == .room_new) hit else null;
+                break :blk if (hit == .room) hit else null;
             } else null;
             if (!std.meta.eql(room_hover, app_state.g_room_hover)) {
                 app_state.g_room_hover = room_hover;
@@ -6271,11 +6266,51 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_NEW_TERMINAL_OFFSET) {
+                    debugLog("[terminal] palette action");
+                    const picker_before = app_state.g_search_pick_repo_mode;
+                    const spawned_terminal = spawnWorkspaceTerminalSession();
+                    if (!picker_before and app_state.g_search_pick_repo_mode) {
+                        debugLog("[terminal] no workspace folder: opening picker");
+                        app_state.g_search_workspace_mode = false;
+                        app_state.g_search_theme_mode = false;
+                        app_state.g_search_openall_host_mode = false;
+                        app_state.g_search_len = 0;
+                        app_state.g_search_sel = 1;
+                        app_state.g_search_scroll = 0;
+                        requestAllRepoRefresh();
+                        updateSearchResults();
+                        _ = InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    }
+                    closePickRepo();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
-                    const spawned_terminal = spawnWorkspaceTerminalSession();
-                    if (!spawned_terminal) showActiveShellAfterOverlay();
+                    if (spawned_terminal) {
+                        debugLog("[terminal] plain shell spawned");
+                        applyPendingGroup();
+                        app_state.g_refocus_remaining = 4;
+                    } else {
+                        showActiveShellAfterOverlay();
+                        switch (@import("command_palette.zig").g_start_fail) {
+                            .capacity => {
+                                debugLog("[terminal] refused: host capacity");
+                                showHeaderNoticeAscii("Cannot start terminal: host is at capacity", 5000, true);
+                            },
+                            .launch_command => {
+                                debugLog("[terminal] refused: launch preparation");
+                                showHeaderNoticeAscii("Cannot prepare the new terminal", 5000, true);
+                            },
+                            .spawn_shell => {
+                                debugLog("[terminal] refused: shell launch");
+                                showHeaderNoticeAscii("Could not start the new terminal", 5000, true);
+                            },
+                            .none => {
+                                debugLog("[terminal] refused: unknown reason");
+                                showHeaderNoticeAscii("Could not start the new terminal", 5000, true);
+                            },
+                        }
+                    }
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, if (spawned_terminal) 200 else 50, null);
                     return 0;
@@ -6285,8 +6320,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_open_session_mode = open_session;
                     app_state.g_search_shells_mode = !open_session;
                     app_state.g_search_snippet_mode = false;
-                    app_state.g_search_shells_mode = false;
-                    app_state.g_search_open_session_mode = false;
                     app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_workspace_delete_mode = false;
@@ -8369,7 +8402,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = InvalidateRect(hwnd, null, 0);
                         }
                     }
-                    if (app_state.g_chat_active) chatWorkingIndicatorSync();
+                    if (app_state.g_chat_active) {
+                        chatWorkingIndicatorSync();
+                        @import("chat_render.zig").chatLogPosition();
+                    }
                     @import("chat_composer.zig").chatStopSlotSync();
                     if (app_state.g_voice_mic_start_pending and !app_state.g_dictation_capturing.load(.acquire) and app_state.g_voice_mode_active and app_state.g_voice_always_listen) voiceMicStart();
                     voiceCheckScreenFallback();

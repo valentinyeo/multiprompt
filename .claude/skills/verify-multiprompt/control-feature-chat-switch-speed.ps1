@@ -85,13 +85,14 @@
             try {
                 Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $sessionCount -and @($state.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq $sessionCount } 'five seeded remote sessions restored'
                 $gapCase.phase = 'idle-close-fixture'
-                Focus-Palette 'browser auto suspend' 6240
-                Press @(0x0D) 'Enter: disable timed browser closing while measuring'
+                Invoke-JourneyCommand 'Browser: Auto-Suspend Idle Panes' -Confirm {
+                    Press @(0x0D) 'Enter: disable timed browser closing while measuring'
+                }
                 Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
                 $gapCase.phase = 'manual-tab-order'
-                Focus-Palette 'tab order' 6217
-                Press @(0x28) 'Down: Tab Order Manual'
-                Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
+                Invoke-JourneyCommand 'Tab order: auto' -Confirm {
+                    Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
+                }
                 Wait-Until {
                     $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
                     if (-not (Test-Path $path)) { return $false }
@@ -177,7 +178,7 @@
                             $jobCpu = ([double]$jobAfter.UserTime + $jobAfter.KernelTime - $jobBefore.UserTime - $jobBefore.KernelTime) / 10000
                             $shapeSample.owned_job = @{ cpu_ms = $jobCpu; elapsed_ms = $jobClock.Elapsed.TotalMilliseconds; cpu_one_core_percent = 100 * $jobCpu / $jobClock.Elapsed.TotalMilliseconds; active_before = $jobBefore.ActiveProcesses; active_after = $jobAfter.ActiveProcesses }
                             $shapeSample.hang_ms = [VerifyNative]::HangProbeMax()
-                            $measured = @($shapeSample.shown_ms, $shapeSample.hang_ms)
+                            $measured = @($shapeSample.shown_ms, $shapeSample.hang_ms, ($shapeSample.elapsed_ms - $shapeSample.shown_ms))
                         } else {
                             $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
                         }
@@ -201,7 +202,14 @@
                         $timings[$mode].samples_ms += $(if ($measured[0] -lt 0) { $settleMs } else { [Math]::Round($measured[0], 1) })
                         $timings[$mode].app_ms += $appMs
                         $timings[$mode].hang_ms += [Math]::Round($measured[1], 1)
-                        $range | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample))
+                        $sampleLog = Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample)
+                        $range | Set-Content -Encoding UTF8 $sampleLog
+                        if (-not $env:RELEASE_TAG) {
+                            $observedMs = ([double]$measured[2]).ToString([Globalization.CultureInfo]::InvariantCulture)
+                            $positionFile = Join-Path $Evidence ("{0}-{1}-position.json" -f $mode, $sample)
+                            & node (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-open-position.cjs') $sampleLog $shellIds[$target] $observedMs $positionFile
+                            if ($LASTEXITCODE -ne 0) { throw 'Chat messages moved during the first second after opening; inspect the position samples' }
+                        }
                         if ($shapeProof) {
                             if (-not $widths.Success -or $shapeSample.shown_ms -lt 0) { throw 'Shape sample needs a completed target paint with geometry' }
                             $shapeSample.index = $sample
@@ -230,6 +238,21 @@
                             $shapeResult.modes[$mode] += $shapeSample
                         }
                         $current = $target
+                    }
+                    $idleStart = [VerifyNative]::GetTickCount64()
+                    $idleOffset = (Get-Item -LiteralPath $log).Length
+                    Record "Observe $mode chat without input for five seconds"
+                    Wait-Until { [VerifyNative]::GetTickCount64() -ge $idleStart + 5000 } 'five-second idle chat observation' 10
+                    $idleEnd = [VerifyNative]::GetTickCount64()
+                    $idleTrace = Read-SharedLog $log $idleOffset
+                    $idleTrace | Set-Content -Encoding UTF8 (Join-Path $Evidence "$mode-idle-debug.log")
+                    Save-Json @{ shell = $shellIds[$current]; start_tick = $idleStart; end_tick = $idleEnd } "$mode-idle-window.json"
+                    if (-not $env:RELEASE_TAG) {
+                        $idleFile = Join-Path $Evidence "$mode-idle-position.json"
+                        & node (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-open-position.cjs') --steady (Join-Path $Evidence "$mode-idle-debug.log") $idleStart $idleEnd $idleFile
+                        if ($LASTEXITCODE -ne 0) { throw 'Idle chat moved; inspect the position samples' }
+                        $idle = Get-Content -LiteralPath $idleFile -Raw | ConvertFrom-Json
+                        if ($idle.layouts -ne 0 -or $idle.paints -gt 1) { throw "Idle chat did unnecessary work: $($idle.layouts) layouts and $($idle.paints) paints" }
                     }
                     $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
                     $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum

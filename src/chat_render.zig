@@ -2461,6 +2461,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 }
 
 pub fn chatRelayout(client_width: i32) void {
+    app_state.g_chat_layout_count +%= 1;
     g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
@@ -6050,6 +6051,20 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
     }
 }
 
+pub fn chatLogPosition() void {
+    if (!verboseLoggingEnabled() or !app_state.g_chat_active or app_state.g_chat_layout_dirty or app_state.active_shell >= app_state.shell_count) return;
+    const tick = GetTickCount64();
+    const edge = app_state.g_chat_scroll_y + app_state.g_chat_top_pad;
+    const anchor = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], edge) orelse return;
+    for (anchor.index..app_state.g_chat_block_count) |first| {
+        const block = app_state.g_chat_blocks[first];
+        if (block.role == .tool or g_reaction_view.hides(first)) continue;
+        var log: [384]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] position ms={d} shell={d} first={d} message={d} offset={d} y={d} scroll={d} height={d} pad={d} opening={d} paints={d} layouts={d} tick={d}", .{ tick -| app_state.g_chat_switch_started, app_state.g_chat_cache_shell_id, first, block.message_id, block.source_offset, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y, app_state.g_chat_scroll_y, app_state.g_chat_content_h, app_state.g_chat_top_pad, app_state.g_chat_switch_started, app_state.g_chat_paint_count, app_state.g_chat_layout_count, tick }) catch "");
+        return;
+    }
+}
+
 var transcript_paint_dc: HANDLE = null;
 var transcript_paint_bitmap: HANDLE = null;
 var transcript_paint_old_bitmap: HANDLE = null;
@@ -6125,6 +6140,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 _ = EndPaint(hwnd, &ps);
                 if (painted) chatSwitchDidPaint();
                 if (painted) chatSwitchContentPainted();
+                if (painted) {
+                    app_state.g_chat_paint_count +%= 1;
+                    chatLogPosition();
+                }
                 if (painted) chatBenchPaint();
                 if (painted) @import("launch_cache.zig").painted(true);
             }
@@ -7928,6 +7947,8 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         _ = live.begin(shell_id, 0, sid);
         var entry = app_state.ChatOutboxEntry{ .id = 1668, .state = .queued };
         entry.text = try std.heap.page_allocator.dupe(u16, std.unicode.utf8ToUtf16LeStringLiteral("Please reply."));
+        const landed_wire = "m-1668";
+        @memcpy(entry.message_wire_id[0..landed_wire.len], landed_wire);
         const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &entry.key);
         entry.key_len = @intCast(key.len);
         app_state.g_chat_outbox.append(std.heap.page_allocator, entry) catch |err| {
@@ -7940,8 +7961,10 @@ test "IGSH-1668 hosted live events reach the native working painter" {
         app_state.g_chat_outbox.items[0].state = .delivered;
         app_state.g_chat_outbox.items[0].channel_sent = true;
         layout.chatWorkingIndicatorSync();
+        try std.testing.expect(layout.chatStopVisible());
+        try std.testing.expect(g_working_rect != null);
         try liveWorkingProofFrame(dc, case.files[1], bytes, info.header, started, case.name, "accepted-before-event");
-        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{}}}]}}";
+        const begin = "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t1\",\"payload\":{\"message_id\":\"m-1668\"}}}]}}";
         try std.testing.expect(live.applyPage(shell_id, sid, begin));
         session.chatFileOnReady();
         try liveWorkingProofFrame(dc, case.files[2], bytes, info.header, started, case.name, "turn-started");

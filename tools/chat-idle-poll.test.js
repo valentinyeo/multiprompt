@@ -183,8 +183,26 @@ test('SOFT-1973 the other delay branches keep their timings', () => {
 
 test('SOFT-1973 the result handler repaints nothing for an empty poll and a chat that becomes live is read at once', () => {
   const ready = body(session, 'chatFileOnReady');
-  assert.match(ready, /active_changed = active_changed or !entry\.unchanged or history\.revision != app_state\.g_chat_last_hash;/);
   assert.match(ready, /if \(preview_changed\) \{\n\s+@import\("window_layout\.zig"\)\.invalidateSidebar\(\);/);
   const request = body(session, 'chatFileRequestForDelivery');
   assert.match(request, /key\.shell_id == live_shell_id and entry\.quiet > 0\) \{\n\s+entry\.quiet = 0;\n\s+entry\.next = @min\(entry\.next, now\);/);
+});
+
+test('SOFT-2557 unchanged history does not repaint a chat whose live state was already drawn', () => {
+  const ready = body(session, 'chatFileOnReady');
+  const line = ready.match(/active_changed = ([^;]+);/g).find(value => value.includes('entry.unchanged'));
+  assert.ok(line, 'history completion decides whether the visible chat changed');
+  const expression = line.slice('active_changed = '.length, -1)
+    .replace(/\bor\b/g, '||')
+    .replace(/g_chat_live_drawn_revision \*% (0x[0-9A-Fa-f]+)/g, 'BigInt.asUintN(64, liveRevision * $1n)')
+    .replaceAll('app_state.g_chat_last_hash', 'paintedRevision');
+  const changed = new Function('active_changed', 'entry', 'history', 'paintedRevision', 'liveRevision', `return ${expression};`);
+  for (const liveRevision of [0n, 1n, 2n, 91n]) {
+    const history = { revision: 7n };
+    const painted = history.revision ^ BigInt.asUintN(64, liveRevision * 0x9E3779B97F4A7C15n);
+    assert.equal(changed(false, { unchanged: true }, history, painted, liveRevision), false, `unchanged live revision ${liveRevision} must not schedule a layout`);
+    assert.equal(changed(false, { unchanged: false }, history, painted, liveRevision), true);
+    assert.equal(changed(true, { unchanged: true }, history, painted, liveRevision), true);
+    assert.equal(changed(false, { unchanged: true }, { revision: 8n }, painted, liveRevision), true);
+  }
 });

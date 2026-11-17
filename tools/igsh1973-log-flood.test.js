@@ -10,6 +10,7 @@ const repaintLoggers = {
   chatShellSyncBuild: 'logs only when the shell view changed',
   chatChoicesLog: 'logs only when the choice hash changed',
   chatPaintReadDivider: 'goes through the paint log rule in diagnostics',
+  chatLogPosition: 'position changes or a one-second snapshot, not each paint',
   chatPaintTranscriptContent: 'logs the missing history note once',
 };
 
@@ -48,7 +49,7 @@ test('IGSH-1973 the list cache that only existed to log once per list is gone', 
 test('IGSH-1973 every repeating diagnostic line is deduplicated with a heartbeat', () => {
   const diagnostics = read('src/diagnostics.zig');
   const rules = diagnostics.slice(diagnostics.indexOf('fn paintLogRule('), diagnostics.indexOf('fn paintLogAllowed('));
-  for (const prefix of ['[chat] unread divider ', 'PERF[chat]: ', 'browser-freeze-state: now=', '[chat-live] page ', '[chat-live] draw ', '[focus-trace] event=blocked ', '[altq] composer_focus ', '[bt ']) {
+  for (const prefix of ['[chat] position ', '[chat] unread divider ', 'PERF[chat]: ', 'browser-freeze-state: now=', '[chat-live] page ', '[chat-live] draw ', '[focus-trace] event=blocked ', '[altq] composer_focus ', '[bt ']) {
     assert.ok(rules.includes(`"${prefix}"`), `paintLogRule must cover ${prefix}`);
   }
   assert.match(rules, /"receive to paint"\)\) return null/);
