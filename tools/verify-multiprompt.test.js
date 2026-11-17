@@ -2267,7 +2267,7 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
-  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ inputs\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
+  const proofOnly = [...workflow.matchAll(/^      ([A-Z0-9_]+)_PROOF: \$\{\{ (?:inputs|matrix)\.feature == '([a-z0-9-]+)'/gm)].map(match => match[2]);
   assert.ok(proofOnly.includes('chat-model') && proofOnly.includes('chat-working-live'));
   assert.deepEqual(features.available.filter(feature => !proofOnly.includes(feature)), registered.filter(feature => !proofOnly.includes(feature)));
   assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);

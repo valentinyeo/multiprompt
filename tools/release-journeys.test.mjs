@@ -5,7 +5,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { releaseMaps, releasePlan, checkEvidence, evidenceNotes } from './release-journeys.mjs';
+const gateFile = new URL('./release-journeys.mjs', import.meta.url);
+const { releaseMaps, releasePlan, checkEvidence, evidenceNotes } = fs.existsSync(gateFile) ? await import(gateFile.href) : {};
+
+test('releases have an executable candidate journey gate', () => {
+  assert.equal(typeof checkEvidence, 'function', 'Release publication must check candidate journeys before publishing');
+});
 
 const sha = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -43,6 +48,7 @@ function fixture(t, features = ['chat']) {
   return { dir, candidate, plan, artifacts, write, check, sha256 };
 }
 
+if (checkEvidence) {
 test('merged PRs map to every touched feature, including reverted changes and direct commits', () => {
   const changes = [change(['src/chat_render.zig']), { commit: base, prs: [], files: ['src/command_palette.zig'] }, change(['src/chat_render.zig'])];
   const plan = releasePlan(base, sha, changes, maps);
@@ -173,3 +179,4 @@ test('published v0.28.1761 lacks videos for its changed features', t => {
     return true;
   });
 });
+}

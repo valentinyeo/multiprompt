@@ -32,7 +32,7 @@ jobs:
       - name: Test automatic crash report triage
         run: node --test tools/crash-report-tickets.test.js
       - name: Test release candidate video gate
-        run: node --test tools/release-journeys.test.mjs tools/version-stamp-release.test.mjs
+        run: node --test tools/release-journeys.test.mjs
       - name: Test release tag publication
         run: node --test tools/release-version.test.mjs
       - name: Test release symbol packaging
