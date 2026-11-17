@@ -36,6 +36,9 @@ Preconditions: baseline Doctor passes on a fresh single-window instance with its
 
 ## Gotchas
 
+Remote account sync now captures and restores both home and Starred group names. This offline journey is not cross-device proof. Its driver includes two restarts; do not exclude restart persistence from the checks it actually performs.
+
+
 - Groups use their real default saved names. This journey does not type into an inline rename editor or seed JSON.
 - Group memberships are local to this device; account layout sync is unchanged and does not sync groups across devices.
 - This journey covers local CMD membership independence, not remote windows, all group context actions or relaunch persistence.

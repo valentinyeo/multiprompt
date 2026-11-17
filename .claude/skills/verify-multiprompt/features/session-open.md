@@ -35,6 +35,9 @@ Preconditions:
 
 ## Gotchas
 
+The CLI also supports --after-tab <id> instead of --group: it inherits the anchor group and inserts directly after it, including an ungrouped anchor. This is a distinct unexercised alternative, not a claim that the documented existing-group recipe covers it.
+
+
 - This verifies the real local agent request handler and app persistence, not Bash argument validation, a reverse SSH tunnel, successful authentication, remote tmux existence or browser-extension behavior.
 - Port 19548 is the remote CLI default, not the app's local inbound port. Do not use the separate notification listener or set an internal port/state value.
 - Fresh groups are created through the palette, never by writing session JSON. Group persistence is not proof of rename-editor focus; this journey uses the saved default group name and does not verify custom naming. Workspace display names fall back to `Workspace N` when the saved name is empty.
