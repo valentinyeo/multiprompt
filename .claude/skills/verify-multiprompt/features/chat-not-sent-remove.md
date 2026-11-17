@@ -1,5 +1,7 @@
 # Remove a stuck Not sent message
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-not-sent-remove.ps1
+
 A message that is stuck as Not sent from an old session can be removed with Remove.
 
 ## Sub-features

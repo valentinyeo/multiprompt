@@ -1,5 +1,7 @@
 # Every session message
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-full-history.ps1, tools/chat-full-history-proof.mjs
+
 ## Sub-features
 
 - A long session opens with all 50 known user/assistant messages in order, not just its recent tail.

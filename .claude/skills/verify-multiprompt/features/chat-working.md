@@ -1,5 +1,7 @@
 # Inline working dots
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-working.ps1
+
 ## Sub-features
 
 - Three dots sit in the next assistant reply slot while the existing working signal is active.

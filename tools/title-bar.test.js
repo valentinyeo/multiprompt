@@ -11,8 +11,10 @@ const control = read(base + 'control.ps1');
 const native = read(base + 'title-bar-native.cs');
 
 test('title-bar keeps real monitor DPI coverage while migrating to the app-owned controls journey', () => {
-  assert.match(workflow, /caption-dpi:.*inputs.feature == 'title-bar'.*\[96,120,144\]/);
-  assert.match(workflow, /caption-dpi:.*inputs.feature == 'window-controls'.*\[96,120,144\]/);
+  assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
+  const { journeyMatrix } = require('./verify-features.cjs');
+  assert.equal(typeof journeyMatrix, 'function');
+  for (const feature of ['title-bar', 'window-controls']) assert.deepEqual([...new Set(journeyMatrix([feature]).map(row => row['caption-dpi']))], [96, 120, 144]);
   assert.match(control, /Feature -in @\('title-bar', 'window-controls'\)[\s\S]*CaptionProof\]::SetDpi/);
   assert.match(control, /Feature -in @\('title-bar', 'window-controls'\) -and \('CaptionProof'/);
   assert.match(read(base + 'title-bar.ps1'), /Join-Path \$PSScriptRoot 'window-controls.ps1'/);
