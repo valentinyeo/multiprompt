@@ -22,6 +22,7 @@ function fixture(t, responses) {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.REQUESTS, JSON.stringify(args) + '\n');
+if (args.some(arg => arg.includes('/test.yml/runs'))) { console.log(process.env.WORKFLOW_RUNS || '[{"id":1,"status":"completed","conclusion":"success"}]'); process.exit(0); }
 if (!args.includes('graphql')) process.exit(2);
 const responses = JSON.parse(fs.readFileSync(process.env.RESPONSES, 'utf8'));
 console.log(JSON.stringify(responses.shift()));
@@ -68,7 +69,8 @@ test('Tests waiting backs off from one minute to five minutes instead of polling
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(fs.readFileSync(delays, 'utf8').trim().split('\n').map(Number), [60000, 120000, 240000, 300000, 300000]);
   assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /result=PASS/);
-  assert.equal(f.requests().length, 6);
+  assert.equal(f.requests().filter(args => args.includes('graphql')).length, 6);
+  assert.equal(f.requests().filter(args => args.some(arg => arg.includes('/test.yml/runs'))).length, 1);
 });
 
 test('query failures and missing head state cannot produce a successful Tests result', t => {
@@ -87,4 +89,17 @@ test('the Tests waiter can read GraphQL check suites with its scoped workflow to
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
   const waiter = workflow.split('  tests:\n')[1].split('  resolve:\n')[0];
   assert.match(waiter, /permissions:[\s\S]*checks: read/);
+});
+
+
+test('terminal suite state is confirmed against the actual workflow, not verifier-created checks', t => {
+  for (const [suiteResult, workflowResult, expected] of [['FAILURE', 'success', 'PASS'], ['SUCCESS', 'failure', 'FAIL']]) {
+    const f = fixture(t, [state([suite(1, 'COMPLETED', suiteResult)])]);
+    const result = spawnSync(process.execPath, [modulePath, 'wait-for-tests'], { env: { ...f.env, WORKFLOW_RUNS: JSON.stringify([{ id: 1, status: 'completed', conclusion: workflowResult }]) }, encoding: 'utf8' });
+    assert.equal(result.status, expected === 'PASS' ? 0 : 1, result.stderr);
+    const output = fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8');
+    assert.match(output, new RegExp(`result=${expected}`));
+    assert.equal(f.requests().length, 2);
+    assert.ok(f.requests().some(args => args.some(arg => arg.includes(`head_sha=${head}`))));
+  }
 });

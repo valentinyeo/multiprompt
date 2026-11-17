@@ -229,3 +229,5 @@ Measure real automatic runs, including queue time and cancellations. Put run lin
 Cancelled verifier runs recover the latest open PR head automatically, at most once per head. Recovery skips drafts, existing active runs, and successful verdicts. It never retries product failures or dispatches measurement runs. Cancelling a superseded run stops its queued report jobs; the separate completion observer keeps cancellation BLOCKED until a fresh independent verdict passes.
 
 Verifier recovery reads PR metadata, head checks, comments and Tests status in one GraphQL snapshot. Tests and release-status polling start at one minute and back off to five minutes. Missing head state, API errors, and non-green Tests remain fail-closed; snapshots never substitute an older successful head or attempt.
+
+A terminal check-suite result is confirmed once against the actual Tests workflow run. Custom verifier checks can attach to another workflow's suite, so the suite's conclusion alone cannot prove that Tests passed or failed.

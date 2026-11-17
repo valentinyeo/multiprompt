@@ -363,7 +363,7 @@ function recover(env) {
   let { result, body } = recoveryReport(run, headSha, comments);
   if (checkConclusion(result) === 'success') {
     let gate;
-    try { gate = testsGate(tests); }
+    try { gate = testsGate(testsRuns(env, headSha, tests)); }
     catch { gate = { reason: 'Tests could not be confirmed' }; }
     if (gate.action !== 'pass') {
       ({ result, body } = recoveryReport(run, headSha, []));
@@ -612,8 +612,11 @@ async function pickDeepseek(env, outDir) {
   setOutputs({ structured_output: structured });
 }
 
-function testsRuns(env, headSha) {
-  return githubState(env, { headSha }).tests;
+function testsRuns(env, headSha, suites) {
+  const snapshot = suites || githubState(env, { headSha }).tests;
+  if (testsGate(snapshot).action === 'wait') return snapshot;
+  const runs = JSON.parse(gh(['api', `repos/${env.REPO}/actions/workflows/test.yml/runs?head_sha=${headSha}&per_page=20`, '--jq', '[.workflow_runs[] | {id, status, conclusion}]']));
+  return runs;
 }
 
 async function waitForTests(env) {

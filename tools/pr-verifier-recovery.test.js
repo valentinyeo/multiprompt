@@ -158,7 +158,8 @@ else if (endpoint.includes('/test.yml/runs')) {
       assert.ok(check.includes(`conclusion=${gate.startsWith('success') ? 'success' : 'failure'}`));
       assert.ok(check.includes(`output[title]=pstack-verifier: ${gate.startsWith('success') ? 'PASS+NOTES' : 'BLOCKED'}`));
       assert.equal(calls.filter(args => args.includes('graphql')).length, 1);
-      assert.equal(calls.some(args => args.some(arg => /\/(?:test.yml\/runs|comments|pulls\/1052|check-runs\?)/.test(arg))), false);
+      assert.equal(calls.some(args => args.some(arg => /\/(?:comments|pulls\/1052|check-runs\?)/.test(arg))), false);
+      assert.equal(calls.filter(args => args.some(arg => arg.includes('/test.yml/runs'))).length, gate === 'queued' ? 0 : 1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
