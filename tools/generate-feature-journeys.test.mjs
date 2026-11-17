@@ -108,4 +108,6 @@ test('hosted desktop routing runs generated rows and rejects a mutation failing 
     assert.deepEqual(JSON.parse(run.stdout.match(/^builds=(.+)$/m)[1]), expected);
   }
   assert.equal((workflow.match(/name: shortcut-break-app/g) || []).length, 2);
+  const recorder = workflow.split('      - name: Install browser toggle recorder\n')[1].split('\n')[0].trim();
+  assert.ok(recorder.includes("startsWith(env.FEATURE, 'generated-')"), 'Every generated drive.ps1 row needs the recorder before launch');
 });
