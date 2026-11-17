@@ -101,7 +101,11 @@ test('manual and nightly reaction proof uses the shared journey', () => {
   assert.match(verify, /workflow_call:\n    inputs:\n(?:      [\s\S]*?)      chat_reactions_proof:/);
   assert.match(verify, /workflow_call:\n    inputs:\n      revision:\n        required: false\n        type: string/);
   verifyManualNightly(verify);
-  assert.match(verify, /CHAT_REACTIONS_PROOF: \$\{\{ inputs.chat_reactions_proof && '1' \|\| '' \}\}/);
+  const expression = verify.match(/CHAT_REACTIONS_PROOF: \$\{\{ (.+) \}\}/)?.[1];
+  assert.ok(expression, 'reaction proof routing exists');
+  for (const [requested, feature, expected] of [[true, 'chat-delivery', '1'], [false, 'chat-double-click', '1'], [false, 'chat-delivery', '']]) {
+    assert.equal(vm.runInNewContext(expression, { inputs: { chat_reactions_proof: requested }, matrix: { feature } }), expected);
+  }
   assert.match(verify, /control\.ps1 -Feature \$env:FEATURE/);
 });
 
