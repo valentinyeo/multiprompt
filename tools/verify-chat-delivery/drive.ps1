@@ -180,7 +180,18 @@ function Shell-Input([string]$Kind, [string]$Value = '') {
 function Fake-State {
     $text = & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell show
     if ($LASTEXITCODE -ne 0) { throw 'Fake shell state read failed' }
-    ($text -join "`n") | ConvertFrom-Json
+    $view = ($text -join "`n") | ConvertFrom-Json
+    foreach ($line in ((Read-Shared "$state/message-dispatch.jsonl") -split "`n" | Where-Object { $_.Trim() })) {
+        $message = ($line | ConvertFrom-Json).result.message
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $hash.ComputeHash([Text.Encoding]::UTF8.GetBytes("$($message.id)`n$($message.attempt)`n$($message.epoch)")) }
+        finally { $hash.Dispose() }
+        $token = ([BitConverter]::ToString($digest) -replace '-', '').Substring(0, 16).ToLowerInvariant()
+        $payload = $message.text + "`n[mp:$token]"
+        $view.queue = @($view.queue | ForEach-Object { $_.Replace($payload, $message.text) })
+        $view.box = $view.box.Replace($payload, $message.text)
+    }
+    $view
 }
 function Queue-View {
     $views = [regex]::Matches((Read-Shared "$settings/debug.log"), 'CHAT_QUEUE items=(\[[^\r\n]*\])')
@@ -883,7 +894,6 @@ foreach ($plan in $plans) {
             $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
@@ -891,6 +901,7 @@ foreach ($plan in $plans) {
             }
             Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
             . "$PSScriptRoot/../verify-chat-reply.ps1"
