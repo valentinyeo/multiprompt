@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { discoverFeatures } = require('./verify-features.cjs');
+const { touchedJourneys } = require('./touched-journeys.cjs');
 
 const MAX_FEATURES = 3;
 const MAX_EVIDENCE_LINES = 8;
@@ -166,8 +167,7 @@ function failedHeadFeatures(jobs, features) {
   const list = Array.isArray(jobs) ? jobs : [];
   const failed = [];
   for (const feature of names) {
-    const prefix = `head ${feature} /`;
-    const mine = list.filter(job => job && (job.name === `head ${feature}` || String(job.name || '').startsWith(prefix)));
+    const mine = list.filter(job => job && (job.name === `head / verify (${feature})` || String(job.name || '').startsWith(`head / verify (${feature}, `)));
     const finished = mine.filter(job => job.conclusion && job.conclusion !== 'skipped');
     if (finished.some(job => job.conclusion !== 'success')) failed.push(feature);
   }
@@ -367,8 +367,10 @@ function prepare(env, outDir) {
     '',
   ].join('\n');
   fs.writeFileSync(path.join(outDir, 'pr.md'), context);
-  const available = availableFeatures(env);
-  fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(selectable(available), null, 2));
+  const files = execFileSync('git', ['diff', '--name-only', '-z', `${env.BASE_SHA}...HEAD`], { encoding: 'utf8' }).split('\0').filter(Boolean);
+  const mapped = touchedJourneys(files, env.FEATURES_DIR);
+  fs.writeFileSync(path.join(outDir, 'mapped.json'), JSON.stringify(mapped, null, 2));
+  fs.writeFileSync(path.join(outDir, 'selectable.json'), JSON.stringify(mapped.features, null, 2));
 }
 
 function latestArtifacts(artifacts, selection, baseSha) {
@@ -593,6 +595,11 @@ async function main(argv, env) {
   if (command === 'select') {
     const outDir = rest[0];
     const selection = validateSelection(env.SELECTION, availableFeatures(env));
+    const mapped = JSON.parse(fs.readFileSync(path.join(outDir, 'mapped.json'), 'utf8'));
+    selection.features = mapped.features;
+    selection.dropped = [];
+    selection.compareBase = selection.features.length > 0 && JSON.parse(env.SELECTION).compare_base !== false;
+    selection.unmapped = mapped.unmapped;
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'selection.json'), JSON.stringify(selection, null, 2));
     if (selection.newMap) fs.writeFileSync(path.join(outDir, 'generated-journey-map.md'), selection.newMap);

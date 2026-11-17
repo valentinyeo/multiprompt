@@ -1,5 +1,7 @@
 # Appearance
 
+Source files: src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-appearance.ps1, .claude/skills/verify-multiprompt/drive.ps1, tools/pane-spacing.test.js, src/design_tokens.zig
+
 Verify on: push, pull_request
 
 Confirm the main window starts maximized, then choose a global color theme through the command palette and confirm both the visible desktop and saved preference change.

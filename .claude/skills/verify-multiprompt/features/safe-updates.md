@@ -1,5 +1,7 @@
 # Safe release updates
 
+Source files: src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-safe-updates.ps1, tools/update-release-journey.ps1
+
 ## Sub-features
 
 Signed-manifest verification, background staging, explicit and cold apply, helper retirement, bundle rollback and launch-argument preservation.

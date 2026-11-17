@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-close-unattached-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   close-unattached:
     runs-on: windows-latest

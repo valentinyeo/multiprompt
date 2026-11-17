@@ -1,5 +1,7 @@
 # Session open
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-open.ps1
+
 Open an existing remote tmux session as a named background tab through the agent's real `zsb` TCP entry point, without changing the user's selection.
 
 ## Sub-features

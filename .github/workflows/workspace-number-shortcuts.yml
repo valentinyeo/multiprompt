@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: workspace-numbers-${{ github.ref }}-${{ inputs.tag }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   shortcuts:

@@ -1,5 +1,7 @@
 # Messages only
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-messages-only.ps1, tools/verify-chat-delivery/drive.ps1, tools/chat-messages-only-proof.mjs, tools/chat-unread-divider.test.js, tools/chat-messages-only-proof.test.js
+
 Verify on: push
 
 ## Sub-features

@@ -1,5 +1,7 @@
 # Remind Me
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-remind-me.ps1, src/app_state.zig
+
 Verify on: push
 
 Open the Remind Me preset picker with Ctrl+H on a tmux session and see the hour and evening presets without choosing one.

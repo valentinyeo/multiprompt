@@ -1,5 +1,7 @@
 # Chat delivery
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-delivery.ps1, tools/chat-history-reader-test.py, tools/verify-chat-delivery/drive.ps1, tools/verify-chat-delivery.test.js, tools/chat-missing-note-proof.mjs
+
 ## Sub-features
 
 - `busy-send`: a message typed in the real Chat View composer reaches an agent buffer as exactly that text followed by Enter within 15 seconds while the scripted agent remains busy (`esc to interrupt`).

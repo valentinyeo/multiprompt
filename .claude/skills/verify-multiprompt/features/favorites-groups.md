@@ -1,5 +1,7 @@
 # Favorites groups
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-favorites-groups.ps1
+
 Verify on: push
 
 Group the same session independently in its home workspace and Favorites (Alt+1), using the existing group palette.

@@ -195,3 +195,15 @@ Use `/maintain-verification-skill` when menus, keyboard routing, persistence or 
 
 - [Skill pills](features/chat-skill-pill.md): native draft and sent-history colors on dark and light themes.
 - [Chat options](features/chat-options.md): clickable answer cards for lettered or numbered options and terminal pick lists.
+
+## Part S. Verification speed
+
+PRs select journeys from each feature map's `Source files:` line. Run every match. An unknown application source selects all runnable journeys; never cap the result to save time. Documentation and CI-only edits use the required Tests and independent verifier without unrelated UI journeys.
+
+Selection and desktop journeys overlap Tests. A verdict still requires Tests to pass for the exact PR head. The independent judge, PASS, PASS+NOTES, FAIL, BLOCKED, inherited-failure handling, and cleanup requirements do not change.
+
+One application build per revision is shared within each run. Signed update fixtures, source instrumentation, and symbolized builds retain separate binaries because their build inputs differ. Zig toolchains and compilation are cached. Never accept a cached binary without the embedded version, revision, and hash checks.
+
+All workflows cancel superseded work. Keep reusable workflow groups separate from their callers. Run the full runnable set nightly on master and before release publication. Keep all Tests shards, update scenarios, speed comparisons, and five-minute idle observations.
+
+Measure real automatic runs, including queue time and cancellations. Put run links, sample counts, elapsed times, and conclusions in the PR body. Do not report a failed or cancelled run as a speedup. Push once per fix and never dispatch additional measurements.

@@ -1,5 +1,7 @@
 # Chat first paint
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-first-paint.ps1
+
 Verify on: push
 
 One failure class: Chat View shows one layout in the first frame after launch and a different layout once restore finishes (IGSH-925: the message card was drawn for a narrow pane while the transcript and message box kept the full width, then everything jumped).

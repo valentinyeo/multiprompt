@@ -20,8 +20,8 @@ concurrency:
 
 jobs:
   tests:
-    needs: resolve
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    needs: [resolve, select, head, failed-head, base]
+    if: always() && ( github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     runs-on: ubuntu-latest
     timeout-minutes: 80
     outputs:
@@ -76,8 +76,8 @@ jobs:
         run: node tools/pr-verifier.cjs resolve
 
   select:
-    needs: [resolve, tests]
-    if: needs.resolve.outputs.eligible == 'true' && needs.tests.result == 'success'
+    needs: resolve
+    if: needs.resolve.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -106,6 +106,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.resolve.outputs.number }}
           FEATURES_DIR: .claude/skills/verify-multiprompt/features
+          BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
         run: node verifier-tools/tools/pr-verifier.cjs prepare verifier-out
       - name: Pick the journeys with DeepSeek
         id: deepseek-pick
@@ -159,14 +160,10 @@ jobs:
   head:
     needs: [resolve, select]
     if: needs.select.result == 'success' && needs.select.outputs.features != '[]'
-    name: head ${{ matrix.feature }}
-    strategy:
-      fail-fast: false
-      matrix:
-        feature: ${{ fromJSON(needs.select.outputs.features) }}
+    name: head
     uses: ./.github/workflows/verify.yml
     with:
-      feature: ${{ matrix.feature }}
+      features: ${{ needs.select.outputs.features }}
       revision: ${{ needs.resolve.outputs.head_sha }}
 
   failed-head:
@@ -199,14 +196,10 @@ jobs:
   base:
     needs: [resolve, failed-head]
     if: always() && !cancelled() && needs.failed-head.result == 'success' && needs.failed-head.outputs.features != '[]' && needs.failed-head.outputs.features != ''
-    name: base ${{ matrix.feature }}
-    strategy:
-      fail-fast: false
-      matrix:
-        feature: ${{ fromJSON(needs.failed-head.outputs.features) }}
+    name: base
     uses: ./.github/workflows/verify.yml
     with:
-      feature: ${{ matrix.feature }}
+      features: ${{ needs.failed-head.outputs.features }}
       revision: ${{ needs.resolve.outputs.head_sha }}
       app_revision: ${{ needs.resolve.outputs.base_sha }}
 

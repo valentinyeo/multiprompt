@@ -1,5 +1,7 @@
 # Inbox order
 
+Source files: src/inbox*, src/notification*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-inbox-order.ps1
+
 The desktop Inbox shows recent sessions first.
 
 ## Sub-features

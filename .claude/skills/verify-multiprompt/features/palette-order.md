@@ -1,5 +1,7 @@
 # Palette order
 
+Source files: src/command_palette.zig, src/shortcuts.zig, src/search*, src/main.zig, build.zig, build.zig.zon, .claude/skills/verify-multiprompt/control-feature-palette-order.ps1
+
 Verify on: push
 
 Open an empty Ctrl+K with a known usage history and check the Most used band, the job groups, a removed command and renamed commands.

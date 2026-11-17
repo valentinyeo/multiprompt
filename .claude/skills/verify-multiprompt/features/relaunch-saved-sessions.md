@@ -1,5 +1,7 @@
 # Relaunch saved sessions
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/update*, src/release*, src/startup.zig, src/restore*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-relaunch-saved-sessions.ps1, src/notify_ports.zig
+
 Verify on: push
 
 The release gate for one failure class: a bug that only shows when the app starts again on real saved sessions (IGSH-890 listed every starred session twice and kept adding more; every check had only started the app once on an empty profile).

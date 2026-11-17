@@ -1,5 +1,7 @@
 # Bot photos
 
+Source files: src/window*, src/title*, src/dpi*, src/pane*, src/layout*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-bot-photo.ps1
+
 ## Sub-features
 
 Bot face offers an image and Reset. Images use a centered circle. Reset keeps the chosen face and color. Remote session pictures upload through background account sync, including existing local pictures. Offline changes retry when sync resumes.

@@ -1,5 +1,7 @@
 # Chat code font
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/settings*, src/themes.zig, src/ui_scale.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-code-font.ps1, tools/chat-code-font-proof.mjs
+
 IGSH-678: every code piece in Chat View draws in the bundled Nordwand Mono SemiBold, 2 pt smaller than before, with the same smooth DirectWrite edges as body text, including diff rows on green and red backgrounds.
 
 ## Sub-features

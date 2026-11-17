@@ -1,5 +1,7 @@
 # Hosted live working dots
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-working-live.ps1
+
 ## Sub-features
 
 - Real composer Enter to three painted dots within 1000 ms.

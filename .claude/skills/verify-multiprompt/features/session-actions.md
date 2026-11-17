@@ -1,5 +1,7 @@
 # Quit, hide and delete chats
 
+Source files: src/workspaces.zig, src/workspace*, src/session.zig, src/sidebar.zig, src/group*, src/session*, src/reconnect*, src/ssh*, src/tmux*, src/launcher*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-session-actions.ps1
+
 ## Sub-features
 
 Ctrl+W quits without stopping agents. Ctrl+Shift+W deletes the selected chat once. Deletion saves its history identity before stopping it. Alt+X has no action. Right-click opens seven shared palette actions, with Delete last and red.

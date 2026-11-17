@@ -1,5 +1,7 @@
 # Chat send latency
 
+Source files: src/chat*, src/terminal*, src/markdown*, src/claude*, src/tmux*, src/message*, tools/chat-history-reader.py, tools/verify-chat-delivery/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, .claude/skills/verify-multiprompt/control-feature-chat-send-latency.ps1
+
 Verify on: push
 
 IGSH-977: a message must be on screen in the Chat View the moment it is sent. The app used to hold the window thread for the 120 ms paste-and-Enter wait (250 ms for tmux and remote tabs) before the window could redraw, so the new message appeared late.
