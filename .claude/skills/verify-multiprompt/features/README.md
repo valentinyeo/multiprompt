@@ -66,6 +66,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Hosted live working dots](chat-working-live.md): composer send, event subscription and timestamped native pixels with a provider stand-in.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
+- [Jump to newest](chat-newest.md): Shift+G twice, exact draft preservation and the renamed palette action, with direct verifier checks.
 - [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 
 - [Messages only](chat-messages-only.md): a tool-heavy assistant turn retains all transcript data but paints no tool rows or empty space; the identical Windows journey must reject the pinned pre-fix commit 42cecfd3.
