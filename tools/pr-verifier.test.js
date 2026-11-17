@@ -518,7 +518,7 @@ test('recovery only restores trusted published verdicts', () => {
 test('SOFT-2418 delegated journeys keep distinct artifacts discoverable by the verifier', () => {
   const expression = verify.match(/name: verify-\$\{\{ ([^}]+) \}\}\$\{\{ matrix.app-revision/)[1];
   const { runInNewContext } = require('node:vm');
-  const names = ['chat-working-live', 'chat-instant', 'chat-model', 'chat-delivery'].map(feature => {
+  const names = ['chat-working-live', 'chat-instant', 'chat-model', 'chat-delivery', 'chat-server-clear'].map(feature => {
     const name = `verify-${runInNewContext(expression, { matrix: { feature }, env: { FEATURE: 'chat-delivery' } })}`;
     assert.match(name, verifier.featureDirPattern(feature));
     assert.match(`${name}-${base}`, verifier.featureDirPattern(feature));
