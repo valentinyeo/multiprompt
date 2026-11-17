@@ -2425,31 +2425,13 @@ pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
 
 const LiveDraft = struct {
     active: bool = false,
-    sealed: bool = false,
     owner: [CHAT_OUTBOX_KEY_CAP]u8 = undefined,
     owner_len: usize = 0,
     range: dictation_live.Range = .{ .start = 0, .len = 0 },
     snap: [16400]u16 = undefined,
     snap_len: usize = 0,
-    shown: [dictation_live.text_cap]u16 = undefined,
-    shown_len: usize = 0,
-    baseline: [dictation_live.text_cap]u16 = undefined,
-    baseline_len: usize = 0,
 };
 var live_draft: LiveDraft = .{};
-
-fn chatLiveCaret(cur_len: usize) usize {
-    var sel_start: u32 = 0;
-    var sel_end: u32 = 0;
-    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
-    return @min(@as(usize, sel_end), cur_len);
-}
-
-fn chatLiveCopy(dst: []u16, src: []const u16) usize {
-    const n = @min(src.len, dst.len);
-    if (n > 0) @memcpy(dst[0..n], src[0..n]);
-    return n;
-}
 
 fn chatLiveOwnerMatches(owner: []const u8) bool {
     if (app_state.g_chat_composer_hwnd == null or owner.len == 0) return false;
@@ -2503,42 +2485,19 @@ pub fn chatDictationLiveApply(owner: []const u8, words: []const u16) void {
     const cur = composerText(&buf);
     if (!live_draft.active or !std.mem.eql(u8, live_draft.owner[0..live_draft.owner_len], owner)) {
         if (owner.len > live_draft.owner.len) return;
-        const at = chatLiveCaret(cur.len);
+        var sel_start: u32 = 0;
+        var sel_end: u32 = 0;
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B0, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+        const at: usize = @min(@as(usize, sel_end), cur.len);
         @memcpy(live_draft.owner[0..owner.len], owner);
         live_draft.owner_len = owner.len;
         @memcpy(live_draft.snap[0..cur.len], cur);
         live_draft.snap_len = cur.len;
         live_draft.range = .{ .start = at, .len = 0 };
         live_draft.active = true;
-        live_draft.sealed = false;
-        live_draft.shown_len = 0;
-        live_draft.baseline_len = 0;
     }
-    const decided = dictation_live.planApply(
-        live_draft.snap[0..live_draft.snap_len],
-        cur,
-        live_draft.sealed,
-        live_draft.baseline[0..live_draft.baseline_len],
-        live_draft.shown[0..live_draft.shown_len],
-        words,
-    );
-    if (decided.seal and (!live_draft.sealed or decided.at_caret)) {
-        live_draft.baseline_len = chatLiveCopy(&live_draft.baseline, live_draft.shown[0..live_draft.shown_len]);
-    }
-    if (decided.seal) live_draft.sealed = true;
-    live_draft.shown_len = chatLiveCopy(&live_draft.shown, words);
-    if (decided.skip) return;
-    const range: dictation_live.Range = if (decided.at_caret)
-        .{ .start = chatLiveCaret(cur.len), .len = 0 }
-    else
-        chatLiveCurrentRange(cur);
-    if (decided.at_caret and decided.words.len == 0) {
-        @memcpy(live_draft.snap[0..cur.len], cur);
-        live_draft.snap_len = cur.len;
-        live_draft.range = range;
-        return;
-    }
-    if (!chatLiveWrite(cur, range, decided.words, true)) live_draft.active = false;
+    const range = chatLiveCurrentRange(cur);
+    if (!chatLiveWrite(cur, range, words, true)) live_draft.active = false;
 }
 
 pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
@@ -2548,26 +2507,9 @@ pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
     }
     var buf: [16400]u16 = undefined;
     const cur = composerText(&buf);
-    const decided = dictation_live.planApply(
-        live_draft.snap[0..live_draft.snap_len],
-        cur,
-        live_draft.sealed,
-        live_draft.baseline[0..live_draft.baseline_len],
-        live_draft.shown[0..live_draft.shown_len],
-        words,
-    );
-    const range: dictation_live.Range = if (decided.at_caret)
-        .{ .start = chatLiveCaret(cur.len), .len = 0 }
-    else
-        chatLiveCurrentRange(cur);
-    const ok = if (decided.skip) true else if (decided.seal)
-        chatLiveWrite(cur, range, decided.words, true)
-    else
-        chatLiveWrite(cur, range, words, true);
+    const range = chatLiveCurrentRange(cur);
+    const ok = chatLiveWrite(cur, range, words, true);
     live_draft.active = false;
-    live_draft.sealed = false;
-    live_draft.shown_len = 0;
-    live_draft.baseline_len = 0;
     if (!ok) return false;
     chatDraftNoteEdit();
     chatDraftFlush();
@@ -2579,9 +2521,6 @@ pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
 pub fn chatDictationLiveDiscard() void {
     if (!live_draft.active) return;
     live_draft.active = false;
-    live_draft.sealed = false;
-    live_draft.shown_len = 0;
-    live_draft.baseline_len = 0;
     if (!chatLiveOwnerMatches(live_draft.owner[0..live_draft.owner_len])) return;
     var buf: [16400]u16 = undefined;
     const cur = composerText(&buf);
