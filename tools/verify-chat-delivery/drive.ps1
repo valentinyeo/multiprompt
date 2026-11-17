@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-newest')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -40,7 +40,7 @@ $plans = @(
     @{name='send-stays-gone'; mode='busy'; text='send stays gone'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
-if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
+if ($Feature -in @('chat-full-history', 'chat-newest')) { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
@@ -820,6 +820,70 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$caseDir/copied.txt", $observation.copied)
             Press @(0x1B) 'Esc: clear selection'
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } elseif ($Feature -eq 'chat-newest') {
+            Bind-Transcript
+            [void](Wait-For 'loaded conversation has a native scrollbar' {
+                (Read-Shared "$settings/debug.log") -match '\[chat\] scroll ui thumb=-?\d+,[1-9]\d* button=0'
+            })
+            $ggScrollStart = Scroll-Transcript 1200
+            [void](Wait-For 'older messages visible before gg' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '1'
+            })
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Type-Composer 'draftGG'
+            [void](Wait-For 'gg preserves an existing draft' { [ChatDeliveryDesktop]::Text($composer) -ceq 'draftGG' })
+            $existingDraft = [ChatDeliveryDesktop]::Text($composer)
+            Shot 'chat-newest-draft'
+            Clear-Composer
+            Type-Composer 'gg'
+            [void](Wait-For 'lowercase gg remains ordinary text' { [ChatDeliveryDesktop]::Text($composer) -ceq 'gg' })
+            $plainDraft = [ChatDeliveryDesktop]::Text($composer)
+            Clear-Composer
+            Type-Composer 'G'
+            $slowStart = [DateTime]::UtcNow
+            [void](Wait-For 'ordinary g typing exceeds the shortcut interval' { ([DateTime]::UtcNow - $slowStart).TotalMilliseconds -gt 650 })
+            Type-Composer 'G'
+            [void](Wait-For 'slow GG remains ordinary text' { [ChatDeliveryDesktop]::Text($composer) -ceq 'GG' })
+            $slowDraft = [ChatDeliveryDesktop]::Text($composer)
+            $beforeGg = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+            if ($beforeGg.Count -eq 0 -or $beforeGg[$beforeGg.Count - 1].Groups[3].Value -ne '1') { throw 'Ordinary gg typing unexpectedly jumped to newest' }
+            Clear-Composer
+            Shot 'chat-newest-before'
+            $ggStart = (Read-Shared "$settings/debug.log").Length
+            Type-Composer 'GG'
+            if (-not (Step 'GG jumps to newest and leaves an empty composer' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($ggStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0' -and [ChatDeliveryDesktop]::Text($composer) -ceq ''
+            })) {
+                Doctor $true
+                throw 'SOFT-2489 Shift+G twice did not jump to newest or left text in the composer'
+            }
+            $jumpDraft = [ChatDeliveryDesktop]::Text($composer)
+            Shot 'chat-newest-after'
+            $paletteScrollStart = Scroll-Transcript 1200
+            [void](Wait-For 'older messages visible before palette jump' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($paletteScrollStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '1'
+            })
+            Press @(0x11, 0x4B) 'Ctrl+K: jump to newest message'
+            [void](Wait-For 'owned palette ready for newest query' { (Read-Shared "$settings/debug.log").Substring($paletteScrollStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            $query = 'jump to newest message'
+            $actions.Add(@{case=$plan.name; input='type palette query'; text=$query})
+            foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            [void](Wait-For 'Jump to newest message is the selected palette row' {
+                (Read-Shared "$settings/debug.log").Substring($paletteScrollStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6465(?:\s|$)')
+            })
+            Shot 'chat-newest-palette'
+            $paletteJumpStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x0D) 'Enter: jump to newest message'
+            [void](Wait-For 'palette command returns to newest' {
+                $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($paletteJumpStart), '\[chat\] scroll ui thumb=(-?\d+),(-?\d+) button=(\d)')
+                $m.Count -gt 0 -and $m[$m.Count - 1].Groups[3].Value -eq '0'
+            })
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            Doctor $true
+            Save @{scrollStart=$ggScrollStart; jumpDraft=$jumpDraft; paletteJumpStart=$paletteJumpStart; existingDraft=$existingDraft; plainDraft=$plainDraft; slowDraft=$slowDraft; finalDraft=[ChatDeliveryDesktop]::Text($composer); logStart=$ggStart; paletteLogStart=$paletteScrollStart; scrolledBefore=$true} "$caseDir/newest.json"
         } elseif ($isHistory -and $env:CHAT_RETENTION_PROOF -eq '1') {
             Assert-Retention
         } elseif ($isHistory) {
@@ -1581,6 +1645,8 @@ if ($env:CHAT_SKILLS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
 } elseif ($env:CHAT_RETENTION_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-history-retention-proof.mjs" $Evidence
+} elseif ($Feature -eq 'chat-newest') {
+    & node "$PSScriptRoot/../chat-newest-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {
