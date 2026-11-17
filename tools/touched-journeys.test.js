@@ -1,10 +1,19 @@
-const test = require('node:test');
+const nodeTest = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { touchedJourneys } = require('./touched-journeys.cjs');
+const modulePath = path.join(__dirname, 'touched-journeys.cjs');
+const { touchedJourneys } = fs.existsSync(modulePath) ? require(modulePath) : {};
 const { discoverFeatures, journeyMatrix } = require('./verify-features.cjs');
+
+function test(name, fn) {
+  nodeTest(name, t => {
+    assert.equal(typeof touchedJourneys, 'function', 'The changed-file journey selector is available');
+    assert.equal(typeof journeyMatrix, 'function', 'The journey matrix includes all feature variants');
+    return fn(t);
+  });
+}
 
 function maps(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'touched-journeys-'));
@@ -69,4 +78,15 @@ test('the verifier runs every mapped journey, even when its picker proposes fewe
   const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
   assert.deepEqual(selection.features, features);
   assert.equal(selection.compareBase, true);
+});
+
+test('mapped model and live-working journeys retain their chat-delivery driver', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const condition = workflow.split('      - name: Select instant chat driver\n')[1].split('\n')[0].trim().slice(4);
+  for (const flag of ['CHAT_MODEL_PROOF', 'CHAT_WORKING_LIVE_PROOF', 'CHAT_DOUBLE_CLICK_PROOF']) {
+    const expression = condition.replace(/env\.([A-Z_]+)/g, (_, name) => JSON.stringify(name === flag ? '1' : ''));
+    assert.equal(require('node:vm').runInNewContext(expression), true, flag);
+  }
+  const shared = workflow.split('      - name: Download the shared Windows app build\n')[1].split('      - name: Build branch executable')[0];
+  assert.doesNotMatch(shared, /CHAT_MODEL_PROOF/);
 });

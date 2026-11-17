@@ -199,7 +199,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./tools/local-listener-accounts.ps1
       - name: Bound Zig cache before save
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         shell: bash
         run: |
           du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
@@ -469,7 +469,7 @@ jobs:
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
         run: node tools/json-reader/benchmark.mjs --fixtures-only
       - name: Bound Zig cache before save
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         shell: bash
         run: |
           du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
@@ -728,7 +728,7 @@ jobs:
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
       - name: Bound Zig cache before save
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: always()
         shell: bash
         run: |
           du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
@@ -800,7 +800,7 @@ jobs:
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
       - name: Bound Zig cache before save
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: always()
         shell: bash
         run: |
           du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"

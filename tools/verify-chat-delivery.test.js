@@ -10,7 +10,7 @@ const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, 
 const os = require('node:os');
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 const root = path.resolve(__dirname, '..');

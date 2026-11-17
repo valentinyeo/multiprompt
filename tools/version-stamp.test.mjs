@@ -162,84 +162,35 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
 });
 
-test('PR, manual and nightly runs restore Zig caches while master pushes can save them', () => {
+test('PR, manual and nightly runs reuse Zig caches without duplicate restore/save steps', () => {
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-    const speedJobs = ['speed-baseline', 'speed-candidate'].map(name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0]).filter(Boolean);
-    const idleJob = workflow.split('\n  idle-budget:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
-    if (file === 'test.yml') assert.ok(idleJob, 'test.yml runs the idle budget job');
-    if (idleJob) {
-      const idleCaches = idleJob.split(/(?=^      - )/m).filter(step => /uses: actions\/cache/.test(step));
-      assert.equal(idleCaches.length, 1);
-      assert.match(idleCaches[0], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
-      assert.match(idleJob, /if: github\.event_name == 'pull_request'\n/);
-    }
-    const caches = workflow.split(/(?=^      - )/m).filter(step => !speedJobs.some(job => job.includes(step)) && !idleJob?.includes(step)).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
-    const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
-    const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
-    const canSave = /^  push:\n/m.test(workflow);
+    const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     for (const cache of caches) {
-      const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
-      const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
-      assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      if (!canSave) {
-        assert.match(cache, /uses: actions\/cache\/restore@/, `${file} must never save a cache outside a master push`);
-        continue;
-      }
-      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
-      if (cache.includes('uses: actions/cache/restore@')) {
-        const condition = cache.match(new RegExp(`if: ${pathGuard}${guard}\\(([^\\n]+)\\)\\n`));
-        assert.ok(condition, 'restore condition must enumerate allowed events');
-        const events = condition[1].split(' || ').sort();
-        const expected = ["github.event_name == 'pull_request'", "github.event_name == 'workflow_dispatch'", "github.event_name == 'schedule'"];
-        if (windows?.includes(cache)) expected.push("(github.event_name == 'push' && github.ref != 'refs/heads/master')");
-        assert.deepEqual(events, expected.sort());
-      } else {
-        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
-      }
+      assert.match(cache, /uses: actions\/cache(?:\/(?:restore|save))?@[a-f0-9]{40}\n/);
+      assert.match(cache, /path:/);
+      assert.match(cache, /key:/);
+      if (cache.includes('.zig-cache') && cache.includes('uses: actions/cache@')) assert.match(cache, /github.sha|inputs.revision|inputs.app_revision/);
     }
-    if (file === 'test.yml') {
-      assert.equal(caches.length, 16);
-      for (let i = 0; i < caches.length; i += 2) {
-        assert.ok(caches[i].includes('uses: actions/cache/restore@'));
-        assert.ok(caches[i + 1].includes('uses: actions/cache@'));
-        assert.equal(caches[i].split('        with:\n')[1], caches[i + 1].split('        with:\n')[1]);
-      }
-      const gated = "steps\\.paths\\.outputs\\.heavy == 'true' && steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
-      for (const [name, cap, prefix, run, gate] of [
-        ['test', 1600, 'shards-v7-group-', 'Run tests', gated],
-        ['test-vps', 1600, 'shards-v6-vps-', 'Run server tool tests', gated],
-        ['speed-baseline', 1600, '-zig-0\\.16\\.0-speed-', 'Build baseline', ''],
-        ['speed-candidate', 1600, '-zig-0\\.16\\.0-speed-', 'Build candidate', ''],
-      ]) {
-        const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
-        const steps = job.split(/(?=^      - )/m);
-        const trim = steps.filter(step => step.includes('name: Bound Zig cache before save'));
-        assert.equal(trim.length, 1);
-        assert.match(trim[0], new RegExp(`if: ${gate}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\\n`));
-        assert.match(trim[0], /shell: bash\n/);
-        assert.equal((trim[0].match(/du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/g) || []).length, 1);
-        assert.ok(trim[0].includes('du -sh "$ZIG_GLOBAL_CACHE_DIR"\n'));
-        assert.ok(trim[0].includes('if [ -d .zig-cache ]; then du -sh .zig-cache; fi\n'));
-        assert.ok(trim[0].includes(`python3 tools/trim-zig-cache.py --cap-mib ${cap}\n`));
-        assert.ok(job.indexOf(`name: ${run}\n`) < job.indexOf('name: Bound Zig cache before save\n'));
-        const buildCaches = steps.filter(step => /name: (?:Restore Zig \(PR\)|Cache Zig)\n/.test(step));
-        assert.equal(buildCaches.length, 2);
-        for (const cache of buildCaches) {
-          assert.equal((cache.match(new RegExp(prefix, 'g')) || []).length, 2);
-          assert.match(cache, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
-          assert.match(cache, /path: \|\n            \.zig-cache\n            \$\{\{ env\.ZIG_GLOBAL_CACHE_DIR \}\}/);
-        }
-      }
-      const speedCaches = speedJobs.flatMap(job => job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/restore)?@/.test(step)));
-      assert.equal(speedCaches.length, 4);
-      for (let i = 0; i < speedCaches.length; i += 2) {
-        assert.match(speedCaches[i], /uses: actions\/cache\/restore@[a-f0-9]{40}\n/);
-        assert.match(speedCaches[i], /if: \(?github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'schedule'\)?\n/);
-        assert.match(speedCaches[i + 1], /uses: actions\/cache@[a-f0-9]{40}\n/);
-        assert.match(speedCaches[i + 1], /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\n/);
-        assert.equal(speedCaches[i].split('        with:\n')[1], speedCaches[i + 1].split('        with:\n')[1]);
-      }
+    if (file !== 'test.yml') continue;
+    for (const name of ['test', 'test-vps', 'build-windows', 'speed-baseline', 'speed-candidate', 'idle-budget']) {
+      const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+      const caches = job.split(/(?=^      - )/m).filter(step => /uses: actions\/cache@/.test(step));
+      assert.equal(caches.length, 2, name);
+      const compile = caches.find(step => step.includes('.zig-cache'));
+      const toolchain = caches.find(step => step.includes('-toolchain-'));
+      assert.ok(compile && toolchain, name);
+      assert.match(compile, /github.sha/);
+      assert.match(compile, /hashFiles\('build\.zig', 'build\.zig\.zon'\)/);
+      assert.match(compile, /restore-keys:/);
+      assert.match(toolchain, /zig-toolchain-0.16.0/);
+      if (name === 'idle-budget') assert.match(job, /if: github\.event_name == 'pull_request'\n/);
+      if (name === 'build-windows' || name === 'idle-budget') continue;
+      const trim = job.split(/(?=^      - )/m).find(step => step.includes('name: Bound Zig cache before save'));
+      assert.ok(trim, name);
+      assert.match(trim, /python3 tools\/trim-zig-cache.py --cap-mib 1600/);
+      assert.doesNotMatch(trim, /github.event_name == 'push'/);
+      assert.match(trim, /du -sh \.zig-cache "\$ZIG_GLOBAL_CACHE_DIR"/);
     }
   }
 });

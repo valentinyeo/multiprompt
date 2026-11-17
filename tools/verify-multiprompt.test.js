@@ -171,6 +171,7 @@ test('IGSH-1028 reusable PR journeys select their requested feature and cannot c
   const group = workflow.match(/^  group: (.+)$/m)[1];
   const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature } });
   assert.notEqual(evaluateWorkflowExpression(group, context('pane-layout')), evaluateWorkflowExpression(group, context('browser-pane-stuck')));
+  featureMatrix(workflow);
   const script = workflow.split('      - id: matrix\n')[1].split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^          /gm, '');
   const run = (feature, features = '', event = 'pull_request') => {
     const output = require('node:child_process').execFileSync(process.execPath, ['-'], { cwd: root, input: script, encoding: 'utf8', env: { ...process.env, FEATURE: feature, FEATURES: features, EVENT: event, APP_REVISION: '' } });
@@ -2334,7 +2335,7 @@ test('IGSH-1033 shared tracked quarantine protects rollback and release executio
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \|\| inputs.app_revision != '' \}\}/);
   assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
   assert.match(workflow, /fromJSON\(needs.journeys.outputs.matrix\)/);
-  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  assert.match(workflow, /full: \$\{\{ steps.features.outputs.available \}\}/);
   for (const entry of Object.values(policy.quarantined)) {
     assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
     assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);

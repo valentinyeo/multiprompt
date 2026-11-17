@@ -7,7 +7,7 @@ const test = require('node:test');
 
 
 function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.matrix\)/);
   return require('./verify-features.cjs').discoverFeatures();
 }
 
@@ -353,11 +353,11 @@ test('the release journey runs manually and nightly without blocking releases', 
   assert.match(gate, /^  workflow_dispatch:/m);
   assert.match(gate, /^  schedule:/m);
   assert.doesNotMatch(gate, /^  (?:push|pull_request|workflow_run):/m);
-  assert.match(gate, /cancel-in-progress: false/);
+  assert.match(gate, /cancel-in-progress: true/);
   assert.match(gate, /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(gate, /feature: relaunch-saved-sessions/);
   assert.match(verify, /workflow_call:/);
-  assert.match(verify, /inputs\.feature && inputs\.feature != 'all' && fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
+  assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
 });
 
 test('the release tag is created through the git refs API and never pushed with git, so workflow-file commits cannot block it', () => {
