@@ -51,13 +51,20 @@ function verify(root) {
   const queuedFollowups = rows.filter(row => row.stage === 'queued-followup');
   assert.ok(queuedFollowups.some(row => observation.followups.every(text => row.events.some(({event}) => event.state === 'queued' && event.text === text))), 'Real message store did not retain both follow-up messages');
   assert.ok(!rows.some(row => row.stage === 'dispatch-error' || row.stage === 'reply-timeout'), 'Stand-in dispatch failed');
+  const checks = [];
+  const liveIds = new Set(rows.filter(row => row.stage === 'pushed').flatMap(row => row.events.filter(({event}) => event.kind === 'text.done').map(({event}) => event.item)));
   for (const [stage, count] of [['working-final', 1], ['working-second', 2]]) {
     const saved = rows.find(row => row.stage === stage);
+    const visibleReplies = observation[stage]?.split(reply).length - 1;
+    const finalTextCopies = observation[stage]?.split('pstack: verified').length - 1;
     assert.equal(saved?.rows.length, count, 'Provider archive must retain each real reply');
-    assert.equal(observation[stage]?.split(reply).length - 1, count, 'Each real reply must be copied once after history arrives');
-    assert.equal(observation[stage]?.split('pstack: verified').length - 1, count, 'Final text must replace the growing reply');
+    assert.equal(visibleReplies, count, 'Each real reply must be copied once after history arrives');
+    assert.equal(finalTextCopies, count, 'Final text must replace the growing reply');
     assert.deepEqual(saved.rows.map(row => row.id), ['standin-reply', 'standin-reply-two'].slice(0, count), 'Archive and live items must share identities');
+    assert.ok(saved.rows.every(row => liveIds.has(row.id)), 'Saved replies must match delivered live item identities');
     assert.ok(fs.statSync(path.join(root, `${stage}.png`)).size > 0, 'Final reply screenshot missing');
+    checks.push({name: stage, passed: true, expectedReplies: count, visibleReplies, finalTextCopies,
+      historyIds: saved.rows.map(row => row.id), liveIds: [...liveIds].filter(id => saved.rows.some(row => row.id === id)), copied: observation[stage]});
   }
   const area = json('area.json');
   const frames = observation.frames.map(frame => {
@@ -80,7 +87,7 @@ function verify(root) {
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
   assert.equal(cleanup.evidence_preserved, true);
-  return {feature:'chat-working-live', status:'passed', boundary:'Simulated provider and SSH; production composer, message store dispatch, event pages and Windows painter.'};
+  return {feature:'chat-working-live', status:'passed', checks, cleanup, boundary:'Simulated provider and SSH; production composer, message store dispatch, event pages and Windows painter.'};
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

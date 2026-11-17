@@ -23,6 +23,8 @@ The artifact is `verify-chat-working-live`, even though the shared driver runs a
 
 The SOFT-2555 extension then completes that same live item with an extra final line through production `host_event`, which saves the provider's display history. The driver waits for the app's history cache, copies the native conversation, and requires exactly one complete reply. A second live item carries identical text; after history arrives, both replies must appear exactly once. Inspect `working-final.png`, `working-second.png`, the corresponding copied conversations in `working-live/observation.json`, and the recorded archive rows in `working-host.jsonl`. This also covers server chats after a fresh start or AI switch, where display history replaces the native provider transcript. Existing archives are not rewritten.
 
+`result.json` records the checked reply counts, matching saved/live identities, native copied text and actual cleanup values so the independent text-only judge can read the proof.
+
 Recorded hosted proof: https://github.com/valentinyeo/multiprompt/actions/runs/42368960296 passed on `f6fefa003`. Downloaded `verify-chat-delivery/result.json` reports `passed`; both cleanup records report zero remaining owned processes and removed scratch directories. This is the simulated-provider boundary above, not a real provider acceptance claim.
 
 ## Gotchas
