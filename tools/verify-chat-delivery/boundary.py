@@ -950,11 +950,11 @@ VPS_POLL_COMMAND = (
     "grep '^MemAvailable:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
     "grep '^SwapTotal:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
     "grep '^SwapFree:' /proc/meminfo | tr -s ' ' | cut -d' ' -f2 | tr '\\n' '|'; "
-    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; "
-    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; "
-    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00') | cut -d' ' -f2 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/cpu 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/memory 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; "
+    "(head -1 /proc/pressure/io 2>/dev/null || printf 'some avg10=0.00 avg60=0.00') | cut -d' ' -f3 | cut -d= -f2 | tr '\\n' '|'; "
     "printf '\\n'; "
-    "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null"
+    "~/.local/bin/tmux-list.sh 2>/dev/null || tmux list-sessions -F '#{session_name}|#{session_activity}|0|#{session_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host list --tmux-format 2>/dev/null; true"
 )
 
 

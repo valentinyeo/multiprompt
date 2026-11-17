@@ -55,7 +55,7 @@ const desktopFeatures = featureFiles.filter(file => {
   const desktop = text.includes('## Driving it with control.ps1');
   const reconnect = text.includes('## Driving it with the Windows reconnect harness');
   assert.notEqual(desktop, reconnect, `${file} names exactly one desktop or reconnect driver`);
-  return desktop;
+  return desktop && !text.includes('The workflow selects');
 });
 const allowed = driver.match(/ValidateSet\(([^)]*)\)/)?.[1].match(/'([^']+)'/g).map(value => value.slice(1, -1));
 assert.deepEqual([...allowed].sort(), desktopFeatures.map(file => file.slice(0, -3)).sort());

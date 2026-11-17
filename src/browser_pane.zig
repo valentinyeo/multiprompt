@@ -3802,9 +3802,9 @@ fn positionBrowserUrlBar(layout: BrowserLayout) void {
 }
 
 pub fn positionActiveBrowser() void {
-    if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
     const timing_started = switch_timing.start();
     defer switch_timing.record(.position, timing_started);
+    if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
     if (app_state.g_monitor_transition.active and !app_state.g_monitor_transition.positioning) {
         hideBrowserEdgeMasks();
         return;
@@ -4269,14 +4269,14 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
+    const timing_started = switch_timing.start();
+    defer switch_timing.record(.browser_visible, timing_started);
     if (@import("computer_pane.zig").selected()) { hideAllBrowserChrome(); return; }
     defer syncBrowserHotkeys();
     if (!@import("room_frontend.zig").privateActionsAllowed()) {
         hideAllBrowserChrome();
         return;
     }
-    const timing_started = switch_timing.start();
-    defer switch_timing.record(.browser_visible, timing_started);
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (app_state.g_browser_switch_preparing) return;
     if (app_state.g_updating_browser_visibility) return;

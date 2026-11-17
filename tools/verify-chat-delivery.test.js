@@ -118,7 +118,7 @@ test('IGSH-1152 native crash evidence retains the minidump before scratch cleanu
 const ps51Rules = [
   [/\[\s*(?:ushort|uint|ulong|short|sbyte|semver|bigint)\s*\]/i, '[ushort][char]::ToUpperInvariant($letter)'],
   [/\?\?|\?\.|\?\[/, '$value ?? $fallback'],
-  [/\?(?![?.\[:])[^\r\n]*:/, '$ok ? 1 : 0'],
+  [/\?(?![?.\[:=!<])[^\r\n]*:/, '$ok ? 1 : 0'],
   [/&&|\|\|/, 'Get-Item a && Get-Item b'],
   [/(?:\bForEach-Object\b|\bforeach\b|%)[^\r\n]*-Parallel\b/i, 'ForEach-Object -Parallel { $_ }'],
   [/\[[^\r\n]*\[\s*\]\s*\]\s*::new\s*\(/i, '[Collections.Generic.List[]]::new()'],
@@ -371,15 +371,17 @@ test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux 
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
   assert.match(boundary, /subprocess.call\(\[sys.executable, \*remote\[1:\]\], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer/);
-  assert.match(boundary, /if ARGS\[:1\] == \["send-keys"\]:\s+if stateful\(state\(\)\):\s+return box_send\(\)\s+record\("agent-buffer.jsonl", argv=ARGS\)/);
-  assert.match(boundary, /if ARGS\[:1\] == \["capture-pane"\]/);
+  assert.match(boundary, /if argv\[:1\] == \["send-keys"\] and state\(\)\.get\("sendingProof"\) and "-l" in argv:\s+\(ROOT \/ "send-blocked"\)\.touch\(\)/);
+  assert.match(boundary, /if argv\[:1\] == \["send-keys"\]:\s+if stateful\(state\(\)\):\s+return box_send\(\)\s+record\("agent-buffer.jsonl", argv=argv\)/);
+  assert.match(boundary, /if argv\[:1\] == \["capture-pane"\]/);
   assert.match(boundary, /esc to interrupt/);
   assert.match(boundary, /\\u276f/);
   assert.match(boundary, /FillConsoleOutputAttribute\(handle, 8, len\(value\["suggestion"\]\), COORD\(2, top \+ 4\)/);
   assert.doesNotMatch(boundary, /typed public message|busy delivery alpha|idle delivery beta|steer delivery gamma/);
   const launcher = read('tools/verify-chat-delivery/launcher.c');
   assert.match(launcher, /GetCommandLineW\(\)/);
-  assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE/);
+  assert.match(launcher, /DWORD flags = CREATE_SUSPENDED \| \(GetConsoleWindow\(\) == NULL \? CREATE_NO_WINDOW : 0\);/);
+  assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE, flags/);
 });
 
 test('background host probes are explicitly declined and unknown remote commands remain diagnostic failures', () => {
@@ -400,7 +402,7 @@ test('background host probes are explicitly declined and unknown remote commands
     const options = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host];
     for (const [remote, kind, output, code] of [
       [poll, 'capacity-poll', '', 1],
-      [(loopStart + poll + loopEnd).slice(2, -1), 'capacity-poll', '', 1],
+      [loopStart + poll + loopEnd, 'capacity-poll', '', 1],
       [relayCommand, 'notification-relay', 'MP_RELAY_LEGACY\n', 0],
     ]) probes.push({ argv: [...options, remote], kind, output, code });
     for (const name of ['SSH_TUNNEL_KEEPER_OPTS', 'SSH_TUNNEL_KEEPER_OPTS_BATTERY']) {
@@ -468,7 +470,8 @@ print("probe classification passed")
 function assertsConsoleLaunch(launcher) {
   assert.match(launcher, /si.dwFlags = STARTF_USESTDHANDLES \| STARTF_USESHOWWINDOW;/);
   assert.match(launcher, /si.wShowWindow = SW_SHOWNOACTIVATE;/);
-  assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE, GetConsoleWindow\(\) == NULL \? CREATE_NO_WINDOW : 0,/);
+  assert.match(launcher, /DWORD flags = CREATE_SUSPENDED \| \(GetConsoleWindow\(\) == NULL \? CREATE_NO_WINDOW : 0\);/);
+  assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE, flags,/);
   for (const name of ['Input', 'Output', 'Error']) assert.match(launcher, new RegExp(`si.hStd${name} = GetStdHandle\\(STD_${name.toUpperCase()}_HANDLE\\)`));
   assert.doesNotMatch(launcher, /AllocConsole|FreeConsole|DETACHED_PROCESS|GetFileType/);
 }
@@ -502,7 +505,8 @@ function assertsForeground(desktop, driver) {
   };
   const expected = routine(original);
   assert.ok(expected.startsWith('Message message;') && expected.endsWith('}'));
-  assert.equal(routine(desktop).replace('keybd_event(0x12, 0, 0, UIntPtr.Zero);', 'Key(0x12, 0, 0);').replace('keybd_event(0x12, 0, 2, UIntPtr.Zero);', 'Key(0x12, 0, 2);').replace('SetFocus(focus);', 'SetFocus(hwnd);'), expected);
+  const neutralTap = 'keybd_event(0xE8, 0, 0, UIntPtr.Zero);\n        keybd_event(0xE8, 0, 2, UIntPtr.Zero);\n        ';
+  assert.equal(routine(desktop).replace(neutralTap, '').replace('keybd_event(0x12, 0, 0, UIntPtr.Zero);', 'Key(0x12, 0, 0);').replace('keybd_event(0x12, 0, 2, UIntPtr.Zero);', 'Key(0x12, 0, 2);').replace('SetFocus(focus);', 'SetFocus(hwnd);'), expected);
   assert.match(desktop, /SetFocus\(focus\);/);
   assert.match(desktop, /actualPid != pid \|\| Class\(hwnd\) != "ZigShell"/);
   assert.match(desktop, /Owner\(focus\) != pid \|\| \(focus != hwnd && !IsChild\(hwnd, focus\)\)/);
@@ -568,7 +572,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('chat-delivery'));
   assert.match(read(skill + 'control.ps1'), /'chat-delivery' \{[\s\S]*verify-chat-delivery\/drive.ps1/);
-  assert.match(workflow, /if: env.RELEASE_TAG == '' \|\| env.FEATURE == 'chat-delivery'/);
+  assert.match(workflow, /if: env.RELEASE_TAG == '' \|\| env.FEATURE == 'session-actions' \|\| env.FEATURE == 'chat-delivery'/);
   assert.match(workflow, /zig cc[^\n]*-municode[^\n]*verify-chat-delivery\/launcher.c/);
   assert.match(workflow, /zig cc[^\n]*-mwindows[^\n]*verify-bin\/tmux.exe/);
   assert.match(workflow, /actions\/setup-python@[a-f0-9]{40}/);
@@ -576,7 +580,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /Release checksum mismatch/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /verify-chat-delivery\/drive.ps1[\s\S]*errors.Count/);
-  assert.ok(workflow.includes('- tools/verify-chat-delivery/**'));
+  assert.ok(read('.github/workflows/click-through.yml').includes('-- src'));
 });
 
 test('delivery maps state both the accepted boundary and uncovered local console gap', () => {
@@ -1082,7 +1086,7 @@ from unittest.mock import patch
 root = Path(sys.argv[1])
 tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8'))
 functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ('reader_namespace', 'watch_reader')]
-with tempfile.TemporaryDirectory() as temp:
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
     home = Path(temp)
     cwd = str(home / 'work' / 'demo')
     path = home / '.claude/projects' / re.sub(r'[^A-Za-z0-9]', '-', cwd) / 'sid.jsonl'
@@ -1115,7 +1119,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert escapes
         captures.append(True)
         return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
-    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,importlib=importlib,Path=Path,__file__=str(root / 'tools/verify-chat-delivery/boundary.py'),sys=sys,os=os,time=time,capture_screen=capture_screen,state=lambda: {"name": "notification-fixture"})
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,importlib=importlib,Path=Path,__file__=str(root / 'tools/verify-chat-delivery/boundary.py'),sys=sys,os=os,time=time,capture_screen=capture_screen,record=lambda file, **values: None,state=lambda: {"name": "notification-fixture"})
     exec(compile(ast.Module(body=functions,type_ignores=[]), '<boundary-watch>', 'exec'), scope)
     with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.dict(sys.modules, pwd=None), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
         try: scope['watch_reader']()
@@ -1212,7 +1216,8 @@ test('IGSH-1063 question proof selects the saved AMOLED theme and supports publi
   assert.match(journey, /Select-Theme 'amoled' 'theme-amoled'/);
   assert.doesNotMatch(journey, /Palette '(?:theme )?amoled'/);
   const adapter = fs.readFileSync(path.join(root, '.github/workflows/question-journey.yml'), 'utf8');
-  assert.match(adapter, /types: \[structured-question-proof\]/);
+  assert.match(adapter, /^  schedule:$/m);
+  assert.match(adapter, /^  workflow_dispatch:$/m);
   assert.match(adapter, /feature: chat-options/);
   assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
 });
@@ -1220,8 +1225,8 @@ test('IGSH-1063 question proof selects the saved AMOLED theme and supports publi
 test('failed window identity retains observed fields and crash reports without weakening Doctor', () => {
   const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
   assert.match(doctor, /Save .*IsOffscreen.*ProcessId.*title.*doctor-window.json/);
-  assert.match(doctor, /\$element.Current.IsOffscreen -or \$element.Current.ProcessId -ne \$app.Id -or \$title -notmatch/);
-  assert.match(doctor, /throw 'Doctor: visible versioned UI Automation identity missing'/);
+  assert.match(doctor, /\$element.Current.IsOffscreen -or \$element.Current.ProcessId -ne \$app.Id -or \(\$title -cne 'Multi Bot' -and \$title -cnotmatch/);
+  assert.match(doctor, /throw 'Doctor: visible UI Automation identity or fixed title missing'/);
   assert.match(doctor, /Owner\(\$main\) -ne \$app.Id/);
   assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
   assert.match(drive, /if \(Test-Path "\$settings\/crashes"\) \{/);

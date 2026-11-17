@@ -384,6 +384,32 @@ const after = 1;
     assert.doesNotMatch(result.stdout, /stayed green on merge-base source/);
   });
 
+  test('a stale suite that already failed on merge-base source is repaired without a new regression', t => {
+    const f = fixture(t);
+    const stale = name => `const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('${name}',()=>assert.equal(fs.readFileSync('src/value.txt','utf8'),'VALUE'));\n`;
+    f.write('tools/value.test.cjs', stale('stale value').replace('VALUE', 'fixed'));
+    const base = f.commit();
+    f.write('src/other.txt', 'shipped alongside the repair');
+    f.write('tools/value.test.cjs', stale('shipped value').replace('VALUE', 'broken'));
+    f.commit();
+    const result = f.run(base);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /REPAIR PROVEN tools\/value.test.cjs/);
+  });
+
+  test('a repair is refused when the merge-base suite already passed on its own source', t => {
+    const f = fixture(t);
+    f.write('tools/value.test.cjs', "const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('green on merge-base',()=>assert.equal(fs.readFileSync('src/value.txt','utf8'),'broken'));\n");
+    const base = f.commit();
+    f.write('src/other.txt', 'shipped alongside a weakened suite');
+    f.write('tools/value.test.cjs', "const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('still green on merge-base',()=>assert.equal(fs.readFileSync('src/value.txt','utf8'),'broken'));\n");
+    f.commit();
+    const result = f.run(base);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /stayed green on merge-base source/);
+    assert.doesNotMatch(result.stdout, /REPAIR PROVEN/);
+  });
+
   test('nested documentation travels with test repairs like a root README', t => {
     const f = fixture(t);
     f.write('.claude/skills/verify/features/README.md', '# features\n');

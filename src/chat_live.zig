@@ -463,6 +463,16 @@ pub fn settingLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []c
     return finish(&out, a);
 }
 
+pub fn loginLine(a: std.mem.Allocator, id: u32, sid: []const u8, provider_id: []const u8) ![]u8 {
+    var out = try openLine(a, id, "login", "pi", sid);
+    errdefer out.deinit(a);
+    if (provider_id.len > 0) {
+        try out.appendSlice(a, ",\"provider_id\":");
+        try appendQuoted(&out, a, provider_id);
+    }
+    return finish(&out, a);
+}
+
 pub fn interruptLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8) ![]u8 {
     var out = try openLine(a, id, "interrupt", provider, sid);
     errdefer out.deinit(a);
@@ -1394,6 +1404,16 @@ test "Codex and Pi live requests retain the selected provider" {
         defer a.free(expected_interrupt);
         try std.testing.expectEqualStrings(expected_interrupt, interrupt);
     }
+}
+
+test "SOFT-2276 a Pi login request names Pi and the provider" {
+    const a = std.testing.allocator;
+    const named = try loginLine(a, 7, "sid-1", "anthropic");
+    defer a.free(named);
+    try std.testing.expectEqualStrings("{\"id\":7,\"op\":\"login\",\"provider\":\"pi\",\"sid\":\"sid-1\",\"provider_id\":\"anthropic\"}", named);
+    const listed = try loginLine(a, 8, "sid-1", "");
+    defer a.free(listed);
+    try std.testing.expectEqualStrings("{\"id\":8,\"op\":\"login\",\"provider\":\"pi\",\"sid\":\"sid-1\"}", listed);
 }
 
 test "D5 the interrupt op asks the host to stop the turn without killing it" {

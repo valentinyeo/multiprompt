@@ -275,7 +275,7 @@ pub fn snapshot(state: *State) void {
     state.enabled[@intFromEnum(Item.computer)] = tmux;
     state.enabled[@intFromEnum(Item.remind)] = tmux;
     state.enabled[@intFromEnum(Item.end_session)] = tmux;
-    state.enabled[@intFromEnum(Item.model)] = false;
+    state.enabled[@intFromEnum(Item.model)] = @import("pi_models.zig").isPiAgent(app_state.shells[idx].ai_agent) and @import("pi_models.zig").hostForShell(idx) != null;
     const session = @import("chat_session.zig");
     if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| {
         state.model_len = entry.history.status.model_len;
