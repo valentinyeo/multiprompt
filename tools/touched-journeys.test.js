@@ -81,6 +81,49 @@ test('the verifier runs every mapped journey, even when its picker proposes fewe
   assert.equal(selection.compareBase, true);
 });
 
+test('mandatory chat stillness survives an empty mapper and picker', t => {
+  const directory = maps(t);
+  fs.writeFileSync(path.join(directory, 'chat-still.md'), '# Stillness\nSource files: src/chat*.zig\nVerify on: pull_request\n## Driving it with control.ps1\n');
+  const out = path.join(directory, 'out');
+  fs.mkdirSync(out);
+  fs.writeFileSync(path.join(out, 'pr.json'), JSON.stringify({ title: 'Chat update', body: '', labels: [], files: [{ path: 'src/chat_render.zig' }] }));
+  fs.writeFileSync(path.join(out, 'mapped.json'), JSON.stringify({ features: [], unmapped: [] }));
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(__dirname, 'pr-verifier.cjs'), 'select', out], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(directory, 'output'), FEATURES_DIR: directory, SELECTION: JSON.stringify({ features: [], compare_base: false }) },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const selection = JSON.parse(fs.readFileSync(path.join(out, 'selection.json'), 'utf8'));
+  assert.deepEqual(selection.features, ['chat-still']);
+});
+
+test('shared build profiles and artifact names isolate instrumented and comparison apps', () => {
+  const { spawnSync } = require('node:child_process');
+  const { runInNewContext } = require('node:vm');
+  const root = path.join(__dirname, '..');
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  const script = workflow.split("          node - <<'NODE' >> \"$GITHUB_OUTPUT\"\n")[1].split('          NODE')[0].replace(/^ {10}/gm, '');
+  const names = [...workflow.matchAll(/name: (verify-app[^\n]+)/g)].map(match => match[1]);
+  assert.equal(names.length, 2);
+  for (const [features, profiles] of [
+    [['appearance', 'chat-view'], ['normal']],
+    [['chat-still'], ['chat-still']],
+    [['appearance', 'chat-still', 'chat-view'], ['normal', 'chat-still']],
+  ]) {
+    const result = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, FEATURES: JSON.stringify(features), APP_REVISION: '' } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout.match(/^builds=(.+)$/m)[1]), profiles);
+    assert.deepEqual(JSON.parse(result.stdout.match(/^selected=(.+)$/m)[1]), features);
+  }
+  for (const feature of ['appearance', 'chat-still']) {
+    for (const revision of ['', 'base-sha']) {
+      const context = { matrix: { profile: feature === 'chat-still' ? 'chat-still' : 'normal' }, env: { FEATURE: feature }, inputs: { app_revision: revision } };
+      const actual = names.map(name => name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => runInNewContext(expression, context)));
+      const expected = `verify-app${feature === 'chat-still' ? '-chat-still' : ''}${revision ? '-compare' : ''}`;
+      assert.deepEqual(actual, [expected, expected]);
+    }
+  }
+});
+
 test('mapped model and live-working journeys retain their chat-delivery driver', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
   const condition = workflow.split('      - name: Select instant chat driver\n')[1].split('\n')[0].trim().slice(4);

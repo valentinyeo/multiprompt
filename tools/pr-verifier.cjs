@@ -40,6 +40,13 @@ function validateSelection(raw, available, pr = {}) {
   const allowed = new Set(selectable(available));
   const requirement = reproRequirement(pr);
   const requested = Array.isArray(parsed.features) ? parsed.features.map(String) : [];
+  const requiredFeatures = [];
+  const changedPaths = (pr.files || []).map(file => file.path);
+  if (changedPaths.some(file => /^(?:src\/(?:chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.zig|src\/chat[^/]*\.py|tools\/chat-still\/|tools\/verify-chat-delivery\/|tools\/verify-chat-still$|\.claude\/skills\/verify-multiprompt\/control-feature-chat)/.test(file))) {
+    if (!allowed.has('chat-still')) throw new Error('Chat changes require the chat-still journey');
+    requested.unshift('chat-still');
+    requiredFeatures.push('chat-still');
+  }
   if (requirement.bugFix && requirement.reproJourney) requested.unshift(requirement.reproJourney);
   const features = [];
   const dropped = [];
@@ -52,6 +59,7 @@ function validateSelection(raw, available, pr = {}) {
     features,
     dropped,
     ...requirement,
+    requiredFeatures,
     compareBase: features.length > 0 && (requirement.bugFix || parsed.compare_base !== false),
     reason: oneLine(parsed.reason, 1200),
     uncovered: oneLine(parsed.uncovered, 1200),
@@ -413,7 +421,7 @@ function prepare(env, outDir) {
   const number = env.PR_NUMBER;
   const repo = env.REPO;
   fs.mkdirSync(outDir, { recursive: true });
-  const pr = JSON.parse(gh(['pr', 'view', number, '--repo', repo, '--json', 'number,title,labels,body,url,headRefName,baseRefName,commits']));
+  const pr = JSON.parse(gh(['pr', 'view', number, '--repo', repo, '--json', 'number,title,labels,body,url,headRefName,baseRefName,commits,files']));
   const context = [
     `# Pull request ${pr.number}: ${pr.title}`,
     '',
@@ -668,7 +676,7 @@ async function main(argv, env) {
     const selection = validateSelection(env.SELECTION, available, pr);
     const mapped = JSON.parse(fs.readFileSync(path.join(outDir, 'mapped.json'), 'utf8'));
     const repro = selection.bugFix && available.includes(selection.reproJourney) ? [selection.reproJourney] : [];
-    selection.features = [...new Set([...mapped.features, ...repro])].sort();
+    selection.features = [...new Set([...mapped.features, ...repro, ...selection.requiredFeatures])].sort();
     selection.dropped = [];
     selection.compareBase = selection.features.length > 0 && (selection.bugFix || JSON.parse(env.SELECTION).compare_base !== false);
     selection.unmapped = mapped.unmapped;

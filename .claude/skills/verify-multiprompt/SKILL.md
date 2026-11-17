@@ -231,3 +231,7 @@ Cancelled verifier runs recover the latest open PR head automatically, at most o
 Verifier recovery reads PR metadata, head checks, comments and Tests status in one GraphQL snapshot. Tests and release-status polling start at one minute and back off to five minutes. Missing head state, API errors, and non-green Tests remain fail-closed; snapshots never substitute an older successful head or attempt.
 
 A terminal check-suite result is confirmed once against the actual Tests workflow run. Custom verifier checks can attach to another workflow's suite, so the suite's conclusion alone cannot prove that Tests passed or failed.
+
+## Chat stillness
+
+Chat changes also run [verify-chat-still](../verify-chat-still/SKILL.md) and the [chat-still journey](features/chat-still.md). The newest initially visible message must keep its exact screen rectangle from the first content frame, idle and during a streaming reply. Read the recipe for its native paint diagnostic and frame-by-frame evidence.
