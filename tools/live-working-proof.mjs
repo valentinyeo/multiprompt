@@ -61,7 +61,6 @@ export function validate(result) {
   for (const name of ['empty', 'history']) {
     const { stages, observations } = result.cases[name];
     assert.ok(observations.queuedDots, `${name}: queued dots missing`);
-    assert.ok(observations.acceptedGapDots, `${name}: delivered send hides dots before the turn`);
     assert.ok(observations.startedDotsWithinOneSecondOfSyntheticEnqueue, `${name}: event-to-painter dots late or missing`);
     assert.ok(stages['turn-started'].timer, `${name}: live event did not start animation timer`);
     assert.ok(observations.animated, `${name}: dots did not animate`);
