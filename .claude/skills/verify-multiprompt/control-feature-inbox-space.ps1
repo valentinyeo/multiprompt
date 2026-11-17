@@ -15,8 +15,9 @@ $session = Read-Session
 if ($session.PSObject.Properties['ui_scale'] -and $session.ui_scale -ne 100) { throw 'Screenshot proof requires default UI scale' }
 Select-Theme 'amoled' 'inbox-space-theme'
 foreach ($count in 2..18) {
-    Palette 'new cmd'
-    Press @(0x0D) 'Enter: add an existing CMD session to the Inbox'
+    Invoke-JourneyCommand 'new cmd shell' -Confirm {
+        Press @(0x0D) 'Enter: add an existing CMD session to the Inbox'
+    }
     Wait-Until { $state = Read-Session; @($state.tabs).Count -eq $count } "app saved $count user-created sessions"
 }
 Wait-Until { $state = Read-Inbox; @($state.shells).Count -eq 18 } 'all user-created sessions published'

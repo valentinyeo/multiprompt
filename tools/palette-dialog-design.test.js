@@ -104,13 +104,13 @@ test('IGSH-1061: dialog measures body against full content width and uses approv
 
 test('IGSH-1061: palette typing waits for owned foreground after asynchronous browser cancellation', () => {
   const control = read('.claude/skills/verify-multiprompt/control.ps1');
-  const body = control.match(/function Palette\(\[string\]\$Query, \[string\]\$Target = ''\) \{([^]*?)\n\}/)?.[1];
-  assert.ok(body, 'production palette journey accepts an optional target');
-  assert.match(body, /\$offset = if \(\$Target\) \{ \(Read-SharedText \$log\)\.Length \} else \{ 0 \}[\s\S]*Type-Text \$Query\s+if \(\$Target\) \{\s+Wait-Until \{ \$trace = Read-SharedText \$log; \$trace\.Length -ge \$offset -and \$trace\.Substring\(\$offset\) -match/,
-    'targeted queries wait for a fresh palette result');
-  assert.ok(body.includes(String.raw`'\[palette\] ready chars=' + $Query.Length + ' count=[1-9]\d* target=' + $Target + '(?:\r?\n|$)'`),
-    'the selected target must match the complete result line');
-  assert.match(body, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Wait-Foreground\s+Type-Text \$Query/,
+  const body = control.match(/function Invoke-JourneyCommand \{([^]*?)\n\}/)?.[1];
+  assert.ok(body, 'production palette journey accepts a stable command name');
+  assert.match(body, /\$start = \(Read-SharedText \$log\).Length[\s\S]*Press @\(0x11, 0x4B\)/,
+    'queries read only results emitted after this palette opened');
+  assert.match(body, /Read-SharedText \$log\).Substring\(\$start\)[\s\S]*-contains \[string\]\$target/,
+    'the current result list must contain the resolved command');
+  assert.match(body, /Retry-PaletteOpen \$log \$start[\s\S]*GetFocusedWindow\(\$script:window\) -eq \$script:window[\s\S]*'command palette initialized and owned frame focused' 20\s+Type-Text \$query/,
     'the cancelled browser can take foreground after Ctrl+K; settle ownership before typing');
   const workflow = read('.github/workflows/palette-dialog-design.yml');
   assert.match(workflow, /red-control:\s+if: github\.ref != 'refs\/heads\/master'\s+uses: \.\/\.github\/workflows\/check-red-run\.yml/);

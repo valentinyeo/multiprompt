@@ -24,7 +24,7 @@ test('Inbox button hit testing is disabled while open and restored on close', ()
 test('Windows proof restores the workspace strip through the real palette before measuring its button', () => {
   const journey = fs.readFileSync('.claude/skills/verify-multiprompt/control-feature-inbox.ps1', 'utf8');
   assert.match(journey, /if \(\(Read-Session\)\.hide_pills\) \{/);
-  assert.match(journey, /Focus-Palette 'workspace switcher' 6213/);
+  assert.match(journey, /Invoke-JourneyCommand 'Show Workspace Switcher' -Confirm {/);
   assert.ok(journey.indexOf("'workspace switcher shown and saved for Inbox button proof'") < journey.indexOf("foreach ($theme in @('light', 'amoled'))"));
   for (const state of ['closed', 'open', 'returned']) assert.ok(journey.includes(`Snapshot "inbox-button-$theme-${state}"`));
   assert.match(journey, /\$counts\.open -ne 0 -or \$counts\.closed -lt 4/);
