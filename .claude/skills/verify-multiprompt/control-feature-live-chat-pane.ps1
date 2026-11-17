@@ -8,8 +8,9 @@ $initial = Read-Session
 $initialGroupIds = @()
 if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
 $groupCount = $initialGroupIds.Count
-Palette 'move to group'
-Press @(0x0D) 'Enter: Move to Group submenu'
+Invoke-JourneyCommand 'Move to Group' -Confirm {
+    Press @(0x0D) 'Enter: Move to Group submenu'
+}
 Type-Text 'new group'
 Press @(0x0D) 'Enter: New group'
 Wait-Until {

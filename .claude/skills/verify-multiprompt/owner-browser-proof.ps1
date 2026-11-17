@@ -7,8 +7,9 @@ $listeners = [regex]::Matches((Read-SharedText $log), 'notify-listener: tunnel-i
 if ($listeners.Count -eq 0) { throw 'Owned browser listener missing' }
 $ownerPort = [int]$listeners[$listeners.Count - 1].Groups[1].Value
 if (@(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $ownerPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -ne 1) { throw 'Browser listener does not belong to the verified app' }
-Palette 'move to group'
-Press @(0x0D) 'Enter: group menu'
+Invoke-JourneyCommand 'Move to Group' -Confirm {
+    Press @(0x0D) 'Enter: group menu'
+}
 Type-Text 'new group'
 Press @(0x0D) 'Enter: create proof group'
 Wait-Until { $state = Read-Session; @($state.groups).Count -gt 0 } 'owner browser proof group'

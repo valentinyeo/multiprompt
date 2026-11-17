@@ -62,7 +62,7 @@ if ($env:CHAT_RESYNC_PROOF -eq '1') {
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='busy'; text='preconnect first'}) }
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
-if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}) }
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
 if ($Feature -eq 'chat-terminal-replies') { $plans = @(@{name='terminal-replies'; mode='busy'; text='[]'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
@@ -181,7 +181,18 @@ function Shell-Input([string]$Kind, [string]$Value = '') {
 function Fake-State {
     $text = & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell show
     if ($LASTEXITCODE -ne 0) { throw 'Fake shell state read failed' }
-    ($text -join "`n") | ConvertFrom-Json
+    $view = ($text -join "`n") | ConvertFrom-Json
+    foreach ($line in ((Read-Shared "$state/message-dispatch.jsonl") -split "`n" | Where-Object { $_.Trim() })) {
+        $message = ($line | ConvertFrom-Json).result.message
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $hash.ComputeHash([Text.Encoding]::UTF8.GetBytes("$($message.id)`n$($message.attempt)`n$($message.epoch)")) }
+        finally { $hash.Dispose() }
+        $token = ([BitConverter]::ToString($digest) -replace '-', '').Substring(0, 16).ToLowerInvariant()
+        $payload = $message.text + "`n[mp:$token]"
+        $view.queue = @($view.queue | ForEach-Object { $_.Replace($payload, $message.text) })
+        $view.box = $view.box.Replace($payload, $message.text)
+    }
+    $view
 }
 function Queue-View {
     $views = [regex]::Matches((Read-Shared "$settings/debug.log"), 'CHAT_QUEUE items=(\[[^\r\n]*\])')
@@ -564,10 +575,13 @@ foreach ($plan in $plans) {
         $env:USERPROFILE = "$profile/home"
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
-        if ($isModel -or $isRecall) {
+        if ($isModel -or $isRecall -or $plan.name -in @('working-live', 'steady-live')) {
             $socketTemp = Join-Path ([IO.Path]::GetPathRoot($profile)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
             New-Item -ItemType Directory $socketTemp | Out-Null
             $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
+        }
+        if ($plan.name -in @('working-live', 'steady-live')) {
+            New-Item -ItemType Directory -Force "$profile/home/.local/state/multiprompt/agent-host", "$socketTemp/mp-agent-host-0" | Out-Null
         }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
@@ -821,7 +835,6 @@ foreach ($plan in $plans) {
             $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
@@ -829,6 +842,7 @@ foreach ($plan in $plans) {
             }
             Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
             . "$PSScriptRoot/../verify-chat-reply.ps1"
@@ -1440,7 +1454,7 @@ foreach ($plan in $plans) {
         try {
             if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$caseDir/debug.log"; Get-Content "$caseDir/debug.log" | Add-Content "$Evidence/debug.log" }
             if (Test-Path $state) { Copy-Item $state "$caseDir/stand-in" -Recurse -Force }
-            if (($isModel -or $isRecall) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
+            if (($isModel -or $isRecall -or $plan.name -in @('working-live', 'steady-live')) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
             foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl')) {
                 $source = "$caseDir/stand-in/$file"
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
@@ -1525,7 +1539,11 @@ if ($env:CHAT_HAX_PROOF -eq '1') {
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {
-    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    if ($env:CHAT_DOUBLE_CLICK_PROOF -eq '1') {
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --double-click
+    } else {
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    }
     exit $LASTEXITCODE
 }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') {

@@ -108,12 +108,19 @@ test "IGSH-1924 a switch opens on the New divider and later content never moves 
   try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
   app_state.g_chat_top_pad = 20;
 }
-test "IGSH-1924 a stale cache lands on the divider once the newest page arrives" {
+test "SOFT-2557 a late New divider never moves the first painted row" {
   openTab(UNREAD_FROM);
-  try std.testing.expectEqual(app_state.g_chat_content_h - 600, app_state.g_chat_scroll_y);
-  app_state.next_blocks = 40;
-  refreshChatTranscript(false);
-  try std.testing.expectEqual(dividerTop(), app_state.g_chat_scroll_y);
+  const first = app_state.g_chat_scroll_y;
+  const row = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..UNREAD_FROM], first).?.index;
+  const screen_y = app_state.g_chat_layout_rects[row].top - first;
+  for ([_]usize{ 40, 48, 56 }) |count| {
+    app_state.next_blocks = count;
+    refreshChatTranscript(false);
+    try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+    try std.testing.expectEqual(screen_y, app_state.g_chat_layout_rects[row].top - app_state.g_chat_scroll_y);
+    chatRelayoutPreservingScroll(800, 600);
+    try std.testing.expectEqual(first, app_state.g_chat_scroll_y);
+  }
 }
 test "IGSH-1924 reader scroll releases the anchor and new content follows the bottom again" {
   openTab(40);
@@ -223,4 +230,11 @@ test('IGSH-1924 removing the content clamp recreates empty space', () => {
   const result = run(current, unsafeHistory);
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /holds never leave blank space after content shrinks[^]*?FAIL \(TestExpectedEqual\)/);
+});
+
+test('SOFT-2557 the previous opening path moves the visible row when a New divider arrives late', () => {
+  const before = fs.readFileSync(path.join(__dirname, 'fixtures', 'SOFT-2557', 'before-refresh-scroll.txt'), 'utf8');
+  const result = run(before);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /SOFT-2557 a late New divider[^]*?FAIL \(TestExpectedEqual\)/);
 });

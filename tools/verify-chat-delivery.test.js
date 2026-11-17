@@ -6,7 +6,7 @@ assert.equal(typeof readControlSource, 'function', 'Control readers must follow 
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, persistentReader, nativeText, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 
 function featureMatrix(source) {
@@ -367,6 +367,34 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
   assert.match(source, /text = "\\r\\n".join\(lines\) \+ "\\r\\n"/);
 });
 
+test('native correlation IDs are removed only when the exact text and production dispatch identity match', () => {
+  assert.equal(typeof nativeText, 'function', 'native dispatch receipts are checked');
+  const message = { id: 'desktop-proof', attempt: 'test-attempt', epoch: 0, text: 'typed message' };
+  const dispatches = [{ result: { message } }];
+  const payload = 'typed message\n[mp:fd2993712c1ba84d]';
+  assert.equal(nativeText(payload, dispatches), message.text);
+  assert.equal(nativeText(payload, []), payload);
+  assert.equal(nativeText(payload, [{ result: { message: { ...message, epoch: 1 } } }]), payload);
+  assert.equal(nativeText(payload.replace('typed', 'changed'), dispatches), payload.replace('typed', 'changed'));
+  assert.equal(nativeText(payload.replace('fd2993712c1ba84d', '0000000000000000'), dispatches), payload.replace('fd2993712c1ba84d', '0000000000000000'));
+  assert.notEqual(nativeText(payload + '\n[mp:fd2993712c1ba84d]', dispatches), message.text);
+  assert.notEqual(nativeText(payload + '\n' + payload, dispatches), message.text);
+  assert.equal(nativeText('ordinary [mp:fd2993712c1ba84d] user text', dispatches), 'ordinary [mp:fd2993712c1ba84d] user text');
+});
+
+test('persistent reader evidence requires the supplied bootstrap and a real shared serve channel', () => {
+  assert.equal(typeof persistentReader, 'function', 'shared channel provenance is checked');
+  const bootstrap = ['python3', '-u', '-c', 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'];
+  const supplied = { kind: 'reader', argv: bootstrap };
+  const channel = { kind: 'reader', argv: ['--serve'], channel: 2 };
+  assert.equal(persistentReader([{ kind: 'reader', argv: [...bootstrap, '--serve'] }]), true);
+  assert.equal(persistentReader([supplied, channel]), true);
+  assert.equal(persistentReader([supplied]), false);
+  assert.equal(persistentReader([channel]), false);
+  assert.equal(persistentReader([supplied, { ...channel, channel: 0 }]), false);
+  assert.equal(persistentReader([supplied, { ...channel, argv: ['--watch'] }]), false);
+});
+
 test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux writes without fabricating text', () => {
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
@@ -411,6 +439,7 @@ test('background host probes are explicitly declined and unknown remote commands
   }
   probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
   const unknown = [
+    ['-G', 'unexpected-host'],
     ['-T', 'remote-1', 'uname -a'],
     ['-T', 'remote-1', relayCommand + '; unexpected-operation'],
     ['-T', 'remote-2', ladder + '.unknown'],
@@ -447,6 +476,13 @@ with tempfile.TemporaryDirectory() as directory:
         assert row["case"] == "busy-send" and row["ms"] > 0 and row["pid"] > 0, row
     assert len(rows("declined.jsonl")) == len(fixtures["probes"])
     assert not rows("unsupported.jsonl")
+    for host in ("remote-1", "remote-2", "remote-3"):
+        namespace["ARGS"] = ["-G", host]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert namespace["ssh"]() == 0
+        assert output.getvalue() == "hostname " + host + "\nuser verify\nport 22\n"
+        assert rows("invocations.jsonl")[-1]["argv"] == ["-G", host]
     for argv in fixtures["unknown"]:
         namespace["ARGS"] = argv
         assert namespace["declined_remote"](argv) is None, argv
@@ -459,7 +495,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert row["operation"] == "remote command" and row["hasPython"] is False, row
     assert len(rows("unsupported.jsonl")) == len(fixtures["unknown"])
     assert len(rows("declined.jsonl")) == len(fixtures["probes"])
-    assert not rows("invocations.jsonl") and not rows("capture.jsonl")
+    assert len(rows("invocations.jsonl")) == 3
+    assert all(row["kind"] == "config" for row in rows("invocations.jsonl"))
+    assert not rows("capture.jsonl")
     assert (root / "agent-buffer.jsonl").read_text(encoding="utf-8") == "existing delivery evidence\n"
 print("probe classification passed")
 `;
@@ -578,7 +616,7 @@ test('feature dispatch compiles only the system boundary on release runs and pre
   assert.match(workflow, /actions\/setup-python@[a-f0-9]{40}/);
   assert.match(workflow, /gh release download \$env:RELEASE_TAG/);
   assert.match(workflow, /Release checksum mismatch/);
-  assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /verify-chat-delivery\/drive.ps1[\s\S]*errors.Count/);
   assert.ok(read('.github/workflows/click-through.yml').includes('-- src'));
 });
@@ -1449,6 +1487,11 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
 
 test('SOFT-2459 terminal reply evidence rejects residue, lost brackets and missing cleanup', () => {
   assert.ok(fs.existsSync(path.join(__dirname, 'chat-terminal-replies-proof.cjs')), 'terminal reply journey evaluator is available');
+  for (const step of ['Install Zig 0.16.0', 'Compile chat delivery remote-shell boundary']) {
+    const block = workflow.split(`- name: ${step}\n`)[1]?.split('\n      - ')[0];
+    assert.ok(block?.includes("env.FEATURE == 'chat-terminal-replies'"), `${step} prepares terminal reply journeys in reusable verifier calls`);
+  }
+  assert.match(workflow, /uses: actions\/setup-python@[^\n]+\n\s+if: [^\n]*env\.FEATURE == 'chat-terminal-replies'/, 'terminal reply journeys install the remote-shell Python runtime');
   const { verify, replies } = require('./chat-terminal-replies-proof.cjs');
   assert.match(read('tools/verify-chat-delivery/terminal-replies.ps1'), /^[\x00-\x7f]*$/, 'Windows PowerShell 5 reads BOM-free journey scripts as ANSI');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'terminal-replies-proof-'));

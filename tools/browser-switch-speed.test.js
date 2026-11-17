@@ -70,7 +70,7 @@ function assertsPaint(source, driver) {
   assert.match(driver, /\$colors = @\('#db2855', '#26b8d4'\)/);
   assert.match(driver, /\$rgb = @\(0xDB2855, 0x26B8D4\)/);
   assert.match(driver, /html,body\{margin:0;width:100%;height:100%;background:/);
-  assert.match(driver, /Palette 'jump browser'/);
+  assert.match(driver, /Invoke-JourneyCommand 'Browser: Switch Focus Between Terminal and Pane' -Confirm {/);
   assert.match(driver, /GetForegroundWindow\(\) -eq \$browser/);
   assert.match(driver, /DockedPaneWindow\(\$script:window\) -ne \$browser/);
   assert.match(driver, /::Chord\(@\(0x11, 0x4C\)\)/);
@@ -118,7 +118,7 @@ test('paint is an actual target-colored 3x3 screen patch below the toolbar, reac
   for (const before of ['BitBlt(target, 0, 0, pixels.Width, pixels.Height, screen, x, y, 0x00CC0020)', 'row < pixels.Height', 'col < pixels.Width', 'dock.Bottom - dock.Top < 200']) {
     assert.throws(() => assertsPaint(native.replace(before, 'false'), journey));
   }
-  for (const before of ["Palette 'jump browser'", '0x26B8D4', 'width:100%;height:100%', 'PagePainted($dock, $rgb[$tab])']) {
+  for (const before of ["Invoke-JourneyCommand 'Browser: Switch Focus Between Terminal and Pane' -Confirm {", '0x26B8D4', 'width:100%;height:100%', 'PagePainted($dock, $rgb[$tab])']) {
     assert.throws(() => assertsPaint(native, journey.replace(before, 'false')));
   }
   const colors = journey.match(/\$rgb = @\(0x([0-9A-F]+), 0x([0-9A-F]+)\)/).slice(1).map(value => parseInt(value, 16));
@@ -133,7 +133,7 @@ test('paint is an actual target-colored 3x3 screen patch below the toolbar, reac
 function assertsActivePage(source) {
   const steps = [
     "$browser = [VerifyNative]::DockedPaneWindow($script:window)",
-    "Palette 'jump browser'",
+    "Invoke-JourneyCommand 'Browser: Switch Focus Between Terminal and Pane' -Confirm {",
     "GetProp($browser, 'ZigShellPaneOwner') -ne $script:window",
     'GetWindowThreadProcessId($browser, [ref]$browserPid)',
     'FocusOwnedWindow($browser, $browserPid, $script:window)',
@@ -287,8 +287,8 @@ test('a sample whose target is already visible, whose source is not visible, or 
 test('console ordering stays grouped-first and Chat View uses real Alt+C with target-specific unsent drafts', () => {
   const steps = [
     '$initial = Read-Session', 'Wait-WorkspaceSurface $initial.active_workspace 0 $false',
-    "Focus-Palette 'move to group' 6301", "Type-Text 'new group'", '$state.tabs[0].group_id -eq $state.groups[0].id',
-    "Palette 'new cmd'", '@($state.tabs).Count -eq 2 -and $state.active_tab -eq 1',
+    "Invoke-JourneyCommand 'Move to Group' -Confirm {", "Type-Text 'new group'", '$state.tabs[0].group_id -eq $state.groups[0].id',
+    "Invoke-JourneyCommand 'new cmd shell' -Confirm {", '@($state.tabs).Count -eq 2 -and $state.active_tab -eq 1',
     "(-not $state.tabs[1].PSObject.Properties['group_id'] -or $state.tabs[1].group_id -eq 0)",
     '$consoleTab = (Read-Session).active_tab', 'Wait-WorkspaceSurface $initial.active_workspace $consoleTab $false',
     '$shellIds = @($state.tabs[0].shell_id, $state.tabs[1].shell_id)',
@@ -297,7 +297,7 @@ test('console ordering stays grouped-first and Chat View uses real Alt+C with ta
   ];
   let offset = -1;
   for (const step of steps) { const next = journey.indexOf(step, offset + 1); assert.ok(next > offset, step); offset = next; }
-  assert.match(journey, /Focus-Palette 'chat view off everywhere' 6347/);
+  assert.match(journey, /Invoke-JourneyCommand 'Chat View off everywhere' -Confirm {/);
   assert.ok(journey.includes("@($state.tabs | Where-Object { ($_.PSObject.Properties['cv'] -and $_.cv) -or $_.PSObject.Properties['chat_view_lock'] }).Count -eq 0"));
   assert.match(journey, /Press-CloseBrowserPane 'Alt\+A: close browser pane for Chat View baseline'\s+\$null = Assert-BrowserPane 'closed' \('chat-baseline-' \+ \$tab\)/);
   const closer = control.slice(control.indexOf('function Press-CloseBrowserPane'), control.indexOf('function Focus-BrowserPaneOwner'));
@@ -408,7 +408,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('browser-switch-speed'));
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
-  assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
+  assert.match(workflow, /name: verify-\$\{\{ matrix.feature \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(read('.github/workflows/click-through.yml'), /changed=\$\(git diff --name-only[^\n]*-- src[^\n]*\btools\b/);
   assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'chat-browser-shortcut', 'chat-browser-autoload', 'browser-typing', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'/);
@@ -618,7 +618,7 @@ test('optional trace reads retain the real sample and a range record if the live
 });
 
 test('the long freeze fixture disables only tier-three window closing through real palette input', () => {
-  assert.match(journey, /Focus-Palette 'browser auto suspend' 6240/);
+  assert.match(journey, /Invoke-JourneyCommand 'Browser: Auto-Suspend Idle Panes' -Confirm {/);
   assert.match(journey, /Press @\(0x0D\) 'Enter: disable timed browser closing while measuring fresh tier-two freezes'/);
   assert.match(journey, /\$state.PSObject.Properties\['browser_suspend_min'\] -and \$state.browser_suspend_min -eq 0/);
   assert.ok(journey.indexOf('switch-idle-close-fixture.json') < journey.indexOf('foreach ($mode in $modes)', journey.indexOf('$warmupJob = $null')));
@@ -735,13 +735,13 @@ function assertsPageFocus(focus, main, pane, driver) {
     'document.title="', 'let keys=0', '++keys', 'foreach ($key in @(0x20, 0x28, 0x4A, 0x4B))',
     'IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome',
     'foreach ($round in 1..5)', 'Alt+Q sent a page key to the browser menu',
-    "::Chord(@(0x75))", "::Chord(@(0x11, 0x4C))", "Palette 'open browser'",
+    "::Chord(@(0x75))", "::Chord(@(0x11, 0x4C))", "Invoke-JourneyCommand 'Open Browser Pane' -SelectOnly",
     'IGSH-724 page-to-input return lost session typing focus', "name = 'IGSH-724 browser-page-focus'",
   ]) assert.ok(driver.includes(required), required);
 }
 
 function assertsOpenPaneHopSync(driver) {
-  const palette = driver.indexOf("Palette 'open browser'");
+  const palette = driver.indexOf("Invoke-JourneyCommand 'Open Browser Pane' -SelectOnly");
   const offset = driver.indexOf("$hopStart = (Read-SharedText $hopLog).Length", palette);
   const press = driver.indexOf("Press @(0x0D) 'IGSH-724: opening an existing pane focuses its page'", palette);
   const wait = driver.indexOf("-match 'pane_hop result bh_fg=true' } 'IGSH-998 app finished the open-pane hop to its browser'", palette);

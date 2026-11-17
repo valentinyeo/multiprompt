@@ -9,7 +9,7 @@
             }
             if ($expected.Count -lt 3) { throw 'What is new: production title rows unavailable' }
             Save-Json @{ source = 'src/changelog.zig'; buildVersion = $ExpectedVersion; releases = $expected; note = 'First release version may be stamped at build time; compare visible rows with these source titles.' } 'whats-new-source.json'
-            Focus-Palette 'changelog' 6241
+            Invoke-JourneyCommand 'Changelog' -SelectOnly
             Snapshot 'action'
             Record 'Enter: open Changelog'
             $openMs = [VerifyNative]::MeasureChangelogKey($script:window, 0x0D)

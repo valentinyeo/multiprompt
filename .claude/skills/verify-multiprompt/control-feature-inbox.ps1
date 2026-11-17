@@ -11,16 +11,18 @@
             Press @(0x1B) 'Esc: return from Inbox'
             Wait-Until { (($state = Read-Inbox) -and $state.PSObject.Properties['inbox_active'] -and $state.inbox_active -eq $false) -or (-not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') -and [VerifyNative]::Title($script:window) -cne 'Multi Bot') } 'Inbox closed'
             Snapshot 'returned'
-            Palette 'new cmd'
-            Press @(0x0D) 'Enter: create a second CMD session to mute'
+            Invoke-JourneyCommand 'new cmd shell' -Confirm {
+                Press @(0x0D) 'Enter: create a second CMD session to mute'
+            }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD session saved and selected'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells).Count -eq 2 } 'both sessions published to the Inbox'
             $sid = (Read-Session).tabs[1].shell_id
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells | Where-Object { $_.sid -eq $sid }).Count -eq 1 } 'current session listed before muting'
             Wait-Until { $state = Read-Session; $null -ne $state -and $state.active_tab -ge 0 -and $state.tabs[$state.active_tab].shell_id -eq $sid } 'published session is the active saved tab'
             $baseline = Read-Session
-            Palette 'mute tab'
-            Press @(0x0D) 'Enter: mute the current tab'
+            Invoke-JourneyCommand 'Mute Tab' -Confirm {
+                Press @(0x0D) 'Enter: mute the current tab'
+            }
             Wait-Until {
                 $state = Read-Session
                 $null -ne $state -and $state.active_tab -eq $baseline.active_tab -and
@@ -41,13 +43,15 @@
                     @($state.tabs | Where-Object { $_.shell_id -eq $sid }).Count -eq 1
             } 'muted session still exists with unchanged tab count'
             Snapshot 'muted-returned'
-            Palette 'unmute tab'
-            Press @(0x0D) 'Enter: unmute the current tab'
+            Invoke-JourneyCommand 'Unmute Tab' -Confirm {
+                Press @(0x0D) 'Enter: unmute the current tab'
+            }
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells | Where-Object { $_.sid -eq $sid }).Count -eq 1 } 'unmuted session listed in published Inbox'
             $result.checks += @{ name = 'inbox-unmuted-listed'; sid = $sid; listed = $true }
             if ((Read-Session).hide_pills) {
-                Focus-Palette 'workspace switcher' 6213
-                Press @(0x0D) 'Enter: show workspace switcher for Inbox button proof'
+                Invoke-JourneyCommand 'Show Workspace Switcher' -Confirm {
+                    Press @(0x0D) 'Enter: show workspace switcher for Inbox button proof'
+                }
                 Wait-Until { $state = Read-Session; $null -ne $state -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills } 'workspace switcher shown and saved for Inbox button proof'
             }
             $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'

@@ -9,7 +9,7 @@ SID = 'a1b2c3d4-1668-4000-8000-000000001668'
 REPLY = 'The hosted stand-in reply is visible.'
 
 
-def install(namespace, root, record):
+def install(namespace, root, record, steady=False):
     previous_switch = namespace['host_dispatch_switch']
     previous_owned = namespace['host_owned']
     previous_deliver = namespace['host_deliver']
@@ -27,13 +27,46 @@ def install(namespace, root, record):
         except FileExistsError:
             return
         os.close(fd)
-        session = {'turn': 'standin-initial-turn'}
-        try:
-            namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.started')
-            record('working-host.jsonl', stage='initial-turn.started', sid=SID, turn=session['turn'])
-        finally:
+        if steady:
+            session = {'turn': 'standin-seed-turn', 'state': {'display_history': True}}
+            for index in range(50):
+                namespace['host_history_append']('claude', SID, session,
+                    dict(role='assistant', id=f'steady-history-{index}', text=f'Known history message {index}. ' + 'A stable paragraph for reading while a reply streams. ' * 10))
+            namespace['host_state_write']('claude', SID, session['state'])
+            namespace['host_write'](namespace['host_paths']('claude', SID)['config'], dict(enabled=True, tmux='verify-agent'))
+            namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.ended')
+            record('working-host.jsonl', stage='idle-history-ready', sid=SID)
             if session.get('db') is not None:
                 session['db'].close()
+                del session['db']
+
+        def initial_turn():
+            if steady:
+                deadline = time.monotonic() + 60
+                next_flush = time.monotonic() + 0.5
+                while not (root / 'working-initial-start').exists() and time.monotonic() < deadline:
+                    if time.monotonic() >= next_flush:
+                        with namespace['host_paths']('claude', SID)['history'].open('ab') as stream:
+                            stream.write(b'\n')
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        record('working-host.jsonl', stage='unchanged-history-refresh', sid=SID)
+                        next_flush = time.monotonic() + 0.5
+                    time.sleep(0.05)
+                if not (root / 'working-initial-start').exists():
+                    return
+            initial = {'turn': 'standin-initial-turn'}
+            try:
+                namespace['host_event']('claude', SID, 'verify-agent', initial, 'turn.started')
+                record('working-host.jsonl', stage='initial-turn.started', sid=SID, turn=initial['turn'])
+            finally:
+                if initial.get('db') is not None:
+                    initial['db'].close()
+
+        if steady:
+            threading.Thread(target=initial_turn, daemon=True).start()
+        else:
+            initial_turn()
 
     def matches(provider, sid):
         return provider == 'claude' and sid == SID
@@ -69,6 +102,24 @@ def install(namespace, root, record):
             namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
                                     dict(text=REPLY, done=False), 'standin-reply')
             record('working-host.jsonl', stage='text.delta', sid=sid, text=REPLY)
+            text = REPLY
+            for index in range(1, 8):
+                time.sleep(0.4)
+                text += f' Streaming segment {index}.'
+                namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
+                                        dict(text=text, done=False), 'standin-reply')
+                record('working-host.jsonl', stage='streaming-delta', sid=sid, segment=index)
+            if steady:
+                deadline = time.monotonic() + 60
+                while not (root / 'working-steady-stream').exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if (root / 'working-steady-stream').exists():
+                    for index in range(8, 16):
+                        text += f' Reading-time stream segment {index}.'
+                        namespace['host_event'](provider, sid, 'verify-agent', session, 'text.delta',
+                                                dict(text=text, done=False), 'standin-reply')
+                        record('working-host.jsonl', stage='reading-stream-delta', sid=sid, segment=index)
+                        time.sleep(0.4)
             if session.get('db') is not None:
                 session['db'].close()
 
